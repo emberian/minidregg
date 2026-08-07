@@ -32,9 +32,15 @@ What lands here:
 * `OB2_depth_composition_false` — the machine-checked refutation;
 * `OB2_depth_composition_nonneg` — the repaired [OB-2′] — assembled from all
   of the above by `OB2_nonneg_of_gameSlotBound`, conditional on exactly ONE
-  named seam, `GameSlotBound` [OB-2a]: the per-game-slot probability bound,
-  which in the lazy-sampling rendering is the standard deferred-decisions /
-  random-oracle argument (see its doc comment and the ledger at the bottom).
+  named seam, `GameSlotBound` [OB-2a]: the per-game-slot probability bound.
+  Diagnosis (see its doc comment): this file's final-output-prefix machinery
+  (`srFinalChal`/`srRounds`) resolves only the `k` designated queries; the
+  paper's proof of this half needs the eager `rnd` at an ARBITRARY move's own
+  prefix, which lazily means a general lazy-rnd resolver over every salted
+  `(stmt, prefix)` pair — a genuine infrastructure gap, not a longer proof
+  with tools already at hand. `stepFn`/`srTrace_take`/`srTrace_take_agree`/
+  `splitProd1` are proven scaffolding banked toward that resolver's
+  uniformity argument (see the ledger at the bottom).
 -/
 import Mathlib.Algebra.Order.Field.Basic
 import Mathlib.Algebra.BigOperators.Field
@@ -232,6 +238,36 @@ def splitCoord {n : ℕ} {β : Type} (i : Fin n) :
     (h : j ≠ i) (x : ({j : Fin n // j ≠ i} → β) × β) :
     (splitCoord i).symm x j = x.1 ⟨j, h⟩ := by
   simp [splitCoord, h]
+
+/-- Split coordinate `i` out of the FIRST factor of a product of a tuple with
+anything. -/
+def splitProd1 {n : ℕ} {β γ : Type} (i : Fin n) :
+    ((Fin n → β) × γ) ≃ ((({j : Fin n // j ≠ i} → β) × γ) × β) where
+  toFun x := ((fun j => x.1 j.1, x.2), x.1 i)
+  invFun y := (fun j => if h : j = i then y.2 else y.1.1 ⟨j, h⟩, y.1.2)
+  left_inv x := by
+    refine Prod.ext ?_ rfl
+    funext j
+    by_cases h : j = i <;> simp [h]
+  right_inv y := by
+    refine Prod.ext (Prod.ext ?_ rfl) ?_
+    · funext j
+      simp [j.2]
+    · simp
+
+@[simp] lemma splitProd1_symm_fst_self {n : ℕ} {β γ : Type} (i : Fin n)
+    (y : (({j : Fin n // j ≠ i} → β) × γ) × β) :
+    ((splitProd1 i).symm y).1 i = y.2 := by
+  simp [splitProd1]
+
+@[simp] lemma splitProd1_symm_fst_ne {n : ℕ} {β γ : Type} {i j : Fin n}
+    (h : j ≠ i) (y : (({j : Fin n // j ≠ i} → β) × γ) × β) :
+    ((splitProd1 i).symm y).1 j = y.1.1 ⟨j, h⟩ := by
+  simp [splitProd1, h]
+
+@[simp] lemma splitProd1_symm_snd {n : ℕ} {β γ : Type} (i : Fin n)
+    (y : (({j : Fin n // j ≠ i} → β) × γ) × β) :
+    ((splitProd1 i).symm y).2 = y.1.2 := rfl
 
 /-! ## Construction B.5 — the backwards straightline extractor -/
 
@@ -595,6 +631,108 @@ lemma srTrace_length (P : SrProver r s) (c : Fin t → r.Chal) :
     dsimp only
     simp
 
+/-! ### Trace structure: prefix determinism and per-step shape
+
+Scaffolding banked toward **[OB-2a]** (`GameSlotBound`, below): the lazily-
+sampled game reads its coins in step order, each at most once — these lemmas
+expose that structure of `srTrace`'s fold: the first `j` entries are a fold
+over the first `j` step indices (`srTrace_take`), and they depend only on the
+coins below `j` (`srTrace_take_agree`) — i.e. the move made at any step `j` is
+a function of `c_{<j}` alone. This is the backbone `GameSlotBound`'s proof
+plan needs for a general lazy-rnd resolver's uniformity argument (see
+`GameSlotBound`'s doc comment for exactly what is still missing and why these
+lemmas alone don't close it: `srOut`, hence which slot `a` and its earlier
+challenges, is a function of ALL of `c`, not just `c_{<j}`). `splitProd1`
+below is the coordinate-splitting equivalence such a proof would slice
+`c_j` out with, mirroring `splitCoord`'s role in `freshBad_le`. -/
+
+/-- The one-step function of the lazily-sampled SR game, named. -/
+noncomputable def stepFn (P : SrProver r s) (c : Fin t → r.Chal)
+    (log : List (SrMove r s × r.Chal)) (j : Fin t) :
+    List (SrMove r s × r.Chal) :=
+  let q := P.move (log.map Prod.snd)
+  let ρ := match log.find? (fun e => decide (e.1 = q)) with
+    | some e => e.2
+    | none => c j
+  log ++ [(q, ρ)]
+
+lemma srTrace_eq_foldl (P : SrProver r s) (c : Fin t → r.Chal) :
+    srTrace P c = List.foldl (stepFn P c) [] (List.finRange t) := rfl
+
+/-- The step appends exactly one entry. -/
+lemma stepFn_eq (P : SrProver r s) (c : Fin t → r.Chal)
+    (log : List (SrMove r s × r.Chal)) (j : Fin t) :
+    stepFn P c log j = log ++ [(P.move (log.map Prod.snd),
+      match log.find? (fun e => decide (e.1 = P.move (log.map Prod.snd))) with
+      | some e => e.2
+      | none => c j)] := rfl
+
+lemma foldl_stepFn_prefix (P : SrProver r s) (c : Fin t → r.Chal) :
+    ∀ (js : List (Fin t)) (L : List (SrMove r s × r.Chal)),
+      L <+: List.foldl (stepFn P c) L js := by
+  intro js
+  induction js with
+  | nil => intro L; simp
+  | cons j js ih =>
+    intro L
+    rw [List.foldl_cons]
+    exact List.IsPrefix.trans
+      (by rw [stepFn_eq]; exact List.prefix_append _ _) (ih _)
+
+lemma foldl_stepFn_length (P : SrProver r s) (c : Fin t → r.Chal)
+    (js : List (Fin t)) (L : List (SrMove r s × r.Chal)) :
+    (List.foldl (stepFn P c) L js).length = L.length + js.length :=
+  foldl_length_aux _ (fun L j => by rw [stepFn_eq]; simp) js L
+
+/-- The first `j` trace entries are the fold over the first `j` step
+indices. -/
+lemma srTrace_take (P : SrProver r s) (c : Fin t → r.Chal) {j : ℕ}
+    (hj : j ≤ t) :
+    (srTrace P c).take j =
+      List.foldl (stepFn P c) [] ((List.finRange t).take j) := by
+  set X := List.foldl (stepFn P c) [] ((List.finRange t).take j) with hX
+  have hsplit : srTrace P c =
+      List.foldl (stepFn P c) X ((List.finRange t).drop j) := by
+    conv_lhs => rw [srTrace_eq_foldl, ← List.take_append_drop j (List.finRange t)]
+    rw [List.foldl_append]
+  have hpre : X <+: srTrace P c := by
+    rw [hsplit]
+    exact foldl_stepFn_prefix P c _ _
+  have hlen : X.length = j := by
+    rw [hX, foldl_stepFn_length]
+    simp [hj]
+  calc (srTrace P c).take j = (srTrace P c).take X.length := by rw [hlen]
+    _ = X := (List.prefix_iff_eq_take.mp hpre).symm
+
+/-- Agreement of the coins below `j` fixes the first `j` trace entries. -/
+lemma srTrace_take_agree (P : SrProver r s) {c c' : Fin t → r.Chal} {j : ℕ}
+    (hj : j ≤ t) (h : ∀ i : Fin t, (i : ℕ) < j → c i = c' i) :
+    (srTrace P c).take j = (srTrace P c').take j := by
+  rw [srTrace_take P c hj, srTrace_take P c' hj]
+  have hgen : ∀ (js : List (Fin t)), (∀ i ∈ js, c i = c' i) →
+      ∀ L, List.foldl (stepFn P c) L js = List.foldl (stepFn P c') L js := by
+    intro js
+    induction js with
+    | nil => intro _ L; rfl
+    | cons x js ih =>
+      intro hmem L
+      rw [List.foldl_cons, List.foldl_cons]
+      have hx : stepFn P c L x = stepFn P c' L x := by
+        rw [stepFn_eq, stepFn_eq, hmem x List.mem_cons_self]
+      rw [hx]
+      exact ih (fun i hi => hmem i (List.mem_cons_of_mem _ hi)) _
+  apply hgen
+  intro i hi
+  apply h
+  obtain ⟨m, hm, hget⟩ := List.mem_iff_getElem.mp hi
+  have hmlt : m < (List.take j (List.finRange t)).length := hm
+  have hmj : m < j := by
+    rw [List.length_take] at hmlt
+    omega
+  rw [List.getElem_take, List.getElem_finRange] at hget
+  rw [← hget]
+  simpa using hmj
+
 /-- `find?` hit gives a first-occurrence index (within the list length). -/
 lemma exists_findIdx?_of_find? {α : Type} (p : α → Bool) :
     ∀ (l : List α) (e : α), l.find? p = some e →
@@ -786,32 +924,47 @@ def OB2_depth_composition_nonneg : Prop :=
 
 /-- **OBLIGATION [OB-2a] — the game-slot bound, the one remaining seam.**
 
-`Pr[HitBad j] ≤ εrbr δ`: if the bad slot's final-prefix query was first made
-at game move `j`, the response coin `c j` was fresh AT MOVE `j` — the move
-(hence the statement, the prover messages, and the pending message) is a
-function of the coins `c_{<j}` alone, and Def 4.2's round bound should apply
-just as in the fresh case.
+`Pr[HitBad j] ≤ εrbr δ`. This is the harder half of the union bound (the `t`
+"game move" slots, vs. the `k` "output prefix" slots closed by `freshBad_le`),
+and after building toward it, the honest diagnosis is sharper than "routine
+ROM argument" — it exposes a genuine INFRASTRUCTURE GAP in this file, not just
+a longer proof with the tools already at hand:
 
-What makes this the hard half — and why it is named rather than closed here —
-is the lazy-sampling rendering of the game (Loom/Rbr.lean, specialization 5):
-the earlier chain challenges `ρ_1 … ρ_{a-1}` are `srFinalChal` values, i.e.
-EVENTUAL responses read off the final log, and the continuation of the game
-after move `j` (hence which coin eventually answers each earlier prefix) does
-depend on `c j`. In the paper's eager formulation (`rnd` a total random
-function) the independence is immediate: `rnd(move)` is independent of
-`rnd` at every other point, which is where Thm B.4's proof says "the prover's
-output is independent of the response". Lazily, the same fact is the standard
-principle-of-deferred-decisions argument — the joint distribution of
-(fresh response at move `j`; eventual responses to any fixed family of
-distinct other queries) is uniform, because each is read from a distinct coin
-coordinate whose index is settled before the coin is read. This is precisely
-the "standard random-oracle argument" that Loom/Rbr.lean's specialization 5
-already defers for the game/uniform-function equivalence; it is a counting
-induction over the trace fold, not a new probabilistic idea. Closing it means:
-(i) an induction over `srTrace`'s fold showing the eventual-response vector at
-fixed distinct queries is uniform conditional on any coin prefix, and
-(ii) the fibrewise assembly `Σ_h Σ_v` against `extract_sound` as in
-`freshBad_le`. -/
+**The gap.** `slotBad`/`HitBad` (as defined above) test the round-bad event
+using `(srOut P c).stmt` and `srRounds`/`srFinalChal` — machinery built to
+answer only the `k` DESIGNATED final-output-prefix queries. That reuse is
+SOUND as a matter of what the event says (`hitAt` forces literal content
+equality between the game move `m_j` at slot `j` and `(srOut P c).query a`,
+so `m_j.stmt = (srOut P c).stmt` on the event) but it is NOT yet what a
+`c_j`-only independence argument can be run against, because `srOut P c` –
+and hence which `a` even matches, and the earlier-round challenges
+`srFinalChal P c d 0, …, srFinalChal P c d (a-1)` needed to instantiate
+`RoundBad` — are functions of the FULL trace, i.e. of ALL of `c` including
+`c_{>j}`, not of `c_{<j}` alone. Fixing `c_{≠j}` and varying only `c_j` (the
+`freshBad_le` recipe) does NOT hold `srOut`, `a`, or the earlier challenges
+fixed here, because the adversary's post-move-`j` behavior (hence its eventual
+output) is free to depend on `c_j` in an adversarial way.
+
+The paper sidesteps this because its `Xa` is stated using the a-th unique
+MOVE's OWN embedded `(i, x, y)` and its OWN prefix, with the earlier
+challenges `ρ_1, …, ρ_{i-1}` obtained by directly invoking the (eager, total)
+random function `rnd_j(i, x, y, (π1,…,πj), (σ1,…,σj))` AT THAT MOVE'S OWN
+prefixes — a total function needing no "was this sub-prefix ever queried"
+case split. Reproducing that here needs a GENERAL lazy-rnd resolver
+`srLazyRnd : Stmt r → List (r.PMsg × Salt s) → (all coins so far) → r.Chal`,
+defined and proved uniform/consistent for EVERY salted `(stmt, prefix)` pair a
+strategy could ever name — not just the `k` output ones — of which
+`srFinalChal` would become one instantiation. With that resolver, `m_j`'s own
+earlier-round challenges are computable from `c_{<j}` and fresh coins strictly
+below the query positions involved, and the `c_j`-only slicing argument goes
+through exactly as in `freshBad_le`.
+
+**What is already banked toward it** (below, `stepFn`/`srTrace_eq_foldl`/
+`srTrace_take`/`srTrace_take_agree`/`splitProd1`): the PROVEN fact that the
+game move made at any step `j` — hence the trace's first `j` entries — is a
+function of the coins strictly below `j` alone. This is exactly the
+"deferred decisions" backbone the general resolver's uniformity proof would
+induct on; it is not yet wired to a resolver or to `GameSlotBound` itself. -/
 def GameSlotBound : Prop :=
   ∀ (r : Reduction) (rbr : RbrKnowledgeSoundness r) (Z : Set (Stmt r))
     (εrbr : ℝ → ℝ) (δ : ℝ), δ ∈ Set.Ioo (0 : ℝ) r.δstar →
@@ -865,10 +1018,15 @@ theorem OB2_nonneg_of_gameSlotBound (H : GameSlotBound) :
 * `freshBad_le` — the per-slot bound for the `k` fresh slots, **PROVED** by
   product slicing on the fresh coin.
 * `GameSlotBound` — **[OB-2a], NAMED OBLIGATION** (the only seam): the
-  per-slot bound for the `t` game slots, i.e. the lazy-sampling
-  deferred-decisions argument — the same standard random-oracle argument
-  Loom/Rbr.lean's specialization 5 already defers. See its doc comment for the
-  exact proof plan.
+  per-slot bound for the `t` game slots. Diagnosis after building toward it:
+  this file's `srFinalChal`/`srRounds` machinery only resolves the `k`
+  DESIGNATED output-prefix queries; the paper's proof of this half instead
+  invokes the eager `rnd` at an arbitrary move's OWN prefixes directly. Closing
+  it needs a GENERAL lazy-rnd resolver over every salted `(stmt, prefix)` pair,
+  not an extension of the existing k-slot one. `stepFn`/`srTrace_take`/
+  `srTrace_take_agree`/`splitProd1` (proved, above) are scaffolding banked
+  toward that resolver's uniformity argument (coin-prefix determinism); see
+  `GameSlotBound`'s doc comment for the full diagnosis and what remains.
 * `OB2_nonneg_of_gameSlotBound` — **PROVED**: [OB-2a] ⟹ [OB-2′], i.e.
   everything of Thm B.4 except the seam is closed, with the loss-free
   `(t + k) · ε_rbr(δ)` arithmetic. -/
