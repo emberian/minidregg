@@ -202,20 +202,33 @@ the plan, several join the watchlist.
 **Adopted into the plan:**
 - **2024/1724** (Rotem–Tessaro) — straight-line knowledge extraction for
   *multi-round* protocols (sumcheck/folding shapes), ROM **and QROM without
-  super-polynomial loss. Now cited in §0 as the transcript-layer extraction
-  architecture. (Missed by the lanes: 2024 number, revised 2025.)
+  super-polynomial loss. (Missed by the lanes: 2024 number, revised 2025.)
+  *(Superseded same-day by the full read: both transforms are priced by the
+  special-soundness tree size N = (d+1)^{log n} — concretely infeasible at
+  sumcheck round counts (t ≈ λ·N transcript trees, or c^s·N ≥ 2¹⁵⁰ prover).
+  Withdrawn from §0; shelved for hypothetical constant-round non-RBR
+  components, where Merkle-instantiated transform 2 uniquely gives
+  polynomial-loss QROM soundness. See LOOM-RECOMPOSITION §2.)*
 - **2026/289** (Zheng–Gao–Liu, ZK-PCD from accumulation) — masking vectors +
   ZK-sumcheck; separates the compliance predicate from accumulation verification
   so no zkNARK is needed. This is the **disclosure dial at the aggregation
-  layer**: when receipts must not leak through the aggregate, this is the
-  reference technique.
+  layer**. *(Full read narrowed this: the split architecture (their Thm 1,
+  generic — zk confined to the compliance proof plus a zk accumulation scheme
+  that simulates accumulator AND accumulation proof) is ported; the concrete
+  masking machinery is Pedersen-homomorphic with rewinding extraction
+  (4m-transcript trees, expected-PPT) — disqualified for our stack. ZK for
+  hash-based straightline accumulation remains open: contribution slot OB-4,
+  LOOM-RECOMPOSITION §4.)*
+- **2026/538** (Paslis–Ràfols–Zacharakis, holography accumulation) — *stateless*
+  recursive proving: accumulates the witness-independent *holographic* (public
+  structure-polynomial) checks by commitment-free sumcheck batching to a fresh
+  point, RBR-proved, straightline after FS. *(Promoted from watchlist by the
+  full read — adopted for the structure side, complementary to the WARP-shape
+  witness accumulator; the homomorphic decider (§5.3 there) is the one
+  hash-incompatible piece and is carved out — the final decide pays merged
+  structure evaluations directly. See LOOM-RECOMPOSITION §3, OB-7.)*
 
 **Watchlist:**
-- **2026/538** (Paslis–Ràfols–Zacharakis, holography accumulation) — *stateless*
-  recursive proving (accumulates witness-independent public evaluation checks;
-  decider collapses to one polynomial evaluation), attacking Arc/WARP's large
-  prover-state cost. If our node's accumulator state becomes an operational
-  burden, this is the refinement to evaluate.
 - **Zinc/Zinc+** (2025/316, 2026/855, Nethermind et al.) — transparent hash-based
   SNARKs over polynomial **rings** (ℚ[X], ℤ[X], F_q[X]) via IPRS codes; matters
   if we ever want native ring/lattice/bitwise arithmetic in-circuit (e.g. PQ
