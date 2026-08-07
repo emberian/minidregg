@@ -24,7 +24,14 @@ encode and an accumulator to encode it into.
 3. Author N2 (hyperedge-as-limit) once the turn structure lands; then design the Q →
    CRS-claim encoding (OB-3) against the landed turn + Loom's accumulated-claim shape.
 
+## In flight (wave 1)
+- `Kernel/State.lean` — cells + bal + caps + keyed map, conservation keystone [lane]
+- `Kernel/Turn.lean` — hyperedge wide-pullback + 3 negative theorems [lane]
+- `Loom/Sumcheck.lean` — arithmetization front, round-by-round soundness [lane]
+
 ## Done-log
+- 2026-08-07 OB3-RECEIPT-ENCODING.md — the kill-checkpoint design: Q as a native
+  accumulated claim, PASS/FAIL criteria + candidate failure sites. Target for OB-3 fixed.
 - 2026-08-07 keystones green+audited on main: OB-6 (MCA@UD, +paper typo), Camera (4
   substances=1 Fpu), N3 (fold_unique — syntactic leaves forced), Reed-Solomon (Cor 4.11),
   OB-2 depth tower (as-stated REFUTED; repaired modulo OB-2a), Pred (the one algebra).
