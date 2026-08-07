@@ -22,10 +22,11 @@ INLINE in prompts from the deep-read reports.
   closes once the accumulator lands).
 
 ## Standing lanes (keep 2–6 live; relaunch as they land)
-Weaving: OB-2a (Depth.lean dirty — building the lazy-rnd resolver), OB3-d-fold, OutOfDomain.
-FiatShamir ✓ committed (98eea64, audit-PENDING — coupled to Depth; audit with OB-2a when it lands).
+Weaving: OB-2a (Depth.lean dirty — the lazy-rnd resolver), OB3-d-fold, LightClient.
+Push HELD (batch): FiatShamir (98eea64, audit-pending, coupled to dirty Depth) + OutOfDomain (bfe67cf, AUDITED ✓). Push the batch once OB-2a clears Depth and FiatShamir audits.
 
 ## Done-log (recent)
+- 2026-08-07 eve **OutOfDomain ✓** (audited, ATLAS triple): WHIR OOD sampling — the uniqueness pin (card_oodAgree < d), the list-separation union bound CLOSED (no residual), ∃! pin, + bonus bridge (oodConstraint = a LinearConstraint → mem_constrainedRS_ood_iff, discharging ConstrainedCode's promise). Teeth attain d-1 at F5.
 - 2026-08-07 eve **FiatShamir** committed (98eea64, self-reported clean, hand-audit pending): the transcript layer. Design finding — Rbr's SR game IS the lazy-sampled ROM game (queries=salted prefixes=SrMoves), so 3 machine-checked pieces not a stub: ROM as an INHABITED handler (Oracle.empty, no axiom), fsStraightline_iff_sr (BCS bridge), FsOfRbrSound ↔ OB2-depth. Its [OB-2a] residual is INHERITED from Depth — the sibling OB-2a lane builds the exact resolver that discharges it.
 - 2026-08-07 eve **Accumulator — THE HEART** (audited): WARP AccClaim (rt,α,μ,β,η) + foldClaims; closure foldClaims_satisfies (CRS×CRS→CRS) [propext,Quot.sound]; a machine-checked bridge to ConstrainedCode (ofConstraints_satisfies_iff); teeth attain (t-1)ℓ/|F| (bad-set card=1 at F5). The chain is one accumulated object.
 - 2026-08-07 eve **ConstrainedCode** (audited): WHIR Def 4.5 constrained RS code + gamma-power batching (forward proved + exact-word t-1 bound, tightness attained at F5); constrainedRS_append = the accumulator's merge closure.
