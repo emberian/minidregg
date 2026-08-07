@@ -63,6 +63,12 @@ naming a Prop we can't yet inhabit responsibly would be faking; the exact-word
 theorem above is the machine-checked kernel of the same argument — same defect
 polynomial, same root count — the residual is the lift from exact membership to
 δ-proximity). No axiom, no placeholder instance.
+⟲ STATUS: the lift is now a THEOREM in `Loom/AccSound.lean`
+(`accSound_batch_proximity`: `(t−1)·ℓ/|F|` with the δ-ball list size ℓ as
+hypothesis, union bound over the list priced by this file's kernel;
+`accSound_batch_proximity_UD`: ℓ = 1 discharged at unique decoding). What
+remains of `[CRS-batch-sound]` is supplying ℓ in the beyond-UD regimes —
+`[ACC-sound-list]` in that file's ledger.
 
 **Keystone hygiene (ATLAS: satisfiable + teeth, BUILT):** over `F₅` on
 `RSExample`'s 4-point domain, `CRSExample.xWord_mem_constrainedRS` exhibits a

@@ -613,6 +613,16 @@ residual's scope: the proximity ledger (δ, regime tag, additive error budget
 bound) is a theorem, and the pre-reduction nonlinear circuit claim
 `P̂(β, C⁻¹(f)) = η` enters via the sumcheck front (`Loom/Sumcheck.lean`), not
 via this file's linear channel.
+⟲ STATUS (`Loom/AccSound.lean`): the probability bounds are now THEOREMS —
+exact-word for BOTH fold rules (`accSound_batch_exact` /
+`AccClaim.batch_sound_exact` at `(t−1)/|F|`; `foldClaims_sound_exact` at
+`(s−1)/|F|`), δ-proximity same-word at `(t−1)·ℓ/|F|` with the list size as
+hypothesis (`accSound_batch_proximity`, ℓ = 1 discharged at unique decoding),
+and the cross-word accumulation step at UD with mutual CA consumed
+(`foldClaims_sound_proximity_UD`, `err⋆ + (s−1)·ℓ/|F|` at s = 2, ℓ = 1).
+What remains of this residual: the beyond-UD list regimes
+`[ACC-sound-list]` and the RBR-game packaging + proximity-ledger field
+`[ACC-sound-rbr]` — see that file's header.
 
 **[ACC-extract]** — the straightline erasure extractor. WARP's relaxed
 round-by-round knowledge soundness (WARP §4 + App. B): the extractor works
