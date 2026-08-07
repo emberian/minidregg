@@ -24,9 +24,13 @@ encode and an accumulator to encode it into.
 3. Author N2 (hyperedge-as-limit) once the turn structure lands; then design the Q →
    CRS-claim encoding (OB-3) against the landed turn + Loom's accumulated-claim shape.
 
-## In flight (wave 1)
-- `Kernel/State.lean` — [lane ALIVE, iterating] cells + bal + caps + keyed map
-- `Loom/Sumcheck.lean` — [lane STALLED @600s watchdog] to redo
+## Kernel spine COMPLETE (green, 1973 jobs)
+Camera (substances) + State (ledger + Σ-conservation, audited) + Turn (hyperedge,
+audited) — the substrate N2 and OB-3 both need. Next: N2 (hyperedge-as-limit),
+then Receipt Q → OB-3 encoding.
+
+## In flight
+- `Loom/Sumcheck.lean` — [relaunched, probing stream recovery]
 
 ## ⚠ Finding: subagent stream-watchdog stalls (2026-08-07 eve)
 2 of 3 wave-1 lanes died at "no progress 600s (stream watchdog)" mid-large-file
