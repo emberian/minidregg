@@ -22,9 +22,10 @@ INLINE in prompts from the deep-read reports.
   closes once the accumulator lands).
 
 ## Standing lanes (keep 2–6 live; relaunch as they land)
-Weaving: Accumulator, OB-2a, FiatShamir, OutOfDomain (replaced ConstrainedCode ✓).
+Weaving: OB-2a, FiatShamir, OutOfDomain, OB3-d-fold (Accumulator ✓, ConstrainedCode ✓).
 
 ## Done-log (recent)
+- 2026-08-07 eve **Accumulator — THE HEART** (audited): WARP AccClaim (rt,α,μ,β,η) + foldClaims; closure foldClaims_satisfies (CRS×CRS→CRS) [propext,Quot.sound]; a machine-checked bridge to ConstrainedCode (ofConstraints_satisfies_iff); teeth attain (t-1)ℓ/|F| (bad-set card=1 at F5). The chain is one accumulated object.
 - 2026-08-07 eve **ConstrainedCode** (audited): WHIR Def 4.5 constrained RS code + gamma-power batching (forward proved + exact-word t-1 bound, tightness attained at F5); constrainedRS_append = the accumulator's merge closure.
 - 2026-08-07 eve **OB-3 kill-checkpoint PASSES** (Assurance/ReceiptClaim, audited): Q's
   word = flatten(post); flatten_faithful binds it over the deployed finite field
