@@ -285,20 +285,20 @@ minidregg/
 
 Rough total: **100–150K lines** — half the budget, for the whole re-expression.
 
-## 8. Open decisions (ember's to make)
+## 8. Decisions (ember, 2026-08-06)
 
-1. **`verifyBatch` opaque vs modeled** — breadstuffs' one explicitly ember-gated call:
-   (A) define `verifyBatch := verifyBatchModel` + KAT correspondence, or (B) keep opaque
-   and name `StarkSound` as the explicit floor. Minidregg gets to choose *before* the
-   import-cycle ripple exists.
-2. **Proof system**: inherit Plonky3/BabyBear/FRI (and its conjectured-vs-Johnson floor,
-   unaudited), or re-decide the backend while the descriptor interface is still ours.
-3. **Turn model unification**: hyperedge-as-primitive with forests as tree instances is
-   the carve above — worth a design pass on whether delegation edges stay *executed*
-   attenuations (they should).
-4. **Which frontier items become day-one features**: refusal-reason export over FFI
-   ("every cheat is refused, with a witnessed reason" — the thesis, currently trapped
-   behind a bare Bool); trace-shaped/causal guards; per-issuer-global conservation as
-   the deployed ledger discipline (breadstuffs specified, never deployed).
-5. **The Games/ question**: 98.6K lines unaudited in this pass; likely home of the
-   largest duplication. Harvest lane needed before anything is carried over.
+1. **Neither fork of the old `verifyBatch` question.** No `verifyBatch := model` + KAT,
+   and no `StarkSound`-style named carrier — that pair IS the main-dregg mistake set
+   (opaque seam, launderable hypothesis, conjectured floor quoted optimistically).
+   Minidregg reevaluates the proof-system floor from scratch; see 2.
+2. **Backend is open — survey the literature for a proof system we can OWN.**
+   We know we can implement entire proof systems; the question is which one has (a) a
+   soundness argument amenable to full Lean mechanization with an honest, *inhabited*
+   floor, (b) **recursion support** (hard requirement — light-client aggregation is the
+   product), (c) transparency, (d) field faithfulness we can commit to at line one.
+   Survey in flight → `docs/PROOF-SYSTEM-SURVEY.md`.
+3. **Hyperedge-as-primitive design pass: approved.** Forests as tree-shaped instances;
+   delegation edges as executed attenuations to be re-examined in the pass.
+4. **Frontier items: undecided** — refusal-reason export, trace-shaped guards,
+   per-issuer-global conservation all stay open; none is a day-one commitment yet.
+5. **Games/: skipped.** Not carried into minidregg; no harvest lane planned.
