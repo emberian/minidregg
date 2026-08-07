@@ -1,0 +1,5 @@
+# Lake build artifacts (per-machine; includes fetched packages)
+/.lake/
+# Stray artifacts from direct `lean` invocations outside lake
+*.olean
+*.ilean
