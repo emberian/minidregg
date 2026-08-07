@@ -3,3 +3,4 @@
 # Stray artifacts from direct `lean` invocations outside lake
 *.olean
 *.ilean
+.claude/settings.local.json
