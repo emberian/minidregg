@@ -29,13 +29,25 @@ Camera (substances) + State (ledger + Σ-conservation, audited) + Turn (hyperedg
 audited) — the substrate N2 and OB-3 both need. Next: N2 (hyperedge-as-limit),
 then Receipt Q → OB-3 encoding.
 
-## In flight (wave 2, bounded/mathlib-only to dodge the stall)
-- `Loom/Sumcheck.lean` — round-by-round soundness (reuse RS card_agreeSet_lt_of_ne)
-- `Kernel/TurnLimit.lean` — N2a (hyperedge-cone = wide pullback), statement-first
+## In flight
+- `Loom/Sumcheck.lean` — [lane weaving] round-by-round soundness
 
 ## Next (fresh focus)
-- Audit + wire wave-2 lanes; author N2b (balanced-limit category, designed in
-  docs/N2-HYPEREDGE-LIMIT §1); Receipt Q (Kernel) → OB-3 encoding (the checkpoint).
+- Audit+wire Sumcheck when it lands; author `Loom/ReceiptClaim.lean` — the OB-3
+  statement (Q as CRS claim: word = C(uproj post), the four PASS obligations
+  keystone-fielded) — the kill-checkpoint itself. Then N2b (balanced category).
+
+## Done-log (recent)
+- 2026-08-07 eve **N2a PROVED** (`Kernel/TurnLimit.lean`, audited): the hyperedge
+  cone data IS a wide-pullback limit (genuine IsLimit via Types.isLimit_iff, ATLAS
+  triple; teeth built incl. no-common-apex refutation; [Nonempty ι] honest —
+  the empty-ι degeneration scoped, not glossed). First necessity theorem of the
+  KERNEL-NECESSITY program: the turn's agreement half is a universal object.
+- 2026-08-07 eve `Kernel/Receipt.lean` (by hand, audited): uproj faithfulness +
+  frame-as-receipt-fact; presence-bit encoding closes the none/some-0 binding
+  hole with the tamper tooth computing. OB-3's kernel side real.
+- 2026-08-07 eve kernel spine COMPLETE + wired: Camera+State+Turn+TurnLimit+Receipt,
+  green 2043 jobs.
 
 ## ⚠ Finding: subagent stream-watchdog stalls (2026-08-07 eve)
 2 of 3 wave-1 lanes died at "no progress 600s (stream watchdog)" mid-large-file
