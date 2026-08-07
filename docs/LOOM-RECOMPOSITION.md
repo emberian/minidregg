@@ -116,25 +116,59 @@ The genuinely new work: **hiding for the spot-check opening leakage** (masked
 openings / zk-code machinery) with a straightline RBR proof. Dial default
 remains off at v0; the research lane runs beside deployment, not in front.
 
-## 5. Small fields and parameters
+## 5. Small fields, parameters — ⟲ and the staging flip
+
+**v0 is WHIR-shaped-at-unique-decoding, not Basefold.** The survey's original
+staging ("Basefold first, WHIR later") is withdrawn: Basefold's knowledge
+soundness is forking-based and its soundness plain-not-RBR (§6) — ineligible
+under the straightline law — while WHIR at UD parameters is unconditional
+end-to-end (CA ⇒ mutual CA free, Lemma 4.10/Cor. 4.11) *with* RBR knowledge
+soundness. The parameter ladder is now regime-tagged on one architecture:
+**UD (unconditional, v0) → Johnson (unconditional for RS since 2025/2051 +
+2025/2110 — the fold rule at √ρ needs no conjecture) → beyond-Johnson (pull
+eprint 2026/1432, "MCA beyond the Johnson radius," before pricing)**. Each
+rung only changes δ, t, and the ledger's regime tag.
 
 Witness data over the deployed base field; challenges/accumulator sampling over
-the extension. WARP App. D transfers the soundness analysis exactly
+the extension (WHIR's OOD errors already demand the cubic/quadratic extension
+at Goldilocks). WARP App. D transfers the soundness analysis exactly
 (|Λ(C_F,δ)| = |Λ(C_𝔹^e,δ)|) but **loses prover linearity by O(λ) — a stated
-open problem** and a second contribution slot [OB-8]. Field-size inequalities
-(WARP Eq. 12–13; Arc Thm 6.2's 2^λ·10⁷·m·d³_max·ρ^{−3.5}) enter the repo as
-checked constants. t = λ/(−log(1−δ)) openings per input oracle is the whole
-verifier story; δ pushed to the mutual-CA radius the *proven* results allow
-(unique regime at v0; Johnson for RS now unconditional — §1).
+open problem** and a contribution slot [OB-8]. Field-size inequalities (WARP
+Eq. 12–13; Arc Thm 6.2) enter the repo as checked constants. t = λ/(−log(1−δ))
+openings per input oracle is the whole verifier story.
 
-## 6. Awaiting the third lane
+## 6. ⟲ The claim interface, confirmed (third lane landed)
 
-The Basefold/WHIR/DeepBrake read will pin: the final-compression step's exact
-interface (WHIR constrained-claim format vs WARP's accumulator claim — they
-are visibly the same shape; the lane confirms whether compression consumes
-`(rt, α, μ, β, η)` natively), the proven query counts at 100–120 bits for that
-one-shot step, and whether DeepBrake's consolidated proximity+evaluation test
-offers anything at the decider. §5 parameter table finalizes then.
+**The accumulated object is a multi-constrained CRS claim over one fixed code,
+frozen at the outermost level — descent is the decider's job.** WHIR's own
+machinery proves the closure Loom needs: CRS-claim × CRS-claim → CRS-claim
+under γ-folding (same-word constraints: Constr. 5.5, RBR error (t−1)ℓ/|F|;
+cross-word: Constr. 7.4 via mutual CA, err★ + (s−1)ℓ/|F|), with the proximity
+test — all queries, all Merkle paths — deferred entirely to the decider, which
+runs ONE WHIR descent ending in a transparent constant-size f̂_M. This is the
+same shape as WARP's `(rt, α, μ, β, η)` (convergent from two papers). The four
+carried data per link: **word commitment** (one root; all links share the
+outermost code — the alignment law, since rate-shifting breaks cross-depth
+folding), **constraint channel** (points + targets, γ-linear in both), the
+**proximity ledger** (δ, its regime tag, and the additive RBR error budget —
+a scalar the accumulator carries), and **uniqueness pins** (one OOD constraint
+per word before its first fold beyond unique decoding; a pin is itself a CRS
+constraint and folds along).
+
+Design rules banked from the reads:
+- **σ before γ** (DeepBrake's message-order lesson): fix every link's claimed
+  targets before sampling the fold challenge — then the fold challenge does
+  double duty and no separate evaluation-binding obligation accrues.
+- **Basefold's native claims are NOT accumulable** (per-level code chain,
+  coupled query paths) — and its extractor is *predicate-forking* (2^d
+  reruns) with plain-not-RBR soundness: excluded from the stack by the
+  straightline law, kept as the fold=bind invariant's origin.
+- The BrakeWHIR **virtual-oracle trick** (outer authenticated columns feed the
+  inner PCS's initial oracle on a shared query set — no recommitment of folds)
+  is reusable wherever a fold of committed words must itself be opened.
+- Concrete decider costs at λ=128 (Goldilocks³, (24,½)): 621 KiB / 4.8 ms /
+  10k hashes at UD, 299 KiB / 2.5 ms at Johnson — the one-time price the
+  light client pays after the accumulator.
 
 ## 7. The obligation ledger (v2)
 

@@ -12,13 +12,15 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
   descriptors) — sumcheck is the most-mechanized protocol in existence and its
   soundness is the exact proof shape mechanization likes (round induction +
   Schwartz–Zippel = the round-by-round invariant).
-- **Multilinear PCS, staged:** **Basefold (RS instantiation) at unique-decoding
-  parameters first** — the only candidate where *every lemma machine-checked, floor =
-  ROM + explicit CR only* is a near-term reality (~10–30K Lean lines beyond infra;
-  elementary correlated agreement; ~2–3× queries as the price) — **then WHIR at the
-  Johnson bound** as the mechanization of Johnson-regime correlated agreement matures
-  (same sumcheck skeleton; 63 KiB / 360 μs verify @2^22 — the cheapest recursion step
-  in the family; the entire Lean ecosystem is converging on it).
+- **Multilinear PCS, staged:** *(staging revised after the construction-level
+  reads — see LOOM-RECOMPOSITION §5/§6)* **WHIR-shaped constrained-claims at
+  unique-decoding parameters first** — unconditional end-to-end (CA ⇒ mutual CA
+  is free in UD) *with* RBR knowledge soundness, so the straightline law holds
+  from v0 — widening to the Johnson bound (unconditional for RS since 2025/2051
+  + 2025/2110) purely by re-tagging δ/t/ledger. Basefold is demoted to
+  prior-art: its extractor is predicate-forking (2^d reruns) and its soundness
+  plain-not-RBR — ineligible under the straightline law; its fold=bind
+  invariant survives as the design idea.
 - **Aggregation (the product):** straightline-extractable hash-based accumulation
   in the **Arc** 2024/1731 / **WARP** 2025/753 shape, **implemented and mechanized
   by us as the aggregation layer from the start** — straightline ROM extraction
