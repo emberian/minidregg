@@ -2,8 +2,10 @@
 
 *For the conversation that starts with a raised eyebrow. Written to be handed to a skeptical
 peer, so it quotes the pessimistic numbers and names what we give up. If this doc can't
-survive that reader, the decision can't either. Status 2026-08-07: Loom is an early spine
-of machine-checked keystones, NOT a working prover — read §6 (honest state) before §3.*
+survive that reader, the decision can't either. Status 2026-08-07: Loom's v0 SOUNDNESS TOWER
+is proved (machine-checked, hand-audited) — the whole-history-aggregation promise is a Lean
+term — but there is still NO prover and performance is UNMEASURED; read §6 (honest state)
+before §3.*
 
 ## 0. The one honest sentence
 
@@ -116,13 +118,36 @@ Loom exists to make (1) a *theorem* and (2) *unnecessary*.
 
 ## 6. Honest state today (do not oversell)
 
-Landed, machine-checked, on the ATLAS axiom triple: sumcheck soundness (round + adaptive
-union bound), Reed-Solomon (Cor 4.11) + mutual-correlated-agreement at unique decoding, the
-OB-2 depth tower (modulo one named seam OB-2a), the RBR knowledge-soundness vocabulary, and
-the OB-3 receipt-binding checkpoint. **In flight:** the accumulator + γ-fold (the heart), the
-constrained-code layer, OB-2a, the Fiat-Shamir layer. **Not started:** a prover, a verifier,
-benchmarks, the ZK slot, the Johnson-regime upgrade. This is a research spine with a
-credible path, not a system you can prove a block with tomorrow.
+**The v0 SOUNDNESS TOWER is proved** — machine-checked, every keystone on the ATLAS axiom
+triple `[propext, Classical.choice, Quot.sound]`, each one hand-audited (statement read, not
+just "it compiled") with a built non-vacuity witness and, where it applies, the *false*
+statement kept compiling beside the true one:
+
+- **OB-2** — whole-stack straightline depth composition — PROVED (the theorem whose absence
+  was breadstuffs' laundered `EngineSound`; anti-weakening check passes).
+- **OB-3** — the receipt is native to the accumulator (binding *and* fold) — PROVED.
+- **ACC-sound** — the γ-fold's soundness bounds are theorems (`err⋆(δ)+1/|F|` at unique
+  decoding, mutual-correlated-agreement genuinely consumed) — PROVED.
+- **LC-sound** — the light client's probabilistic soundness: one sampled challenge schedule
+  catches a false history except with prob `≤ n·(err⋆(δ)+1/|F|)` (exact-word form sharp at
+  `1/|F|`) — PROVED, and the naive one-fixed-schedule form is machine-checked FALSE beside it.
+- **Decider** — the one-time final check, cost `r+1` regardless of chain depth — PROVED.
+- Under them: the code layer (Reed-Solomon Cor 4.11 + MCA-at-UD, constrained code + γ-batching,
+  out-of-domain uniqueness), the sumcheck front (retiring the constraint channel), and the
+  Fiat-Shamir/ROM transcript layer (inhabited handler, keystone unconditional).
+
+So the central promise — *one aggregate proves the whole history, sound at deployed depth* —
+is now a chain of Lean terms, not a heuristic. **What that claim does NOT yet include, stated
+plainly:** the schedule is proved sound as a *uniform* sample; deriving it from a Fiat-Shamir
+hash is `[LC-sound-fs]` (rides the landed FS layer). Soundness is proved against claim-*
+satisfiability; binding a *forging prover*'s recommitments (straightline extraction) is
+`[ACC-extract]`. The decider checks *exact* membership; the rate<1 proximity test (the WHIR
+low-degree test) is in flight, and with it `[OB3-c-prox]`/`[DEC-proximity]`. ZK is a hiding
+*shell* + its MDS opening-core; the full opening-leakage proof is `[OB-4-hiding-rbr]`, the
+contribution slot. And — unchanged and load-bearing — **there is still no prover, no verifier
+implementation, and no benchmarks; performance remains UNMEASURED** (§4). This is a proved
+soundness tower with a deployment layer in progress, not a system you can prove a block with
+tomorrow — but it is no longer an "early spine," and the promise it was built to make is kept.
 
 ## 7. The decision criterion (when Loom, when Plonky3)
 
