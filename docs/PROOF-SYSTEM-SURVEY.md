@@ -19,12 +19,15 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
   Johnson bound** as the mechanization of Johnson-regime correlated agreement matures
   (same sumcheck skeleton; 63 KiB / 360 μs verify @2^22 — the cheapest recursion step
   in the family; the entire Lean ecosystem is converging on it).
-- **Aggregation (the product):** recursion via in-circuit verification of the WHIR/
-  Basefold verifier as the deployed pattern now, with the aggregate format kept
-  **abstract** so a straightline-extractable hash-based accumulator (**Arc**
-  2024/1731 / **WARP** 2025/753) slots in once audited — because straightline ROM
-  extraction makes **unbounded-depth PCD a theorem**, which no rewinding-based
-  scheme honestly offers at our use case.
+- **Aggregation (the product):** straightline-extractable hash-based accumulation
+  in the **Arc** 2024/1731 / **WARP** 2025/753 shape, **implemented and mechanized
+  by us as the aggregation layer from the start** — straightline ROM extraction
+  makes **unbounded-depth PCD a theorem**, which no rewinding-based scheme honestly
+  offers at our use case. The gate to deploying it is our own machine-checked
+  soundness (straightline RBR knowledge soundness; erasure-correction extraction),
+  not anyone's audit. In-circuit recursive verification survives only as the final
+  compression step where a light client wants one small proof, never as the
+  per-link aggregation mechanism.
 - **Transcript layer:** Poseidon2-class sponge as the ROM; Fiat–Shamir/BCS done
   **once over the whole compiled protocol** with round-by-round soundness as the
   non-negotiable invariant (2025/118's practical FS attacks are on protocols that
@@ -79,13 +82,24 @@ DLOG (not PQ), a forced curve cycle, and carries the depth gap at our use case.
 
 **Nobody anywhere has a fully mechanized soundness proof of a complete succinct
 argument** (IOP + commitment + BCS + FS). The field's scaffolds are large and open;
-its finished results are small, parameterized, and honest:
+its finished results are small, parameterized, and honest.
+
+**Ownership stance (ember, 2026-08-07): the whole tower is ours.** No Lean
+dependencies beyond mathlib — no vendored VCV-io, no ArkLib. External projects are
+*prior art to study*, never load-bearing. This is cheaper than it sounds: we need
+one instantiation, not a framework, and straightline extraction **eliminates the
+forking/rewinding machinery entirely** — the hardest thing the external carriers
+offer is machinery we never invoke. Our ROM carrier is a lazy-sampling handler +
+query bounds + reprogramming for the RBR→FS step: a few-K-line build. Breadstuffs'
+in-house record (fixed-parameter FRI soundness, LogUp, chip tables, the hygiene
+discipline) is the evidence we hold this class of material ourselves — and do
+better, because ours will carry the ATLAS vacuity gates the external scaffolds lack.
 
 | artifact | status (cloned/counted 2026-08-07) | role for us |
 |---|---|---|
-| **ArkLib** (Verified-zkEVM, Lean 4) | 100,119 LOC, **293 sorries**; IOR architecture (RBR security, lenses, BCS, duplex-sponge FS) defined; headline theorems open (composition 19 sorries, BCS a stub) | **Adopt the architecture**, not the theorems; consider a specialized composition spine for our one stack; track daily |
-| **VCV-io** (Lean 4) | 146,057 LOC, 82 sorries; oracle computations as free monad; ROM as *inhabited lazy-sampling handler*; forking lemma without rewindability axioms; FS for sigma protocols | **Vendor.** The ROM/game-hopping carrier; irreplaceable |
-| **simple-rbr-fri** (zksecurity, Hirai) | **4,068 LOC, 0 sorries, 0 axioms**; full FRI RBR soundness + completeness, MCA as named pluggable hypothesis; built solo in ~6 weeks | **Port outright.** The completion-discipline template — `FRI_MCA_Hypothesis` is exactly ATLAS's carrier-with-realizer-slot pattern |
+| **ArkLib** (Verified-zkEVM, Lean 4) | 100,119 LOC, **293 sorries**; IOR architecture (RBR security, lenses, BCS, duplex-sponge FS) defined; headline theorems open (composition 19 sorries, BCS a stub) | **Prior art only.** Study the IOR decomposition; our composition spine is specialized to our one stack (their generality is where their sorries live) |
+| **VCV-io** (Lean 4) | 146,057 LOC, 82 sorries; oracle computations as free monad; ROM as *inhabited lazy-sampling handler*; forking lemma without rewindability axioms; FS for sigma protocols | **Prior art only.** The ROM-as-inhabited-handler pattern is the idea worth taking; we build our own minimal carrier (no forking needed — straightline) |
+| **simple-rbr-fri** (zksecurity, Hirai) | **4,068 LOC, 0 sorries, 0 axioms**; full FRI RBR soundness + completeness, MCA as named pluggable hypothesis; built solo in ~6 weeks | **Prior art + calibration.** Proof-shape crib; the named-hypothesis pattern is exactly ATLAS's carrier-with-realizer-slot law; 4K lines/6 weeks proves the scale is weeks, not years |
 | δ\*/rs-mca; ArkLib BCIKS20 track; LeastAuthority WHIR blueprint | active | The MCA mechanization frontier — our Johnson upgrade path is being built by others |
 | S-two AIR soundness (StarkWare, Lean) | shipped, at scale | Precedent that **deployed-AIR ⟸ semantics** scales; their crypto layer stays unverified — ours won't |
 | SP1 chip proofs (EF audit: 51/62 complete, real bugs found) | cautionary | Per-chip green ≠ system-verified; the audit-the-claims law again |
@@ -107,9 +121,10 @@ never an `axiom`:
    slots in as an inhabitation witness, not obsolete); Johnson-bound realizer lands
    when the community MCA mechanization (δ\*, ArkLib-BCIKS) completes, or we
    mechanize Haböck 2024/1571 ourselves.
-2. **ROM realization** — the oracle is an *inhabited handler* (VCV-io lazy
-   sampling); the sole permanently-unproven leap is "the deployed Poseidon2 sponge
-   realizes it," stated as the named idealization it is. Where Merkle binding can
+2. **ROM realization** — the oracle is an *inhabited handler* (our own
+   lazy-sampling carrier; the pattern is standard); the sole permanently-unproven
+   leap is "the deployed Poseidon2 sponge realizes it," stated as the named
+   idealization it is. Where Merkle binding can
    ride explicit collision-resistance instead, it does — CR of a compressing hash
    is inhabited and non-vacuous (never an "injectivity" premise false by counting).
 
@@ -144,16 +159,15 @@ months; the sumcheck front we build is shared with it.
 - **Ligero/Brakedown as the system** — √n verifier kills recursion (but their
   elementary proofs make a fine first mechanization exercise).
 
-## 7. Open questions for ember
+## 7. Decided / remaining
 
+**Decided (ember, 2026-08-07):** the whole tower is ours — no VCV-io, no ArkLib,
+prior art only; and accumulation is not gated on external audit — we implement the
+accumulator and mechanize its soundness ourselves, and that proof is the gate.
+
+**Remaining:**
 1. **Field**: BabyBear (breadstuffs continuity, Plonky3 ecosystem) vs KoalaBear
    (SP1-Hypercube momentum) vs Goldilocks (Neo-compat) — with the Arc/WARP
    field-size inequality satisfied by extension choice either way.
-2. **ArkLib posture**: silent consumers, or upstream contributors (their BCS/
-   composition holes are exactly what we must build anyway — contributing buys
-   review; forking buys velocity)?
-3. **Accumulation phase-in**: how long do we run recursive-verification-only before
-   trusting Arc/WARP-shape accumulation (audits? our own mechanization of WARP's
-   straightline extractor)?
-4. **Poseidon2 vs a SHA3-class sponge** for the ROM instantiation leap (circuit
+2. **Poseidon2 vs a SHA3-class sponge** for the ROM instantiation leap (circuit
    cost vs cryptanalytic maturity).
