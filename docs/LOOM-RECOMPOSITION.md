@@ -1,129 +1,164 @@
-# LOOM — recomposing the frontier into minidregg's own proof system
+# LOOM — recomposing the frontier into minidregg's own proof system (v2)
 
-*Design pass 2026-08-07, following PROOF-SYSTEM-SURVEY.md and its §8 addendum.
-Working name **Loom**: it weaves strands (the blocklace's own word) of receipts into
-one fabric a light client checks once. Name provisional — ember's call.*
+*v1: 2026-08-07 architecture-level design. v2: same day, revised against full
+construction-level reads of WARP (2025/753), Arc (2024/1731), Holography
+Accumulation (2026/538), ZK-PCD (2026/289), and Rotem–Tessaro (2024/1724) —
+appendices included. One deep-read lane (Basefold/WHIR/DeepBrake claim formats)
+still out; §6 notes where it lands. v2 changes are marked ⟲.*
 
-**Stance.** This document recomposes the best published mathematics into a system
-none of the papers describe. Every recomposition step below is either (a) a theorem
-in a cited paper, (b) a composition we must prove ourselves — marked **[OB-n]** and
-entered in the obligation ledger — or (c) a design choice with no mathematical
-content. Nothing here inherits authority from resemblance to published work; the
-ledger is the deliverable.
+**Stance.** Every step below is (a) a cited theorem, (b) our obligation **[OB-n]**,
+or (c) a design choice. The ledger is the deliverable. Working name **Loom**
+(weaves the blocklace's strands into one fabric); ember may rename.
 
-## 1. The component shelf, as typed reductions
+## 1. The link layer — ⟲ OB-1 resolved: the composition dissolves
 
-The frontier, viewed as an algebra of reductions between relations (the IOR lens —
-the one thing ArkLib got architecturally right):
+v1 asked whether a WARP/Arc accumulator can ingest Basefold-style claims at
+successively halved lengths. Construction-level answer: **neither scheme folds
+mixed lengths — and Loom never needs it.** WARP's accumulated object
+`acc.𝕩 = (rt, α, μ, β, η)` — one Merkle root, one multilinear evaluation
+constraint `û(α) = μ`, one bundled circuit constraint `P̂(β, C⁻¹(u)) = η` — **is
+already a constrained-codeword claim at full length** (WARP Def 5.6/5.7,
+Constr. 10.4). The accumulator does not consume a PCS's outputs; it **replaces
+the PCS opening at every chain link**, at per-step cost `(1+ℓ₂)·t` Merkle
+openings + two sumchecks — what one opening would have cost anyway. The folding
+PCS appears exactly **once**, compressing the final accumulator for the light
+client (Arc's own suggestion: outsource the decider to a one-shot argument).
 
-| component | reduction | source | extraction discipline |
+Link-layer facts now pinned (from the reads):
+- **Any linear code works** (n a power of two); no decoder is ever needed by the
+  scheme — extraction uses erasure correction only (every linear code has it,
+  O(n³) generic; Õ(n) for RS). Systematic codes avoid a dec_C term.
+- **Mutual correlated agreement is THE load-bearing property** (plain proximity
+  gaps do not relate input agreement sets to the output's — WARP fn. 6).
+  Unconditional today: every linear code at δ(C)/3 (unique regime); RS at the
+  Johnson radius via 2025/2051 + 2025/2110. ⟲ **The Nov 2025 results upgrade
+  WARP-over-RS at Johnson from conjectured to unconditional — an observation no
+  paper states; Loom's parameter section should state and use it.** [OB-6′]
+- In-domain queries re-read as boolean multilinear claims make batching
+  linear-time; imported claims at non-boolean points cost O(n) each — keep them
+  O(1) per step (design rule for the receipt encoding).
+- Arc's per-instance *degree* heterogeneity (geometric degree correction in
+  Combine) means rates fold natively at one domain — the accommodation we keep
+  in pocket for heterogeneous receipt sizes.
+- Accumulator inputs in Loom are always chain-internal, so Arc's first OOD
+  binding round is skippable (Arc Rem. 7.15) — cheaper links, and the design
+  should never accept externally-supplied accumulators without re-binding.
+- **The strict/relaxed (promise) relation split is the formal interface for
+  "what a chain link certifies"** (honest decider checks exact codeword
+  membership; δ-slack lives only in extraction). Loom's Lean statements fix
+  this interface on day one. [OB-3 restated below]
+
+## 2. The transcript layer — ⟲ corrected: RBR + BCS, no R–T in front
+
+v1 cited Rotem–Tessaro (2024/1724) as the extraction reference for the sumcheck
+front. **Withdrawn on concrete pricing**: both R–T transforms are controlled by
+the special-soundness tree size N = Π nᵢ = (d+1)^{log n}; for n = 2²⁰, d = 3
+that is N ≈ 2⁴⁰, needing t ≈ λ·N committed transcript trees (transform 2) or
+c^s·N ≥ 2¹⁵⁰ prover work (transform 1, whose round cap is Θ(log λ/log log λ) —
+single digits). R–T exists to rescue protocols whose only handle is special
+soundness; **where round-by-round knowledge soundness holds, Fiat–Shamir of RBR
+in the ROM already yields straightline extraction from a single transcript**
+(the CY24/BMNW25 route; what WARP and holography both use). Loom's law:
+
+> **Every component enters the stack with an RBR knowledge-soundness proof;
+> the transcript layer is one BCS/FS compilation of the whole protocol; R–T is
+> reserved for a hypothetical future constant-round non-RBR component** (where
+> its Merkle-instantiated transform 2 also uniquely offers QROM soundness with
+> only polynomial loss — the one thing to remember it for).
+
+The extraction skeleton for the apex is WARP's: relaxed RBR knowledge
+(backwards extraction — each round extractor consumes the *next* round's
+witness), erasure correction only, and loss-free depth composition
+`ε_sr ≤ (t+k)·ε_rbr` proved by a union bound (WARP Thm B.4). This is exactly
+the proof shape mechanization likes. [OB-2 restated below]
+
+## 3. ⟲ The structure layer — adopt the holography split (2026/538)
+
+Verdict from the full read: **genuinely hash-compatible.** Lincheck-family
+SNARKs terminate in two check kinds: witness-dependent evaluations and
+*holographic* checks (evaluations of public structure polynomials — dominating
+recursive cost). Holography accumulation batches the structure claims to a
+fresh point by **commitment-free sumcheck** (Π_GBF2: for R1CS, 7ν + 3(K+1)
+field elements, zero cryptographic operations), RBR-proved, straightline after
+FS. It is *complementary* to the WARP-shape witness accumulator, and it makes
+the prover **stateless on the structure side** while removing per-step
+structure-polynomial costs.
+
+Loom adopts the split: **witness claims → WARP-shape accumulation; structure
+claims → GBF-style commitment-free sumcheck batching.** Hash-based carve-out,
+accepted: no homomorphic decider — the final decide pays the merged structure
+evaluations directly (or one closing argument; the final compression step
+absorbs it). [OB-7] Our receipts' structure side is unusually favorable: the
+body descriptors are *derived* from the fold-algebra IR, so the "circuit
+structure" being holographically evaluated is one uniform family, not per-app
+matrices — the ℓ·t_M term stays small by construction. **[OB-3′]**: state the
+receipt/seam encoding so that Q-chain seam claims land in the GBF (public,
+commitment-free) side wherever possible, and in the witness accumulator only
+where they must.
+
+## 4. ⟲ The disclosure layer — OB-4 is a contribution slot, confirmed
+
+From the reads: **neither WARP nor Arc has any ZK** (salt-zero Merkle, t
+codeword symbols leaked per step, no sketch); 2026/289's concrete zk machinery
+is Pedersen-homomorphic with rewinding extraction (4m-transcript trees,
+expected-PPT) — disqualified twice over for our stack. **ZK for hash-based
+straightline accumulation does not exist. That is Loom's open problem to
+solve.** What ports from 2026/289:
+- the **architecture** (their Thm 1, fully generic): split compliance from
+  accumulation-verification; zk confines to a small compliance proof plus zk of
+  the accumulation scheme in the strengthened sense (simulate accumulator AND
+  accumulation proof) — killing the O(2^d) masking blowup;
+- two ideas to re-prove RBR-style on our substrate: (a) fold in one uniformly
+  random satisfying pair to randomize the output accumulator (cheap here — the
+  folded word is recommitted every step anyway); (b) CFS17/XZZ+19 zk-sumcheck
+  masking with the KS24 point-update to keep claim-state constant.
+The genuinely new work: **hiding for the spot-check opening leakage** (masked
+openings / zk-code machinery) with a straightline RBR proof. Dial default
+remains off at v0; the research lane runs beside deployment, not in front.
+
+## 5. Small fields and parameters
+
+Witness data over the deployed base field; challenges/accumulator sampling over
+the extension. WARP App. D transfers the soundness analysis exactly
+(|Λ(C_F,δ)| = |Λ(C_𝔹^e,δ)|) but **loses prover linearity by O(λ) — a stated
+open problem** and a second contribution slot [OB-8]. Field-size inequalities
+(WARP Eq. 12–13; Arc Thm 6.2's 2^λ·10⁷·m·d³_max·ρ^{−3.5}) enter the repo as
+checked constants. t = λ/(−log(1−δ)) openings per input oracle is the whole
+verifier story; δ pushed to the mutual-CA radius the *proven* results allow
+(unique regime at v0; Johnson for RS now unconditional — §1).
+
+## 6. Awaiting the third lane
+
+The Basefold/WHIR/DeepBrake read will pin: the final-compression step's exact
+interface (WHIR constrained-claim format vs WARP's accumulator claim — they
+are visibly the same shape; the lane confirms whether compression consumes
+`(rt, α, μ, β, η)` natively), the proven query counts at 100–120 bits for that
+one-shot step, and whether DeepBrake's consolidated proximity+evaluation test
+offers anything at the decider. §5 parameter table finalizes then.
+
+## 7. The obligation ledger (v2)
+
+| id | obligation | status / risk | first move |
 |---|---|---|---|
-| Sumcheck | R_hyperedge-body (CCS-shaped) → R_multilinear-eval | classic; 2025/2041 for prover craft | RBR; straightline via R–T [2024/1724] |
-| Foldable-code PCS (Basefold-shape) | R_multilinear-eval → R_proximity(C) | 2023/1705 (+ 2024/1571 Johnson) | RBR; unique-decoding regime = erasure-decodable |
-| Constrained-code IOPP (WHIR-shape) | R_constrained-eval → R_proximity(CRS) | 2024/1586 (+ 2025/2051, 2025/2110) | RBR, MCA @ Johnson unconditional |
-| Accumulation (Arc/WARP-shape) | R_proximity × Acc → Acc | 2024/1731, 2025/753 | **straightline** via erasure correction; unbounded depth |
-| ZK at the aggregate | compliance/accumulation separation + masked sumcheck | 2026/289 | inherits |
-| FS/transcript | interactive → non-interactive, whole-protocol | BCS; RBR discipline; 2024/1724; 2025/118 as the cautionary | straightline in ROM (+QROM variant) |
-
-The shelf has one striking property the papers don't exploit *jointly*: **every row
-can be made straightline-extractable in one ROM**, and **every row can run over one
-code family**. Those two unifications are Loom.
-
-## 2. The recomposition — five moves
-
-### Move 1 — One code, one proximity core, one extraction discipline
-Fix a single foldable linear code family C (RS instantiation at v0), used by BOTH
-the PCS (Basefold-shape folding) and the accumulator (WARP-shape, which accepts any
-linear code). Run v0 entirely in the **unique-decoding regime**, where:
-- correlated agreement is elementary (mechanizable in weeks, per the FRI precedent),
-- **erasure/unique decoding is well-defined**, so WARP's straightline extractor and
-  the PCS's extractor are *the same mathematical object* — one decoder, one lemma
-  family, used at two layers. **[OB-1]**: the fold structure of C commutes with the
-  accumulator's claim format (Basefold folding produces proximity claims about C at
-  successively halved lengths; the accumulator must fold claims at *mixed* lengths
-  or we normalize lengths first — the normalization-vs-mixed-folding choice is the
-  central technical question of Loom v0).
-The Johnson-regime upgrade (2025/2051 + 2025/2110 MCA) later widens parameters
-without touching the architecture — the proximity hypothesis is a pluggable carrier
-exactly as in the survey §4.
-
-### Move 2 — Uniformly straightline: the whole-stack theorem
-Each published piece is straightline *in isolation* (R–T for the sumcheck front;
-WARP for accumulation; RBR+BCS for the transcript). **[OB-2]** — Loom's apex:
-**whole-stack straightline knowledge soundness** — one theorem stating that the
-composed extractor for (sumcheck ∘ fold ∘ accumulate ∘ FS) is straightline in one
-ROM with additive error across depth. No paper states this composed theorem; it is
-exactly the theorem whose absence created breadstuffs' `EngineSound` carrier. The
-composition is *specialized to our one stack* (survey §3's stance), which is why it
-is finishable where ArkLib's general Append machinery is not: our composition spine
-has exactly four arrows.
-
-### Move 3 — Receipt-native accumulation (the product-shaped novelty)
-The papers accumulate proofs *about a general VM*. Loom's accumulated relation is
-the kernel's own algebra: per turn (= one hyperedge, HYPEREDGE-DESIGN §4), the
-accumulator folds the claim bundle
-`⟨body-descriptor satisfied, Q binds post-state, seam: pre-root = prev.post-root⟩`
-— i.e. **the light-client object IS the receipt chain**, not a SNARK of an
-executor-simulator. Payoffs: (a) the compliance predicate is our fold-algebra IR,
-whose interp/compile agreement is by initiality — the circuit the accumulator
-carries is *derived*, closing the loop with ATLAS's compiler spine; (b) the
-uniform-arity receipt (one Q shape for every ι) means ONE claim format at every
-link — no per-shape accumulator variants, which is what kept breadstuffs' prover
-partition alive. **[OB-3]**: the seam claim is linear-algebraic over C-encodings
-(root equality as an encoded-column claim) — prove the encoding makes the seam a
-*native* accumulated claim rather than a side condition.
-
-### Move 4 — The disclosure dial reaches the aggregate
-Adopt 2026/289's separation: the compliance predicate stays non-ZK (our receipts
-are commitments already — hiding lives in the commitment layer per the kernel's
-disclosure ladder), while the accumulator itself can be masked (ZK-sumcheck with
-masking vectors) when a federation wants history-pattern privacy. **[OB-4]**: the
-masking preserves straightline extraction (2026/289 proves ZK for their scheme;
-ours must re-prove it against the WARP-shape extractor). Dial default: off at v0.
-
-### Move 5 — Small fields, explicit inequalities, stateless watch
-Witness data over the deployed base field (survey §7: BabyBear/KoalaBear/Goldilocks
-open); sumcheck challenges and accumulator sampling over the extension satisfying
-Arc's explicit field-size inequality — **a checked constant in the repo, not
-prose**. Prover accumulator state is Arc/WARP's known operational cost; holography
-accumulation (2026/538) is the watchlist refinement if node state becomes a
-burden — its "public evaluation checks accumulate separately" decomposition is
-compatible with Move 3's claim bundle. **[OB-5]** (deferred): stateless variant.
-
-## 3. Why this is plausibly frontier, stated carefully
-
-Nobody has the **conjunction**: unbounded-depth aggregation (straightline, proven
-depth-independent) × fully mechanized soundness (every arrow Lean-checked, floor =
-two inhabited carriers) × PQ-plausible transparency × receipt-native statements
-(the aggregate attests a capability kernel's own algebra, not a VM wrapper) ×
-deployed-parameter honesty (Johnson/unique-decoding only; both capacity
-counterexamples cited on the label). Each conjunct exists somewhere; the
-conjunction exists nowhere. Loom's novelty is the composition and its one apex
-theorem [OB-2] — which is also precisely the theorem minidregg's assurance case
-needs, so no effort is spent on generality we don't ship.
-
-## 4. The obligation ledger (the honest core)
-
-| id | obligation | risk | first move |
-|---|---|---|---|
-| OB-1 | fold ∘ accumulate compatibility (mixed-length claims vs normalization) | **the** technical risk; could force a length-normalization round | work the math on paper against WARP §constructions + Basefold folding; decide v0 shape |
-| OB-2 | whole-stack straightline KS, 4-arrow composition, additive depth error | medium — each arrow published; composition ours | state the theorem in Lean first (statement-first discipline); prove arrows in order sumcheck→fold |
-| OB-3 | seam claims native to the code (root equality as encoded claim) | medium-low | prototype the Q/seam encoding against C |
-| OB-4 | ZK masking preserves straightline extraction | low (deferrable; dial off at v0) | after OB-2 |
-| OB-5 | stateless accumulator variant | watchlist | after deployment cost data |
-| OB-6 | unique-decoding correlated agreement, mechanized (v0 floor realizer) | low — elementary; calibrated by simple-rbr-fri | early, it unblocks the carrier's realizer slot |
+| OB-1 | fold ∘ accumulate mixed-length compatibility | ⟲ **RESOLVED — dissolved.** Accumulator replaces the PCS at links; folding PCS only at final compression | write the link-layer relation in Lean against WARP Constr. 10.4's shape |
+| OB-2 | whole-stack straightline KS apex | ⟲ skeleton now known: RBR per component + BCS once + WARP's relaxed-RBR backwards extraction + (t+k)·ε union-bound depth composition; our composition has 3 arrows (front sumcheck → link accumulation → final compression) | statement-first in Lean; port the relaxed-RBR definitions as the base vocabulary |
+| OB-3 | seam/receipt claims native to the accumulator | ⟲ refined: route seam claims to the GBF (public) side where possible [OB-3′]; strict/relaxed promise interface fixed day-one | prototype Q/seam encoding against `(rt,α,μ,β,η)` + GBF claim shapes |
+| OB-4 | ZK accumulation, hash-based, straightline | ⟲ **confirmed open in the literature — contribution slot.** Architecture ported (2026/289 Thm 1); opening-leakage hiding is the new mathematics | after OB-2 statements; design masked-opening experiment |
+| OB-5 | stateless accumulator variant | ⟲ subsumed: holography split adopted for the structure side (§3); witness side stays WARP-stateful (acceptable: one node, not distributed provers) | — |
+| OB-6 | unique-decoding mutual-CA realizer (v0 floor) | low; unconditional for every linear code at δ(C)/3 | early — it inhabits the carrier |
+| OB-6′ | ⟲ Johnson-regime WARP-over-RS upgrade note (2025/2051+2110 applied to WARP's conjectured-MCA remark) | low — an observation to state precisely and prove the import | parameter section of the Lean tree |
+| OB-7 | ⟲ GBF structure-claim batching integrated with derived descriptors | medium-low | after the IR fold-algebra lands |
+| OB-8 | ⟲ small-field accumulation without the O(λ) linearity loss (WARP App. D's open problem) | open research — second contribution slot | after v0 ships at extension-field sampling |
 
 Statement-first discipline throughout: every OB enters the Lean tree as a
-`Prop`-statement with its ATLAS keystone fields (satisfiable/teeth/premise-
-inhabitation) *before* proof work starts — so a vacuous formulation dies on day
-one, not after a proof exists.
+`Prop` with ATLAS keystone fields (satisfiable/teeth/premise-inhabitation)
+before proof work starts.
 
-## 5. Next actions
+## 8. Next actions
 
-1. Fetch and closely read WARP (2025/753) + Arc (2024/1731) + Basefold (2023/1705)
-   full constructions; work OB-1 on paper. (The abstract-level compatibility above
-   is design; OB-1 is where it meets the actual protocols.)
-2. Scaffold the Lean project with `Theory/` + `Loom/` skeletons; state OB-2 and
-   OB-6 as statement-first keystones.
-3. Field + sponge decisions (survey §7) become blocking at OB-6's parameter
-   instantiation — decide by then.
+1. Third lane lands → finalize §5/§6, close the claim-format question.
+2. Scaffold the Lean project: `Theory/` (import-boundary-enforced) + `Loom/`
+   skeletons; state OB-2 and OB-6 statement-first.
+3. Field + sponge decisions (survey §7) bind at OB-6's instantiation.
+4. The two contribution slots (OB-4 ZK, OB-8 small-field linearity) get
+   research notes of their own once v0 statements are green.

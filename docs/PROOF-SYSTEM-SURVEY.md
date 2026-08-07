@@ -31,10 +31,13 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
 - **Transcript layer:** Poseidon2-class sponge as the ROM; Fiat–Shamir/BCS done
   **once over the whole compiled protocol** with round-by-round soundness as the
   non-negotiable invariant (2025/118's practical FS attacks are on protocols that
-  skipped exactly this). The **Rotem–Tessaro straight-line extraction transforms
-  for multi-round protocols** (2024/1724 — explicitly covers sumcheck/folding
-  shapes, ROM + a QROM variant with no super-polynomial loss) are the reference
-  architecture for the extraction side of this layer.
+  skipped exactly this). *(Corrected after the full read of 2024/1724: the
+  Rotem–Tessaro transforms are concretely infeasible at sumcheck round counts —
+  their cost is governed by the special-soundness tree size N = (d+1)^{log n}.
+  Where RBR knowledge soundness holds, FS-of-RBR already gives straightline
+  extraction from one transcript; R–T stays on the shelf for hypothetical
+  constant-round non-RBR components, where its Merkle-instantiated variant
+  uniquely offers polynomial-loss QROM soundness. See LOOM-RECOMPOSITION §2.)*
 - **No curves anywhere. No DLOG, no pairings, no trusted setup, no AGM, no curve
   cycle, no 255-bit fields.** PQ-plausible throughout.
 
