@@ -25,19 +25,24 @@ build the protocol soundness on top. Nothing is re-derived.
   some round; a union bound over the `v` rounds gives acceptance probability
   `≤ v·d/|F|`. The union bound reuses `uniformProb_exists_le` (Loom/Depth.lean);
   the per-round `≤ d/|F|` reuses the fibrewise `uniformProb_prod_le` + `splitCoord`.
+* `adaptiveUnionBound_holds` — **the fully-adaptive union bound, DISCHARGED.**
+  When each round's laundering set may depend on the challenge PREFIX `r|_{<i}`
+  (prefix-measurability) and has `≤ d` elements, the total laundering probability
+  is still `≤ v·d/|F|`. Per round, `uniformProb_coord_mem_prefix` slices the fresh
+  coin out with `splitCoord`, and prefix-measurability freezes the bad set on the
+  fibre, so `uniformProb_prod_le` reduces it to the fixed-set count.
 
 The reduction "accept ∧ false ⟹ some round launders" is `sumcheck_reduction`,
 proved by an elementary lie-persistence induction (`lie_persists`): if no round
 launders, the claim stays wrong through the final check, which then rejects.
 
-**Honest boundary (`AdaptiveUnionBound`, the remaining obligation).** The proved
-composition fixes the round polynomials up front. A fully adaptive prover chooses
-round `i`'s message as a function of the challenge prefix `r|_{<i}`; the same
-union bound still holds (each round's bad set is prefix-measurable, and
-`uniformProb_prod_le` conditions on all coordinates but the fresh one), but that
-generalization is stated, not discharged, here — `AdaptiveUnionBound`, a genuine
-`Prop` with the fixed case as a firing sub-instance (`sumcheck_soundness` witnesses
-its teeth), left as the sumcheck front's obligation.
+**Remaining wiring (not an obligation of the bound itself).** `sumcheck_soundness`
+is the protocol theorem for fixed round polynomials; `adaptiveUnionBound_holds`
+proves the union-bound engine for prefix-dependent bad sets. The one piece left is
+purely structural — restating `sumcheck_soundness` with the round polynomials
+themselves prefix-dependent (`prover : prefix → F[X]`) and feeding its per-round
+laundering sets into `adaptiveUnionBound_holds`. Both halves are proved; only the
+adaptive protocol packaging is unbuilt.
 -/
 import Mathlib.Algebra.Polynomial.Roots
 import Mathlib.Algebra.Order.Field.Basic
@@ -310,21 +315,64 @@ theorem unionBound_fixed {v d : ℕ} (bad : Fin v → Finset F)
     _ = (v : ℝ) * ((d : ℝ) / Fintype.card F) := by
         rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, nsmul_eq_mul]
 
-/-! ## Keystone obligation: the fully-adaptive union bound
+/-! ## The fully-adaptive union bound (prefix-dependent bad sets)
 
 `sumcheck_soundness` fixes the round polynomials up front. A fully adaptive
-prover chooses round `i`'s message from the challenge prefix `r|_{<i}`; the union
-bound still holds, but its per-round step must condition on the prefix. That
-generalization is stated here as an obligation and NOT discharged — its
-challenge-independent case is `unionBound_fixed` (proved), which fires on nonempty
-laundering sets, so the obligation is a genuine, non-vacuous statement. -/
+prover chooses round `i`'s message from the challenge prefix `r|_{<i}`, so round
+`i`'s laundering set `bad r i` depends on `r` — but *only* through that prefix
+(prefix-measurability). The union bound still holds: the per-round step conditions
+on all coordinates but the fresh coin `rᵢ` via `uniformProb_prod_le`, and
+prefix-measurability makes the fibre's bad set independent of `rᵢ`. -/
 
-/-- **OB-SC (fully-adaptive sumcheck union bound).** Round `i`'s laundering set
-`bad r i` may depend on `r`, but only through the prefix `r|_{<i}`
-(prefix-measurability). If every such set has `≤ d` elements, some round is
-laundered with probability `≤ v·d/|F|`. The prefix-independent case is proved
-(`unionBound_fixed`); the general case is the sumcheck front's obligation
-(dischargeable by the fibrewise `uniformProb_prod_le` per round). -/
+omit [Field F] [Fintype F] [DecidableEq F] in
+/-- `splitCoord`'s inverse on the non-`i` coordinates reads off the first factor. -/
+theorem splitCoord_symm_apply_of_ne {v : ℕ} {i : Fin v}
+    (x : ({j : Fin v // j ≠ i} → F) × F) {j : Fin v} (hj : j ≠ i) :
+    (splitCoord i).symm x j = x.1 ⟨j, hj⟩ := by
+  have hdef : (splitCoord i).symm x j
+      = dite (j = i) (fun _ => x.2) (fun h => x.1 ⟨j, h⟩) := rfl
+  rw [hdef, dif_neg hj]
+
+omit [DecidableEq F] in
+/-- **Per-round adaptive bound.** A single coordinate `rᵢ` lands in a
+prefix-measurable set `bad r` (depending on `r` only through coordinates `< i`,
+of size `≤ d`) with probability `≤ d/|F|`. Slice `rᵢ` out with `splitCoord`; on
+each fibre prefix-measurability freezes `bad`, so `uniformProb_prod_le` reduces to
+the fixed-set count `|bad|/|F| ≤ d/|F|`. -/
+theorem uniformProb_coord_mem_prefix {v d : ℕ} (i : Fin v)
+    (bad : (Fin v → F) → Finset F)
+    (hmeas : ∀ r r' : Fin v → F,
+      (∀ j : Fin v, (j : ℕ) < (i : ℕ) → r j = r' j) → bad r = bad r')
+    (hcard : ∀ r, (bad r).card ≤ d) :
+    uniformProb (Fin v → F) (fun r => r i ∈ bad r) ≤ (d : ℝ) / Fintype.card F := by
+  have key : uniformProb (Fin v → F) (fun r => r i ∈ bad r)
+      = uniformProb (({j : Fin v // j ≠ i} → F) × F)
+          (fun x => x.2 ∈ bad ((splitCoord i).symm x)) := by
+    rw [← uniformProb_equiv (splitCoord i)
+      (fun x : ({j : Fin v // j ≠ i} → F) × F => x.2 ∈ bad ((splitCoord i).symm x))]
+    refine uniformProb_congr fun r => ?_
+    rw [Equiv.symm_apply_apply]
+    rfl
+  rw [key]
+  refine uniformProb_prod_le (by positivity) fun a => ?_
+  show uniformProb F (fun b => b ∈ bad ((splitCoord i).symm (a, b))) ≤ (d : ℝ) / Fintype.card F
+  have hconst : ∀ b : F,
+      bad ((splitCoord i).symm (a, b)) = bad ((splitCoord i).symm (a, (0 : F))) := by
+    intro b
+    refine hmeas _ _ fun j hji => ?_
+    have hjne : j ≠ i := fun h => by rw [h] at hji; exact lt_irrefl _ hji
+    rw [splitCoord_symm_apply_of_ne _ hjne, splitCoord_symm_apply_of_ne _ hjne]
+  calc uniformProb F (fun b => b ∈ bad ((splitCoord i).symm (a, b)))
+      = uniformProb F (fun b => b ∈ bad ((splitCoord i).symm (a, (0 : F)))) :=
+        uniformProb_congr fun b => by rw [hconst b]
+    _ ≤ (d : ℝ) / Fintype.card F := by
+        rw [uniformProb_mem_finset]; gcongr; exact_mod_cast hcard _
+
+/-- **OB-SC, DISCHARGED — the fully-adaptive sumcheck union bound.** Round `i`'s
+laundering set may depend on the challenge, but only through the prefix `r|_{<i}`
+(prefix-measurability); if every such set has `≤ d` elements, some round is
+laundered with probability `≤ v·d/|F|`. Union bound (`uniformProb_exists_le`)
+over the `v` rounds, each round `≤ d/|F|` by `uniformProb_coord_mem_prefix`. -/
 def AdaptiveUnionBound (F : Type) [Field F] [Fintype F] (v d : ℕ) : Prop :=
   ∀ bad : (Fin v → F) → Fin v → Finset F,
     (∀ (i : Fin v) (r r' : Fin v → F),
@@ -334,10 +382,24 @@ def AdaptiveUnionBound (F : Type) [Field F] [Fintype F] (v d : ℕ) : Prop :=
       ≤ (v : ℝ) * ((d : ℝ) / Fintype.card F)
 
 omit [DecidableEq F] in
-/-- **Teeth for `AdaptiveUnionBound`.** Its conclusion holds for every
-challenge-INDEPENDENT bad function (a genuine sub-class of its quantifier — every
-constant `bad` is prefix-measurable), discharged by `unionBound_fixed`. So the
-obligation is satisfiable and non-vacuous, with its fixed case proved. -/
+/-- **`AdaptiveUnionBound` holds** — the obligation is discharged, not just
+stated. -/
+theorem adaptiveUnionBound_holds {v d : ℕ} : AdaptiveUnionBound F v d := by
+  intro bad hmeas hcard
+  calc uniformProb (Fin v → F) (fun r => ∃ i : Fin v, r i ∈ bad r i)
+      ≤ ∑ i : Fin v, uniformProb (Fin v → F) (fun r => r i ∈ bad r i) :=
+        uniformProb_exists_le _
+    _ ≤ ∑ _i : Fin v, (d : ℝ) / Fintype.card F :=
+        Finset.sum_le_sum fun i _ =>
+          uniformProb_coord_mem_prefix i (fun r => bad r i)
+            (fun r r' hjr => hmeas i r r' hjr) (fun r => hcard r i)
+    _ = (v : ℝ) * ((d : ℝ) / Fintype.card F) := by
+        rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, nsmul_eq_mul]
+
+omit [DecidableEq F] in
+/-- Teeth: the discharged bound fires on every challenge-INDEPENDENT bad function
+(constant `bad`, prefix-measurable) — and on nonempty laundering sets, so the
+statement is non-vacuous. -/
 theorem adaptiveUnionBound_fixedCase {v d : ℕ} (b : Fin v → Finset F)
     (hb : ∀ i, (b i).card ≤ d) :
     uniformProb (Fin v → F) (fun r => ∃ i : Fin v, r i ∈ (fun _r => b) r i)
@@ -373,4 +435,5 @@ example : (0 : ZMod 5) ∈ agreeFinset (X : Polynomial (ZMod 5)) 0 := by
 end SumcheckExample
 
 end Minidregg.Loom
+
 
