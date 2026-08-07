@@ -31,7 +31,10 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
 - **Transcript layer:** Poseidon2-class sponge as the ROM; Fiat–Shamir/BCS done
   **once over the whole compiled protocol** with round-by-round soundness as the
   non-negotiable invariant (2025/118's practical FS attacks are on protocols that
-  skipped exactly this).
+  skipped exactly this). The **Rotem–Tessaro straight-line extraction transforms
+  for multi-round protocols** (2024/1724 — explicitly covers sumcheck/folding
+  shapes, ROM + a QROM variant with no super-polynomial loss) are the reference
+  architecture for the extraction side of this layer.
 - **No curves anywhere. No DLOG, no pairings, no trusted setup, no AGM, no curve
   cycle, no 255-bit fields.** PQ-plausible throughout.
 
@@ -171,3 +174,66 @@ accumulator and mechanize its soundness ourselves, and that proof is the gate.
    field-size inequality satisfied by extension choice either way.
 2. **Poseidon2 vs a SHA3-class sponge** for the ROM instantiation leap (circuit
    cost vs cryptanalytic maturity).
+
+## 8. Addendum — the 2026 deep-cut sweep (direct Kagi pass, 2026-08-07)
+
+A second, novelty-targeted search pass beyond the citation graph the three lanes
+walked. Verdict: **the recommendation stands and got stronger**; four items join
+the plan, several join the watchlist.
+
+**Reinforcing:**
+- **2026/782** (Krachun–Kazanin–**Haböck**, Apr 2026) — a *second, independent*
+  counterexample to RS proximity gaps near capacity (an affine line at
+  θ = 1−ρ−η, η = Θ(1/log n), not θ-close yet containing exponentially many close
+  points, over multiplicative subgroups of prime fields). The capacity regime is
+  now dead from two unrelated directions (with 2025/2046). Johnson-only pricing
+  further vindicated.
+- **2025/2041** (Thaler, "Sum-check Is All You Need," Nov 2025–Mar 2026) — the
+  field's own opinionated survey lands on our arithmetization choice; its five
+  prover mechanisms (batch evaluation, read/write memory checking, virtual
+  polynomials, sparse sumchecks, small-value preservation) are the Compiler/
+  lane's optimization roadmap. Plus **2026/587** (sumcheck-prover speedups).
+
+**Adopted into the plan:**
+- **2024/1724** (Rotem–Tessaro) — straight-line knowledge extraction for
+  *multi-round* protocols (sumcheck/folding shapes), ROM **and QROM without
+  super-polynomial loss. Now cited in §0 as the transcript-layer extraction
+  architecture. (Missed by the lanes: 2024 number, revised 2025.)
+- **2026/289** (Zheng–Gao–Liu, ZK-PCD from accumulation) — masking vectors +
+  ZK-sumcheck; separates the compliance predicate from accumulation verification
+  so no zkNARK is needed. This is the **disclosure dial at the aggregation
+  layer**: when receipts must not leak through the aggregate, this is the
+  reference technique.
+
+**Watchlist:**
+- **2026/538** (Paslis–Ràfols–Zacharakis, holography accumulation) — *stateless*
+  recursive proving (accumulates witness-independent public evaluation checks;
+  decider collapses to one polynomial evaluation), attacking Arc/WARP's large
+  prover-state cost. If our node's accumulator state becomes an operational
+  burden, this is the refinement to evaluate.
+- **Zinc/Zinc+** (2025/316, 2026/855, Nethermind et al.) — transparent hash-based
+  SNARKs over polynomial **rings** (ℚ[X], ℤ[X], F_q[X]) via IPRS codes; matters
+  if we ever want native ring/lattice/bitwise arithmetic in-circuit (e.g. PQ
+  signature verification inside the light client). Not core substrate.
+- **DeepBrake / BrakeWHIR** (2026/1561, Jul 2026) — row-wise RS commitments with
+  a consolidated proximity+evaluation check (no sumcheck reduction at opening);
+  BrakeWHIR: 2.6× faster verification, 1.9× smaller proofs. PCS-layer
+  optimization for the WHIR phase.
+- **ProtogaLattice** (2026/1317, Balbás–Nitulescu–Plançon, Jun 2026) — constant-
+  round lattice folding, ~4 RO calls/iteration (vs sumcheck-heavy LatticeFold+/
+  Neo verifier circuits); the lattice watch-item (§5) keeps maturing. Also
+  2026/359 (partial range checks), 2026/1127 (FHE bootstrapping via folding).
+- **WHIR-DAS** (camofu/whir-das) — WHIR + the FoDAS compiler for transparent PQ
+  **data availability sampling** (Lean-Ethereum data layer); early boilerplate,
+  but it is the availability story our storage/light-client layer will want.
+
+**To audit, not adopt — a methodology exercise in our own house style:**
+- **iotexproject/rs-proximity-gaps** — a claimed **zero-sorry, zero-axiom Lean 4
+  formalization** of "FRI soundness above the Johnson bound via threshold
+  halving" (2026/858/861), targeting the intermediate zone between Johnson and
+  capacity (the Proximity Prize zone — untouched by both capacity
+  counterexamples). If the mechanized *statement* says what the paper claims
+  (vacuity audit: premise inhabitation, deployed-regime scope, no smuggled
+  hypotheses), this would be a machine-checked third rung on our parameter
+  ladder — worth one focused audit session precisely because "0 sorries" is
+  where our discipline says the reading *starts*, not ends.
