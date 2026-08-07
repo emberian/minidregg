@@ -22,9 +22,10 @@ INLINE in prompts from the deep-read reports.
   closes once the accumulator lands).
 
 ## Standing lanes (keep 2–6 live; relaunch as they land)
-Current wave: Accumulator, ConstrainedCode, OB-2a, FiatShamir.
+Weaving: Accumulator, OB-2a, FiatShamir, OutOfDomain (replaced ConstrainedCode ✓).
 
 ## Done-log (recent)
+- 2026-08-07 eve **ConstrainedCode** (audited): WHIR Def 4.5 constrained RS code + gamma-power batching (forward proved + exact-word t-1 bound, tightness attained at F5); constrainedRS_append = the accumulator's merge closure.
 - 2026-08-07 eve **OB-3 kill-checkpoint PASSES** (Assurance/ReceiptClaim, audited): Q's
   word = flatten(post); flatten_faithful binds it over the deployed finite field
   (range-restricted cast, non-vacuous); anti-ghost tooth computes over ZMod 5. No failure
