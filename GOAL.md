@@ -29,8 +29,13 @@ Camera (substances) + State (ledger + Σ-conservation, audited) + Turn (hyperedg
 audited) — the substrate N2 and OB-3 both need. Next: N2 (hyperedge-as-limit),
 then Receipt Q → OB-3 encoding.
 
-## In flight
-- `Loom/Sumcheck.lean` — [relaunched, probing stream recovery]
+## In flight (wave 2, bounded/mathlib-only to dodge the stall)
+- `Loom/Sumcheck.lean` — round-by-round soundness (reuse RS card_agreeSet_lt_of_ne)
+- `Kernel/TurnLimit.lean` — N2a (hyperedge-cone = wide pullback), statement-first
+
+## Next (fresh focus)
+- Audit + wire wave-2 lanes; author N2b (balanced-limit category, designed in
+  docs/N2-HYPEREDGE-LIMIT §1); Receipt Q (Kernel) → OB-3 encoding (the checkpoint).
 
 ## ⚠ Finding: subagent stream-watchdog stalls (2026-08-07 eve)
 2 of 3 wave-1 lanes died at "no progress 600s (stream watchdog)" mid-large-file
