@@ -22,9 +22,10 @@ INLINE in prompts from the deep-read reports.
   closes once the accumulator lands).
 
 ## Standing lanes (keep 2–6 live; relaunch as they land)
-Weaving: OB3-d-fold, LightClient, ACC-sound (proximity bound).
+Weaving: LightClient (v0 apex), ACC-sound (proximity bound).
 
 ## Done-log (recent)
+- 2026-08-07 eve **OB-3 kill-checkpoint COMPLETE (binding + fold)** (audited): [OB3-d-fold] CLOSED — receiptClaim_folds proves two receipt claims fold via Loom's foldClaims to ONE accumulated claim (proof term IS foldClaims_satisfies fed the bridge — inheritance visible). The receipt Q is a native AccClaim; the chain is one accumulated object. Teeth: a ghost fold caught at every γ≠0. ATLAS triple. Only [OB3-c-prox] (rate<1) + [ACC-sound] proximity remain.
 - 2026-08-07 eve ★★ **OB-2 COMPLETE — the whole-stack depth composition theorem, RIGOROUSLY AUDITED** ★★. [OB-2a] CLOSED (gameSlotBound_proved: GameSlotBound, fully proved not reduced — the lazy-rnd resolver runFrom/resolveIn + the exactly-uniform kernel card_resolve_runFrom + pushforward slicing). OB2_depth_composition_nonneg_proved inhabits the REAL obligation; the anti-weakening check passes (OB2_depth_composition_false still compiles beside it — the repair is honest, not a relabeled weakening). ATLAS triple. This is the theorem whose absence was breadstuffs' laundered EngineSound carrier. Downstream: FiatShamir's fsKeystone_proved now UNCONDITIONAL (straightline FS-of-RBR at loss-free (t+k)·ε_rbr). FiatShamir + OutOfDomain audited; batch pushed. Tree green 2052.
 - 2026-08-07 eve **OutOfDomain ✓** (audited, ATLAS triple): WHIR OOD sampling — the uniqueness pin (card_oodAgree < d), the list-separation union bound CLOSED (no residual), ∃! pin, + bonus bridge (oodConstraint = a LinearConstraint → mem_constrainedRS_ood_iff, discharging ConstrainedCode's promise). Teeth attain d-1 at F5.
 - 2026-08-07 eve **FiatShamir** committed (98eea64, self-reported clean, hand-audit pending): the transcript layer. Design finding — Rbr's SR game IS the lazy-sampled ROM game (queries=salted prefixes=SrMoves), so 3 machine-checked pieces not a stub: ROM as an INHABITED handler (Oracle.empty, no axiom), fsStraightline_iff_sr (BCS bridge), FsOfRbrSound ↔ OB2-depth. Its [OB-2a] residual is INHERITED from Depth — the sibling OB-2a lane builds the exact resolver that discharges it.
