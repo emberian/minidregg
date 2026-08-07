@@ -54,16 +54,19 @@ What lands here:
   exists — Depth's `trivialReduction`/`trivialRbr`), `sound` (the statement).
   `fsOfRbrSound_iff_depth` proves the statement EQUIVALENT to the repaired
   depth obligation [OB-2′], so `fsKeystone_of_gameSlotBound` assembles the
-  whole keystone from the ONE named seam [OB-2a] (`GameSlotBound`,
-  Loom/Depth.lean) — nothing new is assumed here.
+  whole keystone from [OB-2a] (`GameSlotBound`, Loom/Depth.lean) — nothing
+  new is assumed here. [OB-2a] is now DISCHARGED upstream
+  (`gameSlotBound_proved`), so the keystone holds unconditionally:
+  `fsKeystone_proved`.
 
 ## Residual ledger (honest, named — no `sorry`, no `True` stubs)
-* **[OB-2a] inherited, not new**: `FsOfRbrSound` is proved ⇔ [OB-2′]
-  (`fsOfRbrSound_iff_depth`), and [OB-2′] is proved modulo `GameSlotBound`
-  (Loom/Depth.lean, `OB2_nonneg_of_gameSlotBound`). The FS layer adds NO new
-  unproved mathematics: its own two reductions (game-equivalence, handler
-  correspondence) are closed in this file. The realizer for the seam remains
-  the general lazy-rnd resolver diagnosed in `GameSlotBound`'s doc comment.
+* **[OB-2a] inherited — now CLOSED upstream**: `FsOfRbrSound` is proved ⇔
+  [OB-2′] (`fsOfRbrSound_iff_depth`), [OB-2′] is proved from `GameSlotBound`
+  (Loom/Depth.lean, `OB2_nonneg_of_gameSlotBound`), and `GameSlotBound` is
+  now PROVED there (`gameSlotBound_proved`, via the general lazy-rnd
+  resolver + uniformity kernel its doc comment called for). The FS layer
+  adds NO new unproved mathematics: its own two reductions
+  (game-equivalence, handler correspondence) are closed in this file.
 * **[FS-ROM] the one named idealization**: "the deployed sponge/hash realizes
   this lazy-sampling handler" is a MODELING step outside the theory — the
   handler is the ideal object the deployed function is assumed to
@@ -266,12 +269,9 @@ lemma fiatShamir_congr {r : Reduction} {s : ℕ} {O O' : SrMove r s → r.Chal}
     fiatShamir r s O o = fiatShamir r s O' o :=
   congrArg _ (funext h)
 
-/-- The round-`i` designated query has prefix length `i + 1`. -/
-lemma SrOutput.query_pfx_length {r : Reduction} {s : ℕ} (o : SrOutput r s)
-    (i : Fin r.k) : (o.query i).pfx.length = (i : ℕ) + 1 := by
-  simp only [SrOutput.query, List.length_map, List.length_take,
-    List.length_finRange]
-  omega
+/- (`SrOutput.query_pfx_length` — the round-`i` designated query has prefix
+length `i + 1` — used to live here; it now lands upstream in Loom/Depth.lean's
+query-structure section, and the twin is deleted.) -/
 
 /-- Well-definedness, half 2: the `k` designated queries are pairwise
 distinct (their prefix lengths differ) — so ANY challenge vector is realized
@@ -591,10 +591,11 @@ structure fields (not doc-comment TODOs):
   unconditionally, `fsKeystone_premise`, via Loom/Depth.lean's
   `trivialReduction`/`trivialRbr`);
 * `sound` — THE STATEMENT: FS of RBR preserves knowledge soundness,
-  straightline, at `(t + k) · ε_rbr`. Proved from the ONE named seam
-  [OB-2a] (`fsKeystone_of_gameSlotBound`); its realizer remains the general
-  lazy-rnd resolver named in `GameSlotBound`'s doc comment (the CY24/BMNW25
-  FS-of-RBR route, WARP Thm B.4's game-slot half). -/
+  straightline, at `(t + k) · ε_rbr`. Proved from [OB-2a]
+  (`fsKeystone_of_gameSlotBound`) — and [OB-2a] is now discharged upstream
+  (`gameSlotBound_proved`, Loom/Depth.lean: the general lazy-rnd resolver +
+  uniformity kernel), so the keystone holds unconditionally
+  (`fsKeystone_proved`; the CY24/BMNW25 FS-of-RBR route, WARP Thm B.4). -/
 structure FsOfRbrKeystone : Prop where
   /-- Satisfiable: the lazy-sampling ROM handler is inhabited — the floor is
   a built object. -/
@@ -630,23 +631,29 @@ theorem fsKeystone_premise :
     ∃ r : Reduction, Nonempty (RbrKnowledgeSoundness r) :=
   ⟨trivialReduction, ⟨trivialRbr⟩⟩
 
-/-- **The keystone, assembled from the one named seam**: [OB-2a]
-(`GameSlotBound`, Loom/Depth.lean) implies the whole FS-of-RBR keystone —
-the three companion fields unconditionally, and `sound` through the proved
-chain [OB-2a] ⟹ [OB-2′] (`OB2_nonneg_of_gameSlotBound`) ⟺ `FsOfRbrSound`
+/-- **The keystone, assembled from [OB-2a]**: `GameSlotBound`
+(Loom/Depth.lean) implies the whole FS-of-RBR keystone — the three companion
+fields unconditionally, and `sound` through the proved chain [OB-2a] ⟹
+[OB-2′] (`OB2_nonneg_of_gameSlotBound`) ⟺ `FsOfRbrSound`
 (`fsOfRbrSound_iff_depth`). The transcript layer's own reductions (the BCS
 bridge, the handler correspondence) are closed in this file; NOTHING beyond
-[OB-2a] is assumed. -/
+[OB-2a] is assumed — and [OB-2a] is now proved (`fsKeystone_proved` below). -/
 theorem fsKeystone_of_gameSlotBound (H : GameSlotBound) : FsOfRbrKeystone where
   oracle_inhabited := fsKeystone_oracle_inhabited
   teeth := fsKeystone_teeth
   premise := fsKeystone_premise
   sound := fsOfRbrSound_iff_depth.mpr (OB2_nonneg_of_gameSlotBound H)
 
+/-- **The keystone, unconditional**: [OB-2a] is discharged
+(`gameSlotBound_proved`, Loom/Depth.lean), so FS-of-RBR knowledge-soundness
+preservation holds with no remaining seam. -/
+theorem fsKeystone_proved : FsOfRbrKeystone :=
+  fsKeystone_of_gameSlotBound gameSlotBound_proved
+
 #check @Oracle.respond_consistent
 #check @srFinalChal_eq_lookup
 #check fsStraightline_iff_sr
 #check fsOfRbrSound_iff_depth
-#check fsKeystone_of_gameSlotBound
+#check fsKeystone_proved
 
 end Minidregg.Loom
