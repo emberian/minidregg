@@ -1,69 +1,35 @@
-# GOAL — mutually elaborate minidregg + Loom to a green-audited v0 slice
+# GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
-**North star:** OB-3, the kill-checkpoint — a turn's receipt claim Q is NATIVE to the
-Loom accumulator (the light-client object IS the Q-chain, not a SNARK of a VM). v0 =
-a coherent slice: kernel turn → receipt Q → Loom link-accumulation stating whole-history
-soundness, all green + audited.
+**Priority (ember, 2026-08-07 eve): LOOM IS VITAL, above kernel work.** Keep **2–6 lanes
+active on Loom at all times**, driving it toward maturity — enough that we understand the
+whole system (its resources, its soundness floor, why it beats plonky3) well enough to
+defend "we built our own proof system" to skeptical peers. Breadth AND depth, continuously.
 
-**Discipline:** statement-first; a keystone is not landed until satisfiable + teeth +
-premise-inhabitation are BUILT in Lean (OB-2 was refuted for lack of this). I author
-statements; swarm proves/ports; I audit every lane by hand (axioms + non-vacuity) before
-integrate+push. origin/main stays green; Theory/ boundary clean.
+**All subagents run `model:"fable"`.** Lanes are bounded to mathlib + local Loom/Assurance
+files (NEVER large breadstuffs reads — that stalls the stream); construction facts go
+INLINE in prompts from the deep-read reports.
 
-## Current thrust
-Build the kernel spine the receipt needs (state → hyperedge turn → Q), while closing
-Loom's depth seam (OB-2a) and standing up the sumcheck front — so OB-3 has both a Q to
-encode and an accumulator to encode it into.
+## The Loom map (what a defensible whole needs)
+- **Front:** sumcheck ✓ (round + adaptive union bound, PROVED).
+- **Code layer:** Reed-Solomon ✓ (Cor 4.11 UD); MCA-at-UD ✓. NEXT: constrained RS code
+  (CRS[F,L,m,ŵ,σ]) — the claim object; γ-power constraint batching (WHIR Constr 5.5).
+- **Accumulator (THE HEART, nothing yet):** the WARP claim (rt,α,μ,β,η); the γ-fold
+  (CRS×CRS→CRS closure); straightline erasure-extraction; unbounded-depth composition.
+- **Depth:** OB-2 tower ✓ modulo OB-2a (game-slot bound — close it).
+- **Transcript:** RBR vocabulary ✓ (Rbr.lean). NEXT: BCS/Fiat-Shamir (RBR→straightline NI).
+- **ZK (contribution slot):** OB-4 — hiding for hash-based straightline accumulation.
+- **Bridge:** OB-3 ✓ (receipt Q native to the accumulator, binding half; [OB3-d-fold]
+  closes once the accumulator lands).
 
-## Next 3 moves
-1. Fan out the kernel spine: `Kernel/State.lean` (cells + bal + caps + one keyed map,
-   ATLAS §7) and `Kernel/Turn.lean` (the hyperedge wide-pullback + its 3 negative
-   theorems, from breadstuffs Hyperedge.lean).
-2. Fan out `Loom/Sumcheck.lean` (the arithmetization front — sumcheck soundness) and push
-   OB-2a (the game-slot lazy-rnd resolver) toward closing the depth theorem.
-3. Author N2 (hyperedge-as-limit) once the turn structure lands; then design the Q →
-   CRS-claim encoding (OB-3) against the landed turn + Loom's accumulated-claim shape.
-
-## Kernel spine COMPLETE (green, 1973 jobs)
-Camera (substances) + State (ledger + Σ-conservation, audited) + Turn (hyperedge,
-audited) — the substrate N2 and OB-3 both need. Next: N2 (hyperedge-as-limit),
-then Receipt Q → OB-3 encoding.
-
-## In flight
-- `Loom/Sumcheck.lean` — [lane weaving] round-by-round soundness
-
-## Next (fresh focus)
-- Audit+wire Sumcheck when it lands; author `Loom/ReceiptClaim.lean` — the OB-3
-  statement (Q as CRS claim: word = C(uproj post), the four PASS obligations
-  keystone-fielded) — the kill-checkpoint itself. Then N2b (balanced category).
+## Standing lanes (keep 2–6 live; relaunch as they land)
+Current wave: Accumulator, ConstrainedCode, OB-2a, FiatShamir.
 
 ## Done-log (recent)
-- 2026-08-07 eve **N2a PROVED** (`Kernel/TurnLimit.lean`, audited): the hyperedge
-  cone data IS a wide-pullback limit (genuine IsLimit via Types.isLimit_iff, ATLAS
-  triple; teeth built incl. no-common-apex refutation; [Nonempty ι] honest —
-  the empty-ι degeneration scoped, not glossed). First necessity theorem of the
-  KERNEL-NECESSITY program: the turn's agreement half is a universal object.
-- 2026-08-07 eve `Kernel/Receipt.lean` (by hand, audited): uproj faithfulness +
-  frame-as-receipt-fact; presence-bit encoding closes the none/some-0 binding
-  hole with the tamper tooth computing. OB-3's kernel side real.
-- 2026-08-07 eve kernel spine COMPLETE + wired: Camera+State+Turn+TurnLimit+Receipt,
-  green 2043 jobs.
-
-## ⚠ Finding: subagent stream-watchdog stalls (2026-08-07 eve)
-2 of 3 wave-1 lanes died at "no progress 600s (stream watchdog)" mid-large-file
-read — a systemic subagent-stream issue tonight, not content. Strategy under it:
-the station does load-bearing lanes BY HAND (Turn done so), fans out only when
-the stream recovers. Not owner-blocking; a workaround, noted so the pattern is
-visible if it persists.
-
-## Awaiting-wire
-- `Kernel/Turn.lean` — landed by hand, axiom-clean, NOT yet in Kernel.lean (a
-  live State lane holds that shared root); wire Turn+State together once State lands.
-
-## Done-log
-- 2026-08-07 OB3-RECEIPT-ENCODING.md — the kill-checkpoint design: Q as a native
-  accumulated claim, PASS/FAIL criteria + candidate failure sites. Target for OB-3 fixed.
-- 2026-08-07 keystones green+audited on main: OB-6 (MCA@UD, +paper typo), Camera (4
-  substances=1 Fpu), N3 (fold_unique — syntactic leaves forced), Reed-Solomon (Cor 4.11),
-  OB-2 depth tower (as-stated REFUTED; repaired modulo OB-2a), Pred (the one algebra).
-- 2026-08-07 helm macOS: gate-bind + port-owner /proc fallbacks (tested, PR #1).
+- 2026-08-07 eve **OB-3 kill-checkpoint PASSES** (Assurance/ReceiptClaim, audited): Q's
+  word = flatten(post); flatten_faithful binds it over the deployed finite field
+  (range-restricted cast, non-vacuous); anti-ghost tooth computes over ZMod 5. No failure
+  site bit. Receipt IS the accumulator's word.
+- 2026-08-07 eve Sumcheck ✓ (adaptive union bound discharged), N2a ✓ (hyperedge=limit),
+  Receipt ✓, kernel spine complete (Camera/State/Turn/TurnLimit/Receipt green).
+- Earlier: OB-6 (MCA@UD +typo), Camera, N3 (fold_unique), Reed-Solomon, OB-2 (refuted+
+  repaired mod OB-2a), Pred. Tree green 2045 jobs.
