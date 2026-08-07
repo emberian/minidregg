@@ -25,9 +25,19 @@ encode and an accumulator to encode it into.
    CRS-claim encoding (OB-3) against the landed turn + Loom's accumulated-claim shape.
 
 ## In flight (wave 1)
-- `Kernel/State.lean` — cells + bal + caps + keyed map, conservation keystone [lane]
-- `Kernel/Turn.lean` — hyperedge wide-pullback + 3 negative theorems [lane]
-- `Loom/Sumcheck.lean` — arithmetization front, round-by-round soundness [lane]
+- `Kernel/State.lean` — [lane ALIVE, iterating] cells + bal + caps + keyed map
+- `Loom/Sumcheck.lean` — [lane STALLED @600s watchdog] to redo
+
+## ⚠ Finding: subagent stream-watchdog stalls (2026-08-07 eve)
+2 of 3 wave-1 lanes died at "no progress 600s (stream watchdog)" mid-large-file
+read — a systemic subagent-stream issue tonight, not content. Strategy under it:
+the station does load-bearing lanes BY HAND (Turn done so), fans out only when
+the stream recovers. Not owner-blocking; a workaround, noted so the pattern is
+visible if it persists.
+
+## Awaiting-wire
+- `Kernel/Turn.lean` — landed by hand, axiom-clean, NOT yet in Kernel.lean (a
+  live State lane holds that shared root); wire Turn+State together once State lands.
 
 ## Done-log
 - 2026-08-07 OB3-RECEIPT-ENCODING.md — the kill-checkpoint design: Q as a native
