@@ -55,12 +55,14 @@ reads the `ConstraintDescriptor` this file emits; it never writes constraints.
   honest implementation of the IOP). This file proves the descriptor MEANS the Lean AIR; it
   does NOT claim the unverified prover's acceptance implies the descriptor's satisfaction.
   "It proves on a box" stays exactly that until the floor is discharged.
-* `[EMIT-share]` — `flatten` serializes the term TREE: duplicated subterms (the membership
-  mux re-reads the hash state, the S-box chains re-read their base) emit duplicated gates —
-  the demo note-spend measures 2,696,666 gates (compiled `#eval`, §8). Faithfulness is
-  unaffected (every copy is forced to the same value); gate-count efficiency needs a
-  sharing/CSE pass — a future compiler rung with its OWN faithfulness theorem, derived like
-  this one, never a hand-tuned emitted list.
+* `[EMIT-share]` — CLOSED in `Compiler/EmitShare`. `flatten` serializes the term TREE:
+  duplicated subterms (the membership mux re-reads the hash state, the S-box chains re-read
+  their base) emit duplicated gates — the demo note-spend measures 2,696,666 gates (compiled
+  `#eval`, §8). Faithfulness is unaffected (every copy is forced to the same value); the
+  `cse` pass — a compiler rung with its OWN faithfulness theorem (`cse_faithful`,
+  `cse_emit_accepts_iff`), derived like this one, never a hand-tuned emitted list — merges
+  the copies; what remains there is `[EMIT-share-compact]` (wire renumbering + dead-gate
+  sweep).
 -/
 import Compiler.AirFlatten
 import Compiler.NoteSpend
