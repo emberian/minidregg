@@ -13,12 +13,15 @@
 //! permutation mirroring `Compiler/AirHash.lean`'s `permExec`, and the Merkle
 //! commitment over the trace in `Loom/Commitment`'s `OpeningScheme` shape),
 //! `[PROVER-sumcheck]` (sumcheck.rs — the degree-≤1 sumcheck engine mirroring
-//! `Loom/MultilinearExtension.lean`'s `mle`/`roundSum`; the gate-constraint →
-//! hypercube-claim encoding is `[PROVER-sumcheck-gates]`, next). The FRI/FS
+//! `Loom/MultilinearExtension.lean`'s `mle`/`roundSum`), and
+//! `[PROVER-sumcheck-gates]` (gate_claim.rs — the descriptor's gates encoded as
+//! the hypercube defect table whose sumcheck `Assurance/AirSumcheck(Quadratic)`
+//! proved sound, so the engine proves the ACTUAL gate system). The FRI/FS
 //! rungs and the adopted WGSL fold come later, per docs/PROVER-PLAN.md.
 
 pub mod commit;
 pub mod descriptor;
+pub mod gate_claim;
 pub mod poseidon;
 pub mod sumcheck;
 pub mod trace;

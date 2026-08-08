@@ -38,15 +38,15 @@
 
 use crate::descriptor::Fp;
 
-fn add_mod(a: Fp, b: Fp, p: u64) -> Fp {
+pub(crate) fn add_mod(a: Fp, b: Fp, p: u64) -> Fp {
     ((a as u128 + b as u128) % p as u128) as u64
 }
 
-fn sub_mod(a: Fp, b: Fp, p: u64) -> Fp {
+pub(crate) fn sub_mod(a: Fp, b: Fp, p: u64) -> Fp {
     ((a as u128 + p as u128 - b as u128 % p as u128) % p as u128) as u64
 }
 
-fn mul_mod(a: Fp, b: Fp, p: u64) -> Fp {
+pub(crate) fn mul_mod(a: Fp, b: Fp, p: u64) -> Fp {
     ((a as u128 * b as u128) % p as u128) as u64
 }
 
