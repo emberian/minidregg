@@ -21,32 +21,38 @@ INLINE in prompts from the deep-read reports.
 - **Bridge:** OB-3 ✓ (receipt Q native to the accumulator, binding half; [OB3-d-fold]
   closes once the accumulator lands).
 
-## DIRECTION (ember, 2026-08-08): do the GENUINELY-OPEN work — private-witness turns + hard ZK
-ember steered: make ZK actually hard, private-witness turns, grow the kernel, work toward a
-WGPU prover. **KEY FIND: breadstuffs `circuit-prove` (78K LOC) IS the deployed prover minidregg
-formalizes** — `gpu_hidingfri_fold.rs`+`hidingfri_fold_ext4.wgsl` = protocol-identical Plonky3
-BabyBear⁴ FRI fold (= Proximity.fold + SmallField's field, COMPUTE, portable backend);
-`faithful_note_spend_exact_v3` + `shielded_*`/`dark_*_private` = the private-turn DESIGN ref;
-`*_air.rs` (cert_f/effect_vm_p3/field_delta_range/lean_lookup) = hand-written Rust AIRs = **DEBT,
-reimplement in Lean, NEVER extend**. SUBSTRATE SAID OUT LOUD: private-witness turns + ZK = Lean-
-authored; the WGPU fold is unverified compute that follows the Lean emit path. Asks filed for
-ember: canonical private-turn ref? confirm BabyBear⁴? is lean_lookup_air the emit-path precedent?
-- Threads: (A) private-witness turn MODEL — Lean, statement-first, faithful_note_spend as design
-  ref [IN PROGRESS, station]. (B) ZkArgument [ZK-RBR-game] — the hard open ZK [lane weaving].
-  (C) WGPU prover backend — follows the emit path, NOT started (needs the Lean→constraint path).
+## GOAL (ember, 2026-08-08): FINISH the formalization of Loom — ZK + accumulation + full recursion
 
-## Standing lanes (keep 2–6 live; relaunch as they land)
-**★★★★★ v0 CAPSTONE PROVED — the "prove the tower" phase is COMPLETE.** The whole tower is
-one theorem (`Assurance/LoomV0.loomV0_holds`). Posted ember an async direction question
-(helm ask) — the next step (prover/benchmarks vs research-frontier vs consolidate vs pause)
-**THRUST (ember steered, 2026-08-08): the HIDING / PRIVATE-INPUTS thread** — ember asked
-pointedly "do we actually have hiding/private inputs?" + re-fired the goal (use taste, go).
-First step landed: `Assurance/PrivateReceipt.lean` — the private-input CHECKPOINT (verdict:
-YES at the opening layer; the full ZK + kernel wire-up are honest residuals). Next: take a
-gap-1 (constrained-mask surjectivity) DONE. **NOW HOLDING at the investment fork (ask fe49eaf8):**
-the remaining private-inputs pieces are all research-hard (gap-2: hiding+soundness in one RBR game
-— [OB-4-hiding-rbr]'s open mass) or kernel-design (a private-witness turn type). Do NOT charge the
-hard research half or touch the kernel without ember's steer. Bounded ZK pieces are exhausted.
+Completion map (be honest about the three tiers):
+
+**TIER 1 — PROVED CORE (done):** accumulation (Accumulator + γ-fold + closure), FULL RECURSION
+(AccExtractChain unbounded-depth knowledge-soundness; LightClient whole-history aggregation; OB-2
+depth composition), the capstone (LoomV0.loomV0_holds), OB-3 receipt-native, the code layer
+(RS/MCA/ConstrainedCode/OOD/Proximity-LDT), sumcheck front, FiatShamir, deployed-field (OB-8),
+commitment binding, the single+multi-round+triangular ZK hiding, the arithmetization compiler
+(Air→AirFlatten→AirSumcheck linear face), the kernel (N2a/N2b/verbs/hidden-witness turn).
+
+**TIER 2 — PROVABLE REMAINING (the finish list, drive to closure):**
+  ZK: [ZK-RBR-extract] (extraction flank, ZkExtraction weaving) · [ZK-RBR-triangular] (2 deployment
+  bridge lemmas) · [ACC-sound-rbr-game] (the full RBR game instance).
+  Arithmetization→sound private-turns: [SC-reshape]/MLE (MultilinearExtension weaving) →
+  [AIR-sumcheck-quadratic] (mul-gate soundness) → [AIR-range]/[AIR-poseidon]/[AIR-membership]
+  gadgets → [PRIVATE-TURN-air] (sound note-spend; shielded_exact_apex_v4 design ref).
+  Deployment bookkeeping: [LC-fs-adaptive] · [DEC-prox-query] · [DEC-succinct].
+  Better-rate (BIG research, honest): [ACC-sound-list]/Johnson · [OB-8-tower] binary · [CMASK-dual-distance].
+
+**TIER 3 — IRREDUCIBLE FLOOR (cannot be "proved" — the named cryptographic assumptions, minimal +
+INHABITED, same floor every hash-STARK carries; "finishing" = keep them named, not eliminate):**
+  [PROX-fold-distance] (the proximity-gap hPG) · [FS-ROM] (sponge realizes the RO; inhabited by
+  Oracle.empty) · [COMMIT-CR] (collision-resistant hash; idealCommitment inhabits it AXIOM-FREE).
+
+SUBSTRATE (always): Lean-authored; constraints/executor from the compiler/fold, NEVER hand-authored,
+NEVER the Rust AIR; no WGPU yet (needs the emit path). model:"fable" lanes, mathlib+local; STATION
+does targeted breadstuffs reads. Statement-first; hand-audit every lane; substrate out loud.
+
+## Standing lanes — DRIVE TIER 2 TO CLOSURE (2-6 live)
+Weaving: ZkExtraction (ZK extraction flank), MultilinearExtension (MLE, unblocks AIR-quadratic +
+SC-reshape). Add: AirRange (Compiler gadget, independent). Next: ZK bridges, AIR-quadratic, gadgets.
 
 ## Done-log (recent)
 - 2026-08-08 **Assurance/AirSumcheck [AIR-sumcheck] linear face CLOSED ✓** (audited, c0f87d7, tree green 2492): the arithmetization is now SOUNDNESS-LINKED to Loom's PROVEN sumcheck. The gate system's ADD gates + root-pin encode as LinearConstraints (addGateLin_iff — faithful BOTH directions via flatten_scoped); air_violation_dichotomy (¬accepts ⟹ some auxv violates a MUL gate OR a linear claim); airSumcheck_sound (a violating assignment caught at v·d/|F|, CITING Loom's sumcheck_soundness) + adaptive + γ-batch forms. HONEST: exMulCheat_shows_residual_real — an adversarial self-check proving the linear face ALONE < full gate soundness, so hmul is a REAL premise not dropped. Residual [AIR-sumcheck-quadratic] (mul gates via MLE/R1CS-sumcheck = the [SC-reshape] vocabulary). ATLAS triple. Compiler spine: Air→AirFlatten→AirSumcheck = expr→gates→PROVEN soundness (linear face).
