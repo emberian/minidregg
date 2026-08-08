@@ -9,3 +9,4 @@ import Assurance.Placeholder  -- carve marker: pins, keystone audit, carrier reg
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
 import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
+import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
