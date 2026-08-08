@@ -122,7 +122,11 @@ means keeping them minimal, named, and *inhabited* — never an unproved `axiom`
   quote it.)
 - **`[FS-ROM]` — the sponge realizes the random oracle.** Inhabited by `Oracle.empty` (a lazy-
   sampling handler, no axiom).
-- **`[COMMIT-CR]` — the hash is collision-resistant.** The `BindingCommitment` abstraction is
+- **`[COMMIT-CR]` — the hash is collision-resistant. NOW REDUCED** (`Loom/CollisionResistanceROM`,
+  2026-08-08): provable *in the ROM* by an explicit birthday-bound adversary (`birthday_bound`,
+  `commitCR_of_RO` — the reduction lossless, the bound attained at q=2), modulo the adaptive-schedule
+  lift `[CR-ROM-adaptive]`. So CR is not a standalone assumption — it prices to the RO.
+  Originally: The `BindingCommitment` abstraction is
   inhabited **axiom-free** by `idealCommitment`; binding is proven load-bearing (an equivocating
   scheme breaks the extraction seam); `NoteSpend` exhibits a collision to make the assumption's
   necessity concrete.
