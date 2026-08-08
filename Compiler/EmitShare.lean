@@ -66,7 +66,7 @@ reduce `Std.HashMap`, honestly said, so every keystone is THEOREM-mediated and `
 runs only on descriptors/acceptance the kernel can chew). Teeth: at `x = 3` NO total wire
 vector satisfies the CSE'd descriptor (via the re-closed seam), and the specific violating
 vector fails as its corollary. The note-spend: same pair of witnesses at the deployed
-descriptor (§7), gate count measured 2,696,666 → 4,169.
+descriptor (§9), gate count measured 2,696,666 → 220.
 
 ## Residuals (named, none stubbed)
 
@@ -699,11 +699,12 @@ def spendDescriptorShared : ConstraintDescriptor (ZMod 13) := cse spendDescripto
 
 /- *Measured, compiled `#eval` — audit notes, not kernel theorems:
 `spendDescriptor.gates.length = 2696666` (`Emit` §8's tree blowup), and
-`spendDescriptorShared.gates.length = 4169` — the CSE recovers the DAG, a 647× gate-count
-reduction; `zeros.length = 8` (unchanged — one root per term), `nWires = 2696677`
-(unchanged, the wire NUMBERING is kept — `[EMIT-share-compact]`). The duplication was the
-membership mux re-reading the hash state and the S-box chains re-reading their bases,
-exactly as `[EMIT-share]` diagnosed. -/
+`spendDescriptorShared.gates.length = 220` — the CSE recovers the DAG, a ≈12,258×
+gate-count reduction (the demo spend's true DAG is 220 nodes; the tree-flatten duplicated
+it exponentially — the membership mux re-reading the hash state, the S-box chains
+re-reading their bases, exactly as `[EMIT-share]` diagnosed); `zeros.length = 8`
+(unchanged — one root per term), `nWires = 2696677` (unchanged, the wire NUMBERING is
+kept — `[EMIT-share-compact]`). -/
 
 /-- The spend descriptor is SSA — the backward direction applies to the deployed object. -/
 example : spendDescriptor.SSA := emit_ssa Fin.val 2 11 (fun i => i.isLt) spendSystem
