@@ -11,11 +11,14 @@
 //! Rungs here: `[PROVER-serialize]` reader (descriptor.rs), `[PROVER-trace]`
 //! (trace.rs), `[PROVER-commit]` (poseidon.rs + commit.rs — the Poseidon2-style
 //! permutation mirroring `Compiler/AirHash.lean`'s `permExec`, and the Merkle
-//! commitment over the trace in `Loom/Commitment`'s `OpeningScheme` shape). The
-//! sumcheck/FRI/FS rungs and the adopted WGSL fold come later, per
-//! docs/PROVER-PLAN.md.
+//! commitment over the trace in `Loom/Commitment`'s `OpeningScheme` shape),
+//! `[PROVER-sumcheck]` (sumcheck.rs — the degree-≤1 sumcheck engine mirroring
+//! `Loom/MultilinearExtension.lean`'s `mle`/`roundSum`; the gate-constraint →
+//! hypercube-claim encoding is `[PROVER-sumcheck-gates]`, next). The FRI/FS
+//! rungs and the adopted WGSL fold come later, per docs/PROVER-PLAN.md.
 
 pub mod commit;
 pub mod descriptor;
 pub mod poseidon;
+pub mod sumcheck;
 pub mod trace;
