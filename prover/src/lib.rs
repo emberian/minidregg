@@ -23,13 +23,19 @@
 //! vector `testdata/fri_conformance.json`), and `[PROVER-fri-wgsl]` (gpu.rs +
 //! shaders/fri_fold.wgsl — OUR wgsl kernel adopting the deployed fold MATH,
 //! dispatched via wgpu, conformance-gated to equal `fri::fold` exactly on
-//! GPU hardware; unverified compute, like everything here). The FRI
-//! commit/query and FS rungs come later, per docs/PROVER-PLAN.md.
+//! GPU hardware; unverified compute, like everything here), and
+//! `[PROVER-fri]` (fri_protocol.rs — the FRI LDT protocol around that fold:
+//! commit → fold rounds → query spot-checks → final constant check, matching
+//! `Loom/Proximity.lean`'s tower descent, `mem_reedSolomonCode_one_iff` base
+//! check, and the `FriQueryVerifierAir` fold-consistency formula; challenges
+//! caller-supplied). The FS transcript rung comes later, per
+//! docs/PROVER-PLAN.md.
 
 pub mod commit;
 pub mod descriptor;
 pub mod field4;
 pub mod fri;
+pub mod fri_protocol;
 pub mod gpu;
 pub mod gate_claim;
 pub mod poseidon;
