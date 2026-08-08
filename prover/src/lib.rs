@@ -20,14 +20,17 @@
 //! `[PROVER-fri-fold]` (field4.rs + fri.rs — BabyBear⁴ (X⁴ = 11) and the CPU
 //! reference of breadstuffs' FRI fold kernel, ADOPTED into this crate and
 //! conformant to `Loom/Proximity.lean`'s verified `fold` on the Lean-authored
-//! vector `testdata/fri_conformance.json`; the wgsl GPU dispatch is
-//! `[PROVER-fri-wgsl]`, next — no wgpu here). The FRI commit/query and FS
-//! rungs come later, per docs/PROVER-PLAN.md.
+//! vector `testdata/fri_conformance.json`), and `[PROVER-fri-wgsl]` (gpu.rs +
+//! shaders/fri_fold.wgsl — OUR wgsl kernel adopting the deployed fold MATH,
+//! dispatched via wgpu, conformance-gated to equal `fri::fold` exactly on
+//! GPU hardware; unverified compute, like everything here). The FRI
+//! commit/query and FS rungs come later, per docs/PROVER-PLAN.md.
 
 pub mod commit;
 pub mod descriptor;
 pub mod field4;
 pub mod fri;
+pub mod gpu;
 pub mod gate_claim;
 pub mod poseidon;
 pub mod sumcheck;

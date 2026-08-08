@@ -7,3 +7,9 @@ description = "Unverified prover for minidregg: reads the ConstraintDescriptor e
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# [PROVER-fri-wgsl]: the adopted GPU compute backend (wgpu -> Metal on ember's
+# Mac) for OUR fri_fold.wgsl kernel. Per docs/PROVER-PLAN.md: wgpu/pollster/
+# bytemuck are allowed; the Plonky3 stack (p3-*) is NOT.
+wgpu = "23"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
