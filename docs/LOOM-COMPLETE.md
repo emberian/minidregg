@@ -85,6 +85,18 @@ proximity-gap hypothesis. Those are stated plainly below, not buried.
   `PrivateTurn`, `Kernel/PrivateTurn`), **soundly constrains** (`NoteSpend`), **proved in ZK**
   (`loom_zk_argument`).
 
+**The recursive verifier (a proof verifies a proof — deployed recursion made concrete-circuit).**
+- `Compiler/MerkleBindAir.fullVerifier_correct`: the WHOLE light-client verifier arithmetized as
+  ONE AIR — FS-bound challenges (`FiatShamirAir`) ∧ sumcheck-verify (`SumcheckVerifierAir`) ∧
+  FRI-query fold-consistency (`FriQueryVerifierAir`, = Loom's `Proximity.fold` verbatim) ∧
+  Merkle-bound openings (`AirMembership`). `fullVerifier_binds`: no proof-carrying wire is free.
+  Via `emit` (whose faithfulness is `emit_faithful`), "the whole verifier accepts" is an emitted
+  Loom-provable statement — so a Loom proof can be verified *inside* a Loom circuit. The forgery
+  keystone makes `[COMMIT-CR]` concrete: a fold-consistent forgery passes every other check and is
+  rejected *exactly outside the committed root's hash-collision fiber*. Residual `[RECURSE-full-resid]`
+  (the remaining wire-binding: root absorption, oracle-opening, domain-point arithmetic) + the
+  named floors; the checks themselves are all proved, choice-free where they can be.
+
 **The kernel (the semantic substrate).** `Camera` (resource algebra), `State`, `Turn` (the
 hyperedge), `TurnLimit` (N2a — the turn's agreement half is a universal object), `TurnBalancedLimit`
 (N2b — the conserving turn is universal), `Receipt` (OB-3, the receipt is the accumulator's word),
