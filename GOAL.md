@@ -29,11 +29,13 @@ one theorem (`Assurance/LoomV0.loomV0_holds`). Posted ember an async direction q
 pointedly "do we actually have hiding/private inputs?" + re-fired the goal (use taste, go).
 First step landed: `Assurance/PrivateReceipt.lean` — the private-input CHECKPOINT (verdict:
 YES at the opening layer; the full ZK + kernel wire-up are honest residuals). Next: take a
-real bite of [OB-4-hiding-rbr] (constrained-mask surjectivity — the ONE bounded sub-piece
-maskedOpeningHiding_of_surj reduces it to), or design the private-witness turn type. NOT the
-prover (that risks the AIR-in-Lean tripwire — ember's explicit greenlight needed).
+gap-1 (constrained-mask surjectivity) DONE. **NOW HOLDING at the investment fork (ask fe49eaf8):**
+the remaining private-inputs pieces are all research-hard (gap-2: hiding+soundness in one RBR game
+— [OB-4-hiding-rbr]'s open mass) or kernel-design (a private-witness turn type). Do NOT charge the
+hard research half or touch the kernel without ember's steer. Bounded ZK pieces are exhausted.
 
 ## Done-log (recent)
+- 2026-08-08 **ConstrainedMask [OB-4-hiding-rbr] gap-1 ✓** (audited, 0e2b4dc, r=1): the mask can respect a claim constraint AND still hide — constrainedMaskSpace (RS ⊓ ker(eval)), exists_constrainedMask_open (surjectivity via vanishing-polynomial factorization p=(X-pt)·p', t+1≤d), constrainedMask_hiding (feeds maskedOpeningHiding_of_surj → hiding for the CONSTRAINED mask). Teeth: t+1≤d load-bearing (satisfiable at bound, refuted one past — (1,0) unreachable). Residual [CMASK-multi] (general r routine; non-evaluation constraints = dual distance, genuinely harder). ATLAS triple.
 - 2026-08-08 **PrivateReceipt — the private-input checkpoint ✓** (audited, tree green 2468): answers 'do we actually have private inputs' with a machine-checked object. privateReceipt_witness_hidden (via MaskedOpeningHiding.witness_free): two turns with DIFFERENT private witnesses give identical spot-check openings under masking — a turn CAN hide its witness. Teeth: witness_hidden_needs_mask (γ=0 leaks — mask load-bearing). VERDICT: private inputs POSSIBLE at the opening layer, NOT finished. Residual [PRIVATE-INPUT-rbr]=[OB-4-hiding-rbr] (full ZK RBR + kernel private-witness turn type). ATLAS triple.
 - 2026-08-07 eve **LoomV0Manifest ✓** (audited, 922f899, tree green 2467): the machine-checked table of contents — 42 theorems/defs across 7 layers, every entry a REAL type-checked re-export (zero drift found; refutations oneShot_lightClient_false/OB2_depth_composition_false/smallField_bound_vacuous indexed alongside proofs), §8 residual ledger + §9 live #print-axioms audit in-file. The peer-facing "it all compiles" artifact. Capstone on ATLAS triple, idealCommitment axiom-free — confirmed in-file.
 - 2026-08-07 eve **Erasure [ACC-extract-bind](b) ✓** (audited, 926ea9c): recoverFromColumns_sound — t≥d opened columns recover the FULL folded codeword (MDS/interpolation, full word equality not just agreement; reuses ZKHiding's open_determines). committed_word_recovered connects to Commitment (a verified t-opening of a committed codeword recovers it exactly) — closing [ACC-extract-bind](b). With committed_extract_bind (a), [ACC-extract-bind] is FULLY CLOSED at the word level. Teeth: t=d-1 shares a column with 2 codewords (MDS bound load-bearing). Residual [ERASURE-list] (beyond-UD) honest. ATLAS triple.
