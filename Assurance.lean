@@ -12,3 +12,4 @@ import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-ex
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
 import Assurance.PrivateTurn  -- the private-witness TURN model (Lean-authored): public claim binds, private witness hides; [PRIVATE-TURN-air] the Lean constraint system (not the Rust AIR)
 import Assurance.AirSumcheck  -- [AIR-sumcheck]: the flattened gate system's linear face retired by Loom's proven sumcheck; [AIR-sumcheck-quadratic] the mul-gate MLE encoding
+import Assurance.AirSumcheckQuadratic  -- [AIR-sumcheck-quadratic] CLOSED: the mul-gate face retired at d = 2 (quadHonest), full gate-system soundness; [AIR-quadratic-selectors] the oracle-side table linearization
