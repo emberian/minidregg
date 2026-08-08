@@ -10,26 +10,36 @@ system's soundness is machine-checked, and the constraint systems are *emitted b
 circuit reading provably equals its executor reading* — so the two classic soundness-bug sources
 (an unsound protocol, an under-constrained circuit) are closed structurally, not caught in review.
 
-It runs the same deployed compute you'd expect — the identical BabyBear⁴ FRI fold on the GPU — but
-that compute *follows* the verified constraints instead of being the trusted thing.
+The proof system itself, **Loom**, is not a re-skin of Plonky3's FRI STARK: it is *WHIR*-shaped
+(Arnon–Chiesa–Fenzi–Yogev) — accumulation over a constrained Reed–Solomon code with mutual
+correlated agreement — with a native zero-knowledge argument of knowledge. Its prover *currently*
+reuses the deployed BabyBear⁴ FRI fold (which happens to be Plonky3-identical) as a **backend
+starting point**, conformance-locked to the verified fold; that backend is being **superseded** by
+the Binius additive-FRI substrate we're building, and the security setting pushed past unique
+decoding toward the Johnson regime. The GPU compute *follows* the verified constraints; it is a
+component we adopt and move beyond, not the system's identity.
 
 ---
 
 ## What's different from Plonky3
 
-Plonky3 and minidregg share the same math family (multilinear sumcheck, Reed–Solomon proximity/FRI,
-BabyBear and its degree-4 extension) and, at the hot loop, the *identical* fold. The differences are
-about **where trust lives** and **what the artifact is**:
+They share a math family (multilinear sumcheck, Reed–Solomon proximity, BabyBear⁴) and — *for now,
+at the hot loop only* — the same GPU fold. But Plonky3 is a **FRI STARK toolkit**, while Loom is a
+**WHIR-shaped accumulation system with native ZK** — a more advanced protocol, not just a verified
+copy. The differences below are about **the protocol**, **where trust lives**, **what the artifact
+is**, and **where it's headed**:
 
 | | **Plonky3** (and STARK toolkits generally) | **minidregg** |
 |---|---|---|
+| **Protocol** | FRI STARK. | **WHIR-shaped accumulation** (constrained Reed–Solomon + mutual correlated agreement) with a **NIZK argument of knowledge** — a different, more advanced protocol. |
 | **Soundness** | The Rust prover/verifier is trusted; audited, fuzzed, battle-tested. | The protocol soundness — sumcheck, RS proximity, the accumulator, Fiat–Shamir, the ZK argument — is a **Lean theorem** (`loomV0_holds`, `loom_zk_argument`), on the standard axiom base, hand-audited. |
 | **Circuits (AIR)** | Hand-written in Rust. Under-constraining is the #1 soundness-bug class; caught (if caught) by audit. | **Derived from a spec by a compiler**; circuit⟺executor is proved **by initiality** (`eval_agrees_exec`), so an emitted gadget *cannot* diverge from its semantics. Under-constraining is structurally impossible. |
 | **Recursion** | Recursive verification as (hand-written, trusted) circuits. | The **whole verifier is arithmetized as one emittable AIR** (`fullVerifier`) with a machine-checked correctness theorem — "a proof verifies a proof" is a statement you can *prove*, not just run. |
 | **ZK** | Add-on transforms; hiding is an implementation property. | A **non-interactive zero-knowledge argument of knowledge** is proved (`loom_zk_argument`) — knowledge-soundness *and* perfect ZK coexist, native to hash-based accumulation. |
 | **The trusted floor** | "It's a hash-based STARK" — the proximity gap, ROM, and collision-resistance are assumed. | The **same three assumptions, named and inhabited, and being *proved down***: the proximity gap is *proved* hypothesis-free on a macroscopic band and reduced to one classical lemma over the rest of unique decoding; CR reduces to the RO by an explicit adversary; the RO to an ideal permutation. |
 | **Scope** | A proving toolkit. | A proving toolkit **plus a semantic computer** — a kernel (turns, receipts, a gated executor with a real FFI export), a derivation engine, a policy algebra. You build *on* it. |
-| **Prover** | The reference implementation. | An *unverified* Rust/WGSL crate that **adopts Plonky3's deployed GPU fold** and is proven **bit-for-bit equal to the verified fold** on conformance vectors — same speed, verified constraints. |
+| **Prover backend** | The reference implementation. | An *unverified* Rust/WGSL crate that adopts the deployed GPU fold **as a current starting point**, proven **bit-for-bit equal to the verified fold** — same speed, verified constraints. Being superseded by the additive-FRI backend. |
+| **Trajectory** | Mature, stable, FRI-based. | Actively moving *past* the shared baseline: **Binius binary-tower / additive-FRI** (a faster GF(2) field substrate), the **Johnson/list-decoding regime** (better rates), full-rate proximity. |
 | **Line count** | — | ~10% of the system it reimplements; the shrink comes from *deriving* what others hand-write. |
 
 **What minidregg is *not*:** it is not faster than Plonky3, not more feature-complete as a
