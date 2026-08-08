@@ -97,8 +97,12 @@ means keeping them minimal, named, and *inhabited* — never an unproved `axiom`
 `StarkSound`-with-zero-instances.
 
 - **`[PROX-fold-distance]` — the proximity-gap hypothesis** (`IsProximityGenerator`, WHIR Thm 4.8
-  / BCIKS). The rate<1 soundness rides it. Proven unconditionally at exact-membership (the trivial
-  rate→1 corner); at deployed rates it is the standing hypothesis the whole tree carries. (Sobering
+  / BCIKS). The rate<1 soundness rides it. **Now PARTIALLY DISCHARGED** (`Loom/ProximityGapUD`,
+  2026-08-08): the RS proximity gap is *proved, hypothesis-free*, on the macroscopic band
+  `δ ∈ (0, (1−ρ)/3)` for every rate `ρ<1` (deployed `ρ=1/2 → (0, 1/6)`) — so on that band the
+  mutual-CA consumers and the LDT are zero-hypothesis, and the trusted floor is genuinely smaller.
+  It remains a *hypothesis* only on `[(1−ρ)/3, (1−ρ)/2)` (closeable via BCIKS Thm 4.1, named) and
+  in the Johnson regime beyond UD. (Sobering
   context: the predecessor line had a *conjectured* 130-bit bound disproved to a proven 73 in Nov
   2025 — this is the least-reported, most load-bearing axis in the transparent-STARK field, and we
   quote it.)
