@@ -1,131 +1,112 @@
 # minidregg
 
-**A proof-native semantic computer, formal-first.**
+**A machine-checked proof system, a correct-by-construction AIR compiler, and a proof-native
+computer — built as one artifact.**
 
-minidregg is a from-scratch reimplementation of a zero-knowledge accumulation system
-([breadstuffs](../breadstuffs)) at **≤10% of its line count** — with the crucial difference that
-the parts that matter are *machine-checked theorems in Lean*, not hand-written code. The
-arithmetic constraint systems ("AIR"), the proof system, the shielded-transaction logic, and the
-kernel's authority gate are all **derived from compilers over formal specifications** — never
-hand-authored — so that "the circuit means what the spec says" is a real theorem over the actual
-emitted object, not a code review.
+If you build with Plonky3 (or any STARK/FRI toolkit), you write AIRs in Rust and trust that (a) the
+prover implements a sound protocol and (b) your constraints actually pin the relation you meant.
+Both are checked by audit and testing. In minidregg, **both are Lean theorems**: the proof
+system's soundness is machine-checked, and the constraint systems are *emitted by a compiler whose
+circuit reading provably equals its executor reading* — so the two classic soundness-bug sources
+(an unsound protocol, an under-constrained circuit) are closed structurally, not caught in review.
 
-It is honest about what it is. What follows separates **what is proved**, **the cryptographic
-floor it stands on** (named, inhabited, and being *proved down*), and **what is unverified compute
-or unfinished research**. That separation is the point; see [`docs/LOOM-COMPLETE.md`](docs/LOOM-COMPLETE.md)
-for the full, skeptic-facing account.
+It runs the same deployed compute you'd expect — the identical BabyBear⁴ FRI fold on the GPU — but
+that compute *follows* the verified constraints instead of being the trusted thing.
 
 ---
 
-## What is proved (machine-checked in Lean, hand-audited)
+## What's different from Plonky3
 
-Every claim below is a Lean theorem on the standard axiom base `{propext, Classical.choice,
-Quot.sound}` (many are choice-free), with a *built non-vacuity witness* and, where a claim has a
-plausible false neighbor, the false statement kept compiling beside the true one so the true one
-means exactly what it says.
+Plonky3 and minidregg share the same math family (multilinear sumcheck, Reed–Solomon proximity/FRI,
+BabyBear and its degree-4 extension) and, at the hot loop, the *identical* fold. The differences are
+about **where trust lives** and **what the artifact is**:
 
-**Loom — the owned proof system.**
-- **Accumulation + unbounded-depth recursion:** a whole federation history folds into one
-  accumulated claim; the extractor recovers every link's witness at arbitrary depth
-  (`lightClientKnowledgeSound`), and the tower composes into one capstone (`loomV0_holds`).
-- **A non-interactive zero-knowledge argument of knowledge** (`loom_zk_argument`) — completeness,
-  knowledge-soundness, perfect zero-knowledge, and Fiat-Shamir composition, native at the deployed
-  root/column alphabet. (This was the confirmed-open contribution; the mask counterfactuals the
-  extractor needs are *provably* not computable from what the ZK distinguisher sees.)
-- **A recursive verifier — a proof verifies a proof.** The entire light-client verifier
-  (Fiat-Shamir binding, sumcheck, FRI fold-consistency, Merkle openings) is arithmetized as **one
-  emittable AIR** (`fullVerifier`), so verifying a Loom proof *inside* a Loom circuit is a
-  machine-checked statement. Its forgery keystone makes collision-resistance *concrete*: the only
-  way to cheat is to hit the committed root's hash-collision fiber, exhibited.
+| | **Plonky3** (and STARK toolkits generally) | **minidregg** |
+|---|---|---|
+| **Soundness** | The Rust prover/verifier is trusted; audited, fuzzed, battle-tested. | The protocol soundness — sumcheck, RS proximity, the accumulator, Fiat–Shamir, the ZK argument — is a **Lean theorem** (`loomV0_holds`, `loom_zk_argument`), on the standard axiom base, hand-audited. |
+| **Circuits (AIR)** | Hand-written in Rust. Under-constraining is the #1 soundness-bug class; caught (if caught) by audit. | **Derived from a spec by a compiler**; circuit⟺executor is proved **by initiality** (`eval_agrees_exec`), so an emitted gadget *cannot* diverge from its semantics. Under-constraining is structurally impossible. |
+| **Recursion** | Recursive verification as (hand-written, trusted) circuits. | The **whole verifier is arithmetized as one emittable AIR** (`fullVerifier`) with a machine-checked correctness theorem — "a proof verifies a proof" is a statement you can *prove*, not just run. |
+| **ZK** | Add-on transforms; hiding is an implementation property. | A **non-interactive zero-knowledge argument of knowledge** is proved (`loom_zk_argument`) — knowledge-soundness *and* perfect ZK coexist, native to hash-based accumulation. |
+| **The trusted floor** | "It's a hash-based STARK" — the proximity gap, ROM, and collision-resistance are assumed. | The **same three assumptions, named and inhabited, and being *proved down***: the proximity gap is *proved* hypothesis-free on a macroscopic band and reduced to one classical lemma over the rest of unique decoding; CR reduces to the RO by an explicit adversary; the RO to an ideal permutation. |
+| **Scope** | A proving toolkit. | A proving toolkit **plus a semantic computer** — a kernel (turns, receipts, a gated executor with a real FFI export), a derivation engine, a policy algebra. You build *on* it. |
+| **Prover** | The reference implementation. | An *unverified* Rust/WGSL crate that **adopts Plonky3's deployed GPU fold** and is proven **bit-for-bit equal to the verified fold** on conformance vectors — same speed, verified constraints. |
+| **Line count** | — | ~10% of the system it reimplements; the shrink comes from *deriving* what others hand-write. |
 
-**The arithmetization compiler (derived — drift is impossible, not merely avoided).**
-- An arithmetization DSL whose circuit reading and executor reading are **equal by initiality**
-  (`eval_agrees_exec`) — N3 applied to circuits. Expressions flatten to a degree-≤2 gate system,
-  retired by Loom's *proven* sumcheck (`airGateSystem_sound`, linear ∧ quadratic).
-- Gadgets, all iff-correct: range, a Poseidon2 hash, Merkle membership — composed into a **sound
-  shielded note-spend** (`noteSpend_correct`), which even exhibits a hash collision to make its
-  own floor assumption visible.
+**What minidregg is *not*:** it is not faster than Plonky3, not more feature-complete as a
+production prover, and it runs at **unique decoding** (a conservative rate — roughly 2–4× more
+queries than the aggressive Johnson/conjectured regime deployed systems use) so that every quoted
+number is a *proven* parameter, not a conjecture. It trades peak performance and breadth for
+**assurance** and a **verified application substrate**.
 
-**The kernel (the semantic computer).** A four-substance resource algebra, the turn as a universal
-object (proved a limit at both the agreement and conservation layers), a hidden-witness turn, and a
-**gated executor** — `Verb = admission × footprint`, a 4-leg fail-closed gate where the
-conservation-breaking verb is unreachable *by construction* — with the **first `@[export]`** and a
-verified emitted C symbol, so "the kernel is the executor" is compiled code, not aspiration.
+## Why you'd use it
 
-**The derivation engine (`Effects/`).** A new effect is a *declaration*: its IR term, executor,
-and serializable descriptor all derive by one function application, agreement and faithfulness free
-by initiality. "The derived path is the only path" made concrete.
+- **You cannot afford a circuit bug.** For high-value logic — money, governance, fleet coordination
+  — the "my AIR doesn't match my intent" failure mode is eliminated *by construction*: the
+  constraints come out of a compiler with a machine-checked circuit⟺executor theorem, and the
+  proof system verifying them is itself proved sound.
+- **You're building an application, not just proving statements.** minidregg is a proof-*native*
+  computer: a kernel with turns, receipts, and a fail-closed authority gate (compiled to a real C
+  entry point), a derivation engine where a new effect is a *declaration*, and a policy algebra —
+  a verified substrate to build things like fleet coordination on, not just a proving library.
+- **You want a small, explicit trusted base.** The floor is three named, inhabited cryptographic
+  assumptions with proof routes — and the load-bearing one (the proximity gap) is *partially
+  proved*, not asserted. The trusted base is smaller and legible, not "trust the STARK."
+- **Without leaving the deployed performance path.** The hot loop is the same GPU BabyBear⁴ fold,
+  adopted into our crate and conformance-locked to the verified fold — assurance rides *on top of*
+  the real compute, it doesn't replace it with something slow and academic.
 
-## Runs (unverified compute, conformance-matched)
+## Feature set
 
-The `prover/` crate is a Rust/WGSL prover that **consumes the verified emit** (it never authors a
-constraint) and runs the deployed BabyBear⁴ pipeline: descriptor → trace → Poseidon2 commit →
-sumcheck → FRI. Its FRI fold is *adopted* (not ported) from the deployed GPU kernel, dispatched on
-**Metal**, and runs **~3× CPU** at 2²⁰ elements — while being proven **bit-for-bit equal to Loom's
-verified `Proximity.fold`** on conformance vectors. This is a *conformance* target, never called
-verification: there is no formal semantics of Rust, so the prover is honest compute *following* the
-proofs, not a proof itself.
+**Proved (Lean, hand-audited):** multilinear sumcheck with adaptive soundness · Reed–Solomon
+proximity/FRI at unique decoding · WHIR-shaped **accumulation with unbounded-depth
+knowledge-soundness** · Fiat–Shamir composition with a grinding bound · a **NIZK argument of
+knowledge** · a **derived arithmetization compiler** (DSL → degree-≤2 gates → retired by the proven
+sumcheck) · gadgets (range, Poseidon2, Merkle) composed into a **sound shielded note-spend** · a
+**recursive verifier** as one emittable AIR · a **kernel** (resource algebra, the turn as a
+universal object, a 4-leg fail-closed gated executor, a verified FFI export) · a **derivation
+engine** (effects as declarations).
 
-## The cryptographic floor (named, inhabited, being proved down)
+**Runs (unverified compute, conformance-matched):** a Rust/WGSL prover — descriptor → trace →
+Poseidon2 commit → sumcheck → FRI — with the fold on Metal at **~3× CPU**, every stage conformance-
+locked to the verified Lean objects. (Conformance, never "verification": there is no formal
+semantics of Rust.)
 
-minidregg stands on the **same floor every hash-based SNARK carries** — but treats it as reducible,
-not sacred:
-- **Proximity gap** — *proved, hypothesis-free*, on a macroscopic band; built end-to-end across the
-  rest of unique decoding, reduced to a single named classical lemma (Polishchuk–Spielman).
-- **Collision-resistance** — reducible to the random oracle by an explicit birthday-bound adversary
-  (in progress).
-- **Random oracle** — reducible to an ideal permutation by sponge indifferentiability.
+**In flight / honestly undone:** the general `Pred → constraints` lowering and the effect registry;
+CR-from-RO and sponge indifferentiability (the floor consolidation); the Polishchuk–Spielman lemma
+(full-rate proximity); the additive-FRI transform for the binary-tower substrate; and the helm
+north star (`Distributed/`, `Apps/`). The live tally is in `GOAL.md`.
 
-No unproved `axiom` stands in for any of these; each is an inhabited hypothesis with a proof route.
-Quoted numbers are proven parameters at unique decoding — no conjectures on the label.
+## Architecture
 
-## What is *not* done (honestly)
-
-No production prover or benchmarks beyond the fold; unique-decoding regime (Johnson/list-decoding is
-named research); the deployed-ZK adaptive bound reduced to one RO-programming lemma; the additive-FRI
-transform for the binary-tower substrate; the effect *registry* and general `Pred → constraints`
-compiler in flight; and the **helm north star** (`Distributed/`, `Apps/` — fleet coordination as
-the first application) not yet started. The running tally lives in `GOAL.md`.
-
----
-
-## Architecture (the carve)
-
-| Directory | What it is |
+| Directory | Role |
 |---|---|
-| `Theory/` | Candidate-independent mathematics (codes, fields, the binary tower). Import-boundary–enforced: no dependency on any specific proof system. |
-| `Loom/` | The owned proof system — sumcheck, Reed–Solomon, proximity/FRI, the accumulator, Fiat-Shamir, the ZK argument. |
-| `Compiler/` | The arithmetization: the DSL (`Signature`/`Air`), the gadgets, the emit path, and the recursive-verifier AIRs. |
+| `Theory/` | Candidate-independent math (codes, fields, the binary tower). Import-boundary–enforced. |
+| `Loom/` | The proof system — sumcheck, RS/proximity/FRI, the accumulator, Fiat–Shamir, the ZK argument. |
+| `Compiler/` | The arithmetization — the DSL (`Signature`/`Air`), gadgets, the emit path, the recursive-verifier AIRs. |
 | `Kernel/` | The semantic computer — resource algebra, the turn, the gated executor, the FFI seam. |
-| `Effects/`, `Pred/` | The derivation engine and the policy algebra (the ATLAS thesis substrate). |
-| `Assurance/` | Bridges that compose the layers into deployment-facing statements (the v0 capstone, the manifest). |
-| `prover/` | The unverified Rust/WGSL compute backend that follows the verified emit. |
-
-**The laws that bind the work** (each bought with a documented wound; full list in
-[`ATLAS.md`](ATLAS.md)): the derived path is the *only* path — nothing is hand-authored beside what
-it supersedes; statement-first — a keystone enters as a `Prop` with its satisfiable/teeth/premise
-fields before proof work; green + self-reported ≠ verified; quote the pessimistic number in the same
-sentence as the claim.
+| `Effects/`, `Pred/` | The derivation engine and the policy algebra. |
+| `Assurance/` | Bridges composing the layers into deployment-facing statements (the v0 capstone, the manifest). |
+| `prover/` | The unverified Rust/WGSL backend that follows the verified emit. |
 
 ## Build
 
 ```sh
-lake build Minidregg          # the full Lean tree (the integration gate)
+lake build Minidregg          # the full Lean tree (integration gate)
 lake env lean <File>.lean     # iterate a single file, race-free
-cd prover && cargo test       # the prover conformance suite (GPU tests use Metal, skip cleanly without)
+cd prover && cargo test       # prover conformance suite (GPU tests use Metal, skip cleanly without)
 cd prover && cargo run --release --bin fri_fold_bench   # the GPU fold benchmark
 ```
 
 ## Reading order
 
-1. [`ATLAS.md`](ATLAS.md) — the diagnosis, the sixteen design laws, and the architecture carve.
-2. [`docs/LOOM-COMPLETE.md`](docs/LOOM-COMPLETE.md) — the honest completion account: proved / floor / remainder.
+1. [`ATLAS.md`](ATLAS.md) — the diagnosis, the sixteen design laws (each bought with a documented wound), the architecture carve.
+2. [`docs/LOOM-COMPLETE.md`](docs/LOOM-COMPLETE.md) — the skeptic-facing account: proved / floor / remainder.
 3. [`Assurance/LoomV0Manifest.lean`](Assurance/LoomV0Manifest.lean) — the machine-checked table of contents (~75 type-checked re-exports).
 4. [`docs/PROVER-PLAN.md`](docs/PROVER-PLAN.md) — how the prover adopts the deployed GPU fold into our own crate.
 
 ## North star
 
-minidregg is designed to be *suitable as the substrate under fleet-coordination tools like helm* —
-rooms as cells, posts as signed turns, premises as attested claims, review verdicts and land-receipts
-as receipts on chain. Our own development fleet is the intended first user. Design decisions are
-tested against: *could the helm run on this, better than on what it replaces?*
+minidregg is designed to be the substrate under fleet-coordination tools like **helm** — rooms as
+cells, posts as signed turns, premises as attested claims, review verdicts and land-receipts as
+on-chain receipts. Our own development fleet is the intended first user; every design decision is
+tested against *could the helm run on this, better than on what it replaces?*
