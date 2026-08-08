@@ -762,7 +762,10 @@ end LCSoundExample
   BCS bridge PROVED there, idealization `[FS-ROM]`), consumed once
   `[ACC-sound-rbr]` (named in `Loom/AccSound.lean`) packages these per-fold
   bounds as an RBR round function. Nothing about the BOUNDS changes; only the
-  sampler.
+  sampler. — CLOSED at the fixed-chain level in `Loom/LightClientFS.lean`
+  (`lightClientFS_sound`/`lightClientFS_exact`: prefix distinctness proved,
+  the FS-derived schedule IS the fresh coins, both bounds inherited verbatim);
+  the `t`-query grinding strengthening is `[LC-fs-adaptive]` there.
 * **[ACC-extract]** (unchanged, `Loom/Accumulator.lean`) — both theorems here
   bound events at the HONEST fold interface: the exact form asks whether the
   aggregate claim is satisfiable at all; the δ-form anchors at
