@@ -113,8 +113,10 @@ means keeping them minimal, named, and *inhabited* — never an unproved `axiom`
   2026-08-08): the RS proximity gap is *proved, hypothesis-free*, on the macroscopic band
   `δ ∈ (0, (1−ρ)/3)` for every rate `ρ<1` (deployed `ρ=1/2 → (0, 1/6)`) — so on that band the
   mutual-CA consumers and the LDT are zero-hypothesis, and the trusted floor is genuinely smaller.
-  It remains a *hypothesis* only on `[(1−ρ)/3, (1−ρ)/2)` (closeable via BCIKS Thm 4.1, named) and
-  in the Johnson regime beyond UD. (Sobering
+  On `[(1−ρ)/3, (1−ρ)/2)` (the rest of unique decoding) it is now built end-to-end
+  (`Loom/ProximityGapUDTight`, Berlekamp–Welch over `F(Z)`) modulo a *single named classical lemma*
+  `[PROXGAP-BW-ps]` (Polishchuk–Spielman divisibility, BCIKS Lemma 4.4 — literature-true, a
+  formalization project of its own); beyond UD, the Johnson regime remains a hypothesis. (Sobering
   context: the predecessor line had a *conjectured* 130-bit bound disproved to a proven 73 in Nov
   2025 — this is the least-reported, most load-bearing axis in the transparent-STARK field, and we
   quote it.)
