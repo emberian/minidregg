@@ -28,8 +28,14 @@
 //! commit → fold rounds → query spot-checks → final constant check, matching
 //! `Loom/Proximity.lean`'s tower descent, `mem_reedSolomonCode_one_iff` base
 //! check, and the `FriQueryVerifierAir` fold-consistency formula; challenges
-//! caller-supplied). The FS transcript rung comes later, per
-//! docs/PROVER-PLAN.md.
+//! caller-supplied), and `[PROVER-fs]` (transcript.rs — the Poseidon2 duplex
+//! transcript drawing the sumcheck challenges, FRI betas, and query positions
+//! non-interactively in `Loom/FiatShamir.lean`'s absorb-the-prefix /
+//! squeeze-the-challenge shape, conformant to the Lean sponge chain on
+//! `testdata/fs_conformance.json`; the verifier re-derives every challenge
+//! from the proof's own commitment stream — soundness pricing, the `(t + k)`
+//! grinding factor, stays Loom's: `fsKeystone_proved` /
+//! `lightClientGrinding_sound`).
 
 pub mod commit;
 pub mod descriptor;
@@ -41,3 +47,4 @@ pub mod gate_claim;
 pub mod poseidon;
 pub mod sumcheck;
 pub mod trace;
+pub mod transcript;

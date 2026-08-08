@@ -95,7 +95,9 @@ pub fn ext_digest(spec: &PermSpec, v: &Ext4, p: u64) -> Fp {
 
 /// Commit one fold level: per-element digests, then the `commit.rs` Merkle
 /// tree over them (level lengths are powers of two — no padding in play).
-fn commit_word(spec: &PermSpec, word: &[Ext4], p: u64) -> (Fp, MerkleTree) {
+/// `pub(crate)` for the `[PROVER-fs]` wiring (`transcript::fri_prove_fs` commits
+/// each level to absorb its root before drawing the next challenge).
+pub(crate) fn commit_word(spec: &PermSpec, word: &[Ext4], p: u64) -> (Fp, MerkleTree) {
     let digests: Vec<Fp> = word.iter().map(|v| ext_digest(spec, v, p)).collect();
     commit_trace(spec, &digests, p)
 }
