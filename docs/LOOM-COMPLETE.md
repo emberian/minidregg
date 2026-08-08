@@ -36,6 +36,10 @@ proximity-gap hypothesis. Those are stated plainly below, not buried.
 - `Assurance/LoomV0.loomV0_holds`: the **capstone** — a committed receipt chain verified at one
   FS schedule is sound + knowledge-sound + commitment-bound + decided, the proof term being
   exactly the four citations.
+- `Loom/LightClientGrinding.lightClientGrinding_sound`: soundness against a **grinding** adversary
+  (one that reorders/chooses the chain after querying the oracle) at the try-count-scaled bound —
+  the prefix-correlation kept honest, `phantomGrind_beats_fixed_bound` proving no fixed-chain bound
+  survives grinding.
 
 **The zero-knowledge argument of knowledge (OB-4, confirmed-absent-from-the-literature).**
 - `Loom/ZkRbrGame.loom_zk_argument`: Loom has a **machine-checked straightline non-interactive
