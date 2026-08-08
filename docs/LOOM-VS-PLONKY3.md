@@ -137,7 +137,13 @@ statement kept compiling beside the true one:
   Fiat-Shamir/ROM transcript layer (inhabited handler, keystone unconditional).
 
 So the central promise — *one aggregate proves the whole history, sound at deployed depth* —
-is now a chain of Lean terms, not a heuristic. **What that claim does NOT yet include, stated
+is now a chain of Lean terms, not a heuristic, and it is **composed into a single capstone
+theorem** (`Assurance/LoomV0.loomV0_holds`): a committed chain of kernel receipts, verified at
+one Fiat-Shamir schedule, carries all four guarantees at once — soundness, knowledge-soundness,
+commitment-binding, and decision — the proof term being exactly the four citations, no new
+math. That one theorem is the thing to hand a skeptic; its honest-scope caveat (the soundness
+and knowledge slices are bundled, not yet fused into one deployed transcript — the fusion is
+`[ACC-extract-bind]`/`[FS-ROM]`) is stated in the file, not hidden. **What that claim does NOT yet include, stated
 plainly:** the schedule is proved sound as a *uniform* sample; deriving it from a Fiat-Shamir
 hash is `[LC-sound-fs]` (rides the landed FS layer). Soundness is proved against claim-*
 satisfiability; binding a *forging prover*'s recommitments (straightline extraction) is
