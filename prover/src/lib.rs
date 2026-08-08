@@ -16,11 +16,18 @@
 //! `Loom/MultilinearExtension.lean`'s `mle`/`roundSum`), and
 //! `[PROVER-sumcheck-gates]` (gate_claim.rs — the descriptor's gates encoded as
 //! the hypercube defect table whose sumcheck `Assurance/AirSumcheck(Quadratic)`
-//! proved sound, so the engine proves the ACTUAL gate system). The FRI/FS
-//! rungs and the adopted WGSL fold come later, per docs/PROVER-PLAN.md.
+//! proved sound, so the engine proves the ACTUAL gate system), and
+//! `[PROVER-fri-fold]` (field4.rs + fri.rs — BabyBear⁴ (X⁴ = 11) and the CPU
+//! reference of breadstuffs' FRI fold kernel, ADOPTED into this crate and
+//! conformant to `Loom/Proximity.lean`'s verified `fold` on the Lean-authored
+//! vector `testdata/fri_conformance.json`; the wgsl GPU dispatch is
+//! `[PROVER-fri-wgsl]`, next — no wgpu here). The FRI commit/query and FS
+//! rungs come later, per docs/PROVER-PLAN.md.
 
 pub mod commit;
 pub mod descriptor;
+pub mod field4;
+pub mod fri;
 pub mod gate_claim;
 pub mod poseidon;
 pub mod sumcheck;
