@@ -25,12 +25,16 @@ INLINE in prompts from the deep-read reports.
 **★★★★★ v0 CAPSTONE PROVED — the "prove the tower" phase is COMPLETE.** The whole tower is
 one theorem (`Assurance/LoomV0.loomV0_holds`). Posted ember an async direction question
 (helm ask) — the next step (prover/benchmarks vs research-frontier vs consolidate vs pause)
-is an owner-only decision. [ACC-extract-bind] FULLY CLOSED (a+b). LoomV0 manifest landed (42
-theorems indexed, machine-checked). **NOW HOLDING — no lanes weaving; awaiting ember's
-direction (chat post 3fc288ce1b5d).** Next resume: check for ember's reply; if none, idle-wait
-on the beacon (do NOT spawn research-frontier — owner's call). Milestone reached.
+**THRUST (ember steered, 2026-08-08): the HIDING / PRIVATE-INPUTS thread** — ember asked
+pointedly "do we actually have hiding/private inputs?" + re-fired the goal (use taste, go).
+First step landed: `Assurance/PrivateReceipt.lean` — the private-input CHECKPOINT (verdict:
+YES at the opening layer; the full ZK + kernel wire-up are honest residuals). Next: take a
+real bite of [OB-4-hiding-rbr] (constrained-mask surjectivity — the ONE bounded sub-piece
+maskedOpeningHiding_of_surj reduces it to), or design the private-witness turn type. NOT the
+prover (that risks the AIR-in-Lean tripwire — ember's explicit greenlight needed).
 
 ## Done-log (recent)
+- 2026-08-08 **PrivateReceipt — the private-input checkpoint ✓** (audited, tree green 2468): answers 'do we actually have private inputs' with a machine-checked object. privateReceipt_witness_hidden (via MaskedOpeningHiding.witness_free): two turns with DIFFERENT private witnesses give identical spot-check openings under masking — a turn CAN hide its witness. Teeth: witness_hidden_needs_mask (γ=0 leaks — mask load-bearing). VERDICT: private inputs POSSIBLE at the opening layer, NOT finished. Residual [PRIVATE-INPUT-rbr]=[OB-4-hiding-rbr] (full ZK RBR + kernel private-witness turn type). ATLAS triple.
 - 2026-08-07 eve **LoomV0Manifest ✓** (audited, 922f899, tree green 2467): the machine-checked table of contents — 42 theorems/defs across 7 layers, every entry a REAL type-checked re-export (zero drift found; refutations oneShot_lightClient_false/OB2_depth_composition_false/smallField_bound_vacuous indexed alongside proofs), §8 residual ledger + §9 live #print-axioms audit in-file. The peer-facing "it all compiles" artifact. Capstone on ATLAS triple, idealCommitment axiom-free — confirmed in-file.
 - 2026-08-07 eve **Erasure [ACC-extract-bind](b) ✓** (audited, 926ea9c): recoverFromColumns_sound — t≥d opened columns recover the FULL folded codeword (MDS/interpolation, full word equality not just agreement; reuses ZKHiding's open_determines). committed_word_recovered connects to Commitment (a verified t-opening of a committed codeword recovers it exactly) — closing [ACC-extract-bind](b). With committed_extract_bind (a), [ACC-extract-bind] is FULLY CLOSED at the word level. Teeth: t=d-1 shares a column with 2 codewords (MDS bound load-bearing). Residual [ERASURE-list] (beyond-UD) honest. ATLAS triple.
 - 2026-08-07 eve ★★★★★ **v0 CAPSTONE PROVED — the whole tower is ONE theorem** ★★★★★ (Assurance/LoomV0 e94ae98, RIGOROUSLY AUDITED). loomV0_holds bundles the four guarantees at one shared accumulator: sound (=lightClientSound), knowledge (=lightClientKnowledgeSound), binding (=committed_extract_bind), decision (=decider_sound) — the proof term IS the four citations, NO re-derivation. loomV0_light_client is the one-liner. Fires concretely (ch₁_loomV0_holds on a built receipt chain). HONESTLY SCOPED: bundles 4 SEPARATE guarantees (not one magic transcript), and SURFACES the residual the composition reveals (the soundness slice's words vs the knowledge slice's transcript aren't coupled by the landed pieces — that's [ACC-extract-bind]/[FS-ROM] at deployment). ATLAS triple. THE prove-the-tower phase COMPLETE.
