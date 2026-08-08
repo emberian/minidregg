@@ -9,8 +9,13 @@
 //! by proof. "The prover accepted" inherits the FRI/STARK floor (`[EMIT-sound]`).
 //!
 //! Rungs here: `[PROVER-serialize]` reader (descriptor.rs), `[PROVER-trace]`
-//! (trace.rs). The commit/sumcheck/FRI/FS rungs and the adopted WGSL fold come
-//! later, per docs/PROVER-PLAN.md.
+//! (trace.rs), `[PROVER-commit]` (poseidon.rs + commit.rs — the Poseidon2-style
+//! permutation mirroring `Compiler/AirHash.lean`'s `permExec`, and the Merkle
+//! commitment over the trace in `Loom/Commitment`'s `OpeningScheme` shape). The
+//! sumcheck/FRI/FS rungs and the adopted WGSL fold come later, per
+//! docs/PROVER-PLAN.md.
 
+pub mod commit;
 pub mod descriptor;
+pub mod poseidon;
 pub mod trace;

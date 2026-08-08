@@ -41,6 +41,12 @@ unambiguous. The modulus is stamped in the header; the reader checks it.
   conformance vectors in `prover/tests/` cross-check against Lean-established facts.
 * The `#eval` writer: emits `prover/testdata/demo_descriptor.json` (repo-root-relative) at
   build time — the Lean writer is the ONLY author of that file; the Rust side only reads.
+* `[PROVER-commit]` conformance (§6): `proverPermSpec` — a fixed demo `PermSpec` over
+  BabyBear (width 2, `α = 5`, full·partial·full, NON-symmetric per-round-distinct matrices,
+  so the vector pins the linear layer's row/column orientation and the schedule wiring) —
+  with its `permExec` output KERNEL-DECIDED and written to
+  `prover/testdata/poseidon_conformance.json` for the Rust `perm` to reproduce. A demo
+  instantiation; the deployed constant set is `[AIR-poseidon-params]`/`[PROVER-poseidon-params]`.
 
 ## Residuals
 
@@ -51,6 +57,7 @@ unambiguous. The modulus is stamped in the header; the reader checks it.
   rung shrinks it first.
 -/
 import Compiler.Emit
+import Compiler.AirHash
 import Mathlib.Tactic.NormNum.Prime
 import Lean.Data.Json
 
@@ -229,5 +236,89 @@ def roundTripDemo : IO Unit := do
 /- The testdata write: the Lean writer is the only author of
 `prover/testdata/demo_descriptor.json`; the Rust prover only ever reads it. -/
 #eval writeDescriptorJson "prover/testdata/demo_descriptor.json" demoDescriptor
+
+/-! ## §6. `[PROVER-commit]` conformance — the Poseidon reference vector.
+
+The Rust prover's Merkle commitment compresses with a Rust re-implementation of
+`AirHash`'s EXECUTOR `permExec` (the reference the verified gadget was proved equal to,
+`permGadget_eval`). Rust has no formal semantics, so the seam is a CONFORMANCE VECTOR: this
+section instantiates `permExec` at a fixed spec + input over BabyBear, KERNEL-DECIDES the
+output, and writes spec + input + output to testdata; the Rust test then reproduces the
+output with its own `perm`. Agreement on the vector is the whole claim — never refinement.
+
+The spec is a DEMO instantiation (`[AIR-poseidon-params]`/`[PROVER-poseidon-params]` carry
+the deployed constants): width 2, `α = 5`. Named wart: `p − 1 = 2^27 · 3 · 5`, so
+`5 ∣ p − 1` and `x^5` is NOT a bijection on BabyBear (deployed BabyBear Poseidon2 uses
+`α = 7`, where `gcd(7, p − 1) = 1`). Irrelevant to CONFORMANCE — equal outputs is the whole
+test — but exactly the kind of fact `[PROVER-poseidon-params]` must get right for the
+deployed set. The matrices are NON-symmetric and differ across rounds
+so the vector pins the row/column orientation (`out[i] = Σⱼ M i j · sboxed j`) and the
+schedule wiring — a transposed or reordered Rust mirror fails the test. -/
+
+/-- Demo linear layer 1 (rounds 0 and 2): non-symmetric, det `= 2 ≠ 0`. -/
+def proverPermM1 : Fin 2 → Fin 2 → BabyBear := ![![2, 1], ![4, 3]]
+
+/-- Demo linear layer 2 (round 1): non-symmetric, det `= −7 ≠ 0`. -/
+def proverPermM2 : Fin 2 → Fin 2 → BabyBear := ![![1, 5], ![2, 3]]
+
+/-- **The conformance spec** — mirrored verbatim by the Rust `poseidon::demo_spec()`;
+the test checks the two are equal field-by-field before checking outputs. -/
+def proverPermSpec : PermSpec BabyBear 2 where
+  α := 5
+  rounds :=
+    [ ⟨![3, 5], true,  proverPermM1⟩,
+      ⟨![1, 7], false, proverPermM2⟩,
+      ⟨![2, 4], true,  proverPermM1⟩ ]
+
+/-- The conformance input — asymmetric, far from the field's edges. -/
+def proverPermInput : Fin 2 → BabyBear := ![123456789, 987654321]
+
+/-- *The reference output, KERNEL-DECIDED*: `permExec` of the conformance input. The
+value the Rust `perm` must reproduce byte-for-byte. -/
+example : permExec proverPermSpec proverPermInput = ![1373719630, 1740831647] := by decide
+
+/-- *The hash squeeze, decided*: output wire 0. -/
+example : hashExec proverPermSpec proverPermInput = 1373719630 := by decide
+
+/-! The conformance-file writer — same discipline as the descriptor: the Lean side is the
+only author of `prover/testdata/poseidon_conformance.json`; Rust only reads. -/
+
+variable {w : ℕ}
+
+/-- Serialize a `Fin w`-vector of field elements as a JSON array of canonical values. -/
+def finVecToJson [NeZero p] (v : Fin w → ZMod p) : Json :=
+  Json.arr ((List.finRange w).map fun i => toJson (v i).val).toArray
+
+/-- Serialize a round: `{"rc": […], "full": bool, "m": [[…], …]}` (row-major: `m[i][j]`
+is `M i j`). -/
+def roundToJson [NeZero p] (r : Round (ZMod p) w) : Json :=
+  Json.mkObj
+    [ ("rc", finVecToJson r.rc),
+      ("full", toJson r.full),
+      ("m", Json.arr ((List.finRange w).map fun i => finVecToJson (r.M i)).toArray) ]
+
+/-- Serialize a permutation spec: `{"alpha": ℕ, "width": ℕ, "rounds": […]}`. -/
+def permSpecToJson [NeZero p] (spec : PermSpec (ZMod p) w) : Json :=
+  Json.mkObj
+    [ ("alpha", toJson spec.α),
+      ("width", toJson w),
+      ("rounds", Json.arr (spec.rounds.map roundToJson).toArray) ]
+
+/-- The whole conformance file: field, spec, input, and the Lean-computed
+`permExec`/`hashExec` outputs (the values the decided examples above pin). -/
+def poseidonConformanceJson : Json :=
+  Json.mkObj
+    [ ("p", toJson babyBearP),
+      ("spec", permSpecToJson proverPermSpec),
+      ("input", finVecToJson proverPermInput),
+      ("permOutput", finVecToJson (permExec proverPermSpec proverPermInput)),
+      ("hashOutput", toJson (hashExec proverPermSpec proverPermInput).val) ]
+
+/-- Write the conformance file (creating the parent directory; repo-root-relative). -/
+def writePoseidonConformance (path : System.FilePath) : IO Unit := do
+  if let some dir := path.parent then IO.FS.createDirAll dir
+  IO.FS.writeFile path (poseidonConformanceJson.pretty ++ "\n")
+
+#eval writePoseidonConformance "prover/testdata/poseidon_conformance.json"
 
 end Minidregg.Compiler
