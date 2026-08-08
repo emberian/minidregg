@@ -87,11 +87,10 @@ Gadgets compose by `List.append`; acceptance of the composite is the conjunction
 parts' acceptances. This is the ONLY glue the note-spend needs — everything else is the three
 gadgets' closed iffs. -/
 
-/-- Acceptance distributes over gadget composition: the appended system accepts iff both
-parts accept. -/
-theorem systemAccepts_append (asg : Idx → F) (s₁ s₂ : ConstraintSystem F Idx) :
-    systemAccepts asg (s₁ ++ s₂) ↔ (systemAccepts asg s₁ ∧ systemAccepts asg s₂) :=
-  List.forall_mem_append
+/- `systemAccepts_append` — acceptance distributes over gadget composition — now lives at
+its natural home, `Compiler/AirRange` §1 (beside `systemAccepts` itself), since the general
+`Pred` compiler needs it below the note-spend rung. Same name, same statement; every use
+site resolves unchanged. -/
 
 /-! ## §2. The note-spend system and its keystone iff. -/
 

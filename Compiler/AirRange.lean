@@ -76,6 +76,23 @@ theorem systemAccepts_iff_systemSemHolds (asg : Idx → F) (sys : ConstraintSyst
     systemAccepts asg sys ↔ systemSemHolds asg sys :=
   forall_congr' fun t => imp_congr_right fun _ => accepts_iff_semHolds asg t
 
+/-- The empty system accepts vacuously. -/
+theorem systemAccepts_nil (asg : Idx → F) :
+    systemAccepts asg ([] : ConstraintSystem F Idx) :=
+  fun _ ht => absurd ht (List.not_mem_nil)
+
+/-- Acceptance peels one assertion off the front. -/
+theorem systemAccepts_cons {asg : Idx → F} {t : Term (AirSig F Idx)}
+    {sys : ConstraintSystem F Idx} :
+    systemAccepts asg (t :: sys) ↔ accepts asg t ∧ systemAccepts asg sys :=
+  List.forall_mem_cons
+
+/-- Acceptance distributes over gadget composition: the appended system accepts iff both
+parts accept. (The one glue every composite gadget uses.) -/
+theorem systemAccepts_append (asg : Idx → F) (s₁ s₂ : ConstraintSystem F Idx) :
+    systemAccepts asg (s₁ ++ s₂) ↔ (systemAccepts asg s₁ ∧ systemAccepts asg s₂) :=
+  List.forall_mem_append
+
 /-- Acceptance of one assertion computes (`F` with decidable equality) — keystones below are
 `decide`d against the REAL fold, not a hand mirror. -/
 instance (asg : Idx → F) (t : Term (AirSig F Idx)) [DecidableEq F] :
