@@ -21,6 +21,20 @@ INLINE in prompts from the deep-read reports.
 - **Bridge:** OB-3 ✓ (receipt Q native to the accumulator, binding half; [OB3-d-fold]
   closes once the accumulator lands).
 
+## DIRECTION (ember, 2026-08-08): do the GENUINELY-OPEN work — private-witness turns + hard ZK
+ember steered: make ZK actually hard, private-witness turns, grow the kernel, work toward a
+WGPU prover. **KEY FIND: breadstuffs `circuit-prove` (78K LOC) IS the deployed prover minidregg
+formalizes** — `gpu_hidingfri_fold.rs`+`hidingfri_fold_ext4.wgsl` = protocol-identical Plonky3
+BabyBear⁴ FRI fold (= Proximity.fold + SmallField's field, COMPUTE, portable backend);
+`faithful_note_spend_exact_v3` + `shielded_*`/`dark_*_private` = the private-turn DESIGN ref;
+`*_air.rs` (cert_f/effect_vm_p3/field_delta_range/lean_lookup) = hand-written Rust AIRs = **DEBT,
+reimplement in Lean, NEVER extend**. SUBSTRATE SAID OUT LOUD: private-witness turns + ZK = Lean-
+authored; the WGPU fold is unverified compute that follows the Lean emit path. Asks filed for
+ember: canonical private-turn ref? confirm BabyBear⁴? is lean_lookup_air the emit-path precedent?
+- Threads: (A) private-witness turn MODEL — Lean, statement-first, faithful_note_spend as design
+  ref [IN PROGRESS, station]. (B) ZkArgument [ZK-RBR-game] — the hard open ZK [lane weaving].
+  (C) WGPU prover backend — follows the emit path, NOT started (needs the Lean→constraint path).
+
 ## Standing lanes (keep 2–6 live; relaunch as they land)
 **★★★★★ v0 CAPSTONE PROVED — the "prove the tower" phase is COMPLETE.** The whole tower is
 one theorem (`Assurance/LoomV0.loomV0_holds`). Posted ember an async direction question
