@@ -5,3 +5,4 @@ import Compiler.Placeholder  -- carve marker: syntactic-leaf IR, fold_unique, se
 import Compiler.Signature    -- N3: abstract signatures, Term (= WType), fold_unique, agree_by_initiality, the syntactic-leaves-forced obligation
 import Compiler.Air  -- the arithmetization DSL (derived): circuit⟺executor by initiality (N3), the first gadget; [AIR-poseidon]/[AIR-membership] the rungs toward a note-spend
 import Compiler.AirFlatten  -- [AIR-flatten] CLOSED: nested expressions → degree-≤2 gate systems with aux wires, the flatten a fold; wire-forcing refinement (sound+complete+unique) → gate system ⟺ executor
+import Compiler.AirRange  -- [AIR-range] the bit-decomposition range gadget: k boolGadgets + recomposition as a ConstraintSystem; correct (iff) + bounds (cast of n < 2^k) + val_lt (ZMod p, 2^k ≤ p — the lift CLOSED) + complete (every n < 2^k accepted)
