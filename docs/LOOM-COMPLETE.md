@@ -49,6 +49,14 @@ proximity-gap hypothesis. Those are stated plainly below, not buried.
 - `Loom/AccRbrInstance.accFsSound_native`: the argument is **fully native at the IOR resolution**
   — FS fires on the accumulator's own Def-4.2 instance (all Def-4.1 clauses + `extract_sound`
   proved), not a placeholder.
+- `Loom/AccRbrBcs.accFsSound_bcs`: the argument at the **deployed BCS/root alphabet** (whole-code-
+  mask / unique-decoding regime) — the proof string carries roots + opened columns + opening
+  proofs, the oracle hashes *those* not words, the verifier checks every opening, and
+  `bcs_extract_is_seam` proves the native extractor *is* `extractChain ∘ seamCounterfactual`
+  through binding. One honest residual named mid-build (`[ACC-rbr-bcs-resid]`): the *constrained*-
+  mask fold-root lags its challenge, so its root re-attribution is open packaging — the column
+  data is already seam-equivalent, but a literal fold-root instance mis-aligns the challenge that
+  folds the claim with the message that carries the word. Named, not papered over.
 - The novel content resolved along the way: `ZkExtraction` (the mask counterfactuals the
   extractor needs are provably not computable from what the ZK distinguisher sees — quantifier
   position confines them, `by rfl`); `ZkTriangular` (the deployed recommitment hiding, the
