@@ -44,8 +44,8 @@ the vocabulary the fold algebra speaks). `Loom/ConstrainedMask.lean`'s
 `constrainedMask_hiding` speaks of `constrainedMaskSpace dom d pt` — a
 `Submodule` (the vocabulary the reduction theorem `maskedOpeningHiding_of_surj`
 needs). For a single-evaluation-constraint mask claim (weight `evalAtPt pt`,
-target `0`) these are the SAME set
-(`satWords_evalPt_eq_constrainedMaskSpace`) — the object `Loom/AccExtract.lean`
+target `0`) these are the SAME set, pointwise
+(`mem_constrainedMaskSpace_iff_satisfies`) — the object `Loom/AccExtract.lean`
 peels is, on the nose, the object `Loom/ZKHiding.lean`/`Loom/ConstrainedMask.lean`
 hide. That identification is what lets one `ZkArgument` instance cite both
 without re-deriving either.
@@ -336,11 +336,10 @@ theorem single_fold_ambiguous_masked :
     xWord_sat_evalA, maskWord_sat_Bmask, ZkExample.twoWord_sat_evalA,
     (mem_constrainedMaskSpace_iff_satisfies dom₅ 2 pt2 ()).mp (Submodule.zero_mem _)⟩
 
-/-- **Zero-knowledge survives the ambiguity**: the very transcript
-`single_fold_ambiguous_masked` shows no extractor can invert from ONE fold
-(`γ = 1`) is STILL hidden — `zero_knowledge` fires there. One transcript is
-never enough to extract, but is exactly what zero-knowledge is a statement
-about. -/
+/-- **Zero-knowledge survives the ambiguity**: the very fold at `γ = 1` that
+`single_fold_ambiguous_masked` shows no extractor can invert is STILL hidden
+— `zero_knowledge` fires there. One transcript is never enough to extract,
+but is exactly what zero-knowledge is a statement about. -/
 theorem zeroKnowledge_holds_at_one :
     MaskedOpeningHiding (constrainedMaskSpace dom₅ 2 pt2) qz (1 : ZMod 5) :=
   (zkArgument_F5 (γ := 1) (by decide)).zero_knowledge
