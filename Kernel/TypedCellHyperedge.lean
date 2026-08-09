@@ -306,9 +306,12 @@ theorem leg_fieldFootprint_subset (commit : Commit law declaration)
       declaration.jointPatch.fieldFootprint := by
   intro field present
   have named : field ∈ (declaration.legPatch incidence).namedFields := by
-    change field ∈ (declaration.legs incidence).patch.fieldFootprint at present
-    change field ∈ (declaration.legs incidence).patch.namedFields
-    rw [← (declaration.legs incidence).accepted.validated.fields_exact]
+    have footprintExact :
+        (declaration.legPatch incidence).fieldFootprint =
+          (declaration.legPatch incidence).namedFields := by
+      simpa only [Declaration.legPatch, Leg.patch] using
+        (declaration.legs incidence).accepted.validated.fields_exact
+    rw [← footprintExact]
     exact present
   rcases (by
       simpa [CellState.Patch.namedFields] using named :
@@ -332,10 +335,12 @@ theorem leg_resourceFootprint_subset (commit : Commit law declaration)
   intro resource present
   have named : resource ∈
       (declaration.legPatch incidence).namedResources := by
-    change resource ∈
-      (declaration.legs incidence).patch.resourceFootprint at present
-    change resource ∈ (declaration.legs incidence).patch.namedResources
-    rw [← (declaration.legs incidence).accepted.validated.resources_exact]
+    have footprintExact :
+        (declaration.legPatch incidence).resourceFootprint =
+          (declaration.legPatch incidence).namedResources := by
+      simpa only [Declaration.legPatch, Leg.patch] using
+        (declaration.legs incidence).accepted.validated.resources_exact
+    rw [← footprintExact]
     exact present
   rcases (by
       simpa [CellState.Patch.namedResources] using named :
@@ -385,6 +390,8 @@ def toHyperedge (commit : Commit law declaration) :
     exact commit.apexExact
   balanced := by
     funext coordinate
+    change (∑ incidence,
+      law.delta (declaration.legs incidence) coordinate) = 0
     exact congrFun commit.aggregateBalanced coordinate
 
 @[simp] theorem hyperedge_apex (commit : Commit law declaration) :
@@ -427,7 +434,7 @@ variable
     {legacyMaterializer : CellState.Materializer
       Minidregg.Theory.DeclaredTurn.effectSchema Digest}
     {legacyPortal : Portal}
-    {LegacyIncidence : Type z} [Fintype LegacyIncidence]
+    {LegacyIncidence : Type} [Fintype LegacyIncidence]
     [DecidableEq LegacyIncidence]
 
 /-- The old authorization projection embeds without reinterpretation. -/
