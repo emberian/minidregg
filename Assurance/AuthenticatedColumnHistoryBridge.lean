@@ -60,11 +60,11 @@ structure AuthenticatedLinkColumns
   representedExact : forall round index,
     (columns round).represented index = schedule.base.linkWord round index
   rootRecorded : forall round, (columns round).rootRecord ∈ roots
-  openings : forall round query, ColumnOpening (columns round)
-  openingIndexExact : forall round query,
+  openings : forall round, Fin openedCount -> ColumnOpening (columns round)
+  openingIndexExact : forall round (query : Fin openedCount),
     (openings round query).index =
       (coordinateEquiv (ι := ι)).symm (queries query)
-  openingRecorded : forall round query,
+  openingRecorded : forall round (query : Fin openedCount),
     (openings round query).record ∈ openingRecords
 
 namespace AuthenticatedLinkColumns
