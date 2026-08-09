@@ -4,8 +4,8 @@
 The three private-computation families share one semantic declaration shape but
 remain distinct in the type index.  Cryptographic execution is represented only
 by abstract Lean evidence portals with data witnesses and explicit acceptance
-laws.  A completion token conjoins every authority leg; it is not a receipt
-codec and contains no runtime callback surface.
+laws.  Computation completion is separate from release completion; neither is
+a receipt codec or runtime callback surface.
 -/
 import Theory.DisclosureDeclaration
 
@@ -72,6 +72,16 @@ structure PrivateComputationOutcome
   evidence : language.Evidence mode
   release : Release
   disclosureEffect : DisclosureEffect DeclassificationAuthority Release
+
+/-- The result of private computation before any disclosure decision.  Unlike
+`PrivateComputationOutcome`, this type has no release value or declared release
+effect.  It is the result type accepted by sealed computation paths. -/
+structure PrivateComputationResult
+    (language : PrivateComputationLanguage) (mode : PrivateComputationKind)
+    (OutputCommitment PrivateOutput : Type*) where
+  output : CommittedPrivateOutput OutputCommitment
+    (language.OutputArtifact mode) PrivateOutput
+  evidence : language.Evidence mode
 
 /-- The exact statement supplied to a mode-specific evidence portal. -/
 structure PrivateComputationStatement
@@ -198,6 +208,30 @@ abbrev Outcome :=
   PrivateComputationOutcome language mode OutputCommitment PrivateOutput
     DeclassificationAuthority Release
 
+/-- The private-computation result prior to a separate disclosure effect. -/
+abbrev ComputationOutcome :=
+  let _declarationMarker := declaration
+  PrivateComputationResult language mode OutputCommitment PrivateOutput
+
+/-- Forget the release-bearing extension of a legacy outcome. -/
+def Outcome.computation (outcome : declaration.Outcome) :
+    declaration.ComputationOutcome where
+  output := outcome.output
+  evidence := outcome.evidence
+
+def computationStatementOf
+    (request : declaration.Request) (outcome : declaration.ComputationOutcome) :
+    PrivateComputationStatement language mode SemanticInput OutputCommitment PrivateOutput :=
+  let _declarationMarker := declaration
+  {
+    program := request.program
+    inputValue := request.inputValue
+    inputArtifact := request.computationInput
+    outputCommitment := outcome.output.commitment
+    outputArtifact := outcome.output.representation
+    privateOutput := outcome.output.privateOutput
+  }
+
 def statementOf (request : declaration.Request) (outcome : declaration.Outcome) :
     PrivateComputationStatement language mode SemanticInput OutputCommitment PrivateOutput :=
   let _declarationMarker := declaration
@@ -210,9 +244,23 @@ def statementOf (request : declaration.Request) (outcome : declaration.Outcome) 
     privateOutput := outcome.output.privateOutput
   }
 
-/-- The completion token.  Every field is proof-relevant and indexed by the
-same request/outcome; no constructor permits authorization, input identity,
-computation evidence, or declared disclosure to be omitted. -/
+/-- Completion of the private computation itself.  This token contains the
+three authority/meaning legs required to accept private work: request
+authorization, exact input representation identity, and mode-specific
+computation evidence.  It deliberately contains no release, declassification,
+or output-opening authority. -/
+structure ComputationCompletion
+    (request : declaration.Request) (outcome : declaration.ComputationOutcome) where
+  authorization : CheckedPrivateEvidence declaration.authorizationPortal request
+  inputIdentity : declaration.inputBridge.CheckedIdentity request.inputBridgeName
+    request.canonicalInput request.computationInput request.inputValue
+  computation : CheckedPrivateEvidence declaration.computationPortal
+    (declaration.computationStatementOf request outcome)
+
+/-- A release-capable completion adds the independent output-opening/policy
+judgment and exact declared disclosure to the same computation legs.  Code
+which only accepts sealed computation must consume `ComputationCompletion`,
+not this stronger type. -/
 structure Completion [DecidableEq Release]
     (request : declaration.Request) (outcome : declaration.Outcome) where
   authorization : CheckedPrivateEvidence declaration.authorizationPortal request
@@ -224,6 +272,34 @@ structure Completion [DecidableEq Release]
     request.disclosureRequest outcome.output outcome.release
   disclosureDeclared :
     outcome.disclosureEffect = request.disclosureIntent.materialize outcome.release
+
+/-- Computation completion exposes exactly its non-disclosure semantics. -/
+theorem ComputationCompletion.implies_computation_semantics
+    {request : declaration.Request} {outcome : declaration.ComputationOutcome}
+    (completion : declaration.ComputationCompletion request outcome) :
+    declaration.authorizationPortal.Accepts request completion.authorization.witness ∧
+      SameOpening declaration.inputBridge.sourceSemantics
+        declaration.inputBridge.targetSemantics
+        request.canonicalInput completion.inputIdentity.sourceWitness
+        request.computationInput completion.inputIdentity.targetWitness ∧
+      declaration.computationPortal.Accepts
+        (declaration.computationStatementOf request outcome)
+        completion.computation.witness := by
+  exact ⟨completion.authorization.accepts,
+    completion.inputIdentity.sameOpening,
+    completion.computation.accepts⟩
+
+/-- A legacy release-capable completion has a computation-only projection, but
+the reverse direction is intentionally unavailable. -/
+def Completion.toComputationCompletion [DecidableEq Release]
+    {request : declaration.Request} {outcome : declaration.Outcome}
+    (completion : declaration.Completion request outcome) :
+    declaration.ComputationCompletion request outcome.computation where
+  authorization := completion.authorization
+  inputIdentity := completion.inputIdentity
+  computation := by
+    simpa only [computationStatementOf, Outcome.computation, statementOf] using
+      completion.computation
 
 /-- Completion exposes all semantic authority legs.  The two representation
 joins are existing `SameOpening` relations and the output policy judgment is the

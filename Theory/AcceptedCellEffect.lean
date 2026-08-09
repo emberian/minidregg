@@ -299,6 +299,20 @@ structure Adapter
   nullifier : (request : privateDeclaration.Request) →
     privateDeclaration.Outcome → Option Nullifier
 
+/-- Kernel projections for computation-only outcomes.  This is deliberately a
+separate adapter from the release-capable one: sealed acceptance must not ask
+an application to manufacture a release-bearing `Outcome`. -/
+structure ComputationAdapter
+    {S : CellState.Schema.{u, v, w, x}}
+    (Nullifier : Type y) where
+  requestCodec : LawfulCodec privateDeclaration.Request
+  outcomeCodec : LawfulCodec privateDeclaration.ComputationOutcome
+  effectDigest : privateDeclaration.Request → Digest
+  patch : (request : privateDeclaration.Request) →
+    privateDeclaration.ComputationOutcome → CellState.Patch S Digest
+  nullifier : (request : privateDeclaration.Request) →
+    privateDeclaration.ComputationOutcome → Option Nullifier
+
 /-- Private disclosure decisions must match the legacy outcome's declared
 effect.  Sealing is always safe; it emits no release even when release evidence
 exists. -/
@@ -337,6 +351,43 @@ def family
       request.disclosureRequest outcome.output release
   DisclosureAllowed := fun request outcome =>
     DisclosureAllowed privateDeclaration (request := request) (outcome := outcome)
+
+/-- The sealed-only semantic family.  Its mode evidence is computation
+completion, not release completion.  Both release carriers are empty, making a
+reveal or declassification constructor uninhabited at this semantic boundary. -/
+def sealedFamily
+    {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
+    {Nullifier : Type y}
+    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier) :
+    SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier where
+  Declaration := privateDeclaration.Request
+  declarationCodec := adapter.requestCodec
+  Outcome := fun _ => privateDeclaration.ComputationOutcome
+  outcomeCodec := fun _ => adapter.outcomeCodec
+  ModeEvidence := fun request outcome =>
+    privateDeclaration.ComputationCompletion request outcome
+  effectDigest := adapter.effectDigest
+  patch := adapter.patch
+  nullifier := adapter.nullifier
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => nomatch release
+  DisclosureAllowed := fun _ _ disclosure =>
+    match disclosure with
+    | .sealed => True
+    | .reveal release _ => nomatch release
+    | .declassify authority _ _ => nomatch authority
+
+/-- The sealed family has no release value to authorize or disclose. -/
+theorem sealedFamily_no_release
+    {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
+    {Nullifier : Type y}
+    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
+    (request : privateDeclaration.Request)
+    (outcome : privateDeclaration.ComputationOutcome)
+    (release : (sealedFamily (M := M) privateDeclaration adapter).Release
+      request outcome) : False :=
+  nomatch release
 
 /-- The release decision already established by a private completion.  This is
 only a projection of its request-indexed `VerifiedRelease`; it creates no new
@@ -413,6 +464,35 @@ def acceptCompletionSealed
     (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (family (M := M) privateDeclaration adapter) commonRequest pre request outcome where
+  authorization := authorization
+  effectsDigestBound := effectsDigestBound
+  preRootBound := preRootBound
+  modeEvidence := completion
+  validated := validated
+  disclosure := .sealed
+  disclosureAllowed := trivial
+
+/-- Accept completed private computation without constructing, checking, or
+retaining any release evidence.  The resulting family makes disclosure
+uninhabited except for `.sealed`; a later reveal must be a separate authorized
+effect. -/
+def acceptComputationSealed
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest} {Nullifier : Type y}
+    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : privateDeclaration.Request}
+    {outcome : privateDeclaration.ComputationOutcome}
+    (authorization : Authorized portal authState commonRequest)
+    (effectsDigestBound : commonRequest.effectsDigest = adapter.effectDigest request)
+    (preRootBound : commonRequest.preStateRoot = pre.root)
+    (completion : privateDeclaration.ComputationCompletion request outcome)
+    (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
+    AcceptedCellEffect (portal := portal) (authState := authState)
+      (sealedFamily (M := M) privateDeclaration adapter)
+      commonRequest pre request outcome where
   authorization := authorization
   effectsDigestBound := effectsDigestBound
   preRootBound := preRootBound
