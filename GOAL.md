@@ -51,15 +51,15 @@ hotspots afterward.
 
 1. Refine the landed characteristic-two sampled theorem to the binary runtime and compose its
    cSHAKE/Merkle assumptions.
-2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, replace the
-   handwritten Rust verifier with Lean-emitted control, then connect it to the final LDT.
-3. Lower the landed proof-verified arbitrary-functional history node into the stable common
-   receipt relation consumed by a real unbounded WARP/FACS-style accumulator and decider.
+2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, emit its
+   Lean-owned controller, then connect it to the final LDT.
+3. Build a real unbounded WARP/FACS-style accumulator and decider directly over the stable Lean
+   receipt relation; the former handwritten functional-history node was deleted.
 4. Instantiate hiding committed-word-knowledge proofs and discharge the staged ZK game's explicit
    shared-ROM horn ports.
-5. Upgrade the landed depth-independent light-client conjunction into the intended shared-ROM,
-   RBR/extractor, and final-compression protocol, then benchmark that protocol—not superseded
-   full-opening/reference paths.
+5. Build the intended shared-ROM, RBR/extractor, and final-compression protocol from Lean-owned
+   clauses and controllers, then benchmark that protocol—not any deleted native conjunction or
+   superseded full-opening/reference path.
 
 ## Claim discipline
 

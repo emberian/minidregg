@@ -190,10 +190,13 @@ extractable receipt composition are separate wrappers, not prose properties of t
 The implementation sequence is:
 
 1. **Native proof adapters.** Every accepted receipt clause is backed by a concrete verifier. The
-   functional/gate and indexed-lookup adapters have landed; mutable RAM and FHE adapters follow.
+   Lean relations for gates and indexed lookup have landed; their former handwritten native
+   verifier adapters were deleted. Lean-owned clause controllers and emitted artifacts come next;
+   mutable RAM and FHE adapters follow.
 2. **Stable common relation.** The pre/post/touched frame nucleus, typed request/auth/effect/
    disclosure wrapper, native lookup clause, header-bound runtime word, and `AccClaim` fold have
-   landed. Replace the handwritten Rust header with the Lean-emitted codec/API.
+   landed. `SemanticManifest` now owns the first-order content-addressed ABI; emit its concrete
+   codec/API and admit only manifest-closed clauses.
 3. **One honest outer accumulator.** Implement the WARP/FACS-style relation, transcript, decider,
    and extractor. Do not name a structural hash chain an accumulator.
 4. **Privacy composition.** Add hiding commitments/ZK adapters and prove the shared-ROM and
