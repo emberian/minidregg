@@ -1,0 +1,108 @@
+{
+  "schema": "minidregg/remote-evidence/v3",
+  "runId": "E-20260809T185430-121-persvati-86f2f831e005-lake",
+  "source": {
+    "requestedRevision": "86f2f83",
+    "commit": "86f2f831e005b38ba873ed98398ca9e15807cf90",
+    "tree": "6a5e745a8ed7ac2f838588288afe9538c5d52a3e",
+    "dirty": false,
+    "archiveSha256": "5fed966d7d559fa34d23f4c2dd6513ae74820d2933a07ec3d27bd2ef01914b8e",
+    "leanToolchainSha256": "54727eec5cba149c18842e6deb5c41b369d66455c93ce135d7d5347c782b2325",
+    "lakeManifestSha256": "adfbabe1a7e53e7759216079326e26786c57f62203255595ebe6b7df4f1323bb",
+    "rustToolchainSha256": "09f4296a78c78a96f71b80d4feca5664cfdce14e8a2fd34498ef6a0eb4a916ec",
+    "beforeManifest": {
+      "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.source.sha256",
+      "sha256": "b5c1134d4af40ce9934c8436ab5118793acfc58b9c2f505935352d0cccf9a494"
+    },
+    "afterManifest": {
+      "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.source-after.sha256",
+      "sha256": "b5c1134d4af40ce9934c8436ab5118793acfc58b9c2f505935352d0cccf9a494"
+    },
+    "mutationPolicy": {
+      "default": "exact-manifest-equality",
+      "autoSync": false,
+      "allowlist": {
+        "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.generated-outputs.tsv",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputs": []
+      }
+    }
+  },
+  "dependencies": {
+    "seedKey": "v2-54727eec5cba149c18842e6d-adfbabe1a7e53e7759216079",
+    "runLocalTree": true,
+    "copyMode": "hardlink-readonly-with-private-metadata",
+    "revisionManifest": {
+      "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.dependencies.tsv",
+      "sha256": "3e6a7faddbc876c072e8dfb7ebc5dcae2eb3b8ffed3e816365f27283132f428b"
+    }
+  },
+  "command": [
+    "lake",
+    "build",
+    "Assurance.SemanticHistoryStraightlinePcs",
+    "Assurance.SemanticAdditiveFriCheckpoint",
+    "Assurance.SemanticHistoryWARPAdditiveJoin",
+    "Assurance.SemanticHistoryBcsClaimProjection",
+    "Assurance.SemanticHistoryRecursiveAir"
+  ],
+  "resolvedExecutable": "/home/ember/.elan/bin/lake",
+  "worker": {
+    "hostname": "persvati",
+    "uname": "Linux persvati 6.17.0-40-generic #40-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 19 16:42:13 UTC 2026 x86_64 GNU/Linux",
+    "cpu": "AMD Ryzen AI 9 HX PRO 370 w/ Radeon 890M",
+    "threads": 24,
+    "memoryKiB": 87882880,
+    "gpu": "c4:00.0 Display controller: Advanced Micro Devices, Inc. [AMD/ATI] Strix [Radeon 880M / 890M] (rev d1)",
+    "tools": {
+      "elan": {
+        "path": "/home/ember/.elan/bin/elan",
+        "version": "elan 4.2.3 (b6cec7e10 2026-06-08)"
+      },
+      "lake": {
+        "path": "/home/ember/.elan/bin/lake",
+        "version": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)"
+      },
+      "lean": {
+        "path": "/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0/bin/lean",
+        "version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)"
+      },
+      "cargo": {
+        "path": "/home/ember/.cargo/bin/cargo",
+        "version": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)"
+      },
+      "rustc": {
+        "path": "/home/ember/.cargo/bin/rustc",
+        "version": "rustc 1.98.0-nightly (8b6558a02 2026-06-20)"
+      }
+    },
+    "remoteRun": "/home/ember/minidregg-checks/runs/run-86f2f831e005-VwFMs8O0",
+    "alias": "persvati",
+    "limits": {
+      "cpuSet": "0-7",
+      "virtualMemoryKiB": 67108864,
+      "timeout": "45m",
+      "killAfterSeconds": 30
+    }
+  },
+  "startedAt": "2026-08-09T18:54:30Z",
+  "finishedAt": "2026-08-09T18:55:58Z",
+  "result": {
+    "runnerExit": 0,
+    "commandExit": 0,
+    "sourceIntegrityExit": 0
+  },
+  "rawLog": {
+    "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.log",
+    "sha256": "6796b8f26e80c00795d70b071df4faed4cde2b9a6b637f896bebd4e7d3d6b19a"
+  },
+  "projectOleans": {
+    "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.oleans.sha256",
+    "sha256": "dec1d8986fbc4f5542e0bd456549c181e0622d42fe9a11b1abae612b6767cba0"
+  },
+  "sourceIntegrity": {
+    "file": "E-20260809T185430-121-persvati-86f2f831e005-lake.source-integrity.log",
+    "sha256": "c0aff5052d18acbf2833e1abe5492825b0ccf2b8082ce693597ff6e81ae85360"
+  },
+  "claimCeiling": "Exact explicit-commit source/dependency/build evidence with post-run source equality modulo explicitly hashed generated outputs only; not a benchmark, native-semantics claim, or cryptographic-security claim."
+}
