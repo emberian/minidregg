@@ -1,0 +1,46 @@
+{
+  "schema": "minidregg/remote-evidence/v1",
+  "runId": "E-20260809T163133-21335-persvati-d68e55163d61-lake",
+  "source": {
+    "commit": "d68e55163d61d488f51898b872890de7c71125ad",
+    "tree": "7f9c4f118d134138ea2b8c988bcd1770d8305e64",
+    "dirty": false,
+    "archiveSha256": "ad32b51b3af8bd64aa5dfcf63f72446623c080c9caecd0c6903bf8a41de6f6a1",
+    "leanToolchainSha256": "54727eec5cba149c18842e6deb5c41b369d66455c93ce135d7d5347c782b2325",
+    "lakeManifestSha256": "adfbabe1a7e53e7759216079326e26786c57f62203255595ebe6b7df4f1323bb"
+  },
+  "command": [
+    "lake",
+    "build",
+    "Theory.AcceptedCellEffect"
+  ],
+  "worker": {
+    "alias": "persvati",
+    "hostname": "persvati",
+    "uname": "Linux persvati 6.17.0-40-generic #40-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 19 16:42:13 UTC 2026 x86_64 GNU/Linux",
+    "cpu": "AMD Ryzen AI 9 HX PRO 370 w/ Radeon 890M",
+    "threads": 24,
+    "memoryKiB": 87882880,
+    "gpu": "c4:00.0 Display controller: Advanced Micro Devices, Inc. [AMD/ATI] Strix [Radeon 880M / 890M] (rev d1)",
+    "lake": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)",
+    "cargo": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)",
+    "remoteRun": "/home/ember/minidregg-checks/runs/run-d68e55163d61-OpBbdhWH",
+    "limits": {
+      "cpuSet": "0-7",
+      "virtualMemoryGiB": 64,
+      "timeoutMinutes": 45
+    }
+  },
+  "startedAt": "2026-08-09T16:31:33Z",
+  "finishedAt": "2026-08-09T16:31:55Z",
+  "exitCode": 0,
+  "rawLog": {
+    "file": "E-20260809T163133-21335-persvati-d68e55163d61-lake.log",
+    "sha256": "67e8bdf630b4be8b6be272aa6748cf11d32008624e50474d3df36db273d0e3a7"
+  },
+  "projectOleans": {
+    "file": "E-20260809T163133-21335-persvati-d68e55163d61-lake.oleans.sha256",
+    "sha256": "1067a646a67555b511f0e1a2264551e368eb3729b5f5b5bd87f534e3e2ac6c84"
+  },
+  "claimCeiling": "Exact committed-source build/check evidence only; not a benchmark, native-semantics claim, or cryptographic-security claim."
+}

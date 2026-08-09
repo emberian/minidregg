@@ -17,6 +17,7 @@ artifacts were cached under a host-local lock; no project build output was share
 | [`E-…1947`](evidence/runs/E-20260809T161947-82277-persvati-7ddc9387a267-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Assurance.BfvNativeBufferAdmission` | pass | This exact committed target builds |
 | [`E-…2313`](evidence/runs/E-20260809T162313-5506-hbox-b2c674aee996-cargo.json) | hbox, i9-12900 | pinned-Rust `cargo check --lib` | pass | Native kernel crate compiles at this commit |
 | [`E-…2434`](evidence/runs/E-20260809T162434-6741-persvati-4f02bdb3ef9b-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Theory.CanonicalTransition` | pass | Canonical transition target builds |
+| [`E-…3133`](evidence/runs/E-20260809T163133-21335-persvati-d68e55163d61-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Theory.AcceptedCellEffect` | pass | Accepted private cell-effect target builds |
 
 The records explicitly make no native-semantics, benchmark, or cryptographic-security claim. The
 initial runner trials also caught and fixed SSH argument transport, writable package-hook, and Lean

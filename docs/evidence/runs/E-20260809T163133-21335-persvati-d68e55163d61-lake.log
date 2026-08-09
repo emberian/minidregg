@@ -1,0 +1,28 @@
+run=E-20260809T163133-21335-persvati-d68e55163d61-lake
+commit=d68e55163d61d488f51898b872890de7c71125ad
+host=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-d68e55163d61-OpBbdhWH
+command=lake build Theory.AcceptedCellEffect 
+✔ [2943/2957] Built Theory.PrivacyProfile (1.7s)
+✔ [2944/2957] Built Theory.IndexedProgram (1.9s)
+✔ [2945/2957] Built Theory.ReactiveReceipt (1.9s)
+✔ [2946/2957] Built Theory.TypedAuthorization (2.3s)
+✔ [2947/2957] Built Theory.GuardedAdvice (1.7s)
+✔ [2948/2957] Built Theory.DisclosureDeclaration (1.8s)
+⚠ [2949/2957] Built Theory.AuthorizationDeclaration (2.4s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2950/2957] Built Theory.PrivateComputationDeclaration (1.9s)
+✔ [2951/2957] Built Theory.ReactiveController (2.3s)
+✔ [2952/2957] Built Theory.EffectDeclaration (1.9s)
+✔ [2953/2957] Built Theory.CellState (1.8s)
+✔ [2954/2957] Built Theory.DeclaredTurn (1.5s)
+✔ [2955/2957] Built Theory.ReactiveCellTransition (2.1s)
+✔ [2956/2957] Built Theory.CanonicalTransition (1.7s)
+✔ [2957/2957] Built Theory.AcceptedCellEffect (1.7s)
+Build completed successfully (2957 jobs).
