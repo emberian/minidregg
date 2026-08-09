@@ -198,8 +198,6 @@ structure IndexedTableReceiptClaim (F : Type*) (κ : Type u) (k : Nat) where
   addressRoot : Digest
   weightsRoot : Digest
   tableRoot : Digest
-  commitmentsAbsorbedAt : Nat
-  challengeDerivedAt : Nat
   weights : κ → F
   table : Fin (2 ^ k) → F
   claimedEvaluation : F
@@ -212,6 +210,8 @@ structure Tower256ClausePremises
     (trace : CommittedSemanticTrace κ k)
     (claim : IndexedTableReceiptClaim F κ k)
     (PCSOpeningSound : IndexedTableReceiptClaim F κ k →
+      CommittedSemanticTrace κ k → Prop)
+    (TranscriptSchedule : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
     (CommitmentBindingCR : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
@@ -228,7 +228,9 @@ structure Tower256ClausePremises
     claim.addressRoot = trace.addressRoot ∧
     claim.weightsRoot = trace.weightsRoot ∧
     claim.tableRoot = trace.tableRoot
-  transcriptOrdered : claim.commitmentsAbsorbedAt < claim.challengeDerivedAt
+  /-- A deployment supplies a typed roots-before-challenge schedule.  The
+  semantic clause no longer accepts unrelated timestamp integers as evidence. -/
+  transcriptOrdered : TranscriptSchedule claim trace
   commitmentBindingCR : CommitmentBindingCR claim trace
   semanticTraceRootBound : claim.semanticTraceRoot = trace.semanticTraceRoot
   fiatShamirROM : RandomOracleModel claim
@@ -241,10 +243,12 @@ structure IndexedTableClauseConclusion
     (claim : IndexedTableReceiptClaim F κ k)
     (PCSOpeningSound : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
+    (TranscriptSchedule : IndexedTableReceiptClaim F κ k →
+      CommittedSemanticTrace κ k → Prop)
     (CommitmentBindingCR : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
     (RandomOracleModel : IndexedTableReceiptClaim F κ k → Prop) : Prop where
-  boundary : Tower256ClausePremises trace claim PCSOpeningSound
+  boundary : Tower256ClausePremises trace claim PCSOpeningSound TranscriptSchedule
     CommitmentBindingCR RandomOracleModel
   addressColumnsBoolean : ∀ bit row,
     committedAddressColumn (F := F) trace bit row = 0 ∨
@@ -265,13 +269,15 @@ theorem indexedTableReceiptClause
     (claim : IndexedTableReceiptClaim F κ k)
     (PCSOpeningSound : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
+    (TranscriptSchedule : IndexedTableReceiptClaim F κ k →
+      CommittedSemanticTrace κ k → Prop)
     (CommitmentBindingCR : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
     (RandomOracleModel : IndexedTableReceiptClaim F κ k → Prop)
     (linked : CanonicalAddressLinked trace)
-    (premises : Tower256ClausePremises trace claim PCSOpeningSound
+    (premises : Tower256ClausePremises trace claim PCSOpeningSound TranscriptSchedule
       CommitmentBindingCR RandomOracleModel) :
-    IndexedTableClauseConclusion trace claim PCSOpeningSound
+    IndexedTableClauseConclusion trace claim PCSOpeningSound TranscriptSchedule
       CommitmentBindingCR RandomOracleModel where
   boundary := premises
   addressColumnsBoolean := fun bit row =>
