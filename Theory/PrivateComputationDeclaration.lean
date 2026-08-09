@@ -48,6 +48,66 @@ structure PrivateComputationLanguage where
   OutputArtifact : PrivateComputationKind → Type
   Evidence : PrivateComputationKind → Type
 
+/-! ## Release-free computation core -/
+
+/-- The exact canonical footprint named by a computation request.  It is data,
+not a claim that a candidate patch respects it; the kernel adapter below checks
+that the accepted patch has these exact two footprints. -/
+structure ComputationFootprint (Field Resource : Type*) where
+  fields : Finset Field
+  resources : Finset Resource
+
+/-- First-order syntax for sealed computation.  This is the authoritative
+request shape for witness-ZK, shared-MPC, and encrypted-RNS/FHE work.
+
+There is deliberately no observer, disclosure policy, recipient, purpose,
+release value, reveal bit, or declassification authority in this structure.
+The output commitment and typed resource effects describe what the computation
+may produce; disclosure of that committed output is a separate later request. -/
+structure CoreRequest
+    (language : PrivateComputationLanguage) (mode : PrivateComputationKind)
+    (Relation BridgeName CanonicalInput SemanticInput
+      OutputCommitment ResourceEffect Footprint Nullifier
+      ModeEvidencePins : Type*) where
+  program : language.Program mode
+  relation : Relation
+  canonicalInput : CanonicalInput
+  computationInput : language.InputArtifact mode
+  inputValue : SemanticInput
+  inputBridgeName : BridgeName
+  outputCommitment : OutputCommitment
+  resourceEffects : List ResourceEffect
+  footprint : Footprint
+  nullifier : Option Nullifier
+  modeEvidencePins : ModeEvidencePins
+
+/-- A sealed computation result contains only the mode-native output
+representation and its Lean semantic value.  Evidence belongs to the checked
+completion token, so an unconstrained duplicate evidence field cannot drift
+from the evidence which actually passed the portal. -/
+structure CoreResult
+    (language : PrivateComputationLanguage) (mode : PrivateComputationKind)
+    (PrivateOutput : Type*) where
+  outputRepresentation : language.OutputArtifact mode
+  privateOutput : PrivateOutput
+
+/-- The exact release-free statement checked by a mode-specific portal.  The
+relation and mode pins are part of the statement rather than ambient manifest
+metadata.  Resource effects, footprints, and nullifiers remain in the complete
+request consumed by the kernel join.  Transition authority remains solely in
+the common request-indexed kernel token. -/
+structure CoreStatement
+    (language : PrivateComputationLanguage) (mode : PrivateComputationKind)
+    (Relation SemanticInput OutputCommitment PrivateOutput ModeEvidencePins : Type*) where
+  program : language.Program mode
+  relation : Relation
+  inputValue : SemanticInput
+  inputArtifact : language.InputArtifact mode
+  outputCommitment : OutputCommitment
+  outputArtifact : language.OutputArtifact mode
+  privateOutput : PrivateOutput
+  modeEvidencePins : ModeEvidencePins
+
 /-- The exact computation request.  It carries the semantic input as well as
 the canonical and mode-native representations which must be joined. -/
 structure PrivateComputationRequest
@@ -164,6 +224,82 @@ theorem CheckedIdentity.sameOpening
 
 end NamedRepresentationBridge
 
+/-! ## Authored release-free computation semantics -/
+
+/-- One authored sealed-computation dialect.  The representation bridge checks
+the exact canonical and mode-native input identities; the mode portal checks
+the request-derived core statement.  Transition authority is deliberately not
+present here: the kernel's common request-indexed `Authorized` token is its sole
+owner.  None of these fields can inspect disclosure metadata because no such
+metadata occurs in their domain types. -/
+structure ComputationDeclaration
+    (language : PrivateComputationLanguage) (mode : PrivateComputationKind)
+    (Relation BridgeName CanonicalInput SemanticInput
+      InputSourceWitness InputTargetWitness OutputCommitment
+      PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins : Type*) where
+  inputBridge : NamedRepresentationBridge BridgeName CanonicalInput InputSourceWitness
+    (language.InputArtifact mode) InputTargetWitness SemanticInput
+  computationPortal : PrivateEvidencePortal
+    (CoreStatement language mode Relation SemanticInput OutputCommitment PrivateOutput
+      ModeEvidencePins)
+    (language.Evidence mode)
+
+namespace ComputationDeclaration
+
+variable
+    {language : PrivateComputationLanguage} {mode : PrivateComputationKind}
+    {Relation BridgeName CanonicalInput SemanticInput
+      InputSourceWitness InputTargetWitness OutputCommitment
+      PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins : Type*}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+
+abbrev Request :=
+  let _declarationMarker := declaration
+  CoreRequest language mode Relation BridgeName CanonicalInput
+    SemanticInput OutputCommitment ResourceEffect Footprint Nullifier ModeEvidencePins
+
+abbrev Result :=
+  let _declarationMarker := declaration
+  CoreResult language mode PrivateOutput
+
+def statementOf (request : declaration.Request) (result : declaration.Result) :
+    CoreStatement language mode Relation SemanticInput OutputCommitment PrivateOutput
+      ModeEvidencePins where
+  program := request.program
+  relation := request.relation
+  inputValue := request.inputValue
+  inputArtifact := request.computationInput
+  outputCommitment := request.outputCommitment
+  outputArtifact := result.outputRepresentation
+  privateOutput := result.privateOutput
+  modeEvidencePins := request.modeEvidencePins
+
+/-- The mode/input token for sealed work.  It is not transition authority.
+Evidence is indexed by the exact request-derived statement, and the input
+bridge is indexed by the exact two representations and semantic input carried
+by the request. -/
+structure Completion (request : declaration.Request) (result : declaration.Result) where
+  inputIdentity : declaration.inputBridge.CheckedIdentity request.inputBridgeName
+    request.canonicalInput request.computationInput request.inputValue
+  computation : CheckedPrivateEvidence declaration.computationPortal
+    (declaration.statementOf request result)
+
+theorem Completion.implies_computation_semantics
+    {request : declaration.Request} {result : declaration.Result}
+    (completion : declaration.Completion request result) :
+    SameOpening declaration.inputBridge.sourceSemantics
+        declaration.inputBridge.targetSemantics
+        request.canonicalInput completion.inputIdentity.sourceWitness
+        request.computationInput completion.inputIdentity.targetWitness ∧
+      declaration.computationPortal.Accepts
+        (declaration.statementOf request result) completion.computation.witness := by
+  exact ⟨completion.inputIdentity.sameOpening, completion.computation.accepts⟩
+
+end ComputationDeclaration
+
 /-- One mode-specific authored declaration.  Authorization sees the entire
 request.  Computation evidence sees the exact request-derived statement. -/
 structure PrivateComputationDeclaration
@@ -212,6 +348,53 @@ abbrev Outcome :=
 abbrev ComputationOutcome :=
   let _declarationMarker := declaration
   PrivateComputationResult language mode OutputCommitment PrivateOutput
+
+/-- Compatibility data for forgetting a legacy release-capable request into
+the release-free core.  Fields which did not exist in the legacy syntax are
+authored explicitly here.  The projection below erases all disclosure metadata
+and has intentionally no inverse. -/
+structure LegacyCoreProjection
+    (Relation ResourceEffect Footprint Nullifier ModeEvidencePins : Type*) where
+  relation : declaration.Request → Relation
+  resourceEffects : declaration.Request → declaration.ComputationOutcome →
+    List ResourceEffect
+  footprint : declaration.Request → declaration.ComputationOutcome → Footprint
+  nullifier : declaration.Request → declaration.ComputationOutcome → Option Nullifier
+  modeEvidencePins : declaration.Request → ModeEvidencePins
+
+/-- One-way legacy compatibility: forget policy, observer, recipient, purpose,
+reveal/declassification intent, and every release carrier.  There is no
+`CoreRequest -> PrivateComputationRequest` construction because supplying the
+missing disclosure authorization would be a new semantic act. -/
+def LegacyCoreProjection.request
+    {Relation ResourceEffect Footprint Nullifier ModeEvidencePins : Type*}
+    (projection : declaration.LegacyCoreProjection Relation ResourceEffect Footprint
+      Nullifier ModeEvidencePins)
+    (request : declaration.Request) (outcome : declaration.ComputationOutcome) :
+    CoreRequest language mode Relation BridgeName CanonicalInput
+      SemanticInput OutputCommitment ResourceEffect Footprint Nullifier
+      ModeEvidencePins where
+  program := request.program
+  relation := projection.relation request
+  canonicalInput := request.canonicalInput
+  computationInput := request.computationInput
+  inputValue := request.inputValue
+  inputBridgeName := request.inputBridgeName
+  outputCommitment := outcome.output.commitment
+  resourceEffects := projection.resourceEffects request outcome
+  footprint := projection.footprint request outcome
+  nullifier := projection.nullifier request outcome
+  modeEvidencePins := projection.modeEvidencePins request
+
+/-- One-way legacy compatibility for the result erases the duplicate legacy
+evidence field as well as every release carrier. -/
+def LegacyCoreProjection.result
+    {Relation ResourceEffect Footprint Nullifier ModeEvidencePins : Type*}
+    (_projection : declaration.LegacyCoreProjection Relation ResourceEffect Footprint
+      Nullifier ModeEvidencePins)
+    (outcome : declaration.ComputationOutcome) : CoreResult language mode PrivateOutput where
+  outputRepresentation := outcome.output.representation
+  privateOutput := outcome.output.privateOutput
 
 /-- Forget the release-bearing extension of a legacy outcome. -/
 def Outcome.computation (outcome : declaration.Outcome) :

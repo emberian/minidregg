@@ -14,6 +14,7 @@ private-computation declaration and receipt clause.
 -/
 import Assurance.PrivateComputationReceiptClause
 import Compiler.BfvReceiptClause
+import Theory.AcceptedCellEffect
 
 namespace Minidregg.Assurance.BfvPrivateComputationJoin
 
@@ -23,7 +24,7 @@ open Minidregg.Compiler.BfvInputValidity
 open Minidregg.Compiler.BfvReceiptClause
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Theory
-open Minidregg.Theory.TypedAuthorization (Digest)
+open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
@@ -163,6 +164,205 @@ theorem CheckedPrivateEvidence.bfv_bound_semantics
     rw [outputEq]
     exact checked.witness.every_exact_integer_equation rowIndex
 
+/-! ## Authoritative release-free BFV core -/
+
+/-- First-order mode pins retained in the pure computation request.  Zero
+suite/controller values remain explicit unassigned sentinels; they are not
+interpreted as privacy or cryptographic evidence. -/
+structure ModeEvidencePins where
+  clauseId : Digest
+  relationId : Digest
+  outputRepresentationId : Digest
+  proofSuiteId : Digest
+  controllerDigest : Digest
+deriving DecidableEq, Repr
+
+def modeEvidencePins : ModeEvidencePins where
+  clauseId := bfvClauseId
+  relationId := bfvRelationId
+  outputRepresentationId := outputRepresentationId
+  proofSuiteId := unassignedProofSuiteId
+  controllerDigest := unassignedControllerDigest
+
+theorem modeEvidencePins_crypto_unassigned :
+    modeEvidencePins.proofSuiteId = ⟨0⟩ /\
+      modeEvidencePins.controllerDigest = ⟨0⟩ := by
+  decide
+
+abbrev CoreComputationStatement :=
+  CoreStatement language .encryptedRnsFhe Digest PublicStatement Digest Unit
+    ModeEvidencePins
+
+/-- The pure BFV relation adds exact relation and mode-pin bindings to the
+existing representation/equation statement.  It contains no disclosure or
+transition-authorization premise. -/
+def CoreAccepts (statement : CoreComputationStatement) (evidence : Evidence) : Prop :=
+  statement.program = program /\
+  statement.relation = bfvRelationId /\
+  statement.modeEvidencePins = modeEvidencePins /\
+  statement.inputValue = evidence.claim /\
+  statement.inputArtifact = evidence.inputRepresentation /\
+  statement.outputArtifact = evidence.outputRepresentation /\
+  statement.outputCommitment = evidence.outputRepresentation.commitmentId /\
+  statement.privateOutput = ()
+
+/-- Lean checker for the exact pure BFV relation.  The checked witness embeds
+the existing 384-row BFV AIR token; this definition adds no privacy, ZK, MPC,
+PCS, controller-implementation, or cryptographic soundness theorem. -/
+noncomputable def coreEvidencePortal :
+    PrivateEvidencePortal CoreComputationStatement Evidence := by
+  classical
+  exact {
+    verify := fun statement evidence => decide (CoreAccepts statement evidence)
+    Accepts := CoreAccepts
+    accepted_law := by
+      intro statement evidence accepted
+      exact of_decide_eq_true accepted
+  }
+
+/-- A pure BFV dialect owns only the named input-identity bridge.  It is not an
+authority object: transition authority is the common request-indexed kernel
+`Authorized` token consumed by `ComputationCellEffect.accept`. -/
+structure CoreDialect
+    (CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type) where
+  inputBridge : NamedRepresentationBridge Digest CanonicalInput InputSourceWitness
+    InputRepresentation InputTargetWitness PublicStatement
+
+noncomputable def CoreDialect.declaration
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier) :
+    ComputationDeclaration language .encryptedRnsFhe Digest Digest CanonicalInput
+      PublicStatement InputSourceWitness InputTargetWitness Digest Unit ResourceEffect
+      Footprint Nullifier ModeEvidencePins where
+  inputBridge := dialect.inputBridge
+  computationPortal := coreEvidencePortal
+
+theorem core_bfv_bound_semantics
+    {statement : CoreComputationStatement}
+    (checked : CheckedPrivateEvidence coreEvidencePortal statement) :
+    statement.program = program /\
+    statement.relation = bfvRelationId /\
+    statement.modeEvidencePins = modeEvidencePins /\
+    statement.inputValue = checked.witness.claim /\
+    statement.inputArtifact.reference = checked.witness.claim.input.reference /\
+    statement.outputArtifact = checked.witness.outputRepresentation /\
+    statement.outputArtifact.inputReference = checked.witness.claim.input.reference /\
+    statement.outputArtifact.representationId = outputRepresentationId /\
+    statement.outputCommitment = statement.outputArtifact.commitmentId /\
+    (forall rowIndex,
+      (statement.outputArtifact.equations.equation rowIndex).numerator
+          checked.witness.token.input.row =
+        ((statement.outputArtifact.equations.equation rowIndex).rns.value : Int) *
+          (checked.witness.token.batch.rowCall rowIndex).witness.quotient.value) := by
+  have accepted : CoreAccepts statement checked.witness := checked.accepts
+  rcases accepted with
+    ⟨programEq, relationEq, pinsEq, claimEq, inputEq, outputEq, commitmentEq, -⟩
+  refine ⟨programEq, relationEq, pinsEq, claimEq, ?_, outputEq, ?_, ?_, ?_, ?_⟩
+  · rw [inputEq]
+    exact checked.witness.input_reference_eq
+  · rw [outputEq]
+    exact checked.witness.output_reference_eq
+  · rw [outputEq]
+    exact checked.witness.output_representation_id
+  · simpa [outputEq] using commitmentEq
+  · intro rowIndex
+    rw [outputEq]
+    exact checked.witness.every_exact_integer_equation rowIndex
+
+/-- The positive pure-BFV kernel path.  The common `Authorized` token is the
+sole transition authority; exact argument/effect digests, pre-root, validated
+patch, input identity, and the BFV mode token are all required in this one
+construction. -/
+noncomputable def acceptCore
+    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier)
+    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+    (authorization : Authorized portal authState commonRequest)
+    (argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request)
+    (effectsDigestBound : commonRequest.effectsDigest = adapter.completeEffectDigest request)
+    (preRootBound : commonRequest.preStateRoot = pre.root)
+    (completion : dialect.declaration.Completion request result)
+    (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
+    ComputationCellEffect.Accepted (portal := portal) (authState := authState)
+      dialect.declaration adapter commonRequest pre request result :=
+  ComputationCellEffect.accept dialect.declaration adapter authorization argsDigestBound
+    effectsDigestBound preRootBound completion validated
+
+/-- An accepted pure BFV effect retains all request bindings, is necessarily
+sealed, and exposes the exact equation for every one of the 384 owner rows.
+This is an arithmetic/representation theorem only. -/
+theorem acceptedCore_bfv_semantics
+    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier)
+    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+    (accepted : ComputationCellEffect.Accepted (portal := portal) (authState := authState)
+      dialect.declaration adapter commonRequest pre request result) :
+    commonRequest.argsDigest = adapter.completeRequestDigest request /\
+    commonRequest.effectsDigest = adapter.completeEffectDigest request /\
+    accepted.cellEffect.disclosure = .sealed /\
+    request.program = program /\
+    request.relation = bfvRelationId /\
+    request.modeEvidencePins = modeEvidencePins /\
+    request.inputValue =
+      accepted.cellEffect.modeEvidence.computation.witness.claim /\
+    result.outputRepresentation =
+      accepted.cellEffect.modeEvidence.computation.witness.outputRepresentation /\
+    result.outputRepresentation.representationId = outputRepresentationId /\
+    request.outputCommitment = result.outputRepresentation.commitmentId /\
+    (forall rowIndex,
+      (result.outputRepresentation.equations.equation rowIndex).numerator
+          accepted.cellEffect.modeEvidence.computation.witness.token.input.row =
+        ((result.outputRepresentation.equations.equation rowIndex).rns.value : Int) *
+          (accepted.cellEffect.modeEvidence.computation.witness.token.batch.rowCall rowIndex).witness.quotient.value) := by
+  have bound :=
+    core_bfv_bound_semantics accepted.cellEffect.modeEvidence.computation
+  have core :
+      request.program = program /\
+      request.relation = bfvRelationId /\
+      request.modeEvidencePins = modeEvidencePins /\
+      request.inputValue =
+        accepted.cellEffect.modeEvidence.computation.witness.claim /\
+      result.outputRepresentation =
+        accepted.cellEffect.modeEvidence.computation.witness.outputRepresentation /\
+      result.outputRepresentation.inputReference =
+        accepted.cellEffect.modeEvidence.computation.witness.claim.input.reference /\
+      result.outputRepresentation.representationId = outputRepresentationId /\
+      request.outputCommitment = result.outputRepresentation.commitmentId /\
+      (forall rowIndex,
+        (result.outputRepresentation.equations.equation rowIndex).numerator
+            accepted.cellEffect.modeEvidence.computation.witness.token.input.row =
+          ((result.outputRepresentation.equations.equation rowIndex).rns.value : Int) *
+            (accepted.cellEffect.modeEvidence.computation.witness.token.batch.rowCall rowIndex).witness.quotient.value) := by
+    simpa only [CoreDialect.declaration, ComputationDeclaration.statementOf] using
+      ⟨bound.1, bound.2.1, bound.2.2.1, bound.2.2.2.1,
+        bound.2.2.2.2.2.1, bound.2.2.2.2.2.2.1,
+        bound.2.2.2.2.2.2.2.1, bound.2.2.2.2.2.2.2.2.1,
+        bound.2.2.2.2.2.2.2.2.2⟩
+  exact ⟨accepted.argsDigestBound,
+    accepted.cellEffect.effectsDigestBound,
+    accepted.disclosure_sealed,
+    core.1, core.2.1, core.2.2.1, core.2.2.2.1,
+    core.2.2.2.2.1, core.2.2.2.2.2.2.1,
+    core.2.2.2.2.2.2.2.1,
+    core.2.2.2.2.2.2.2.2⟩
+
 /-! ## Concrete declaration constructor -/
 
 /-- The authorization, canonical-input bridge, and disclosure authority stay authored by
@@ -197,6 +397,25 @@ noncomputable def Authority.declaration
   inputBridge := authority.inputBridge
   computationPortal := evidencePortal
   disclosureDeclaration := authority.disclosureDeclaration
+
+/-- One-way compatibility for legacy authors: retain only the named BFV input
+identity bridge and forget the legacy transition-authorization portal and all
+disclosure/release syntax.  There is deliberately no inverse projection. -/
+noncomputable def Authority.toCoreDialect
+    {Observer Policy Recipient Purpose AuthorizationContext CanonicalInput
+      InputSourceWitness InputTargetWitness AuthorizationWitness OutputSourceWitness
+      OutputTargetWitness ReleaseAuthorizationWitness DeclassificationAuthority Release
+      ResourceEffect Footprint Nullifier : Type}
+    (authority : Authority Observer Policy Recipient Purpose AuthorizationContext
+      CanonicalInput InputSourceWitness InputTargetWitness AuthorizationWitness
+      OutputSourceWitness OutputTargetWitness ReleaseAuthorizationWitness
+      DeclassificationAuthority Release) :
+    CoreDialect CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect
+      Footprint Nullifier where
+  inputBridge := authority.inputBridge
+
+theorem exact_owner_row_count : equationsPerOwner = 384 :=
+  rfl
 
 /-! ## Existing private-computation receipt clause -/
 
@@ -247,8 +466,12 @@ theorem receiptEvent_bfv_semantics
     exact event.evidence.checked.witness.every_exact_integer_equation rowIndex
 
 #print axioms program_crypto_pins_unassigned
+#print axioms modeEvidencePins_crypto_unassigned
 #print axioms Evidence.every_exact_integer_equation
 #print axioms CheckedPrivateEvidence.bfv_bound_semantics
+#print axioms core_bfv_bound_semantics
+#print axioms acceptedCore_bfv_semantics
+#print axioms exact_owner_row_count
 #print axioms receiptEvent_bfv_semantics
 
 end Minidregg.Assurance.BfvPrivateComputationJoin

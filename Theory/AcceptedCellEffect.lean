@@ -268,7 +268,273 @@ def AcceptedCellEffect.toReceiptEvent
     accepted.toReceiptEvent.postRoot = accepted.prepared.postRoot :=
   rfl
 
-/-! ## Private ZK/MPC/FHE as the first semantic family -/
+/-! ## Authoritative release-free ZK/MPC/FHE computation family -/
+
+namespace ComputationCellEffect
+
+variable
+    {language : PrivateComputationLanguage} {mode : PrivateComputationKind}
+    {Relation BridgeName CanonicalInput SemanticInput
+      InputSourceWitness InputTargetWitness OutputCommitment
+      PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins : Type z}
+
+/-- Kernel projections for a pure sealed-computation declaration.  The request
+itself owns the nullifier and exact footprint.  The adapter supplies only the
+canonical patch/digest interpretation and an explicit realization relation for
+the request's typed resource effects. -/
+structure Adapter
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins) where
+  requestCodec : LawfulCodec declaration.Request
+  resultCodec : LawfulCodec declaration.Result
+  requestDigestBytes : List UInt8 → Digest
+  effectIntentCodec : LawfulCodec (List ResourceEffect × Footprint × Option Nullifier)
+  effectDigestBytes : List UInt8 → Digest
+  patch : declaration.Request → declaration.Result → CellState.Patch S Digest
+  fieldFootprint : Footprint → Finset S.Field
+  resourceFootprint : Footprint → Finset S.Resource
+  RealizesResourceEffects : declaration.Request → declaration.Result →
+    CellState.Patch S Digest → Prop
+  resourceEffectsRealized : ∀ request result,
+    RealizesResourceEffects request result (patch request result)
+  fieldFootprintExact : ∀ request result,
+    (patch request result).fieldFootprint = fieldFootprint request.footprint
+  resourceFootprintExact : ∀ request result,
+    (patch request result).resourceFootprint = resourceFootprint request.footprint
+
+/-- The argument digest is structurally computed from the lawful encoding of
+the entire core request. -/
+def Adapter.completeRequestDigest
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins}
+    (adapter : Adapter (S := S) declaration) (request : declaration.Request) : Digest :=
+  adapter.requestDigestBytes (adapter.requestCodec.encode request)
+
+/-- The effect digest is structurally computed from the lawful encoding of the
+exact typed resource effects, declared footprint, and eager nullifier. -/
+def Adapter.completeEffectDigest
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins}
+    (adapter : Adapter (S := S) declaration) (request : declaration.Request) : Digest :=
+  adapter.effectDigestBytes <|
+    adapter.effectIntentCodec.encode
+      (request.resourceEffects, request.footprint, request.nullifier)
+
+/-- Pure computation is a semantic effect family whose only disclosure type is
+empty.  Mode evidence is the exact release-free completion; the eager
+nullifier is projected from the request rather than supplied by another path. -/
+def family
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration) :
+    SemanticEffectFamily.{u, v, w, x, z, z} S M Nullifier where
+  Declaration := declaration.Request
+  declarationCodec := adapter.requestCodec
+  Outcome := fun _ => declaration.Result
+  outcomeCodec := fun _ => adapter.resultCodec
+  ModeEvidence := fun request result => declaration.Completion request result
+  effectDigest := adapter.completeEffectDigest
+  patch := adapter.patch
+  nullifier := fun request _ => request.nullifier
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => nomatch release
+  DisclosureAllowed := fun _ _ disclosure =>
+    match disclosure with
+    | .sealed => True
+    | .reveal release _ => nomatch release
+    | .declassify authority _ _ => nomatch authority
+
+/-- The private accepted-computation wrapper retains the binding which the
+generic `AcceptedCellEffect` does not store: the common authorization request's
+`argsDigest` names this exact complete computation request.  Its nested cell
+effect already stores the exact effect-digest and pre-root bindings. -/
+structure Accepted
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    (commonRequest : Request kind) (pre : CellState.Materialized M)
+    (request : declaration.Request) (result : declaration.Result) where
+  cellEffect : AcceptedCellEffect (portal := portal) (authState := authState)
+    (family declaration adapter) commonRequest pre request result
+  argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request
+
+/-- There is no value in the release carrier of a pure computation family. -/
+theorem family_no_release
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    (request : declaration.Request) (result : declaration.Result)
+    (release : (family (M := M) declaration adapter).Release request result) : False :=
+  nomatch release
+
+/-- The positive kernel join for sealed computation.  Disclosure is fixed to
+`.sealed`; callers cannot supply a decision or a release-bearing witness. -/
+def accept
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (authorization : Authorized portal authState commonRequest)
+    (argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request)
+    (effectsDigestBound : commonRequest.effectsDigest = adapter.completeEffectDigest request)
+    (preRootBound : commonRequest.preStateRoot = pre.root)
+    (completion : declaration.Completion request result)
+    (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
+    Accepted (portal := portal) (authState := authState)
+      declaration adapter commonRequest pre request result where
+  cellEffect := {
+    authorization := authorization
+    effectsDigestBound := effectsDigestBound
+    preRootBound := preRootBound
+    modeEvidence := completion
+    validated := validated
+    disclosure := .sealed
+    disclosureAllowed := trivial
+  }
+  argsDigestBound := argsDigestBound
+
+/-- Every accepted pure computation is sealed by construction. -/
+theorem accepted_disclosure_sealed
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter) commonRequest pre request result) :
+    accepted.disclosure = .sealed := by
+  cases accepted.disclosure with
+  | sealed => rfl
+  | reveal release _ => exact nomatch release
+  | declassify authority _ _ => exact nomatch authority
+
+/-- The authoritative wrapper therefore cannot carry or select a release. -/
+theorem Accepted.disclosure_sealed
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : Accepted (portal := portal) (authState := authState)
+      declaration adapter commonRequest pre request result) :
+    accepted.cellEffect.disclosure = .sealed :=
+  accepted_disclosure_sealed declaration adapter accepted.cellEffect
+
+@[simp] theorem accepted_field_footprint
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter) commonRequest pre request result) :
+    accepted.prepared.delta.fieldFootprint = adapter.fieldFootprint request.footprint := by
+  exact adapter.fieldFootprintExact request result
+
+@[simp] theorem accepted_resource_footprint
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter) commonRequest pre request result) :
+    accepted.prepared.delta.resourceFootprint = adapter.resourceFootprint request.footprint := by
+  exact adapter.resourceFootprintExact request result
+
+@[simp] theorem accepted_nullifier
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter) commonRequest pre request result) :
+    accepted.prepared.nullifier = request.nullifier :=
+  rfl
+
+theorem accepted_resource_effects_realized
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    (declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins)
+    (adapter : Adapter (S := S) declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (_accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter) commonRequest pre request result) :
+    adapter.RealizesResourceEffects request result (adapter.patch request result) :=
+  adapter.resourceEffectsRealized request result
+
+end ComputationCellEffect
+
+/-! ## Legacy release-coupled private family (compatibility only) -/
 
 namespace PrivateCellEffect
 

@@ -225,20 +225,23 @@ structure CanonicalPostOpening
     sourceSlots ≠ [] /\
       (sourceSlots.flatMap layout.boundCoordinates).Nodup
 
-namespace CanonicalPostOpening
-
 variable {layout : CanonicalPostLayout n F}
-variable {entry : HistoryEntry} {opening : RangeOrValueOpening n F}
+variable
+    {entry : VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := family)
+      (headerCells := headerCells) (C := C)}
+    {opening : RangeOrValueOpening n F}
 
 /-- A canonical post opening is an exact opening of the retained entry word. -/
-theorem exact (canonical : CanonicalPostOpening layout entry opening) :
+theorem canonicalPostOpening_exact
+    (canonical : CanonicalPostOpening layout entry opening) :
     opening.Exact entry.word :=
   canonical.openingExact
 
 /-- Every quoted coordinate is a semantic `.post` slot selected by the exact
 layout.  This is the positive theorem from which all anti-masquerade facts
 follow. -/
-theorem coordinates_post_only
+theorem canonicalPostOpening_coordinates_post_only
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) :
@@ -247,28 +250,26 @@ theorem coordinates_post_only
       coordinate = .inr (postCoordinate, .post) :=
   canonical.coordinatesPostOnly coordinate member
 
-theorem no_header_coordinate
+theorem canonicalPostOpening_no_header_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (header : BindingIx) :
     coordinate ≠ .inl header :=
   canonical.noHeaderCoordinate coordinate member header
 
-theorem no_pre_coordinate
+theorem canonicalPostOpening_no_pre_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
     coordinate ≠ .inr (key, .pre) :=
   canonical.noPreCoordinate coordinate member key
 
-theorem no_touched_coordinate
+theorem canonicalPostOpening_no_touched_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
     coordinate ≠ .inr (key, .touched) :=
   canonical.noTouchedCoordinate coordinate member key
-
-end CanonicalPostOpening
 
 end CanonicalOpening
 
@@ -329,13 +330,22 @@ structure HeadObservation
 namespace HeadObservation
 
 variable
-    {ExactFinality : (head : HistoryHead) -> (entry : HistoryEntry) ->
-      EntryAt head entry -> Digest -> Prop}
+    {ExactFinality :
+      (head' : VerifiedHistoryHead (manifest := manifest)
+        (registry := registry) (clauseEvidence := clauseEvidence)
+        (family := family) (headerCells := headerCells) C SCommit) ->
+      (entry' : VerifiedEntry (manifest := manifest) (registry := registry)
+        (clauseEvidence := clauseEvidence) (family := family)
+        (headerCells := headerCells) (C := C)) ->
+      EntryAt (SCommit := SCommit) head' entry' -> Digest -> Prop}
     {PCSOpeningSound : BoundSemanticReceiptClaim n F ->
       RangeOrValueOpening n F -> Prop}
     {CommitmentBindingCR : BoundSemanticReceiptClaim n F -> Prop}
     {RandomOracleModel : BoundSemanticReceiptClaim n F -> Prop}
-    {layout : CanonicalPostLayout n F} {head : HistoryHead}
+    {layout : CanonicalPostLayout n F}
+    {head : VerifiedHistoryHead (manifest := manifest)
+      (registry := registry) (clauseEvidence := clauseEvidence)
+      (family := family) (headerCells := headerCells) C SCommit}
     {ref : TransclusionRef n F DisclosureAtom}
 
 local notation "Observed" =>
@@ -344,6 +354,8 @@ local notation "Observed" =>
     (headerCells := headerCells) (C := C) (SCommit := SCommit)
     ExactFinality PCSOpeningSound
     CommitmentBindingCR RandomOracleModel layout head ref
+
+include ExactFinality head
 
 /-- The observed entry is the exact value stored at its proof-relevant head
 index.  Keeping the `Fin` index visible avoids asking typeclass inference to
@@ -355,7 +367,7 @@ theorem entry_index_exact (observation : Observed) :
 theorem cells_authenticated (observation : Observed) :
     ref.opening.cells =
       ref.opening.coordinates.map observation.entry.word :=
-  observation.canonicalOpening.exact.cellsExact
+  observation.canonicalOpening.openingExact.cellsExact
 
 theorem coordinates_are_post (observation : Observed)
     {coordinate : BoundReceiptIx n}
@@ -363,7 +375,7 @@ theorem coordinates_are_post (observation : Observed)
     ∃ slot ∈ observation.canonicalOpening.sourceSlots, ∃ postCoordinate,
       postCoordinate ∈ (layout.spanAt slot).coordinates /\
       coordinate = .inr (postCoordinate, .post) :=
-  observation.canonicalOpening.coordinates_post_only member
+  observation.canonicalOpening.coordinatesPostOnly coordinate member
 
 end HeadObservation
 
@@ -521,13 +533,22 @@ structure HeadLinkEvent
 namespace HeadLinkEvent
 
 variable
-    {ExactFinality : (head : HistoryHead) -> (entry : HistoryEntry) ->
-      EntryAt head entry -> Digest -> Prop}
+    {ExactFinality :
+      (head' : VerifiedHistoryHead (manifest := manifest)
+        (registry := registry) (clauseEvidence := clauseEvidence)
+        (family := family) (headerCells := headerCells) C SCommit) ->
+      (entry' : VerifiedEntry (manifest := manifest) (registry := registry)
+        (clauseEvidence := clauseEvidence) (family := family)
+        (headerCells := headerCells) (C := C)) ->
+      EntryAt (SCommit := SCommit) head' entry' -> Digest -> Prop}
     {PCSOpeningSound : BoundSemanticReceiptClaim n F ->
       RangeOrValueOpening n F -> Prop}
     {CommitmentBindingCR : BoundSemanticReceiptClaim n F -> Prop}
     {RandomOracleModel : BoundSemanticReceiptClaim n F -> Prop}
-    {layout : CanonicalPostLayout n F} {head : HistoryHead}
+    {layout : CanonicalPostLayout n F}
+    {head : VerifiedHistoryHead (manifest := manifest)
+      (registry := registry) (clauseEvidence := clauseEvidence)
+      (family := family) (headerCells := headerCells) C SCommit}
     {linkRelationId : Digest}
 
 local notation "Event" =>
@@ -537,6 +558,8 @@ local notation "Event" =>
     ExactFinality PCSOpeningSound
     CommitmentBindingCR RandomOracleModel historyProjection (content := content)
     layout head linkRelationId
+
+include ExactFinality head
 
 def opening (event : Event) : RangeOrValueOpening n F where
   shape := .range
@@ -612,8 +635,9 @@ theorem opening_not_header (event : Event)
     coordinate ≠ .inl header := by
   obtain ⟨postCoordinate, _, coordinateExact⟩ :=
     event.opening_coordinates_post_only member
-  rw [coordinateExact]
-  simp
+  intro masquerades
+  rw [coordinateExact] at masquerades
+  cases masquerades
 
 theorem opening_not_pre (event : Event)
     {coordinate : BoundReceiptIx n}
@@ -621,8 +645,9 @@ theorem opening_not_pre (event : Event)
     coordinate ≠ .inr (key, .pre) := by
   obtain ⟨postCoordinate, _, coordinateExact⟩ :=
     event.opening_coordinates_post_only member
-  rw [coordinateExact]
-  simp
+  intro masquerades
+  rw [coordinateExact] at masquerades
+  cases masquerades
 
 theorem opening_not_touched (event : Event)
     {coordinate : BoundReceiptIx n}
@@ -630,16 +655,20 @@ theorem opening_not_touched (event : Event)
     coordinate ≠ .inr (key, .touched) := by
   obtain ⟨postCoordinate, _, coordinateExact⟩ :=
     event.opening_coordinates_post_only member
-  rw [coordinateExact]
-  simp
+  intro masquerades
+  rw [coordinateExact] at masquerades
+  cases masquerades
 
 end HeadLinkEvent
 
 end LinkEvent
 
 #print axioms EntryAt.receiptRootAt_exact
-#print axioms CanonicalPostOpening.exact
-#print axioms CanonicalPostOpening.coordinates_post_only
+#print axioms canonicalPostOpening_exact
+#print axioms canonicalPostOpening_coordinates_post_only
+#print axioms canonicalPostOpening_no_header_coordinate
+#print axioms canonicalPostOpening_no_pre_coordinate
+#print axioms canonicalPostOpening_no_touched_coordinate
 #print axioms AcceptedLinkWrite.post_contains
 #print axioms HeadLinkEvent.opening_exact
 #print axioms HeadLinkEvent.accepted_post_contains_link
