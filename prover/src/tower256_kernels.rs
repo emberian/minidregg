@@ -153,17 +153,16 @@ pub fn equality_weights(point: &[Tower256]) -> Result<Vec<Tower256>, Tower256Ker
         .checked_shl(shift)
         .ok_or(Tower256KernelError::SizeOverflow)?;
     let mut weights = Vec::with_capacity(len);
-    for index in 0..len {
-        let mut value = Tower256::ONE;
-        for (bit, &coordinate) in point.iter().enumerate() {
-            let factor = if index & (1usize << bit) == 0 {
-                Tower256::ONE.add(coordinate)
-            } else {
-                coordinate
-            };
-            value = value.mul(factor);
+    weights.push(Tower256::ONE);
+    for &coordinate in point {
+        let complement = Tower256::ONE.add(coordinate);
+        let half = weights.len();
+        weights.resize(2 * half, Tower256::ZERO);
+        for index in (0..half).rev() {
+            let prefix = weights[index];
+            weights[half + index] = prefix.mul(coordinate);
+            weights[index] = prefix.mul(complement);
         }
-        weights.push(value);
     }
     Ok(weights)
 }
@@ -306,5 +305,24 @@ mod tests {
             [numerators[0], denominators[0]],
             [t(3).mul(t(11)).add(t(5).mul(t(7))), t(7).mul(t(11))],
         );
+    }
+
+    #[test]
+    fn equality_weight_recurrence_preserves_lsb_address_order() {
+        let point = [t(3), t(5), t(7), t(11)];
+        let weights = equality_weights(&point).unwrap();
+        assert_eq!(weights.len(), 16);
+        for (address, &weight) in weights.iter().enumerate() {
+            let corner = (0..point.len())
+                .map(|bit| {
+                    if address & (1usize << bit) == 0 {
+                        Tower256::ZERO
+                    } else {
+                        Tower256::ONE
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(weight, equality_weight(&corner, &point).unwrap());
+        }
     }
 }
