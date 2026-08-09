@@ -18,6 +18,10 @@ import Assurance.SemanticHistoryWARPAdditiveJoin
 namespace Minidregg.Assurance.SemanticHistoryBcsClaimProjection
 
 open Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
+open Minidregg.Assurance.SemanticHistoryFamily
+open Minidregg.Assurance.SemanticReceiptRuntimeCodec
+open Minidregg.Compiler.DialectClauseDispatch
+open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
 
 set_option autoImplicit false
@@ -257,6 +261,57 @@ theorem reindexedTargetRelation_iff
   exact reindexClaim_satisfies_iff C
     (aggregate foldRoot schedule genesis chain) foldedWord
 
+/-! ## Direct projection of the authoritative semantic-family head -/
+
+universe uSemantics uOp uClauseInput uClauseQuery uClauseReply
+  uClauseOutcome uClauseEvidence
+
+section SemanticHead
+
+variable [DecidableEq F]
+variable {n : Nat} {Op : Type uOp}
+variable
+    {manifest : Manifest}
+    {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome}}
+    {clauseEvidence : ClauseEvidenceFamily manifest registry}
+    {family : EntrySemanticsFamily.{uSemantics} n F}
+    {headerCells : HistoryAdmissionContext → BindingIx → F}
+    {C : Submodule F (BoundReceiptIx n → F)}
+    {S : BindingCommitment Digest F (BoundReceiptIx n) Op}
+
+local notation "HistoryHead" => VerifiedHistoryHead
+  (n := n) (F := F) (Op := Op) manifest registry clauseEvidence family
+  headerCells C S
+
+/-- The exact accumulated claim of a request-neutral semantic history, merely
+re-presented on the canonical finite BCS carrier. -/
+def reindexHistoryHeadClaim (head : HistoryHead) :
+    AccClaim Digest F (Fin (CoordinateCount (BoundReceiptIx n)))
+      (Fintype.card (BoundReceiptIx n)) :=
+  reindexClaim head.accumulator
+
+/-- The exact satisfying word of the same history at the BCS carrier. -/
+def reindexHistoryHeadWord (head : HistoryHead) :
+    Fin (CoordinateCount (BoundReceiptIx n)) → F :=
+  reindexWord head.foldedWord
+
+/-- Direct authoritative-input theorem: every admitted heterogeneous history
+head supplies the projected BCS claim and its exact satisfying word.  This is
+carrier transport only; it introduces no PCS, ROM, or binding premise. -/
+theorem reindexHistoryHead_satisfies (head : HistoryHead) :
+    AccClaim.Satisfies (reindexCode C) (reindexHistoryHeadClaim head)
+      (reindexHistoryHeadWord head) :=
+  (reindexClaim_satisfies_iff C head.accumulator head.foldedWord).mpr
+    head.satisfies
+
+/-- Carrier projection retains the authoritative accumulator root literally. -/
+@[simp] theorem reindexHistoryHeadClaim_rt (head : HistoryHead) :
+    (reindexHistoryHeadClaim head).rt = head.accumulator.rt :=
+  rfl
+
+end SemanticHead
+
 /-! ## The actual unshifted BCS reduction at the semantic carrier -/
 
 section BcsReduction
@@ -336,6 +391,7 @@ end BcsReduction
 #print axioms reindexWord_foldWords
 #print axioms reindexedSourceRelation_iff
 #print axioms reindexedTargetRelation_iff
+#print axioms reindexHistoryHead_satisfies
 #print axioms semanticBcsReduction_source_iff
 #print axioms semanticBcsReduction_target_iff
 
