@@ -9,7 +9,8 @@ import Assurance.Placeholder  -- carve marker: pins, keystone audit, carrier reg
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Loom AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation
-import Assurance.SemanticReceiptRuntimeCodec  -- exact Rust key-major word/residual layout ↔ formal receipt relation
+import Assurance.SemanticReceiptRuntimeCodec  -- exact fixed key-major word/residual layout ↔ formal receipt relation; no native semantics is asserted
+import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject receipts fold only from a verified predecessor head; WARP/PCS recommitment stays explicit proof data
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
 import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
