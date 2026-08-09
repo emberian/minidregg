@@ -24,67 +24,35 @@ import Compiler.Tower256NativeByteBoundary
 namespace Minidregg.Compiler.NativeWorkProfiles
 
 open Minidregg.Theory
+open Minidregg.Compiler.SemanticArtifactBundle
 
 set_option autoImplicit false
 
 abbrev Coordinate256 :=
   Minidregg.Compiler.Tower256NativeByteBoundary.Coordinate256
 
-/-- Closed kernel vocabulary understood by the generator.  Adding a constructor
-requires adding generated plumbing, not a handwritten runtime selector. -/
-inductive KernelTag where
-  | tower256DotProduct
-deriving DecidableEq, Repr
-
-/-- Closed byte-codec shapes.  These are transport layouts, not Rust types or
-semantic acceptance predicates. -/
-inductive ByteCodecShape where
-  | tower256PairVectorsU32LE
-  | tower256CoordinateLE
-deriving DecidableEq, Repr
-
-structure ByteCodecProfile where
-  codecId : Nat
-  valueTypeId : Nat
-  version : Nat
-  shape : ByteCodecShape
-deriving DecidableEq, Repr
-
-structure WorkProfile where
-  workId : Nat
-  carrierProfileId : Nat
-  requestCodec : ByteCodecProfile
-  responseCodec : ByteCodecProfile
-  kernel : KernelTag
-deriving DecidableEq, Repr
-
 /-- Native-only ABI pin for a pair of Tower256 vectors.  It is deliberately
 distinct from the semantic manifest's single-value Tower256 codec. -/
-def tower256DotProductRequestCodec : ByteCodecProfile where
-  codecId := 9001
-  valueTypeId := 9002
-  version := 1
-  shape := .tower256PairVectorsU32LE
+def tower256DotProductRequestCodec : ByteCodecProfile :=
+  MinidreggV1Artifact.tower256DotProductRequestCodec
 
 /-- The response reuses the semantic artifact's canonical Tower256 value-codec
 identifier and value-type identifier. -/
-def tower256CoordinateResponseCodec : ByteCodecProfile where
-  codecId := MinidreggV1Artifact.tower256ValueCodec.codecId.value
-  valueTypeId := MinidreggV1Artifact.tower256ValueCodec.valueTypeId.value
-  version := MinidreggV1Artifact.tower256ValueCodec.version
-  shape := .tower256CoordinateLE
+def tower256CoordinateResponseCodec : ByteCodecProfile :=
+  MinidreggV1Artifact.tower256CoordinateResponseCodec
 
 /-- The one live native work profile.  Identifier 9101 denotes opaque Tower256
 dot-product compute only; it is not a proposition or proof-system relation. -/
-def tower256DotProduct : WorkProfile where
-  workId := 9101
-  carrierProfileId := MinidreggV1Artifact.gf2Tower256Carrier.id.value
-  requestCodec := tower256DotProductRequestCodec
-  responseCodec := tower256CoordinateResponseCodec
-  kernel := .tower256DotProduct
+def tower256DotProduct : WorkProfile :=
+  MinidreggV1Artifact.tower256DotProductWork
 
 /-- The closed catalog emitted into the v1 Rust integration surface. -/
-def v1Catalog : List WorkProfile := [tower256DotProduct]
+def v1Catalog : List WorkProfile :=
+  MinidreggV1Artifact.nativeWorkCatalog
+
+theorem v1Catalog_is_artifact_catalog :
+    v1Catalog = MinidreggV1Artifact.bundle.nativeWorkCatalog := by
+  rfl
 
 /-! ## Exact Lean request codec -/
 

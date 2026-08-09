@@ -321,10 +321,54 @@ def disclosureArtifact : DeclarationArtifact :=
     disclosureCommitmentCodec.codecId disclosureRepresentationCodec.codecId
     disclosureReleaseCodec.codecId disclosureProofCodec.codecId 1 [id 703]
 
+/-! ## Artifact-authenticated native ABI and work catalog -/
+
+/-- Transport-only aggregate request layout.  Codec `9001` is intentionally
+absent from the semantic manifest and closed in the separate native ABI
+registry below. -/
+def tower256DotProductRequestCodec : ByteCodecProfile where
+  registry := .nativeAbi
+  codecId := 9001
+  valueTypeId := 9002
+  version := 1
+  shape := .tower256PairVectorsU32LE
+
+/-- The native response bytes use the exact semantic Tower256 value-codec pin.
+The shape remains explicit work-catalog data; Rust does not choose it. -/
+def tower256CoordinateResponseCodec : ByteCodecProfile where
+  registry := .semanticManifest
+  codecId := tower256ValueCodec.codecId.value
+  valueTypeId := tower256ValueCodec.valueTypeId.value
+  version := tower256ValueCodec.version
+  shape := .tower256CoordinateLE
+
+/-- The first live opaque/fallible native work item.  This record is part of
+the canonical artifact identity, not an extra argument to the generator. -/
+def tower256DotProductWork : WorkProfile where
+  workId := 9101
+  carrierProfileId := gf2Tower256Carrier.id.value
+  requestCodec := tower256DotProductRequestCodec
+  responseCodec := tower256CoordinateResponseCodec
+  kernel := .tower256DotProduct
+
+def nativeAbiCodecRegistry : List ByteCodecProfile :=
+  [tower256DotProductRequestCodec]
+
+def nativeWorkCatalog : List WorkProfile :=
+  [tower256DotProductWork]
+
 def bundle : ArtifactBundle :=
-  ArtifactBundle.ofDeclarations manifest (id 601)
+  ArtifactBundle.ofDeclarations manifest nativeAbiCodecRegistry nativeWorkCatalog (id 601)
     authorizationDeclarationCodec.codecId authorizationRequestCodec.codecId
     [effectArtifact] reactiveArtifact disclosureArtifact
+
+/-- Exact registry closure for the artifact-authenticated native catalog.
+In particular, request codec `9001` resolves only in the native ABI registry,
+while response codec `21` resolves to the semantic Tower256 codec pin. -/
+theorem bundle_native_catalog_wellFormed :
+    NativeCatalogWellFormed bundle.manifest bundle.nativeAbiCodecs
+      bundle.nativeWorkCatalog := by
+  constructor <;> decide
 
 /-- The four declarations in the artifact are exactly the expected projections and
 carry distinct pinned declaration identities. -/
@@ -362,17 +406,7 @@ intentionally retained at the theorem boundary.  Materializing that unbounded nu
 is not a deployment hashing strategy.  This concrete writer emits the exact canonical
 payload, from the shared JSON projections, for a deployment hash suite to digest. -/
 def artifactPayloadToJson (artifact : ArtifactBundle) : Lean.Json :=
-  let wire := artifact.canonicalEncoding
-  Lean.Json.mkObj
-    [("schema", Lean.Json.str "minidregg/semantic-artifact-bundle/v1"),
-     ("canonicalEncoding", Lean.Json.str "minidregg/encodable/v1"),
-     ("manifest", manifestToJson wire.manifest),
-     ("authorization", authorizationToJson wire.authorization),
-     ("effects", Lean.Json.arr (wire.effects.map declarationToJson).toArray),
-     ("reactive", declarationToJson wire.reactive),
-     ("disclosure", declarationToJson wire.disclosure),
-     ("phasePlan", Lean.Json.arr
-       (wire.phasePlan.map fun phase => Lean.Json.str phase.name).toArray)]
+  canonicalPayloadToJson artifact.canonicalEncoding
 
 def artifactPayloadText (artifact : ArtifactBundle) : String :=
   (artifactPayloadToJson artifact).pretty ++ "\n"

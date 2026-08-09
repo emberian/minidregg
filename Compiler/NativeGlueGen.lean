@@ -1,8 +1,8 @@
 /-
 # Compiler.NativeGlueGen — deterministic data-only Rust glue
 
-This generator consumes only `ArtifactBundle.canonicalEncoding` and a closed
-Lean-owned `NativeWorkProfiles` catalog.  It emits a mechanical Rust integration
+This generator consumes only `ArtifactBundle.canonicalEncoding`, including its
+closed Lean-owned native work catalog.  It emits a mechanical Rust integration
 surface: canonical data constants, private work tags, pinned constructors, and
 one byte/error dispatch function.  It emits no
 validation routine, transcript implementation, statement construction,
@@ -132,16 +132,7 @@ private def dispatchArm (ordinal : Nat) (profile : WorkProfile) : List String :=
 Gödel-number content-address field, whose concrete evaluation is not a viable
 source-generation representation. -/
 def canonicalPayloadJson (wire : ArtifactBundleEncoding) : Lean.Json :=
-  Lean.Json.mkObj
-    [("schema", Lean.Json.str "minidregg/semantic-artifact-bundle/v1"),
-     ("canonicalEncoding", Lean.Json.str "minidregg/encodable/v1"),
-     ("manifest", manifestToJson wire.manifest),
-     ("authorization", authorizationToJson wire.authorization),
-     ("effects", Lean.Json.arr (wire.effects.map declarationToJson).toArray),
-     ("reactive", declarationToJson wire.reactive),
-     ("disclosure", declarationToJson wire.disclosure),
-     ("phasePlan", Lean.Json.arr
-       (wire.phasePlan.map fun phase => Lean.Json.str phase.name).toArray)]
+  canonicalPayloadToJson wire
 
 /-- Exact payload embedded by the generated Rust source. -/
 def canonicalPayloadText (wire : ArtifactBundleEncoding) : String :=
@@ -149,12 +140,11 @@ def canonicalPayloadText (wire : ArtifactBundleEncoding) : String :=
 
 /-- Rust source generated from the closed first-order artifact encoding and work
 catalog, rather than from higher-order declaration or runtime callback objects. -/
-def rustSourceFromEncoding (wire : ArtifactBundleEncoding)
-    (catalog : List WorkProfile) : String :=
+def rustSourceFromEncoding (wire : ArtifactBundleEncoding) : String :=
   let manifest := wire.manifest
   let clauseIds := manifest.dialectClauses.map (·.clauseId)
   let codecIds := manifest.codecs.map (·.codecId)
-  let indexed := enumerateFrom 0 catalog
+  let indexed := enumerateFrom 0 wire.nativeWorkCatalog
   let constants := indexed.flatMap fun item => workConstants item.1 item.2
   let tags := indexed.map fun item => "    " ++ workTag item.1 ++ ","
   let constructors := indexed.flatMap fun item =>
@@ -286,52 +276,53 @@ def rustSourceFromEncoding (wire : ArtifactBundleEncoding)
 
 /-- Public generator entry point.  Its inputs are reduced to first-order
 artifact and native-work data before source generation. -/
-def rustSource (bundle : ArtifactBundle) (catalog : List WorkProfile) : String :=
-  rustSourceFromEncoding bundle.canonicalEncoding catalog
+def rustSource (bundle : ArtifactBundle)
+    (_closed : NativeCatalogWellFormed bundle.manifest bundle.nativeAbiCodecs
+      bundle.nativeWorkCatalog) : String :=
+  rustSourceFromEncoding bundle.canonicalEncoding
 
 @[simp] theorem rustSource_def (bundle : ArtifactBundle)
-    (catalog : List WorkProfile) :
-    rustSource bundle catalog =
-      rustSourceFromEncoding bundle.canonicalEncoding catalog :=
+    (closed : NativeCatalogWellFormed bundle.manifest bundle.nativeAbiCodecs
+      bundle.nativeWorkCatalog) :
+    rustSource bundle closed = rustSourceFromEncoding bundle.canonicalEncoding :=
   rfl
 
 /-- Equal canonical artifact encodings generate byte-for-byte equal Rust source
 text.  No ambient state, target path, clock, or native implementation is read. -/
 theorem rustSource_eq_of_canonicalEncoding_eq
-    {left right : ArtifactBundle} {leftCatalog rightCatalog : List WorkProfile}
-    (sameEncoding : left.canonicalEncoding = right.canonicalEncoding)
-    (sameCatalog : leftCatalog = rightCatalog) :
-    rustSource left leftCatalog = rustSource right rightCatalog := by
-  subst rightCatalog
-  exact congrArg (fun encoding => rustSourceFromEncoding encoding leftCatalog)
-    sameEncoding
+    {left right : ArtifactBundle}
+    (leftClosed : NativeCatalogWellFormed left.manifest left.nativeAbiCodecs
+      left.nativeWorkCatalog)
+    (rightClosed : NativeCatalogWellFormed right.manifest right.nativeAbiCodecs
+      right.nativeWorkCatalog)
+    (sameEncoding : left.canonicalEncoding = right.canonicalEncoding) :
+    rustSource left leftClosed = rustSource right rightClosed := by
+  exact congrArg rustSourceFromEncoding sameEncoding
 
 /-- Determinism stated directly at the closed encoding boundary. -/
 theorem rustSourceFromEncoding_deterministic
-    {left right : ArtifactBundleEncoding}
-    {leftCatalog rightCatalog : List WorkProfile}
-    (same : left = right) (sameCatalog : leftCatalog = rightCatalog) :
-    rustSourceFromEncoding left leftCatalog =
-      rustSourceFromEncoding right rightCatalog := by
-  subst rightCatalog
-  exact congrArg (fun encoding => rustSourceFromEncoding encoding leftCatalog) same
+    {left right : ArtifactBundleEncoding} (same : left = right) :
+    rustSourceFromEncoding left = rustSourceFromEncoding right := by
+  exact congrArg rustSourceFromEncoding same
 
 /-! ## Writer and reusable build target -/
 
 /-- Write generated source only when explicitly run by a build target.  Defining
 this function performs no filesystem or Rust mutation. -/
 def writeRustSource (path : System.FilePath) (bundle : ArtifactBundle)
-    (catalog : List WorkProfile) : IO Unit := do
+    (closed : NativeCatalogWellFormed bundle.manifest bundle.nativeAbiCodecs
+      bundle.nativeWorkCatalog) : IO Unit := do
   if let some directory := path.parent then IO.FS.createDirAll directory
-  IO.FS.writeFile path (rustSource bundle catalog)
+  IO.FS.writeFile path (rustSource bundle closed)
 
 structure BuildTarget where
   path : System.FilePath
   bundle : ArtifactBundle
-  catalog : List WorkProfile
+  nativeCatalogWellFormed : NativeCatalogWellFormed bundle.manifest
+    bundle.nativeAbiCodecs bundle.nativeWorkCatalog
 
 def BuildTarget.run (target : BuildTarget) : IO Unit :=
-  writeRustSource target.path target.bundle target.catalog
+  writeRustSource target.path target.bundle target.nativeCatalogWellFormed
 
 #print axioms rustSource_eq_of_canonicalEncoding_eq
 #print axioms rustSourceFromEncoding_deterministic

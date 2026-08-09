@@ -245,10 +245,88 @@ def DeclarationArtifact.ofDisclosure
     declarationWords := []
     phasePlan := [.disclosureSameOpening, .disclosurePermission] }
 
+/-! ## Native ABI catalog carried by the semantic artifact -/
+
+/-- Closed native kernel vocabulary.  A tag selects fallible opaque compute only;
+it is neither a semantic relation nor an acceptance predicate. -/
+inductive KernelTag where
+  | tower256DotProduct
+deriving DecidableEq, Repr, Encodable
+
+/-- Closed byte-layout vocabulary used by generated transport glue. -/
+inductive ByteCodecShape where
+  | tower256PairVectorsU32LE
+  | tower256CoordinateLE
+deriving DecidableEq, Repr, Encodable
+
+/-- Codec identifiers live in one of two explicit registries.  Manifest codecs
+name semantic representations.  Native-ABI codecs name transport-only aggregate
+layouts and cannot silently masquerade as manifest codecs. -/
+inductive ByteCodecRegistry where
+  | semanticManifest
+  | nativeAbi
+deriving DecidableEq, Repr, Encodable
+
+/-- Exact first-order byte-codec data authenticated by the artifact. -/
+structure ByteCodecProfile where
+  registry : ByteCodecRegistry
+  codecId : Nat
+  valueTypeId : Nat
+  version : Nat
+  shape : ByteCodecShape
+deriving DecidableEq, Repr, Encodable
+
+/-- Exact first-order native work data authenticated by the artifact.  The
+kernel tag only selects an opaque byte implementation generated outside the
+semantic acceptance path. -/
+structure WorkProfile where
+  workId : Nat
+  carrierProfileId : Nat
+  requestCodec : ByteCodecProfile
+  responseCodec : ByteCodecProfile
+  kernel : KernelTag
+deriving DecidableEq, Repr, Encodable
+
+/-- Lookup in the artifact-local, transport-only ABI registry. -/
+def lookupNativeAbiCodec (registry : List ByteCodecProfile) (codecId : Nat) :
+    Option ByteCodecProfile :=
+  registry.find? fun codec => decide (codec.codecId = codecId)
+
+/-- One work codec is closed either by an exact manifest codec pin or by an
+exact entry in the separate native-ABI registry. -/
+def WorkCodecClosed (manifest : SemanticManifest.Manifest)
+    (nativeAbiCodecs : List ByteCodecProfile) (codec : ByteCodecProfile) : Prop :=
+  match codec.registry with
+  | .semanticManifest =>
+      manifest.lookupCodec ⟨codec.codecId⟩ = some
+        ⟨⟨codec.codecId⟩, ⟨codec.valueTypeId⟩, codec.version⟩
+  | .nativeAbi => lookupNativeAbiCodec nativeAbiCodecs codec.codecId = some codec
+
+/-- Structural closure for the native portion of an artifact.  Work identifiers
+and native-ABI codec identifiers are unique; native codec IDs are disjoint from
+semantic manifest codec IDs; every work carrier and both codec uses resolve
+inside this same artifact. -/
+structure NativeCatalogWellFormed (manifest : SemanticManifest.Manifest)
+    (nativeAbiCodecs : List ByteCodecProfile) (catalog : List WorkProfile) : Prop where
+  workIdsUnique : (catalog.map WorkProfile.workId).Nodup
+  nativeAbiCodecIdsUnique : (nativeAbiCodecs.map ByteCodecProfile.codecId).Nodup
+  nativeAbiEntriesScoped : forall codec, codec ∈ nativeAbiCodecs →
+    codec.registry = .nativeAbi
+  nativeAbiDisjointManifest : forall codec, codec ∈ nativeAbiCodecs →
+    manifest.lookupCodec ⟨codec.codecId⟩ = none
+  carriersClosed : forall work, work ∈ catalog →
+    ∃ carrier, manifest.lookupCarrier ⟨work.carrierProfileId⟩ = some carrier
+  requestCodecsClosed : forall work, work ∈ catalog →
+    WorkCodecClosed manifest nativeAbiCodecs work.requestCodec
+  responseCodecsClosed : forall work, work ∈ catalog →
+    WorkCodecClosed manifest nativeAbiCodecs work.responseCodec
+
 /-! ## Bundle and canonical encoding -/
 
 structure ArtifactBundle where
   manifest : SemanticManifest.Manifest
+  nativeAbiCodecs : List ByteCodecProfile
+  nativeWorkCatalog : List WorkProfile
   authorization : AuthorizationArtifact
   effects : List DeclarationArtifact
   reactive : DeclarationArtifact
@@ -260,11 +338,15 @@ deriving DecidableEq, Repr
 declaration projection. -/
 def ArtifactBundle.ofDeclarations
     (manifest : SemanticManifest.Manifest)
+    (nativeAbiCodecs : List ByteCodecProfile)
+    (nativeWorkCatalog : List WorkProfile)
     (authorizationDeclarationId authorizationDeclarationCodecId
       authorizationRequestCodecId : Digest)
     (effects : List DeclarationArtifact)
     (reactive disclosure : DeclarationArtifact) : ArtifactBundle where
   manifest := manifest
+  nativeAbiCodecs := nativeAbiCodecs
+  nativeWorkCatalog := nativeWorkCatalog
   authorization := authorizationArtifact authorizationDeclarationId
     authorizationDeclarationCodecId authorizationRequestCodecId
   effects := effects
@@ -330,6 +412,8 @@ def DeclarationArtifactEncoding.decode
 
 structure ArtifactBundleEncoding where
   manifest : SemanticManifest.ManifestEncoding
+  nativeAbiCodecs : List ByteCodecProfile
+  nativeWorkCatalog : List WorkProfile
   authorization : AuthorizationArtifactEncoding
   effects : List DeclarationArtifactEncoding
   reactive : DeclarationArtifactEncoding
@@ -339,6 +423,8 @@ deriving DecidableEq, Repr, Encodable
 
 def ArtifactBundle.canonicalEncoding (bundle : ArtifactBundle) : ArtifactBundleEncoding where
   manifest := bundle.manifest.canonicalEncoding
+  nativeAbiCodecs := bundle.nativeAbiCodecs
+  nativeWorkCatalog := bundle.nativeWorkCatalog
   authorization := bundle.authorization.canonicalEncoding
   effects := bundle.effects.map DeclarationArtifact.canonicalEncoding
   reactive := bundle.reactive.canonicalEncoding
@@ -347,6 +433,8 @@ def ArtifactBundle.canonicalEncoding (bundle : ArtifactBundle) : ArtifactBundleE
 
 def ArtifactBundleEncoding.decode (wire : ArtifactBundleEncoding) : ArtifactBundle where
   manifest := wire.manifest.decode
+  nativeAbiCodecs := wire.nativeAbiCodecs
+  nativeWorkCatalog := wire.nativeWorkCatalog
   authorization := wire.authorization.decode
   effects := wire.effects.map DeclarationArtifactEncoding.decode
   reactive := wire.reactive.decode
@@ -494,6 +582,33 @@ def ControllerPhase.name : ControllerPhase -> String
   | .bindReceipt => "bind_receipt"
   | .commit => "commit"
 
+def KernelTag.name : KernelTag -> String
+  | .tower256DotProduct => "tower256_dot_product"
+
+def ByteCodecShape.name : ByteCodecShape -> String
+  | .tower256PairVectorsU32LE => "tower256_pair_vectors_u32_le"
+  | .tower256CoordinateLE => "tower256_coordinate_le"
+
+def ByteCodecRegistry.name : ByteCodecRegistry -> String
+  | .semanticManifest => "semantic_manifest"
+  | .nativeAbi => "native_abi"
+
+def byteCodecProfileToJson (codec : ByteCodecProfile) : Json :=
+  Json.mkObj
+    [("registry", Json.str codec.registry.name),
+     ("codecId", toJson codec.codecId),
+     ("valueTypeId", toJson codec.valueTypeId),
+     ("version", toJson codec.version),
+     ("shape", Json.str codec.shape.name)]
+
+def workProfileToJson (work : WorkProfile) : Json :=
+  Json.mkObj
+    [("workId", toJson work.workId),
+     ("carrierProfileId", toJson work.carrierProfileId),
+     ("requestCodec", byteCodecProfileToJson work.requestCodec),
+     ("responseCodec", byteCodecProfileToJson work.responseCodec),
+     ("kernelTag", Json.str work.kernel.name)]
+
 def declarationToJson (artifact : DeclarationArtifactEncoding) : Json :=
   Json.mkObj
     [("kind", Json.str artifact.kind.name),
@@ -507,12 +622,39 @@ def declarationToJson (artifact : DeclarationArtifactEncoding) : Json :=
      ("phasePlan", Json.arr
        (artifact.phasePlan.map fun phase => Json.str phase.name).toArray)]
 
+/-- Complete bounded JSON projection of the exact canonical encoding.  Both the
+standalone JSON writer and generated Rust consume this definition, preventing a
+generator-local native catalog from escaping the artifact identity. -/
+def canonicalPayloadToJson (wire : ArtifactBundleEncoding) : Json :=
+  Json.mkObj
+    [("schema", Json.str "minidregg/semantic-artifact-bundle/v1"),
+     ("canonicalEncoding", Json.str "minidregg/encodable/v1"),
+     ("manifest", manifestToJson wire.manifest),
+     ("nativeAbiCodecs", Json.arr
+       (wire.nativeAbiCodecs.map byteCodecProfileToJson).toArray),
+     ("nativeWorkCatalog", Json.arr
+       (wire.nativeWorkCatalog.map workProfileToJson).toArray),
+     ("authorization", authorizationToJson wire.authorization),
+     ("effects", Json.arr (wire.effects.map declarationToJson).toArray),
+     ("reactive", declarationToJson wire.reactive),
+     ("disclosure", declarationToJson wire.disclosure),
+     ("phasePlan", Json.arr
+       (wire.phasePlan.map fun phase => Json.str phase.name).toArray)]
+
+theorem canonicalPayloadToJson_deterministic {left right : ArtifactBundleEncoding}
+    (same : left = right) : canonicalPayloadToJson left = canonicalPayloadToJson right := by
+  exact congrArg canonicalPayloadToJson same
+
 def artifactBundleToJson (bundle : ArtifactBundle) : Json :=
   let wire := bundle.canonicalEncoding
   Json.mkObj
     [("schema", Json.str "minidregg/semantic-artifact-bundle/v1"),
      ("contentAddress", toJson bundle.contentAddress.value),
      ("manifest", manifestToJson wire.manifest),
+     ("nativeAbiCodecs", Json.arr
+       (wire.nativeAbiCodecs.map byteCodecProfileToJson).toArray),
+     ("nativeWorkCatalog", Json.arr
+       (wire.nativeWorkCatalog.map workProfileToJson).toArray),
      ("authorization", authorizationToJson wire.authorization),
      ("effects", Json.arr (wire.effects.map declarationToJson).toArray),
      ("reactive", declarationToJson wire.reactive),
