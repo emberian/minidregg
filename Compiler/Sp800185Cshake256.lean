@@ -227,21 +227,26 @@ def cshake256Bytes (customization input : List UInt8) : List UInt8 :=
 def fixedDigestBytesLE (digest : Digest) : List UInt8 :=
   (Bignum.digitsLE 256 32 digest.value).map UInt8.ofNat
 
+/-- Minimal little-endian bytes for the total-codec escape branch. -/
+def variableDigestBytesLE (digest : Digest) : List UInt8 :=
+  (Nat.digits 256 digest.value).map UInt8.ofNat
+
 /-- A total lawful codec cannot encode the repository's unbounded `Digest`
 carrier into 32 bytes.  Values in the cSHAKE range use the exact 32-byte
-encoding; unreachable larger values use a unary escape encoding.  This keeps
+encoding; larger values use a zero-tagged minimal base-256 escape.  This keeps
 the generic carrier honest while making every cSHAKE reply exactly 32 bytes. -/
 def digestBytesLE (digest : Digest) : List UInt8 :=
   if digest.value < 256 ^ 32 then fixedDigestBytesLE digest
-  else List.replicate digest.value 0
+  else 0 :: variableDigestBytesLE digest
 
 def digestOfBytesLE (bytes : List UInt8) : Digest :=
   ⟨Bignum.denoteNat 256 (bytes.map UInt8.toNat)⟩
 
 def decodeDigestBytes (bytes : List UInt8) : Option Digest :=
   if bytes.length = 32 then some (digestOfBytesLE bytes)
-  else if bytes.all (fun byte => byte == 0) then some ⟨bytes.length⟩
-  else none
+  else match bytes with
+    | 0 :: payload => some ⟨Nat.ofDigits 256 (payload.map UInt8.toNat)⟩
+    | _ => none
 
 def digestCodec : LawfulCodec Digest where
   encode := digestBytesLE
@@ -270,15 +275,40 @@ def digestCodec : LawfulCodec Digest where
         simpa only [List.map_id, id_eq] using hcongr
       rw [hmap]
       exact Bignum.denoteNat_digitsLE (by decide) 32 digest.value hlow
-    · have hne : digest.value ≠ 32 := by
+    · have hlength : (0 :: variableDigestBytesLE digest).length ≠ 32 := by
         intro heq
+        have hdigitLength : (Nat.digits 256 digest.value).length = 31 := by
+          simp only [variableDigestBytesLE, List.length_cons, List.length_map]
+            at heq
+          omega
+        have hfits := Nat.lt_base_pow_length_digits
+          (m := digest.value) (b := 256) (by decide)
+        rw [hdigitLength] at hfits
         apply hlow
-        rw [heq]
-        norm_num
-      rw [show digestBytesLE digest = List.replicate digest.value 0 by
+        exact lt_of_lt_of_le hfits
+          (Nat.pow_le_pow_right (by decide) (by omega))
+      rw [show digestBytesLE digest = 0 :: variableDigestBytesLE digest by
         unfold digestBytesLE
         rw [if_neg hlow]]
-      simp [decodeDigestBytes, hne]
+      simp only [decodeDigestBytes, hlength, if_false]
+      apply congrArg some
+      apply congrArg Digest.mk
+      simp only [variableDigestBytesLE, List.map_map]
+      change Nat.ofDigits 256
+        ((Nat.digits 256 digest.value).map
+          (fun digit => (UInt8.ofNat digit).toNat)) = digest.value
+      have hmap :
+          (Nat.digits 256 digest.value).map
+              (fun digit => (UInt8.ofNat digit).toNat) =
+            Nat.digits 256 digest.value := by
+        have hcongr := List.map_congr_left
+          (l := Nat.digits 256 digest.value)
+          (f := fun digit => (UInt8.ofNat digit).toNat)
+          (g := id) (fun digit hdigit =>
+            UInt8.toNat_ofNat_of_lt
+              (Nat.digits_lt_base (by decide) hdigit))
+        simpa only [List.map_id, id_eq] using hcongr
+      rw [hmap, Nat.ofDigits_digits]
 
 @[simp] theorem digestCodec_encode (digest : Digest) :
     digestCodec.encode digest = digestBytesLE digest := rfl
