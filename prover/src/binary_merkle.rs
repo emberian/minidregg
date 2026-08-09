@@ -2,9 +2,9 @@
 //!
 //! This module is intentionally oblivious to BabyBear and `wide::Digest`.
 //! Leaves are arbitrary canonical byte strings, roots and siblings retain the
-//! hash suite's root type, and every opening is checked against the exact
-//! power-of-two tree height.  It is the commitment substrate for the additive
-//! GF(2) prover.
+//! hash suite's root type, and root recomputation checks the exact power-of-two
+//! tree height.  Equality with an expected root is deliberately left to
+//! Lean-owned generated control.
 
 use core::fmt;
 
@@ -124,19 +124,18 @@ impl<R: Copy + Eq + fmt::Debug> BinaryMerkleTree<R> {
     }
 }
 
-/// Verify one canonical payload at an exact index and tree size.
+/// Recompute the root for one canonical payload at an exact index and tree size.
 ///
-/// Shape errors are distinguished from an authentication mismatch so callers
-/// can reject malformed proof encodings before doing any hashing.
-pub fn verify_binary_opening<S: HashSuite>(
+/// Native code returns the computed value only.  It does not receive an
+/// expected root and cannot return an authentication verdict.
+pub fn recompute_binary_root<S: HashSuite>(
     suite: &S,
     domain: BinaryHashDomain,
     leaf_count: usize,
     index: usize,
     payload: &[u8],
     path: &BinaryMerklePath<S::Root>,
-    expected_root: &S::Root,
-) -> Result<bool, BinaryMerkleError> {
+) -> Result<S::Root, BinaryMerkleError> {
     if leaf_count == 0 {
         return Err(BinaryMerkleError::EmptyTree);
     }
@@ -167,5 +166,5 @@ pub fn verify_binary_opening<S: HashSuite>(
         };
         cursor >>= 1;
     }
-    Ok(&node == expected_root)
+    Ok(node)
 }
