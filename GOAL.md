@@ -60,12 +60,13 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   a concrete Lean controller must introduce one. Commitment authentication,
   transcript/opening control, coherent proximity, base-subfield provenance/sampling, final LDT,
   and CR/ROM composition remain.
-- **BFV receipt clause — exact integer consequence, unassigned proof pins:**
+- **BFV receipt clause — checked arithmetic admission, unassigned proof suite:**
   `Compiler.BfvReceiptClause.AcceptedToken` binds one committed witness to the ordered 384-row
-  modulus-major batch and a Lean-checked emitted-AIR buffer per row;
-  `every_exact_integer_equation` derives every signed `Int` equation. The carrier/statement codec,
-  proof codec/suite, and controller are not assigned; `register` does not establish manifest
-  closure or an online proof system.
+  modulus-major batch. `Assurance.BfvNativeBufferAdmission` gives each row one combined emitted
+  scalar/accumulator descriptor, blocks on native error, checks the returned buffer and exact row
+  links in Lean, constructs the full token/private receipt event under an inhabited local
+  manifest/controller binding, and derives every signed `Int` equation. The proof-suite pin remains
+  unassigned; privacy, knowledge soundness, and commitment binding are not inferred.
 - **Accumulation — proof-relevant semantic history, no native authority:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
   quadratic language is iff a genuine `ReceiptDelta`; `SemanticHistoryAccumulator` admits both
@@ -74,9 +75,12 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   constructed depth. The head retains the complete proof-relevant entry list; append requires an
   explicit `FoldRecommitment`; and extraction uses all authenticated openings/full opening. It is
   not a WARP/FACS PCS, succinct history, hiding/ZK composition, or compressed structural hash
-  chain. `SemanticHistoryStraightlinePcs` adds an exact same-carrier/prefix-root/one-transcript
-  extraction interface and error-ledger envelope, but does not instantiate a PCS, `Reduction`,
-  Fiat–Shamir ROM, Merkle CR, sampled decider, or lagged-root hiding schedule.
+  chain. Exact controller-resolved clause evidence is now required at every statement/proof root.
+  `SemanticHistoryStraightlinePcs` adds the same-carrier/prefix-root extraction interface, and
+  `SemanticAdditiveFriCheckpoint` canonically pads the same word into the additive code, derives
+  the same root, and recovers the authoritative head under KS-good extraction. They do not
+  instantiate a PCS, shared `Reduction`/Fiat–Shamir ROM game, Merkle CR, sampled decider, or
+  lagged-root hiding schedule.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate

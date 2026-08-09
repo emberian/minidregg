@@ -9,10 +9,13 @@ may not be traded away, and the order in which incomplete edges are closed.
 ## One sentence
 
 minidregg is a proof-native semantic computer: one typed transactional/effect semantics, several
-native execution and proof dialects, canonical proofs between representations, one receipt/event
+typed execution modes and algebra-native proof dialects, canonical proofs between representations, one receipt/event
 relation, and one unbounded history accumulator.
 
 It is deliberately **not** one universal field, AIR, VM, or cryptographic backend.
+
+Here **native dialect** means native to an algebra or computation model (binary words, Ext6,
+residue rings, or shares). It never means that Rust owns a semantics.
 
 ## The target composition
 
@@ -165,7 +168,7 @@ The first formal substrate is already present in:
 | **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash buffers, but its tower/LCH representation and chosen hash algorithm are not yet generated or checked from Lean pins. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not base-V1 admitted |
 | **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves `X^6−31` irreducibility, descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | Base V1 deliberately admits no Ext6 or other proof dialect. Native `field6` limb/polynomial conventions are not connected to generated pins. A concrete Ext6 clause/controller, commitment/transcript/opening control, coherent proximity, subfield provenance, final LDT, and CR/ROM composition remain |
 | **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; native Tower256 retains arithmetic kernels only | V1 declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it only in a local extension. Caller-selected positions/probes/challenges feed stateless `logup256_kernels`; its fixed relation arithmetic and Tower representation remain unverified compute. PCS, CR/ROM, controller admission, proximity, and mutable state remain |
-| **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Bignum/cross-modulus theory and `Compiler.BfvReceiptClause`: one proof-relevant token binds the committed witness and ordered 384-row modulus-major batch, checks each candidate BabyBear accumulator buffer through emitted AIR, and derives every exact signed `Int` equation | Its clause pin deliberately leaves proof codec, suite, and controller at zero/unassigned and does not close a manifest. Concrete carrier/statement codecs, proof system/controller, commitment binding, and full application receipt integration remain; naive field lookup over cyclotomic rings is unsound |
+| **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Bignum/cross-modulus theory plus `Compiler.BfvReceiptClause`; `Assurance.BfvNativeBufferAdmission` uses a fallible opaque runner, checks the emitted per-row scalar/accumulator descriptor and exact links in Lean, constructs all 384 rows under an inhabited local controller binding, and projects the private receipt event with every exact `Int` equation | The proof-suite pin remains unassigned. Arithmetic admission is real; privacy/knowledge soundness, commitment binding, generated deployment dispatch, and the full application receipt remain; naive field lookup over cyclotomic rings is unsound |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
 
 Tower256 exists because it lets binary semantics use cheap native operations while sampling
