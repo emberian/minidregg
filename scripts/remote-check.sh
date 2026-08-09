@@ -52,8 +52,8 @@ esac
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "remote checks require a clean, committed source tree" >&2
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "remote checks require HEAD with no tracked or staged modifications" >&2
   exit 2
 fi
 
