@@ -368,7 +368,33 @@ while response codec `21` resolves to the semantic Tower256 codec pin. -/
 theorem bundle_native_catalog_wellFormed :
     NativeCatalogWellFormed bundle.manifest bundle.nativeAbiCodecs
       bundle.nativeWorkCatalog := by
-  constructor <;> decide
+  constructor
+  · decide
+  · decide
+  · intro codec member
+    simp [bundle, ArtifactBundle.ofDeclarations, nativeAbiCodecRegistry] at member
+    subst codec
+    rfl
+  · intro codec member
+    simp [bundle, ArtifactBundle.ofDeclarations, nativeAbiCodecRegistry] at member
+    subst codec
+    decide
+  · intro work member
+    simp [bundle, ArtifactBundle.ofDeclarations, nativeWorkCatalog] at member
+    subst work
+    exact ⟨gf2Tower256Carrier, by decide⟩
+  · intro work member
+    simp [bundle, ArtifactBundle.ofDeclarations, nativeWorkCatalog] at member
+    subst work
+    change lookupNativeAbiCodec [tower256DotProductRequestCodec] 9001 =
+      some tower256DotProductRequestCodec
+    rfl
+  · intro work member
+    simp [bundle, ArtifactBundle.ofDeclarations, nativeWorkCatalog] at member
+    subst work
+    change manifest.lookupCodec tower256ValueCodec.codecId =
+      some tower256ValueCodec
+    decide
 
 /-- The four declarations in the artifact are exactly the expected projections and
 carry distinct pinned declaration identities. -/
