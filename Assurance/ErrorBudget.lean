@@ -425,7 +425,9 @@ theorem FIRES on the landed F₅ witnesses end to end (premise inhabitation). -/
 `Compiler/EmitSerialize.lean`; `|F| = p⁴ ≈ 2^{123.63}`), code length `2^{20}`
 (the benchmarked fold domain), rate `1/2`, `δ = 1/8` (inside the UD radius
 `1/6`), grinding/hash budgets `2^{40}`, chain depth `2^8`, sumcheck `20`
-rounds at degree `≤ 3`, hash range `2^{248}` (the 8-limb BabyBear digest),
+rounds at degree `≤ 3`, ideal hash range `2^{248}`. The Rust commitment carrier
+now uses nine BabyBear limbs (eight are slightly below 248 bits), but carrier
+width alone does not instantiate this ideal collision-resistant range,
 target λ = 55 — the level the budget PROVES (`deployedBudget_secure`) and
 whose successor it refutes (`deployedBudget_ceiling`). -/
 noncomputable def deployedBudget : SoundnessParams where
