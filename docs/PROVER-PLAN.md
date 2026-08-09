@@ -34,14 +34,16 @@ The `prover/` crate has been reduced to:
 | `fri` | one multiplicative fold kernel with caller-supplied schedule |
 | `mle_kernels` | Möbius, MLE, reversed-LCH, coefficient/word folds, linear dot |
 | `gate_kernels` | emitted-op residual arithmetic and caller-driven affine/quadratic folds |
-| `logup256_kernels` | incidence, equality weights, fraction trees, round messages, interpolation |
+| `tower256_kernels` | generic scatter, equality weights, affine/MLE operations, rational-pair reduction |
 | `hash_kernels` | caller-parameterized cSHAKE framing, tree construction, path/root recomputation |
 | `trace` | candidate wire generation only |
 | `descriptor` | temporary data-only JSON transport DTO |
 | `gpu` / `fri_fold_bench` | optional downstream fold experiment |
 
-There is no surviving native proof object, prover/verifier API, transcript state machine, suite
-selector, statement validator, descriptor-acceptance predicate, or final verification Boolean.
+There is no surviving native proof object, protocol round-message API, prover/verifier API,
+transcript state machine, suite selector, statement validator, descriptor-acceptance predicate,
+or final verification Boolean. The exact surviving ABI and representation debt are recorded in
+[`decisions/2026-08-09-rust-native-authority.md`](decisions/2026-08-09-rust-native-authority.md).
 Hash customization strings, domains, frame tags, root widths, and expected-root equality belong to
 the generated Lean artifact and controller.
 
