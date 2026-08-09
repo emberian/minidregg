@@ -354,8 +354,9 @@ worktrees. See [`D-0003`](docs/decisions/D-0003-remote-evidence.md).
    migration views, not the future kernel.
 2. Instantiate one Tower256/additive `AuthenticatedColumnPlan` with concrete codec, commitment,
    cSHAKE/Merkle, PCS, transcript/ROM/CR reduction, and sampled decider. The exact commitment/opening
-   adapter and attestation-to-WARP message bridge have landed; next use that same accepted transcript
-   to discharge semantic indexed lookup and the WARP/additive history checkpoint under one game.
+   adapter, attestation-to-WARP message bridge, and attestation-to-indexed-LogUp semantic bridge have
+   landed; next instantiate the real lookup/proximity controller and use the same accepted transcript
+   to discharge the WARP/additive history checkpoint under one game.
 3. Close the unshifted WARP claim reindexing and one common security game, then remove the
    retained-entry/full-opening history seam only after the succinct path is real.
 4. Join verified deltas to promises, DeOS projections/invalidation, and typed external

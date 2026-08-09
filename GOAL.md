@@ -97,11 +97,15 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
 - **Authenticated proof control — one typed spine, first concrete deployment open:**
   `Compiler.AuthenticatedColumnPlan` owns typed column roots, global root-before-challenge draws,
   opaque fallible native calls, Lean-checked openings, common-opening representation edges, exact
-  execution traces, and a sole terminal attestation. Its Tower256-shaped non-vacuity path proves
-  the controller is inhabited and native errors cannot accept. Its `BindingCommitmentScheme.toLoom`
+  execution traces, and a sole terminal attestation. The attestation now retains the exact reflected
+  proposition decided by its final Boolean, and every draw records the authentic committed-root
+  prefix length. Its Tower256-shaped non-vacuity path proves the controller is inhabited and native
+  errors cannot accept. Its `BindingCommitmentScheme.toLoom`
   adapter and `AuthenticatedColumnHistoryBridge` now feed the exact same accepted commitment and
-  opening objects into the WARP history message schedule. It does not yet instantiate the deployed
-  Tower codec, cSHAKE framing, Merkle commitment/CR, proximity PCS, or lookup-clause evidence.
+  opening objects into the WARP history message schedule. `AuthenticatedColumnLogupBridge` uses the
+  reflected statement and first-draw root prefix to discharge canonical address linkage, Tower
+  arithmetic, exact roots, and exact indexed evaluation. It does not yet instantiate the deployed
+  Tower codec, cSHAKE framing, Merkle commitment/CR, proximity PCS, or LogUp security reduction.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -131,6 +135,13 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   semantic BCS link/challenge stream. This closes the former controller→history opening seam without
   inventing native authority. Remaining: a concrete collision-resistant commitment/proximity PCS,
   CR/ROM, claim reindexing, sampled decider, hiding, and one common security game.
+- 2026-08-09 ★★★★★ **Authenticated columns → exact indexed LogUp** ✓ at semantic interface
+  resolution: terminal acceptance retains its reflected proposition; the first draw records its
+  authentic prior-root count; `RootPrefixSchedule.no_schedule_of_required_missing` rejects a trace
+  missing any semantic/address/weights/table root; and
+  `AcceptedLogupRun.indexedEvaluation_of_attestation` reaches the existing exact pullback/
+  pushforward table-read theorem. Remaining: instantiate the real LogUp proof controller and PCS,
+  then price concrete commitment CR/binding and Fiat--Shamir in the shared game.
 - 2026-08-09 ★★★★★ **Declaration-derived effect, turn, and reactive cell seams** ✓:
   `Compiler.DeclaredEffectArtifact.accountMoveArtifact_exact` pins the typed account move's wire
   word; `Theory.DeclaredTurn.execute_committed_sound` and `execute_rejected_unchanged` pin the

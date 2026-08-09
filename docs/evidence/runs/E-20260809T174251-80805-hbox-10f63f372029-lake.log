@@ -1,0 +1,268 @@
+run=E-20260809T174251-80805-hbox-10f63f372029-lake
+commit=10f63f372029e4e3a85acbb34bab6cb7563c7895
+host=hbox
+remote_run=/tank/dregg-build/minidregg-checks/runs/run-10f63f372029-qT31sZN9
+command=lake build Compiler.AuthenticatedColumnLogupBridge 
+ℹ [2947/2992] Built Compiler.Signature (4.5s)
+info: Compiler/Signature.lean:426:0: Minidregg.Compiler.N3_opaque_payloads_forbid_second_reading : Prop
+ℹ [2948/2992] Built Loom.Rbr (4.5s)
+info: Loom/Rbr.lean:465:0: Minidregg.Loom.OB2_depth_composition : Prop
+✔ [2949/2992] Built Compiler.Air (5.3s)
+ℹ [2950/2992] Built Theory.Bignum (9.0s)
+info: Theory/Bignum.lean:354:0: 'Minidregg.Theory.Bignum.denoteInt_eq_natCast' depends on axioms: [propext]
+info: Theory/Bignum.lean:355:0: 'Minidregg.Theory.Bignum.denoteNat_lt_pow' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:356:0: 'Minidregg.Theory.Bignum.denoteNat_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:357:0: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:358:0: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext]
+info: Theory/Bignum.lean:359:0: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:360:0: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:361:0: 'Minidregg.Theory.Bignum.Limbs.toFin_ofFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:362:0: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:363:0: 'Minidregg.Theory.Bignum.Limbs.toNat_ofBounded' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:364:0: 'Minidregg.Theory.Bignum.bits_248_fit_nine_radix_2013265921_limbs' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2951/2992] Built Theory.PrivacyProfile (9.2s)
+✔ [2952/2992] Built Loom.CorrelatedAgreement (9.4s)
+✔ [2953/2992] Built Theory.ReactiveReceipt (9.5s)
+✔ [2954/2992] Built Theory.IndexedProgram (9.5s)
+✔ [2955/2992] Built Compiler.TranscriptController (10s)
+✔ [2956/2992] Built Theory.TypedAuthorization (12s)
+✔ [2957/2992] Built Loom.Depth (10s)
+✔ [2958/2992] Built Compiler.AirRange (6.1s)
+✔ [2959/2992] Built Compiler.AirFlatten (6.1s)
+✔ [2960/2992] Built Theory.CrossModulus (6.3s)
+✔ [2961/2992] Built Theory.GuardedAdvice (6.4s)
+✔ [2962/2992] Built Loom.ReedSolomon (6.6s)
+✔ [2963/2992] Built Theory.DisclosureDeclaration (6.0s)
+✔ [2964/2992] Built Compiler.AirHash (3.9s)
+⚠ [2965/2992] Built Theory.AuthorizationDeclaration (7.2s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2966/2992] Built Loom.Sumcheck (4.2s)
+✔ [2967/2992] Built Loom.ConstrainedCode (5.0s)
+✔ [2968/2992] Built Theory.ReactiveController (6.4s)
+✔ [2969/2992] Built Compiler.AirMembership (4.0s)
+ℹ [2970/2992] Built Loom.LogupStar (5.4s)
+info: Loom/LogupStar.lean:367:0: 'Minidregg.Loom.logup_pullback_pushforward' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/LogupStar.lean:368:0: 'Minidregg.Loom.logup_logDerivative_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/LogupStar.lean:369:0: 'Minidregg.Loom.logupDefect_ne_zero_of_ne' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/LogupStar.lean:370:0: 'Minidregg.Loom.logup_wrong_rational_accept_prob_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/LogupStar.lean:371:0: 'Minidregg.Loom.LogupStarExample.wrong_rejected_at_two' depends on axioms: [propext, Classical.choice, Quot.sound]
+✔ [2971/2992] Built Theory.EffectDeclaration (6.8s)
+✔ [2972/2992] Built Loom.SumcheckReduction (5.1s)
+✔ [2973/2992] Built Loom.Accumulator (6.3s)
+⚠ [2974/2992] Built Compiler.SemanticManifest (9.5s)
+warning: Compiler/SemanticManifest.lean:138:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:153:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:168:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:234:15: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:518:13: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:553:14: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+✔ [2975/2992] Built Compiler.NoteSpend (5.5s)
+✔ [2976/2992] Built Loom.Decider (3.5s)
+✔ [2977/2992] Built Compiler.DeclaredEffectArtifact (5.0s)
+✔ [2978/2992] Built Loom.MultilinearExtension (5.5s)
+✔ [2979/2992] Built Compiler.Emit (3.8s)
+✔ [2980/2992] Built Loom.Commitment (3.5s)
+ℹ [2981/2992] Built Loom.BinaryLookup (2.6s)
+info: Loom/BinaryLookup.lean:158:0: 'Minidregg.Loom.binaryLookupEq_cubePt_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/BinaryLookup.lean:159:0: 'Minidregg.Loom.binaryTableDot_lookupEq_eq_mle' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/BinaryLookup.lean:160:0: 'Minidregg.Loom.BinaryLookupExample.boolean_sum_one_not_oneHot_charTwo' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [2982/2992] Built Compiler.SemanticArtifactBundle (5.8s)
+warning: Compiler/SemanticArtifactBundle.lean:297:17: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+⚠ [2983/2992] Built Loom.LogupIndexLink (4.6s)
+warning: Loom/LogupIndexLink.lean:29:0: automatically included section variable(s) unused in theorem `Minidregg.Loom.canonicalIndexColumn_boolean`:
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Loom/LogupIndexLink.lean:41:0: automatically included section variable(s) unused in theorem `Minidregg.Loom.canonicalIndexPoint_eq`:
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Loom/LogupIndexLink.lean:48:0: automatically included section variable(s) unused in theorem `Minidregg.Loom.canonicalIncidence_eq_unitVector`:
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Loom/LogupIndexLink.lean:94:0: 'Minidregg.Loom.canonicalIncidence_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/LogupIndexLink.lean:95:0: 'Minidregg.Loom.canonicalIncidencePushforward_eq_logupPushforward' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Loom/LogupIndexLink.lean:96:0: 'Minidregg.Loom.canonical_indexed_lookup_pullback' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [2984/2992] Built Compiler.AirBignum (8.7s)
+info: Compiler/AirBignum.lean:315:0: 'Minidregg.Compiler.AirBignum.addLimbTerm_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirBignum.lean:316:0: 'Minidregg.Compiler.AirBignum.addGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:317:0: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:318:0: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:319:0: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+✔ [2985/2992] Built Compiler.MinidreggV1Artifact (5.6s)
+ℹ [2986/2992] Built Compiler.EmitSerialize (9.3s)
+info: Compiler/EmitSerialize.lean:233:0: round-trip OK: 18 gates, 5 zeros, nWires = 23
+⚠ [2987/2992] Built Compiler.Logup256ReceiptClause (2.2s)
+warning: Compiler/Logup256ReceiptClause.lean:127:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.Logup256ReceiptClause.committedAddressColumn_eq_canonical`:
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/Logup256ReceiptClause.lean:148:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.Logup256ReceiptClause.committedIncidence_eq_canonical`:
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/Logup256ReceiptClause.lean:156:8: This simp argument is unused:
+  committedIncidence
+
+Hint: Omit it from the simp argument list.
+  simp [̵c̵o̵m̵m̵i̵t̵t̵e̵d̵I̵n̵c̵i̵d̵e̵n̵c̵e̵,̵ ̵c̵a̵n̵o̵n̵i̵c̵a̵l̵I̵n̵c̵i̵d̵e̵n̵c̵e̵,̵[̲c̲a̲n̲o̲n̲i̲c̲a̲l̲I̲n̲c̲i̲d̲e̲n̲c̲e̲,̲ canonicalIndexColumn, linked row, cubePt]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Compiler/Logup256ReceiptClause.lean:156:28: This simp argument is unused:
+  canonicalIncidence
+
+Hint: Omit it from the simp argument list.
+  simp [committedIncidence, c̵a̵n̵o̵n̵i̵c̵a̵l̵I̵n̵c̵i̵d̵e̵n̵c̵e̵,̵ ̵canonicalIndexColumn, linked row, cubePt]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+info: Compiler/Logup256ReceiptClause.lean:299:0: 'Minidregg.Compiler.Logup256ReceiptClause.committedIncidence_eq_unitVector' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/Logup256ReceiptClause.lean:300:0: 'Minidregg.Compiler.Logup256ReceiptClause.committedIncidencePushforward_eq_logupPushforward' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/Logup256ReceiptClause.lean:301:0: 'Minidregg.Compiler.Logup256ReceiptClause.indexedTableReceiptClause' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2988/2992] Built Compiler.AirModularView (4.8s)
+info: Compiler/AirModularView.lean:666:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:667:0: 'Minidregg.Compiler.AirModularView.mulCarryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:668:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:669:0: 'Minidregg.Compiler.AirModularView.modularViewGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:670:0: 'Minidregg.Compiler.AirModularView.accepted_has_modularView' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:671:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:672:0: 'Minidregg.Compiler.AirModularView.scalarMulCarryEquations_denote' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:673:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:674:0: 'Minidregg.Compiler.AirModularView.emit_scalarMulGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:675:0: 'Minidregg.Compiler.AirModularView.fheggQ0_scalar24_base64_fits' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:676:0: 'Minidregg.Compiler.AirModularView.emit_modularViewGadget_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2989/2992] Built Compiler.BignumKernelABI (2.7s)
+info: Compiler/BignumKernelABI.lean:453:0: 'Minidregg.Compiler.BignumKernelABI.KernelCall.accepts_iff_descriptor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:454:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/BignumKernelABI.lean:455:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:456:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:457:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_wellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:458:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:459:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2990/2992] Built Compiler.NativeKernelPlan (2.5s)
+info: Compiler/NativeKernelPlan.lean:538:0: 'Minidregg.Compiler.NativeKernelPlan.arbitraryRunner_integrity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:539:0: 'Minidregg.Compiler.NativeKernelPlan.descriptorFailure_not_certified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:540:0: 'Minidregg.Compiler.NativeKernelPlan.manifestMismatch_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:541:0: 'Minidregg.Compiler.NativeKernelPlan.checkInstructions_headError' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:542:0: 'Minidregg.Compiler.NativeKernelPlan.firstInstructionError_blocks' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2991/2992] Built Compiler.AuthenticatedColumnPlan (5.3s)
+info: Compiler/AuthenticatedColumnPlan.lean:1069:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.challenge_before_root_unrepresentable' depends on axioms: [propext]
+info: Compiler/AuthenticatedColumnPlan.lean:1070:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.native_error_cannot_accept_query' depends on axioms: [propext]
+info: Compiler/AuthenticatedColumnPlan.lean:1071:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.towerBinding_toLoom_commit_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AuthenticatedColumnPlan.lean:1072:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.concrete_schedule_is_nonvacuous' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [2992/2992] Built Compiler.AuthenticatedColumnLogupBridge (2.1s)
+warning: Compiler/AuthenticatedColumnLogupBridge.lean:98:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.priorRootCount_le`:
+  [Field F]
+  [CharP F 2]
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [CharP F 2] [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/AuthenticatedColumnLogupBridge.lean:105:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.required_present`:
+  [Field F]
+  [CharP F 2]
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [CharP F 2] [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/AuthenticatedColumnLogupBridge.lean:112:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.no_schedule_of_required_missing`:
+  [Field F]
+  [CharP F 2]
+  [Fintype κ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [CharP F 2] [Fintype κ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/AuthenticatedColumnLogupBridge.lean:210:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.AuthenticatedColumnLogupBridge.AcceptedLogupRun.controllerStatement`:
+  [CharP F 2]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [CharP F 2] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Compiler/AuthenticatedColumnLogupBridge.lean:255:0: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.priorRootCount_le' depends on axioms: [propext,
+ Quot.sound]
+info: Compiler/AuthenticatedColumnLogupBridge.lean:256:0: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.no_schedule_of_required_missing' depends on axioms: [propext,
+ Quot.sound]
+info: Compiler/AuthenticatedColumnLogupBridge.lean:257:0: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.AcceptedLogupRun.controllerStatement' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AuthenticatedColumnLogupBridge.lean:258:0: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.AcceptedLogupRun.indexedTableReceiptClause_of_attestation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+Build completed successfully (2992 jobs).
