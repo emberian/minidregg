@@ -2,7 +2,7 @@
 name = "minidregg-prover"
 version = "0.1.0"
 edition = "2021"
-description = "Unverified prover for minidregg: reads the ConstraintDescriptor emitted by Compiler/Emit.lean. Consumes constraints; never authors them."
+description = "Unverified native arithmetic, transform, hash, and buffer kernels for Lean-owned minidregg control."
 
 [features]
 default = []
