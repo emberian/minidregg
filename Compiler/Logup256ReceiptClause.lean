@@ -12,9 +12,9 @@ collision resistance/binding, and the Fiat--Shamir random-oracle model remain ex
 boundary premises.  They are not implemented or proved here.  No protocol, native
 verifier, or cross-characteristic map is introduced.
 
-The v1 generic GF(2) clause pin cannot be reused: it names another opaque relation and
-requires an unrelated GF(2)-to-Ext6 bridge.  This clause receives a distinct relation
-pin on the same GF(2)-tower carrier, with no bridge requirement.
+The v1 generic GF(2^64) clause pin cannot be reused: it names another opaque relation,
+has the wrong degree, and requires an unrelated GF(2)-to-Ext6 bridge.  This clause uses
+the distinct declared GF(2^256) carrier profile and has no bridge requirement.
 -/
 import Compiler.MinidreggV1Artifact
 import Loom.LogupIndexLink
@@ -32,14 +32,16 @@ set_option autoImplicit false
 def clausePin : DialectClauseDecl where
   clauseId := MinidreggV1Artifact.id 404
   relationId := MinidreggV1Artifact.id 414
-  carrierProfileId := MinidreggV1Artifact.gf2Carrier.id
+  carrierProfileId := MinidreggV1Artifact.gf2Tower256Carrier.id
   statementCodecId := MinidreggV1Artifact.dialectStatementCodec.codecId
   proofCodecId := MinidreggV1Artifact.dialectProofCodec.codecId
   proofSuiteId := MinidreggV1Artifact.id 424
   verifierControllerDigest := MinidreggV1Artifact.id 434
   requiredBridgeIds := []
 
-/-- The v1 manifest extended only by this new opaque semantic dialect relation pin. -/
+/-- The base V1 manifest already declares the GF(2^256) carrier and codec, but this
+semantic clause remains an extension: no concrete proof-suite/controller realization or
+Rust correspondence is claimed by the base artifact. -/
 def manifest : Manifest :=
   { MinidreggV1Artifact.manifest with
     dialectClauses := MinidreggV1Artifact.clauseRegistry ++ [clausePin] }
@@ -66,7 +68,7 @@ theorem manifest_wellFormed : manifest.WellFormed where
         Manifest.lookupBridge] using
         (MinidreggV1Artifact.manifest_wellFormed.dialectClausesClosed clause old)
     · refine
-        ⟨⟨MinidreggV1Artifact.gf2Carrier, by decide⟩,
+        ⟨⟨MinidreggV1Artifact.gf2Tower256Carrier, by decide⟩,
          ⟨MinidreggV1Artifact.dialectStatementCodec, by decide⟩,
          ⟨MinidreggV1Artifact.dialectProofCodec, by decide⟩, ?_⟩
       intro bridgeId member
@@ -78,13 +80,24 @@ theorem clause_pin_registered :
 
 theorem clause_pin_registry_closed :
     manifest.lookupCarrier clausePin.carrierProfileId =
-        some MinidreggV1Artifact.gf2Carrier ∧
+        some MinidreggV1Artifact.gf2Tower256Carrier ∧
     manifest.lookupCodec clausePin.statementCodecId =
         some MinidreggV1Artifact.dialectStatementCodec ∧
     manifest.lookupCodec clausePin.proofCodecId =
         some MinidreggV1Artifact.dialectProofCodec ∧
     clausePin.requiredBridgeIds = [] := by
   decide
+
+/-- The clause selects the distinct 256-bit profile and its declared value codec.  This
+is manifest identity/shape data only, not a theorem about `prover::Tower256`. -/
+theorem clause_pin_tower256_profile :
+    clausePin.carrierProfileId = MinidreggV1Artifact.gf2Tower256Carrier.id ∧
+    MinidreggV1Artifact.gf2Tower256Carrier =
+      .gf2Tower (MinidreggV1Artifact.id 205)
+        MinidreggV1Artifact.fanPaarTowerId
+        MinidreggV1Artifact.fanPaarRecursiveBasisId
+        MinidreggV1Artifact.tower256ValueCodec.codecId 256 := by
+  exact ⟨rfl, rfl⟩
 
 /-! ## Committed semantic trace and canonical address link -/
 
@@ -207,6 +220,10 @@ structure Tower256ClausePremises
     (CommitmentBindingCR : IndexedTableReceiptClaim F κ k →
       CommittedSemanticTrace κ k → Prop)
     (RandomOracleModel : IndexedTableReceiptClaim F κ k → Prop) : Prop where
+  /-- The abstract clause field has exactly the characteristic and cardinality pinned by
+  the manifest profile.  This still asserts no representation correspondence. -/
+  tower256Characteristic : CharP F 2
+  tower256Cardinality : Nat.card F = 2 ^ 256
   tower256Arithmetic :
     claim.claimedEvaluation =
       logupDot claim.table (committedIncidencePushforward trace claim.weights)

@@ -44,6 +44,10 @@ def dialectProofCodec : CodecPin := ⟨id 17, id 1017, 1⟩
 def gf2ValueCodec : CodecPin := ⟨id 18, id 1018, 1⟩
 def ext6ValueCodec : CodecPin := ⟨id 19, id 1019, 1⟩
 def residueRingValueCodec : CodecPin := ⟨id 20, id 1020, 1⟩
+/-- Semantic pin for the canonical 256-bit recursive-coordinate value encoding.
+This registers an ABI identity and version only; it does not identify or validate any
+Rust representation. -/
+def tower256ValueCodec : CodecPin := ⟨id 21, id 1021, 1⟩
 
 def codecRegistry : List CodecPin :=
   [receiptCodec, authorizationDeclarationCodec, authorizationRequestCodec,
@@ -52,10 +56,17 @@ def codecRegistry : List CodecPin :=
    disclosureDeclarationCodec, disclosureRequestCodecPin,
    disclosureCommitmentCodec, disclosureRepresentationCodec,
    disclosureReleaseCodec, disclosureProofCodec, dialectStatementCodec,
-   dialectProofCodec, gf2ValueCodec, ext6ValueCodec, residueRingValueCodec]
+   dialectProofCodec, gf2ValueCodec, ext6ValueCodec, residueRingValueCodec,
+   tower256ValueCodec]
+
+/-- Identifiers for the declared recursive Fan--Paar tower family and its canonical
+recursive coordinate basis.  These are semantic ABI pins, not correspondence claims
+about a native implementation. -/
+def fanPaarTowerId : Digest := id 211
+def fanPaarRecursiveBasisId : Digest := id 212
 
 def gf2Carrier : CarrierProfile :=
-  .gf2Tower (id 201) (id 211) (id 212) gf2ValueCodec.codecId 64
+  .gf2Tower (id 201) fanPaarTowerId fanPaarRecursiveBasisId gf2ValueCodec.codecId 64
 
 def ext6Carrier : CarrierProfile :=
   .ext6 (id 202) 2013265921 (id 213) ext6ValueCodec.codecId
@@ -68,8 +79,15 @@ def residueRingCarrier : CarrierProfile :=
 def mpcCarrier : CarrierProfile :=
   .mpcShared (id 204) gf2Carrier.id (id 230) (id 231) 3 2 (id 232)
 
+/-- A distinct `GF(2^256)` semantic carrier profile.  Sharing the declared tower family
+and basis with the 64-bit profile does not identify their representations: the profile,
+degree, and codec pins are distinct.  No Rust correspondence theorem is claimed. -/
+def gf2Tower256Carrier : CarrierProfile :=
+  .gf2Tower (id 205) fanPaarTowerId fanPaarRecursiveBasisId
+    tower256ValueCodec.codecId 256
+
 def carrierRegistry : List CarrierProfile :=
-  [gf2Carrier, ext6Carrier, residueRingCarrier, mpcCarrier]
+  [gf2Carrier, ext6Carrier, residueRingCarrier, mpcCarrier, gf2Tower256Carrier]
 
 /-- A named consistency requirement only.  This record does not claim an implemented
 cross-characteristic homomorphism. -/
@@ -148,11 +166,12 @@ def manifest : Manifest where
 theorem manifest_wellFormed : manifest.WellFormed where
   codecIdsUnique := by
     change ([id 1, id 2, id 3, id 4, id 5, id 6, id 7, id 8, id 9, id 10,
-      id 11, id 12, id 13, id 14, id 15, id 16, id 17, id 18, id 19, id 20] :
+      id 11, id 12, id 13, id 14, id 15, id 16, id 17, id 18, id 19, id 20,
+      id 21] :
       List Digest).Nodup
     decide
   carrierIdsUnique := by
-    change ([id 201, id 202, id 203, id 204] : List Digest).Nodup
+    change ([id 201, id 202, id 203, id 204, id 205] : List Digest).Nodup
     decide
   bridgeIdsUnique := by
     change ([id 301, id 302] : List Digest).Nodup
@@ -164,11 +183,12 @@ theorem manifest_wellFormed : manifest.WellFormed where
   mpcBasesClosed := by
     intro profile member
     simp only [manifest, carrierRegistry, List.mem_cons, List.not_mem_nil, or_false] at member
-    rcases member with rfl | rfl | rfl | rfl
+    rcases member with rfl | rfl | rfl | rfl | rfl
     · trivial
     · trivial
     · trivial
     · exact ⟨gf2Carrier, by decide⟩
+    · trivial
   bridgeEndpointsClosed := by
     intro bridge member
     simp only [manifest, bridgeRegistry, List.mem_cons, List.not_mem_nil, or_false] at member
