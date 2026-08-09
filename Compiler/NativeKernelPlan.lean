@@ -54,10 +54,13 @@ structure Instruction where
   call : KernelCall
   publicInputs : List BabyBear
 
-/-- A generated plan binds its manifest content address and fixes instruction
-order as first-order list data. -/
+/-- A generated plan carries the canonical first-order manifest value and fixes
+instruction order as first-order list data.  Executable control compares this
+structure directly; it never normalizes the theorem-oriented Gödel
+`Manifest.contentAddress`.  A deployment hash may authenticate the serialized
+payload outside this relation. -/
 structure Plan where
-  manifestAddress : Digest
+  manifestEncoding : ManifestEncoding
   instructions : List Instruction
 
 /-- Convenience constructors preserve the closed work vocabulary.  Hash and
@@ -320,7 +323,7 @@ inductive Certificate (manifest : Manifest) (runner : PlanRunner) :
       Certificate manifest runner (instruction :: rest)
 
 inductive Failure
-  | manifestAddressMismatch
+  | manifestEncodingMismatch
   | unregisteredClause (clauseId : Digest)
   | malformedCall (clauseId : Digest)
   | publicPrefixMismatch (clauseId : Digest)
@@ -374,7 +377,7 @@ def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
 /-- The only successful controller token. -/
 structure Verified (manifest : Manifest) (plan : Plan)
     (runner : PlanRunner) : Type where
-  manifestExact : plan.manifestAddress = manifest.contentAddress
+  manifestExact : plan.manifestEncoding = manifest.canonicalEncoding
   certificate : Certificate manifest runner plan.instructions
 
 inductive Outcome (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
@@ -390,11 +393,11 @@ def Outcome.IsVerified {manifest : Manifest} {plan : Plan}
 issued; all later continuation choices remain inside `checkInstructions`. -/
 def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
     Outcome manifest plan runner :=
-  if hmanifest : plan.manifestAddress = manifest.contentAddress then
+  if hmanifest : plan.manifestEncoding = manifest.canonicalEncoding then
     match checkInstructions manifest runner plan.instructions with
     | .rejected failure => .rejected failure
     | .checked certificate => .verified ⟨hmanifest, certificate⟩
-  else .rejected .manifestAddressMismatch
+  else .rejected .manifestEncodingMismatch
 
 /-! ## 5. Arbitrary-runner integrity and teeth -/
 
@@ -419,7 +422,7 @@ the exact bounded response whose public prefix is plan-authored. -/
 theorem arbitraryRunner_integrity
     (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
     (reached : (run manifest plan runner).IsVerified) :
-    plan.manifestAddress = manifest.contentAddress ∧
+    plan.manifestEncoding = manifest.canonicalEncoding ∧
     ∀ instruction, instruction ∈ plan.instructions →
       ∃ clause : DialectClauseDecl,
         manifest.lookupClause instruction.clauseId = some clause ∧
@@ -448,10 +451,10 @@ theorem descriptorFailure_not_certified
   intro certificate _
   exact failure certificate.descriptorAcceptance
 
-/-- A plan with the wrong manifest address never invokes the success branch. -/
+/-- A plan with the wrong canonical manifest never invokes the success branch. -/
 theorem manifestMismatch_not_verified
     (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
-    (mismatch : plan.manifestAddress ≠ manifest.contentAddress) :
+    (mismatch : plan.manifestEncoding ≠ manifest.canonicalEncoding) :
     ¬ (run manifest plan runner).IsVerified := by
   simp [run, mismatch, Outcome.IsVerified]
 

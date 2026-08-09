@@ -154,10 +154,10 @@ abbrev FriClause
 
 /-! ## A non-vacuous additive-FRI manifest pin
 
-The generic clause asks for controller equality. The old opaque V1 GF(2)
-declaration does not have it (`431 != 500`), so it is intentionally not used.
-This fresh declaration is a local manifest extension whose controller is the
-actual outer manifest controller. -/
+The generic clause asks for controller equality. The former opaque V1 GF(2)
+declaration did not have it (`431 != 500`), and the current base correctly
+admits no dialect clause. This fresh declaration is a local manifest extension
+whose controller is the actual outer manifest controller. -/
 
 /-- First-order registry pins supplied by the concrete artifact. Keeping these
 as data avoids silently identifying an arbitrary characteristic-two Lean field
