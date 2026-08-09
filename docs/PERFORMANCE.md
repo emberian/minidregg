@@ -27,6 +27,26 @@ worker-memory assumptions before these passing records were promoted. See
 [`D-0003`](decisions/D-0003-remote-evidence.md) and
 [`scripts/remote-check.sh`](../scripts/remote-check.sh).
 
+### Lean cSHAKE256 and Merkle-collision reduction replay
+
+Both workers independently built exact commit
+`6657717efeb627962ae6546949c213966899d116`.  The target pair contains the
+Lean-computed SP800-185 cSHAKE256 controller and the reduction from two unequal
+accepted openings at one Merkle position to a concrete framed XOF collision.
+Each run preserved the exact source manifest
+`0889d488c8067e668e257a211c1be4ed7edd1ef3c4cca0dda7fc0e137990b174`; the
+project OLean manifests also agree at
+`5239b648f6279e5cdbe7fa9f56ce4d2631c902770354806928c179b4b93ff817`.
+
+| Evidence | Host | Exact targets | Result | Claim ceiling |
+|---|---|---|---:|---|
+| [`E-…5257`](evidence/runs/E-20260809T205257-59804-hbox-6657717efeb6-lake.json) | hbox, i9-12900 | `Compiler.Sp800185Cshake256` + `Compiler.Tower256CshakeMerkleBinding` | 8,513 jobs pass | These exact Lean modules build from the committed archive |
+| [`E-…5258`](evidence/runs/E-20260809T205258-59779-persvati-6657717efeb6-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | same targets | 8,513 jobs pass | Same source and project-OLean manifests as hbox |
+
+This is reproducibility evidence for the Lean computation and reduction, not a
+collision-resistance or random-oracle theorem for cSHAKE256 and not a statement
+that any Rust implementation refines the Lean function.
+
 ### Canonical credential-authority clean build
 
 Both workers independently built the exact committed snapshot
