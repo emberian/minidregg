@@ -1,0 +1,24 @@
+run=E-20260809T162434-6741-persvati-4f02bdb3ef9b-lake
+commit=4f02bdb3ef9b17e5bb064dcb16b17a2d1d938441
+host=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-4f02bdb3ef9b-GK438X7K
+command=lake build Theory.CanonicalTransition 
+✔ [2943/2953] Built Theory.IndexedProgram (1.7s)
+✔ [2944/2953] Built Theory.ReactiveReceipt (1.8s)
+✔ [2945/2953] Built Theory.TypedAuthorization (2.1s)
+✔ [2946/2953] Built Theory.GuardedAdvice (1.6s)
+⚠ [2947/2953] Built Theory.AuthorizationDeclaration (2.3s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2948/2953] Built Theory.ReactiveController (2.2s)
+✔ [2949/2953] Built Theory.EffectDeclaration (1.9s)
+✔ [2950/2953] Built Theory.CellState (1.8s)
+✔ [2951/2953] Built Theory.DeclaredTurn (1.5s)
+✔ [2952/2953] Built Theory.ReactiveCellTransition (2.1s)
+✔ [2953/2953] Built Theory.CanonicalTransition (1.6s)
+Build completed successfully (2953 jobs).
