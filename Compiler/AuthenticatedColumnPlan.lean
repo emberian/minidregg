@@ -385,6 +385,10 @@ deriving DecidableEq, Repr
 structure DrawRecord where
   label : GlobalDrawLabel
   coin : Digest
+  /-- Exact number of committed roots already present when this challenge was
+  derived. Roots are append-only in `Ledger`, so a concrete clause can prove
+  that every required root lies in this prefix without using timestamps. -/
+  priorRootCount : Nat
 deriving DecidableEq, Repr
 
 inductive GlobalFrame where
@@ -411,8 +415,8 @@ structure DerivedChallenge {State : Type}
 
 def DerivedChallenge.record
     {State : Type} {portal : GlobalTranscriptPortal State}
-    (draw : DerivedChallenge portal) : DrawRecord :=
-  ⟨draw.label, draw.coin⟩
+    (draw : DerivedChallenge portal) (priorRootCount : Nat) : DrawRecord :=
+  ⟨draw.label, draw.coin, priorRootCount⟩
 
 structure TranscriptState {State : Type}
     (portal : GlobalTranscriptPortal State) where
@@ -521,7 +525,8 @@ inductive Plan (transcriptDomain : Digest) : Phase -> Type 1 where
       {round : Nat} {ledger : Ledger} {anchor : RootAnchor ledger}
       (next : (coin : Digest) -> Plan transcriptDomain
         (.roundChallenged round (ledger.addDraw
-          ⟨⟨transcriptDomain, .roundChallenge, ledger.draws.length⟩, coin⟩))) :
+          ⟨⟨transcriptDomain, .roundChallenge, ledger.draws.length⟩, coin,
+            ledger.roots.length⟩))) :
       Plan transcriptDomain (.rooted round ledger anchor)
   | runRoundNative
       {round : Nat} {ledger : Ledger} (call : NativeCall)
@@ -542,7 +547,8 @@ inductive Plan (transcriptDomain : Digest) : Phase -> Type 1 where
       {round : Nat} {ledger : Ledger} {anchor : RootAnchor ledger}
       (next : (coin : Digest) -> Plan transcriptDomain
         (.queryChallenged round (ledger.addDraw
-          ⟨⟨transcriptDomain, .queryChallenge, ledger.draws.length⟩, coin⟩))) :
+          ⟨⟨transcriptDomain, .queryChallenge, ledger.draws.length⟩, coin,
+            ledger.roots.length⟩))) :
       Plan transcriptDomain (.rooted round ledger anchor)
   | runQueryNative
       {rounds : Nat} {ledger : Ledger} (call : NativeCall)
@@ -629,7 +635,8 @@ inductive ExecutionTrace
       (draw : DerivedChallenge portal) (next : TranscriptState portal)
       (resultExact : transcript.draw ⟨transcriptDomain, role, ordinal⟩ =
         (draw, next)) :
-      ExecutionTrace portal transcriptDomain next (ledger.addDraw draw.record)
+      ExecutionTrace portal transcriptDomain next
+        (ledger.addDraw (draw.record ledger.roots.length))
   | native
       {transcript : TranscriptState portal} {ledger : Ledger}
       (prior : ExecutionTrace portal transcriptDomain transcript ledger)
