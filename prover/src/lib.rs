@@ -17,4 +17,5 @@ pub mod binary_tower_256;
 pub mod field6;
 pub mod hash_kernels;
 pub mod mle_kernels;
+pub mod native_dispatch;
 pub mod tower256_kernels;

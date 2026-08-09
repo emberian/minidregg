@@ -9,7 +9,10 @@ pub const SEMANTIC_PROGRAM_ID_DECIMAL: &str = "101";
 pub const SEMANTIC_RELATION_ID_DECIMAL: &str = "102";
 pub const RECEIPT_CODEC_ID_DECIMAL: &str = "1";
 pub const DIALECT_CLAUSE_IDS_DECIMAL: &[&str] = &[];
-pub const CODEC_IDS_DECIMAL: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21"];
+pub const CODEC_IDS_DECIMAL: &[&str] = &[
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17",
+    "18", "19", "20", "21",
+];
 pub const EFFECT_DECLARATION_COUNT: usize = 1;
 pub const OUTER_PHASE_COUNT: usize = 15;
 
@@ -18,6 +21,9 @@ pub const WORK_0_CARRIER_PROFILE_ID_DECIMAL: &str = "205";
 pub const WORK_0_REQUEST_CODEC_ID_DECIMAL: &str = "9001";
 pub const WORK_0_RESPONSE_CODEC_ID_DECIMAL: &str = "21";
 pub const WORK_0_RESPONSE_WIDTH: usize = 32;
+pub const WORK_0_REQUEST_COUNT_WIDTH: usize = 4;
+pub const WORK_0_REQUEST_COORDINATE_WIDTH: usize = 32;
+pub const WORK_0_REQUEST_VECTOR_ARITY: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalArtifactDto {
@@ -61,7 +67,10 @@ pub struct NativeErrorDto {
 
 impl NativeWorkRequestDto {
     pub fn tower256_dot_product(request_bytes: Box<[u8]>) -> Self {
-        Self { work: NativeWorkTag::Work0, request_bytes }
+        Self {
+            work: NativeWorkTag::Work0,
+            request_bytes,
+        }
     }
 
     pub fn from_ids(
@@ -78,7 +87,8 @@ impl NativeWorkRequestDto {
             {
                 return Err(NativeErrorDto {
                     kind: NativeErrorKind::MalformedRequest,
-                    detail: "work identifier supplied with noncanonical profile or codec pins".into(),
+                    detail: "work identifier supplied with noncanonical profile or codec pins"
+                        .into(),
                 });
             }
             return Ok(Self::tower256_dot_product(request_bytes));
@@ -113,30 +123,42 @@ impl NativeWorkRequestDto {
         }
     }
 
-    pub fn request_bytes(&self) -> &[u8] { &self.request_bytes }
+    pub fn request_bytes(&self) -> &[u8] {
+        &self.request_bytes
+    }
 }
 
 impl NativeReplyDto {
-    pub fn response_bytes(&self) -> &[u8] { &self.response_bytes }
-    pub fn into_response_bytes(self) -> Box<[u8]> { self.response_bytes }
+    pub fn response_bytes(&self) -> &[u8] {
+        &self.response_bytes
+    }
+    pub fn into_response_bytes(self) -> Box<[u8]> {
+        self.response_bytes
+    }
 }
 
-pub fn dispatch_native(
-    request: NativeWorkRequestDto,
-) -> Result<NativeReplyDto, NativeErrorDto> {
+pub fn dispatch_native(request: NativeWorkRequestDto) -> Result<NativeReplyDto, NativeErrorDto> {
     match request.work {
         NativeWorkTag::Work0 => {
-            let response = crate::native_dispatch::tower256_dot_product_bytes(&request.request_bytes).map_err(|error| NativeErrorDto {
-                kind: NativeErrorKind::ExecutionFailure,
-                detail: error.to_string(),
-            })?;
+            let response =
+                crate::native_dispatch::tower256_dot_product_bytes(&request.request_bytes)
+                    .map_err(|error| NativeErrorDto {
+                        kind: NativeErrorKind::ExecutionFailure,
+                        detail: error.to_string(),
+                    })?;
             if response.len() != WORK_0_RESPONSE_WIDTH {
                 return Err(NativeErrorDto {
                     kind: NativeErrorKind::ExecutionFailure,
-                    detail: format!("native response has {} bytes, expected {}", response.len(), WORK_0_RESPONSE_WIDTH),
+                    detail: format!(
+                        "native response has {} bytes, expected {}",
+                        response.len(),
+                        WORK_0_RESPONSE_WIDTH
+                    ),
                 });
             }
-            Ok(NativeReplyDto { response_bytes: response.into_boxed_slice() })
+            Ok(NativeReplyDto {
+                response_bytes: response.into_boxed_slice(),
+            })
         }
     }
 }

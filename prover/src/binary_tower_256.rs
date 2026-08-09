@@ -17,9 +17,10 @@
 //!
 //! `Theory.BinaryTowerFanPaar` and `Theory.BinaryTowerTrace` prove analogous
 //! identities for Lean's abstract tower. They do not prove this four-limb code
-//! or bind its byte representation. `[BTOWER256-RUST-UNVERIFIED]` is the honest
-//! seam: this is a Rust-selected profile with empirical native tests only, and
-//! no compiled generated adapter currently checks or invokes it.
+//! as a refinement. `[BTOWER256-RUST-UNVERIFIED]` remains the honest seam: the
+//! Lean-generated native catalog now pins and invokes one byte-only dot-product
+//! adapter, but Lean's canonical decoder and selected checker retain all
+//! acceptance authority over its returned bytes.
 
 use core::fmt;
 
@@ -324,6 +325,5 @@ mod tests {
                 .unwrap()
                 .mul(Tower256::embed_gf2_64(small_b).unwrap())
         );
-
     }
 }

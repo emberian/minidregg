@@ -55,6 +55,14 @@ private def responseWidth : ByteCodecShape → Nat
   | .tower256PairVectorsU32LE => 0
   | .tower256CoordinateLE => 32
 
+private def requestShapeConstants (stem : String) : ByteCodecShape → List String
+  | .tower256PairVectorsU32LE =>
+      ["pub const " ++ stem ++ "_REQUEST_COUNT_WIDTH: usize = 4;",
+       "pub const " ++ stem ++ "_REQUEST_COORDINATE_WIDTH: usize = 32;",
+       "pub const " ++ stem ++ "_REQUEST_VECTOR_ARITY: usize = 2;"]
+  | .tower256CoordinateLE =>
+      ["pub const " ++ stem ++ "_REQUEST_COORDINATE_WIDTH: usize = 32;"]
+
 private def kernelFunction : KernelTag → String
   | .tower256DotProduct => "crate::native_dispatch::tower256_dot_product_bytes"
 
@@ -71,7 +79,8 @@ private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String 
    "pub const " ++ stem ++ "_RESPONSE_CODEC_ID_DECIMAL: &str = " ++
      rustDecimal profile.responseCodec.codecId ++ ";",
    "pub const " ++ stem ++ "_RESPONSE_WIDTH: usize = " ++
-     toString (responseWidth profile.responseCodec.shape) ++ ";"]
+     toString (responseWidth profile.responseCodec.shape) ++ ";"] ++
+    requestShapeConstants stem profile.requestCodec.shape
 
 private def requestConstructor (ordinal : Nat) (profile : WorkProfile) : List String :=
   ["    pub fn " ++ kernelConstructor profile.kernel ++ "(request_bytes: Box<[u8]>) -> Self {",
