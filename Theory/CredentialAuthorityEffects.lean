@@ -196,7 +196,7 @@ structure AttenuateEvidence {M : Materializer} (domain : ProjectionUniverse)
   parentExact : readCapability pre kind declaration.parentId = some parent
   parentIdExact : parent.head.id = declaration.parentId
   parentLineageValid : LineageValid parent
-  strict : StrictAttenuates declaration.child parent.head
+  strict : declaration.child.StrictAttenuates parent.head
   childSlotFresh : readCapability pre kind declaration.child.id = none
   nullifierFresh : isNullified pre declaration.operationNullifier = false
   issuerCurrent : declaration.child.issuerEpoch =
