@@ -4,10 +4,6 @@ use minidregg_prover::{
         prove_logup256_single, semantic_index_bundle_root, verify_logup256_single,
         verify_logup256_single_bound, Logup256Error,
     },
-    semantic_lookup::{
-        bind_semantic_lookup_clause, semantic_lookup_native_binding, verify_semantic_lookup_clause,
-        verify_semantic_lookup_native_binding,
-    },
 };
 
 #[test]
@@ -33,21 +29,6 @@ fn tower256_logup_single_looker_end_to_end_smoke() {
     let unrelated_bundle =
         minidregg_prover::binary_hash::BinaryRoot::from_bytes(unrelated_bundle_bytes);
     assert!(!verify_logup256_single_bound(&unrelated_bundle, &statement, &proof).unwrap());
-
-    let clause = bind_semantic_lookup_clause(statement.clone(), proof.clone()).unwrap();
-    assert!(verify_semantic_lookup_clause(&semantic_bundle, &clause).unwrap());
-    assert!(!verify_semantic_lookup_clause(&unrelated_bundle, &clause).unwrap());
-    let receipt_binding = semantic_lookup_native_binding(&clause);
-    assert_eq!(receipt_binding.commitment_root, semantic_bundle);
-    assert!(verify_semantic_lookup_native_binding(&receipt_binding, &clause).unwrap());
-
-    let mut root_splice = receipt_binding.clone();
-    root_splice.commitment_root = unrelated_bundle;
-    assert!(!verify_semantic_lookup_native_binding(&root_splice, &clause).unwrap());
-
-    let mut statement_splice = clause.clone();
-    statement_splice.statement_id[0] ^= 1;
-    assert!(!verify_semantic_lookup_clause(&semantic_bundle, &statement_splice).unwrap());
 
     let mut tampered = proof.clone();
     tampered.evaluation_value = tampered.evaluation_value.add(Tower256::ONE);

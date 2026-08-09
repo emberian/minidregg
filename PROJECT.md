@@ -114,8 +114,8 @@ The first formal substrate is already present in:
 | Dialect | Native work | Current proof direction | Boundary that must stay explicit |
 |---|---|---|---|
 | **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)` execution, `GF(2^256)` challenges, additive LCH/FRI, trace-linear retirement | Rust kernels are unverified compute; generated Lean authority, CR/ROM composition, and an outer large-challenge accumulator remain |
-| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Factored gate sumcheck and sampled committed-trace opening | Coherent proximity, subfield provenance, and runtime/Lean refinement |
-| **Lookup / RAM** | Range, decode, tables, sparse state buses | Tower256 LogUp* now proves each committed index column Boolean, reconstructs the canonical incidence relation, and exposes one ordered index-bundle root through `SemanticLookupClause`; the typed receipt carries its relation id, statement id, and exact bundle root; `LogupIndexLink` proves the formal unit-vector/pushforward semantics | CR/ROM/proximity and the later Twist/Shout mutable-state layer remain |
+| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Factored gate sumcheck and sampled committed-trace opening | Coherent proximity, subfield provenance, and Lean-owned control that rechecks native compute |
+| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses, unit-vector incidence, and the exact pushforward; Tower256 Rust remains an unverified compute prototype | Lean emission of the lookup clause/bundle, CR/ROM/proximity, and the later Twist/Shout mutable-state layer remain; the handwritten Rust semantic adapter was deleted |
 | **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Exact bignum/cross-modulus equations and ring-native receipts | Naive field lookup over cyclotomic rings is unsound; canonical limbs/ranges or indexed ring protocols are mandatory |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
 
@@ -160,11 +160,12 @@ mistake at the relation boundary; code membership, shared-ROM composition, and t
 protocol remain absent by name. [`Assurance/SemanticReceiptRuntimeCodec.lean`](Assurance/SemanticReceiptRuntimeCodec.lean)
 proves the exact Rust `16 binding cells ++ 3*k+slot` layout, injectivity of the fixed 32-byte/u16
 packing, both residual lanes, and the bound `AccClaim` fold. Runtime
-[`prover/src/semantic_turn_receipt.rs`](prover/src/semantic_turn_receipt.rs) admits through one
-complete request-indexed verifier portal, hashes the canonical typed header, and places those
-sixteen digest cells inside the committed relation word. Native clause bindings include the exact
-Tower256 lookup relation, statement, and index-root bundle. The remaining refinement is the full
-byte-for-byte theorem connecting Rust's header encoder to the Lean typed wrapper.
+[`Compiler/SemanticTurnReceiptDescriptor.lean`](Compiler/SemanticTurnReceiptDescriptor.lean)
+projects the existing Lean relation through the existing AIR/emit path, proves descriptor
+acceptance iff the authoritative bound relation, and emits the field/layout/tag/constraint
+artifact. The handwritten Rust typed-turn verifier and lookup receipt adapter were deleted; no
+native module may reconstruct those decisions. Full authorization/effect/disclosure/header-preimage
+arithmetization and emitted online control remain.
 
 ## Reactive UI and tools
 
@@ -211,10 +212,15 @@ The implementation sequence is:
 Each development step closes **one edge in the composition graph**:
 
 1. state the exact relation and the false neighboring claim;
-2. land the formal theorem or executable verifier that owns that edge;
-3. run one focused firing example with at least one substitution/refutation tooth;
-4. update [`GOAL.md`](GOAL.md) with evidence and this document only when a design decision changes;
-5. defer broad test matrices, benchmarks, and presentation work until a complete path exists.
+2. land the formal theorem or Lean-emitted controller that owns that edge;
+3. commit that thematic edge immediately, whether or not the tree is green;
+4. add a focused substitution/refutation tooth when it advances the construction, then commit the
+   fix forward instead of holding unrelated work for a test gate;
+5. update [`GOAL.md`](GOAL.md) with evidence and this document only when a design decision changes;
+6. defer broad test matrices, benchmarks, and presentation work until a complete path exists.
+
+Commits are the development journal: small, thematic, frequent, and never delayed for a broad
+verification ritual. A later compile or theorem failure becomes a new fix-forward commit.
 
 No step may add a second semantic implementation in Rust. New Rust is either generated glue or a
 clearly labeled unverified computational kernel invoked through a Lean-emitted interface.
@@ -224,8 +230,9 @@ are used for genuinely expensive builds or measurements, not repetitive ritual.
 
 ## Ordered frontier
 
-1. Replace the handwritten Rust semantic-turn/header mirror with a Lean-owned codec and generated
-   artifact/API. The current runtime header is an executable prototype, not a refinement target.
+1. Extend the landed Lean semantic-receipt artifact from the frame nucleus to the complete typed
+   request, authorization, effects, disclosures, native clauses, and header preimage; emit online
+   control from the same declaration.
 2. Implement one real unbounded outer accumulation step and decider with its extraction statement.
 3. Join `ReceiptDelta` to promises, UI projections, and tool completion receipts in the executable
    semantic machine.

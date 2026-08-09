@@ -81,26 +81,24 @@ commitment/query/protocol join over the fast tower arithmetic. WGPU is explicitl
 disposable.
 
 ## Done-log (recent)
-- 2026-08-09 ★★★★★ **Typed runtime header → bound accumulated word** ✓:
-  `semantic_turn_receipt.rs` admits commit/reject through one verifier portal indexed by the complete
-  typed request, hashes the canonical header, and places the resulting 32-byte binding into sixteen
-  little-endian u16 cells ahead of the pre/post/touched relation word. Native clauses are ordered
-  relation/statement/root triples; `semantic_lookup.rs` now projects the Tower256 indexed lookup
-  into that exact header shape and verifies it without an external expected-root parameter.
+- 2026-08-09 ★★★★★ **Lean-owned semantic receipt descriptor** ✓:
   `SemanticReceiptRuntimeCodec.lean` proves the bound runtime index equivalence, fixed digest-pair
-  packing injectivity, relation satisfaction, and native `AccClaim` fold. Focused tests reject
-  target, native-root, frame, header-binding, and rejection/post substitution. The remaining codec
-  seam is the full byte-for-byte Rust header encoder ↔ Lean typed wrapper theorem; the real
-  WARP/FACS outer accumulator remains next.
+  packing injectivity, relation satisfaction, and native `AccClaim` fold.
+  `Compiler/SemanticTurnReceiptDescriptor.lean` compiles the sole authoritative Boolean/frame
+  relation through the existing AIR and emit path, proves emitted descriptor acceptance iff the
+  bound relation, and emits field/layout/tag/constraint metadata. The audit caught a Rust-only
+  `Threshold` authorization mode absent from Lean; the handwritten Rust typed-turn verifier and
+  semantic lookup receipt adapter were deleted rather than called mirrors/refinements. Remaining:
+  extend Lean emission to the full header/auth/effect/disclosure/native-clause semantics and then
+  build the real WARP/FACS outer accumulator.
 - 2026-08-09 ★★★★★ **Tower256 indexed lookup → semantic root bundle** ✓:
   `Loom/LogupIndexLink.lean` proves that canonical decoded address-bit columns are Boolean, their
   incidence row is the literal unit vector at the fixed index, and incidence scattering equals
   `logupPushforward`. Runtime LogUp v2 now runs a roots-before-challenge cubic Booleanity zerocheck
   plus sampled opening for every index root, then binds the ordered root vector and shape into one
-  cSHAKE semantic bundle. `semantic_lookup.rs` binds the full native statement digest and verifies
-  the proof against an independently supplied receipt root; Booleanity-message, bundle, and
-  statement splices reject in the focused smoke. The typed runtime header now carries the exact
-  relation/statement/bundle triple; proximity/CR/ROM/refinement and mutable RAM remain.
+  cSHAKE semantic bundle. The former handwritten Rust receipt adapter was deleted; its exact
+  relation/statement/bundle projection must be emitted from Lean. Proximity/CR/ROM and mutable RAM
+  remain.
 - 2026-08-09 ★★★★★ **Typed receipt admission → accumulated core** ✓:
   `Assurance/SemanticTurnReceipt.lean` requires every committed outcome to carry authorization
   indexed by the complete request, an exact effect digest and effect-to-`ReceiptDelta` semantics,

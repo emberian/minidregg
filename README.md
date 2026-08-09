@@ -24,7 +24,7 @@ experiment and can be replaced wholesale as the protocol evolves.
 
 | Surface | What has landed | Exact boundary |
 |---|---|---|
-| **Derived arithmetization** | `Compiler/Air` proves the executor and circuit readings agree; flattening produces degree-≤2 gates; `Compiler/Emit` produces a serializable descriptor with `emit_faithful`. `Theory/Bignum` owns fixed-width little-endian limbs, and `Compiler/AirBignum` emits range-checked carry addition with exact integer soundness and overflow rejection. | This proves what emitted constraints mean, including the landed bignum addition gadget. Rust/WGSL execution is not formally refined to Lean; multiplication and broader application-language lowering remain separate work. |
+| **Derived arithmetization** | `Compiler/Air` proves the executor and circuit readings agree; flattening produces degree-≤2 gates; `Compiler/Emit` produces a serializable descriptor with `emit_faithful`. `Theory/Bignum` owns fixed-width little-endian limbs, and `Compiler/AirBignum` emits range-checked carry addition with exact integer soundness and overflow rejection. | This proves what emitted constraints mean, including the landed bignum addition gadget. Rust/WGSL has no semantics here: it is unverified compute whose outputs must be rechecked by Lean-owned control. Multiplication and broader application-language lowering remain separate work. |
 | **Multiplicative RS proximity** | Ordinary unique-decoding results, an unconditional one-third-UD band, and `HalfThreshold*`: one round halves the radius outside at most one field challenge, followed by a proved UD tail. The committed transcript, adaptive earliest-deviation argument, and coherent runtime-shaped query paths are assembled at `m·b/|F| + (1−τ)^q`; the rate-1/2 `δ=3/10 → 3/20<1/6` specialization is machine-checked. | Concrete Merkle collision resistance and the single-ROM Fiat–Shamir reduction remain cryptographic/composition floors. The coherent theorem is multiplicative; it is not silently reused for characteristic-two additive folding. |
 | **Johnson/list regime** | `JohnsonRegime` proves the list-size inequality and exact sampling amplification. `JohnsonMcaBridge` imports the exact theorem interface and constants from Haböck 2025/2110, corrects the paper/Loom degree convention to `ρ_H=(d−1)/n`, and proves that one `m=max(3,d)` instance covers Loom's rounded Johnson target. | The hard BCIKS/GS/Hensel algebraic proof is still the explicit proposition `HaboeckTheorem2`, not a local theorem or axiom. Thus the Johnson MCA seam is exact and conditional, not yet machine-proved end to end. There is **no blanket capacity claim**: capacity-level variants have counterexamples. |
 | **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` now close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. Rust has Fan–Paar `GF(2^64)`, a shift-aware `O(n log n)` transform, cSHAKE commitments/transcript, sampled multi-round FRI, an OOD quotient PCS, and arbitrary trace-linear retirement. | Those Rust paths are unverified compute/conformance oracles, not refinements. Generated Lean authority, basis/order correspondence, CR/shared-XOF composition, and the outer accumulator remain. |
@@ -101,12 +101,12 @@ bits are Boolean; `(1−touched)·(post−pre)=0` enforces the frame; the zero s
 `ReceiptDelta`; and two valid fixed-shape words enter and fold through Loom's actual `AccClaim`.
 `Assurance/SemanticTurnReceipt` now makes admission precede that projection: a commit carries
 authorization for the exact request, exact effect/delta semantics, permitted disclosures, and
-bound roots; reject has no post-state. Runtime `semantic_turn_receipt` verifies that same complete
-request through one portal, commits the canonical header digest as sixteen little-endian u16 cells,
-and includes those cells in the Ext6 relation word. `SemanticReceiptRuntimeCodec` proves the
-`binding ++ 3*k+slot` layout, injectivity of the fixed 32-byte packing, and bound-claim fold. It does
-not yet prove that every Rust header byte denotes the complete Lean wrapper, nor implement the WARP
-IOR/decider/extractor.
+bound roots; reject has no post-state. `SemanticReceiptRuntimeCodec` proves the
+`binding ++ 3*k+slot` layout, injectivity of the fixed 32-byte packing, and bound-claim fold.
+`Compiler/SemanticTurnReceiptDescriptor` compiles that existing relation through the existing AIR
+and emit path and produces the first-order deployment artifact. The handwritten Rust typed-turn
+verifier and lookup receipt adapter were deleted. Complete header-preimage/auth/effect/disclosure
+emission and the WARP IOR/decider/extractor remain.
 
 `semantic_receipt_relation` is the matching exhaustive Rust reference. It checks the same
 quadratics, canonically lifts the header-bound BabyBear semantic word into Ext6, commits the exact

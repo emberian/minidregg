@@ -304,7 +304,7 @@ end CommittedProjection
 /-- The first-order artifact contains all layout numbers downstream code
 previously reconstructed and the actual Lean-emitted descriptor it executes.
 It is generated glue into unverified compute, not a Rust semantic model and not
-the subject of a Rust-refinement theorem. -/
+the subject of any theorem about Rust execution. -/
 structure RustArtifactSurface where
   semanticVersion : Nat
   fieldModulus : Nat

@@ -7,7 +7,8 @@ old rungs have largely landed in CPU reference form, and the GPU fold is now del
 
 The `prover/` crate is **unverified compute downstream of the verified emit seam**. It consumes a
 `ConstraintDescriptor` produced by `Compiler/Emit.lean`; it does not author an AIR. Lean proves
-`emit_faithful`, while Rust tests supply conformance evidence rather than a refinement proof.
+`emit_faithful`. Rust has no semantics in this project; native tests are only engineering evidence
+for unverified compute, whose outputs Lean-owned control must recheck.
 
 The crate contains:
 
