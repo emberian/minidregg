@@ -295,7 +295,7 @@ def TranscriptDomains.portal
 /-- Concrete first-order Tower256 profile obligations.  The codec is selected
 by Lean and every encoded field value is exactly 32 bytes.  This still does
 not identify an abstract Lean field element with Rust's four `u64` limbs. -/
-structure Tower256Profile (F : Type) where
+structure Tower256Profile (F : Type) [Field F] where
   carrier : CarrierProfile
   profileId : Digest
   towerId : Digest
@@ -303,6 +303,8 @@ structure Tower256Profile (F : Type) where
   representationId : Digest
   carrierExact : carrier =
     .gf2Tower profileId towerId basisId representationId 256
+  characteristic : CharP F 2
+  cardinality : Nat.card F = 2 ^ 256
   valueCodecPin : CodecPin
   valueCodec : LawfulCodec F
   valueWidthExact : forall value, (valueCodec.encode value).length = 32
@@ -310,7 +312,7 @@ structure Tower256Profile (F : Type) where
 /-- One backend shares a literal cSHAKE object between its Merkle tree and
 global transcript.  There is no opportunity to splice another hash function
 while retaining this type. -/
-structure Backend (F : Type) where
+structure Backend (F : Type) [Field F] where
   tower : Tower256Profile F
   cshake : Cshake256
   merkle : MerkleDomains cshake
@@ -318,7 +320,7 @@ structure Backend (F : Type) where
 
 namespace Backend
 
-variable {F : Type}
+variable {F : Type} [Field F]
 
 /-- Build an identity-representation Tower256 column port.  Semantic and
 representation codecs are the same selected 32-byte codec. -/
