@@ -846,6 +846,34 @@ theorem challenge_before_root_unrepresentable :
     ¬ Nonempty (RootAnchor Ledger.empty) :=
   empty_has_no_root_anchor
 
+/-- Every recorded draw's root-prefix count is authentic: it is bounded by
+the final append-only root list of the trace which carries it.  Concrete
+clauses may therefore bind required commitments by membership in
+`roots.take draw.priorRootCount`, rather than trusting caller timestamps. -/
+theorem ExecutionTrace.draw_priorRootCount_le
+    {State : Type} {portal : GlobalTranscriptPortal State}
+    {transcriptDomain : Digest} {transcript : TranscriptState portal}
+    {ledger : Ledger}
+    (trace : ExecutionTrace portal transcriptDomain transcript ledger) :
+    forall draw, draw ∈ ledger.draws ->
+      draw.priorRootCount ≤ ledger.roots.length := by
+  induction trace with
+  | initial seed => simp [Ledger.empty]
+  | absorbPublic prior context induction => exact induction
+  | root prior column induction =>
+      intro draw member
+      have bounded := induction draw member
+      simpa [Ledger.addRoot] using Nat.le.step bounded
+  | draw prior role ordinal derived next resultExact induction =>
+      intro draw member
+      simp only [Ledger.addDraw, List.mem_append, List.mem_singleton] at member
+      rcases member with priorMember | rfl
+      · exact induction draw priorMember
+      · simp [Ledger.addDraw, DerivedChallenge.record]
+  | native prior call bytes accepted induction => exact induction
+  | opening prior opening rootPresent induction => exact induction
+  | reprEq prior edge sourcePresent targetPresent induction => exact induction
+
 @[simp] theorem native_error_blocks_query
     {Error State : Type}
     {portal : GlobalTranscriptPortal State} {runner : NativeRunner Error}
