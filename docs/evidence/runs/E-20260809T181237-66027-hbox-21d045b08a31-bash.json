@@ -1,0 +1,90 @@
+{
+  "schema": "minidregg/remote-evidence/v2",
+  "runId": "E-20260809T181237-66027-hbox-21d045b08a31-bash",
+  "source": {
+    "requestedRevision": "21d045b08a315f0c1bbcddcbfb0543f141d7b866",
+    "commit": "21d045b08a315f0c1bbcddcbfb0543f141d7b866",
+    "tree": "3081ccf3e702b306afffb028561d6cf87fe76f5a",
+    "dirty": false,
+    "archiveSha256": "c92186166e705bbbff12a38d839caf47ff1dd5d9d2450e5c2b89d0609b978948",
+    "leanToolchainSha256": "54727eec5cba149c18842e6deb5c41b369d66455c93ce135d7d5347c782b2325",
+    "lakeManifestSha256": "adfbabe1a7e53e7759216079326e26786c57f62203255595ebe6b7df4f1323bb",
+    "rustToolchainSha256": "09f4296a78c78a96f71b80d4feca5664cfdce14e8a2fd34498ef6a0eb4a916ec",
+    "fileManifest": {
+      "file": "E-20260809T181237-66027-hbox-21d045b08a31-bash.source.sha256",
+      "sha256": "e563c8c7cee7867ab8682fefb92ab7479ff79db3f77586af372d3fd9ce487b3e"
+    }
+  },
+  "dependencies": {
+    "seedKey": "v2-54727eec5cba149c18842e6d-adfbabe1a7e53e7759216079",
+    "runLocalTree": true,
+    "copyMode": "hardlink-readonly-with-private-metadata",
+    "revisionManifest": {
+      "file": "E-20260809T181237-66027-hbox-21d045b08a31-bash.dependencies.tsv",
+      "sha256": "3e6a7faddbc876c072e8dfb7ebc5dcae2eb3b8ffed3e816365f27283132f428b"
+    }
+  },
+  "command": [
+    "bash",
+    "scripts/run-sparse-equality-benchmark.sh"
+  ],
+  "resolvedExecutable": "/usr/bin/bash",
+  "worker": {
+    "hostname": "hbox",
+    "uname": "Linux hbox 6.11.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 13 20:29:41 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900",
+    "threads": 24,
+    "memoryKiB": 129319636,
+    "gpu": "00:02.0 Display controller: Intel Corporation AlderLake-S GT1 (rev 0c)\n03:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 22 [Radeon RX 6700/6700 XT/6750 XT / 6800M/6850M XT] (rev c0)",
+    "tools": {
+      "elan": {
+        "path": "/home/hbox/.elan/bin/elan",
+        "version": "elan 4.2.3 (b6cec7e10 2026-06-08)"
+      },
+      "lake": {
+        "path": "/home/hbox/.elan/bin/lake",
+        "version": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)"
+      },
+      "lean": {
+        "path": "/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0/bin/lean",
+        "version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)"
+      },
+      "cargo": {
+        "path": "/home/hbox/.cargo/bin/cargo",
+        "version": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)"
+      },
+      "rustc": {
+        "path": "/home/hbox/.cargo/bin/rustc",
+        "version": "rustc 1.98.0-nightly (8b6558a02 2026-06-20)"
+      }
+    },
+    "remoteRun": "/tank/dregg-build/minidregg-checks/runs/run-21d045b08a31-OhSzhk55",
+    "alias": "hbox",
+    "limits": {
+      "cpuSet": "0-7",
+      "virtualMemoryKiB": 67108864,
+      "timeout": "45m",
+      "killAfterSeconds": 30
+    }
+  },
+  "startedAt": "2026-08-09T18:12:37Z",
+  "finishedAt": "2026-08-09T18:13:23Z",
+  "result": {
+    "runnerExit": 0,
+    "commandExit": 0,
+    "sourceIntegrityExit": 0
+  },
+  "rawLog": {
+    "file": "E-20260809T181237-66027-hbox-21d045b08a31-bash.log",
+    "sha256": "e75fdf144a66bfb79bb587c6320fc8ecfdc4d45c6e603cb21f5bed64b9226b4a"
+  },
+  "projectOleans": {
+    "file": "E-20260809T181237-66027-hbox-21d045b08a31-bash.oleans.sha256",
+    "sha256": "1c62e9159fd0bc2501712c725e861de491231543869580374c7c4c37b47105db"
+  },
+  "sourceIntegrity": {
+    "file": "E-20260809T181237-66027-hbox-21d045b08a31-bash.source-integrity.log",
+    "sha256": "ceef638933ab08b6cabeda2e6c074369ade4dc12eeb4726712def531109d17ec"
+  },
+  "claimCeiling": "Exact explicit-commit source/dependency/build evidence only; not a benchmark, native-semantics claim, or cryptographic-security claim."
+}

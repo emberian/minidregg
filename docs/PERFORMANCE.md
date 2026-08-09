@@ -27,6 +27,54 @@ worker-memory assumptions before these passing records were promoted. See
 [`D-0003`](decisions/D-0003-remote-evidence.md) and
 [`scripts/remote-check.sh`](../scripts/remote-check.sh).
 
+## Dense/sparse equality-functional crossover — 2026-08-09
+
+This is the first routing benchmark whose two paths target the same Lean expression.
+[`mle_sparseTable`](../Compiler/SparseEqualityWorkProfile.lean) proves that MLE evaluation of a
+dense scatter-added table equals direct equality-weight accumulation over the active address rows.
+It also owns the exact `m = 12`, density, and repetition profile emitted to the native harness.
+There is still no Lean/Rust refinement theorem: the Rust run checks the two native outputs are equal
+on each deterministic fixture before timing them.
+
+The dense kernel was first changed from `O(m 2^m)` independent products to the exact prefix
+recurrence (`O(2^m)`) that shares each equality prefix. The measured plans are then:
+
+* dense: materialize 4,096 equality weights and a 4,096-element scattered table, then dot them;
+* sparse: evaluate the 12 equality factors and row-value product only at each active address.
+
+The Lean profile counts `12,286` multiplications for the dense plan and `13q` for `q` active rows;
+it also records 262,144 bytes of dense plan-specific live `Tower256` buffers. Common inputs,
+allocator metadata, and cache effects are excluded from that byte count.
+
+```sh
+bash scripts/run-sparse-equality-benchmark.sh
+```
+
+Exact immutable commit: `21d045b08a315f0c1bbcddcbfb0543f141d7b866`. The raw runs are
+[`hbox`](evidence/runs/E-20260809T181237-66027-hbox-21d045b08a31-bash.json) and
+[`persvati`](evidence/runs/E-20260809T181238-66028-persvati-21d045b08a31-bash.json); both command
+and post-run source-integrity checks passed. Their evidence envelopes authenticate source,
+dependencies, host, limits, and raw output; they do not turn wall-clock samples into a native
+semantics, proof-security, SIMD/GPU, or production-prover claim.
+
+| active rows | density | hbox dense/sparse | persvati dense/sparse | observed route |
+|---:|---:|---:|---:|---|
+| 64 | 1.5625% | 12.044× | 12.069× | sparse |
+| 256 | 6.25% | 3.017× | 2.995× | sparse |
+| 512 | 12.5% | 1.508× | 1.501× | sparse |
+| 768 | 18.75% | 1.005× | 1.011× | tie |
+| 1,024 | 25% | 0.749× | 0.844× | dense |
+| 4,096 | 100% | 0.189× | 0.188× | dense |
+
+Here `dense/sparse > 1` means sparse is faster. The two CPUs independently put the crossover at
+essentially 18.75% density. A conservative current routing policy is therefore sparse at or below
+12.5%, dense at or above 25%, and profile-dependent in between. This is not yet a universal
+threshold: it applies to the current scalar recursive `Tower256`, 4,096-point equality functional,
+and these allocation strategies. The architectural conclusion is narrower and stronger: the
+controller should retain both native work plans and select one from Lean-owned public shape data;
+forcing every lookup through a dense column, or forcing every dense table through address-native
+evaluation, leaves repeatable factors on the table.
+
 ## Archived full-trace reference baseline — 2026-08-09
 
 The benchmark and Rust-owned reference verifier were deleted. These numbers are historical evidence

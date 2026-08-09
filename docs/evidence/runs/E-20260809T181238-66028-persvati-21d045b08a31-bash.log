@@ -1,0 +1,16 @@
+run=E-20260809T181238-66028-persvati-21d045b08a31-bash
+commit=21d045b08a315f0c1bbcddcbfb0543f141d7b866
+tree=3081ccf3e702b306afffb028561d6cf87fe76f5a
+host_alias=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-21d045b08a31-74L2F9QW
+command=bash scripts/run-sparse-equality-benchmark.sh 
+resolved_executable=/usr/bin/bash
+schema,log_domain,domain_points,active_rows,density,dense_mul_count,sparse_mul_count,dense_extra_bytes,dense_us,sparse_us,dense_over_sparse,winner
+minidregg/sparse-equality-work-profile/v1,12,4096,64,0.01562500,12286,832,262144,138298.90,11458.69,12.0693,sparse
+minidregg/sparse-equality-work-profile/v1,12,4096,256,0.06250000,12286,3328,262144,137480.78,45897.02,2.9954,sparse
+minidregg/sparse-equality-work-profile/v1,12,4096,512,0.12500000,12286,6656,262144,137398.20,91548.85,1.5008,sparse
+minidregg/sparse-equality-work-profile/v1,12,4096,768,0.18750000,12286,9984,262144,138897.37,137418.88,1.0108,sparse
+minidregg/sparse-equality-work-profile/v1,12,4096,1024,0.25000000,12286,13312,262144,155004.83,183733.65,0.8436,dense
+minidregg/sparse-equality-work-profile/v1,12,4096,4096,1.00000000,12286,53248,262144,137281.07,728900.65,0.1883,dense
+command_exit=0
+source_integrity_exit=0
