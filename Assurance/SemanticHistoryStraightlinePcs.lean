@@ -14,7 +14,10 @@ whose fields state, rather than assume silently:
 * round root `j` is a function only of challenges before `j`;
 * every root commits the scheduled word and every fold root binds the literal
   linear combination;
-* the actual schedule terminates at the semantic head's word and root;
+* schedule genesis/link words are exact projections of the retained semantic
+  trace, whose challenges determine the actual execution;
+* terminal word/root equalities are derived from that trace and the schedule
+  laws rather than supplied by a caller;
 * verified distinct openings with `degree <= openedCount` feed the landed
   erasure-correction theorem; and
 * the straightline KS price has WARP's `(moves + rounds) * roundError` shape,
@@ -109,6 +112,28 @@ theorem foldRoot_commits_folded_word
   rw [← schedule.foldRootExact j challengesPrefix gamma,
     schedule.rootCommits, schedule.wordStep]
 
+/-- Restrict a schedule to an initial segment.  Prefix words and roots are
+literally the same functions, and no challenge at or after `kept` is made
+available. -/
+def truncate
+    (schedule : FoldRootSchedule C S foldRoot rounds)
+    (kept : Nat) (keptLe : kept ≤ rounds) :
+    FoldRootSchedule C S foldRoot kept where
+  initialWord := schedule.initialWord
+  linkWord := fun j => schedule.linkWord
+    ⟨j, lt_of_lt_of_le j.isLt keptLe⟩
+  wordAt := schedule.wordAt
+  rootAt := schedule.rootAt
+  initialWordExact := schedule.initialWordExact
+  rootCommits := schedule.rootCommits
+  initialCodeword := schedule.initialCodeword
+  linkCodeword := fun j => schedule.linkCodeword
+    ⟨j, lt_of_lt_of_le j.isLt keptLe⟩
+  wordStep := fun j => schedule.wordStep
+    ⟨j, lt_of_lt_of_le j.isLt keptLe⟩
+  foldRootExact := fun j => schedule.foldRootExact
+    ⟨j, lt_of_lt_of_le j.isLt keptLe⟩
+
 end FoldRootSchedule
 
 /-! ## Semantic-head binding -/
@@ -135,19 +160,112 @@ local notation "HistoryHead" => VerifiedHistoryHead
 def historyWords (head : HistoryHead) : List (BoundReceiptIx n → F) :=
   head.entries.map fun entry => entry.word
 
-/-- Bind one actual challenge schedule to a semantic head. The list equation
-ties every scheduled codeword to a verified semantic entry; the terminal
-equations tie the external schedule back to the head's authoritative folded
-word and root. -/
+/-- The genesis word derived from the authoritative proof-relevant fold
+trace. -/
+def historyInitialWord (head : HistoryHead) : BoundReceiptIx n → F :=
+  head.initialWord
+
+/-- The exact controller challenges retained by the authoritative fold
+trace.  These are not supplied by a proof consumer. -/
+def historyChallenges (head : HistoryHead) : Fin head.foldRounds → F :=
+  head.foldChallenges
+
+/-- The exact pre-challenge link words retained by the authoritative fold
+trace.  Every word is derived from a `VerifiedEntry`, including its semantic
+family and ordered clause evidence. -/
+def historyLinkWord (head : HistoryHead) :
+    Fin head.foldRounds → BoundReceiptIx n → F :=
+  head.foldLinkWord
+
+/-- A PCS fold schedule may choose its prefix-typed realization, but its
+genesis and per-round link words are exact projections of the authoritative
+history trace.  Challenges and terminal equations are deliberately absent:
+they are derived below from the trace and schedule laws. -/
 structure SemanticScheduleBinding
-    (head : HistoryHead) (rounds : Nat)
-    (schedule : FoldRootSchedule C S foldRoot rounds) where
-  challenges : Fin rounds → F
-  roundsSuccDepth : rounds + 1 = head.depth
-  entryWordsExact :
-    schedule.initialWord :: List.ofFn schedule.linkWord = historyWords head
-  finalWordExact : schedule.wordAt rounds challenges = head.foldedWord
-  finalRootExact : schedule.rootAt rounds challenges = head.accumulator.rt
+    (head : HistoryHead)
+    (schedule : FoldRootSchedule C S head.foldRoot head.foldRounds) where
+  initialWordExact : schedule.initialWord = historyInitialWord head
+  linkWordExact : ∀ j, schedule.linkWord j = historyLinkWord head j
+
+/-- Following the trace-retained challenges through any exactly bound
+prefix-typed schedule reaches the trace-indexed folded word. -/
+theorem FoldRootSchedule.wordAt_historyTrace
+    {rounds : Nat} {entries : List (VerifiedEntry
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := family)
+      (headerCells := headerCells) (C := C))}
+    {accumulator : AccClaim Digest F (BoundReceiptIx n)
+      (Fintype.card (BoundReceiptIx n))}
+    {foldedWord : BoundReceiptIx n → F}
+    {initialWord : BoundReceiptIx n → F}
+    {challenges : Fin rounds → F}
+    {linkWord : Fin rounds → BoundReceiptIx n → F}
+    {foldRoot : Digest → F → Digest → Digest}
+    (trace : HistoryFoldTrace manifest registry clauseEvidence family
+      headerCells C S foldRoot rounds entries accumulator foldedWord
+        initialWord challenges linkWord)
+    (schedule : FoldRootSchedule C S foldRoot rounds)
+    (initialWordExact : schedule.initialWord = initialWord)
+    (linkWordExact : ∀ j, schedule.linkWord j = linkWord j) :
+    schedule.wordAt rounds challenges = foldedWord := by
+  induction trace with
+  | start entry =>
+      calc
+        schedule.wordAt 0 (fun index => index.elim0) =
+            schedule.initialWord := schedule.initialWordExact
+        _ = entry.word := initialWordExact
+  | @append priorRounds priorEntries priorAccumulator priorWord
+      priorInitial priorChallenges priorLink prior entry gamma rootExact ih =>
+      let priorSchedule := schedule.truncate priorRounds (by omega)
+      have priorInitialExact : priorSchedule.initialWord = priorInitial := by
+        simpa [priorSchedule, FoldRootSchedule.truncate] using initialWordExact
+      have priorLinkExact : ∀ j, priorSchedule.linkWord j =
+          priorLink j := by
+        intro j
+        simpa [priorSchedule, FoldRootSchedule.truncate,
+          Fin.snoc_castSucc] using
+          linkWordExact j.castSucc
+      have priorFinal := ih priorSchedule priorInitialExact priorLinkExact
+      have priorFinal' :
+          schedule.wordAt priorRounds priorChallenges = priorWord := by
+        simpa [priorSchedule, FoldRootSchedule.truncate] using priorFinal
+      calc
+        schedule.wordAt (priorRounds + 1)
+            (Fin.snoc priorChallenges gamma) =
+            schedule.wordAt priorRounds
+                priorChallenges +
+              gamma • schedule.linkWord (Fin.last priorRounds) :=
+          schedule.wordStep (Fin.last priorRounds)
+            priorChallenges gamma
+        _ = priorWord + gamma • entry.word := by
+          rw [priorFinal']
+          rw [linkWordExact (Fin.last priorRounds)]
+          simp only [Fin.snoc_last]
+
+namespace SemanticScheduleBinding
+
+/-- The terminal word equation is a theorem, not caller-supplied schedule
+data. -/
+theorem finalWordExact
+    (head : HistoryHead)
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
+    (binding : SemanticScheduleBinding head schedule) :
+    schedule.wordAt head.foldRounds (historyChallenges head) =
+      head.foldedWord :=
+  schedule.wordAt_historyTrace head.foldTrace
+    binding.initialWordExact binding.linkWordExact
+
+/-- The terminal root equation follows from commitment exactness, the derived
+terminal word theorem, and the authoritative head's root binding. -/
+theorem finalRootExact
+    (head : HistoryHead)
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
+    (binding : SemanticScheduleBinding head schedule) :
+    schedule.rootAt head.foldRounds (historyChallenges head) =
+      head.accumulator.rt := by
+  rw [schedule.rootCommits, binding.finalWordExact head, head.rootBound]
+
+end SemanticScheduleBinding
 
 /-! ## External one-transcript PCS extractor and exact erasure bridge -/
 
@@ -179,9 +297,9 @@ callback or rewind operation exists. The only accepted values are verified by
 the existing binding commitment, and `extractIsErasureRecovery` fixes the
 extractor to the landed linear-code erasure algorithm. -/
 structure StraightlinePcsExtraction
-    (head : HistoryHead) {rounds : Nat}
-    (schedule : FoldRootSchedule C S foldRoot rounds)
-    (scheduleBinding : SemanticScheduleBinding head rounds schedule)
+    (head : HistoryHead)
+    (schedule : FoldRootSchedule C S head.foldRoot head.foldRounds)
+    (scheduleBinding : SemanticScheduleBinding head schedule)
     (Coin : Type) [Fintype Coin] [DecidableEq Coin]
     (Transcript : Type uTranscript) where
   transcript : Coin → Transcript
@@ -208,11 +326,10 @@ structure StraightlinePcsExtraction
         (opened (transcript coin) j) (values (transcript coin) j)
         (openingProofs (transcript coin) j)
 
-  ledger : KnowledgeErrorLedger Coin rounds ksFailure
+  ledger : KnowledgeErrorLedger Coin head.foldRounds ksFailure
 
 namespace StraightlinePcsExtraction
 
-variable {rounds : Nat}
 variable {Coin : Type} [Fintype Coin] [DecidableEq Coin]
 variable {Transcript : Type uTranscript}
 
@@ -221,19 +338,19 @@ failure event, one accepted transcript erasure-recovers exactly the semantic
 head's committed folded word. -/
 theorem extract_eq_semantic_head
     (head : HistoryHead)
-    {schedule : FoldRootSchedule C S foldRoot rounds}
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
     {scheduleBinding : SemanticScheduleBinding
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
+      (C := C) (S := S) head schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot)
+      (C := C) (S := S)
       head schedule scheduleBinding Coin Transcript)
     (coin : Coin) (accepted : pcs.accepts (pcs.transcript coin))
     (ksGood : ¬pcs.ksFailure coin) :
@@ -248,19 +365,19 @@ theorem extract_eq_semantic_head
 of the semantic head's accumulated Loom claim. -/
 theorem extract_satisfies_semantic_head
     (head : HistoryHead)
-    {schedule : FoldRootSchedule C S foldRoot rounds}
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
     {scheduleBinding : SemanticScheduleBinding
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
+      (C := C) (S := S) head schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot)
+      (C := C) (S := S)
       head schedule scheduleBinding Coin Transcript)
     (coin : Coin) (accepted : pcs.accepts (pcs.transcript coin))
     (ksGood : ¬pcs.ksFailure coin) :
@@ -273,19 +390,19 @@ The binding/ROM floor is an additive external envelope, not a proved event
 reduction; deterministic erasure contributes exactly zero. -/
 theorem knowledge_failure_le_totalEnvelope
     (head : HistoryHead)
-    {schedule : FoldRootSchedule C S foldRoot rounds}
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
     {scheduleBinding : SemanticScheduleBinding
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
+      (C := C) (S := S) head schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot)
+      (C := C) (S := S)
       head schedule scheduleBinding Coin Transcript) :
     uniformProb Coin pcs.ksFailure ≤ pcs.ledger.totalEnvelope := by
   refine le_trans pcs.ledger.knowledgeFailureBound ?_
@@ -296,22 +413,22 @@ theorem knowledge_failure_le_totalEnvelope
 interface equality, not a claim that this module constructed the RBR game. -/
 theorem knowledge_error_shape
     (head : HistoryHead)
-    {schedule : FoldRootSchedule C S foldRoot rounds}
+    {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}
     {scheduleBinding : SemanticScheduleBinding
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
+      (C := C) (S := S) head schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (Op := Op)
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells)
-      (C := C) (S := S) (foldRoot := foldRoot)
+      (C := C) (S := S)
       head schedule scheduleBinding Coin Transcript) :
     pcs.ledger.knowledgeError =
-      ((pcs.ledger.moveBudget : Real) + (rounds : Real)) *
+      ((pcs.ledger.moveBudget : Real) + (head.foldRounds : Real)) *
         pcs.ledger.roundError :=
   pcs.ledger.knowledgeErrorExact
 
@@ -320,6 +437,8 @@ end StraightlinePcsExtraction
 end Semantic
 
 #print axioms FoldRootSchedule.foldRoot_commits_folded_word
+#print axioms FoldRootSchedule.wordAt_historyTrace
+#print axioms SemanticScheduleBinding.finalRootExact
 #print axioms StraightlinePcsExtraction.extract_eq_semantic_head
 #print axioms StraightlinePcsExtraction.extract_satisfies_semantic_head
 #print axioms StraightlinePcsExtraction.knowledge_failure_le_totalEnvelope

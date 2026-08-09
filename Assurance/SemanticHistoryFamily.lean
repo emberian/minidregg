@@ -346,14 +346,20 @@ recommitment equation.  This is evidence about Loom's existing `foldClaims`;
 it does not introduce a second accumulator relation. -/
 inductive HistoryFoldTrace
     (foldRoot : Digest → F → Digest → Digest) :
-    Nat → List HistoryEntry →
+    (rounds : Nat) → List HistoryEntry →
       AccClaim Digest F (BoundReceiptIx n) (ChannelCount (n := n)) →
-      (BoundReceiptIx n → F) → Type _ where
+      (BoundReceiptIx n → F) →
+      (BoundReceiptIx n → F) →
+      (Fin rounds → F) →
+      (Fin rounds → BoundReceiptIx n → F) → Type _ where
   | start (entry : HistoryEntry) :
       HistoryFoldTrace foldRoot 0 [entry]
-        (entry.claim.acc (entry.receiptRoot S)) entry.word
-  | append {rounds entries accumulator foldedWord}
-      (prior : HistoryFoldTrace foldRoot rounds entries accumulator foldedWord)
+        (entry.claim.acc (entry.receiptRoot S)) entry.word entry.word
+        (fun index => index.elim0) (fun index => index.elim0)
+  | append {rounds entries accumulator foldedWord initialWord
+      challenges linkWord}
+      (prior : HistoryFoldTrace foldRoot rounds entries accumulator foldedWord
+        initialWord challenges linkWord)
       (entry : HistoryEntry) (gamma : F)
       (rootExact :
         foldRoot accumulator.rt gamma (entry.receiptRoot S) =
@@ -361,39 +367,29 @@ inductive HistoryFoldTrace
       HistoryFoldTrace foldRoot (rounds + 1) (entries ++ [entry])
         (foldClaims foldRoot accumulator
           (entry.claim.acc (entry.receiptRoot S)) gamma)
-        (foldedWord + gamma • entry.word)
+        (foldedWord + gamma • entry.word) initialWord
+        (Fin.snoc challenges gamma) (Fin.snoc linkWord entry.word)
 
 namespace HistoryFoldTrace
 
-variable {foldRoot : Digest → F → Digest → Digest}
-variable {rounds : Nat}
-variable {entries : List HistoryEntry}
-variable {accumulator :
-  AccClaim Digest F (BoundReceiptIx n) (ChannelCount (n := n))}
-variable {foldedWord : BoundReceiptIx n → F}
-
-/-- The genesis word, retained independently of the final fold. -/
-def initialWord : (trace : HistoryFoldTrace manifest registry clauseEvidence
-    family headerCells C S foldRoot rounds entries accumulator foldedWord) →
-    BoundReceiptIx n → F
-  | .start entry => entry.word
-  | .append prior _ _ _ => initialWord prior
-
-/-- Controller challenges in exact append order. -/
-def challenges : (trace : HistoryFoldTrace manifest registry clauseEvidence
-    family headerCells C S foldRoot rounds entries accumulator foldedWord) →
-    Fin rounds → F
-  | .start _ => fun index => index.elim0
-  | .append prior _ gamma _ => Fin.snoc (challenges prior) gamma
-
-/-- Pre-challenge semantic link words in exact append order.  Each word still
-comes from the retained `VerifiedEntry`, which carries the complete semantic
-family and ordered clause evidence. -/
-def linkWord : (trace : HistoryFoldTrace manifest registry clauseEvidence
-    family headerCells C S foldRoot rounds entries accumulator foldedWord) →
-    Fin rounds → BoundReceiptIx n → F
-  | .start _ => fun index => index.elim0
-  | .append prior entry _ _ => Fin.snoc (linkWord prior) entry.word
+/-- The indexed trace has exactly one fold round per post-genesis entry. -/
+theorem rounds_succ_entries_length
+    {foldRoot : Digest → F → Digest → Digest}
+    {rounds : Nat} {entries : List HistoryEntry}
+    {accumulator :
+      AccClaim Digest F (BoundReceiptIx n) (ChannelCount (n := n))}
+    {foldedWord initialWord : BoundReceiptIx n → F}
+    {challenges : Fin rounds → F}
+    {linkWord : Fin rounds → BoundReceiptIx n → F}
+    (trace : HistoryFoldTrace manifest registry clauseEvidence family
+      headerCells C S foldRoot rounds entries accumulator foldedWord
+        initialWord challenges linkWord) :
+    rounds + 1 = entries.length := by
+  induction trace with
+  | start entry => rfl
+  | append prior entry gamma rootExact ih =>
+      simp only [List.length_append, List.length_singleton]
+      omega
 
 end HistoryFoldTrace
 
@@ -409,10 +405,14 @@ structure VerifiedHistoryHead where
   linked : LinkedEntries entries
   foldRoot : Digest → F → Digest → Digest
   foldRounds : Nat
+  initialWord : BoundReceiptIx n → F
+  foldChallenges : Fin foldRounds → F
+  foldLinkWord : Fin foldRounds → BoundReceiptIx n → F
   accumulator : AccClaim Digest F (BoundReceiptIx n) (ChannelCount (n := n))
   foldedWord : BoundReceiptIx n → F
   foldTrace : HistoryFoldTrace manifest registry clauseEvidence family
     headerCells C S foldRoot foldRounds entries accumulator foldedWord
+      initialWord foldChallenges foldLinkWord
   satisfies : AccClaim.Satisfies C accumulator foldedWord
   rootBound : accumulator.rt = S.commit foldedWord
   channelFixed : ∀ index,
@@ -430,6 +430,13 @@ def depth (head : HistoryHead) : Nat := head.entries.length
 def latestReceiptRoot (head : HistoryHead) : Digest :=
   head.latest.receiptRoot S
 
+/-- The retained fold schedule is definitionally the causal history tail;
+this was previously a caller-supplied schedule-binding premise. -/
+theorem foldRounds_succ_depth (head : HistoryHead) :
+    head.foldRounds + 1 = head.depth := by
+  exact HistoryFoldTrace.rounds_succ_entries_length manifest registry
+    clauseEvidence family headerCells C S head.foldTrace
+
 def start
     (foldRoot : Digest → F → Digest → Digest)
     (entry : HistoryEntry)
@@ -442,7 +449,8 @@ def start
   have hsatisfies : AccClaim.Satisfies C accumulator word :=
     (entry.claim.acc_satisfies_iff root word).mpr ⟨entry.codeword, rfl⟩
   exact VerifiedHistoryHead.mk [entry] entry (by simp)
-    (.start entry sequenceZero noPredecessor) foldRoot 0 accumulator word
+    (.start entry sequenceZero noPredecessor) foldRoot 0 word
+    (fun index => index.elim0) (fun index => index.elim0) accumulator word
     (.start entry) hsatisfies rfl (fun _ => rfl)
 
 @[simp] theorem start_depth
@@ -498,7 +506,9 @@ def append
     .append head.linked head.latestIsLast link.historyDomainExact
       link.sequenceExact link.predecessorExact link.stateExact
   exact VerifiedHistoryHead.mk (head.entries ++ [entry]) entry (by simp)
-    hlinked head.foldRoot (head.foldRounds + 1) accumulator word
+    hlinked head.foldRoot (head.foldRounds + 1) head.initialWord
+    (Fin.snoc head.foldChallenges gamma)
+    (Fin.snoc head.foldLinkWord entry.word) accumulator word
     (.append head.foldTrace entry gamma recommit.rootExact)
     hsatisfies hroot hfixed
 
@@ -550,6 +560,8 @@ end History
 #print axioms VerifiedEntry.toSumLeft
 #print axioms VerifiedEntry.toSumRight
 #print axioms VerifiedEntry.word_reject_atomic
+#print axioms HistoryFoldTrace.rounds_succ_entries_length
+#print axioms VerifiedHistoryHead.foldRounds_succ_depth
 #print axioms VerifiedHistoryHead.decider_complete_at_head
 #print axioms VerifiedHistoryHead.opened_decider_extracts_head
 

@@ -367,25 +367,24 @@ structure StraightlineCheckpointExtraction
       (family := family) (headerCells := headerCells) friS clause)
     (Coin : Type) [Fintype Coin] [DecidableEq Coin]
     (Transcript : Type uTranscript) where
-  foldRoot : Digest → F → Digest → Digest
-  semanticRounds : Nat
   schedule : FoldRootSchedule (checkpointCode friS clause checkpoint.padding)
-    (semanticCommitment friS checkpoint.padding) foldRoot semanticRounds
+    (semanticCommitment friS checkpoint.padding) checkpoint.head.foldRoot
+      checkpoint.head.foldRounds
   scheduleBinding : SemanticScheduleBinding
     (n := n) (F := F) (Op := FriOp 0)
     (manifest := manifest) (registry := registry)
     (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells)
     (C := checkpointCode friS clause checkpoint.padding)
-    (S := semanticCommitment friS checkpoint.padding) (foldRoot := foldRoot)
-    checkpoint.head semanticRounds schedule
+    (S := semanticCommitment friS checkpoint.padding)
+    checkpoint.head schedule
   pcs : StraightlinePcsExtraction
     (n := n) (F := F) (Op := FriOp 0)
     (manifest := manifest) (registry := registry)
     (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells)
     (C := checkpointCode friS clause checkpoint.padding)
-    (S := semanticCommitment friS checkpoint.padding) (foldRoot := foldRoot)
+    (S := semanticCommitment friS checkpoint.padding)
     checkpoint.head schedule scheduleBinding Coin Transcript
 
 namespace StraightlineCheckpointExtraction

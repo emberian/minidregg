@@ -294,6 +294,35 @@ local notation "BoundCheckpoint" => Checkpoint
   (registry := registry) (clauseEvidence := clauseEvidence)
   (family := family) (headerCells := headerCells) friS clause
 
+/-- The WARP dual-root view of a checkpoint is constructed from the
+authoritative trace-retained challenges.  The caller supplies only the PCS
+realization whose words are exactly bound to that trace. -/
+def historyDualRootSchedule
+    (checkpoint : BoundCheckpoint)
+    (joined : StraightlineCheckpointExtraction
+      (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
+      (manifest := manifest)
+      (registry := registry) (clauseEvidence := clauseEvidence)
+      (family := family) (headerCells := headerCells)
+      friS clause checkpoint Coin Transcript) :=
+  dualRootOfSchedule joined.schedule checkpoint.head.foldChallenges
+
+/-- Every pre-challenge WARP/BCS link word is the exact word indexed by the
+retained semantic history trace. -/
+theorem historyDualRootSchedule_linkWord_exact
+    (checkpoint : BoundCheckpoint)
+    (joined : StraightlineCheckpointExtraction
+      (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
+      (manifest := manifest)
+      (registry := registry) (clauseEvidence := clauseEvidence)
+      (family := family) (headerCells := headerCells)
+      friS clause checkpoint Coin Transcript)
+    (j : Fin checkpoint.head.foldRounds) :
+    (historyDualRootSchedule friS checkpoint joined).base.linkWord j =
+      checkpoint.head.foldLinkWord j := by
+  simpa [historyDualRootSchedule, historyLinkWord] using
+    joined.scheduleBinding.linkWordExact j
+
 /-- The semantic schedule's terminal post-challenge fold root is exactly the
 existing additive-FRI checkpoint's level-zero root.  No root-bridge premise is
 introduced: both equalities are already proved by the imported layers. -/
@@ -305,13 +334,12 @@ theorem terminal_root_eq_additive_initial
       (registry := registry) (clauseEvidence := clauseEvidence)
       (family := family) (headerCells := headerCells)
       friS clause checkpoint Coin Transcript) :
-    (dualRootOfSchedule joined.schedule
-      joined.scheduleBinding.challenges).terminalRoot =
+    (historyDualRootSchedule friS checkpoint joined).terminalRoot =
       clause.transcript.root 0 (fun i => i.elim0) := by
   calc
-    (dualRootOfSchedule joined.schedule
-        joined.scheduleBinding.challenges).terminalRoot =
-        checkpoint.head.accumulator.rt := joined.scheduleBinding.finalRootExact
+    (historyDualRootSchedule friS checkpoint joined).terminalRoot =
+        checkpoint.head.accumulator.rt :=
+      joined.scheduleBinding.finalRootExact checkpoint.head
     _ = clause.transcript.root 0 (fun i => i.elim0) :=
       (Checkpoint.initial_root_eq_semantic_head checkpoint).symm
 
@@ -324,6 +352,7 @@ without asserting that carrier join here. -/
 #print axioms DualRootSchedule.foldedRoot_after_challenge
 #print axioms DualRootSchedule.foldedRoot_commits_folded_word
 #print axioms BcsLinkOpenings.bcsRounds_exact
+#print axioms historyDualRootSchedule_linkWord_exact
 #print axioms terminal_root_eq_additive_initial
 
 end
