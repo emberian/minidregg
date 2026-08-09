@@ -39,7 +39,9 @@ case "$host" in
     remote_root=/home/ember/minidregg-checks
     remote_lake=/home/ember/.elan/bin/lake
     remote_cargo=/home/ember/.cargo/bin/cargo
-    package_candidate=
+    # Keep this a nonempty argv value: OpenSSH reconstructs a remote command
+    # string and would otherwise erase an empty positional argument.
+    package_candidate=/home/ember/.cache/minidregg-no-package-candidate
     ;;
   *)
     echo "unsupported worker '$host' (expected hbox or persvati)" >&2
