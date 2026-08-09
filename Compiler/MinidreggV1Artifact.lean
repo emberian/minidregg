@@ -4,8 +4,9 @@
 This module instantiates the generic semantic artifact boundary.  Every exported
 declaration is projected from an existing Lean declaration: the repository's typed
 authorization plan, a typed account-move declaration, a finite guarded reactive controller,
-and a same-opening disclosure declaration.  The dialect clauses remain opaque
-relation/codec pins; no native verifier semantics are reproduced here.
+and a same-opening disclosure declaration.  Carrier, codec, and bridge vocabulary
+is registered here, but no proof dialect is admitted without a concrete Lean
+controller supplied by an extension manifest.
 -/
 import Compiler.SemanticArtifactBundle
 
@@ -110,41 +111,10 @@ def ext6ToResidueRingBridge : NamedBridgeRequirement where
 def bridgeRegistry : List NamedBridgeRequirement :=
   [gf2ToExt6Bridge, ext6ToResidueRingBridge]
 
-/-- Opaque controller/proof-suite pins.  Registration here does not claim that the
-named proof suites are implemented; a native implementation remains completeness-only
-until Lean rechecks the relation named by its clause. -/
-def gf2DialectClause : DialectClauseDecl where
-  clauseId := id 401
-  relationId := id 411
-  carrierProfileId := gf2Carrier.id
-  statementCodecId := dialectStatementCodec.codecId
-  proofCodecId := dialectProofCodec.codecId
-  proofSuiteId := id 421
-  verifierControllerDigest := id 431
-  requiredBridgeIds := [gf2ToExt6Bridge.bridgeId]
-
-def ext6DialectClause : DialectClauseDecl where
-  clauseId := id 402
-  relationId := id 412
-  carrierProfileId := ext6Carrier.id
-  statementCodecId := dialectStatementCodec.codecId
-  proofCodecId := dialectProofCodec.codecId
-  proofSuiteId := id 422
-  verifierControllerDigest := id 432
-  requiredBridgeIds := [ext6ToResidueRingBridge.bridgeId]
-
-def residueRingDialectClause : DialectClauseDecl where
-  clauseId := id 403
-  relationId := id 413
-  carrierProfileId := residueRingCarrier.id
-  statementCodecId := dialectStatementCodec.codecId
-  proofCodecId := dialectProofCodec.codecId
-  proofSuiteId := id 423
-  verifierControllerDigest := id 433
-  requiredBridgeIds := [ext6ToResidueRingBridge.bridgeId]
-
-def clauseRegistry : List DialectClauseDecl :=
-  [gf2DialectClause, ext6DialectClause, residueRingDialectClause]
+/-- The base artifact deliberately admits no proof dialect.  Concrete proof dialects
+must extend this manifest with both a declaration and a Lean-owned controller; carrier
+or codec registration alone is not implementation evidence. -/
+def clauseRegistry : List DialectClauseDecl := []
 
 /-! ## Concrete manifest and registry proofs -/
 
@@ -177,8 +147,7 @@ theorem manifest_wellFormed : manifest.WellFormed where
     change ([id 301, id 302] : List Digest).Nodup
     decide
   dialectClauseIdsUnique := by
-    change ([id 401, id 402, id 403] : List Digest).Nodup
-    decide
+    exact List.nodup_nil
   receiptCodecClosed := ⟨receiptCodec, by decide⟩
   mpcBasesClosed := by
     intro profile member
@@ -205,32 +174,7 @@ theorem manifest_wellFormed : manifest.WellFormed where
          ⟨residueRingValueCodec, by decide⟩⟩
   dialectClausesClosed := by
     intro clause member
-    simp only [manifest, clauseRegistry, List.mem_cons, List.not_mem_nil, or_false] at member
-    rcases member with rfl | rfl | rfl
-    · refine
-        ⟨⟨gf2Carrier, by decide⟩,
-         ⟨dialectStatementCodec, by decide⟩,
-         ⟨dialectProofCodec, by decide⟩, ?_⟩
-      intro bridgeId member
-      simp only [gf2DialectClause, List.mem_singleton] at member
-      subst bridgeId
-      exact ⟨gf2ToExt6Bridge, by decide⟩
-    · refine
-        ⟨⟨ext6Carrier, by decide⟩,
-         ⟨dialectStatementCodec, by decide⟩,
-         ⟨dialectProofCodec, by decide⟩, ?_⟩
-      intro bridgeId member
-      simp only [ext6DialectClause, List.mem_singleton] at member
-      subst bridgeId
-      exact ⟨ext6ToResidueRingBridge, by decide⟩
-    · refine
-        ⟨⟨residueRingCarrier, by decide⟩,
-         ⟨dialectStatementCodec, by decide⟩,
-         ⟨dialectProofCodec, by decide⟩, ?_⟩
-      intro bridgeId member
-      simp only [residueRingDialectClause, List.mem_singleton] at member
-      subst bridgeId
-      exact ⟨ext6ToResidueRingBridge, by decide⟩
+    simp [manifest, clauseRegistry] at member
 
 /-- The full declared registries are not merely nodup: every key can be resolved by
 the manifest's public lookup operations to exactly its authored declaration. -/

@@ -44,15 +44,14 @@ semantic clause remains an extension: no concrete proof-suite/controller realiza
 Rust correspondence is claimed by the base artifact. -/
 def manifest : Manifest :=
   { MinidreggV1Artifact.manifest with
-    dialectClauses := MinidreggV1Artifact.clauseRegistry ++ [clausePin] }
+    dialectClauses := [clausePin] }
 
 theorem manifest_wellFormed : manifest.WellFormed where
   codecIdsUnique := MinidreggV1Artifact.manifest_wellFormed.codecIdsUnique
   carrierIdsUnique := MinidreggV1Artifact.manifest_wellFormed.carrierIdsUnique
   bridgeIdsUnique := MinidreggV1Artifact.manifest_wellFormed.bridgeIdsUnique
   dialectClauseIdsUnique := by
-    change ([MinidreggV1Artifact.id 401, MinidreggV1Artifact.id 402,
-      MinidreggV1Artifact.id 403, MinidreggV1Artifact.id 404] : List Digest).Nodup
+    change ([MinidreggV1Artifact.id 404] : List Digest).Nodup
     decide
   receiptCodecClosed :=
     MinidreggV1Artifact.manifest_wellFormed.receiptCodecClosed
@@ -62,17 +61,14 @@ theorem manifest_wellFormed : manifest.WellFormed where
     MinidreggV1Artifact.manifest_wellFormed.bridgeEndpointsClosed
   dialectClausesClosed := by
     intro clause member
-    simp only [manifest, List.mem_append, List.mem_singleton] at member
-    rcases member with old | rfl
-    · simpa [manifest, Manifest.lookupCarrier, Manifest.lookupCodec,
-        Manifest.lookupBridge] using
-        (MinidreggV1Artifact.manifest_wellFormed.dialectClausesClosed clause old)
-    · refine
-        ⟨⟨MinidreggV1Artifact.gf2Tower256Carrier, by decide⟩,
-         ⟨MinidreggV1Artifact.dialectStatementCodec, by decide⟩,
-         ⟨MinidreggV1Artifact.dialectProofCodec, by decide⟩, ?_⟩
-      intro bridgeId member
-      simp [clausePin] at member
+    simp only [manifest, List.mem_singleton] at member
+    subst clause
+    refine
+      ⟨⟨MinidreggV1Artifact.gf2Tower256Carrier, by decide⟩,
+       ⟨MinidreggV1Artifact.dialectStatementCodec, by decide⟩,
+       ⟨MinidreggV1Artifact.dialectProofCodec, by decide⟩, ?_⟩
+    intro bridgeId member
+    simp [clausePin] at member
 
 theorem clause_pin_registered :
     manifest.lookupClause clausePin.clauseId = some clausePin := by
