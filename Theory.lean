@@ -27,6 +27,7 @@ import Theory.TurnTransition  -- ordinary and resumed reactive turns share canon
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
 import Theory.CredentialAuthorityEffects  -- issuance, strict attenuation, revocation, and epoch rotation are sealed AcceptedCellEffect families with exact atomic patches and same-canonical-pre authorization
+import Theory.Hyperdocument  -- versioned domain-separated hyperdocument identity, authenticated principals, typed sparse namespaces, and exact canonical CellState mapping
 import Theory.Bignum  -- canonical fixed-width little-endian limbs + proved Nat/Int codec (wide digest/challenge substrate)
 import Theory.CrossModulus  -- one canonical integer with exact quotient/remainder views in two coprime moduli; CRT/range/canonicality seams for RNS/FHE bridges
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
