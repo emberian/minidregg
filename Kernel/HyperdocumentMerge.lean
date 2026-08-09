@@ -20,6 +20,7 @@ declaration needed by a later `MultiCellHyperedge` publication.  Physical CAS,
 persistence, consensus and finality remain external handler obligations.
 -/
 import Kernel.HyperdocumentVersionEffects
+import Theory.CausalVersionAncestry
 
 namespace Minidregg.Kernel.HyperdocumentMerge
 
@@ -28,6 +29,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.HyperdocumentOperationIntent
+open Minidregg.Theory.CausalVersionAncestry
 
 set_option autoImplicit false
 
@@ -295,10 +297,6 @@ structure ValidMerge
     parent.record.semanticVersion < declaration.intent.semanticVersion
   fieldsValid : ∀ plan, plan ∈ declaration.body.fields →
     plan.Valid declaration.body.parents
-  /-- Until the causal substrate exposes a proof-relevant ancestry path, a
-  merge may not decorate a conflict with an unproved common-base id. -/
-  unprovedBasesAbsent : ∀ plan, plan ∈ declaration.body.fields →
-    plan.base = none
   fieldsUnique : (declaration.body.fields.map FieldPlan.field).Nodup
   overlaysExact : ∀ overlay, overlay ∈ declaration.body.overlays →
     overlay.ParentExact declaration.body.parents
@@ -342,6 +340,161 @@ structure CurrentParentEvidence
   realization : ∀ parent, parent ∈ parents → Hyperdocument.Cell MDoc
   realizationRootExact : ∀ parent, ∀ present : parent ∈ parents,
     (realization parent present).root = parent.record.postStateRoot
+
+/-! ## Proof-relevant common-base selection -/
+
+/-- One common ancestor of every exact resolved merge parent.  The paths are
+the admitted `CausalVersionAncestry.Reaches` relation in the same built history,
+not a host-provided digest relation. -/
+structure CommonBase
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  base : CausalNode
+  admitted : base ∈ history.events
+  reachesEvery : ∀ node, node ∈ parents.resolved →
+    CausalVersionAncestry.Reaches history base node
+
+/-- A selected base is genuinely lowest among all common bases for this exact
+parent family.  General DAGs need not admit this certificate. -/
+structure LowestCommonBase
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  selected : CommonBase parents
+  belowEvery : ∀ other : CommonBase parents,
+    CausalVersionAncestry.Reaches history other.base selected.base
+
+namespace LowestCommonBase
+
+theorem selected_unique
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    {parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents}
+    (first second : LowestCommonBase parents) :
+    first.selected.base = second.selected.base :=
+  CausalVersionAncestry.Reaches.antisymm
+    (second.belowEvery first.selected) (first.belowEvery second.selected)
+
+end LowestCommonBase
+
+/-- A maximal common base has no distinct common descendant.  Several
+incomparable maximal bases may coexist. -/
+structure MaximalCommonBase
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  candidate : CommonBase parents
+  noLower : ∀ other : CommonBase parents,
+    CausalVersionAncestry.Reaches history candidate.base other.base →
+      other.base = candidate.base
+
+/-- Explicit evidence that no unique lowest base is available: two distinct
+maximal common bases. -/
+structure AmbiguousCommonBases
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  first : MaximalCommonBase parents
+  second : MaximalCommonBase parents
+  distinct : first.candidate.base ≠ second.candidate.base
+
+namespace AmbiguousCommonBases
+
+theorem excludes_lowest
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    {parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents}
+    (ambiguous : AmbiguousCommonBases parents) :
+    LowestCommonBase parents → False := by
+  intro lowest
+  have firstEqual :
+      lowest.selected.base = ambiguous.first.candidate.base :=
+    ambiguous.first.noLower lowest.selected
+      (lowest.belowEvery ambiguous.first.candidate)
+  have secondEqual :
+      lowest.selected.base = ambiguous.second.candidate.base :=
+    ambiguous.second.noLower lowest.selected
+      (lowest.belowEvery ambiguous.second.candidate)
+  exact ambiguous.distinct (firstEqual.symm.trans secondEqual)
+
+end AmbiguousCommonBases
+
+/-- A selected base also retains its exact canonical content realization and
+binds that cell root to the admitted base event's post-state root. -/
+structure SelectedBase
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  causal : LowestCommonBase parents
+  realization : Hyperdocument.Cell MDoc
+  realizationRootExact : realization.root = causal.selected.base.preimage.postStateRoot
+
+/-- Honest merge-wide base decision.  `ambiguous` and `unavailable` serialize
+no base; they do not choose a winner or assert a unique LCA. -/
+inductive BaseDecision
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    (parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents) :
+    Type _ where
+  | selected (certificate : SelectedBase parents)
+  | ambiguous (certificate : AmbiguousCommonBases parents)
+  | unavailable (noCommon : CommonBase parents → False)
+
+def causalEventId
+    (node : CausalVersionDag.VerifiedEvent scheme causalFamily) :
+    VersionEventId :=
+  ⟨node.entryId⟩
+
+/-- Every field plan must serialize exactly the merge-wide decision. -/
+def BaseDecision.Exact
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    {parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents}
+    (decision : BaseDecision parents) (plans : List FieldPlan) : Prop :=
+  match decision with
+  | .selected certificate =>
+      ∀ plan, plan ∈ plans →
+        plan.base = some (causalEventId certificate.causal.selected.base)
+  | .ambiguous _ | .unavailable _ =>
+      ∀ plan, plan ∈ plans → plan.base = none
+
+/-- Compatibility constructor for the former no-base API.  Absence is no
+longer a free flag: callers must prove that no common base exists. -/
+def BaseDecision.unavailableOfAbsent
+    {MDoc : Hyperdocument.Materializer Digest}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {declaredParents : List Parent}
+    {parents : CurrentParentEvidence (MDoc := MDoc) history declaredParents}
+    {plans : List FieldPlan}
+    (noCommon : CommonBase parents → False)
+    (absent : ∀ plan, plan ∈ plans → plan.base = none) :
+    ∃ decision : BaseDecision parents, decision.Exact plans :=
+  ⟨.unavailable noCommon, absent⟩
 
 /-- Every declared contribution is opened from the exact content realization
 of its named parent.  Operation/author equality alone is deliberately
@@ -411,6 +564,8 @@ structure Accepted
   semantic : ValidMerge config documentPre declaration
   parents : CurrentParentEvidence (MDoc := MDoc) history declaration.body.parents
   parentContent : ParentContentEvidence parents
+  baseDecision : BaseDecision parents
+  basesExact : baseDecision.Exact declaration.body.fields
   namedCapabilityAdmissible :
     (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
       principal semantic.objectCapability).Admissible
@@ -436,6 +591,8 @@ def accept
     (semantic : ValidMerge config documentPre declaration)
     (parents : CurrentParentEvidence (MDoc := MDoc) history declaration.body.parents)
     (parentContent : ParentContentEvidence parents)
+    (baseDecision : BaseDecision parents)
+    (basesExact : baseDecision.Exact declaration.body.fields)
     (namedCapabilityAdmissible :
       (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
         principal semantic.objectCapability).Admissible
@@ -451,6 +608,8 @@ def accept
   semantic := semantic
   parents := parents
   parentContent := parentContent
+  baseDecision := baseDecision
+  basesExact := basesExact
   namedCapabilityAdmissible := namedCapabilityAdmissible
   accepted :=
     { authorization := authorization
@@ -765,6 +924,9 @@ structure PublicationInputs
 #print axioms FieldPlan.two_sources_not_conflict_free
 #print axioms Declaration.conflicting_plan_not_conflict_free
 #print axioms concurrent_sibling_conflict_positive
+#print axioms LowestCommonBase.selected_unique
+#print axioms AmbiguousCommonBases.excludes_lowest
+#print axioms BaseDecision.unavailableOfAbsent
 #print axioms recordOfAccepted_parents_exact
 #print axioms eventDeclaration_record_exact
 
