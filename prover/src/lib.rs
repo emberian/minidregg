@@ -5,7 +5,6 @@
 //! Lean-owned generated control. Native code may return data; it may not choose a
 //! statement, transcript schedule, security profile, or final acceptance bit.
 
-pub mod additive_mle_terminal;
 pub mod additive_mle_tower256;
 pub mod additive_ntt;
 pub mod binary_hash;
@@ -23,7 +22,6 @@ pub mod gate_claim;
 pub mod gpu;
 pub mod logup_tower256;
 pub mod mle_kernels;
-pub mod multiplicative_mle_terminal;
 pub mod outer_factored_gate;
 pub mod poseidon;
 pub mod sumcheck;
