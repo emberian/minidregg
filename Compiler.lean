@@ -9,10 +9,11 @@ import Compiler.DialectBundle  -- typed heterogeneous ports/fingerprints and an 
 import Compiler.AirRange  -- [AIR-range] the bit-decomposition range gadget: k boolGadgets + recomposition as a ConstraintSystem; correct (iff) + bounds (cast of n < 2^k) + val_lt (ZMod p, 2^k ≤ p — the lift CLOSED) + complete (every n < 2^k accepted)
 import Compiler.AirBignum  -- fixed-width radix-2^k addition over Theory.Bignum: emitted range/carry constraints, exact integer soundness, overflow rejection
 import Compiler.AirModularView  -- exact modular-view AIR plus wide fixed-modulus scalar multiplication; FHEgg q0×24-bit quotient bounds are proved, while the signed/compressed equation frontend remains explicit
-import Compiler.BfvCompressedEquation  -- audited FHEgg 12,435-coordinate/384-row schema and the first exact q0 shifted-quotient AIR join; the full signed accumulator/transcript refinement stays explicit
-import Compiler.WideDigestAir  -- [AIR-wide-digest] runtime WDG1/domain/9-limb transcript encoding pinned through emit; canonicality and 248-bit capacity proved; sponge scheduling/refinement, concrete permutation, Rust refinement, and [COMMIT-CR] remain explicit
+import Compiler.BignumKernelABI  -- Lean-owned versioned call envelope: metadata schedules native arithmetic only; acceptance remains exactly descriptorHolds
+import Compiler.BfvCompressedEquation  -- audited FHEgg 12,435-coordinate/384-row schema and the first exact q0 shifted-quotient AIR join; the full signed accumulator and Lean-owned transcript control stay explicit
+import Compiler.WideDigestAir  -- [AIR-wide-digest] WDG1/domain/9-limb encoding pinned through emit; canonicality and 248-bit capacity proved; sponge schedule, concrete permutation, native-output checks, and [COMMIT-CR] remain explicit
 import Compiler.WideDigestByteDecodeAir  -- raw four-byte little-endian limbs are range-checked and proved < BabyBear before field recomposition; raw p is universally rejected
-import Compiler.Ext6Conformance  -- BabyBear[u]/(u^6−31) irreducible with finrank six; Rust six-lane multiplication proved against the field with shared known vectors
+import Compiler.Ext6Conformance  -- BabyBear[u]/(u^6−31) irreducible with finrank six; the six-lane multiplication formula and known vectors are proved for unverified native compute to reproduce
 import Compiler.GateMleExt6  -- emitted descriptor residuals lifted and gamma-batched in Ext6, with exact MLE sumcheck rounds/terminal; the succinct factored-selector commitment opening is the sole remaining gate-oracle seam
 import Compiler.GateFactoredExt6 -- seven sparse selector operands give the exact gamma-batched descriptor claim, degree-two rounds, public trace functionals, and a sharp fresh-eta aggregation bound
 import Compiler.GateTraceRelationExt6 -- extends eta aggregation to the entire public prefix and zero padding, and proves the exact Ext6 subfield-evaluation bound behind sampled base-limb checks
