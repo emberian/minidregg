@@ -47,6 +47,7 @@ inductive IdDomain where
   | mark
   | annotation
   | versionEvent
+  | operationIntent
   deriving DecidableEq, Repr
 
 def CodecVersion.tag : CodecVersion -> UInt8
@@ -64,6 +65,7 @@ def IdDomain.tag : IdDomain -> UInt8
   | .mark => 9
   | .annotation => 10
   | .versionEvent => 11
+  | .operationIntent => 12
 
 theorem IdDomain.tag_injective : Function.Injective IdDomain.tag := by
   intro left right equal
@@ -178,6 +180,10 @@ abbrev TransclusionId := Identifier .v1 .transclusion
 abbrev MarkId := Identifier .v1 .mark
 abbrev AnnotationId := Identifier .v1 .annotation
 abbrev VersionEventId := Identifier .v1 .versionEvent
+/-- Pre-commit provenance identity.  Its canonical preimage is defined by the
+operation layer and excludes post-state roots, request ids, and final version
+event ids. -/
+abbrev OperationId := Identifier .v1 .operationIntent
 
 /-! ## Authenticated author principals -/
 
@@ -267,16 +273,16 @@ structure AtomRecord where
   kind : AtomKind
   payload : List UInt8
   createdBy : PrincipalRef
-  createdAt : VersionEventId
-  tombstonedAt : Option VersionEventId
+  createdAt : OperationId
+  tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
 structure RunRecord where
   document : DocumentId
   atoms : List AtomId
   createdBy : PrincipalRef
-  createdAt : VersionEventId
-  tombstonedAt : Option VersionEventId
+  createdAt : OperationId
+  tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
 /-- An embed is a typed document reference.  Fetch and disclosure semantics are
@@ -299,8 +305,8 @@ structure ElementRecord where
   parent : Option ElementId
   body : ElementBody
   createdBy : PrincipalRef
-  createdAt : VersionEventId
-  tombstonedAt : Option VersionEventId
+  createdAt : OperationId
+  tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
 inductive AnchorBias where
@@ -380,13 +386,13 @@ structure FieldRecord where
   value : valueType.Value
   merge : MergeRegime
   writtenBy : PrincipalRef
-  writtenAt : VersionEventId
+  writtenAt : OperationId
 
 structure ConflictAlternative where
   valueType : FieldType
   value : valueType.Value
   author : PrincipalRef
-  event : VersionEventId
+  operation : OperationId
 
 /-- Concurrent values remain representable with their provenance.  Resolution
 is a later authority-sensitive operation, not a projection performed here. -/
@@ -395,7 +401,7 @@ structure ConflictRecord where
   base : Option VersionEventId
   alternatives : List ConflictAlternative
   regime : MergeRegime
-  recordedAt : VersionEventId
+  recordedAt : OperationId
 
 inductive TransclusionMode where
   | snapshot
@@ -469,8 +475,8 @@ structure LinkRecord where
   target : LinkTarget
   relation : Digest
   author : PrincipalRef
-  event : VersionEventId
-  tombstonedAt : Option VersionEventId
+  operation : OperationId
+  tombstonedAt : Option OperationId
   deriving DecidableEq
 
 /-- Canonical stored transclusion plus provenance of the storage event.  Fetch,
@@ -480,9 +486,9 @@ structure TransclusionRecord where
   hostDocument : DocumentId
   reference : StoredTransclusionRef
   author : PrincipalRef
-  event : VersionEventId
+  operation : OperationId
   disclosurePolicy : Digest
-  tombstonedAt : Option VersionEventId
+  tombstonedAt : Option OperationId
   deriving DecidableEq
 
 structure MarkRecord where
@@ -491,9 +497,9 @@ structure MarkRecord where
   kind : Digest
   payload : List UInt8
   author : PrincipalRef
-  event : VersionEventId
+  operation : OperationId
   visibilityPolicy : Digest
-  tombstonedAt : Option VersionEventId
+  tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
 structure AnnotationRecord where
@@ -501,17 +507,22 @@ structure AnnotationRecord where
   range : Option StableRange
   body : DocumentId
   author : PrincipalRef
-  event : VersionEventId
+  operation : OperationId
   visibilityPolicy : Digest
-  tombstonedAt : Option VersionEventId
+  tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
+/-- Final causal event data lives in the separate append-only event-log cell,
+not in the mutable document cell below.  Its `operation` was derived before
+the content transition; only this final record binds projected pre/post roots
+and request/effect ids.  Consequently content never contains the final event
+id whose preimage names its post root. -/
 structure VersionEventRecord where
   historyDomain : Digest
   document : DocumentId
   schema : CausalVersionDag.SchemaRef
   semanticVersion : Nat
-  semanticObjectRoot : Digest
+  operation : OperationId
   parents : List VersionEventId
   preStateRoot : Digest
   postStateRoot : Digest
@@ -533,7 +544,7 @@ def toCausalPreimage (event : VersionEventRecord) :
   streamId := event.document.digest
   schema := event.schema
   semanticVersion := event.semanticVersion
-  semanticObjectRoot := event.semanticObjectRoot
+  semanticObjectRoot := event.operation.digest
   preStateRoot := event.preStateRoot
   postStateRoot := event.postStateRoot
   parentFrontier := event.parents.map Identifier.digest
@@ -551,7 +562,7 @@ def ofCausalPreimage (author : PrincipalRef)
   document := ⟨event.streamId⟩
   schema := event.schema
   semanticVersion := event.semanticVersion
-  semanticObjectRoot := event.semanticObjectRoot
+  operation := ⟨event.semanticObjectRoot⟩
   parents := event.parentFrontier.map Identifier.mk
   preStateRoot := event.preStateRoot
   postStateRoot := event.postStateRoot
@@ -726,10 +737,10 @@ structure DocumentRecord where
   rootElement : ElementId
   schema : Digest
   createdBy : PrincipalRef
-  createdAt : VersionEventId
+  createdAt : OperationId
   deriving DecidableEq, Repr
 
-/-! ## One dependent sparse namespace and exact CellState mapping -/
+/-! ## One dependent document namespace and exact CellState mapping -/
 
 inductive Namespace where
   | documents
@@ -742,18 +753,17 @@ inductive Namespace where
   | transclusions
   | marks
   | annotations
-  | versionEvents
   deriving DecidableEq, Repr
 
-/-- P0 storage discipline declarations.  Enforcement belongs to accepted
-sparse operations, not this value schema. -/
+/-- P0 storage discipline declarations.  The separate event-log adapter uses
+`appendOnly`; every namespace in this mutable document cell is currently RAM.
+Enforcement belongs to accepted sparse operations, not this value schema. -/
 inductive StorageDiscipline where
   | mutable
   | appendOnly
   deriving DecidableEq, Repr
 
 def Namespace.discipline : Namespace -> StorageDiscipline
-  | .versionEvents => .appendOnly
   | _ => .mutable
 
 def Key : Namespace -> Type
@@ -767,7 +777,6 @@ def Key : Namespace -> Type
   | .transclusions => TransclusionId
   | .marks => MarkId
   | .annotations => AnnotationId
-  | .versionEvents => VersionEventId
 
 def Value : (space : Namespace) -> Type
   | .documents => DocumentRecord
@@ -780,7 +789,6 @@ def Value : (space : Namespace) -> Type
   | .transclusions => TransclusionRecord
   | .marks => MarkRecord
   | .annotations => AnnotationRecord
-  | .versionEvents => VersionEventRecord
 
 instance keyDecidableEq (space : Namespace) : DecidableEq (Key space) := by
   cases space <;> simp only [Key] <;> infer_instance
