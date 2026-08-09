@@ -283,7 +283,8 @@ theorem Commit.noMergeConflict
   | field mode key leftWrites rightWrites =>
       have disjoint : declaration.FieldFootprintsDisjoint := by
         simpa [mode] using commit.shape.fieldsValid
-      exact (Finset.disjoint_left.mp disjoint leftWrites) rightWrites
+      exact (Finset.disjoint_left.mp
+        (disjoint left right different) leftWrites) rightWrites
   | resource key leftWrites rightWrites =>
       exact (Finset.disjoint_left.mp
         (commit.shape.resourcesDisjoint left right different) leftWrites) rightWrites
@@ -329,7 +330,8 @@ def post (settlement : AcceptedSettlement (law := law) cut) :
   settlement.commit.prepared.post
 
 def hyperedge (settlement : AcceptedSettlement (law := law) cut) :
-    SemanticHyperedge settlement.commit :=
+    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge
+      settlement.commit :=
   settlement.commit.toHyperedge
 
 @[simp] theorem postRoot (settlement : AcceptedSettlement (law := law) cut) :
@@ -339,7 +341,7 @@ def hyperedge (settlement : AcceptedSettlement (law := law) cut) :
 theorem noMergeConflict (settlement : AcceptedSettlement (law := law) cut)
     {left right : Incidence} (different : left ≠ right) :
     Not (MergeConflict declaration left right) :=
-  settlement.commit.noMergeConflict different
+  GrainForkSettlement.Commit.noMergeConflict settlement.commit different
 
 theorem includes_leg_field
     (settlement : AcceptedSettlement (law := law) cut)
@@ -438,7 +440,9 @@ structure CanonicalReceipt
     (fieldProjection : FieldProjection (S := S) n F)
     (headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F) where
   private mk ::
-  semanticHyperedge : SemanticHyperedge settlement.commit
+  semanticHyperedge :
+    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge
+      settlement.commit
   semanticHyperedgeExact : semanticHyperedge = settlement.hyperedge
   claim : BoundSemanticReceiptClaim n F
   claimExact : claim = settlement.receiptClaim fieldProjection headerCells
