@@ -1,10 +1,10 @@
 //! Native `Tower256` arithmetic kernels for a LogUp-style experiment.
 //!
 //! This module has no complete statement, transcript, proof carrier, verifier,
-//! or final acceptance predicate. Addresses, values, incidence layout, batching
-//! scalars, round probes, and fold challenges are caller supplied. The functions
-//! retain only arithmetic and arithmetic-shape checks; no compiled generated
-//! adapter currently invokes them as a Lean-owned LogUp suite.
+//! or final acceptance predicate. Addresses, values, exact scatter positions,
+//! batching scalars, round probes, and fold challenges are caller supplied. The
+//! functions retain only arithmetic and arithmetic-shape checks; no generated
+//! dispatch implementation currently invokes them as a Lean-owned LogUp suite.
 
 use core::fmt;
 

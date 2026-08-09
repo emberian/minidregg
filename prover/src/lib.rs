@@ -1,6 +1,6 @@
 //! minidregg-prover — unverified native compute.
 //!
-//! This crate exposes arithmetic, transform, hash, Merkle, and buffer-management
+//! This crate exposes arithmetic, transform, raw hash, and buffer-management
 //! kernels. Inputs are explicit low-level work data; outputs are buffers or local
 //! execution errors.
 
