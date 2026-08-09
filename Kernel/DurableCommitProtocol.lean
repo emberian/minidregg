@@ -367,6 +367,20 @@ theorem execute_no_partial_commit
     · simp [Outcome.storeAfter]
     · split <;> simp [Outcome.storeAfter]
 
+/-- Positive non-vacuity tooth: an unrecorded intent that passes the complete
+fail-closed preflight reaches exactly the one atomic installation. -/
+theorem execute_complete_ready
+    {TxId : Type u} {CellId : Type v} {Nullifier : Type w} {Event : Type x}
+    [DecidableEq TxId] [DecidableEq CellId] [DecidableEq Nullifier]
+    [DecidableEq Event]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (unrecorded : Snapshot.lookupRecorded intent.transactionId before.journal = none)
+    (ready : intent.preflight before = .ok ()) :
+    execute .complete before intent =
+      .accepted (Snapshot.install before intent) := by
+  simp [execute, unrecorded, ready]
+
 /-- A retry after any complete installation is idempotent and returns the
 original recorded payload without touching roots, nullifiers, budget, or
 history a second time. -/
@@ -890,6 +904,7 @@ theorem physical_step_no_partial_commit
 end Minidregg.Kernel.DurableCommitProtocol
 
 #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_no_partial_commit
+#print axioms Minidregg.Kernel.DurableCommitProtocol.execute_complete_ready
 #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_retry_after_install
 #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry
 #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect
