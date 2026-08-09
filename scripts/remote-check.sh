@@ -2,7 +2,7 @@
 # Check one explicit committed minidregg snapshot on hbox or persvati.
 #
 # Source identity is the transferred git archive plus a SHA-256 manifest of
-# every regular source file.  Each invocation receives a unique source/build
+# every regular source file.  Each invocation receives a unique writable source
 # tree and a run-local read-only snapshot of the exact dependency seed: project
 # builds never share a checkout, writable package worktree, or build output.
 set -euo pipefail
@@ -10,15 +10,19 @@ set -euo pipefail
 usage() {
   local status=${1:-2}
   cat >&2 <<'EOF'
-usage: scripts/remote-check.sh [--dry-run] HOST COMMIT -- COMMAND [ARG ...]
+usage: scripts/remote-check.sh [--dry-run] [--allow-generated PATH=SHA256]... HOST COMMIT -- COMMAND [ARG ...]
 
 Examples:
   scripts/remote-check.sh hbox HEAD -- lake build Compiler.NativeKernelPlan
   scripts/remote-check.sh persvati dcea7d1 -- lake env lean Compiler/AuthenticatedColumnLogupBridge.lean
+  scripts/remote-check.sh --allow-generated generated/table.json=0123... hbox HEAD -- lake build EmitTable
 
 COMMIT is required and is resolved locally to one commit before any transfer.
 The command is executed as an exact argument vector, not through a shell.
 Evidence defaults to /tmp/minidregg-evidence and must remain outside the repo.
+The private source is writable, but its complete post-run manifest must equal
+the committed pre-run manifest.  --allow-generated admits one exact relative
+path only at its declared full SHA-256; it never copies output into the repo.
 
 Optional environment limits:
   MINIDREGG_EVIDENCE_DIR       local evidence directory (outside the repo)
@@ -39,15 +43,36 @@ sha256_file() {
 }
 
 dry_run=false
-case "${1:-}" in
-  -h|--help)
-    usage 0
-    ;;
-  --dry-run)
-    dry_run=true
-    shift
-    ;;
-esac
+generated_output_specs=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage 0
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    --allow-generated)
+      [[ $# -ge 2 ]] || die "--allow-generated requires PATH=SHA256"
+      generated_output_specs+=("$2")
+      shift 2
+      ;;
+    --allow-generated=*)
+      generated_output_specs+=("${1#--allow-generated=}")
+      shift
+      ;;
+    --)
+      die "options must precede HOST COMMIT"
+      ;;
+    -*)
+      die "unknown option '$1'"
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ $# -lt 4 || "$3" != "--" ]]; then
   usage 2
@@ -115,14 +140,39 @@ archive=$local_tmp/source.tar
 snapshot=$local_tmp/snapshot
 source_manifest=$local_tmp/source.files.sha256
 dependency_manifest=$local_tmp/dependency-revisions.tsv
+generated_output_allowlist=$local_tmp/generated-output-allowlist.tsv
 mkdir "$snapshot"
 git archive --format=tar --output="$archive" "$commit"
 tar -xf "$archive" -C "$snapshot"
 
 (cd "$snapshot" &&
-  LC_ALL=C find . -type f -print0 |
+  LC_ALL=C find . -path './.lake' -prune -o -type f -print0 |
     LC_ALL=C sort -z |
     xargs -0 shasum -a 256) > "$source_manifest"
+
+: > "$generated_output_allowlist"
+for generated_spec in "${generated_output_specs[@]}"; do
+  generated_path=${generated_spec%=*}
+  generated_sha=${generated_spec##*=}
+  [[ "$generated_path" != "$generated_spec" && -n "$generated_path" ]] ||
+    die "generated output must have form PATH=SHA256"
+  [[ "$generated_path" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+    die "unsafe generated-output path '$generated_path'"
+  [[ "$generated_path" != /* && "$generated_path" != .lake && "$generated_path" != .lake/* ]] ||
+    die "generated-output path must be relative and outside .lake"
+  case "/$generated_path/" in
+    *//*|*/./*|*/../*) die "generated-output path is not normalized: '$generated_path'" ;;
+  esac
+  [[ "$generated_sha" =~ ^[0-9a-f]{64}$ ]] ||
+    die "generated output '$generated_path' needs a full lowercase SHA-256"
+  printf '%s\t%s\n' "$generated_path" "$generated_sha" >> "$generated_output_allowlist"
+done
+LC_ALL=C sort -o "$generated_output_allowlist" "$generated_output_allowlist"
+if [[ -n "$(cut -f1 "$generated_output_allowlist" | uniq -d | head -1)" ]]; then
+  die "generated-output paths must be unique"
+fi
+generated_output_allowlist_sha=$(sha256_file "$generated_output_allowlist")
+generated_output_count=$(wc -l < "$generated_output_allowlist" | tr -d ' ')
 
 [[ -f "$snapshot/lean-toolchain" ]] || die "snapshot has no lean-toolchain"
 [[ -f "$snapshot/lake-manifest.json" ]] || die "snapshot has no lake-manifest.json"
@@ -167,6 +217,11 @@ if $dry_run; then
     "$toolchain_sha" "$lake_manifest_sha"
   printf 'dependency_manifest_sha256=%s\nseed_key=%s\n' \
     "$dependency_manifest_sha" "$seed_key"
+  printf 'generated_output_count=%s\ngenerated_output_allowlist_sha256=%s\n' \
+    "$generated_output_count" "$generated_output_allowlist_sha"
+  if [[ "$generated_output_count" -gt 0 ]]; then
+    sed 's/^/allow_generated=/' "$generated_output_allowlist"
+  fi
   printf 'limits=cpuset:%s,memory_kib:%s,timeout:%s\ncommand=' \
     "$remote_cpuset" "$remote_memory_kib" "$remote_timeout"
   printf_command
@@ -213,6 +268,8 @@ run_id="E-$stamp-$host-$short_commit-$command_name"
 log_path=$evidence_dir/$run_id.log
 json_path=$evidence_dir/$run_id.json
 source_path=$evidence_dir/$run_id.source.sha256
+post_source_path=$evidence_dir/$run_id.source-after.sha256
+allowlist_path=$evidence_dir/$run_id.generated-outputs.tsv
 dependency_path=$evidence_dir/$run_id.dependencies.tsv
 olean_path=$evidence_dir/$run_id.oleans.sha256
 integrity_path=$evidence_dir/$run_id.source-integrity.log
@@ -227,10 +284,12 @@ printf_command | tee -a "$log_path"
 scp "${ssh_options[@]}" -q "$archive" "$host:$remote_run/source.tar.partial"
 scp "${ssh_options[@]}" -q "$source_manifest" \
   "$host:$remote_run/source.files.sha256.partial"
+scp "${ssh_options[@]}" -q "$generated_output_allowlist" \
+  "$host:$remote_run/generated-output-allowlist.tsv.partial"
 
 ssh "${ssh_options[@]}" "$host" bash -s -- \
   "$remote_run" "$archive_sha" "$source_manifest_sha" "$toolchain_sha" \
-  "$lake_manifest_sha" "$rust_toolchain_sha" <<'REMOTE'
+  "$lake_manifest_sha" "$rust_toolchain_sha" "$generated_output_allowlist_sha" <<'REMOTE'
 set -euo pipefail
 run=$1
 archive_sha=$2
@@ -238,14 +297,17 @@ source_manifest_sha=$3
 toolchain_sha=$4
 lake_manifest_sha=$5
 rust_toolchain_sha=$6
+generated_output_allowlist_sha=$7
 [[ "$(sha256sum "$run/source.tar.partial" | awk '{print $1}')" == "$archive_sha" ]]
 [[ "$(sha256sum "$run/source.files.sha256.partial" | awk '{print $1}')" == "$source_manifest_sha" ]]
+[[ "$(sha256sum "$run/generated-output-allowlist.tsv.partial" | awk '{print $1}')" == "$generated_output_allowlist_sha" ]]
 mv "$run/source.tar.partial" "$run/source.tar"
 mv "$run/source.files.sha256.partial" "$run/source.files.sha256"
+mv "$run/generated-output-allowlist.tsv.partial" "$run/generated-output-allowlist.tsv"
 mkdir "$run/source"
 tar -xf "$run/source.tar" -C "$run/source"
 (cd "$run/source" &&
-  LC_ALL=C find . -type f -print0 |
+  LC_ALL=C find . -path './.lake' -prune -o -type f -print0 |
     LC_ALL=C sort -z |
     xargs -0 -r sha256sum) > "$run/source.extracted.sha256"
 cmp -s "$run/source.files.sha256" "$run/source.extracted.sha256"
@@ -353,9 +415,12 @@ mutable_metadata=$run/mutable-package-metadata.tar
 printf '%s\n' hardlink-readonly-with-private-metadata > "$run/dependency-copy-mode"
 verify_packages "$source/.lake/packages" "$run/dependency-revisions.private.tsv"
 cmp -s "$run/dependency-revisions.tsv" "$run/dependency-revisions.private.tsv"
-# Snapshot files remain read-only; all expected build state lives under the
-# run-private .lake or build directories.
-find "$source" -path "$source/.lake" -prune -o -type f -exec chmod a-w {} +
+# The archived source itself is a unique private copy.  Make it writable so
+# deterministic Lean generators may rewrite their committed targets.  The
+# complete post-run manifest check below, not filesystem permissions, enforces
+# source integrity.  Package-cache files retain their separate policy above.
+find "$source" -path "$source/.lake" -prune -o \
+  \( -type d -o -type f \) -exec chmod u+w {} +
 REMOTE
 
 worker_json=$(ssh "${ssh_options[@]}" "$host" bash -s -- \
@@ -454,9 +519,86 @@ command_exit=$?
 set -e
 printf '%s\n' "$command_exit" > "$run/command.exit"
 
+# Record the entire post-run source tree, including newly generated files.
+# Root .lake is the run-private build directory and is deliberately outside the
+# source-mutation claim; Cargo output is separately directed to $run/build.
+post_source_manifest=$run/source.after.sha256
+(
+  cd "$source"
+  LC_ALL=C find . -path './.lake' -prune -o -type f -print0 |
+    LC_ALL=C sort -z |
+    xargs -0 -r sha256sum
+) > "$post_source_manifest"
+
+filter_allowed_paths() {
+  local input=$1
+  local output=$2
+  local line path allowed_path allowed_sha skip
+  : > "$output"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    path=${line#*  }
+    [[ "$path" != "$line" ]] || return 1
+    skip=false
+    while IFS=$'\t' read -r allowed_path allowed_sha; do
+      if [[ "$path" == "./$allowed_path" ]]; then
+        skip=true
+        break
+      fi
+    done < "$run/generated-output-allowlist.tsv"
+    $skip || printf '%s\n' "$line" >> "$output"
+  done < "$input"
+}
+
+validate_allowed_outputs() {
+  local allowed_path expected_sha actual_sha status=0
+  while IFS=$'\t' read -r allowed_path expected_sha; do
+    if [[ ! -f "$source/$allowed_path" || -L "$source/$allowed_path" ]]; then
+      printf 'allowed output missing or non-regular: %s\n' "$allowed_path"
+      status=1
+      continue
+    fi
+    actual_sha=$(sha256sum "$source/$allowed_path" | awk '{print $1}')
+    printf 'allowed output %s expected=%s actual=%s\n' \
+      "$allowed_path" "$expected_sha" "$actual_sha"
+    [[ "$actual_sha" == "$expected_sha" ]] || status=1
+  done < "$run/generated-output-allowlist.tsv"
+  return "$status"
+}
+
 set +e
-sha256sum -c "$run/source.files.sha256" > "$run/source-integrity.log" 2>&1
-source_integrity_exit=$?
+source_integrity_exit=0
+{
+  printf 'before_manifest_sha256=%s\n' \
+    "$(sha256sum "$run/source.files.sha256" | awk '{print $1}')"
+  printf 'after_manifest_sha256=%s\n' \
+    "$(sha256sum "$post_source_manifest" | awk '{print $1}')"
+  printf 'generated_output_allowlist_sha256=%s\n' \
+    "$(sha256sum "$run/generated-output-allowlist.tsv" | awk '{print $1}')"
+  printf 'generated_output_count=%s\n' \
+    "$(wc -l < "$run/generated-output-allowlist.tsv" | tr -d ' ')"
+
+  validate_allowed_outputs
+  allowed_status=$?
+  filter_allowed_paths "$run/source.files.sha256" "$run/source.before.filtered.sha256"
+  before_filter_status=$?
+  filter_allowed_paths "$post_source_manifest" "$run/source.after.filtered.sha256"
+  after_filter_status=$?
+  cmp -s "$run/source.before.filtered.sha256" "$run/source.after.filtered.sha256"
+  manifest_status=$?
+
+  if [[ "$manifest_status" -eq 0 ]]; then
+    echo 'non-allowlisted source manifest: exact match'
+  else
+    echo 'non-allowlisted source manifest: MISMATCH'
+    diff -u "$run/source.before.filtered.sha256" "$run/source.after.filtered.sha256"
+  fi
+  printf 'allowed_output_status=%s\nbefore_filter_status=%s\nafter_filter_status=%s\nmanifest_status=%s\n' \
+    "$allowed_status" "$before_filter_status" "$after_filter_status" "$manifest_status"
+  if [[ "$allowed_status" -ne 0 || "$before_filter_status" -ne 0 ||
+        "$after_filter_status" -ne 0 || "$manifest_status" -ne 0 ]]; then
+    source_integrity_exit=1
+  fi
+} > "$run/source-integrity.log" 2>&1
 set -e
 printf '%s\n' "$source_integrity_exit" > "$run/source-integrity.exit"
 printf 'command_exit=%s\nsource_integrity_exit=%s\n' "$command_exit" "$source_integrity_exit"
@@ -494,10 +636,13 @@ jq -n \
   --arg dependencySha256 "$(sha256sum "$run/dependency-revisions.tsv" | awk '{print $1}')" \
   --arg oleanSha256 "$(sha256sum "$olean_manifest" | awk '{print $1}')" \
   --arg integritySha256 "$(sha256sum "$run/source-integrity.log" | awk '{print $1}')" \
+  --arg postSourceSha256 "$(sha256sum "$run/source.after.sha256" | awk '{print $1}')" \
+  --arg generatedAllowlistSha256 "$(sha256sum "$run/generated-output-allowlist.tsv" | awk '{print $1}')" \
   '{commandExit:$commandExit,sourceIntegrityExit:$sourceIntegrityExit,
     resolvedExecutable:$resolvedExecutable,dependencyCopyMode:$dependencyCopyMode,
     dependencySha256:$dependencySha256,
-    oleanSha256:$oleanSha256,integritySha256:$integritySha256}'
+    oleanSha256:$oleanSha256,integritySha256:$integritySha256,
+    postSourceSha256:$postSourceSha256,generatedAllowlistSha256:$generatedAllowlistSha256}'
 REMOTE
 )
 jq -e . >/dev/null <<< "$post_json" || die "worker artifact collection returned invalid JSON"
@@ -505,7 +650,9 @@ jq -e . >/dev/null <<< "$post_json" || die "worker artifact collection returned 
 scp "${ssh_options[@]}" -q "$host:$remote_run/dependency-revisions.tsv" "$dependency_path"
 scp "${ssh_options[@]}" -q "$host:$remote_run/project-oleans.sha256" "$olean_path"
 scp "${ssh_options[@]}" -q "$host:$remote_run/source-integrity.log" "$integrity_path"
+scp "${ssh_options[@]}" -q "$host:$remote_run/source.after.sha256" "$post_source_path"
 cp "$source_manifest" "$source_path"
+cp "$generated_output_allowlist" "$allowlist_path"
 
 [[ "$(sha256_file "$dependency_path")" == "$(jq -r .dependencySha256 <<< "$post_json")" ]] ||
   die "dependency manifest transfer hash mismatch"
@@ -513,6 +660,12 @@ cp "$source_manifest" "$source_path"
   die "olean manifest transfer hash mismatch"
 [[ "$(sha256_file "$integrity_path")" == "$(jq -r .integritySha256 <<< "$post_json")" ]] ||
   die "source-integrity log transfer hash mismatch"
+[[ "$(sha256_file "$post_source_path")" == "$(jq -r .postSourceSha256 <<< "$post_json")" ]] ||
+  die "post-source manifest transfer hash mismatch"
+[[ "$(sha256_file "$allowlist_path")" == "$(jq -r .generatedAllowlistSha256 <<< "$post_json")" ]] ||
+  die "generated-output allowlist transfer hash mismatch"
+[[ "$(sha256_file "$allowlist_path")" == "$generated_output_allowlist_sha" ]] ||
+  die "generated-output allowlist differs from the requested policy"
 [[ "$(sha256_file "$dependency_path")" == "$dependency_manifest_sha" ]] ||
   die "worker dependency revisions differ from the snapshot manifest"
 
@@ -520,18 +673,25 @@ finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 log_sha=$(sha256_file "$log_path")
 olean_sha=$(sha256_file "$olean_path")
 integrity_sha=$(sha256_file "$integrity_path")
+post_source_sha=$(sha256_file "$post_source_path")
 command_json='[]'
 for argument in "${command_args[@]}"; do
   command_json=$(jq --arg argument "$argument" '. + [$argument]' <<< "$command_json")
 done
+generated_outputs_json=$(jq -R 'select(length > 0) | split("\t") |
+  {path:.[0],sha256:.[1]}' "$allowlist_path" | jq -s .)
 
 jq -n \
-  --arg schema minidregg/remote-evidence/v2 \
+  --arg schema minidregg/remote-evidence/v3 \
   --arg runId "$run_id" --arg requestedRevision "$requested_revision" \
   --arg commit "$commit" --arg tree "$tree" --arg archiveSha256 "$archive_sha" \
   --arg toolchainSha256 "$toolchain_sha" --arg lakeManifestSha256 "$lake_manifest_sha" \
   --arg rustToolchainSha256 "$rust_toolchain_sha" \
   --arg sourceFile "$(basename "$source_path")" --arg sourceManifestSha256 "$source_manifest_sha" \
+  --arg postSourceFile "$(basename "$post_source_path")" --arg postSourceSha256 "$post_source_sha" \
+  --arg allowlistFile "$(basename "$allowlist_path")" \
+  --arg allowlistSha256 "$generated_output_allowlist_sha" \
+  --argjson generatedOutputs "$generated_outputs_json" \
   --arg dependencyFile "$(basename "$dependency_path")" \
   --arg dependencyManifestSha256 "$dependency_manifest_sha" --arg seedKey "$seed_key" \
   --arg dependencyCopyMode "$(jq -r .dependencyCopyMode <<< "$post_json")" \
@@ -548,7 +708,10 @@ jq -n \
     source:{requestedRevision:$requestedRevision,commit:$commit,tree:$tree,dirty:false,
       archiveSha256:$archiveSha256,leanToolchainSha256:$toolchainSha256,
       lakeManifestSha256:$lakeManifestSha256,rustToolchainSha256:$rustToolchainSha256,
-      fileManifest:{file:$sourceFile,sha256:$sourceManifestSha256}},
+      beforeManifest:{file:$sourceFile,sha256:$sourceManifestSha256},
+      afterManifest:{file:$postSourceFile,sha256:$postSourceSha256},
+      mutationPolicy:{default:"exact-manifest-equality",autoSync:false,
+        allowlist:{file:$allowlistFile,sha256:$allowlistSha256,outputs:$generatedOutputs}}},
     dependencies:{seedKey:$seedKey,runLocalTree:true,copyMode:$dependencyCopyMode,
       revisionManifest:{file:$dependencyFile,sha256:$dependencyManifestSha256}},
     command:$command,resolvedExecutable:$resolvedExecutable,
@@ -560,7 +723,7 @@ jq -n \
     rawLog:{file:$logFile,sha256:$logSha256},
     projectOleans:{file:$oleanFile,sha256:$oleanSha256},
     sourceIntegrity:{file:$integrityFile,sha256:$integritySha256},
-    claimCeiling:"Exact explicit-commit source/dependency/build evidence only; not a benchmark, native-semantics claim, or cryptographic-security claim."}' \
+    claimCeiling:"Exact explicit-commit source/dependency/build evidence with post-run source equality modulo explicitly hashed generated outputs only; not a benchmark, native-semantics claim, or cryptographic-security claim."}' \
   > "$json_path"
 
 echo "evidence: $json_path"
