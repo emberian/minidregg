@@ -46,20 +46,9 @@ inductive Side
   | after
 deriving DecidableEq
 
-/-- The policy to apply if the endpoint atom dies.
-
-`keepTombstone` preserves provenance but makes the range unprojectable.
-Preference policies may retarget only to a candidate carried by the exact
-delete event.  If no requested candidate exists the endpoint becomes explicitly
-unresolved; it never searches the current order for a convenient replacement. -/
-inductive DeathPolicy
-  | invalidate
-  | keepTombstone
-  | preferPrevious
-  | preferNext
-  | preferPreviousThenNext
-  | preferNextThenPrevious
-deriving DecidableEq
+/-- The operational model consumes the canonical stored death-policy type
+directly; there is no second semantic copy or adapter-selected policy. -/
+abbrev DeathPolicy := Hyperdocument.EndpointDeathPolicy
 
 /-- One stable endpoint.  Its death behavior is data, not a UI convention. -/
 structure Endpoint (RunId : Type uRun) (AtomId : Type uAtom) where
@@ -383,6 +372,14 @@ inductive AnnotationContent (Body : Type uBody) (Reference : Type uRef)
   | reference (target : Reference)
 deriving DecidableEq
 
+/-- An annotation targets either a whole sovereign document or an atom-backed
+range.  Document-wide comments are semantic objects, not failed range decodes. -/
+inductive AnnotationTarget
+    (RunId : Type uRun) (AtomId : Type uAtom) (Reference : Type uRef)
+  | document (target : Reference)
+  | range (target : StableRange RunId AtomId)
+deriving DecidableEq
+
 /-- A mark is an independently identified range overlay.  Its author is part of
 the object, avoiding the old range+kind identity which conflated two authors. -/
 structure Mark
@@ -406,7 +403,7 @@ structure Annotation
     (EventRef : Type uEvent) (PolicyRef : Type uPolicy) where
   id : ObjectId
   author : Principal
-  target : StableRange RunId AtomId
+  target : AnnotationTarget RunId AtomId Reference
   content : AnnotationContent Body Reference
   created : EventRef
   lifecycle : Lifecycle Principal EventRef
@@ -435,7 +432,8 @@ structure ProjectedAnnotation
     (Body : Type uBody) (Reference : Type uRef)
     (EventRef : Type uEvent) (PolicyRef : Type uPolicy) where
   source : Annotation RunId AtomId ObjectId Principal Body Reference EventRef PolicyRef
-  range : ProjectedRange RunId AtomId
+  target :
+    Sum Reference (ProjectedRange RunId AtomId)
 
 structure OverlayProjection
     (RunId : Type uRun) (AtomId : Type uAtom)
@@ -478,9 +476,12 @@ def projectAnnotation
   if !annotation.lifecycle.displayable then none
   else if !annotation.visibility.visibleTo annotation.author observer indexedDecision then none
   else
-    match projectRange order (RangeTrace.run annotation.target edits) with
-    | some range => some { source := annotation, range := range }
-    | none => none
+    match annotation.target with
+    | .document target => some { source := annotation, target := .inl target }
+    | .range target =>
+        match projectRange order (RangeTrace.run target edits) with
+        | some range => some { source := annotation, target := .inr range }
+        | none => none
 
 /-- Deterministic projection preserves source order and keeps the two object
 families separate. -/
@@ -757,12 +758,11 @@ theorem Overlay.project_annotations_frame_marks
 
 /-! ## Exact adapter from canonical Hyperdocument storage
 
-`Theory.Hyperdocument` stores compact wire points as `(run, neighbor?, bias)`.
-That representation deliberately omits endpoint-death policy, which belongs to
-an operation context, and permits an empty-run anchor with no neighboring atom.
-The adapter below supplies the missing policy explicitly and represents empty
-anchors separately.  Consequently `decodePoint?` and `decodeRange?` cannot
-invent an atom identity for an empty run.
+`Theory.Hyperdocument` stores compact wire points as
+`(run, neighbor?, bias, death)`.  The adapter consumes every field directly and
+permits an empty-run anchor with no neighboring atom.  Empty anchors remain a
+separate realization, so `decodePoint?` and `decodeRange?` cannot invent an atom
+identity for an empty run.
 -/
 
 namespace HyperdocumentAdapter
@@ -788,26 +788,26 @@ inductive PointRealization
   | emptyRun (run : Hyperdocument.RunId) (side : Side)
 deriving DecidableEq
 
-/-- Realize one stored point under an explicit endpoint-death policy. -/
-def realizePoint (death : DeathPolicy) (point : StoredPoint) : PointRealization :=
+/-- Realize one stored point, including its canonical death policy. -/
+def realizePoint (point : StoredPoint) : PointRealization :=
   match point.neighbor with
   | some atom =>
       .anchored
         { location := ⟨point.run, atom⟩
           side := sideOfBias point.bias
-          onDeath := death }
+          onDeath := point.death }
   | none => .emptyRun point.run (sideOfBias point.bias)
 
 /-- The exact graph relation for stored-point realization. -/
 def PointRealizes
-    (death : DeathPolicy) (stored : StoredPoint) (meaning : PointRealization) : Prop :=
-  meaning = realizePoint death stored
+    (stored : StoredPoint) (meaning : PointRealization) : Prop :=
+  meaning = realizePoint stored
 
 theorem point_realization_unique
-    (death : DeathPolicy) (stored : StoredPoint)
+    (stored : StoredPoint)
     {left right : PointRealization}
-    (leftRealizes : PointRealizes death stored left)
-    (rightRealizes : PointRealizes death stored right) :
+    (leftRealizes : PointRealizes stored left)
+    (rightRealizes : PointRealizes stored right) :
     left = right := by
   exact leftRealizes.trans rightRealizes.symm
 
@@ -816,14 +816,14 @@ def PointRealization.endpoint? : PointRealization -> Option SemanticEndpoint
   | .anchored endpoint => some endpoint
   | .emptyRun _ _ => none
 
-def decodePoint? (death : DeathPolicy) (point : StoredPoint) :
+def decodePoint? (point : StoredPoint) :
     Option SemanticEndpoint :=
-  (realizePoint death point).endpoint?
+  (realizePoint point).endpoint?
 
 @[simp] theorem decodePoint_some
     (death : DeathPolicy) (run : Hyperdocument.RunId)
     (atom : Hyperdocument.AtomId) (bias : Hyperdocument.AnchorBias) :
-    decodePoint? death { run := run, neighbor := some atom, bias := bias } =
+    decodePoint? { run := run, neighbor := some atom, bias := bias, death := death } =
       some
         { location := ⟨run, atom⟩
           side := sideOfBias bias
@@ -833,21 +833,15 @@ def decodePoint? (death : DeathPolicy) (point : StoredPoint) :
 @[simp] theorem decodePoint_empty
     (death : DeathPolicy) (run : Hyperdocument.RunId)
     (bias : Hyperdocument.AnchorBias) :
-    decodePoint? death { run := run, neighbor := none, bias := bias } = none :=
+    decodePoint? { run := run, neighbor := none, bias := bias, death := death } = none :=
   rfl
 
 theorem decodePoint_eq_none_iff
-    (death : DeathPolicy) (point : StoredPoint) :
-    decodePoint? death point = none <-> point.neighbor = none := by
+    (point : StoredPoint) :
+    decodePoint? point = none <-> point.neighbor = none := by
   cases point with
-  | mk run neighbor bias =>
+  | mk run neighbor bias death =>
       cases neighbor <;> simp [decodePoint?, realizePoint, PointRealization.endpoint?]
-
-/-- Start and finish endpoint-death policies remain distinct inputs. -/
-structure RangeDeathPolicies where
-  start : DeathPolicy
-  finish : DeathPolicy
-deriving DecidableEq
 
 /-- Total stored-range realization, including empty anchors. -/
 structure RangeRealization where
@@ -856,11 +850,10 @@ structure RangeRealization where
   finish : PointRealization
 deriving DecidableEq
 
-def realizeRange (policies : RangeDeathPolicies) (stored : StoredRange) :
-    RangeRealization :=
+def realizeRange (stored : StoredRange) : RangeRealization :=
   { stored := stored
-    start := realizePoint policies.start stored.start
-    finish := realizePoint policies.finish stored.finish }
+    start := realizePoint stored.start
+    finish := realizePoint stored.finish }
 
 /-- Decode to the atom-backed semantic range only when both stored endpoints
 name atoms.  Empty start or finish anchors remain visible in `realizeRange` and
@@ -871,34 +864,36 @@ def RangeRealization.range? (realization : RangeRealization) :
   | some start, some stop => some { start := start, stop := stop }
   | _, _ => none
 
-def decodeRange? (policies : RangeDeathPolicies) (stored : StoredRange) :
-    Option SemanticRange :=
-  (realizeRange policies stored).range?
+def decodeRange? (stored : StoredRange) : Option SemanticRange :=
+  (realizeRange stored).range?
 
 theorem range_realization_unique
-    (policies : RangeDeathPolicies) (stored : StoredRange)
+    (stored : StoredRange)
     {left right : RangeRealization}
-    (leftExact : left = realizeRange policies stored)
-    (rightExact : right = realizeRange policies stored) :
+    (leftExact : left = realizeRange stored)
+    (rightExact : right = realizeRange stored) :
     left = right := by
   exact leftExact.trans rightExact.symm
 
 @[simp] theorem decodeRange_empty_start
-    (policies : RangeDeathPolicies) (startRun : Hyperdocument.RunId)
-    (startBias : Hyperdocument.AnchorBias) (finish : StoredPoint) :
-    decodeRange? policies
-      { start := { run := startRun, neighbor := none, bias := startBias }
+    (startRun : Hyperdocument.RunId) (startBias : Hyperdocument.AnchorBias)
+    (startDeath : DeathPolicy) (finish : StoredPoint) :
+    decodeRange?
+      { start :=
+          { run := startRun, neighbor := none, bias := startBias, death := startDeath }
         finish := finish } = none :=
   rfl
 
 @[simp] theorem decodeRange_empty_finish
-    (policies : RangeDeathPolicies) (start : StoredPoint)
-    (finishRun : Hyperdocument.RunId) (finishBias : Hyperdocument.AnchorBias) :
-    decodeRange? policies
+    (start : StoredPoint) (finishRun : Hyperdocument.RunId)
+    (finishBias : Hyperdocument.AnchorBias) (finishDeath : DeathPolicy) :
+    decodeRange?
       { start := start
-        finish := { run := finishRun, neighbor := none, bias := finishBias } } = none := by
+        finish :=
+          { run := finishRun, neighbor := none, bias := finishBias, death := finishDeath } } =
+      none := by
   cases start with
-  | mk startRun neighbor startBias =>
+  | mk startRun neighbor startBias startDeath =>
       cases neighbor <;>
         simp [decodeRange?, realizeRange, RangeRealization.range?, realizePoint,
           PointRealization.endpoint?]
@@ -934,14 +929,13 @@ def annotationLifecycle (record : Hyperdocument.AnnotationRecord) :
   | none => .active
   | some event => .retracted record.author event
 
-/-- Decode a stored mark only after supplying the operational death policies
-and visibility metadata absent from the P0 record.  Empty-anchor ranges remain
-non-decoded rather than receiving a synthetic target. -/
+/-- Decode a stored mark directly from its canonical range/death/visibility
+data.  Empty-anchor ranges remain non-decoded rather than receiving a synthetic
+target. -/
 def decodeMarkRecord?
-    (id : Hyperdocument.MarkId) (policies : RangeDeathPolicies)
-    (visibility : Visibility Hyperdocument.PrincipalRef TypedAuthorization.Digest)
+    (id : Hyperdocument.MarkId)
     (record : Hyperdocument.MarkRecord) : Option DecodedMark :=
-  match decodeRange? policies record.range with
+  match decodeRange? record.range with
   | none => none
   | some target =>
       some
@@ -951,35 +945,48 @@ def decodeMarkRecord?
           kind := { kind := record.kind, payload := record.payload }
           created := record.event
           lifecycle := markLifecycle record
-          visibility := visibility }
+          visibility := .indexed record.visibilityPolicy }
 
-/-- Decode a range-targeted stored annotation.  A `none` stored range denotes a
-document-wide annotation and is intentionally outside this range-only semantic
-object; it returns `none` instead of manufacturing a document span. -/
+/-- Decode a stored annotation directly from canonical data.  A `none` stored
+range becomes a first-class document target; an atom-backed stored range becomes
+a range target.  Empty-run range anchors remain explicit non-decodes. -/
 def decodeAnnotationRecord?
-    (id : Hyperdocument.AnnotationId) (policies : RangeDeathPolicies)
-    (visibility : Visibility Hyperdocument.PrincipalRef TypedAuthorization.Digest)
+    (id : Hyperdocument.AnnotationId)
     (record : Hyperdocument.AnnotationRecord) : Option DecodedAnnotation :=
   match record.range with
-  | none => none
+  | none =>
+      some
+        { id := id
+          author := record.author
+          target := .document record.document
+          content := .reference record.body
+          created := record.event
+          lifecycle := annotationLifecycle record
+          visibility := .indexed record.visibilityPolicy }
   | some storedRange =>
-      match decodeRange? policies storedRange with
+      match decodeRange? storedRange with
       | none => none
       | some target =>
           some
             { id := id
               author := record.author
-              target := target
+              target := .range target
               content := .reference record.body
               created := record.event
               lifecycle := annotationLifecycle record
-              visibility := visibility }
+              visibility := .indexed record.visibilityPolicy }
 
 @[simp] theorem decodeAnnotation_documentWide
-    (id : Hyperdocument.AnnotationId) (policies : RangeDeathPolicies)
-    (visibility : Visibility Hyperdocument.PrincipalRef TypedAuthorization.Digest)
-    (record : Hyperdocument.AnnotationRecord) (documentWide : record.range = none) :
-    decodeAnnotationRecord? id policies visibility record = none := by
+    (id : Hyperdocument.AnnotationId) (record : Hyperdocument.AnnotationRecord)
+    (documentWide : record.range = none) :
+    (decodeAnnotationRecord? id record).isSome = true := by
+  simp [decodeAnnotationRecord?, documentWide]
+
+@[simp] theorem decodeAnnotation_documentWide_target
+    (id : Hyperdocument.AnnotationId) (record : Hyperdocument.AnnotationRecord)
+    (documentWide : record.range = none) :
+    (decodeAnnotationRecord? id record).map (fun annotation => annotation.target) =
+      some (.document record.document) := by
   simp [decodeAnnotationRecord?, documentWide]
 
 end HyperdocumentAdapter

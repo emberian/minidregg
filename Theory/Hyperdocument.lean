@@ -270,18 +270,32 @@ inductive AnchorBias where
   | after
   deriving DecidableEq, Repr
 
+/-- Canonical behavior when the atom neighboring a stored endpoint dies.
+Preference policies may select only an exact predecessor/successor committed by
+the accepted delete event; they do not authorize a renderer to search for a
+replacement. -/
+inductive EndpointDeathPolicy where
+  | invalidate
+  | keepTombstone
+  | preferPrevious
+  | preferNext
+  | preferPreviousThenNext
+  | preferNextThenPrevious
+  deriving DecidableEq, Repr
+
 /-- Canonical stored/wire endpoint data names a neighboring atom identity
-rather than a byte offset.  `Theory.StableRanges` owns the richer operational
-endpoint/death semantics; an exact adapter to that model is required before
-range operations land.  This record is not a second range calculus. -/
+rather than a byte offset and commits its behavior if that atom dies.
+`Theory.StableRanges` owns the operational transport semantics and realizes
+this record definitionally; this record is not a second range calculus. -/
 structure StablePoint where
   run : RunId
   neighbor : Option AtomId
   bias : AnchorBias
+  death : EndpointDeathPolicy
   deriving DecidableEq, Repr
 
-/-- Canonical stored/wire range data.  Its interpretation must go through the
-future exact `Theory.StableRanges` adapter mentioned above. -/
+/-- Canonical stored/wire range data.  Its interpretation goes through the
+exact `Theory.StableRanges` adapter. -/
 structure StableRange where
   start : StablePoint
   finish : StablePoint
@@ -387,6 +401,7 @@ structure MarkRecord where
   payload : List UInt8
   author : PrincipalRef
   event : VersionEventId
+  visibilityPolicy : Digest
   tombstonedAt : Option VersionEventId
   deriving DecidableEq, Repr
 
@@ -396,6 +411,7 @@ structure AnnotationRecord where
   body : DocumentId
   author : PrincipalRef
   event : VersionEventId
+  visibilityPolicy : Digest
   tombstonedAt : Option VersionEventId
   deriving DecidableEq, Repr
 
