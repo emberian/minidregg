@@ -19,12 +19,10 @@ hotspots afterward.
   challenge/query bound. Native Fan–Paar `GF(2^64)`, the reversed-LCH transform, and cSHAKE/Merkle
   compute remain. The handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted:
   it bound but never enforced its coefficient bound, so it was not a low-degree test.
-- **Ext6 gate suite — proved relation, native verifiers deleted:** `X^6−31` is proved irreducible. One trace root is
-  fixed before gamma; a degree-2 factored-selector sumcheck reduces emitted gates to seven terminal
-  trace functionals; eta aggregates those with public-prefix and padding equations; one sampled
-  trace-linear opening retires the aggregate without revealing the trace/table. Lean proves the
-  seven-operand provenance, terminal functionals, and eta bad-set bound. The handwritten Rust gate
-  verifier family was deleted pending Lean-owned transcript/control emission.
+- **Ext6 gate suite — proved algebra, native verifiers deleted:** `X^6−31` is proved irreducible.
+  Lean proves emitted-descriptor residual provenance, seven factored operands, degree-two rounds,
+  terminal affine functionals, and eta aggregation with its bad-set bound. Commitment
+  authentication, transcript scheduling, subfield/proximity composition, and final LDT remain.
 - **Accumulation — proved algebra, no authoritative native history:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
   quadratic language is iff a genuine `ReceiptDelta` and folds valid words through `AccClaim`.
@@ -143,12 +141,9 @@ disposable.
   relabeled. Reintroduction requires rate-aware Lean-emitted control and a re-derived OOD argument.
 - 2026-08-09 ★★★★★ **Succinct emitted-gate proof joined** ✓: `GateFactoredExt6` proves exact
   seven-operand selector provenance, degree-2 outer rounds, terminal trace functionals, and the
-  fresh-eta bad-set bound. `succinct_factored_gate.rs` fixes one lifted trace root before gamma,
-  runs the outer sumcheck, aggregates all seven terminal equations plus the public prefix and
-  padding zeros, and retires one combined functional with a sampled MLE opening. Verification sees
-  no trace or defect table; unrelated roots, public substitution, and sampled non-base Ext6 traces
-  reject. Honest boundaries: coherent proximity, subfield sampling composition, CR/ROM, and
-  replacement of the handwritten native verifier by Lean-owned control.
+  fresh-eta bad-set bound. The former `succinct_factored_gate.rs` composition was subsequently
+  deleted because it authored commitment, transcript, proof, and verifier control. Commitment
+  authentication, coherent proximity, subfield sampling, CR/ROM, and Lean-owned control remain.
 - 2026-08-09 ★★★★ **Characteristic-two adaptive sampled soundness** ✓: `AdditiveFriQuery` uses the
   literal additive tower fold, authenticated openings, coherent modulo paths, and an
   earliest-deviation cover to prove `m*2^(ell-1)/|F| + (1-tau)^q` in the UD schedule. No
@@ -163,8 +158,9 @@ disposable.
   recomputes the exact residual table/root and rejects a separately valid unrelated PCS.
   `MultiplicativeMleTerminal` proves the Möbius/even-odd fold terminal is exactly `mle f r` and
   machine-refutes raw table values as coefficients; `GateMleExt6` proves descriptor ordering,
-  extension lift, batching, and terminal semantics. The succinct factored-selector replacement is
-  the later ★★★★★ entry above; this clear path remains a reference oracle.
+  extension lift, batching, and terminal semantics. The native `gate_mle_ext6` and MLE-terminal
+  protocol objects were subsequently deleted; only their Lean mathematics and extracted native
+  arithmetic remain.
 - 2026-08-09 **RETRACTED and deleted sampled binary admission surface:** `AdditiveFriTower` and
   `AdditiveFriQuery` remain valid Lean mathematics, but the former Rust verifier checked only local
   full-depth fold consistency. Because `coefficient_bound` was unused, arbitrary words and

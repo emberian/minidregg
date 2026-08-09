@@ -114,7 +114,7 @@ The first formal substrate is already present in:
 | Dialect | Native work | Current proof direction | Boundary that must stay explicit |
 |---|---|---|---|
 | **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)` execution, `GF(2^256)` challenges, additive LCH/FRI, trace-linear retirement | Rust kernels are unverified compute; generated Lean authority, CR/ROM composition, and an outer large-challenge accumulator remain |
-| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Factored gate sumcheck and sampled committed-trace opening | Coherent proximity, subfield provenance, and Lean-owned control that rechecks native compute |
+| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | A Lean-owned commitment/transcript/opening controller, coherent proximity, subfield provenance, and final LDT remain |
 | **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses, unit-vector incidence, and the exact pushforward; native Tower256 retains arithmetic kernels only | Lean emission of the lookup clause/controller, CR/ROM/proximity, and the later Twist/Shout mutable-state layer remain; handwritten native proof and receipt adapters are deleted |
 | **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Exact bignum/cross-modulus equations and ring-native receipts | Naive field lookup over cyclotomic rings is unsound; canonical limbs/ranges or indexed ring protocols are mandatory |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
@@ -139,8 +139,8 @@ A receipt binds at least:
   explicitly a charged committed transition);
 - prior receipt/history links and verifiable finality when finality is claimed.
 
-The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its replacement is a
-Lean-owned `SemanticManifest`: native code will
+The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its replacement spine
+begins with a Lean-owned `SemanticManifest`: native code will
 receive bounded calls and return data; it will not construct or verify receipt meaning.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first
@@ -163,8 +163,10 @@ arithmetization and emitted online control remain.
 
 ## Reactive UI and tools
 
-The good idea from Breadstuffs/DeOS is retained, but the previously separate worlds are collapsed
-onto the receipt relation:
+The good idea from Breadstuffs/DeOS is retained. The target is to collapse the previously separate
+worlds onto the receipt relation; `ReactiveReceipt`, `GuardedAdvice`, `ReactiveController`, and
+`CellState` are the landed fragments, while durable CAS/nullifier handling and the executable
+tool/UI/agent join remain:
 
 1. a projection is a pure, proved program from semantic state and observer policy to a typed view;
 2. it returns the exact dependency set used to produce that view;
@@ -222,7 +224,8 @@ verification ritual. A later compile or theorem failure becomes a new fix-forwar
 No step may add a second semantic implementation in Rust. New Rust is either generated glue or a
 clearly labeled unverified computational kernel invoked through a Lean-emitted interface.
 
-`Compiler.SemanticController.arbitraryOracle_integrity` now makes that rule semantic: for every
+`Compiler.SemanticController.arbitraryOracle_integrity` now establishes that rule for the current
+fixed frame-nucleus descriptor model: for every
 arbitrary native oracle, reaching the sole Lean `Verified` constructor implies exact-request
 authorization, the existing bound receipt relation, and acceptance by the Lean-emitted descriptor.
 Native failure can deny availability or completeness; it cannot construct an accepted turn.

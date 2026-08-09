@@ -38,9 +38,11 @@ experiment and can be replaced wholesale as the protocol evolves.
 There is deliberately no authoritative Rust one-call prover/verifier API now. The former
 full-trace `reference_prove` / `reference_verify` composition and its benchmark were deleted because
 they authored transcript and acceptance semantics in Rust. Native code currently supplies
-unverified field/tower arithmetic, transforms, hash/Merkle operations, and several explicitly
-temporary protocol prototypes. Lean owns the relations and emitted descriptors.
-`Compiler.SemanticController` is now the first executable authority path: for every arbitrary
+unverified field/tower arithmetic, transforms, hash/Merkle operations, candidate trace data, and a
+data-only descriptor reader. The protocol wrappers for gate sumcheck, MLE openings, LogUp, and
+Fiat--Shamir have been deleted. Lean owns the relations, manifests, plans, and emitted descriptors.
+`Compiler.SemanticController` is now the first Lean-executable authority model at the fixed
+frame-nucleus descriptor boundary: for every arbitrary
 native oracle, its only successful outcome carries exact-request authorization, the bound semantic
 receipt relation, and descriptor acceptance. The native reply has no acceptance bit.
 
@@ -49,25 +51,26 @@ consistency but never used the advertised coefficient bound, so it was not a low
 could make a false OOD claim pass with a pointwise quotient. Reintroduction requires a Lean-emitted,
 genuinely rate-aware additive-FRI controller and a re-derived OOD theorem.
 
-The proved Ext6 gate decomposition is:
+The proved Ext6 gate algebra is:
 
 ```text
-emitted descriptor + public inputs + one trace root
-    -> Ext6 gamma + degree-2 factored-selector sumcheck
-    -> seven terminal trace functionals + fresh eta
-    -> one aggregated committed-trace opening
+emitted descriptor
+    -> gamma-batched residual relation
+    -> seven factored operand tables
+    -> degree-2 sumcheck terminal
+    -> eta-batched linear functional
 ```
 
 Lean proves that seven sparse
 selector operands have exactly the emitted descriptor's gamma-batched cube sum, that their outer
 sumcheck has individual degree two, and that their terminal values are public affine trace
-functionals. The former Rust verifiers for that composition were deleted; their replacement is the
-Lean-owned transcript/controller path. Coherent proximity, subfield sampling, CR/ROM, and generated
-control remain explicit rather than being mistaken for code-level completion.
+functionals. A commitment/opening, roots-before-challenge controller, coherent proximity and
+subfield proof, CR/ROM composition, and final LDT remain. The former native verifier composition
+was deleted rather than being mistaken for code-level completion.
 
 The old `nextgen_light_client` conjunction was deleted with the unsound binary admission branch.
-The surviving handwritten Ext6 prototypes are not semantic authority and are scheduled
-for replacement by a Lean-owned controller and one real outer accumulator.
+Only Ext6 arithmetic kernels survive on the native side; no Ext6 proof or verifier composition is
+currently exported. A Lean-owned controller and one real outer accumulator remain.
 
 On the formal side, `Assurance/SemanticReceiptRelation` gives that phrase exact content: touched
 bits are Boolean; `(1−touched)·(post−pre)=0` enforces the frame; the zero set is iff a genuine
@@ -108,8 +111,9 @@ The active direction is to make the strongest pieces meet at one honest end-to-e
 - **Accumulation:** construct the common WARP/FACS relation, decider, and extractor from the
   Lean-owned receipt relation. The former handwritten functional-history node was deleted rather
   than promoted into the architecture.
-- **Gate provenance:** refine the landed succinct factored-selector/trace-opening protocol to Lean,
-  close its coherent-proximity and base-subfield sampling composition, and join it to final FRI.
+- **Gate provenance:** extend the landed Lean factored-selector algebra with generated
+  transcript/opening control, close coherent proximity and base-subfield sampling, and join it to
+  final FRI.
 - **Deployed ZK:** instantiate the staged roots-before-query game with hiding committed-word-
   knowledge proofs and discharge its explicit shared-ROM fresh/hit/sampling ports; never revive the
   vacuous existential or refuted hidden-state targets.
