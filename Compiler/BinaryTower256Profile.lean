@@ -2,9 +2,10 @@
 # Compiler.BinaryTower256Profile -- inhabited semantic Tower256 backend profile
 
 This instantiates the controller's abstract Tower256 profile with Lean's
-`binaryTower 8` and the exact 32-byte finite-carrier codec.  It closes profile
-inhabitation and the characteristic/cardinality/width obligations.  It still
-does not identify that codec with a native four-u64 layout.
+`binaryTower 8` and the exact recursive Fan--Paar 32-byte codec.  The low child
+occupies the low coordinate half and `fpGen 7` is bit 128, so the manifest's
+basis id now describes the actual Lean representation rather than an arbitrary
+finite enumeration.  It still does not prove handwritten native arithmetic.
 -/
 
 import Theory.BinaryTowerCodec
@@ -46,7 +47,14 @@ theorem profile_width_exact (value : Tower256) :
 theorem profile_cardinality : Nat.card Tower256 = 2 ^ 256 :=
   profile.cardinality
 
+/-- Profile-level basis tooth: the top generator starts the high 128-bit half. -/
+theorem profile_top_generator_index :
+    (Minidregg.Theory.BinaryTowerCodec.toFin
+      (Minidregg.Theory.fpGen 7)).val = 2 ^ 128 :=
+  Minidregg.Theory.BinaryTowerCodec.toFin_fpGen_seven
+
 #print axioms profile_width_exact
 #print axioms profile_cardinality
+#print axioms profile_top_generator_index
 
 end Minidregg.Compiler.BinaryTower256Profile
