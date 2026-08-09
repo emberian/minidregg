@@ -1,7 +1,7 @@
 /-
 # Loom.JohnsonRegime — the beyond-unique-decoding frontier, driven to its
 honest boundary: the Johnson list bound PROVED, mutual CA past `dC/2`
-REDUCED to the named literature conjecture (WHIR Conj. 4.12), the
+REDUCED locally to the named historical conjecture interface (WHIR Conj. 4.12), the
 `t`-column sampling bridge BOUNDED.
 
 **What this file is.** `[SUBUD-johnson]` (Loom/SubUdSeam.lean's residual)
@@ -25,16 +25,20 @@ This file attacks the rest at the honest resolution each part admits:
   "recovered up to the mutual-CA list" in the Johnson regime. Selecting
   the intended member is the landed `[OOD-pin-proximity]` seam, untouched.
 
-* **(ii) — LITERATURE-OPEN, and REDUCED, never proved: mutual CA past
-  `dC/2`.** The landed WHIR Lemma 4.10 upgrade
+* **(ii) — PROVED IN THE LITERATURE FOR THE RS/POLYNOMIAL-GENERATOR
+  JOHNSON INSTANCE, but not formalized locally.** The landed WHIR Lemma 4.10 upgrade
   (`hasMutualCorrelatedAgreement_of_isProximityGenerator`, CITED) caps the
   mutual-CA bound at `B⋆ = max (1 − dC/2) B` — intrinsically
   unique-decoding. Whether mutual CA extends to the generator's OWN bound
-  `B` (for RS with `B = √ρ`: up to the Johnson radius) is **WHIR
-  (eprint 2024/1586) Conjecture 4.12 — OPEN in the literature. It CANNOT
-  be proved here and is NOT.** It enters exactly as the cryptographic
-  floor does: a named `Prop` (`WHIRConjecture412`), consumed only as an
-  explicit hypothesis. What IS proved: the reduction
+  `B` was posed as **WHIR (eprint 2024/1586) Conjecture 4.12**. Subsequent
+  results prove the relevant RS/polynomial-generator instance through the
+  Johnson radius: eprints 2025/2051 and 2025/2110 prove mutual correlated
+  agreement, with 2025/2055 developing the corresponding proximity
+  consequences. Those proofs are NOT formalized in this tree. Moreover,
+  `WHIRConjecture412` is deliberately more parametric than the RS instance,
+  so it remains a named LOCAL `Prop`, consumed only as an explicit
+  hypothesis rather than silently upgraded by a citation. What IS proved
+  locally is the reduction
   (`mutualCA_johnson_of_conj`, `mutualCA_johnson`,
   `foldFamily_mutualCA_johnson`) — conjecture + proximity gap at `B = √ρ`
   ⟹ mutual correlated agreement on ALL of `δ ∈ (0, J(ρ))`, in the exact
@@ -59,10 +63,12 @@ This file attacks the rest at the honest resolution each part admits:
 **The honest boundary, in one sentence.** Johnson-regime LIST SIZE and
 `t`-column AMPLIFICATION are theorems (proved here, no hypotheses beyond
 the code's distance); Johnson-regime MUTUAL CORRELATED AGREEMENT — the
-statement the beyond-UD extractor actually rides — is exactly WHIR
-Conjecture 4.12 plus the (literature-proved, here-unformalized) BCIKS
-Johnson-regime proximity gap, both carried as named hypotheses, zero
-conjectures on any label.
+statement the beyond-UD extractor actually rides — is literature-proved
+for the needed RS/polynomial-generator Johnson instance (2025/2051,
+2025/2055, 2025/2110), but remains conditional in THIS Lean tree on the
+historically named `WHIRConjecture412` plus the locally unformalized
+Johnson-regime proximity gap. Capacity-level versions are not a stronger
+future endpoint: the conjecture family at capacity is false (2025/2046).
 
 **Keystones** (ATLAS law 2). Satisfiable: `J(1/2) = 1 − 1/√2 ∈ (0.29, 0.30)`
 strictly beats the UD radius `1/4` (`johnson_win_at_rate_half`), and the
@@ -423,27 +429,31 @@ theorem reedSolomon_johnson_list_bound [Nonempty ι] (dom : ι ↪ F) {d : ℕ}
   rwa [show (1 : ℝ) - (1 - (d : ℝ) / (Fintype.card ι : ℝ))
       = (d : ℝ) / (Fintype.card ι : ℝ) from by ring] at h
 
-/-! ## WHIR Conjecture 4.12 — NAMED, never proved
+/-! ## WHIR Conjecture 4.12 — historical name, still a LOCAL hypothesis
 
 The landed Lemma 4.10 (`hasMutualCorrelatedAgreement_of_isProximityGenerator`,
 CITED) upgrades a proximity generator to MUTUAL correlated agreement only at
 the capped bound `B⋆ = max (1 − dC/2) B` — its proof pins the nearby codeword
 by UNIQUE decoding and cannot cross `dC/2`. Whether the upgrade holds at the
 generator's own bound `B` — for RS with `B = √ρ` (WHIR Thm 4.8 / BCIKS),
-i.e. mutual CA on the whole Johnson interval `(0, J(ρ))` — is WHIR
-(eprint 2024/1586) **Conjecture 4.12: OPEN in the literature**. It enters
-this tree exactly the way the cryptographic floor does: a named `Prop`,
-consumed only as an explicit hypothesis, never an instance, never an axiom,
-never claimed. -/
+i.e. mutual CA on the whole Johnson interval `(0, J(ρ))` — was WHIR
+(eprint 2024/1586) Conjecture 4.12. The needed RS/polynomial-generator
+Johnson instance is now a theorem in the literature (2025/2051 and
+2025/2110; see also the proximity consequences in 2025/2055), but its
+proof is not formalized here. The general `Prop` below is also intentionally
+broader than that instance. It therefore remains a LOCAL interface,
+consumed only as an explicit hypothesis, never an instance or axiom. The
+capacity-level conjecture family must not be substituted for it: those
+stronger variants are false (2025/2046). -/
 
 /-- **WHIR Conjecture 4.12, as a named conjecture-hypothesis.** For the
 generator/code pair: the plain proximity gap at bound `B` upgrades to MUTUAL
 correlated agreement at the SAME bound and error — no unique-decoding cap.
 The landed Lemma 4.10 PROVES this Prop when `B` already dominates
 `1 − dC/2`; its content past `dC/2` (for RS at `B = √ρ`: the band
-`(dC/2, J(ρ))`, nonempty by `conjecture_band_nonempty`) is the open
-conjecture. This definition is the honest boundary marker: everything
-beyond-UD downstream must consume it BY NAME. -/
+`(dC/2, J(ρ))`, nonempty by `conjecture_band_nonempty`) is the part not
+formalized locally. This definition is the honest LOCAL boundary marker:
+everything beyond-UD downstream in this tree must consume it BY NAME. -/
 def WHIRConjecture412 (G : ProximityGenerator F ℓ) (C : Submodule F (ι → F))
     (B : ℝ) (err : ℝ → ℝ) : Prop :=
   IsProximityGenerator G C B err → HasMutualCorrelatedAgreement G C B err
@@ -452,7 +462,7 @@ omit [DecidableEq ι] in
 /-- The conjecture Prop is a satisfiable SHAPE, not a contradiction: over
 the full code `⊤` (every function a codeword) the implication holds
 outright — the mutual-CA failure event is empty. Satisfiability of the
-statement form, NOT evidence for the RS instance, which stays open. -/
+statement form, NOT a local formalization of the literature's RS theorem. -/
 theorem whirConjecture412_top (G : ProximityGenerator F ℓ) :
     WHIRConjecture412 G (⊤ : Submodule F (ι → F)) 0 (fun _ => 0) := by
   intro _ f δ _ _
@@ -465,11 +475,12 @@ theorem whirConjecture412_top (G : ProximityGenerator F ℓ) :
 bound `B` already dominates the unique-decoding cap `1 − dC/2`, the
 conjecture Prop is a THEOREM — the landed Lemma 4.10
 (`hasMutualCorrelatedAgreement_of_isProximityGenerator`, CITED) with the
-`max` collapsed. So `WHIRConjecture412`'s open content is EXACTLY the band
+`max` collapsed. So the content not discharged by THIS local Lemma 4.10
+route is EXACTLY the band
 `B < 1 − dC/2`: for RS at `B = √ρ` and exact distance, that is the
 macroscopic regime `√n·(1 − √ρ) > 1` (quantized toy sites with
 `√n − √d ≤ 1` fall to this theorem — see `whirConjecture412_sqrtRate_F5`;
-the landed F₁₁ site with `√8 − √2 > 1` does not, and is genuinely open). -/
+the landed F₁₁ site with `√8 − √2 > 1` does not discharge locally). -/
 theorem whirConjecture412_of_ud_bound [Nonempty ι] (G : ProximityGenerator F ℓ)
     (C : Submodule F (ι → F)) {B : ℝ} {err : ℝ → ℝ} {dC : ℝ}
     (hdC : ∀ u ∈ C, ∀ v ∈ C, u ≠ v → dC ≤ relDist u v)
@@ -490,8 +501,9 @@ honest hypothesis exactly as `Loom/ReedSolomon.lean` carries it) yields
 mutual correlated agreement with `B⋆ = √ρ`: the admissible radius interval
 becomes `(0, 1 − √ρ) = (0, johnsonRadius ρ)`, strictly containing the
 landed UD interval (`johnson_interval_extends_UD`). The proof is the
-one-step discharge — the POINT is that the beyond-UD seam is now a single
-named literature conjecture away, with zero re-derivation downstream. -/
+one-step discharge — the POINT is that importing a local formalization of
+the published RS theorem can discharge this named seam with zero
+re-derivation downstream. -/
 theorem mutualCA_johnson_of_conj [Nonempty ι] [Fintype F] (dom : ι ↪ F)
     (d : ℕ) {err : ℝ → ℝ}
     (hconj : WHIRConjecture412 (affineGenerator F) (reedSolomonCode dom d)
@@ -776,9 +788,10 @@ theorem reduction_fires_F5 :
 quantization quirk `√n − √d = 2 − √2 ≤ 1` puts `√(1/2) ≈ 0.707` above the
 exact-distance cap `5/8`, so the literature's own bound falls to the UD
 theorem here. Premise inhabitation at the conjecture's exact `B`; the OPEN
-content is the macroscopic regime `√n(1 − √ρ) > 1` (already at the landed
-F₁₁ site, `√8 − √2 ≈ 1.41 > 1`, this route is unavailable — that instance
-is genuinely open). -/
+content of THIS local Lemma 4.10 route is the macroscopic regime
+`√n(1 − √ρ) > 1` (already at the landed F₁₁ site,
+`√8 − √2 ≈ 1.41 > 1`, this route is unavailable; the published Johnson
+theorems are not formalized here). -/
 theorem whirConjecture412_sqrtRate_F5 :
     WHIRConjecture412 (affineGenerator (ZMod 5)) (reedSolomonCode dom₅ 2)
       (Real.sqrt ((2 : ℝ) / (Fintype.card (Fin 4) : ℝ)))
@@ -822,20 +835,26 @@ attained. Keystones fired on the landed F₅/F₁₁ sites: two codewords in a
 past-UD ball capped at 3; `J(1/2) ∈ (0.29, 0.30) > 1/4`; the sampling
 bound met with equality.
 
-**What is REDUCED, never proved — the conjecture boundary:**
+**What is REDUCED locally — the historical conjecture boundary:**
 
 * **`WHIRConjecture412`** — mutual correlated agreement past `dC/2` at the
   generator's own bound (WHIR eprint 2024/1586, Conjecture 4.12).
-  **OPEN in the literature; no proof exists to formalize.** Named as a
-  parametric `Prop`, satisfiable as a shape (`whirConjecture412_top`),
-  non-vacuous where consumed (`conjecture_band_nonempty`), and PROVED
-  by the landed Lemma 4.10 whenever `B ≥ 1 − dC/2` — its open content is
-  exactly the band `(dC/2, 1 − B)`. The reductions
+  The relevant RS/polynomial-generator Johnson instance is PROVED by
+  2025/2051 and 2025/2110, with 2025/2055 giving related proximity
+  consequences, but those arguments are not formalized locally. The
+  stronger capacity-level conjecture family is FALSE (2025/2046), so
+  “through Johnson” is the precise positive boundary, not evidence for
+  capacity. This file retains the historical name as a parametric `Prop`
+  broader than the cited RS instance: satisfiable as a shape
+  (`whirConjecture412_top`), non-vacuous where consumed
+  (`conjecture_band_nonempty`), and PROVED by the landed Lemma 4.10 whenever
+  `B ≥ 1 − dC/2`. Its content not discharged by the local Lemma 4.10 route
+  is exactly the band `(dC/2, 1 − B)`. The reductions
   (`mutualCA_johnson_of_conj`, `mutualCA_johnson`,
   `foldFamily_mutualCA_johnson`) are proved: conjecture + Johnson-regime
   proximity gap ⟹ mutual CA on all of `(0, J(ρ))`, in the exact shape the
-  sub-UD seam ladder consumes. If the conjecture falls, everything here
-  survives — only the beyond-UD radius claims retreat to `dC/2`.
+  sub-UD seam ladder consumes. A faithful local formalization of the
+  published RS theorem should discharge this interface at that instance.
 
 **What REMAINS provable but unformalized, named:**
 
@@ -859,6 +878,11 @@ bound met with equality.
   beyond-UD `subUdRecover` analogue (the list-valued decoder with an OOD
   pin) — the natural next file once (a) or the conjecture's status moves.
 
+Beyond Johnson is a separate frontier, not an extrapolation to capacity:
+2026/858 studies threshold halving and 2026/861 the action-orbit route.
+Neither is imported by this file, and 2025/2046 rules out the old blanket
+capacity conjectures.
+
 ## Ledger
 
 * `johnsonRadius` — DEFINED: `J(ρ) = 1 − √ρ`.
@@ -873,21 +897,24 @@ bound met with equality.
 * `reedSolomon_johnson_list_bound` — PROVED: the RS form at radius
   `J(ρ)`, `reedSolomonCode_minDist` CITED at the rounded distance.
 * `WHIRConjecture412` — DEFINED (a `Prop`, nowhere asserted): mutual CA
-  past `dC/2` at the generator's own bound — WHIR Conj 4.12,
-  LITERATURE-OPEN.
+  past `dC/2` at the generator's own bound — the historical WHIR Conj 4.12
+  interface, now literature-proved for the needed RS/polynomial-generator
+  Johnson instance but not formalized locally.
 * `whirConjecture412_top` — PROVED: the Prop shape is satisfiable (full
   code, degenerate site).
 * `whirConjecture412_of_ud_bound` — PROVED (boundary-sharpening): the
   conjecture Prop is a THEOREM wherever `B ≥ 1 − dC/2` (Lemma 4.10 CITED,
-  `max` collapsed) — its open content is EXACTLY `B < 1 − dC/2`; for RS at
-  `√ρ`/exact distance, exactly the macroscopic regime `√n(1 − √ρ) > 1`.
+  `max` collapsed) — the content left open by that local route is EXACTLY
+  `B < 1 − dC/2`; for RS at `√ρ`/exact distance, exactly the macroscopic
+  regime `√n(1 − √ρ) > 1`.
 * `JohnsonRegimeExample.whirConjecture412_F5` /
   `whirConjecture412_sqrtRate_F5` / `reduction_fires_F5` — PROVED: the
   conjecture Prop inhabited at the genuine rate-1/2 F₅ site (at the proved
   UD generator's `B = 5/6`, and — quantization quirk `√4 − √2 ≤ 1` — even
   at the literature's `B = √ρ`), and the reduction fired END-TO-END through
   the conjecture channel with the PROVED `hPG`; no new radius at that site,
-  said plainly — the F₁₁-scale instances (`√8 − √2 > 1`) stay open.
+  said plainly — the F₁₁-scale instances (`√8 − √2 > 1`) remain
+  undischargeable by the local Lemma 4.10 route alone.
 * `mutualCA_johnson_of_conj` / `mutualCA_johnson` /
   `foldFamily_mutualCA_johnson` — PROVED (reductions): conjecture + `hPG`
   at `√ρ` ⟹ mutual CA on `(0, J(ρ))`, in the sub-UD seam's shape.
@@ -900,8 +927,9 @@ bound met with equality.
   `sampling_bridge_tight` (bound attained).
 * Residual — prose above: (a) `hPG` at `√ρ` (BCIKS, provable-unformalized),
   (b) `[OOD-pin-proximity]` selection (inherited), (c) sharp/q-ary
-  constants, (d) the beyond-UD decoder assembly; plus the conjecture
-  boundary `WHIRConjecture412` (open, named, never claimed).
+  constants, (d) the beyond-UD decoder assembly; plus the LOCAL historical
+  interface `WHIRConjecture412` (published RS theorem not yet imported,
+  named and never silently claimed).
 
 `#print axioms` on `johnson_list_bound`, `reedSolomon_johnson_list_bound`,
 `mutualCA_johnson`, `column_sampling_bridge_pr`,

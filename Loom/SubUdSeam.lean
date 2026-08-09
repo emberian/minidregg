@@ -869,9 +869,13 @@ four named parts, none absorbed:
 * **(ii) Mutual CA beyond the UD radius.** The landed Lemma 4.10 upgrade
   caps the mutual-CA bound at `B⋆ = max (1 − dC/2) B` — its proof is
   intrinsically unique-decoding. For `δ ∈ (dC/2, 1 − √ρ)` mutual CA is
-  WHIR Conjecture 4.12's territory: OPEN IN THE LITERATURE, and this file
-  consumes nothing from it — every theorem here prices its radius inside
-  `(0, min {dC/2, 1 − B})`.
+  the territory historically named WHIR Conjecture 4.12. The relevant
+  RS/polynomial-generator Johnson instance is now literature-PROVED
+  (2025/2051 and 2025/2110, with related proximity consequences in
+  2025/2055), but those arguments are not formalized here. This file
+  consumes nothing from them: every theorem here prices its radius inside
+  `(0, min {dC/2, 1 − B})`. The stronger capacity-level conjecture family
+  is false (2025/2046), so Johnson is the positive boundary being cited.
 * **(iii) The list pin beyond `dC/2`.** `subUdRecover_sound`'s singleton
   pin (via `codeword_eq_of_close_of_close`) becomes a LIST pin: for
   `δ ≤ 1 − √ρ − η` the qualifying-codeword count is Johnson-bounded
@@ -909,11 +913,13 @@ recovery theory at the UD radius — the diagnosis (columns can never carry
 it), the mechanism (mutual CA over the challenge family), the decoder with
 exactness on codewords and correction within `2δ`, the full chain
 extraction, and the hiding coexistence that lemma A's conflict said was
-impossible. OPEN: realizing `hPG` (provable, UD case), the sampling bridge
+impossible. OPEN LOCALLY: realizing `hPG` (provable, UD case), the sampling
+bridge
 from `t`-column checks to the closeness event (provable, quantitative),
 the root-to-word attribution in the deployed BCS game (inherited,
-`[ACC-rbr-bcs-resid]`(a)), and the radius extension past `dC/2` (rides
-literature-open WHIR Conj. 4.12 + `[OOD-pin-proximity]`). The first two
+`[ACC-rbr-bcs-resid]`(a)), and the radius extension past `dC/2` (rides the
+locally unformalized, literature-proved RS Johnson MCA result through the
+historical `WHIRConjecture412` interface + `[OOD-pin-proximity]`). The first two
 are the load-bearing remainder for deploying the constrained-mask seam;
 neither touches the shapes landed here.
 
@@ -960,7 +966,9 @@ neither touches the shapes landed here.
   (genuine corruption corrected).
 * Residual — `[SUBUD-johnson]` (prose above): (i) the `hPG` realizer
   (UD case provable), (ii) mutual CA past `dC/2` (WHIR Conj. 4.12,
-  literature-open), (iii) the Johnson list pin + `[OOD-pin-proximity]`
+  historical LOCAL hypothesis; RS/polynomial-generator Johnson instance
+  literature-proved but unformalized here), (iii) the Johnson list pin +
+  `[OOD-pin-proximity]`
   selection, (iv) the `t`-column sampling bridge + root attribution
   (`[ACC-rbr-bcs-resid]`(a) inherited).
 
