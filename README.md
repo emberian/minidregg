@@ -39,8 +39,10 @@ There is deliberately no authoritative Rust one-call prover/verifier API now. Th
 full-trace `reference_prove` / `reference_verify` composition and its benchmark were deleted because
 they authored transcript and acceptance semantics in Rust. Native code currently supplies
 unverified field/tower arithmetic, transforms, hash/Merkle operations, and several explicitly
-temporary protocol prototypes. Lean owns the relations and emitted descriptors; the next executable
-path is a Lean-owned controller around bounded native replies.
+temporary protocol prototypes. Lean owns the relations and emitted descriptors.
+`Compiler.SemanticController` is now the first executable authority path: for every arbitrary
+native oracle, its only successful outcome carries exact-request authorization, the bound semantic
+receipt relation, and descriptor acceptance. The native reply has no acceptance bit.
 
 The former sampled binary-history/OOD API is deliberately absent. Its verifier checked local fold
 consistency but never used the advertised coefficient bound, so it was not a low-degree test and

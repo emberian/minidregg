@@ -41,6 +41,14 @@ hotspots afterward.
 
 ## Active completion frontier
 
+- 2026-08-09 ★★★★★ **Arbitrary-native-oracle semantic integrity** ✓:
+  `Compiler.SemanticController` compiles authorization and receipt checking into a phased indexed
+  controller. A native oracle can return only bounded echoed data and descriptor wires; it cannot
+  choose the challenge or construct `Verified`. `arbitraryOracle_integrity` proves that any reached
+  verified outcome contains exact-request `Authorized`, `BoundSemanticReceiptRelation`, and
+  `descriptorHolds`, with no hypothesis about native behavior. Result mismatch and descriptor
+  failure have explicit non-acceptance teeth.
+
 1. Refine the landed characteristic-two sampled theorem to the binary runtime and compose its
    cSHAKE/Merkle assumptions.
 2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, replace the

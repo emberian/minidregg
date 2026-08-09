@@ -219,6 +219,11 @@ verification ritual. A later compile or theorem failure becomes a new fix-forwar
 No step may add a second semantic implementation in Rust. New Rust is either generated glue or a
 clearly labeled unverified computational kernel invoked through a Lean-emitted interface.
 
+`Compiler.SemanticController.arbitraryOracle_integrity` now makes that rule semantic: for every
+arbitrary native oracle, reaching the sole Lean `Verified` constructor implies exact-request
+authorization, the existing bound receipt relation, and acceptance by the Lean-emitted descriptor.
+Native failure can deny availability or completeness; it cannot construct an accepted turn.
+
 Performance work begins on the actual selected protocol. Distributed hosts (`persvati`, `hbox`)
 are used for genuinely expensive builds or measurements, not repetitive ritual.
 
