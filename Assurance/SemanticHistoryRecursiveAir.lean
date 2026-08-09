@@ -39,8 +39,6 @@ open Minidregg.Compiler
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
-open Minidregg.Theory.AuthorizationDeclaration
-open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 

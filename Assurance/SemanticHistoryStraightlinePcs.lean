@@ -36,12 +36,9 @@ namespace Minidregg.Assurance.SemanticHistoryStraightlinePcs
 open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
-open Minidregg.Assurance.SemanticTurnReceipt
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
-open Minidregg.Theory.AuthorizationDeclaration
-open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
