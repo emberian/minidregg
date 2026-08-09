@@ -33,6 +33,7 @@ open Minidregg.Compiler.AdditiveFriReceiptClause
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
+open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 

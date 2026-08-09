@@ -18,17 +18,19 @@ import Assurance.SemanticHistoryWARPAdditiveJoin
 namespace Minidregg.Assurance.SemanticHistoryBcsClaimProjection
 
 open Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
+open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
+open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
 noncomputable section
 
-variable {Root : Type*} {F : Type} {iota : Type*} [Field F]
+variable {Root : Type} {F : Type} {iota : Type} [Field F]
 variable [Fintype iota] [DecidableEq iota]
 variable {r : Nat}
 
@@ -67,6 +69,12 @@ def coordinateLinearEquiv :
     funext k
     rfl
 
+@[simp] theorem coordinateLinearEquiv_symm_reindexWord
+    (word : iota → F) :
+    coordinateLinearEquiv.symm (reindexWord word) = word := by
+  change restoreWord (reindexWord word) = word
+  exact restoreWord_reindexWord word
+
 /-- The semantic code transported to the exact `Fin _` carrier expected by
 `accReductionBcs`.  `comap` makes its meaning definitionally explicit: a
 finite word is admitted exactly when restoring its coordinates lies in the
@@ -78,7 +86,8 @@ def reindexCode (C : Submodule F (iota → F)) :
 @[simp] theorem reindexWord_mem_reindexCode
     (C : Submodule F (iota → F)) (word : iota → F) :
     reindexWord word ∈ reindexCode C ↔ word ∈ C := by
-  simp [reindexCode]
+  change coordinateLinearEquiv.symm (reindexWord word) ∈ C ↔ word ∈ C
+  rw [coordinateLinearEquiv_symm_reindexWord]
 
 /-! ## Claims and satisfaction -/
 
@@ -90,7 +99,9 @@ def reindexFunctional (functional : (iota → F) →ₗ[F] F) :
 @[simp] theorem reindexFunctional_reindexWord
     (functional : (iota → F) →ₗ[F] F) (word : iota → F) :
     reindexFunctional functional (reindexWord word) = functional word := by
-  simp [reindexFunctional]
+  change functional (coordinateLinearEquiv.symm (reindexWord word)) =
+    functional word
+  rw [coordinateLinearEquiv_symm_reindexWord]
 
 /-- Exact accumulated-claim projection.  The root and targets are retained;
 only the coordinate presentation of each functional changes. -/
@@ -121,10 +132,19 @@ theorem reindexClaim_satisfies_iff
   constructor
   · rintro ⟨hmem, hchannel⟩
     refine ⟨(reindexWord_mem_reindexCode C word).mp hmem, fun j => ?_⟩
-    simpa using hchannel j
+    have exactChannel := hchannel j
+    change (reindexClaim claim).weights j (reindexWord word) =
+      (reindexClaim claim).targets j at exactChannel
+    rw [reindexClaim_weights, reindexFunctional_reindexWord,
+      reindexClaim_targets] at exactChannel
+    exact exactChannel
   · rintro ⟨hmem, hchannel⟩
     refine ⟨(reindexWord_mem_reindexCode C word).mpr hmem, fun j => ?_⟩
-    simpa using hchannel j
+    change (reindexClaim claim).weights j (reindexWord word) =
+      (reindexClaim claim).targets j
+    rw [reindexClaim_weights, reindexFunctional_reindexWord,
+      reindexClaim_targets]
+    exact hchannel j
 
 /-! ## Folding and history transport -/
 
@@ -167,14 +187,28 @@ def chainIndexEquiv (chain : Chain Root F iota r) :
     (k : Fin (reindexChain chain).length) :
     (reindexChain chain).get k =
       reindexLink (chain.get (chainIndexEquiv chain k)) := by
-  change reindexLink (chain.get ⟨k, by simpa using k.isLt⟩) = _
-  congr 2
+  let sourceIndex : Fin chain.length :=
+    ⟨k.val, by simpa [reindexChain] using k.isLt⟩
+  have indexExact : chainIndexEquiv chain k = sourceIndex := Fin.ext rfl
+  rw [indexExact]
+  simp [reindexChain, sourceIndex]
 
 /-- A semantic family of per-link witnesses on the projected round indices. -/
 def reindexWitness (chain : Chain Root F iota r)
     (witness : Fin chain.length → iota → F) :
     Fin (reindexChain chain).length → Fin (CoordinateCount iota) → F :=
   fun k => reindexWord (witness (chainIndexEquiv chain k))
+
+/-- `LinkAligned` lifted verbatim from its deployed `Fin m` API to an
+arbitrary typed finite carrier.  This is only a carrier-generic presentation
+of the existing source relation, not a second accumulator or acceptance
+relation. -/
+def TypedLinkAligned
+    (C : Submodule F (iota → F)) (genesis : AccClaim Root F iota r)
+    (chain : Chain Root F iota r) (k : Fin chain.length)
+    (word : iota → F) : Prop :=
+  word ∈ C ∧ ∀ j,
+    genesis.weights j word = (chain.get k).claim.targets j
 
 /-- `LinkAligned`, the source relation used by `accReductionBcs`, is invariant
 under claim/carrier projection. -/
@@ -185,9 +219,9 @@ theorem reindexLinkAligned_iff
     (k : Fin (reindexChain chain).length) :
     LinkAligned (reindexCode C) (reindexClaim genesis) (reindexChain chain) k
         (reindexWitness chain witness k) ↔
-      LinkAligned C genesis chain (chainIndexEquiv chain k)
+      TypedLinkAligned C genesis chain (chainIndexEquiv chain k)
         (witness (chainIndexEquiv chain k)) := by
-  unfold LinkAligned reindexWitness
+  unfold LinkAligned TypedLinkAligned reindexWitness
   rw [reindexWord_mem_reindexCode]
   simp only [reindexClaim_weights, reindexFunctional_reindexWord,
     reindexChain_get, reindexLink, reindexClaim_targets]
@@ -204,7 +238,8 @@ theorem reindexedSourceRelation_iff
         LinkAligned (reindexCode C) (reindexClaim genesis)
           (reindexChain chain) k (reindexWitness chain witness k)) ↔
     (AccClaim.Satisfies C genesis genesisWord ∧
-      ∀ k : Fin chain.length, LinkAligned C genesis chain k (witness k)) := by
+      ∀ k : Fin chain.length,
+        TypedLinkAligned C genesis chain k (witness k)) := by
   constructor
   · rintro ⟨hgenesis, hlinks⟩
     refine ⟨(reindexClaim_satisfies_iff C genesis genesisWord).mp hgenesis,
@@ -231,6 +266,7 @@ theorem reindexClaim_aggregate
   | cons link tail ih =>
       simp only [aggregate_cons, reindexChain, List.map_cons]
       rw [ih, reindexClaim_foldClaims]
+      rfl
 
 /-- Word folding is the same linear combination after coordinate projection. -/
 theorem reindexWord_foldWords
@@ -241,9 +277,8 @@ theorem reindexWord_foldWords
   | nil => rfl
   | cons word tail ih =>
       simp only [foldWords_cons, List.map_cons]
-      rw [← ih]
-      funext k
-      rfl
+      rw [ih]
+      congr 1
 
 /-- The target satisfaction relation reached after the unshifted fold is
 identical to semantic aggregate satisfaction. -/
@@ -356,7 +391,8 @@ theorem semanticBcsReduction_source_iff
       () (reindexClaim genesis) (reindexWord genesisWord)
         (reindexWitness chain witness) ↔
       (AccClaim.Satisfies C genesis genesisWord ∧
-        ∀ k : Fin chain.length, LinkAligned C genesis chain k (witness k)) := by
+        ∀ k : Fin chain.length,
+          TypedLinkAligned C genesis chain k (witness k)) := by
   exact reindexedSourceRelation_iff C genesis chain genesisWord witness
 
 /-- Likewise, the target relation reached by the actual BCS reduction reads

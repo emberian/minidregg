@@ -39,6 +39,7 @@ open Minidregg.Compiler
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
+open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
@@ -233,8 +234,7 @@ theorem friRoundOpeningGadget_correct
     systemAccepts asg (friRoundOpeningGadget spec wiring round) ↔
       FriRoundOpeningsAccept asg spec wiring round := by
   unfold friRoundOpeningGadget FriRoundOpeningsAccept MerkleOpeningAccepts
-  rw [systemAccepts_append, systemAccepts_append,
-    membership_correct, membership_correct, membership_correct]
+  simp only [systemAccepts_append, membership_correct, and_assoc]
 
 /-- A list of per-round constraint systems accepts exactly when every round's
 system accepts. -/
@@ -268,10 +268,10 @@ theorem recursiveHistoryVerifier_correct
     systemAccepts asg (recursiveHistoryVerifierGadget hashSpec half wiring) ↔
       RecursiveHistoryVerifierAccepts asg hashSpec half wiring := by
   unfold recursiveHistoryVerifierGadget RecursiveHistoryVerifierAccepts
-  rw [systemAccepts_append, systemAccepts_append, systemAccepts_append,
+    MerkleOpeningAccepts
+  simp only [systemAccepts_append,
     sumcheckVerifier_correct, friQueryVerifier_correct, membership_correct,
-    friOpeningGadgets_correct]
-  rfl
+    friOpeningGadgets_correct, and_assoc]
 
 /-! ## Typed semantic-history receipt for the recursive AIR -/
 
@@ -314,13 +314,13 @@ namespace RecursiveHistoryAirReceipt
 
 variable {encodeDigest : Digest → F}
 variable {statement : StatelessHistoryStatement F}
-variable {head : HistoryHead}
 variable {hashSpec : PermSpec F 2} {half : F}
 variable {wiring : RecursiveVerifierWiring Idx sumcheckRounds friRounds}
 
 /-- The level-zero FRI root wire is exactly the encoding of the authoritative
 semantic accumulator root. -/
 theorem initial_fri_root_is_semantic_head
+    (head : HistoryHead)
     (receipt : RecursiveHistoryAirReceipt encodeDigest statement head
       hashSpec half wiring) :
     receipt.assignment (wiring.friRoot 0) =
@@ -330,6 +330,7 @@ theorem initial_fri_root_is_semantic_head
 /-- An accepted typed receipt exposes all deterministic component meanings.
 No security property is inferred. -/
 theorem component_acceptance
+    (head : HistoryHead)
     (receipt : RecursiveHistoryAirReceipt encodeDigest statement head
       hashSpec half wiring) :
     RecursiveHistoryVerifierAccepts receipt.assignment hashSpec half wiring :=
