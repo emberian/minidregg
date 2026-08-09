@@ -16,6 +16,7 @@ if [[ ! -w prover/testdata/demo_descriptor.json ]]; then
   mkdir -p "$work_dir"
   tar --exclude=.git --exclude=.lake --exclude='*.olean' -cf - . |
     tar -xf - -C "$work_dir"
+  chmod u+w "$work_dir"/prover/testdata/*.json
   mkdir -p "$work_dir/.lake"
   ln -s "$repo_dir/.lake/packages" "$work_dir/.lake/packages"
 fi
