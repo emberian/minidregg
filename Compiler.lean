@@ -26,6 +26,7 @@ import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic rec
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
 import Compiler.DeclaredEffectArtifact -- first-order effect artifact projected from the target-indexed Theory.EffectDeclaration, including the concrete v1 account move
+import Compiler.DeclaredHyperedgeArtifact -- flat joint turns emit the complete ordered request/effect family and presentation-root pins; no call forest or opaque witness codec is invented
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners may block with opaque errors or return bounded data, but cannot choose continuation or acceptance
 import Compiler.MinidreggV1ArithmeticWork -- concrete zero-add arithmetic clause/work item: a successful native buffer is admitted only by the generic Lean checker; native failure blocks
 import Compiler.DialectClauseDispatch -- a manifest clause is dispatchable only with its exact Lean controller; native failure blocks and only that controller checks the reply
