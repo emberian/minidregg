@@ -138,6 +138,7 @@ end SharedOracleSchedule
 proof stack.  Algebraic semantic failure is not a tag here: deterministic
 Lean theorems reduce it to these deployment events. -/
 inductive FailureClass where
+  | logupAlgebra
   | logupPcs
   | historyPcs
   | additiveProximity
@@ -166,6 +167,7 @@ variable {Omega : Type} [Fintype Omega]
 
 /-- At least one named component fails on this game coin. -/
 def Bad (ledger : FailureLedger Omega) (omega : Omega) : Prop :=
+  (ledger .logupAlgebra).event omega ∨
   (ledger .logupPcs).event omega ∨
   (ledger .historyPcs).event omega ∨
   (ledger .additiveProximity).event omega ∨
@@ -176,6 +178,7 @@ def Bad (ledger : FailureLedger Omega) (omega : Omega) : Prop :=
 
 /-- The exact additive envelope. -/
 def total (ledger : FailureLedger Omega) : Real :=
+  (ledger .logupAlgebra).price +
   (ledger .logupPcs).price +
   (ledger .historyPcs).price +
   (ledger .additiveProximity).price +
@@ -189,35 +192,44 @@ composition step that is unavailable for bounds stated over unrelated coin
 types. -/
 theorem bad_le_total (ledger : FailureLedger Omega) :
     uniformProb Omega ledger.Bad <= ledger.total := by
-  have h1 := uniformProb_or_le (ledger .logupPcs).event (fun omega =>
+  have h1 := uniformProb_or_le (ledger .logupAlgebra).event (fun omega =>
+    (ledger .logupPcs).event omega ∨
     (ledger .historyPcs).event omega ∨
     (ledger .additiveProximity).event omega ∨
     (ledger .commitmentBinding).event omega ∨
     (ledger .oracleTransport).event omega ∨
     (ledger .oracleLog).event omega ∨
     (ledger .zeroKnowledge).event omega)
-  have h2 := uniformProb_or_le (ledger .historyPcs).event (fun omega =>
+  have h2 := uniformProb_or_le (ledger .logupPcs).event (fun omega =>
+    (ledger .historyPcs).event omega ∨
     (ledger .additiveProximity).event omega ∨
     (ledger .commitmentBinding).event omega ∨
     (ledger .oracleTransport).event omega ∨
     (ledger .oracleLog).event omega ∨
     (ledger .zeroKnowledge).event omega)
-  have h3 := uniformProb_or_le (ledger .additiveProximity).event (fun omega =>
+  have h3 := uniformProb_or_le (ledger .historyPcs).event (fun omega =>
+    (ledger .additiveProximity).event omega ∨
     (ledger .commitmentBinding).event omega ∨
     (ledger .oracleTransport).event omega ∨
     (ledger .oracleLog).event omega ∨
     (ledger .zeroKnowledge).event omega)
-  have h4 := uniformProb_or_le (ledger .commitmentBinding).event (fun omega =>
+  have h4 := uniformProb_or_le (ledger .additiveProximity).event (fun omega =>
+    (ledger .commitmentBinding).event omega ∨
     (ledger .oracleTransport).event omega ∨
     (ledger .oracleLog).event omega ∨
     (ledger .zeroKnowledge).event omega)
-  have h5 := uniformProb_or_le (ledger .oracleTransport).event (fun omega =>
+  have h5 := uniformProb_or_le (ledger .commitmentBinding).event (fun omega =>
+    (ledger .oracleTransport).event omega ∨
     (ledger .oracleLog).event omega ∨
     (ledger .zeroKnowledge).event omega)
-  have h6 := uniformProb_or_le (ledger .oracleLog).event
+  have h6 := uniformProb_or_le (ledger .oracleTransport).event (fun omega =>
+    (ledger .oracleLog).event omega ∨
+    (ledger .zeroKnowledge).event omega)
+  have h7 := uniformProb_or_le (ledger .oracleLog).event
     (ledger .zeroKnowledge).event
   unfold Bad total
-  linarith [(ledger .logupPcs).bound, (ledger .historyPcs).bound,
+  linarith [(ledger .logupAlgebra).bound, (ledger .logupPcs).bound,
+    (ledger .historyPcs).bound,
     (ledger .additiveProximity).bound, (ledger .commitmentBinding).bound,
     (ledger .oracleTransport).bound, (ledger .oracleLog).bound,
     (ledger .zeroKnowledge).bound]
@@ -232,21 +244,28 @@ theorem good_of_not_bad (ledger : FailureLedger Omega) {omega : Omega}
     ledger.Good failure omega := by
   intro bad
   cases failure with
-  | logupPcs => exact good (Or.inl bad)
-  | historyPcs => exact good (Or.inr (Or.inl bad))
-  | additiveProximity => exact good (Or.inr (Or.inr (Or.inl bad)))
-  | commitmentBinding => exact good (Or.inr (Or.inr (Or.inr (Or.inl bad))))
-  | oracleTransport =>
+  | logupAlgebra => exact good (Or.inl bad)
+  | logupPcs => exact good (Or.inr (Or.inl bad))
+  | historyPcs => exact good (Or.inr (Or.inr (Or.inl bad)))
+  | additiveProximity =>
+      exact good (Or.inr (Or.inr (Or.inr (Or.inl bad))))
+  | commitmentBinding =>
       exact good (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad)))))
+  | oracleTransport =>
+      exact good
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad))))))
   | oracleLog =>
-      exact good (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad))))))
+      exact good
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad)))))))
   | zeroKnowledge =>
-      exact good (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr bad))))))
+      exact good
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr bad)))))))
 
 theorem not_bad_of_all_good (ledger : FailureLedger Omega) {omega : Omega}
     (good : forall failure, ledger.Good failure omega) :
     ¬ledger.Bad omega := by
-  rintro (h | h | h | h | h | h | h)
+  rintro (h | h | h | h | h | h | h | h)
+  · exact good .logupAlgebra h
   · exact good .logupPcs h
   · exact good .historyPcs h
   · exact good .additiveProximity h
