@@ -26,13 +26,15 @@ module proves only the deterministic circuit/meaning equivalence and the
 exact public-root attribution needed by a later concrete recursive argument.
 -/
 
-import Assurance.SemanticHistoryAccumulator
+import Assurance.SemanticHistoryFamily
 import Compiler.FriQueryVerifierAir
 import Compiler.AirMembership
 
 namespace Minidregg.Assurance.SemanticHistoryRecursiveAir
 
 open Minidregg.Assurance.SemanticHistoryAccumulator
+open Minidregg.Assurance.SemanticHistoryFamily
+open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
@@ -42,7 +44,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe uEffect uDisclosure uError uOp uIdx
+universe uSemantics uOp uIdx
   uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 noncomputable section
@@ -66,27 +68,19 @@ section SemanticBinding
 variable {F : Type*} [Field F] [DecidableEq F]
 variable {n : Nat}
 variable
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {Effect : Type uEffect} {Disclosure : Type uDisclosure}
-    {Error : Type uError} {Op : Type uOp}
-    {stateCommitment : StateCommitment (Fin n) F}
-    {effectSemantics : EffectSemantics (Fin n) F Effect}
-    {disclosurePolicy : DisclosurePolicy Disclosure}
+    {Op : Type uOp}
     {manifest : Manifest}
     {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
       uClauseReply, uClauseOutcome}}
     {clauseEvidence : ClauseEvidenceFamily manifest registry}
-    {errorId : Error → Digest}
-    {headerCells : AdmissionContext → BindingIx → F}
+    {family : EntrySemanticsFamily.{uSemantics} n F}
+    {headerCells : HistoryAdmissionContext → BindingIx → F}
     {C : Submodule F (BoundReceiptIx n → F)}
     {S : BindingCommitment Digest F (BoundReceiptIx n) Op}
 
 local notation "HistoryHead" => VerifiedHistoryHead
-  (n := n) (F := F) (portal := portal) (authState := authState)
-  (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
-  (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
-  (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest registry clauseEvidence errorId headerCells C S
+  (n := n) (F := F) (Op := Op) manifest registry clauseEvidence family
+  headerCells C S
 
 /-- Exact semantic realization of the small public statement.  Every field is
 derived from the verified head; callers cannot substitute an unrelated depth,
@@ -124,7 +118,7 @@ end SemanticBinding
 
 /-! ## One shared-wire recursive verifier system -/
 
-variable {F : Type*} [Field F]
+variable {F : Type uIdx} [Field F]
 variable {Idx : Type uIdx}
 variable {sumcheckRounds friRounds : Nat}
 
@@ -288,27 +282,19 @@ section Receipt
 variable [DecidableEq F]
 variable {n : Nat}
 variable
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {Effect : Type uEffect} {Disclosure : Type uDisclosure}
-    {Error : Type uError} {Op : Type uOp}
-    {stateCommitment : StateCommitment (Fin n) F}
-    {effectSemantics : EffectSemantics (Fin n) F Effect}
-    {disclosurePolicy : DisclosurePolicy Disclosure}
+    {Op : Type uOp}
     {manifest : Manifest}
     {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
       uClauseReply, uClauseOutcome}}
     {clauseEvidence : ClauseEvidenceFamily manifest registry}
-    {errorId : Error → Digest}
-    {headerCells : AdmissionContext → BindingIx → F}
+    {family : EntrySemanticsFamily.{uSemantics} n F}
+    {headerCells : HistoryAdmissionContext → BindingIx → F}
     {C : Submodule F (BoundReceiptIx n → F)}
     {S : BindingCommitment Digest F (BoundReceiptIx n) Op}
 
 local notation "HistoryHead" => VerifiedHistoryHead
-  (n := n) (F := F) (portal := portal) (authState := authState)
-  (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
-  (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
-  (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest registry clauseEvidence errorId headerCells C S
+  (n := n) (F := F) (Op := Op) manifest registry clauseEvidence family
+  headerCells C S
 
 /-- An accepted recursive AIR instance bound to one exact arbitrary-depth
 semantic history head.  This object deliberately stores AIR acceptance, not a

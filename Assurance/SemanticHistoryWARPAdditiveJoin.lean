@@ -28,6 +28,7 @@ import Loom.AccRbrBcs
 namespace Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
 
 open Minidregg.Assurance.SemanticHistoryAccumulator
+open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticHistoryStraightlinePcs
 open Minidregg.Assurance.SemanticAdditiveFriCheckpoint
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
@@ -270,7 +271,7 @@ end BcsProjection
 
 /-! ## The semantic/additive checkpoint join -/
 
-universe uEffect uDisclosure uError uFriOp uTranscript
+universe uSemantics uFriOp uTranscript
   uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 variable {F : Type} [Field F] [CharP F 2] [Algebra (ZMod 2) F]
@@ -279,29 +280,21 @@ variable (friS : ∀ level, BindingCommitment Digest F
   (AdditiveFriLevels ell level) (FriOp level))
 variable [DecidableEq F]
 variable
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {Effect : Type uEffect} {Disclosure : Type uDisclosure}
-    {Error : Type uError}
-    {stateCommitment : StateCommitment (Fin n) F}
-    {effectSemantics : EffectSemantics (Fin n) F Effect}
-    {disclosurePolicy : DisclosurePolicy Disclosure}
-    {manifest : Manifest} {errorId : Error → Digest}
+    {manifest : Manifest}
     {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
       uClauseReply, uClauseOutcome}}
     {clauseEvidence : ClauseEvidenceFamily manifest registry}
-    {headerCells : AdmissionContext → BindingIx → F}
+    {family : EntrySemanticsFamily.{uSemantics} n F}
+    {headerCells : HistoryAdmissionContext → BindingIx → F}
     {clause : FriClause m manifest friS}
     {Coin : Type} [Fintype Coin] [DecidableEq Coin]
     {Transcript : Type uTranscript}
 
 local notation "BoundCheckpoint" => Checkpoint
   (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-  (portal := portal) (authState := authState) (kind := kind)
-  (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-  (stateCommitment := stateCommitment) (effectSemantics := effectSemantics)
-  (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+  (manifest := manifest)
   (registry := registry) (clauseEvidence := clauseEvidence)
-  (errorId := errorId) (headerCells := headerCells) friS clause
+  (family := family) (headerCells := headerCells) friS clause
 
 /-- The semantic schedule's terminal post-challenge fold root is exactly the
 existing additive-FRI checkpoint's level-zero root.  No root-bridge premise is
@@ -310,13 +303,9 @@ theorem terminal_root_eq_additive_initial
     (checkpoint : BoundCheckpoint)
     (joined : StraightlineCheckpointExtraction
       (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-      (portal := portal) (authState := authState) (kind := kind)
-      (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-      (stateCommitment := stateCommitment)
-      (effectSemantics := effectSemantics)
-      (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+      (manifest := manifest)
       (registry := registry) (clauseEvidence := clauseEvidence)
-      (errorId := errorId) (headerCells := headerCells)
+      (family := family) (headerCells := headerCells)
       friS clause checkpoint Coin Transcript) :
     (dualRootOfSchedule joined.schedule
       joined.scheduleBinding.challenges).terminalRoot =

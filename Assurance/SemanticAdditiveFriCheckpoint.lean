@@ -26,6 +26,7 @@ import Assurance.SemanticHistoryStraightlinePcs
 namespace Minidregg.Assurance.SemanticAdditiveFriCheckpoint
 
 open Minidregg.Assurance.SemanticHistoryAccumulator
+open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticHistoryStraightlinePcs
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticTurnReceipt
@@ -38,7 +39,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe uEffect uDisclosure uError uFriOp uTranscript
+universe uSemantics uFriOp uTranscript
   uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 noncomputable section
@@ -132,17 +133,12 @@ variable (friS : ∀ level, BindingCommitment Digest F
 
 variable
     [DecidableEq F]
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {Effect : Type uEffect} {Disclosure : Type uDisclosure}
-    {Error : Type uError}
-    {stateCommitment : StateCommitment (Fin n) F}
-    {effectSemantics : EffectSemantics (Fin n) F Effect}
-    {disclosurePolicy : DisclosurePolicy Disclosure}
-    {manifest : Manifest} {errorId : Error → Digest}
+    {manifest : Manifest}
     {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
       uClauseReply, uClauseOutcome}}
     {clauseEvidence : ClauseEvidenceFamily manifest registry}
-    {headerCells : AdmissionContext → BindingIx → F}
+    {family : EntrySemanticsFamily.{uSemantics} n F}
+    {headerCells : HistoryAdmissionContext → BindingIx → F}
 
 abbrev FriClause
     (m : Nat)
@@ -278,11 +274,8 @@ coordinate padding; the commitment and code are constructed from the clause. -/
 structure Checkpoint (clause : FriClause m manifest friS) where
   padding : CoordinatePadding (BoundReceiptIx n) (AdditiveFriLevels ell 0)
   head : VerifiedHistoryHead
-    (n := n) (F := F) (portal := portal) (authState := authState)
-    (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
-    (Error := Error) (Op := FriOp 0) (stateCommitment := stateCommitment)
-    (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-    manifest registry clauseEvidence errorId headerCells
+    (n := n) (F := F) (Op := FriOp 0)
+    manifest registry clauseEvidence family headerCells
       (checkpointCode friS clause padding)
       (semanticCommitment friS padding)
   initialWordExact :
@@ -301,12 +294,9 @@ variable {clause : FriClause m manifest friS}
 
 local notation "BoundCheckpoint" => Checkpoint
   (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-  (portal := portal) (authState := authState) (kind := kind)
-  (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-  (stateCommitment := stateCommitment) (effectSemantics := effectSemantics)
-  (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+  (manifest := manifest)
   (registry := registry) (clauseEvidence := clauseEvidence)
-  (errorId := errorId) (headerCells := headerCells) friS clause
+  (family := family) (headerCells := headerCells) friS clause
 
 /-- The actual FRI input is a codeword because the semantic head already
 proved membership in the exact pullback code. -/
@@ -374,13 +364,9 @@ structure StraightlineCheckpointExtraction
     (clause : FriClause m manifest friS)
     (checkpoint : Checkpoint
       (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-      (portal := portal) (authState := authState) (kind := kind)
-      (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-      (stateCommitment := stateCommitment)
-      (effectSemantics := effectSemantics)
-      (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+      (manifest := manifest)
       (registry := registry) (clauseEvidence := clauseEvidence)
-      (errorId := errorId) (headerCells := headerCells) friS clause)
+      (family := family) (headerCells := headerCells) friS clause)
     (Coin : Type) [Fintype Coin] [DecidableEq Coin]
     (Transcript : Type uTranscript) where
   foldRoot : Digest → F → Digest → Digest
@@ -388,23 +374,17 @@ structure StraightlineCheckpointExtraction
   schedule : FoldRootSchedule (checkpointCode friS clause checkpoint.padding)
     (semanticCommitment friS checkpoint.padding) foldRoot semanticRounds
   scheduleBinding : SemanticScheduleBinding
-    (n := n) (F := F) (portal := portal) (authState := authState)
-    (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
-    (Error := Error) (Op := FriOp 0) (stateCommitment := stateCommitment)
-    (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
+    (n := n) (F := F) (Op := FriOp 0)
     (manifest := manifest) (registry := registry)
-    (clauseEvidence := clauseEvidence) (errorId := errorId)
+    (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells)
     (C := checkpointCode friS clause checkpoint.padding)
     (S := semanticCommitment friS checkpoint.padding) (foldRoot := foldRoot)
     checkpoint.head semanticRounds schedule
   pcs : StraightlinePcsExtraction
-    (n := n) (F := F) (portal := portal) (authState := authState)
-    (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
-    (Error := Error) (Op := FriOp 0) (stateCommitment := stateCommitment)
-    (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
+    (n := n) (F := F) (Op := FriOp 0)
     (manifest := manifest) (registry := registry)
-    (clauseEvidence := clauseEvidence) (errorId := errorId)
+    (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells)
     (C := checkpointCode friS clause checkpoint.padding)
     (S := semanticCommitment friS checkpoint.padding) (foldRoot := foldRoot)
@@ -421,12 +401,9 @@ variable {clauseEvidence : ClauseEvidenceFamily manifest registry}
 variable {clause : FriClause m manifest friS}
 local notation "BoundCheckpoint" => Checkpoint
   (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-  (portal := portal) (authState := authState) (kind := kind)
-  (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-  (stateCommitment := stateCommitment) (effectSemantics := effectSemantics)
-  (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+  (manifest := manifest)
   (registry := registry) (clauseEvidence := clauseEvidence)
-  (errorId := errorId) (headerCells := headerCells) friS clause
+  (family := family) (headerCells := headerCells) friS clause
 variable {checkpoint : BoundCheckpoint}
 variable {Coin : Type} [Fintype Coin] [DecidableEq Coin]
 variable {Transcript : Type uTranscript}
@@ -438,13 +415,9 @@ theorem accepted_sample_extracts_checkpoint
     (checkpoint : BoundCheckpoint)
     (joined : StraightlineCheckpointExtraction
       (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-      (portal := portal) (authState := authState) (kind := kind)
-      (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-      (stateCommitment := stateCommitment)
-      (effectSemantics := effectSemantics)
-      (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+      (manifest := manifest)
       (registry := registry) (clauseEvidence := clauseEvidence)
-      (errorId := errorId) (headerCells := headerCells)
+      (family := family) (headerCells := headerCells)
       friS clause checkpoint Coin Transcript)
     {CommitmentBindingLaw CshakeRomLaw ArithmeticBufferCheck : Prop}
     (sample : AcceptedSample clause CommitmentBindingLaw CshakeRomLaw
@@ -488,13 +461,9 @@ theorem component_error_bounds
     (checkpoint : BoundCheckpoint)
     (joined : StraightlineCheckpointExtraction
       (n := n) (F := F) (ell := ell) (m := m) (FriOp := FriOp)
-      (portal := portal) (authState := authState) (kind := kind)
-      (Effect := Effect) (Disclosure := Disclosure) (Error := Error)
-      (stateCommitment := stateCommitment)
-      (effectSemantics := effectSemantics)
-      (disclosurePolicy := disclosurePolicy) (manifest := manifest)
+      (manifest := manifest)
       (registry := registry) (clauseEvidence := clauseEvidence)
-      (errorId := errorId) (headerCells := headerCells)
+      (family := family) (headerCells := headerCells)
       friS clause checkpoint Coin Transcript)
     {radius : Nat → Real} {tau : Real}
     (friSound : FarWordSoundnessCertificate clause radius tau) :
