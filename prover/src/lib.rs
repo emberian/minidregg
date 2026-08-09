@@ -5,7 +5,6 @@
 //! Lean-owned generated control. Native code may return data; it may not choose a
 //! statement, transcript schedule, security profile, or final acceptance bit.
 
-pub mod additive_mle_tower256;
 pub mod additive_ntt;
 pub mod binary_hash;
 pub mod binary_merkle;
@@ -20,7 +19,6 @@ pub mod fri;
 pub mod gate_kernels;
 #[cfg(feature = "wgpu-fold")]
 pub mod gpu;
-pub mod logup_tower256;
 pub mod logup256_kernels;
 pub mod mle_kernels;
 pub mod outer_factored_gate;
