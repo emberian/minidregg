@@ -16,6 +16,7 @@ import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject 
 import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
 import Assurance.SemanticAdditiveFriCheckpoint  -- canonical zero-padding joins the exact semantic history word/root to additive FRI; KS-good extraction recovers the authoritative head
 import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold challenges, post-challenge fold roots commit exact words, and the terminal root is the additive-FRI initial root
+import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedule and one tagged PCS/CR/ROM/FRI/OracleLog/ZK failure ledger; the union bound is over an actual common coin space
 import Assurance.AuthenticatedColumnHistoryBridge  -- openings retained by one accepted authenticated-column trace become the identical binding BCS messages and exact semantic WARP link stream
 import Assurance.PrivateComputationReceiptClause  -- ZK/MPC/FHE completions become manifest-bound receipt disclosures only through exact authorization, named same-opening bridges, evidence, and VerifiedRelease
 import Assurance.BfvPrivateComputationJoin  -- the encrypted-RNS/FHE evidence lane instantiates the private receipt with one BFV token and all 384 exact integer equations; suite/privacy/knowledge remain unassigned
