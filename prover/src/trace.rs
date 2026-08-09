@@ -3,7 +3,7 @@
 //! This module returns data only.  It contains no descriptor-satisfaction or
 //! acceptance predicate; generated Lean control checks the returned wires.
 
-use crate::descriptor::{Descriptor, Fp, Wire};
+use crate::descriptor::{Descriptor, Fp, GateOp, Wire};
 
 /// Evaluate the descriptor's gates in emission order, producing the full wire
 /// vector of length `nWires`.
@@ -53,7 +53,10 @@ pub fn generate_trace(d: &Descriptor, vars: &[Fp]) -> Vec<Fp> {
             d.n_vars
         );
         assert!(!defined[out], "gate {gi}: redefines wire {out}");
-        wires[out] = g.op.denote(a, b, d.p);
+        wires[out] = match g.op {
+            GateOp::Add => ((a as u128 + b as u128) % d.p as u128) as u64,
+            GateOp::Mul => ((a as u128 * b as u128) % d.p as u128) as u64,
+        };
         defined[out] = true;
     }
     assert!(

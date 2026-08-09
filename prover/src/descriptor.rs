@@ -1,8 +1,7 @@
-//! The Rust mirror of `Compiler/Emit.lean`'s `ConstraintDescriptor`, plus the serde
-//! reader for the JSON that `Compiler/EmitSerialize.lean` writes.
+//! Data-only reader for the first-order descriptor emitted by Lean.
 //!
-//! Mirror, not source of truth: the Lean structure is authoritative; this file only
-//! re-declares its shape so the bytes can be read. The wire format
+//! This file only re-declares the transport shape so bytes can be read. It does
+//! not validate, interpret, or accept a descriptor. The wire format
 //! (`[EMIT-backend]`, concretized in EmitSerialize):
 //!
 //! ```json
@@ -11,9 +10,8 @@
 //!   "zeros": [ {"w": 6}, ... ] }
 //! ```
 //!
-//! Constants travel as canonical naturals (`ZMod.val`, `0 <= v < p`); the modulus is
-//! stamped in the header. `validate` mirrors `ConstraintDescriptor.WellFormed`
-//! (Emit §6) plus constant canonicity — a reader-side input contract, not a proof.
+//! Constants and the modulus are transported as integers; Lean-owned generated
+//! control establishes every well-formedness and acceptance property.
 
 use std::path::Path;
 
@@ -30,17 +28,6 @@ pub type Fp = u64;
 pub enum GateOp {
     Add,
     Mul,
-}
-
-impl GateOp {
-    /// Mirror of `GateOp.denote` at `ZMod p`: field add/mul on canonical
-    /// representatives (u128 intermediates, exact for any u64 modulus).
-    pub fn denote(self, a: Fp, b: Fp, p: u64) -> Fp {
-        match self {
-            GateOp::Add => ((a as u128 + b as u128) % p as u128) as u64,
-            GateOp::Mul => ((a as u128 * b as u128) % p as u128) as u64,
-        }
-    }
 }
 
 /// Mirror of `DWire`: a literal field constant (`{"c": v}`, canonical) or an index
@@ -90,49 +77,6 @@ impl Descriptor {
         Self::from_json_str(&s)
     }
 
-    /// Reader-side input contract, mirroring `ConstraintDescriptor.WellFormed`
-    /// (Emit §6: nested split, all operands bounded by `nWires`, gate outputs in
-    /// the aux region `[nVars, nWires)`) plus constant canonicity (`v < p`).
-    /// The Lean side PROVED the emitted descriptor satisfies this
-    /// (`emit_wellFormed`); here it is re-checked on the parsed bytes.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.p < 2 {
-            return Err(format!("modulus {} is not a field modulus", self.p));
-        }
-        if !(self.n_public <= self.n_vars && self.n_vars <= self.n_wires) {
-            return Err(format!(
-                "split not nested: nPublic={} nVars={} nWires={}",
-                self.n_public, self.n_vars, self.n_wires
-            ));
-        }
-        let check_wire = |what: &str, w: &Wire| -> Result<(), String> {
-            match *w {
-                Wire::Const(c) if c >= self.p => Err(format!(
-                    "{what}: non-canonical constant {c} (mod {})",
-                    self.p
-                )),
-                Wire::Wire(n) if n >= self.n_wires => Err(format!(
-                    "{what}: wire index {n} out of range (nWires={})",
-                    self.n_wires
-                )),
-                _ => Ok(()),
-            }
-        };
-        for (i, g) in self.gates.iter().enumerate() {
-            check_wire(&format!("gate {i} input a"), &g.a)?;
-            check_wire(&format!("gate {i} input b"), &g.b)?;
-            if !(self.n_vars <= g.out && g.out < self.n_wires) {
-                return Err(format!(
-                    "gate {i}: output {} outside aux region [{}, {})",
-                    g.out, self.n_vars, self.n_wires
-                ));
-            }
-        }
-        for (i, z) in self.zeros.iter().enumerate() {
-            check_wire(&format!("zero-check {i}"), z)?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -147,39 +91,4 @@ mod tests {
         assert_eq!(GateOp::Mul, serde_json::from_str(r#""mul""#).unwrap());
     }
 
-    #[test]
-    fn validate_rejects_output_outside_aux_region() {
-        let d = Descriptor {
-            p: 7,
-            n_public: 1,
-            n_vars: 1,
-            n_wires: 2,
-            gates: vec![Gate {
-                op: GateOp::Mul,
-                a: Wire::Wire(0),
-                b: Wire::Wire(0),
-                out: 0,
-            }],
-            zeros: vec![],
-        };
-        assert!(d.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_non_canonical_constant() {
-        let d = Descriptor {
-            p: 7,
-            n_public: 0,
-            n_vars: 0,
-            n_wires: 1,
-            gates: vec![Gate {
-                op: GateOp::Add,
-                a: Wire::Const(7),
-                b: Wire::Const(0),
-                out: 0,
-            }],
-            zeros: vec![],
-        };
-        assert!(d.validate().is_err());
-    }
 }
