@@ -3,7 +3,7 @@
 
 This module instantiates the generic semantic artifact boundary.  Every exported
 declaration is projected from an existing Lean declaration: the repository's typed
-authorization plan, the derived move effect, a finite guarded reactive controller,
+authorization plan, a typed account-move declaration, a finite guarded reactive controller,
 and a same-opening disclosure declaration.  The native clauses remain opaque
 relation/codec pins; no native verifier semantics are reproduced here.
 -/
@@ -16,6 +16,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.SemanticArtifactBundle
+open Minidregg.Compiler.DeclaredEffectArtifact
 
 set_option autoImplicit false
 
@@ -337,8 +338,13 @@ theorem disclosure_accepts_honest_opening :
 /-! ## Projected declarations and the v1 bundle -/
 
 def effectArtifact : DeclarationArtifact :=
-  moveEffectArtifact (id 602) effectDeclarationCodec.codecId
-    moveOperationCodec.codecId kernelStateCodec.codecId 1 [id 701]
+  DeclarationArtifact.ofDeclaredEffect accountMoveArtifact (id 602)
+    effectDeclarationCodec.codecId moveOperationCodec.codecId
+    kernelStateCodec.codecId [id 701]
+
+theorem effectArtifact_is_typed_account_move :
+    effectArtifact.declarationWords = [accountMoveDeclaration.toWire.words] := by
+  rfl
 
 def reactiveArtifact : DeclarationArtifact :=
   DeclarationArtifact.ofReactive reactiveDeclaration (id 603)

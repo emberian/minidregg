@@ -134,7 +134,7 @@
    "outputCodecIds": [6],
    "kind": "effect",
    "inputCodecIds": [5, 6],
-   "declarationWords": [[0, 1, 0, 0, 2], [1, 0, 0, 0, 1]],
+   "declarationWords": [[1, 2, 0, 1, 2, 0, 1, 0, 4]],
    "declarationId": 602,
    "declarationCodecId": 4}],
  "disclosure":

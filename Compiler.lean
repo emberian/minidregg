@@ -24,6 +24,7 @@ import Compiler.NextgenLightClientPublicInputs -- exact current binary light-cli
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed native-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
+import Compiler.DeclaredEffectArtifact -- first-order effect artifact projected from the target-indexed Theory.EffectDeclaration, including the concrete v1 account move
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners return bounded data and cannot choose continuation or acceptance
 import Compiler.NativeGlueGen -- deterministic data-only Rust DTO/dispatch text generated from the canonical Lean artifact; no native semantics or acceptance
 import Compiler.MinidreggV1Artifact -- concrete v1 declaration bundle and Lean-emitted canonical JSON payload; bridge/clause records are requirements, not implementation claims

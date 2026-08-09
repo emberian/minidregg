@@ -7,9 +7,10 @@ The emitted object contains identifiers, codec pins, declaration data, and a pha
 plan only.  It contains no native callback, verifier predicate, executor, challenge,
 or acceptance bit.
 
-Authorization is projected from `AuthorizationDeclaration.declaration`.  Effect
-descriptors are obtained from `EffectSpec.derivedDescriptor`.  Reactive declarations
-export only their closed guard syntax and shape; their keys, values, and root values
+Authorization is projected from `AuthorizationDeclaration.declaration`.  Semantic
+effect data is projected from `Theory.EffectDeclaration.Declaration.toWire/words`.
+Reactive declarations export only their closed guard syntax and shape; their keys,
+values, and root values
 remain bound by the declaration identifier.  A disclosure declaration exports codec
 identifiers and its two mandatory check phases, never its executable verifier or
 projection functions.
@@ -21,7 +22,7 @@ cryptographic hash claim.
 -/
 import Compiler.SemanticManifest
 import Compiler.TranscriptController
-import Effects.EffectSpec
+import Compiler.DeclaredEffectArtifact
 import Theory.DisclosureDeclaration
 import Theory.ReactiveController
 
@@ -164,40 +165,23 @@ def authorizationArtifact
 
 /-! ## Projections from the existing effect/reactive/disclosure declarations -/
 
-/-- Project an existing derived effect descriptor.  The caller supplies only the lawful
-first-order operation encoder selected by `operationCodecId`; the encoder itself is not
-stored in the artifact. -/
-def DeclarationArtifact.ofEffect
-    (E : Minidregg.Effects.EffectSpec)
-    (program : Minidregg.Effects.EffectSpec.Prog E)
-    (encodeOp : E.Op -> List Nat)
+/-- Embed the first-order projection of an authoritative typed effect declaration.
+The projection's schema and declaration word are derived from
+`Theory.EffectDeclaration.Declaration.toWire/words`; only registry pins remain caller
+arguments. -/
+def DeclarationArtifact.ofDeclaredEffect
+    (effect : DeclaredEffectArtifact.Artifact)
     (declarationId declarationCodecId operationCodecId stateCodecId : Digest)
-    (schemaVersion : Nat) (parameterIds : List Digest) : DeclarationArtifact where
+    (parameterIds : List Digest) : DeclarationArtifact where
   kind := .effect
   declarationId := declarationId
   declarationCodecId := declarationCodecId
-  schemaVersion := schemaVersion
+  schemaVersion := effect.schemaVersion
   inputCodecIds := [operationCodecId, stateCodecId]
   outputCodecIds := [stateCodecId]
   parameterIds := parameterIds
-  declarationWords := (E.derivedDescriptor program).map encodeOp
+  declarationWords := [effect.words]
   phasePlan := [.effectDescriptor]
-
-def encodeInt (value : Int) : List Nat :=
-  match value with
-  | .ofNat n => [0, n]
-  | .negSucc n => [1, n]
-
-/-- Exact first-order encoding for the repository's first concrete effect payload. -/
-def encodeMoveArgs (move : Minidregg.Effects.MoveArgs) : List Nat :=
-  [move.src, move.dst, move.asset] ++ encodeInt move.δ
-
-def moveEffectArtifact
-    (declarationId declarationCodecId operationCodecId stateCodecId : Digest)
-    (schemaVersion : Nat) (parameterIds : List Digest) : DeclarationArtifact :=
-  DeclarationArtifact.ofEffect Minidregg.Effects.moveEffect Minidregg.Effects.moveProg
-    encodeMoveArgs declarationId declarationCodecId operationCodecId stateCodecId
-    schemaVersion parameterIds
 
 /-- Prefix-free encoding of the closed reactive guard AST. -/
 def encodeGuardTerm : Minidregg.Theory.ReactiveController.GuardTerm -> List Nat
