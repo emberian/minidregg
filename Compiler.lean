@@ -43,6 +43,7 @@ import Compiler.Tower256CshakeMerkleController -- shared Lean-selected cSHAKE fr
 import Compiler.Sp800185Cshake256 -- exact Lean Keccak-f[1600] + SP 800-185 framing instantiate the controller's 32-byte cSHAKE256 function; NIST/FIPS build-time vectors, no CR/ROM claim
 import Compiler.BinaryTower256Profile -- inhabits the Tower256 controller profile with Lean's binaryTower 8 and exact 32-byte codec; no native representation claim
 import Compiler.Tower256NativeByteBoundary -- arbitrary native Tower256 compute returns bytes only; Lean's exact Fan--Paar decoder plus a reflected Lean checker are the sole path to an accepted semantic value
+import Compiler.Tower256CshakeMerkleBinding -- exact framed leaf/node XOF collision event; accepted unequal openings at one root/index reduce to a collision, with exact-depth paths and cryptographic event price left explicit
 import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round challenge, additive checkpoint before query challenge, exact Merkle openings, opaque fallible Tower work, and reflected Lean final semantics
 import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exact plan retains its reflected statement and four-root prefix, yielding indexed evaluation from explicit PCS/CR/ROM judgments
 import Compiler.SparseAuthenticatedStateLogupBridge -- exact sparse ROM/RAM/append buses compile to canonical Tower256 lookup indices while retaining Twist-style state continuity and explicit PCS/CR/ROM premises
