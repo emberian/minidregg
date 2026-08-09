@@ -7,7 +7,8 @@ policy, continuation, or callback field.  Its semantic payload is an existing
 `BignumKernelABI.KernelCall`: despite that historical module name, the call has
 one generic descriptor entry and its relation is exactly `descriptorHolds`.
 
-The opaque boundary returns only a fixed-width field buffer.  Lean checks the
+The opaque boundary returns either an opaque native error or a fixed-width field
+buffer.  An error blocks the plan before any certificate or continuation.  Lean checks the
 manifest clause registration, ABI shape, public-input prefix, and emitted
 descriptor before it invokes the runner on the next instruction.  Consequently
 the runner neither chooses the continuation nor constructs the sole `Verified`
@@ -94,9 +95,10 @@ def KernelResponse.totalWires {instruction : Instruction}
   else 0
 
 /-- The only opaque boundary.  A runner receives one Lean-selected instruction
-and returns its bounded data response. -/
-abbrev PlanRunner :=
-  (instruction : Instruction) → KernelResponse instruction
+and returns either an opaque error or its bounded data response.  Neither branch
+contains acceptance, policy, or a continuation. -/
+abbrev PlanRunner (Error : Type) :=
+  (instruction : Instruction) → Except Error (KernelResponse instruction)
 
 /-! ## 3. Lean-owned checks and certificates -/
 
@@ -313,12 +315,17 @@ structure CertifiedResponse (manifest : Manifest) (instruction : Instruction)
   publicPrefixExact : PublicPrefixExact instruction response
   descriptorAcceptance : instruction.call.Accepts response.totalWires
 
-/-- Proof that Lean checked every response in the plan's fixed order. -/
-inductive Certificate (manifest : Manifest) (runner : PlanRunner) :
+/-- Proof that Lean checked every response in the plan's fixed order.  Each node
+stores the exact bounded response and its runner-return equation; later proofs
+never call the opaque runner again to recover certificate data. -/
+inductive Certificate (manifest : Manifest) {Error : Type}
+    (runner : PlanRunner Error) :
     List Instruction → Type
   | nil : Certificate manifest runner []
   | cons {instruction : Instruction} {rest : List Instruction}
-      (head : CertifiedResponse manifest instruction (runner instruction))
+      (response : KernelResponse instruction)
+      (returned : runner instruction = .ok response)
+      (head : CertifiedResponse manifest instruction response)
       (tail : Certificate manifest runner rest) :
       Certificate manifest runner (instruction :: rest)
 
@@ -330,9 +337,12 @@ inductive Failure
   | descriptorRejected (clauseId : Digest)
 deriving DecidableEq, Repr
 
-/-- Internal result for a suffix.  Only Lean constructs the certificate. -/
-inductive SuffixOutcome (manifest : Manifest) (runner : PlanRunner)
+/-- Internal result for a suffix.  Native errors block before continuation;
+Lean-check failures reject; only Lean constructs the checked certificate. -/
+inductive SuffixOutcome (Error : Type) (manifest : Manifest)
+    (runner : PlanRunner Error)
     (instructions : List Instruction)
+  | blocked (error : Error)
   | rejected (failure : Failure)
   | checked (certificate : Certificate manifest runner instructions)
 
@@ -361,58 +371,110 @@ def checkInstruction (manifest : Manifest) (instruction : Instruction)
 
 /-- Execute and check instructions in Lean-owned order.  The recursive call—and
 therefore the next native invocation—exists only in the certified branch. -/
-def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
-    (instructions : List Instruction) → SuffixOutcome manifest runner instructions
+def checkInstructions {Error : Type} (manifest : Manifest)
+    (runner : PlanRunner Error) :
+    (instructions : List Instruction) →
+      SuffixOutcome Error manifest runner instructions
   | [] => .checked .nil
   | instruction :: rest =>
-      match checkInstruction manifest instruction (runner instruction) with
-      | .inl failure => .rejected failure
-      | .inr head =>
-          match checkInstructions manifest runner rest with
-          | .rejected failure => .rejected failure
-          | .checked tail => .checked (.cons head tail)
+      match hreturned : runner instruction with
+      | .error error => .blocked error
+      | .ok response =>
+          match checkInstruction manifest instruction response with
+          | .inl failure => .rejected failure
+          | .inr head =>
+              match checkInstructions manifest runner rest with
+              | .blocked error => .blocked error
+              | .rejected failure => .rejected failure
+              | .checked tail =>
+                  .checked (.cons response hreturned head tail)
+
+/-- A native error at the head instruction blocks before the Lean checker and
+before the recursive continuation.  It cannot be encoded as a response buffer. -/
+theorem checkInstructions_headError {Error : Type}
+    (manifest : Manifest) (runner : PlanRunner Error)
+    (instruction : Instruction) (rest : List Instruction) (error : Error)
+    (failed : runner instruction = .error error) :
+    checkInstructions manifest runner (instruction :: rest) = .blocked error := by
+  unfold checkInstructions
+  split
+  · rename_i returnedError returned
+    have same : returnedError = error := by
+      have equality := returned.symm.trans failed
+      exact Except.error.inj equality
+    subst returnedError
+    rfl
+  · rename_i response returned
+    have impossible := returned.symm.trans failed
+    cases impossible
 
 /-! ## 4. Sole verified token and controller run -/
 
 /-- The only successful controller token. -/
 structure Verified (manifest : Manifest) (plan : Plan)
-    (runner : PlanRunner) : Type where
+    {Error : Type} (runner : PlanRunner Error) : Type where
   manifestExact : plan.manifestEncoding = manifest.canonicalEncoding
   certificate : Certificate manifest runner plan.instructions
 
-inductive Outcome (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
+inductive Outcome (Error : Type) (manifest : Manifest) (plan : Plan)
+    (runner : PlanRunner Error)
+  | blocked (error : Error)
   | rejected (failure : Failure)
   | verified (token : Verified manifest plan runner)
 
-def Outcome.IsVerified {manifest : Manifest} {plan : Plan}
-    {runner : PlanRunner} : Outcome manifest plan runner → Prop
+def Outcome.IsVerified {Error : Type} {manifest : Manifest} {plan : Plan}
+    {runner : PlanRunner Error} : Outcome Error manifest plan runner → Prop
+  | .blocked _ => False
   | .rejected _ => False
   | .verified _ => True
 
 /-- Run the plan.  Manifest binding is checked before any native instruction is
 issued; all later continuation choices remain inside `checkInstructions`. -/
-def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
-    Outcome manifest plan runner :=
+def run {Error : Type} (manifest : Manifest) (plan : Plan)
+    (runner : PlanRunner Error) : Outcome Error manifest plan runner :=
   if hmanifest : plan.manifestEncoding = manifest.canonicalEncoding then
     match checkInstructions manifest runner plan.instructions with
+    | .blocked error => .blocked error
     | .rejected failure => .rejected failure
     | .checked certificate => .verified ⟨hmanifest, certificate⟩
   else .rejected .manifestEncodingMismatch
 
+/-- If the first scheduled native instruction errors, the whole plan is
+blocked with that exact error.  No check, certificate, or tail instruction is
+reachable from this branch. -/
+theorem firstInstructionError_blocks {Error : Type}
+    (manifest : Manifest) (plan : Plan) (runner : PlanRunner Error)
+    (instruction : Instruction) (rest : List Instruction) (error : Error)
+    (manifestExact : plan.manifestEncoding = manifest.canonicalEncoding)
+    (instructionsExact : plan.instructions = instruction :: rest)
+    (failed : runner instruction = .error error) :
+    run manifest plan runner = .blocked error := by
+  cases plan with
+  | mk encoding instructions =>
+      dsimp only [Plan.instructions] at instructionsExact
+      subst instructions
+      unfold run
+      split
+      · rw [checkInstructions_headError manifest runner instruction rest error failed]
+      · rename_i mismatch
+        exact (mismatch manifestExact).elim
+
 /-! ## 5. Arbitrary-runner integrity and teeth -/
 
 theorem Certificate.checked_of_mem
-    {manifest : Manifest} {runner : PlanRunner}
+    {Error : Type} {manifest : Manifest} {runner : PlanRunner Error}
     {instructions : List Instruction}
     (certificate : Certificate manifest runner instructions)
     {instruction : Instruction} (member : instruction ∈ instructions) :
-    Nonempty (CertifiedResponse manifest instruction (runner instruction)) := by
+    ∃ response : KernelResponse instruction,
+      runner instruction = .ok response ∧
+      Nonempty (CertifiedResponse manifest instruction response) := by
   induction certificate with
   | nil => simp at member
-  | @cons headInstruction rest head tail ih =>
+  | @cons headInstruction rest response returned head tail ih =>
       rcases List.mem_cons.mp member with same | member
       · subst instruction
-        exact ⟨head⟩
+        exact ⟨response, returned, ⟨head⟩⟩
       · exact ih member
 
 /-- **Arbitrary-runner integrity.**  No honesty, determinism theorem, or native
@@ -420,23 +482,32 @@ semantics is assumed for `runner`.  If Lean reaches `Verified`, every instructio
 has an exact registered clause and satisfies the existing descriptor relation on
 the exact bounded response whose public prefix is plan-authored. -/
 theorem arbitraryRunner_integrity
-    (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
+    {Error : Type} (manifest : Manifest) (plan : Plan)
+    (runner : PlanRunner Error)
     (reached : (run manifest plan runner).IsVerified) :
     plan.manifestEncoding = manifest.canonicalEncoding ∧
     ∀ instruction, instruction ∈ plan.instructions →
-      ∃ clause : DialectClauseDecl,
-        manifest.lookupClause instruction.clauseId = some clause ∧
-        instruction.call.FullyWellFormed ∧
-        PublicPrefixExact instruction (runner instruction) ∧
-        instruction.call.Accepts (runner instruction).totalWires := by
+      ∃ response : KernelResponse instruction,
+        runner instruction = .ok response ∧
+        ∃ clause : DialectClauseDecl,
+          manifest.lookupClause instruction.clauseId = some clause ∧
+          instruction.call.FullyWellFormed ∧
+          PublicPrefixExact instruction response ∧
+          instruction.call.Accepts response.totalWires := by
   cases hrun : run manifest plan runner with
-  | rejected failure => simp [Outcome.IsVerified, hrun] at reached
+  | blocked error =>
+      rw [hrun] at reached
+      exact False.elim reached
+  | rejected failure =>
+      rw [hrun] at reached
+      exact False.elim reached
   | verified token =>
       refine ⟨token.manifestExact, ?_⟩
       intro instruction member
-      rcases token.certificate.checked_of_mem member with ⟨checked⟩
+      rcases token.certificate.checked_of_mem member with
+        ⟨response, returned, ⟨checked⟩⟩
       rcases checked.clauseRegistered with ⟨clause, registered⟩
-      exact ⟨clause, registered,
+      exact ⟨response, returned, clause, registered,
         checked.callWellFormed, checked.publicPrefixExact,
         checked.descriptorAcceptance⟩
 
@@ -453,13 +524,21 @@ theorem descriptorFailure_not_certified
 
 /-- A plan with the wrong canonical manifest never invokes the success branch. -/
 theorem manifestMismatch_not_verified
-    (manifest : Manifest) (plan : Plan) (runner : PlanRunner)
+    {Error : Type} (manifest : Manifest) (plan : Plan)
+    (runner : PlanRunner Error)
     (mismatch : plan.manifestEncoding ≠ manifest.canonicalEncoding) :
     ¬ (run manifest plan runner).IsVerified := by
-  simp [run, mismatch, Outcome.IsVerified]
+  intro reached
+  unfold run at reached
+  split at reached
+  · rename_i same
+    exact (mismatch same).elim
+  · exact reached
 
 #print axioms arbitraryRunner_integrity
 #print axioms descriptorFailure_not_certified
 #print axioms manifestMismatch_not_verified
+#print axioms checkInstructions_headError
+#print axioms firstInstructionError_blocks
 
 end Minidregg.Compiler.NativeKernelPlan
