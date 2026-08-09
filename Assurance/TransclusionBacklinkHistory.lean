@@ -20,6 +20,7 @@ domain supplied to the derivation; it makes no global-web completeness claim.
 
 import Assurance.AcceptedCellEffectHistory
 import Assurance.SemanticHistoryFamily
+import Theory.Hyperdocument
 
 namespace Minidregg.Assurance.TransclusionBacklinkHistory
 
@@ -139,6 +140,182 @@ structure ReferenceEncoding (n : Nat) (F : Type*)
     (DisclosureAtom : Type uAtom) where
   cells : TransclusionRef n F DisclosureAtom -> List F
   injective : Function.Injective cells
+
+/-! ## Exact realization of the canonical first-order hyperdocument record -/
+
+namespace StoredReference
+
+open Minidregg.Theory.IndexedProgram
+
+/-- Exact shape translation; the stored schema never mentions the proof field. -/
+def openingShape : Hyperdocument.StoredOpeningShape -> OpeningShape
+  | .value => .value
+  | .range => .range
+
+/-- Snapshot/live translation retains no host refetch semantics. -/
+def mode : Hyperdocument.TransclusionMode -> Mode
+  | .snapshot => .snapshot
+  | .live => .live
+
+/-- The generic source identity is a lossless projection of four separately
+stored roots, not a reinterpretation of one document URI. -/
+def sourceIdentity (source : Hyperdocument.StoredSourceIdentity) : SourceIdentity where
+  domain := source.historyDomain
+  object := source.objectRoot
+  historyEntryRoot := source.historyEntryRoot
+  semanticRoot := source.semanticRoot
+
+/-- A concrete proof-field representation named by the first-order opening
+descriptor.  The lawful codec owns all `n`, `F`, coordinate, and cell choices;
+the stored schema therefore needs no universal-field mirror. -/
+structure OpeningRepresentation (n : Nat) (F : Type*) where
+  codecId : Digest
+  relationId : Digest
+  codec : LawfulCodec (RangeOrValueOpening n F)
+  commitDescriptor : List UInt8 -> Digest
+
+/-- Exact realization of one stored descriptor in one explicit representation.
+Every equality is load bearing: matching only the commitment or only the shape
+is insufficient to produce a generic transclusion reference. -/
+structure ReferenceRealization {n : Nat} {F : Type*}
+    (representation : OpeningRepresentation n F)
+    (stored : Hyperdocument.StoredTransclusionRef) where
+  opening : RangeOrValueOpening n F
+  shapeExact : opening.shape = openingShape stored.opening.shape
+  codecIdExact : representation.codecId = stored.opening.openingCodecId
+  relationIdExact :
+    representation.relationId = stored.opening.openingRelationId
+  descriptorExact :
+    representation.codec.encode opening = stored.opening.canonicalDescriptor
+  commitmentExact :
+    representation.commitDescriptor stored.opening.canonicalDescriptor =
+      stored.opening.openingCommitment
+  disclosureWithinCeiling :
+    stored.disclosureScope ⊆ stored.capabilityCeiling
+
+/-- The representation and its exact realization are explicit proof-relevant
+input.  There is intentionally no `StoredTransclusionRef -> TransclusionRef`
+shortcut which could guess `F`, coordinates, cells, or opening semantics. -/
+structure RealizedReference (n : Nat) (F : Type*)
+    (stored : Hyperdocument.StoredTransclusionRef) where
+  representation : OpeningRepresentation n F
+  realization : ReferenceRealization representation stored
+
+namespace RealizedReference
+
+variable {n : Nat} {F : Type*} {stored : Hyperdocument.StoredTransclusionRef}
+
+/-- Produce the generic durable reference only through the named lawful
+representation and its exact realization proof. -/
+def toRef (realized : RealizedReference n F stored) :
+    TransclusionRef n F Hyperdocument.DisclosureAtom where
+  referenceRoot := stored.referenceRoot
+  source := sourceIdentity stored.source
+  opening := realized.realization.opening
+  mode := StoredReference.mode stored.mode
+  disclosure := stored.disclosureScope
+  capabilityCeiling := stored.capabilityCeiling
+
+@[simp] theorem toRef_referenceRoot
+    (realized : RealizedReference n F stored) :
+    realized.toRef.referenceRoot = stored.referenceRoot :=
+  rfl
+
+@[simp] theorem toRef_sourceDomain
+    (realized : RealizedReference n F stored) :
+    realized.toRef.source.domain = stored.source.historyDomain :=
+  rfl
+
+@[simp] theorem toRef_sourceObject
+    (realized : RealizedReference n F stored) :
+    realized.toRef.source.object = stored.source.objectRoot :=
+  rfl
+
+@[simp] theorem toRef_historyEntryRoot
+    (realized : RealizedReference n F stored) :
+    realized.toRef.source.historyEntryRoot = stored.source.historyEntryRoot :=
+  rfl
+
+@[simp] theorem toRef_semanticRoot
+    (realized : RealizedReference n F stored) :
+    realized.toRef.source.semanticRoot = stored.source.semanticRoot :=
+  rfl
+
+@[simp] theorem toRef_opening
+    (realized : RealizedReference n F stored) :
+    realized.toRef.opening = realized.realization.opening :=
+  rfl
+
+theorem toRef_openingShape
+    (realized : RealizedReference n F stored) :
+    realized.toRef.opening.shape = openingShape stored.opening.shape :=
+  realized.realization.shapeExact
+
+theorem toRef_descriptorExact
+    (realized : RealizedReference n F stored) :
+    realized.representation.codec.encode realized.toRef.opening =
+      stored.opening.canonicalDescriptor :=
+  realized.realization.descriptorExact
+
+theorem toRef_commitmentExact
+    (realized : RealizedReference n F stored) :
+    realized.representation.commitDescriptor
+        stored.opening.canonicalDescriptor =
+      stored.opening.openingCommitment :=
+  realized.realization.commitmentExact
+
+@[simp] theorem toRef_mode
+    (realized : RealizedReference n F stored) :
+    realized.toRef.mode = StoredReference.mode stored.mode :=
+  rfl
+
+@[simp] theorem toRef_disclosure
+    (realized : RealizedReference n F stored) :
+    realized.toRef.disclosure = stored.disclosureScope :=
+  rfl
+
+@[simp] theorem toRef_capabilityCeiling
+    (realized : RealizedReference n F stored) :
+    realized.toRef.capabilityCeiling = stored.capabilityCeiling :=
+  rfl
+
+theorem toRef_disclosureWithinCeiling
+    (realized : RealizedReference n F stored) :
+    realized.toRef.disclosure ⊆ realized.toRef.capabilityCeiling :=
+  realized.realization.disclosureWithinCeiling
+
+end RealizedReference
+
+/-- Exact adapter for the transclusion-bearing forward-link constructor.  A
+document/element/range/external link cannot be silently reinterpreted as a
+transclusion target, and the complete stored reference is retained. -/
+structure ForwardLinkRealization (n : Nat) (F : Type*)
+    (link : Hyperdocument.LinkRecord) where
+  transclusionId : Hyperdocument.TransclusionId
+  stored : Hyperdocument.StoredTransclusionRef
+  targetExact : link.target = .transclusion transclusionId stored
+  realized : RealizedReference n F stored
+
+namespace ForwardLinkRealization
+
+variable {n : Nat} {F : Type*} {link : Hyperdocument.LinkRecord}
+
+def targetRef (forward : ForwardLinkRealization n F link) :
+    TransclusionRef n F Hyperdocument.DisclosureAtom :=
+  forward.realized.toRef
+
+theorem target_source_exact (forward : ForwardLinkRealization n F link) :
+    forward.targetRef.source = sourceIdentity forward.stored.source :=
+  rfl
+
+theorem link_binds_complete_stored_reference
+    (forward : ForwardLinkRealization n F link) :
+    link.target = .transclusion forward.transclusionId forward.stored :=
+  forward.targetExact
+
+end ForwardLinkRealization
+
+end StoredReference
 
 /-! ## Observation of an actual verified history entry -/
 

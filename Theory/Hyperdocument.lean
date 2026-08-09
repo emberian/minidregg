@@ -359,13 +359,72 @@ structure ConflictRecord where
   regime : MergeRegime
   recordedAt : VersionEventId
 
+inductive TransclusionMode where
+  | snapshot
+  | live
+  deriving DecidableEq, Repr
+
+/-- First-order identity of the exact source version named by a transclusion.
+The object, receipt/history entry, and semantic state/value roots are distinct;
+none can be reconstructed from a URI or from another root by convention. -/
+structure StoredSourceIdentity where
+  historyDomain : Digest
+  objectRoot : Digest
+  historyEntryRoot : Digest
+  semanticRoot : Digest
+  deriving DecidableEq, Repr
+
+inductive StoredOpeningShape where
+  | value
+  | range
+  deriving DecidableEq, Repr
+
+/-- First-order descriptor of an opening whose coordinate and cell carriers
+are selected only by the named codec/relation.  The hyperdocument schema does
+not pretend that an arbitrary proof field `F` fits a fixed value namespace.
+
+`canonicalDescriptor` is the full codec output for the later generic opening;
+`openingCommitment` binds those bytes under the named deployment commitment.
+The exact lawful codec and commitment function are supplied by an assurance
+`OpeningRepresentation`, not by a Rust parser. -/
+structure OpeningDescriptor where
+  shape : StoredOpeningShape
+  openingCodecId : Digest
+  openingRelationId : Digest
+  canonicalDescriptor : List UInt8
+  openingCommitment : Digest
+  deriving DecidableEq, Repr
+
+/-- Canonical disclosure vocabulary shared by scope and capability ceiling. -/
+structure DisclosureAtom where
+  namespaceId : Digest
+  payload : List UInt8
+  deriving DecidableEq, Repr
+
+/-- The complete durable reference identity needed by a transclusion opening,
+chain weld, or authenticated reverse index.  Provenance of the act which stores
+it lives in `TransclusionRecord`; all target identity lives here so a forward
+link can commit the same object without copying a lossy subset. -/
+structure StoredTransclusionRef where
+  referenceRoot : Digest
+  source : StoredSourceIdentity
+  opening : OpeningDescriptor
+  mode : TransclusionMode
+  disclosureScope : Finset DisclosureAtom
+  capabilityCeiling : Finset DisclosureAtom
+  deriving DecidableEq
+
 inductive LinkTarget where
   | document (id : DocumentId)
   | element (id : ElementId)
   | range (document : DocumentId) (range : StableRange)
+  | transclusion (id : TransclusionId) (reference : StoredTransclusionRef)
   | external (scheme authority path : List UInt8)
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
+/-- A forward link stores the complete transclusion reference when that is its
+target.  Backlinks are derived from accepted `LinkRecord` history events; this
+record is not itself a mutable reverse-index row. -/
 structure LinkRecord where
   sourceDocument : DocumentId
   source : Option StableRange
@@ -374,25 +433,19 @@ structure LinkRecord where
   author : PrincipalRef
   event : VersionEventId
   tombstonedAt : Option VersionEventId
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
-inductive TransclusionMode where
-  | snapshot (event : VersionEventId)
-  | live
-  deriving DecidableEq, Repr
-
-/-- Durable transclusion identity and provenance only.  Chain weld, fetch,
-release, and non-amplification judgments intentionally do not appear here. -/
+/-- Canonical stored transclusion plus provenance of the storage event.  Fetch,
+finality, PCS/CR/ROM evidence, chain welds, and accepted-effect admission remain
+proof fields in the assurance layer, but every datum they bind is present here. -/
 structure TransclusionRecord where
   hostDocument : DocumentId
-  targetDocument : DocumentId
-  targetRange : Option StableRange
-  mode : TransclusionMode
+  reference : StoredTransclusionRef
   author : PrincipalRef
   event : VersionEventId
   disclosurePolicy : Digest
   tombstonedAt : Option VersionEventId
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 structure MarkRecord where
   document : DocumentId
