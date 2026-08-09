@@ -18,7 +18,6 @@ The crate contains:
 - multilinear sumcheck and the descriptor gate-defect reduction;
 - BabyBear⁴ arithmetic, multiplicative FRI folding, commitments, query openings, and final checks;
 - a Fiat–Shamir transcript with Lean-authored conformance vectors;
-- `reference_prove` / `reference_verify`, one-call composition under one transcript;
 - a succinct Ext6 factored-gate verifier using one committed trace root and one aggregated
   trace-functional opening;
 - a separate executable mirror of Loom's linear accumulator algebra; and
@@ -26,7 +25,7 @@ The crate contains:
   hash/Merkle compute. The former handwritten sampled-FRI/OOD/evaluation-history admission stack was
   deleted after its claimed degree bound was found unenforced.
 
-The reference protocol performs:
+The deleted reference protocol performed:
 
 ```text
 descriptor + assignment
@@ -38,17 +37,17 @@ descriptor + assignment
     -> final-word and opening checks
 ```
 
-The verifier takes public inputs, replays every challenge, recomputes the trace root, reconstructs
-the full RS word, checks that word's initial FRI commitment, and verifies the gate and FRI phases.
+That flow is retained only as historical architecture context. Its Rust-owned transcript and final
+acceptance were not an admissible authority boundary.
 
 ## What that does not mean
 
-`ReferenceProof` contains the whole trace. Verification is linear in the trace and full RS word.
-The path is therefore:
+The deleted `ReferenceProof` contained the whole trace. Verification was linear in the trace and
+full RS word. The path was therefore:
 
 - **non-succinct**;
 - **non-zero-knowledge**;
-- a demo/reference implementation rather than a production prover; and
+- a deleted demo/reference implementation rather than a production prover; and
 - unverified Rust, even where its behavior is conformance-matched to Lean objects.
 
 The reference permutation parameters are intentionally small demo/conformance parameters.
@@ -60,8 +59,8 @@ range is not collision resistance. `Compiler.WideDigestAir` now pins the matchin
 encoding through emit. `[COMMIT-CR]`, production permutation/capacity analysis, raw-byte canonical
 decoding, and wire-sharing composition with the recursive sponge/full verifier remain load-bearing.
 
-The historical one-call implementation still uses multiplicative BabyBear⁴ rather than the binary
-suite. Native GF(2) arithmetic, transform, and byte-native hash/Merkle kernels remain, but no sampled
+The historical one-call implementation was deleted. Native GF(2) arithmetic, transform, and
+byte-native hash/Merkle kernels remain, but no sampled
 binary FRI/OOD verifier is currently admissible. Lean-emitted rate-aware control must replace the
 deleted handwritten stack before a binary light-client proof returns.
 
@@ -79,8 +78,7 @@ wide root to a fully opened word, authenticates every position, checks multiplic
 by inverse DFT, and rechecks committed fold closure. This resolution is deliberately exhaustive,
 shipping the whole word and every authentication path. Succinct queried openings/FRI,
 extension-field challenges, formal FS/RBR refinement, RBR extraction, and the gate-to-linear-channel
-bridge remain. The reference wrapper does derive its base-field fold challenge after absorbing both
-complete claims and roots under a dedicated domain; it is not yet part of `ReferenceProof`.
+bridge remain. This wrapper is itself scheduled for replacement by generated control.
 
 ## WGPU is an optional experiment
 
@@ -88,7 +86,7 @@ The `wgpu-fold` Cargo feature contains a BabyBear⁴ WGSL fold adopted into this
 bit-for-bit agreement with the CPU fold. It is useful performance and conformance evidence, but:
 
 - default builds do not depend on WGPU;
-- `reference_prove` and `reference_verify` are CPU-only;
+- the deleted reference composition was CPU-only;
 - only the fold is accelerated, not the surrounding PCS/protocol; and
 - no future protocol is required to preserve this kernel or its data layout.
 

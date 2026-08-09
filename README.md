@@ -31,34 +31,16 @@ experiment and can be replaced wholesale as the protocol evolves.
 | **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. The Rust Tower256 LogUp prototype checks each committed index column and binds the ordered roots into one bundle. | Its handwritten verifier/receipt adapter is not authoritative and must be replaced by Lean emission. The zerocheck/PCS also inherits additive proximity and CR/ROM assumptions; this is indexed evaluation, not yet mutable RAM. |
 | **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; Lean proves header-cell packing and the bound `AccClaim` fold. Rust has executable history prototypes. | The handwritten Rust receipt/admission/history objects are mirrors and are being replaced by Lean-emitted artifacts. This is not yet the final WARP/FACS protocol; hiding/ZK composition and the unbounded outer accumulator/decider remain. |
 | **Zero knowledge and extraction** | Native formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
-| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The Rust succinct verifier is an unverified prototype, not a refinement. Coherent proximity, base-subfield sampling, CR/shared-ROM, generated verifier wiring, recursion, and PoW composition remain before calling 137 bits deployed. |
+| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The Rust succinct verifier is an unverified compute prototype with no semantics. Coherent proximity, base-subfield sampling, CR/shared-ROM, Lean-owned verifier control, recursion, and PoW composition remain before calling 137 bits deployed. |
 
 ## What runs today
 
-The default Rust path is CPU-only and has a one-call API:
-
-```text
-Lean-emitted descriptor
-    -> deterministic trace
-    -> trace commitment
-    -> Fiat–Shamir gate sumcheck
-    -> trace-derived Reed–Solomon word
-    -> Fiat–Shamir FRI commitments and queries
-    -> reference verification
-```
-
-The verifier derives its challenges from one transcript and checks the first FRI commitment
-against the Reed–Solomon encoding of the supplied trace. This closes a useful executable loop, but
-the proof literally contains the entire witness trace and verification recomputes the whole trace
-encoding. It is therefore **non-succinct, non-zero-knowledge, and not a production prover**. The
-current hash permutation still uses a small conformance/demo parameter set, but the former
-scalar-root wound is closed at the runtime representation layer: roots and authentication paths are
-nine canonical BabyBear limbs, absorbed with a fixed-width, domain-separated transcript encoding.
-That carrier has sufficient cardinality for a 248-bit range; it does **not** make the demo hash a
-248-bit collision-resistant commitment. `Compiler/WideDigestAir` now pins the exact eleven-field
-encoding through the emitted constraint system. Raw byte decoding, its wire-sharing composition
-with the recursive sponge/full verifier, concrete permutation/capacity analysis, and `[COMMIT-CR]`
-remain.
+There is deliberately no authoritative Rust one-call prover/verifier API now. The former
+full-trace `reference_prove` / `reference_verify` composition and its benchmark were deleted because
+they authored transcript and acceptance semantics in Rust. Native code currently supplies
+unverified field/tower arithmetic, transforms, hash/Merkle operations, and several explicitly
+temporary protocol prototypes. Lean owns the relations and emitted descriptors; the next executable
+path is a Lean-owned controller around bounded native replies.
 
 The former sampled binary-history/OOD API is deliberately absent. Its verifier checked local fold
 consistency but never used the advertised coefficient bound, so it was not a low-degree test and
@@ -80,7 +62,7 @@ sumcheck has individual degree two, and that their terminal values are public af
 functionals. Rust binds those seven equations, the entire public prefix, and padding zeros with one
 fresh eta, then opens the aggregate against the same trace root fixed before gamma. Sampled
 round-zero checks reject non-base Ext6 witnesses. Coherent proximity, subfield sampling, CR/ROM,
-and executable refinement remain explicit rather than being mistaken for code-level completion.
+and generated Lean control remain explicit rather than being mistaken for code-level completion.
 
 The old `nextgen_light_client` conjunction was deleted with the unsound binary admission branch.
 The surviving handwritten Ext6 and history prototypes are not semantic authority and are scheduled
@@ -98,13 +80,9 @@ and emit path and produces the first-order deployment artifact. The handwritten 
 verifier and lookup receipt adapter were deleted. Complete header-preimage/auth/effect/disclosure
 emission and the WARP IOR/decider/extractor remain.
 
-`semantic_receipt_relation` is the matching exhaustive Rust reference. It checks the same
-quadratics, canonically lifts the header-bound BabyBear semantic word into Ext6, commits the exact
-word with the binary cSHAKE Merkle suite, and constructs the coordinate accumulator claim. Both
-roots are transcript-bound before one atomic Ext6 challenge drives the committed cross-word fold.
-This closes the executable field-consistency join, while deliberately leaving code membership,
-sampled proximity, shared-ROM composition, the full typed-envelope codec refinement, and WARP
-extraction open.
+The former Rust receipt-relation and proof-history wrappers were deleted. Their replacement is not a
+new mirror: it is a Lean-owned manifest/controller whose only native interface is bounded compute
+calls and replies, followed by Lean-side checks and construction of the sole verified receipt token.
 
 The optional `wgpu-fold` feature contains a BabyBear⁴ WGSL fold that is bit-for-bit conformance
 tested against the CPU fold on supported hardware. It is not a dependency of proving or

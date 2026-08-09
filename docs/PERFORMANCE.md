@@ -4,7 +4,10 @@ This file records reproducible measurements, including bad news. It is not a pro
 page. Each row names the exact path measured, because the current full-trace reference protocol
 and the intended succinct additive protocol are different algorithms.
 
-## Full-trace reference baseline — 2026-08-09
+## Archived full-trace reference baseline — 2026-08-09
+
+The benchmark and Rust-owned reference verifier were deleted. These numbers are historical evidence
+about the discarded algorithm, not a currently runnable command or selected protocol.
 
 Command:
 

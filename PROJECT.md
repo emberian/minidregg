@@ -139,11 +139,9 @@ A receipt binds at least:
   explicitly a charged committed transition);
 - prior receipt/history links and verifiable finality when finality is claimed.
 
-[`prover/src/semantic_receipt.rs`](prover/src/semantic_receipt.rs) owns the canonical heterogeneous
-ABI. [`prover/src/proof_carrying_history.rs`](prover/src/proof_carrying_history.rs) is the first
-non-vacuous native adapter: it verifies the real GF(2) functional append and Ext6 factored-gate
-proof, reconstructs the entire canonical envelope, and checks a two-node state/accumulator seam.
-It is authenticated history, not recursive compression.
+The canonical heterogeneous ABI is being moved from the former handwritten
+`prover/src/semantic_receipt.rs` prototype into a Lean-owned `SemanticManifest`. Native code will
+receive bounded calls and return data; it will not construct or verify receipt meaning.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first
 common accumulator language: a fixed pre/post/touched word, Boolean-mask and frame quadratics, an
@@ -152,13 +150,9 @@ semantic wrapper is now [`Assurance/SemanticTurnReceipt.lean`](Assurance/Semanti
 commit requires authorization indexed by the exact request, exact effect-digest and effect-to-delta
 semantics, permitted disclosures, and bound pre/post roots; reject has no post-state. The wrapper
 projects to the accumulator nucleus only after those clauses are proved.
-[`prover/src/semantic_receipt_relation.rs`](prover/src/semantic_receipt_relation.rs) is its
-exhaustive executable mirror: it validates the same equations, lifts the canonical BabyBear
-semantic word into BabyBear⁶, commits that word, fixes both roots, and derives one atomic
-Ext6 challenge before the root-linked linear fold. This closes the former base-field-challenge
-mistake at the relation boundary; code membership, shared-ROM composition, and the succinct outer
-protocol remain absent by name. [`Assurance/SemanticReceiptRuntimeCodec.lean`](Assurance/SemanticReceiptRuntimeCodec.lean)
-proves the exact Rust `16 binding cells ++ 3*k+slot` layout, injectivity of the fixed 32-byte/u16
+The former Rust receipt-relation mirror and proof-history wrappers have been deleted.
+[`Assurance/SemanticReceiptRuntimeCodec.lean`](Assurance/SemanticReceiptRuntimeCodec.lean)
+proves the exact `16 binding cells ++ 3*k+slot` layout, injectivity of the fixed 32-byte/u16
 packing, both residual lanes, and the bound `AccClaim` fold. Runtime
 [`Compiler/SemanticTurnReceiptDescriptor.lean`](Compiler/SemanticTurnReceiptDescriptor.lean)
 projects the existing Lean relation through the existing AIR/emit path, proves descriptor

@@ -130,17 +130,14 @@ Rust reference sumcheck is presently over base BabyBear, its FRI challenges are 
 emits no PoW nonce. A mixed-field theorem plus the shared-ROM/domain-separation/runtime bridge is
 required before assigning that label to an implementation.
 
-## Running compute
+## Native compute boundary
 
-There is now a prover and verifier implementation, contrary to the old version of this document.
-`prover/src/protocol.rs` composes descriptor validation, trace generation, a trace commitment,
-gate sumcheck, trace-derived RS encoding, and FRI under one replayed transcript. The integration
-tests exercise the Lean-emitted demo descriptor and reject mutations.
+The former Rust-owned whole-protocol prover/verifier was deleted. Native code retains arithmetic,
+transforms, hash/Merkle compute, and temporary protocol experiments, but it is not an acceptance
+authority. The next executable path is a Lean-owned controller around bounded native replies.
 
-Its boundary is deliberate:
+The surviving historical boundary remains deliberate:
 
-- `ReferenceProof` carries the full witness trace;
-- verification recomputes the trace commitment and entire RS word;
 - the hash uses demo/conformance parameters, not a selected deployment set;
 - runtime roots, authentication paths, and transcript encodings are nine canonical BabyBear
   limbs, closing `[PROVER-digest-width]` as a representation issue; this does not establish
