@@ -25,6 +25,7 @@ import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic rec
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed native-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners return bounded data and cannot choose continuation or acceptance
+import Compiler.NativeGlueGen -- deterministic data-only Rust DTO/dispatch text generated from the canonical Lean artifact; no native semantics or acceptance
 import Compiler.SemanticController -- arbitrary native oracle may return bounded data only; Lean owns authorization, challenge/order, descriptor checks, and the sole Verified token
 import Compiler.TranscriptController -- Lean-owned phased transcript program: native replies are data, challenges and query order are derived internally, and only the Lean checker can accept
 import Compiler.AirHash  -- [AIR-poseidon] the hash-permutation gadget: parameterized Poseidon2-style rounds (add-rc, S-box x^α full/partial, linear layer) as DSL terms; permGadget_eval (circuit ⟺ executor, all R rounds) + hashConstraint (nullifier ≐ hash(note), iff + teeth + complete); [AIR-poseidon-params] the deployed constants, [COMMIT-CR] the crypto floor
