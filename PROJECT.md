@@ -324,6 +324,12 @@ Each development step closes **one edge in the composition graph**:
 Commits are the development journal: small, thematic, frequent, and never delayed for a broad
 verification ritual. A later compile or theorem failure becomes a new fix-forward commit.
 
+Cross-layer or expensive architectural choices additionally receive a compact record under
+[`docs/decisions/`](docs/decisions/). The decision names its hard invariants, rejected alternatives,
+required evidence, and invalidation trigger; routine theorem work still needs only a thematic
+commit. Formal and remote evidence must identify the exact source commit and may support only its
+stated claim ceiling.
+
 No step may add a second semantic implementation in Rust. New Rust is either generated data-only
 glue or a clearly labeled, caller-parameterized opaque compute kernel invoked through a
 Lean-emitted interface. It is never a refinement and never returns the project's acceptance bit.
@@ -335,7 +341,10 @@ authorization, the existing bound receipt relation, and acceptance by the Lean-e
 Native failure can deny availability or completeness; it cannot construct an accepted turn.
 
 Performance work begins on the actual selected protocol. Distributed hosts (`persvati`, `hbox`)
-are used for genuinely expensive builds or measurements, not repetitive ritual.
+are used for genuinely expensive builds or measurements through
+[`scripts/remote-check.sh`](scripts/remote-check.sh): an exact committed archive, unique run tree,
+resource limits, and hashed evidence. Their pre-existing minidregg directories are never source
+worktrees. See [`D-0003`](docs/decisions/D-0003-remote-evidence.md).
 
 ## Ordered frontier
 
