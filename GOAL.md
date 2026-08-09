@@ -98,8 +98,10 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   `Compiler.AuthenticatedColumnPlan` owns typed column roots, global root-before-challenge draws,
   opaque fallible native calls, Lean-checked openings, common-opening representation edges, exact
   execution traces, and a sole terminal attestation. Its Tower256-shaped non-vacuity path proves
-  the controller is inhabited and native errors cannot accept. It does not yet instantiate the
-  deployed Tower codec, cSHAKE framing, Merkle commitment/CR, PCS, or lookup/history clause evidence.
+  the controller is inhabited and native errors cannot accept. Its `BindingCommitmentScheme.toLoom`
+  adapter and `AuthenticatedColumnHistoryBridge` now feed the exact same accepted commitment and
+  opening objects into the WARP history message schedule. It does not yet instantiate the deployed
+  Tower codec, cSHAKE framing, Merkle commitment/CR, proximity PCS, or lookup-clause evidence.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -122,7 +124,12 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
 - 2026-08-09 ★★★★★ **Authenticated columns and dual-root WARP/additive join** ✓ at interface
   resolution: `AuthenticatedColumnPlan` makes a challenge before any root unrepresentable and
   blocks native errors; `SemanticHistoryWARPAdditiveJoin` fixes link-root-before-γ and exact
-  fold-root-after-γ ordering and terminal checkpoint equality. Remaining: concrete commitment/PCS,
+  fold-root-after-γ ordering and terminal checkpoint equality. `BindingCommitmentScheme.toLoom`
+  gives controller and accumulator the same literal commitment/opening relation, while
+  `AuthenticatedColumnHistoryBridge.AuthenticatedLinkColumns.bcsRounds_exact_of_attestation`
+  converts the roots, values, and proof bytes in one accepted controller attestation into the exact
+  semantic BCS link/challenge stream. This closes the former controller→history opening seam without
+  inventing native authority. Remaining: a concrete collision-resistant commitment/proximity PCS,
   CR/ROM, claim reindexing, sampled decider, hiding, and one common security game.
 - 2026-08-09 ★★★★★ **Declaration-derived effect, turn, and reactive cell seams** ✓:
   `Compiler.DeclaredEffectArtifact.accountMoveArtifact_exact` pins the typed account move's wire

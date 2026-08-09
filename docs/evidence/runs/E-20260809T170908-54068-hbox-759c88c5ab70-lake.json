@@ -1,0 +1,46 @@
+{
+  "schema": "minidregg/remote-evidence/v1",
+  "runId": "E-20260809T170908-54068-hbox-759c88c5ab70-lake",
+  "source": {
+    "commit": "759c88c5ab70900c6e73889850544d732e969ad2",
+    "tree": "e84cef0e9d6ad95305061edf210705f587fdd445",
+    "dirty": false,
+    "archiveSha256": "187cfb567a8c1212fdc03a67b2cc667aadf56b554ea7aa6c782603559d47cb81",
+    "leanToolchainSha256": "54727eec5cba149c18842e6deb5c41b369d66455c93ce135d7d5347c782b2325",
+    "lakeManifestSha256": "adfbabe1a7e53e7759216079326e26786c57f62203255595ebe6b7df4f1323bb"
+  },
+  "command": [
+    "lake",
+    "build",
+    "Assurance.AuthenticatedColumnHistoryBridge"
+  ],
+  "worker": {
+    "alias": "hbox",
+    "hostname": "hbox",
+    "uname": "Linux hbox 6.11.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 13 20:29:41 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900",
+    "threads": 24,
+    "memoryKiB": 129319636,
+    "gpu": "00:02.0 Display controller: Intel Corporation AlderLake-S GT1 (rev 0c)\n03:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 22 [Radeon RX 6700/6700 XT/6750 XT / 6800M/6850M XT] (rev c0)",
+    "lake": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)",
+    "cargo": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)",
+    "remoteRun": "/tank/dregg-build/minidregg-checks/runs/run-759c88c5ab70-Bxkdiiif",
+    "limits": {
+      "cpuSet": "0-7",
+      "virtualMemoryGiB": 64,
+      "timeoutMinutes": 45
+    }
+  },
+  "startedAt": "2026-08-09T17:09:08Z",
+  "finishedAt": "2026-08-09T17:11:00Z",
+  "exitCode": 0,
+  "rawLog": {
+    "file": "E-20260809T170908-54068-hbox-759c88c5ab70-lake.log",
+    "sha256": "88eba4dc9c1a7c64dc713063bae7ec267e78c64ff705a34bd51da409a724dd91"
+  },
+  "projectOleans": {
+    "file": "E-20260809T170908-54068-hbox-759c88c5ab70-lake.oleans.sha256",
+    "sha256": "bb49ee9fced22fc4062b15739140d63ef6f28c07777055cdb134e134bb520f71"
+  },
+  "claimCeiling": "Exact committed-source build/check evidence only; not a benchmark, native-semantics claim, or cryptographic-security claim."
+}
