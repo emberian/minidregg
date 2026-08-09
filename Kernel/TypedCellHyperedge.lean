@@ -66,35 +66,35 @@ variable
     {pre : CellState.Materialized M}
 
 /-- The exact patch already validated by this incidence's accepted effect. -/
-def patch (leg : Leg (y := y) (z := z) portal authState pre) :
+def patch (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     CellState.Patch S Digest :=
   leg.family.patch leg.declaration leg.outcome
 
 /-- The incidence-local canonical post.  This is retained even though the
 joint transition below has one separately composed post. -/
-def post (leg : Leg (y := y) (z := z) portal authState pre) :
+def post (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     CellState.Materialized M :=
   leg.accepted.prepared.post
 
 @[simp] theorem request_preRoot
-    (leg : Leg (y := y) (z := z) portal authState pre) :
+    (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     leg.request.preStateRoot = pre.root :=
   leg.accepted.preRootBound
 
 @[simp] theorem request_effectsDigest
-    (leg : Leg (y := y) (z := z) portal authState pre) :
+    (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     leg.request.effectsDigest =
       leg.family.effectDigest leg.declaration :=
   leg.accepted.effectsDigestBound
 
 /-- Exact request-indexed authority is retained, not summarized by a Boolean. -/
 def authorization
-    (leg : Leg (y := y) (z := z) portal authState pre) :
+    (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     Authorized portal authState leg.request :=
   leg.accepted.authorization
 
 @[simp] theorem post_exact
-    (leg : Leg (y := y) (z := z) portal authState pre) :
+    (leg : Leg.{u, v, w, x, y, z} portal authState pre) :
     leg.post = leg.accepted.validated.apply :=
   rfl
 
@@ -107,7 +107,7 @@ inductive FieldCompositionMode
   | canonical
   deriving DecidableEq, Repr
 
-structure CompositionPlan (Incidence : Type) where
+structure CompositionPlan (Incidence : Type z) where
   fieldMode : FieldCompositionMode
   order : List Incidence
 
@@ -122,7 +122,7 @@ structure ResourceLaw
     (M : CellState.Materializer S Digest) (portal : Portal)
     (Coordinate : Type y) (Balance : Type b) [AddCommMonoid Balance] where
   delta : {authState : AuthState} -> {pre : CellState.Materialized M} ->
-    Leg (y := y) (z := z) portal authState pre -> Coordinate -> Balance
+    Leg.{u, v, w, x, y, z} portal authState pre -> Coordinate -> Balance
 
 /-- One flat family of accepted incidences.  All legs are definitionally
 indexed by the same canonical pre-cell and by the authorization projection of
@@ -135,7 +135,7 @@ structure Declaration
     (Incidence : Type z) where
   pre : CellState.Materialized M
   apex : Digest
-  legs : Incidence -> Leg (y := y) (z := z) portal
+  legs : Incidence -> Leg.{u, v, w, x, y, z} portal
     (projection.project pre.logical) pre
   composition : CompositionPlan Incidence
 
@@ -148,7 +148,8 @@ variable
     {portal : Portal} {projection : AuthorizationProjection S}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
 
-def legPatch (declaration : Declaration (y := y) S M portal projection Incidence)
+def legPatch
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
     (incidence : Incidence) : CellState.Patch S Digest :=
   (declaration.legs incidence).patch
 
@@ -156,7 +157,7 @@ def legPatch (declaration : Declaration (y := y) S M portal projection Incidence
 actual concatenated typed writes, so joint validation can contain neither an
 undeclared write nor a ghost key. -/
 def jointPatch
-    (declaration : Declaration (y := y) S M portal projection Incidence) :
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
     CellState.Patch S Digest where
   expectedPreRoot := declaration.pre.root
   fieldWrites := declaration.composition.order.flatMap fun incidence =>
@@ -173,12 +174,12 @@ def jointPatch
         CellState.ResourceWrite.resource).toFinset
 
 def OrderComplete
-    (declaration : Declaration (y := y) S M portal projection Incidence) : Prop :=
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) : Prop :=
   declaration.composition.order.Nodup /\
     forall incidence, incidence ∈ declaration.composition.order
 
 def FieldFootprintsDisjoint
-    (declaration : Declaration (y := y) S M portal projection Incidence) : Prop :=
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) : Prop :=
   forall left right, left ≠ right ->
     Disjoint (declaration.legPatch left).fieldFootprint
       (declaration.legPatch right).fieldFootprint
@@ -186,13 +187,13 @@ def FieldFootprintsDisjoint
 /-- Resource packages are authority/evidence-indexed replacements, so two
 independently accepted legs may not both replace the same resource. -/
 def ResourceFootprintsDisjoint
-    (declaration : Declaration (y := y) S M portal projection Incidence) : Prop :=
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) : Prop :=
   forall left right, left ≠ right ->
     Disjoint (declaration.legPatch left).resourceFootprint
       (declaration.legPatch right).resourceFootprint
 
 structure ShapeValid
-    (declaration : Declaration (y := y) S M portal projection Incidence) : Prop where
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) : Prop where
   orderComplete : declaration.OrderComplete
   resourcesDisjoint : declaration.ResourceFootprintsDisjoint
   fieldsValid :
@@ -202,11 +203,11 @@ structure ShapeValid
 
 /-- Heterogeneous eager nullifiers are retained with their incidence index. -/
 def JointNullifier
-    (declaration : Declaration (y := y) S M portal projection Incidence) : Type _ :=
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) : Type _ :=
   Sigma fun incidence => (declaration.legs incidence).Nullifier
 
 def jointNullifiers
-    (declaration : Declaration (y := y) S M portal projection Incidence) :
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
     List declaration.JointNullifier :=
   declaration.composition.order.filterMap fun incidence =>
     match (declaration.legs incidence).family.nullifier
@@ -219,8 +220,8 @@ def jointNullifiers
 against the common canonical pre. -/
 def aggregateDelta
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    (law : ResourceLaw (z := z) S M portal Coordinate Balance)
-    (declaration : Declaration (y := y) S M portal projection Incidence) :
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
     Coordinate -> Balance :=
   fun coordinate => Finset.univ.sum fun incidence =>
     law.delta (declaration.legs incidence) coordinate
@@ -241,8 +242,8 @@ variable
 /-- A committed generic hyperedge has one verifier-minted validation for the
 exact joint patch, one exact shared apex, and the aggregate resource law. -/
 structure Commit
-    (law : ResourceLaw (z := z) S M portal Coordinate Balance)
-    (declaration : Declaration (y := y) S M portal projection Incidence) :
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
     Type (max u v w x y z b) where
   shape : declaration.ShapeValid
   validated : CellState.ValidatedPatch M declaration.pre declaration.jointPatch
@@ -252,8 +253,8 @@ structure Commit
 namespace Commit
 
 variable
-    {law : ResourceLaw (z := z) S M portal Coordinate Balance}
-    {declaration : Declaration (y := y) S M portal projection Incidence}
+    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
 
 /-- The unique canonical transition.  Its post and both footprints come only
 from the validated concatenated patch. -/
@@ -397,8 +398,8 @@ end Commit
 /-- Shape, validation, exact authorizations, and even apex agreement cannot
 manufacture conservation for a nonzero typed resource coordinate. -/
 theorem no_commit_of_nonzero_resource
-    (law : ResourceLaw (z := z) S M portal Coordinate Balance)
-    (declaration : Declaration (y := y) S M portal projection Incidence)
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
     (coordinate : Coordinate)
     (nonzero : declaration.aggregateDelta law coordinate ≠ 0) :
     IsEmpty (Commit law declaration) :=
@@ -439,10 +440,10 @@ resource vector must be the generic conservation vector. -/
 structure Certificate
     (legacyProjection : Legacy.AuthorizationProjection legacyMaterializer)
     (legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence)
-    (typed : Declaration (y := y)
+    (typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence)
-    (law : ResourceLaw (z := z)
+    (law : ResourceLaw
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       Digest Int) : Prop where
   preExact : typed.pre = legacy.pre
@@ -473,10 +474,10 @@ structure Certificate
 theorem committed_post_matches_legacy
     {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
     {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
-    {typed : Declaration (y := y)
+    {typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence}
-    {law : ResourceLaw (z := z)
+    {law : ResourceLaw
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       Digest Int}
     (certificate : Certificate legacyProjection legacy typed law)
@@ -490,10 +491,10 @@ theorem committed_post_matches_legacy
 theorem committed_balance_matches_legacy
     {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
     {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
-    {typed : Declaration (y := y)
+    {typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence}
-    {law : ResourceLaw (z := z)
+    {law : ResourceLaw
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       Digest Int}
     (certificate : Certificate legacyProjection legacy typed law)

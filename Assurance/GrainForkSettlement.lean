@@ -190,7 +190,7 @@ variable
     {M : CellState.Materializer S Digest}
     {portal : Portal} {projection : AuthorizationProjection S}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {declaration : Declaration (y := y) S M portal projection Incidence}
+    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
     {L : Sparse.Layout.{u, v, w}}
     {sparseMaterializer : Sparse.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
@@ -204,7 +204,7 @@ leg's effect digest.  The focused cell keys are exactly the joint patch
 footprints; sparse roots are retained as additional read context and derived by
 `StateFocus.sparseRootAt`. -/
 structure FocusCut (base : CanonicalHead)
-    (declaration : Declaration (y := y) S M portal projection Incidence) where
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) where
   canonical : BranchHistory base
   branches : Incidence -> BranchHistory base
   focus : StateFocus S L sparseMaterializer Plane sparseState
@@ -247,14 +247,15 @@ variable
     {portal : Portal} {projection : AuthorizationProjection S}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : ResourceLaw (z := z) S M portal Coordinate Balance}
-    {declaration : Declaration (y := y) S M portal projection Incidence}
+    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
 
 /-- An unresolved conflict is exactly a colliding resource replacement, or a
 field collision while the plan declares disjoint field composition.  Field
 overlap in canonical mode is resolved by the complete declared later-wins order
 and is therefore not called an unresolved conflict. -/
-inductive MergeConflict (declaration : Declaration (y := y) S M portal projection Incidence)
+inductive MergeConflict
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
     (left right : Incidence) : Prop
   | field
       (mode : declaration.composition.fieldMode = .disjoint)
@@ -294,8 +295,8 @@ variable
     {portal : Portal} {projection : AuthorizationProjection S}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : ResourceLaw (z := z) S M portal Coordinate Balance}
-    {declaration : Declaration (y := y) S M portal projection Incidence}
+    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
     {L : Sparse.Layout.{u, v, w}}
     {sparseMaterializer : Sparse.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
