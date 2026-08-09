@@ -1,0 +1,15 @@
+run=E-20260809T162313-5506-hbox-b2c674aee996-cargo
+commit=b2c674aee99659c1f474ea2d04d361fb9c461748
+host=hbox
+remote_run=/tank/dregg-build/minidregg-checks/runs/run-b2c674aee996-y0QAHu8A
+command=cargo check --manifest-path prover/Cargo.toml --lib 
+   Compiling version_check v0.9.5
+    Checking typenum v1.20.1
+    Checking keccak v0.1.6
+   Compiling generic-array v0.14.7
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking digest v0.10.7
+    Checking sha3 v0.10.9
+    Checking minidregg-prover v0.1.0 (/tank/dregg-build/minidregg-checks/runs/run-b2c674aee996-y0QAHu8A/source/prover)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.04s
