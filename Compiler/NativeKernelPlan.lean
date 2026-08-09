@@ -111,17 +111,17 @@ def PublicPrefixExact (instruction : Instruction)
 arithmetic/hash/transform labels add no parallel semantics: acceptance is the
 existing generic call relation. -/
 structure CertifiedResponse (manifest : Manifest) (instruction : Instruction)
-    (response : KernelResponse instruction) : Prop where
-  clause : DialectClauseDecl
+    (response : KernelResponse instruction) : Type where
   clauseRegistered :
-    manifest.lookupClause instruction.clauseId = some clause
+    ∃ clause : DialectClauseDecl,
+      manifest.lookupClause instruction.clauseId = some clause
   callWellFormed : instruction.call.FullyWellFormed
   publicPrefixExact : PublicPrefixExact instruction response
   descriptorAcceptance : instruction.call.Accepts response.totalWires
 
 /-- Proof that Lean checked every response in the plan's fixed order. -/
 inductive Certificate (manifest : Manifest) (runner : PlanRunner) :
-    List Instruction → Prop
+    List Instruction → Type
   | nil : Certificate manifest runner []
   | cons {instruction : Instruction} {rest : List Instruction}
       (head : CertifiedResponse manifest instruction (runner instruction))
@@ -144,7 +144,7 @@ inductive SuffixOutcome (manifest : Manifest) (runner : PlanRunner)
 
 /-- Lean checker for one response.  Clause lookup is performed before the
 descriptor checks, so no unregistered native work can reach the continuation. -/
-def checkInstruction (manifest : Manifest) (instruction : Instruction)
+noncomputable def checkInstruction (manifest : Manifest) (instruction : Instruction)
     (response : KernelResponse instruction) :
     Sum Failure (CertifiedResponse manifest instruction response) := by
   match hclause : manifest.lookupClause instruction.clauseId with
@@ -154,8 +154,7 @@ def checkInstruction (manifest : Manifest) (instruction : Instruction)
         if hprefix : PublicPrefixExact instruction response then
           if haccepts : instruction.call.Accepts response.totalWires then
             exact .inr
-              { clause := clause
-                clauseRegistered := hclause
+              { clauseRegistered := ⟨clause, hclause⟩
                 callWellFormed := hcall
                 publicPrefixExact := hprefix
                 descriptorAcceptance := haccepts }
@@ -165,7 +164,7 @@ def checkInstruction (manifest : Manifest) (instruction : Instruction)
 
 /-- Execute and check instructions in Lean-owned order.  The recursive call—and
 therefore the next native invocation—exists only in the certified branch. -/
-def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
+noncomputable def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
     (instructions : List Instruction) → SuffixOutcome manifest runner instructions
   | [] => .checked .nil
   | instruction :: rest =>
@@ -180,7 +179,7 @@ def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
 
 /-- The only successful controller token. -/
 structure Verified (manifest : Manifest) (plan : Plan)
-    (runner : PlanRunner) : Prop where
+    (runner : PlanRunner) : Type where
   manifestExact : plan.manifestAddress = manifest.contentAddress
   certificate : Certificate manifest runner plan.instructions
 
@@ -195,7 +194,7 @@ def Outcome.IsVerified {manifest : Manifest} {plan : Plan}
 
 /-- Run the plan.  Manifest binding is checked before any native instruction is
 issued; all later continuation choices remain inside `checkInstructions`. -/
-def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
+noncomputable def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
     Outcome manifest plan runner :=
   if hmanifest : plan.manifestAddress = manifest.contentAddress then
     match checkInstructions manifest runner plan.instructions with
@@ -210,13 +209,13 @@ theorem Certificate.checked_of_mem
     {instructions : List Instruction}
     (certificate : Certificate manifest runner instructions)
     {instruction : Instruction} (member : instruction ∈ instructions) :
-    CertifiedResponse manifest instruction (runner instruction) := by
+    Nonempty (CertifiedResponse manifest instruction (runner instruction)) := by
   induction certificate with
   | nil => simp at member
   | @cons headInstruction rest head tail ih =>
       rcases List.mem_cons.mp member with same | member
       · subst instruction
-        exact head
+        exact ⟨head⟩
       · exact ih member
 
 /-- **Arbitrary-runner integrity.**  No honesty, determinism theorem, or native
@@ -238,8 +237,9 @@ theorem arbitraryRunner_integrity
   | verified token =>
       refine ⟨token.manifestExact, ?_⟩
       intro instruction member
-      have checked := token.certificate.checked_of_mem member
-      exact ⟨checked.clause, checked.clauseRegistered,
+      rcases token.certificate.checked_of_mem member with ⟨checked⟩
+      rcases checked.clauseRegistered with ⟨clause, registered⟩
+      exact ⟨clause, registered,
         checked.callWellFormed, checked.publicPrefixExact,
         checked.descriptorAcceptance⟩
 
@@ -251,8 +251,8 @@ theorem descriptorFailure_not_certified
     (failure : ¬ instruction.call.Accepts response.totalWires) :
     ∀ certificate,
       checkInstruction manifest instruction response ≠ .inr certificate := by
-  intro certificate
-  simp [checkInstruction, failure]
+  intro certificate _
+  exact failure certificate.descriptorAcceptance
 
 /-- A plan with the wrong manifest address never invokes the success branch. -/
 theorem manifestMismatch_not_verified
