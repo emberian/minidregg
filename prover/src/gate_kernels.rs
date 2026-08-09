@@ -8,19 +8,6 @@ use core::fmt;
 
 use crate::field6::Ext6;
 
-/// Seven operand tables for the factored degree-two gate polynomial.
-pub const GATE_OPERAND_TABLES: usize = 7;
-pub const MUL_LEFT_WEIGHTED: usize = 0;
-pub const MUL_RIGHT: usize = 1;
-pub const MUL_OUTPUT_WEIGHTED: usize = 2;
-pub const ADD_LEFT_WEIGHTED: usize = 3;
-pub const ADD_RIGHT_WEIGHTED: usize = 4;
-pub const ADD_OUTPUT_WEIGHTED: usize = 5;
-pub const ZERO_WEIGHTED: usize = 6;
-
-pub type GateOperandValues<E> = [E; GATE_OPERAND_TABLES];
-pub type GateOperandTables<E> = [Vec<E>; GATE_OPERAND_TABLES];
-
 /// The buffer in which a non-canonical base-field representative occurred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferKind {
@@ -54,15 +41,7 @@ pub enum GateKernelError {
         index: usize,
         value: u64,
     },
-    OperandTableLength {
-        table: usize,
-        expected: usize,
-        actual: usize,
-    },
     NoRoundRemaining,
-    NotTerminal {
-        remaining: usize,
-    },
 }
 
 impl fmt::Display for GateKernelError {
@@ -90,18 +69,7 @@ impl fmt::Display for GateKernelError {
             Self::NonCanonicalBase { index, value } => {
                 write!(f, "base embedding rejected residual[{index}] = {value}")
             }
-            Self::OperandTableLength {
-                table,
-                expected,
-                actual,
-            } => write!(
-                f,
-                "gate operand table {table} has length {actual}, expected {expected}"
-            ),
             Self::NoRoundRemaining => write!(f, "sumcheck layer is already terminal"),
-            Self::NotTerminal { remaining } => {
-                write!(f, "sumcheck layer has {remaining} terminal candidates")
-            }
         }
     }
 }
@@ -479,117 +447,9 @@ pub fn batch_lifted_residuals<E: BaseEmbedding>(
     Ok(out)
 }
 
-// --- Degree-two factored-gate kernels --------------------------------------
-
-fn check_operand_tables<E>(tables: &GateOperandTables<E>) -> Result<usize, GateKernelError> {
-    let len = tables[MUL_LEFT_WEIGHTED].len();
-    cube_dim(len)?;
-    for (table, values) in tables.iter().enumerate().skip(1) {
-        if values.len() != len {
-            return Err(GateKernelError::OperandTableLength {
-                table,
-                expected: len,
-                actual: values.len(),
-            });
-        }
-    }
-    Ok(len)
-}
-
-/// `(gamma*A)*B - gamma*C + gamma*(L+R-O) + gamma*Z` at one point.
-pub fn gate_polynomial_value<E: KernelScalar>(values: GateOperandValues<E>) -> E {
-    values[MUL_LEFT_WEIGHTED]
-        .mul(values[MUL_RIGHT])
-        .sub(values[MUL_OUTPUT_WEIGHTED])
-        .add(values[ADD_LEFT_WEIGHTED])
-        .add(values[ADD_RIGHT_WEIGHTED])
-        .sub(values[ADD_OUTPUT_WEIGHTED])
-        .add(values[ZERO_WEIGHTED])
-}
-
-fn interpolate<E: KernelScalar>(low: E, high: E, at: E) -> E {
-    low.add(high.sub(low).mul(at))
-}
-
-fn gate_round_value<E: KernelScalar>(tables: &GateOperandTables<E>, at: E) -> E {
-    let mut sum = E::ZERO;
-    for pair in 0..tables[0].len() / 2 {
-        let low = 2 * pair;
-        let high = low + 1;
-        let values =
-            core::array::from_fn(|table| interpolate(tables[table][low], tables[table][high], at));
-        sum = sum.add(gate_polynomial_value(values));
-    }
-    sum
-}
-
-/// Sum the factored degree-two gate polynomial over the current cube.
-pub fn quadratic_gate_cube_sum<E: KernelScalar>(
-    tables: &GateOperandTables<E>,
-) -> Result<E, GateKernelError> {
-    let len = check_operand_tables(tables)?;
-    Ok((0..len).fold(E::ZERO, |sum, index| {
-        let values = core::array::from_fn(|table| tables[table][index]);
-        sum.add(gate_polynomial_value(values))
-    }))
-}
-
-/// Emit `[g(0),g(1),g(2)]` for the factored gate polynomial.  `two` is caller
-/// supplied so the kernel does not select a field or encoding.
-pub fn quadratic_gate_round_message<E: KernelScalar>(
-    tables: &GateOperandTables<E>,
-    two: E,
-) -> Result<[E; 3], GateKernelError> {
-    let len = check_operand_tables(tables)?;
-    if len == 1 {
-        return Err(GateKernelError::NoRoundRemaining);
-    }
-    Ok([
-        gate_round_value(tables, E::ZERO),
-        gate_round_value(tables, E::ONE),
-        gate_round_value(tables, two),
-    ])
-}
-
-/// Fold all seven gate operand buffers at one caller-supplied challenge.
-pub fn fold_gate_operand_tables<E: KernelScalar>(
-    tables: &GateOperandTables<E>,
-    challenge: E,
-) -> Result<GateOperandTables<E>, GateKernelError> {
-    let len = check_operand_tables(tables)?;
-    if len == 1 {
-        return Err(GateKernelError::NoRoundRemaining);
-    }
-    Ok(core::array::from_fn(|table| {
-        fold_layer_unchecked(&tables[table], challenge)
-    }))
-}
-
-/// Read the seven singleton terminal values after all folds.
-pub fn gate_operand_terminal<E: Copy>(
-    tables: &GateOperandTables<E>,
-) -> Result<GateOperandValues<E>, GateKernelError> {
-    let len = check_operand_tables(tables)?;
-    if len != 1 {
-        return Err(GateKernelError::NotTerminal { remaining: len });
-    }
-    Ok(core::array::from_fn(|table| tables[table][0]))
-}
-
-/// Evaluate `[g(0),g(1),g(2)]` at a caller challenge.  The caller also supplies
-/// the field element `1/2` explicitly.
-pub fn evaluate_quadratic<E: KernelScalar>(message: [E; 3], challenge: E, two_inverse: E) -> E {
-    let [g0, g1, g2] = message;
-    let linear = g1.sub(g0).mul(challenge);
-    let second_difference = g2.sub(g1.add(g1)).add(g0);
-    let choose_two = challenge.mul(challenge.sub(E::ONE)).mul(two_inverse);
-    g0.add(linear).add(second_difference.mul(choose_two))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field4::{HALF, P};
 
     fn ext(value: u64) -> Ext6 {
         Ext6::try_from_base(value).unwrap()
@@ -609,22 +469,5 @@ mod tests {
             );
         }
         assert_eq!(layer[0], evaluate_mle(&table, &point).unwrap());
-    }
-
-    #[test]
-    fn quadratic_message_and_fold_share_the_caller_challenge() {
-        let mut tables: GateOperandTables<Ext6> = core::array::from_fn(|_| vec![Ext6::ZERO; 4]);
-        tables[MUL_LEFT_WEIGHTED] = vec![ext(1), ext(2), ext(3), ext(4)];
-        tables[MUL_RIGHT] = vec![ext(5), ext(6), ext(7), ext(8)];
-        tables[ZERO_WEIGHTED] = vec![ext(9), ext(10), ext(11), ext(12)];
-
-        let message = quadratic_gate_round_message(&tables, ext(2)).unwrap();
-        let challenge = ext(13);
-        let next = fold_gate_operand_tables(&tables, challenge).unwrap();
-        assert_eq!(
-            evaluate_quadratic(message, challenge, ext(HALF)),
-            quadratic_gate_cube_sum(&next).unwrap()
-        );
-        assert_eq!(P, 2_013_265_921);
     }
 }
