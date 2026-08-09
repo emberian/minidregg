@@ -16,7 +16,7 @@ disjoint or use one declared later-wins order.  This avoids pretending that
 two independently pre-authorized authority-package replacements can be
 sequentially composed.
 -/
-import Kernel.Turn
+import Kernel.DeclaredHyperedge
 import Theory.AcceptedCellEffect
 
 namespace Minidregg.Kernel.TypedCellHyperedge
@@ -404,10 +404,125 @@ theorem no_commit_of_nonzero_resource
     IsEmpty (Commit law declaration) :=
   ⟨fun commit => nonzero (congrFun commit.aggregateBalanced coordinate)⟩
 
+/-! ## Exact legacy migration boundary
+
+The old executable module remains useful while callers migrate, but it cannot
+itself manufacture `AcceptedCellEffect`: its effect declaration has no lawful
+semantic-family codec, its patch is an integer-store program rather than a
+`CellState.Patch`, and its committed token retains authorization under
+`Nonempty`.  The certificate below states the complete adapter obligation.  It
+is intentionally proof-relevant; a digest-only or root-only shim is not an
+adapter.
+-/
+
+namespace LegacyAdapter
+
+namespace Legacy := Minidregg.Kernel.DeclaredHyperedge
+
+variable
+    {legacyMaterializer : CellState.Materializer
+      Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {legacyPortal : Portal}
+    {LegacyIncidence : Type z} [Fintype LegacyIncidence]
+    [DecidableEq LegacyIncidence]
+
+/-- The old authorization projection embeds without reinterpretation. -/
+def authorizationProjection
+    (legacy : Legacy.AuthorizationProjection legacyMaterializer) :
+    AuthorizationProjection Minidregg.Theory.DeclaredTurn.effectSchema where
+  project := legacy.project
+
+/-- Exact obligations for replacing one old declaration by the generic typed
+kernel.  In particular, each accepted leg must execute the old leg's patch,
+the one joint post must execute the old joint patch, and the full-width legacy
+resource vector must be the generic conservation vector. -/
+structure Certificate
+    (legacyProjection : Legacy.AuthorizationProjection legacyMaterializer)
+    (legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence)
+    (typed : Declaration (y := y)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      (authorizationProjection legacyProjection) LegacyIncidence)
+    (law : ResourceLaw (z := z)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      Digest Int) : Prop where
+  preExact : typed.pre = legacy.pre
+  apexExact : typed.apex = legacy.apex
+  kindExact : forall incidence,
+    (typed.legs incidence).kind = (legacy.legs incidence).kind
+  requestExact : forall incidence,
+    HEq (typed.legs incidence).request (legacy.legs incidence).request
+  legFieldFootprintExact : forall incidence,
+    (typed.legPatch incidence).fieldFootprint =
+      (legacy.legs incidence).effects.footprint.toFinset
+  legResourceFootprintEmpty : forall incidence,
+    (typed.legPatch incidence).resourceFootprint = ∅
+  legPostLogicalExact : forall incidence,
+    (typed.legs incidence).post.logical =
+      Minidregg.Theory.DeclaredTurn.logicalOfStore
+        (Minidregg.Theory.EffectDeclaration.applyPatch
+          (legacy.legs incidence).effects.patch legacy.preStore)
+  jointPostLogicalExact : forall
+      validated : CellState.ValidatedPatch legacyMaterializer typed.pre
+        typed.jointPatch,
+    validated.apply.logical =
+      Minidregg.Theory.DeclaredTurn.logicalOfStore
+        (Minidregg.Theory.EffectDeclaration.applyPatch
+          legacy.patch legacy.preStore)
+  aggregateExact : typed.aggregateDelta law = legacy.aggregateDelta
+
+theorem committed_post_matches_legacy
+    {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
+    {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
+    {typed : Declaration (y := y)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      (authorizationProjection legacyProjection) LegacyIncidence}
+    {law : ResourceLaw (z := z)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      Digest Int}
+    (certificate : Certificate legacyProjection legacy typed law)
+    (commit : Commit law typed) :
+    commit.prepared.post.logical =
+      Minidregg.Theory.DeclaredTurn.logicalOfStore
+        (Minidregg.Theory.EffectDeclaration.applyPatch
+          legacy.patch legacy.preStore) :=
+  certificate.jointPostLogicalExact commit.validated
+
+theorem committed_balance_matches_legacy
+    {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
+    {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
+    {typed : Declaration (y := y)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      (authorizationProjection legacyProjection) LegacyIncidence}
+    {law : ResourceLaw (z := z)
+      Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
+      Digest Int}
+    (certificate : Certificate legacyProjection legacy typed law)
+    (commit : Commit law typed) :
+    legacy.aggregateDelta = 0 := by
+  rw [← certificate.aggregateExact]
+  exact commit.aggregateBalanced
+
+/-
+Named construction residuals:
+
+* `[TYPED-HYPEREDGE-LEGACY-FAMILY]`: give legacy effect declarations lawful
+  first-order codecs and a `SemanticEffectFamily` whose validated typed patch
+  is extensionally the existing `EffectDeclaration.applyPatch`.
+* `[TYPED-HYPEREDGE-LEGACY-AUTH]`: change the legacy committed carrier from
+  `Nonempty (Authorized ...)` to the accepted-cell positive path, or expose
+  only `Nonempty` generic commits.  Do not use classical choice to invent a
+  computational authorization witness.
+* `[TYPED-HYPEREDGE-HISTORY]`: migrate receipt/history admission to consume
+  the generic commit and its complete incidence/request family.
+-/
+
+end LegacyAdapter
+
 #print axioms Leg.request_preRoot
 #print axioms Commit.prepared_postRoot
 #print axioms Commit.leg_resourceFootprint_subset
 #print axioms Commit.toHyperedge
 #print axioms no_commit_of_nonzero_resource
+#print axioms LegacyAdapter.committed_post_matches_legacy
 
 end Minidregg.Kernel.TypedCellHyperedge
