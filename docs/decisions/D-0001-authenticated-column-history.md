@@ -13,7 +13,10 @@ algebras heterogeneous. The first concrete backend is Tower256/additive LCH-FRI.
 Semantic history uses a dual-root schedule: commit the exact link word before `gamma`; derive
 `gamma`; then bind the next folded root. Only the terminal folded word enters the additive
 checkpoint. WARP-shaped accumulation remains the semantic/history accumulator; additive FRI is its
-checkpoint/PCS backend, not a replacement semantic accumulator.
+checkpoint/PCS backend, not a replacement semantic accumulator. The retained-history BCS game now
+reconstructs exact genesis/chain/link words and challenges and keeps its PCS, binding, and ROM
+premises on one history coin. That does not yet supply the additive-checkpoint/knowledge
+false-accept cover on the same coin.
 
 ## Hard invariants and non-claims
 
@@ -21,8 +24,10 @@ checkpoint/PCS backend, not a replacement semantic accumulator.
 - GF(2), Ext6, residue rings, and MPC shares are never coerced into a universal field.
 - A representation bridge is a checked common-opening relation, not a cross-characteristic cast.
 - Capacity-regime soundness is not assumed; deployed rates use only an explicitly proved regime.
-- Until a concrete PCS, CR, and shared-ROM game instantiate the controller, this is not a deployed
-  succinct proof or security claim.
+- The landed Tower256 additive controller closes deterministic admission, not PCS/ROM/proximity
+  security. The extension-local LogUp controller closes byte dispatch, not deployment.
+- Until a concrete PCS, CR, and shared-ROM game instantiate the common cover, this is not a
+  deployed succinct proof or security claim.
 
 ## Alternatives rejected
 
@@ -34,9 +39,15 @@ checkpoint/PCS backend, not a replacement semantic accumulator.
 ## Required evidence
 
 - `Compiler.AuthenticatedColumnPlan`: typed roots-before-challenges executable controller.
+- `Compiler.Tower256CshakeMerkleController` and the additive admission modules: exact shared
+  cSHAKE/Tower/Merkle transcript, byte decoding, coherent openings/folds, and ideal-clause bridge.
+- `Compiler.Tower256LogupClauseDispatch`: extension-local clause-404 first-order byte dispatch;
+  clause 404 remains absent from base/deployment.
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: exact dual-root/history/checkpoint join.
-- A concrete Tower256 codec, commitment binding/CR proof, shared-ROM reduction, and sampled PCS
-  decider before a deployment claim.
+- `Assurance.SemanticHistoryBcsGame`: exact retained-history BCS reconstruction and conditional
+  single-coin ledger.
+- A concrete PositionBinding/CR price, cSHAKE→ROM transport, proximity/PCS reduction, sampled
+  decider, hiding schedule, and additive/history common-cover theorem before a deployment claim.
 - Remote evidence records must name the exact commit and command and may claim only that check.
 
 ## Revisit trigger
@@ -49,6 +60,8 @@ subsumes both WARP link attribution and additive checkpoints in the required tra
 - `Assurance/SemanticHistoryAccumulator.lean`
 - `Assurance/SemanticHistoryStraightlinePcs.lean`
 - `Assurance/SemanticAdditiveFriCheckpoint.lean`
+- `Assurance/SemanticHistoryBcsGame.lean`
+- `Compiler/Tower256CshakeMerkleController.lean`
+- `Compiler/Tower256LogupClauseDispatch.lean`
 - `Compiler/AdditiveFriReceiptClause.lean`
 - `Compiler/Logup256ReceiptClause.lean`
-

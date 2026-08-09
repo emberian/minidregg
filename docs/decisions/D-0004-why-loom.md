@@ -12,9 +12,10 @@ zero-knowledge, and history constructions remain native dialects.
 
 Loom owns the typed joints between them: roots-before-challenges transcript causality, exact
 security/error regimes, checked common-opening representation relations, native-failure
-non-authority, clause evidence, and proof-carrying history attribution. The first deployment target
-is one Tower256/additive authenticated-column controller shared by indexed lookup and the terminal
-history checkpoint, followed by a cross-carrier BFV receipt.
+non-authority, clause evidence, and proof-carrying history attribution. The first deterministic
+Tower256/additive controller and the extension-local indexed-lookup controller have landed at **A**;
+the first deployment target remains their shared concrete **P/D** history path, followed by a
+cross-carrier BFV receipt.
 
 ## Why a composition layer is necessary
 
@@ -43,8 +44,9 @@ provide dialect components; they do not define the semantic machine or their com
 - Unique/Johnson/post-Johnson, PCS, commitment-CR, ROM, sampling, ZK, and extraction errors remain
   separate until a common game composes them.
 - A manifest/controller/pin is not implementation or cryptographic evidence.
-- Loom is not yet a deployed succinct or zero-knowledge proof system. Concrete PCS, CR, ROM,
-  sampled-decider, hiding, and benchmark seams remain.
+- Loom is not yet a deployed succinct or zero-knowledge proof system. The additive controller,
+  retained-history BCS game, and Ext6 controller close deterministic structure, not their concrete
+  PCS/CR/ROM/proximity/hiding reductions or consumer deployment.
 
 ## Alternatives rejected
 
@@ -61,11 +63,16 @@ provide dialect components; they do not define the semantic machine or their com
   representation edges, opaque native errors, and a Lean terminal checker.
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: pre-challenge semantic link roots and exact
   post-challenge folds joined to the additive checkpoint.
-- One instantiated Tower256 codec/commitment/cSHAKE/Merkle/PCS controller shared by lookup and
-  history.
+- The landed exact Tower256 codec/cSHAKE/Merkle/additive controller and gated LogUp dispatch.
+- One same-coin false-accept cover and concrete PositionBinding/CR, cSHAKE→ROM, proximity/PCS,
+  sampled-decider, and hiding instantiation shared by lookup and history.
 - One BFV/RNS native-ring clause joined to exact bounded-integer consequences through checked
   representations.
-- End-to-end prover/verifier/proof-size/memory measurements on application workloads.
+- End-to-end prover/verifier/proof-size/memory measurements on user/agent application workloads.
+
+Evidence is evaluated at five boundaries: **S** semantic theorem, **A** controller, **P** concrete
+cryptographic game, **D** deployment/cutover, and **B** matched benchmark. Progress at one boundary
+does not promote the others.
 
 ## Kill or replace criteria
 

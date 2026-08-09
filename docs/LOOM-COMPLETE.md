@@ -1,182 +1,219 @@
 # Loom: what is complete, at which boundary
 
-Status: 2026-08-08.
+Status: 2026-08-09.
 
-This document used to call Loom “complete” in a way that collapsed several proof resolutions into
-one. The repository has since advanced substantially—and found important false targets—but the
-honest claim is narrower:
+Loom is substantial machine-checked mathematics plus several real Lean-owned controllers. It is
+not one deployed succinct ZK proof system. This document replaces earlier uses of “complete” that
+collapsed ideal theorems, verifier gadgets, native experiments, and deployment into one label.
 
-> Loom contains machine-checked protocol, compiler, proximity, accumulation, and game-theoretic
-> chains at explicit abstract interfaces. It does not give Rust a semantics, and therefore contains
-> no theorem relating native execution to Lean beyond Lean-side checks of native outputs. The old
-> Rust proof/verifier protocols were deleted; the project does not yet contain one succinct,
-> zero-knowledge, deployment-parameterized end-to-end theorem under generated Lean control.
+## Boundary legend
 
-That distinction is the organizing principle below.
+| Level | Meaning |
+|---|---|
+| **S** | semantic/formal carrier, theorem, or exact reduction interface |
+| **A** | Lean-owned controller/admission over bytes or error |
+| **P** | concrete cryptographic proof/security game and priced error |
+| **D** | authenticated deployment and consumer cutover |
+| **B** | reproducible matched-workload benchmark |
 
-## Machine-checked core
+Current Loom is strongest at **S**, has concrete **A** seams, has conditional **P** shapes, and has
+not yet reached an end-to-end **P/D/B** proof-system claim.
 
-### Accumulation and chain extraction
+## Machine-checked formal core — S
 
-- `Loom/Accumulator.lean` defines the constrained Reed–Solomon claim, same-word batching, and
-  cross-word affine folding. Honest closure and the one-bad-challenge algebra have firing
-  small-field examples.
-- `Loom/AccExtractChain.lean`, `Loom/LightClient*.lean`, and the v0 assurance modules prove chain
-  extraction, fixed/adaptive soundness, and Fiat–Shamir/grinding statements at their declared
-  oracle and commitment interfaces.
-- These are protocol theorems, not evidence that `prover/src/accumulator.rs` implements the whole
-  protocol. The Rust module mirrors only the post-reduction linear channel.
+### Reed–Solomon, accumulation, and extraction
+
+- constrained RS claims, same-word batching, cross-word affine folding, exact/UD soundness, and
+  arbitrary-depth chain extraction are local Lean theorems;
+- light-client, RBR, Fiat–Shamir, and grinding results hold at their stated oracle/commitment and
+  rate interfaces;
+- commitment/extraction examples make binding premises load-bearing rather than hiding them; and
+- semantic history uses the same `AccClaim` carrier rather than a structural hash-chain lookalike.
+
+This does not instantiate a concrete PCS, ROM, commitment, or succinct verifier.
 
 ### Sumcheck and derived arithmetization
 
-- `Loom/Sumcheck.lean` and `Loom/MultilinearExtension.lean` prove the algebraic sumcheck layer.
-- `Compiler/Air.lean` derives a circuit interpretation and proves it agrees with execution.
-- `Compiler/AirFlatten.lean` lowers into degree-≤2 gates, and the assurance sumcheck modules retire
-  the full linear-plus-quadratic gate system.
-- `Compiler/Emit.lean` produces first-order descriptor data and proves `emit_faithful`:
-  `descriptorHolds` means the emitted Lean gate system holds.
+- `Loom/Sumcheck` and multilinear-extension modules prove the algebraic layer;
+- `Compiler/Air` proves the circuit fold and executor readings agree;
+- `AirFlatten` derives degree-≤2 gates with forced auxiliary wires;
+- assurance modules retire linear and quadratic gate faces at their theorem interfaces; and
+- `Compiler/Emit` produces first-order descriptor data with `emit_faithful`.
 
-This closes semantic drift inside the compiler. It does not formalize Rust or prove that every
-external proof accepted for a descriptor implies `descriptorHolds`.
+This proves what a descriptor means. It does not prove that Rust implements the descriptor or that
+an external proof system soundly proves it.
 
-### Reed–Solomon proximity and the rate regimes
+### Multiplicative proximity and rate regimes
 
-- The unique-decoding core and the unconditional band
-  `0 < δ < (1 - ρ) / 3` are proved locally.
-- `Loom/HalfThresholdRegime.lean` proves the characteristic-independent algebra behind threshold
-  halving: if two distinct affine folds are `δ/2`-close, the source pair has `δ` correlated
-  agreement, hence at most one challenge can be bad.
-- `Loom/HalfThresholdFri.lean` identifies the ordinary multiplicative FRI fold with that affine
-  family and proves the `δ -> δ/2` transition.
-- `Loom/HalfThresholdFriTower.lean` composes one halving round with a fixed `δ/2` tail. At rate
-  `1/2`, the concrete starting radius `3/10` is above the Johnson radius and the tail radius
-  `3/20` lies in the unconditional one-third-UD band.
+- the unique-decoding core and unconditional band `0 < δ < (1-ρ)/3` are proved;
+- one threshold-halving round has at most one bad field challenge before a proved UD tail;
+- committed coherent runtime-shaped query paths and their miss price are formalized; and
+- the rate-1/2 `3/10 → 3/20 < 1/6` specialization is checked.
 
-The tower is a challenge-counting theorem over whole words. It does not yet price query misses or
-model adversarially recommitted intermediate words, Merkle openings, or a single Fiat–Shamir
-execution.
+Concrete Merkle CR/binding and one-execution Fiat–Shamir/ROM composition remain **P** work.
 
-### Johnson: published mathematics, local import outstanding
+### Johnson/list regime
 
-`Loom/JohnsonRegime.lean` proves the classical Johnson list-size bound, shows the Johnson interval
-strictly extends unique decoding for every nontrivial rate, and proves the exact sampling bridge.
-
-The status of mutual correlated agreement changed after WHIR:
-
-- WHIR's 2024 Conjecture 4.12 remains a named **local hypothesis** so the existing reductions retain
-  their historical shape.
-- The needed RS/polynomial-generator results through Johnson were subsequently published in
-  [2025/2051](https://eprint.iacr.org/2025/2051) and
-  [2025/2110](https://eprint.iacr.org/2025/2110), with related proximity consequences in
-  [2025/2055](https://eprint.iacr.org/2025/2055). Their proofs are not yet formalized here.
-- Capacity-level proximity-gap variants are false; see
-  [2025/2046](https://eprint.iacr.org/2025/2046). Loom therefore makes no blanket capacity claim.
-- Above Johnson, Loom now has the local threshold-halving route motivated by
-  [2026/858](https://eprint.iacr.org/2026/858). The distinct action–orbit route is
-  [2026/861](https://eprint.iacr.org/2026/861).
+`JohnsonRegime` proves the list-size inequality and sampling amplification. `JohnsonMcaBridge`
+matches the exact published theorem interface and corrects the degree/rate convention. The hard
+BCIKS/GS/Hensel algebra remains the explicit proposition `HaboeckTheorem2`, not a locally proved
+theorem or hidden axiom. Capacity-level variants have counterexamples; no blanket capacity claim is
+made.
 
 ### GF(2) tower and additive proximity
 
-- `Theory/BinaryTower*.lean` constructs actual finite fields of cardinality `2^(2^k)`, proper
-  embeddings, Fan–Paar generators, the trace induction, and the proved fast multiplication
-  recurrence.
-- `Theory/AdditiveNTT*.lean` proves the additive domains, vanishing-polynomial fold structure,
-  novel-basis transform, and additive fold algebra.
-- `Loom/AdditiveProximity.lean` identifies the additive image domain with an ordinary
-  Reed–Solomon domain, transports proximity-generator results, and proves an unconditional
-  positive macroscopic additive-FRI band.
+- Lean constructs the binary towers, embeddings, Fan–Paar basis/trace facts, and fast multiplication;
+- the exact recursive low/high 32-byte Tower256 codec is proved;
+- additive domains, novel-basis transforms, quotient folds, coherent queries, and adaptive
+  earliest-deviation bounds are proved; and
+- the characteristic-two clause binds exact basis order, affine domain, rate schedule,
+  roots-before-challenges, queries, terminal, and ideal UD predicate.
 
-`prover/src/binary_tower.rs` now supplies an explicit Fan--Paar coordinate runtime through
-`GF(2^64)`, including field operations and one additive fold pair, with exhaustive small-field
-teeth. It is still arithmetic rather than an additive-FRI runtime: the fast novel-basis transform,
-commitments, query protocol, transcript integration, and Lean-emitted control around unverified
-Rust compute remain.
+The multiplicative theorem is not silently reused for the additive protocol.
 
-### Zero knowledge: theorem resolution matters
+### Zero knowledge and straight-line extraction
 
-The native Loom games contain proved masking, completeness, extraction, and zero-knowledge
-results, including `loom_zk_argument` at its stated formal-game resolution. Sub-UD recovery is
-also proved at word/family resolution; the old premise that columns alone determine the increment
-below unique decoding is machine-refuted.
+Formal games include constrained masking, multi-round/triangular hiding, straight-line extraction,
+and repaired OracleLog linked-target assembly. The current linked construction freezes checked root
+preimages before domain-separated queries and exposes shared-ROM fresh/hit/sampling ports.
 
-Deployment-facing composition is not finished. `Loom/OracleLogLinkedTarget.lean` demonstrates why
-the distinction matters:
+These are real formal-game results. They do not mean the current runtime is a succinct NIZK. A
+concrete hiding deployment still needs proof of committed-word knowledge, opening binding,
+shared-ROM composition, and concrete ZK errors.
 
-- the former unrestricted `OracleLogReduction` extractor target is vacuous because an extractor
-  can return the already-designated witness without reading the oracle log;
-- the replacement pins the extractor definitionally to the shifted log and states the missing
-  opening-injectivity, code-membership, distance, and radius hypotheses;
-- a fresh-aggregate-challenge uniqueness kernel is proved; and
-- `Loom/OracleLogLinkedAssembly.lean` closes the corrected target: fresh-link and hit-slot horns,
-  the finite cover, the `(t+k)` union bound, the exact shifted-log extractor reduction, and an F₅
-  premise-firing example.
+### Error budgets
 
-This is the repaired linked OracleLog theorem at explicit UD/root/opening hypotheses. Older Def.
-4.2 state-design and sub-UD deployment boundaries remain separate. Accordingly, “native
-formal-game ZK theorem” is accurate; “the running prover is a succinct NIZK argument of knowledge”
-is not.
+The repository proves exact arithmetic for candidate formulas, including the BabyBear⁶ expression
+in `(2^-138, 2^-137]`. The old 55-bit BabyBear⁴ expression and old recursive-verifier gadget are
+historical results for deleted paths. A candidate formula is not a deployed security level until
+the actual controller, fields, PCS, commitments, oracle, PoW, and common game match it.
 
-### Assurance budgets
+## Lean-owned controllers — A
 
-- `Assurance/ErrorBudget.lean` proves the displayed BabyBear⁴ budget expression is at most `2^-55`
-  and greater than `2^-56`, under its explicit threat model and component interfaces.
-- `Assurance/ErrorBudget120.lean` proves a BabyBear⁶ challenge-coordinate plus 20-bit-PoW
-  expression lies in `(2^-138, 2^-137]`, and proves both levers are load-bearing at that point.
-- `Assurance/PowGrinding.lean` proves the finite ideal-coordinate core: exact `2^-bits` nonce
-  density, product factorization, and a leave-one-out adaptive `work * epsilon / 2^bits` bound.
+### Tower256 additive FRI
 
-The 137-bit result is an exact theorem about that idealized formula, not a current runtime claim.
-The single `fieldCard = BabyBear^6` parameter prices all challenge terms, including sumcheck. The
-Rust reference sumcheck is presently over base BabyBear, its FRI challenges are BabyBear⁴, and it
-emits no PoW nonce. A mixed-field theorem plus the shared-ROM/domain-separation/runtime bridge is
-required before assigning that label to an implementation.
+The shared backend fixes exact Lean Tower256, cSHAKE256 framing/output, and perfect-tree Merkle
+relations. The deterministic controller:
+
+- accepts only arbitrary native bytes or an opaque error;
+- decodes proof bytes in Lean;
+- derives roots-before-challenges transcript draws and coherent query seeds;
+- checks exact Merkle openings, fold equations, and final polynomial; and
+- reaches `AdditiveFriAdaptiveCoherentAccepts` and can issue the accepted sample token.
+
+One controller-game coin owns schedule and ledger. This closes **A**, not deployed **P**.
+
+Open **P/D/B** obligations:
+
+- pointwise same-coin false-accept cover into additive proximity, commitment binding, or oracle
+  transport;
+- concrete PositionBinding and cSHAKE collision-resistance price;
+- cSHAKE→ROM transport and far-word/proximity Fiat–Shamir reduction;
+- emitted executable checker for the currently noncomputable Tower relation;
+- proof/container/domain/level codecs and authenticated work IDs; and
+- matched end-to-end prover/verifier benchmarks.
+
+### Tower256 indexed LogUp
+
+Exact Boolean-address decoding, unit-vector incidence, table pushforward, semantic roots, and indexed
+evaluation are proved. The extension-local clause-404 dispatcher fixes the clause/controller/
+backend/transcript identity and accepts exactly two uniquely keyed byte replies. Wrong counts,
+duplicates, missing replies, native errors, or Lean plan failure block. Successful control retains
+the existing proof-relevant `VerifiedExecution`.
+
+Clause 404 remains absent from base V1 and deployment. Position binding, concrete PCS/sampled
+decider, CR/ROM, mutable RAM, native artifact work profile, history evidence, and common-game budget
+remain.
+
+### Ext6 gate proof
+
+`GateFactoredExt6` proves descriptor residual provenance, seven factored operands, degree-two
+rounds, public affine terminal forms, and eta aggregation. The landed controller fixes:
+
+- exact Lean-emitted descriptor bytes;
+- lawful receipt/field/message codecs;
+- cSHAKE-derived gamma, round challenges, and eta;
+- exact transcript order; and
+- the full algebraic acceptance relation around arbitrary native bytes/error.
+
+The admission theorem names gate algebra, gate PCS, subfield, proximity, binding, oracle transport,
+and final LDT as seven events on one finite coin. Its reduction laws are premises. Concrete PCS,
+subfield proof, proximity, binding/ROM, final LDT, global-game injection, recursion, and deployed
+137-bit security remain.
+
+### Semantic history and BCS game
+
+The retained history now supplies exact genesis/chain/link words and challenges, accumulator/fold/
+source alignment, semantic-to-finite claim/witness reindexing, roots/opened-column binding, and the
+actual unshifted semantic BCS reduction. PCS, commitment-binding, and ROM `Good` events share one
+history coin; private admission has only an `ofNotBad` constructor.
+
+This closes a conditional **P shape**, not the premises themselves. Concrete PCS opening, CR/
+binding, ROM transport, MCA/error hypotheses, hiding/sub-UD, and the end-to-end additive-controller/
+history common cover remain. The uncommitted Tower256 checkpoint experiment is not current source
+evidence.
+
+## Semantic and deployment joins
+
+Loom's proof claims meet the semantic kernel only through typed clauses:
+
+- exact requests and family-selected argument bytes are bound to accepted effects;
+- canonical patches produce one pre/post state and exact footprint;
+- flat multi-cell hyperedges publish joint effects;
+- exact-head history admission binds a precise entry, occurrence, receipt root, and supported
+  finite post layout; and
+- durable settlement has a semantic model but still needs physical implementation refinement.
+
+The deployment registry is fail-closed: base V1 contains zero dialect clauses; 406 has deterministic
+control but no native byte profile; 404 is gated; BFV 901 is reserved with zero proof-suite and
+controller pins. A manifest record never supplies cryptographic evidence.
 
 ## Native compute boundary
 
-The former Rust-owned whole-protocol prover/verifier was deleted. Native code retains arithmetic,
-transforms, hash/Merkle compute, and temporary protocol experiments, but it is not an acceptance
-authority. The next executable path is a Lean-owned controller around bounded native replies.
+The canonical artifact authenticates native ABI codecs and a native work catalog. The current
+generated catalog contains Tower256 dot product work `9101`, carrier `205`, request codec `9001`,
+and response codec `21`. This closes artifact identity and transport selection.
 
-The surviving historical boundary remains deliberate:
+Rust remains opaque and fallible. There is no Rust operational semantics, Lean↔Rust refinement,
+FFI proof, or cross-language correctness theorem. Deleted reference prover/verifier, WGPU, sampled
+FRI/OOD, Ext6 verifier, and LogUp verifier paths remain historical and must not be cited as current
+runtime closure.
 
-- the hash uses demo/conformance parameters, not a selected deployment set;
-- runtime roots, authentication paths, and transcript encodings are nine canonical BabyBear
-  limbs, closing `[PROVER-digest-width]` as a representation issue; this does not establish
-  `[COMMIT-CR]` or production permutation/capacity security. `Compiler.WideDigestAir` pins the
-  corresponding eleven-field encoding through emit, while raw-byte decoding and composition with
-  the recursive sponge/full verifier remain;
-- the deleted path was multiplicative BabyBear, not the additive tower;
-- the Rust/WGSL is unverified compute.
+## Performance boundary — B, narrow
 
-So its old data is only a historical baseline; there is currently no native end-to-end reference
-verifier.
+Source `54295c6` and evidence `4d1f290` validate byte identity and measure direct versus generated
+dispatch for work 9101. Ratios across lengths 1–16384 were `0.985–1.040` on hbox and
+`0.985–1.025` on persvati. This is an empirical dispatch microbenchmark with no threshold and no
+semantic, security, or complete-prover implication.
 
-The optional WGPU implementation accelerates only the BabyBear⁴ fold and is conformance-tested
-against the CPU version. It is outside the protocol core and imposes no compatibility constraint
-on the next prover architecture.
+## Historical claim corrections
 
-## What is not complete
+- “The recursive verifier is complete” meant a then-local emittable AIR gadget composition. It did
+  not include real CR/ROM, complete root/opening/domain wiring, recursive control, or deployment.
+- “The v0 soundness tower is proved” meant an ideal uniform-schedule theorem composition at its
+  interfaces. It was not a concrete one-game proof system.
+- “Fully native NIZK” meant the formal reduction's own message/relation resolution, not Rust and not
+  a deployed NIZK.
+- “Deployed BCS alphabet” meant a concrete formal message shape, not a deployed PCS/controller.
+- Old BabyBear⁴ prover, FRI, reference verifier, and WGPU results describe deleted experiments.
 
-The principal remaining joins are:
+The theorems and counterexamples remain useful historical evidence. Their old deployment rhetoric
+is superseded.
 
-1. global adaptive earliest-deviation/query coupling for the landed committed half-threshold FRI
-   rounds, followed by concrete Merkle/CR and FS Reduction composition;
-2. formalize the `HaboeckTheorem2` algebraic core behind the landed exact Johnson MCA interface;
-3. connect the landed fast additive NTT to commitments, queries, transcript, multi-round FRI, and
-   its Lean refinement;
-4. replace the landed exhaustive commitment/code-linked accumulator reference with succinct
-   queried openings, transcript-derived challenges, and its RBR extractor;
-5. add verifier-level root-word attribution, then compose sampling-to-closeness into the landed
-   sub-UD linked-log transport and build the hiding-window Def. 4.2/runtime instance;
-6. succinct openings connecting the emitted nonlinear gate claim to the low-degree claim;
-7. concrete hash parameters and a one-execution ROM/PoW composition; and
-8. a concrete commitment hash, the wide-digest verifier-AIR bridge, and one field-consistent
-   security budget matching the runtime actually executed.
+## What remains before a defensible whole
 
-The defensible one-breath claim is therefore:
+1. Prove one same-coin additive/history false-accept cover.
+2. Instantiate PositionBinding/CR, cSHAKE→ROM, proximity/PCS, MCA, hiding, and sampled-decider
+   reductions at the actual controller parameters.
+3. Complete versioned proof/container/domain codecs and authenticated native work profiles.
+4. Close Ext6 PCS/subfield/proximity/final-LDT and global-game joins.
+5. Close a concrete BFV proof controller and separately authorized disclosure path.
+6. Deploy one durable handler and migrate real user/agent consumers.
+7. Benchmark admitted end-to-end workloads against alternatives and apply Loom's kill criteria.
 
-> minidregg has a large machine-checked proof-system and compiler core, new unconditional
-> post-Johnson and additive-proximity mathematics, and a running transparent reference prover.
-> Its remaining frontier is not “get the old GPU path into production”; it is to connect those
-> pieces into a succinct, ZK, field-consistent implementation without weakening their exact
-> theorem boundaries.
+The defensible one-breath claim is:
+
+> minidregg has a large machine-checked proof-system and semantic core, exact Lean-owned additive,
+> lookup, Ext6, and history control seams, and an authenticated bytes/error native boundary. The
+> remaining work is to close their concrete cryptographic games, deployment handlers, consumer
+> migrations, and matched end-to-end performance without weakening those boundaries.
