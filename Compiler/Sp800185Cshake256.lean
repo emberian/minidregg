@@ -25,12 +25,14 @@ carry that first-order length premise explicitly when required.
 -/
 
 import Mathlib
+import Theory.Bignum
 import Compiler.Tower256CshakeMerkleController
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
+open Minidregg.Theory
 open Minidregg.Compiler.SemanticManifest (CodecPin)
 open Minidregg.Compiler.Tower256CshakeMerkleController (Cshake256)
 
@@ -221,38 +223,65 @@ def cshake256Bytes (customization input : List UInt8) : List UInt8 :=
 
 /-! ## Digest projection and the controller instance -/
 
-/-- Canonical variable-width little-endian base-256 bytes for the repository's
-unbounded `Digest`.  It is intentionally not described as a fixed-width codec:
-no lawful 32-byte codec can cover every `Nat`. -/
+/-- Fixed-width little-endian bytes on the 256-bit digest range. -/
+def fixedDigestBytesLE (digest : Digest) : List UInt8 :=
+  (Bignum.digitsLE 256 32 digest.value).map UInt8.ofNat
+
+/-- A total lawful codec cannot encode the repository's unbounded `Digest`
+carrier into 32 bytes.  Values in the cSHAKE range use the exact 32-byte
+encoding; unreachable larger values use a unary escape encoding.  This keeps
+the generic carrier honest while making every cSHAKE reply exactly 32 bytes. -/
 def digestBytesLE (digest : Digest) : List UInt8 :=
-  (Nat.digits 256 digest.value).map UInt8.ofNat
+  if digest.value < 256 ^ 32 then fixedDigestBytesLE digest
+  else List.replicate digest.value 0
 
 def digestOfBytesLE (bytes : List UInt8) : Digest :=
-  ⟨Nat.ofDigits 256 (bytes.map UInt8.toNat)⟩
+  ⟨Bignum.denoteNat 256 (bytes.map UInt8.toNat)⟩
+
+def decodeDigestBytes (bytes : List UInt8) : Option Digest :=
+  if bytes.length = 32 then some (digestOfBytesLE bytes)
+  else if bytes.all (fun byte => byte == 0) then some ⟨bytes.length⟩
+  else none
 
 def digestCodec : LawfulCodec Digest where
   encode := digestBytesLE
-  decode bytes := some (digestOfBytesLE bytes)
+  decode := decodeDigestBytes
   decode_encode := by
     intro digest
-    apply congrArg some
-    apply congrArg Digest.mk
-    simp only [digestBytesLE, List.map_map]
-    have hmap :
-        (Nat.digits 256 digest.value).map
-            (fun digit => (UInt8.ofNat digit).toNat) =
-          Nat.digits 256 digest.value := by
-      have hcongr := List.map_congr_left
-        (l := Nat.digits 256 digest.value)
-        (f := fun digit => (UInt8.ofNat digit).toNat)
-        (g := id) (fun digit hdigit =>
-          UInt8.toNat_ofNat_of_lt
-            (Nat.digits_lt_base (by decide) hdigit))
-      simpa only [List.map_id, id_eq] using hcongr
-    change Nat.ofDigits 256
-      ((Nat.digits 256 digest.value).map
-        (fun digit => (UInt8.ofNat digit).toNat)) = digest.value
-    rw [hmap, Nat.ofDigits_digits]
+    by_cases hlow : digest.value < 256 ^ 32
+    · have hlength : (fixedDigestBytesLE digest).length = 32 := by
+        simp [fixedDigestBytesLE]
+      simp only [digestBytesLE, hlow, if_true, decodeDigestBytes, hlength]
+      apply congrArg some
+      apply congrArg Digest.mk
+      change Bignum.denoteNat 256
+        ((Bignum.digitsLE 256 32 digest.value).map
+          (fun digit => (UInt8.ofNat digit).toNat)) = digest.value
+      have hmap :
+          (Bignum.digitsLE 256 32 digest.value).map
+              (fun digit => (UInt8.ofNat digit).toNat) =
+            Bignum.digitsLE 256 32 digest.value := by
+        have hcongr := List.map_congr_left
+          (l := Bignum.digitsLE 256 32 digest.value)
+          (f := fun digit => (UInt8.ofNat digit).toNat)
+          (g := id) (fun digit hdigit =>
+            UInt8.toNat_ofNat_of_lt
+              (Bignum.digitsLE_ranged (by decide) 32 digest.value digit hdigit))
+        simpa only [List.map_id, id_eq] using hcongr
+      rw [hmap]
+      exact Bignum.denoteNat_digitsLE (by decide) 32 digest.value hlow
+    · have hne : digest.value ≠ 32 := by
+        intro heq
+        apply hlow
+        rw [heq]
+        norm_num
+      rw [show digestBytesLE digest = List.replicate digest.value 0 by
+        unfold digestBytesLE
+        rw [if_neg hlow]]
+      simp [decodeDigestBytes, hne]
+
+@[simp] theorem digestCodec_encode (digest : Digest) :
+    digestCodec.encode digest = digestBytesLE digest := rfl
 
 /-- A proof-relevant 32-byte result, retained before projecting to the legacy
 `Digest` wrapper. -/
@@ -266,6 +295,34 @@ def hash (customization input : List UInt8) : Output :=
 
 def Output.digest (output : Output) : Digest := digestOfBytesLE output.bytes
 
+/-- Re-encoding any exact 32-byte string through its `Digest` projection
+recovers those identical bytes, including leading zero bytes. -/
+theorem digestBytesLE_digestOfBytesLE (bytes : List UInt8)
+    (hlength : bytes.length = 32) :
+    digestBytesLE (digestOfBytesLE bytes) = bytes := by
+  have hranged : Bignum.Ranged 256 (bytes.map UInt8.toNat) := by
+    intro digit hdigit
+    rcases List.mem_map.mp hdigit with ⟨byte, _, rfl⟩
+    exact byte.toNat_lt
+  have hvalue := Bignum.denoteNat_lt_pow (by decide)
+    (bytes.map UInt8.toNat) hranged
+  simp only [List.length_map, hlength] at hvalue
+  simp only [digestBytesLE, digestOfBytesLE, hvalue, if_true,
+    fixedDigestBytesLE]
+  have hdigits := Bignum.digitsLE_denoteNat (by decide)
+    (bytes.map UInt8.toNat) hranged
+  simp only [List.length_map, hlength] at hdigits
+  rw [hdigits]
+  have hfunction : (UInt8.ofNat ∘ UInt8.toNat) = id := by
+    funext byte
+    simp
+  rw [List.map_map, hfunction, List.map_id]
+
+theorem digestBytesLE_hash (customization input : List UInt8) :
+    digestBytesLE (hash customization input).digest =
+      (hash customization input).bytes :=
+  digestBytesLE_digestOfBytesLE _ (hash customization input).length_exact
+
 /-- The concrete computation layer behind the controller seam.  Identifiers
 remain caller-selected first-order manifest data; computation does not invent
 their content-addressing policy. -/
@@ -277,17 +334,67 @@ def controller (algorithmId : Digest) (digestCodecPin : CodecPin) : Cshake256 wh
   outputBytesExact := rfl
   xofDigest customization input := (hash customization input).digest
 
+@[simp] theorem controller_digestCodec (algorithmId : Digest)
+    (digestCodecPin : CodecPin) :
+    (controller algorithmId digestCodecPin).digestCodec = digestCodec := rfl
+
 @[simp] theorem controller_xofDigest (algorithmId : Digest)
     (digestCodecPin : CodecPin) (customization input : List UInt8) :
     (controller algorithmId digestCodecPin).xofDigest customization input =
       (hash customization input).digest := rfl
 
+theorem controller_digest_encode_exact (algorithmId : Digest)
+    (digestCodecPin : CodecPin) (customization input : List UInt8) :
+    (controller algorithmId digestCodecPin).digestCodec.encode
+        ((controller algorithmId digestCodecPin).xofDigest customization input) =
+      (hash customization input).bytes := by
+  rw [controller_digestCodec, digestCodec_encode, controller_xofDigest,
+    digestBytesLE_hash]
+
+/-- For this concrete backend, the generic opaque native XOF seam returns the
+literal 32 cSHAKE bytes, not merely some variable-width encoding of a `Nat`. -/
+theorem checkedXofCall_reply_bytes_exact (algorithmId : Digest)
+    (digestCodecPin requestCodecPin : CodecPin)
+    (requestCodec : LawfulCodec
+      Tower256CshakeMerkleController.XofRequest)
+    (callSlotId carrierProfileId : Digest)
+    (request : Tower256CshakeMerkleController.XofRequest)
+    (bytes : List UInt8)
+    (accepted : (Tower256CshakeMerkleController.checkedXofCall
+      (controller algorithmId digestCodecPin) requestCodecPin requestCodec
+      callSlotId carrierProfileId request).acceptsReply bytes = true) :
+    bytes = (hash request.customization request.input).bytes := by
+  calc
+    bytes = (controller algorithmId digestCodecPin).digestCodec.encode
+        ((controller algorithmId digestCodecPin).xofDigest
+          request.customization request.input) :=
+      Tower256CshakeMerkleController.checkedXofCall_reply_exact
+        (controller algorithmId digestCodecPin) requestCodecPin requestCodec
+        callSlotId carrierProfileId request bytes accepted
+    _ = (hash request.customization request.input).bytes :=
+      controller_digest_encode_exact algorithmId digestCodecPin _ _
+
+theorem checkedXofCall_reply_width (algorithmId : Digest)
+    (digestCodecPin requestCodecPin : CodecPin)
+    (requestCodec : LawfulCodec
+      Tower256CshakeMerkleController.XofRequest)
+    (callSlotId carrierProfileId : Digest)
+    (request : Tower256CshakeMerkleController.XofRequest)
+    (bytes : List UInt8)
+    (accepted : (Tower256CshakeMerkleController.checkedXofCall
+      (controller algorithmId digestCodecPin) requestCodecPin requestCodec
+      callSlotId carrierProfileId request).acceptsReply bytes = true) :
+    bytes.length = 32 := by
+  rw [checkedXofCall_reply_bytes_exact algorithmId digestCodecPin
+    requestCodecPin requestCodec callSlotId carrierProfileId request bytes accepted]
+  exact (hash request.customization request.input).length_exact
+
 theorem hash_digest_lt (customization input : List UInt8) :
     (hash customization input).digest.value < 256 ^ 32 := by
-  apply Nat.ofDigits_lt_base_pow_length (by decide)
-  · intro digit hdigit
-    rcases List.mem_map.mp hdigit with ⟨byte, _, rfl⟩
-    exact byte.toNat_lt
+  apply Bignum.denoteNat_lt_pow (by decide)
+  intro digit hdigit
+  rcases List.mem_map.mp hdigit with ⟨byte, _, rfl⟩
+  exact byte.toNat_lt
 
 theorem hash_digest_lt_two_pow_256 (customization input : List UInt8) :
     (hash customization input).digest.value < 2 ^ 256 := by
@@ -343,5 +450,7 @@ def checkShake256Empty : IO Unit := do
 #print axioms cshake256Bytes_length
 #print axioms hash_digest_lt
 #print axioms hash_digest_lt_two_pow_256
+#print axioms checkedXofCall_reply_bytes_exact
+#print axioms checkedXofCall_reply_width
 
 end Minidregg.Compiler.Sp800185Cshake256
