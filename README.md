@@ -58,6 +58,9 @@ number is a *proven* parameter, not a conjecture. It trades peak performance and
   computer: a kernel with turns, receipts, and a fail-closed authority gate (compiled to a real C
   entry point), a derivation engine where a new effect is a *declaration*, and a policy algebra —
   a verified substrate to build things like fleet coordination on, not just a proving library.
+- **You want a number, not a vibe.** The end-to-end soundness is *one proven bound* —
+  `≤ 2⁻⁵⁵` at deployed BabyBear⁴ parameters (exact integer arithmetic, union-bounded from proven
+  terms), with the dominant term identified. A machine-checked security level, not an estimate.
 - **You want a small, explicit trusted base.** The floor is three named, inhabited cryptographic
   assumptions with proof routes — and the load-bearing one (the proximity gap) is *partially
   proved*, not asserted. The trusted base is smaller and legible, not "trust the STARK."

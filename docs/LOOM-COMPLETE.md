@@ -97,6 +97,14 @@ proximity-gap hypothesis. Those are stated plainly below, not buried.
   (the remaining wire-binding: root absorption, oracle-opening, domain-point arithmetic) + the
   named floors; the checks themselves are all proved, choice-free where they can be.
 
+**The end-to-end security, as one number.** `Assurance/ErrorBudget.deployedBudget_secure`: the
+composed soundness error — grinding + sumcheck + collision-resistance-in-ROM + proximity, union-
+bounded over the product coin space (a real theorem; no independence assumed, mutual-CA
+*discharged* not hypothesized) — is `≤ 2⁻⁵⁵` and `> 2⁻⁵⁶` at deployed BabyBear⁴ parameters (the
+honest prime, exact integer arithmetic): **55 bits, tight**, at unique decoding, budget-relative to
+a `2⁴⁰`-query adversary, with the named floor contributing no silent summand. The dominant term is
+the grinding factor; the native-grinding sharpening (`[LC-grinding-native]`) would buy 8 bits.
+
 **The kernel (the semantic substrate).** `Camera` (resource algebra), `State`, `Turn` (the
 hyperedge), `TurnLimit` (N2a — the turn's agreement half is a universal object), `TurnBalancedLimit`
 (N2b — the conserving turn is universal), `Receipt` (OB-3, the receipt is the accumulator's word),
