@@ -37,6 +37,28 @@ Both workers independently built the exact committed snapshot
 | [`E-…5834`](evidence/runs/E-20260809T185834-6029-hbox-d57bf19a1af5-lake.json) | hbox, i9-12900 | `Theory.CredentialAuthorityEffects` | 2,960 jobs pass | This exact committed authority-state/effect target builds |
 | [`E-…5835`](evidence/runs/E-20260809T185835-6030-persvati-d57bf19a1af5-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Theory.CredentialAuthorityEffects` | 2,960 jobs pass | This exact committed authority-state/effect target builds |
 
+### Canonical Tower256 coordinate replay
+
+Both workers independently built commit
+`8561296256df30209894b35df571d3c48b62c883`, which replaces arbitrary finite enumeration with the
+Lean-owned recursive Fan–Paar coordinate codec and threads it through the Tower256 profile,
+accepted LogUp run, and sparse-state lookup bridge. The archive hash was
+`ea40a5566bf8dec0dd082504ce5feb3b67feea2aadc85fcead1b00d18fb67932`; both complete source
+manifests remained exactly
+`05c746147d83b16628ad082673d1e80a6238a15fa65005fd7b8b1cced6a22d2d` after the build.
+
+| Evidence | Host | Exact targets | Result | Claim ceiling |
+|---|---|---|---:|---|
+| [`E-…5954`](evidence/runs/E-20260809T195954-54645-hbox-8561296256df-lake.json) | hbox, i9-12900 | `Compiler.BinaryTower256Profile`, `Compiler.Tower256LogupAcceptedRun`, `Compiler.SparseAuthenticatedStateLogupBridge` | 3,003 jobs pass | The exact Lean codec/profile/controller/lookup targets build |
+| [`E-…5954`](evidence/runs/E-20260809T195954-54647-persvati-8561296256df-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | same | 3,003 jobs pass | The exact Lean codec/profile/controller/lookup targets build |
+
+The two project-olean manifests are byte-identical
+(`d5bd3798d12b08ebc699a47c72f5adf641bacfb681c02b6fbfce3ac1f0a6f8d8`). The checked basis
+teeth fix zero at coordinate 0, one at coordinate 1, and the top recursive generator at coordinate
+`2^128`. This is reproducible Lean build evidence. It does not prove that Rust's four-`u64`
+representation implements the codec, or establish PCS binding, collision resistance, ROM security,
+or LogUp soundness.
+
 ### Writable private generator replay
 
 Commit `c300f7fa57366c96e706ea59d83fa9838cdb5715` exposed an evidence-runner bug: compiling

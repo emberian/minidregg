@@ -62,8 +62,10 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   columns to the literal incidence/pushforward relation and exact indexed evaluation. Its
   Tower256-arithmetic, PCS-opening, transcript-order, CR, semantic-root, and ROM premises remain
   explicit. V1 now declares distinct profile `205`, degree `256`, and codec `21` in Lean, JSON, and
-  generated Rust artifact data; pin `404` selects it instead of degree-64 `gf2Carrier`. The clause
-  remains outside base-V1 clauses, and no native representation theorem follows from the pin.
+  generated Rust artifact data; pin `404` selects it instead of degree-64 `gf2Carrier`.
+  `Theory.BinaryTowerFanPaarCodec` now gives that codec exact recursive low/high Fan–Paar
+  coordinates and 32-byte little-endian encoding, rather than an arbitrary finite enumeration.
+  The clause remains outside base-V1 clauses, and no Rust representation theorem follows.
 - **Ext6 gate suite — proved algebra, no admitted dialect:** `X^6−31` is proved irreducible. Lean proves
   emitted-descriptor residual provenance, seven factored operands, degree-two rounds, terminal
   affine functionals, and eta aggregation with its bad-set bound. Base V1 admits no Ext6 clause;
@@ -104,8 +106,10 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   adapter and `AuthenticatedColumnHistoryBridge` now feed the exact same accepted commitment and
   opening objects into the WARP history message schedule. `AuthenticatedColumnLogupBridge` uses the
   reflected statement and first-draw root prefix to discharge canonical address linkage, Tower
-  arithmetic, exact roots, and exact indexed evaluation. It does not yet instantiate the deployed
-  Tower codec, cSHAKE framing, Merkle commitment/CR, proximity PCS, or LogUp security reduction.
+  arithmetic, exact roots, and exact indexed evaluation. `Compiler.BinaryTower256Profile`
+  instantiates the exact Lean recursive Fan–Paar 32-byte codec. It does not yet prove the Rust limb
+  representation, or instantiate deployed cSHAKE framing, Merkle commitment/CR, proximity PCS, or
+  the LogUp security reduction.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -189,8 +193,9 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   clause reused `GF(2^64)` while its premises and arithmetic are `GF(2^256)`. V1 now declares
   `tower256ValueCodec`, `gf2Tower256Carrier` profile `205`, and degree `256`; generated JSON/Rust
   artifact data agree; clause `404` selects the new profile and adds characteristic/cardinality
-  premises. Remaining: clause `404` is extension-only, and native limb/basis correspondence is
-  unproved.
+  premises. `BinaryTowerFanPaarCodec` now proves the semantic codec is the recursive low/high basis,
+  with zero/one/top-generator coordinate teeth and exact 32-byte round trips. Remaining: clause
+  `404` is extension-only, and Rust four-limb correspondence is unproved.
 - 2026-08-09 ★★★★★ **Arbitrary-native-oracle semantic integrity** ✓:
   `Compiler.SemanticController` compiles authorization and receipt checking into a phased indexed
   controller. A native oracle can return only bounded echoed data and descriptor wires; it cannot

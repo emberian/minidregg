@@ -168,9 +168,9 @@ The first formal substrate is already present in:
 
 | Dialect | Native work | Current proof direction | Boundary that must stay explicit |
 |---|---|---|---|
-| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash buffers, but its tower/LCH representation and chosen hash algorithm are not yet generated or checked from Lean pins. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not base-V1 admitted |
+| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `BinaryTowerFanPaarCodec` fixes exact recursive low/high coordinates and a 32-byte little-endian codec; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash buffers, but its four-limb tower/LCH implementation and chosen hash algorithm are not yet generated or checked against the Lean codec. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not base-V1 admitted |
 | **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves `X^6−31` irreducibility, descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | Base V1 deliberately admits no Ext6 or other proof dialect. Native `field6` limb/polynomial conventions are not connected to generated pins. A concrete Ext6 clause/controller, commitment/transcript/opening control, coherent proximity, subfield provenance, final LDT, and CR/ROM composition remain |
-| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; native Tower256 retains generic arithmetic kernels only | V1 declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it only in a local extension. The former handwritten LogUp round-polynomial APIs are deleted; `tower256_kernels` accepts only caller-selected generic buffers/indices/coordinates. Its Tower representation remains unverified compute. PCS, CR/ROM, controller admission, proximity, and mutable state remain |
+| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; the profile uses the proved recursive Fan–Paar codec; native Tower256 retains generic arithmetic kernels only | V1 declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it only in a local extension. The former handwritten LogUp round-polynomial APIs are deleted; `tower256_kernels` accepts only caller-selected generic buffers/indices/coordinates. Its four-`u64` representation remains unverified compute. PCS, CR/ROM, controller admission, proximity, and mutable state remain |
 | **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Bignum/cross-modulus theory plus `Compiler.BfvReceiptClause`; `Assurance.BfvNativeBufferAdmission` uses a fallible opaque runner, checks the emitted per-row scalar/accumulator descriptor and exact links in Lean, constructs all 384 rows under an inhabited local controller binding, and projects the private receipt event with every exact `Int` equation | The proof-suite pin remains unassigned. Arithmetic admission is real; privacy/knowledge soundness, commitment binding, generated deployment dispatch, and the full application receipt remain; naive field lookup over cyclotomic rings is unsound |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
 
@@ -181,16 +181,19 @@ interpret all computation as GF(2).
 The remaining handwritten kernels are not yet uniformly convention-free. The protocol-shaped
 `logup256_kernels` round-message/interpolation surface has been deleted; its surviving generic
 arithmetic is `tower256_kernels`. `hash_kernels` fixes only the cSHAKE256 algorithm, and the
-tower/Ext6 modules fix limb, basis, and polynomial representations. Until those conventions are generated from Lean or checked
-against exact Lean-owned pins, they are opaque untrusted candidate computation and may affect only
-availability/completeness—not semantics or acceptance.
+tower/Ext6 modules fix limb and polynomial representations. Lean now fixes the Tower256 recursive
+Fan–Paar semantic basis and codec exactly; Rust's four-limb realization of it is still not proved or
+generated. Until native conventions are checked against exact Lean-owned pins, they are opaque
+untrusted candidate computation and may affect only availability/completeness—not semantics or
+acceptance.
 
 The Tower256 carrier distinction is load-bearing: a clause whose arithmetic premise is over
 `GF(2^256)` cannot be registered on the degree-64 `gf2Carrier`. V1 now includes
 `gf2Tower256Carrier` (profile `205`, degree `256`, distinct codec `21`) in Lean, JSON, and generated
 Rust artifact data, and clause `404` selects it. The clause itself is still extension-only, and
-carrier metadata does not prove that the four-`u64` native `Tower256` representation implements the
-profile.
+`BinaryTowerFanPaarCodec` proves the Lean profile's recursive coordinates and 32-byte codec. Neither
+carrier metadata nor that semantic theorem proves that the four-`u64` native `Tower256`
+representation implements the profile.
 
 ## Receipt relation
 
@@ -352,7 +355,8 @@ worktrees. See [`D-0003`](docs/decisions/D-0003-remote-evidence.md).
    authorization state from the same canonical pre-state; compile ordinary, reactive, private, and
    external-intent/completion effects into that common carrier. The current compatibility sums are
    migration views, not the future kernel.
-2. Instantiate one Tower256/additive `AuthenticatedColumnPlan` with concrete codec, commitment,
+2. Instantiate one Tower256/additive `AuthenticatedColumnPlan` with the landed concrete Lean codec,
+   a native byte-decoding/recheck boundary, commitment,
    cSHAKE/Merkle, PCS, transcript/ROM/CR reduction, and sampled decider. The exact commitment/opening
    adapter, attestation-to-WARP message bridge, and attestation-to-indexed-LogUp semantic bridge have
    landed; next instantiate the real lookup/proximity controller and use the same accepted transcript
