@@ -18,6 +18,7 @@ import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject 
 import Assurance.SemanticHistoryFamily  -- request-shape-neutral, proof-relevant entry semantics fold singular turns and joint objects through Loom's one AccClaim
 import Assurance.SemanticHistoryFamilyInstances  -- exact singular-turn and complete flat-hyperedge instances; no synthetic primary request
 import Assurance.AcceptedCellEffectHistory  -- accepted canonical cell effects derive their exact bounded core and enter the same request-shape-neutral verified history family without a legacy turn wrapper
+import Assurance.ReactiveLifecycleHistory  -- weak-hole Promise/Notify/React/Finalize/Expire/Break over authenticated history entries; finalization is an accepted cell effect/typed hyperedge leg and physical CAS remains explicit
 import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
 import Assurance.SemanticAdditiveFriCheckpoint  -- canonical zero-padding joins the exact semantic history word/root to additive FRI; KS-good extraction recovers the authoritative head
 import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold challenges, post-challenge fold roots commit exact words, and the terminal root is the additive-FRI initial root
