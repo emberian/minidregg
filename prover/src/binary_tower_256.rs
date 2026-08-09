@@ -275,13 +275,10 @@ fn mul_by_generator_small(level: u8, value: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        binary_tower::TowerElem,
-        binary_transcript::{BinaryShake256Transcript, TranscriptSuite},
-    };
+    use crate::binary_tower::TowerElem;
 
     #[test]
-    fn gf2_256_tower_and_atomic_transcript_smoke() {
+    fn gf2_256_tower_arithmetic_smoke() {
         let one = Tower256::ONE;
         let y5 = Tower256::fp_generator(5).unwrap();
         let y6 = Tower256::fp_generator(6).unwrap();
@@ -328,25 +325,5 @@ mod tests {
                 .mul(Tower256::embed_gf2_64(small_b).unwrap())
         );
 
-        // One typed request produces one 32-byte XOF read.  A distinct request
-        // frame prevents a same-label GF(2^64) request from receiving the
-        // prefix of this challenge.
-        let mut wide_a = BinaryShake256Transcript::new(b"gf2-256-smoke");
-        let challenge = wide_a.sample_gf2_256(b"lookup-challenge");
-        let next_challenge = wide_a.sample_gf2_256(b"lookup-challenge");
-        assert_ne!(challenge, next_challenge);
-        assert_eq!(Tower256::from_le_bytes(challenge.to_le_bytes()), challenge);
-
-        let mut wide_b = BinaryShake256Transcript::new(b"gf2-256-smoke");
-        assert_eq!(wide_b.sample_gf2_256(b"lookup-challenge"), challenge);
-
-        let mut narrow = BinaryShake256Transcript::new(b"gf2-256-smoke");
-        assert_ne!(
-            &challenge.to_le_bytes()[..8],
-            &narrow.sample_gf2_64(b"lookup-challenge").to_le_bytes()
-        );
-
-        let mut other_label = BinaryShake256Transcript::new(b"gf2-256-smoke");
-        assert_ne!(other_label.sample_gf2_256(b"sumcheck-challenge"), challenge);
     }
 }

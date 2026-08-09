@@ -10,7 +10,6 @@ pub mod binary_hash;
 pub mod binary_merkle;
 pub mod binary_tower;
 pub mod binary_tower_256;
-pub mod binary_transcript;
 pub mod commit;
 pub mod descriptor;
 pub mod field4;

@@ -16,10 +16,8 @@ use sha3::{
 pub const BINARY_ROOT_BYTES: usize = 48;
 
 pub(crate) const COMMITMENT_CUSTOMIZATION: &[u8] = b"minidregg/BinaryShake256V1/commitment";
-pub(crate) const TRANSCRIPT_CUSTOMIZATION: &[u8] = b"minidregg/BinaryShake256V1/transcript";
 
 const COMMITMENT_PREFIX: &[u8] = b"MDRG-BINARY-COMMIT-V1";
-pub(crate) const TRANSCRIPT_PREFIX: &[u8] = b"MDRG-BINARY-TRANSCRIPT-V1";
 
 const LEAF_FRAME: u8 = 1;
 const PAYLOAD_FRAME: u8 = 2;
