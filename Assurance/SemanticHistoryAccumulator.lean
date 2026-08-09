@@ -6,6 +6,8 @@ introducing a second receipt or accumulator relation:
 
 * `SemanticManifest.AdmissionContext.WellFormed` supplies manifest closure,
   history shape, and rejected-root atomicity;
+* `DialectClauseDispatch.ResolvedClause` plus ordered `ClauseEvidenceCoverage`
+  supplies controller-resolved evidence for every exact statement/proof root;
 * `SemanticTurnReceipt.TurnReceipt` supplies the proof-relevant committed or
   rejected semantic outcome;
 * `SemanticReceiptRuntimeCodec.BoundReceiptWitness.encode` is the one word
@@ -23,6 +25,7 @@ sampled-opening/proximity lift remain exactly Loom's named `[COMMIT-CR]`,
 `[ACC-extract-bind]`, and `[DEC-proximity]` seams.  No axiom is declared here.
 -/
 
+import Compiler.DialectClauseDispatch
 import Compiler.SemanticManifest
 import Assurance.SemanticReceiptRuntimeCodec
 import Loom.Commitment
@@ -30,6 +33,7 @@ import Loom.Commitment
 namespace Minidregg.Assurance.SemanticHistoryAccumulator
 
 open Minidregg.Compiler.SemanticManifest
+open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Assurance.SemanticReceiptRelation
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticTurnReceipt
@@ -41,6 +45,7 @@ open Minidregg.Loom
 set_option autoImplicit false
 
 universe uEffect uDisclosure uError uOp
+  uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 noncomputable section
 
@@ -159,6 +164,37 @@ variable
     {effectSemantics : EffectSemantics (Fin n) F Effect}
     {disclosurePolicy : DisclosurePolicy Disclosure}
 
+/-! ### Exact clause evidence, distinct from registry closure -/
+
+/-- A trusted Lean integration chooses the proof object accepted for each
+resolved controller and exact pair of statement/proof roots.  This is only a
+type family: it supplies no generic verifier predicate and invokes no native
+callback.  Concrete clause modules instantiate it with their own semantic
+evidence types. -/
+structure ClauseEvidenceFamily
+    (manifest : Manifest)
+    (registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome}) where
+  Evidence : {clauseId : Digest} →
+    ResolvedClause manifest registry clauseId →
+    (statementRoot proofRoot : Digest) → Type uClauseEvidence
+
+/-- Complete ordered evidence for the context's exact clause-root list.
+Every position resolves through the Lean controller registry, then carries the
+family's evidence indexed by that resolved declaration and those exact roots.
+There is no constructor which covers only a subset or reorders the roots. -/
+structure ClauseEvidenceCoverage
+    {manifest : Manifest}
+    {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome}}
+    (family : ClauseEvidenceFamily manifest registry)
+    (roots : List DialectClauseRoots) where
+  resolved : (index : Fin roots.length) →
+    ResolvedClause manifest registry (roots.get index).clauseId
+  evidence : (index : Fin roots.length) →
+    family.Evidence (resolved index)
+      (roots.get index).statementRoot (roots.get index).proofRoot
+
 /-- Convert the typed semantic outcome to the manifest's first-order outcome
 tag.  The error identifier is a declared codec projection, never native
 acceptance. -/
@@ -178,6 +214,9 @@ manifest admission relation.  `codeword` is the honest-code/PCS boundary
 needed by Loom; no cryptographic fact is inferred from the semantic proof. -/
 structure VerifiedEntry
     (manifest : Manifest)
+    (registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome})
+    (clauseEvidence : ClauseEvidenceFamily manifest registry)
     (errorId : Error → Digest)
     (headerCells : AdmissionContext → BindingIx → F)
     (C : Submodule F (BoundReceiptIx n → F)) where
@@ -189,6 +228,7 @@ structure VerifiedEntry
     (effectSemantics := effectSemantics)
     (disclosurePolicy := disclosurePolicy)
   contextWellFormed : context.WellFormed manifest
+  dialectEvidence : ClauseEvidenceCoverage clauseEvidence context.dialectClauseRoots
   requestExact : context.request = ⟨kind, receipt.request⟩
   outcomeExact : context.outcome = receiptAdmissionOutcome errorId receipt
   preStateExact : context.preStateRoot = stateCommitment.root receipt.pre
@@ -199,7 +239,11 @@ structure VerifiedEntry
 namespace VerifiedEntry
 
 variable
-    {manifest : Manifest} {errorId : Error → Digest}
+    {manifest : Manifest}
+    {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome}}
+    {clauseEvidence : ClauseEvidenceFamily manifest registry}
+    {errorId : Error → Digest}
     {headerCells : AdmissionContext → BindingIx → F}
     {C : Submodule F (BoundReceiptIx n → F)}
 
@@ -208,7 +252,7 @@ local notation "ThisEntry" => VerifiedEntry
   (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
   (Error := Error) (stateCommitment := stateCommitment)
   (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest errorId headerCells C
+  manifest registry clauseEvidence errorId headerCells C
 
 abbrev Claim (entry : ThisEntry) :=
   historyClaim (n := n) (F := F) (portal := portal) (authState := authState)
@@ -216,6 +260,30 @@ abbrev Claim (entry : ThisEntry) :=
     (Error := Error) (stateCommitment := stateCommitment)
     (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
     headerCells entry.context entry.receipt
+
+/-- Resolve the exact declaration/controller at one position of the context's
+ordered clause-root list. -/
+def resolvedClauseAt (entry : ThisEntry)
+    (index : Fin entry.context.dialectClauseRoots.length) :
+    ResolvedClause manifest registry
+      (entry.context.dialectClauseRoots.get index).clauseId :=
+  entry.dialectEvidence.resolved index
+
+/-- The load-bearing admission witness at one exact ordered position.  Its
+type mentions the resolved declaration/controller and both roots literally. -/
+def clauseEvidenceAt (entry : ThisEntry)
+    (index : Fin entry.context.dialectClauseRoots.length) :
+    clauseEvidence.Evidence (entry.resolvedClauseAt index)
+      (entry.context.dialectClauseRoots.get index).statementRoot
+      (entry.context.dialectClauseRoots.get index).proofRoot :=
+  entry.dialectEvidence.evidence index
+
+theorem resolvedClauseAt_registered (entry : ThisEntry)
+    (index : Fin entry.context.dialectClauseRoots.length) :
+    manifest.lookupClause
+      (entry.context.dialectClauseRoots.get index).clauseId =
+        some (entry.resolvedClauseAt index).clause :=
+  (entry.resolvedClauseAt index).clauseFound
 
 /-- The exact Loom/runtime-codec word for this entry. -/
 def word (entry : ThisEntry) :
@@ -276,6 +344,9 @@ variable
     {effectSemantics : EffectSemantics (Fin n) F Effect}
     {disclosurePolicy : DisclosurePolicy Disclosure}
     (manifest : Manifest)
+    (registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome})
+    (clauseEvidence : ClauseEvidenceFamily manifest registry)
     (errorId : Error → Digest)
     (headerCells : AdmissionContext → BindingIx → F)
     (C : Submodule F (BoundReceiptIx n → F))
@@ -287,7 +358,7 @@ local notation "HistoryEntry" => VerifiedEntry
   (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
   (Error := Error) (stateCommitment := stateCommitment)
   (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest errorId headerCells C
+  manifest registry clauseEvidence errorId headerCells C
 
 abbrev ChannelCount := Fintype.card (BoundReceiptIx n)
 
@@ -315,7 +386,7 @@ local notation "LinkedEntries" => HistoryChain
   (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
   (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
   (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest errorId headerCells C S
+  manifest registry clauseEvidence errorId headerCells C S
 
 /-- A verified head contains the complete proof-relevant entry list, its latest
 entry, the single folded Loom claim/word, exact satisfaction, and commitment
@@ -339,7 +410,7 @@ local notation "HistoryHead" => VerifiedHistoryHead
   (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
   (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
   (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest errorId headerCells C S
+  manifest registry clauseEvidence errorId headerCells C S
 
 namespace VerifiedHistoryHead
 
@@ -376,7 +447,7 @@ def start
     (entry : HistoryEntry)
     (sequenceZero : entry.context.sequence = 0)
     (noPredecessor : entry.context.previousReceiptRoot = none) :
-    (start manifest errorId headerCells C S entry sequenceZero
+    (start manifest registry clauseEvidence errorId headerCells C S entry sequenceZero
       noPredecessor).depth = 1 :=
   rfl
 
@@ -411,8 +482,10 @@ proof. -/
 def append
     (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
-    (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
+    (gamma : F) (link : AppendLink manifest registry clauseEvidence
+      errorId headerCells C S head entry)
+    (recommit : FoldRecommitment manifest registry clauseEvidence
+      errorId headerCells C S foldRoot
       head entry gamma) :
     HistoryHead := by
   let linkClaim := entry.Claim.acc (entry.receiptRoot S)
@@ -442,20 +515,26 @@ def append
 @[simp] theorem append_depth
     (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
-    (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
+    (gamma : F) (link : AppendLink manifest registry clauseEvidence
+      errorId headerCells C S head entry)
+    (recommit : FoldRecommitment manifest registry clauseEvidence
+      errorId headerCells C S foldRoot
       head entry gamma) :
-    (append manifest errorId headerCells C S foldRoot head entry gamma link
+    (append manifest registry clauseEvidence errorId headerCells C S foldRoot
+      head entry gamma link
       recommit).depth = head.depth + 1 := by
   simp [append, depth]
 
 @[simp] theorem append_latest
     (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
-    (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
+    (gamma : F) (link : AppendLink manifest registry clauseEvidence
+      errorId headerCells C S head entry)
+    (recommit : FoldRecommitment manifest registry clauseEvidence
+      errorId headerCells C S foldRoot
       head entry gamma) :
-    (append manifest errorId headerCells C S foldRoot head entry gamma link
+    (append manifest registry clauseEvidence errorId headerCells C S foldRoot
+      head entry gamma link
       recommit).latest = entry :=
   rfl
 

@@ -36,6 +36,7 @@ namespace Minidregg.Assurance.SemanticHistoryStraightlinePcs
 open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticTurnReceipt
+open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Loom
 open Minidregg.Theory.AuthorizationDeclaration
@@ -44,6 +45,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 universe uEffect uDisclosure uError uOp uTranscript
+  uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 noncomputable section
 
@@ -122,7 +124,11 @@ variable
     {stateCommitment : StateCommitment (Fin n) F}
     {effectSemantics : EffectSemantics (Fin n) F Effect}
     {disclosurePolicy : DisclosurePolicy Disclosure}
-    {manifest : Manifest} {errorId : Error → Digest}
+    {manifest : Manifest}
+    {registry : ControllerRegistry.{uClauseInput, uClauseQuery,
+      uClauseReply, uClauseOutcome}}
+    {clauseEvidence : ClauseEvidenceFamily manifest registry}
+    {errorId : Error → Digest}
     {headerCells : AdmissionContext → BindingIx → F}
     {C : Submodule F (BoundReceiptIx n → F)}
     {S : BindingCommitment Digest F (BoundReceiptIx n) Op}
@@ -133,7 +139,7 @@ local notation "HistoryHead" => VerifiedHistoryHead
   (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
   (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
   (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-  manifest errorId headerCells C S
+  manifest registry clauseEvidence errorId headerCells C S
 
 /-- The exact list of semantic entry words retained by a verified head. -/
 def historyWords (head : HistoryHead) : List (BoundReceiptIx n → F) :=
@@ -231,14 +237,16 @@ theorem extract_eq_semantic_head
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (portal := portal) (authState := authState)
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot)
       head schedule scheduleBinding Coin Transcript)
     (coin : Coin) (accepted : pcs.accepts (pcs.transcript coin))
@@ -260,14 +268,16 @@ theorem extract_satisfies_semantic_head
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (portal := portal) (authState := authState)
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot)
       head schedule scheduleBinding Coin Transcript)
     (coin : Coin) (accepted : pcs.accepts (pcs.transcript coin))
@@ -287,14 +297,16 @@ theorem knowledge_failure_le_totalEnvelope
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (portal := portal) (authState := authState)
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot)
       head schedule scheduleBinding Coin Transcript) :
     uniformProb Coin pcs.ksFailure ≤ pcs.ledger.totalEnvelope := by
@@ -312,14 +324,16 @@ theorem knowledge_error_shape
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot) head rounds schedule}
     (pcs : StraightlinePcsExtraction
       (n := n) (F := F) (portal := portal) (authState := authState)
       (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
       (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
       (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
-      (manifest := manifest) (errorId := errorId) (headerCells := headerCells)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (errorId := errorId) (headerCells := headerCells)
       (C := C) (S := S) (foldRoot := foldRoot)
       head schedule scheduleBinding Coin Transcript) :
     pcs.ledger.knowledgeError =
