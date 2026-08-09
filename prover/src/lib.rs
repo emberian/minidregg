@@ -5,8 +5,6 @@
 //! Lean-owned generated control. Native code may return data; it may not choose a
 //! statement, transcript schedule, security profile, or final acceptance bit.
 
-pub mod accumulator;
-pub mod accumulator_generic;
 pub mod additive_fri_reference;
 pub mod additive_mle_terminal;
 pub mod additive_mle_tower256;
@@ -17,7 +15,6 @@ pub mod binary_tower;
 pub mod binary_tower_256;
 pub mod binary_transcript;
 pub mod commit;
-pub mod committed_accumulator;
 pub mod descriptor;
 pub mod field4;
 pub mod field6;

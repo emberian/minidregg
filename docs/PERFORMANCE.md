@@ -114,7 +114,10 @@ The commitment leaf encoding is fixed and injective:
 challenge scheduling, sampled openings, multi-round proximity composition, audited commitment
 parameters/CR, basis coherence, and Lean-emitted control around unverified compute kernels.
 
-## Exhaustive committed-accumulator append baseline — 2026-08-09
+## Archived exhaustive committed-accumulator append baseline — 2026-08-09
+
+The exhaustive Rust verifier and benchmark binary were deleted. These rows are historical
+measurements of the discarded full-opening algorithm, not a runnable selected path.
 
 ```sh
 cargo run --release --quiet --manifest-path prover/Cargo.toml \

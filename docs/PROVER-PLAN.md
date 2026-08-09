@@ -66,19 +66,10 @@ deleted handwritten stack before a binary light-client proof returns.
 
 ## Accumulator boundary
 
-`prover/src/accumulator.rs` implements the post-reduction linear algebra:
-
-- batch constraints with powers of one challenge;
-- fold aligned claim targets;
-- fold witness words coordinatewise; and
-- iterate those operations over a chain.
-
-The separate `prover/src/committed_accumulator.rs` is the first honest reference join: it binds a
-wide root to a fully opened word, authenticates every position, checks multiplicative RS membership
-by inverse DFT, and rechecks committed fold closure. This resolution is deliberately exhaustive,
-shipping the whole word and every authentication path. Succinct queried openings/FRI,
-extension-field challenges, formal FS/RBR refinement, RBR extraction, and the gate-to-linear-channel
-bridge remain. This wrapper is itself scheduled for replacement by generated control.
+The handwritten native claim algebra and exhaustive committed-accumulator verifier were deleted.
+Loom owns batching, folding, extraction, and depth composition. The next implementation is the real
+outer accumulator/decider under Lean-owned transcript and statement control, not another Rust
+reference verifier.
 
 ## WGPU is an optional experiment
 
