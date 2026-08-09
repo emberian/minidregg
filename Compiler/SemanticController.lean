@@ -74,6 +74,11 @@ def Challenge.Matches {decl : ReceiptDeclaration}
   left.keyCount = right.keyCount ∧
   ∀ index : BindingIx, left.binding index = right.binding index
 
+instance Challenge.instDecidableMatches {decl : ReceiptDeclaration}
+    (left right : Challenge decl) : Decidable (left.Matches right) := by
+  unfold Challenge.Matches
+  infer_instance
+
 theorem Challenge.eq_of_matches {decl : ReceiptDeclaration}
     {left right : Challenge decl} (h : left.Matches right) :
     left = right := by
@@ -392,8 +397,20 @@ theorem resultMismatch_not_verified
     (issued : Challenge decl) (reply : KernelReply decl)
     (mismatch : reply.result ≠ boundRuntimeEncode ctx.witness) :
     ¬ (checkReply ctx authorization issued reply).IsVerified := by
-  classical
-  simp [checkReply, mismatch, Outcome.IsVerified]
+  have hpointwise : ¬ ∀ index : decl.WireIx,
+      reply.result index = boundRuntimeEncode ctx.witness index := by
+    intro equalAt
+    apply mismatch
+    funext index
+    exact equalAt index
+  by_cases hissued : issued.Matches ctx.challenge
+  · by_cases hrequest : reply.requestEcho = ctx.requestWire
+    · by_cases hchallenge : reply.challengeEcho.Matches issued
+      · simp [checkReply, hissued, hrequest, hchallenge, hpointwise,
+          Outcome.IsVerified]
+      · simp [checkReply, hissued, hrequest, hchallenge, Outcome.IsVerified]
+    · simp [checkReply, hissued, hrequest, Outcome.IsVerified]
+  · simp [checkReply, hissued, Outcome.IsVerified]
 
 /-- Even a perfectly echoed result cannot promote proof wires that fail the
 Lean-emitted descriptor. -/
@@ -407,8 +424,22 @@ theorem descriptorFailure_not_verified
     (failure : ¬ descriptorHolds
       (descriptor decl) reply.totalWires) :
     ¬ (checkReply ctx authorization issued reply).IsVerified := by
-  classical
-  simp [checkReply, failure, Outcome.IsVerified]
+  by_cases hissued : issued.Matches ctx.challenge
+  · by_cases hrequest : reply.requestEcho = ctx.requestWire
+    · by_cases hchallenge : reply.challengeEcho.Matches issued
+      · by_cases hresult : ∀ index : decl.WireIx,
+          reply.result index = boundRuntimeEncode ctx.witness index
+        · by_cases hprefix : ∀ index : decl.WireIx,
+            reply.totalWires index.val = boundRuntimeEncode ctx.witness index
+          · simp [checkReply, hissued, hrequest, hchallenge, hresult,
+              hprefix, failure, Outcome.IsVerified]
+          · simp [checkReply, hissued, hrequest, hchallenge, hresult,
+              hprefix, Outcome.IsVerified]
+        · simp [checkReply, hissued, hrequest, hchallenge, hresult,
+            Outcome.IsVerified]
+      · simp [checkReply, hissued, hrequest, hchallenge, Outcome.IsVerified]
+    · simp [checkReply, hissued, hrequest, Outcome.IsVerified]
+  · simp [checkReply, hissued, Outcome.IsVerified]
 
 #print axioms arbitraryOracle_integrity
 #print axioms resultMismatch_not_verified
