@@ -21,6 +21,12 @@ pub const WORK_0_RESPONSE_WIDTH: usize = 32;
 pub const WORK_0_REQUEST_COUNT_WIDTH: usize = 4;
 pub const WORK_0_REQUEST_COORDINATE_WIDTH: usize = 32;
 pub const WORK_0_REQUEST_VECTOR_ARITY: usize = 2;
+pub const WORK_0_BENCHMARK_SCHEMA: &str = "minidregg/native-dispatch-benchmark/v1";
+pub const WORK_0_BENCHMARK_PATTERN: &str = "xorshift64-four-limb/v1";
+pub const WORK_0_BENCHMARK_SEED: u64 = 2611923443488327891;
+pub const WORK_0_BENCHMARK_SCHEDULE: &[(usize, usize, usize)] = &[(1, 1024, 7), (8, 256, 7), (64, 32, 7), (512, 4, 7), (4096, 1, 5), (16384, 1, 3)];
+pub const WORK_0_BENCHMARK_SENTINEL_REQUEST: &[u8] = &[1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const WORK_0_BENCHMARK_SENTINEL_RESPONSE: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalArtifactDto {

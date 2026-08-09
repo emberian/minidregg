@@ -34,6 +34,18 @@ private def rustDecimalSlice (values : List Nat) : String :=
   let entries := values.map rustDecimal
   "&[" ++ String.intercalate ", " entries ++ "]"
 
+private def rustByteSlice (values : List UInt8) : String :=
+  let entries := values.map fun value => toString value.toNat
+  "&[" ++ String.intercalate ", " entries ++ "]"
+
+private def rustBenchmarkSchedule
+    (cases : List DispatchBenchmarkCase) : String :=
+  let entries := cases.map fun benchmark =>
+    "(" ++ toString benchmark.vectorLength ++ ", " ++
+      toString benchmark.batchRepetitions ++ ", " ++
+      toString benchmark.samples ++ ")"
+  "&[" ++ String.intercalate ", " entries ++ "]"
+
 private def rustEscapeChar : Char → String
   | '"' => "\\\""
   | '\\' => "\\\\"
@@ -69,6 +81,20 @@ private def kernelFunction : KernelTag → String
 private def kernelConstructor : KernelTag → String
   | .tower256DotProduct => "tower256_dot_product"
 
+private def benchmarkConstants (stem : String) : KernelTag → List String
+  | .tower256DotProduct =>
+      ["pub const " ++ stem ++ "_BENCHMARK_SCHEMA: &str = \"minidregg/native-dispatch-benchmark/v1\";",
+       "pub const " ++ stem ++ "_BENCHMARK_PATTERN: &str = " ++
+         rustStringLiteral tower256DotProductBenchmarkPattern ++ ";",
+       "pub const " ++ stem ++ "_BENCHMARK_SEED: u64 = " ++
+         toString tower256DotProductBenchmarkSeed ++ ";",
+       "pub const " ++ stem ++ "_BENCHMARK_SCHEDULE: &[(usize, usize, usize)] = " ++
+         rustBenchmarkSchedule tower256DotProductBenchmarkSchedule ++ ";",
+       "pub const " ++ stem ++ "_BENCHMARK_SENTINEL_REQUEST: &[u8] = " ++
+         rustByteSlice tower256DotProductBenchmarkSentinelRequestBytes ++ ";",
+       "pub const " ++ stem ++ "_BENCHMARK_SENTINEL_RESPONSE: &[u8] = " ++
+         rustByteSlice tower256DotProductBenchmarkSentinelResponseBytes ++ ";"]
+
 private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String :=
   let stem := workName ordinal
   ["pub const " ++ stem ++ "_ID_DECIMAL: &str = " ++ rustDecimal profile.workId ++ ";",
@@ -80,7 +106,8 @@ private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String 
      rustDecimal profile.responseCodec.codecId ++ ";",
    "pub const " ++ stem ++ "_RESPONSE_WIDTH: usize = " ++
      toString (responseWidth profile.responseCodec.shape) ++ ";"] ++
-    requestShapeConstants stem profile.requestCodec.shape
+    requestShapeConstants stem profile.requestCodec.shape ++
+    benchmarkConstants stem profile.kernel
 
 private def requestConstructor (ordinal : Nat) (profile : WorkProfile) : List String :=
   ["    pub fn " ++ kernelConstructor profile.kernel ++ "(request_bytes: Box<[u8]>) -> Self {",

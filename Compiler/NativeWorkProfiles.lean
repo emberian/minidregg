@@ -106,8 +106,66 @@ theorem work_profile_exact :
     tower256DotProduct.kernel = .tower256DotProduct := by
   exact ⟨rfl, rfl, rfl, rfl, rfl⟩
 
+/-! ## Lean-owned manual performance schedule
+
+These values are emitted as append-only generated Rust constants.  They are
+benchmark evidence parameters, not part of `ArtifactBundle` and therefore do
+not silently change the production artifact identity.  The work/profile/codec
+pins under measurement remain the authenticated `tower256DotProduct` record
+above. -/
+
+structure DispatchBenchmarkCase where
+  vectorLength : Nat
+  batchRepetitions : Nat
+  samples : Nat
+deriving DecidableEq, Repr
+
+/-- Multiple payload sizes with roughly bounded work per timing sample.  The
+benchmark is manual/ignored and reports medians rather than asserting a speed
+threshold. -/
+def tower256DotProductBenchmarkSchedule : List DispatchBenchmarkCase :=
+  [⟨1, 1024, 7⟩, ⟨8, 256, 7⟩, ⟨64, 32, 7⟩,
+   ⟨512, 4, 7⟩, ⟨4096, 1, 5⟩, ⟨16384, 1, 3⟩]
+
+/-- Reproducible diagnostic fixture family.  This names input generation only;
+it makes no semantic or native-refinement claim. -/
+def tower256DotProductBenchmarkPattern : String :=
+  "xorshift64-four-limb/v1"
+
+def tower256DotProductBenchmarkSeed : Nat :=
+  2611923443488327891
+
+private def coordinateOne : Coordinate256 :=
+  ⟨1, by omega⟩
+
+/-- One Lean-encoded `1 · 1` request checked before any timing occurs. -/
+def tower256DotProductBenchmarkSentinelRequest : Tower256DotProductRequest where
+  left := [coordinateOne]
+  right := [coordinateOne]
+  sameLength := rfl
+  countFits := by norm_num
+
+def tower256DotProductBenchmarkSentinelRequestBytes : List UInt8 :=
+  tower256DotProductBenchmarkSentinelRequest.encode
+
+/-- Exact expected sentinel bytes from Lean's canonical response encoder. -/
+def tower256DotProductBenchmarkSentinelResponseBytes : List UInt8 :=
+  encodeTower256Response coordinateOne
+
+@[simp] theorem benchmark_sentinel_request_length :
+    tower256DotProductBenchmarkSentinelRequestBytes.length = 68 := by
+  simp [tower256DotProductBenchmarkSentinelRequestBytes,
+    Tower256DotProductRequest.encode_length,
+    tower256DotProductBenchmarkSentinelRequest]
+
+@[simp] theorem benchmark_sentinel_response_length :
+    tower256DotProductBenchmarkSentinelResponseBytes.length = 32 := by
+  simp [tower256DotProductBenchmarkSentinelResponseBytes]
+
 #print axioms Tower256DotProductRequest.encode_length
 #print axioms encodeTower256Response_length
 #print axioms work_profile_exact
+#print axioms benchmark_sentinel_request_length
+#print axioms benchmark_sentinel_response_length
 
 end Minidregg.Compiler.NativeWorkProfiles
