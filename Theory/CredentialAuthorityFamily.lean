@@ -86,16 +86,22 @@ theorem retarget_changes_wire {kind : ResourceKind} (request : Request kind)
       encodeRequest ⟨kind, request⟩ := by
   intro same
   apply different
-  apply ResourceId.ext
-  simpa [encodeRequest, Request.retarget] using
-    congrArg RequestWire.target same
+  cases target with
+  | mk targetValue =>
+      cases request.target with
+      | mk requestValue =>
+          have values : targetValue = requestValue := by
+            simpa [encodeRequest, Request.retarget] using
+              congrArg RequestWire.target same
+          cases values
+          rfl
 
 /-! ## 2. Holder-aware attenuation and proof-relevant lineage -/
 
-/-- Holder attenuation is semantic inclusion: every subject covered by the child
-was already covered by the parent. -/
 namespace Holder
 
+/-- Holder attenuation is semantic inclusion: every subject covered by the child
+was already covered by the parent. -/
 def Narrows (child parent : Holder) : Prop :=
   ∀ subject, child.Covers subject → parent.Covers subject
 
