@@ -97,6 +97,173 @@ abbrev PlanRunner :=
 
 /-! ## 3. Lean-owned checks and certificates -/
 
+/-! ### Finite executable reflection of the existing propositions -/
+
+def dWireBoundedCheck (bound : Nat) : DWire BabyBear → Bool
+  | .cnst _ => true
+  | .wire index => decide (index < bound)
+
+@[simp] theorem dWireBoundedCheck_eq_true_iff
+    (bound : Nat) (wire : DWire BabyBear) :
+    dWireBoundedCheck bound wire = true ↔ wire.bounded bound := by
+  cases wire <;> simp [dWireBoundedCheck, DWire.bounded]
+
+def dGateInBoundsCheck (descriptor : ConstraintDescriptor BabyBear)
+    (gate : DGate BabyBear) : Bool :=
+  dWireBoundedCheck descriptor.nWires gate.a &&
+  dWireBoundedCheck descriptor.nWires gate.b &&
+  decide (descriptor.nVars ≤ gate.out) &&
+  decide (gate.out < descriptor.nWires)
+
+@[simp] theorem dGateInBoundsCheck_eq_true_iff
+    (descriptor : ConstraintDescriptor BabyBear) (gate : DGate BabyBear) :
+    dGateInBoundsCheck descriptor gate = true ↔
+      gate.a.bounded descriptor.nWires ∧
+      gate.b.bounded descriptor.nWires ∧
+      descriptor.nVars ≤ gate.out ∧ gate.out < descriptor.nWires := by
+  simp [dGateInBoundsCheck, and_assoc]
+
+def descriptorWellFormedCheck
+    (descriptor : ConstraintDescriptor BabyBear) : Bool :=
+  decide (descriptor.nPublic ≤ descriptor.nVars) &&
+  decide (descriptor.nVars ≤ descriptor.nWires) &&
+  descriptor.gates.all (dGateInBoundsCheck descriptor) &&
+  descriptor.zeros.all (dWireBoundedCheck descriptor.nWires)
+
+theorem descriptorWellFormedCheck_eq_true_iff
+    (descriptor : ConstraintDescriptor BabyBear) :
+    descriptorWellFormedCheck descriptor = true ↔ descriptor.WellFormed := by
+  simp only [descriptorWellFormedCheck, Bool.and_eq_true, decide_eq_true_eq,
+    List.all_eq_true, dGateInBoundsCheck_eq_true_iff,
+    dWireBoundedCheck_eq_true_iff]
+  constructor
+  · rintro ⟨⟨⟨publicLe, varsLe⟩, gatesIn⟩, zerosIn⟩
+    exact ⟨publicLe, varsLe, gatesIn, zerosIn⟩
+  · rintro ⟨publicLe, varsLe, gatesIn, zerosIn⟩
+    exact ⟨⟨⟨publicLe, varsLe⟩, gatesIn⟩, zerosIn⟩
+
+def visibilityFitsCheck (nPublic : Nat) (segment : WireSegment) : Bool :=
+  match segment.visibility with
+  | .publicInput => decide (segment.offset + segment.length ≤ nPublic)
+  | .witness => decide (nPublic ≤ segment.offset)
+
+@[simp] theorem visibilityFitsCheck_eq_true_iff
+    (nPublic : Nat) (segment : WireSegment) :
+    visibilityFitsCheck nPublic segment = true ↔
+      segment.visibilityFits nPublic := by
+  cases h : segment.visibility <;>
+    simp [visibilityFitsCheck, WireSegment.visibilityFits, h]
+
+def segmentsCoverFromCheck (nPublic : Nat) :
+    Nat → List WireSegment → Nat → Bool
+  | cursor, [], nVars => decide (cursor = nVars)
+  | cursor, segment :: rest, nVars =>
+      decide (segment.offset = cursor) &&
+      decide (segment.offset + segment.length ≤ nVars) &&
+      visibilityFitsCheck nPublic segment &&
+      segmentsCoverFromCheck nPublic
+        (segment.offset + segment.length) rest nVars
+
+theorem segmentsCoverFromCheck_eq_true_iff (nPublic cursor nVars : Nat)
+    (segments : List WireSegment) :
+    segmentsCoverFromCheck nPublic cursor segments nVars = true ↔
+      segmentsCoverFrom nPublic cursor segments nVars := by
+  induction segments generalizing cursor with
+  | nil => simp [segmentsCoverFromCheck, segmentsCoverFrom]
+  | cons segment rest ih =>
+      simp [segmentsCoverFromCheck, segmentsCoverFrom, ih, and_assoc]
+
+def spanInBoundsCheck (nVars : Nat) (span : WireSpan) : Bool :=
+  decide (span.start + span.length ≤ nVars)
+
+@[simp] theorem spanInBoundsCheck_eq_true_iff
+    (nVars : Nat) (span : WireSpan) :
+    spanInBoundsCheck nVars span = true ↔ span.inBounds nVars := by
+  simp [spanInBoundsCheck, WireSpan.inBounds]
+
+def addWellShapedCheck (nVars : Nat) (call : AddCall) : Bool :=
+  decide (call.x.length = call.width) &&
+  decide (call.y.length = call.width) &&
+  decide (call.z.length = call.width) &&
+  decide (call.xBits.length = call.width * call.limbBits) &&
+  decide (call.yBits.length = call.width * call.limbBits) &&
+  decide (call.zBits.length = call.width * call.limbBits) &&
+  decide (call.carry.length = call.width + 1) &&
+  [call.x, call.y, call.z, call.xBits, call.yBits, call.zBits, call.carry].all
+    (spanInBoundsCheck nVars)
+
+theorem addWellShapedCheck_eq_true_iff (nVars : Nat) (call : AddCall) :
+    addWellShapedCheck nVars call = true ↔ call.WellShaped nVars := by
+  simp [addWellShapedCheck, AddCall.WellShaped, and_assoc]
+
+def scalarMulConstWellShapedCheck
+    (nVars : Nat) (call : ScalarMulConstCall) : Bool :=
+  decide (call.scalar.length = 1) &&
+  decide (call.scalarBits.length = call.quotientBits) &&
+  decide (call.product.length = call.width) &&
+  decide (call.productBits.length = call.width * call.limbBits) &&
+  decide (call.carry.length = call.width + 1) &&
+  decide (call.carryBits.length = (call.width + 1) * call.quotientBits) &&
+  [call.scalar, call.scalarBits, call.product, call.productBits,
+    call.carry, call.carryBits].all (spanInBoundsCheck nVars)
+
+theorem scalarMulConstWellShapedCheck_eq_true_iff
+    (nVars : Nat) (call : ScalarMulConstCall) :
+    scalarMulConstWellShapedCheck nVars call = true ↔
+      call.WellShaped nVars := by
+  simp [scalarMulConstWellShapedCheck, ScalarMulConstCall.WellShaped,
+    and_assoc]
+
+def witnessCallWellShapedCheck (nVars : Nat) : WitnessCall → Bool
+  | .add call => addWellShapedCheck nVars call
+  | .scalarMulConst call => scalarMulConstWellShapedCheck nVars call
+
+@[simp] theorem witnessCallWellShapedCheck_eq_true_iff
+    (nVars : Nat) (call : WitnessCall) :
+    witnessCallWellShapedCheck nVars call = true ↔
+      call.WellShaped nVars := by
+  cases call <;> simp [witnessCallWellShapedCheck, WitnessCall.WellShaped,
+    addWellShapedCheck_eq_true_iff, scalarMulConstWellShapedCheck_eq_true_iff]
+
+def kernelCallFullyWellFormedCheck (call : KernelCall) : Bool :=
+  descriptorWellFormedCheck call.descriptor &&
+  segmentsCoverFromCheck call.descriptor.nPublic 0 call.segments
+    call.descriptor.nVars &&
+  call.calls.all (witnessCallWellShapedCheck call.descriptor.nVars)
+
+theorem kernelCallFullyWellFormedCheck_eq_true_iff (call : KernelCall) :
+    kernelCallFullyWellFormedCheck call = true ↔ call.FullyWellFormed := by
+  simp only [kernelCallFullyWellFormedCheck, Bool.and_eq_true,
+    descriptorWellFormedCheck_eq_true_iff,
+    segmentsCoverFromCheck_eq_true_iff, List.all_eq_true,
+    witnessCallWellShapedCheck_eq_true_iff]
+  constructor
+  · rintro ⟨⟨descriptor, layout⟩, calls⟩
+    exact ⟨⟨descriptor, layout⟩, calls⟩
+  · rintro ⟨⟨descriptor, layout⟩, calls⟩
+    exact ⟨⟨descriptor, layout⟩, calls⟩
+
+def finAll (n : Nat) (check : Fin n → Bool) : Bool :=
+  (List.finRange n).all check
+
+@[simp] theorem finAll_eq_true_iff (n : Nat) (check : Fin n → Bool) :
+    finAll n check = true ↔ ∀ index, check index = true := by
+  simp [finAll]
+
+def descriptorHoldsCheck (descriptor : ConstraintDescriptor BabyBear)
+    (wireValues : Nat → BabyBear) : Bool :=
+  (descriptor.gates.all fun gate =>
+    decide (gate.op.denote (gate.a.read wireValues) (gate.b.read wireValues) =
+      wireValues gate.out)) &&
+  descriptor.zeros.all fun zero => decide (zero.read wireValues = 0)
+
+theorem descriptorHoldsCheck_eq_true_iff
+    (descriptor : ConstraintDescriptor BabyBear)
+    (wireValues : Nat → BabyBear) :
+    descriptorHoldsCheck descriptor wireValues = true ↔
+      descriptorHolds descriptor wireValues := by
+  simp [descriptorHoldsCheck, descriptorHolds, DGate.holds]
+
 /-- Public inputs are bound positionally to the descriptor's public prefix.
 The separate length equality prevents a short list from being padded with the
 `getD` default. -/
@@ -106,6 +273,30 @@ def PublicPrefixExact (instruction : Instruction)
   ∀ index : Fin instruction.call.descriptor.nPublic,
     response.totalWires index.val =
       instruction.publicInputs.getD index.val 0
+
+def publicPrefixExactCheck (instruction : Instruction)
+    (response : KernelResponse instruction) : Bool :=
+  decide
+    (instruction.publicInputs.length = instruction.call.descriptor.nPublic) &&
+  finAll instruction.call.descriptor.nPublic fun index =>
+    decide (response.totalWires index.val =
+      instruction.publicInputs.getD index.val 0)
+
+theorem publicPrefixExactCheck_eq_true_iff (instruction : Instruction)
+    (response : KernelResponse instruction) :
+    publicPrefixExactCheck instruction response = true ↔
+      PublicPrefixExact instruction response := by
+  simp [publicPrefixExactCheck, PublicPrefixExact]
+
+def kernelCallAcceptsCheck (instruction : Instruction)
+    (response : KernelResponse instruction) : Bool :=
+  descriptorHoldsCheck instruction.call.descriptor response.totalWires
+
+theorem kernelCallAcceptsCheck_eq_true_iff (instruction : Instruction)
+    (response : KernelResponse instruction) :
+    kernelCallAcceptsCheck instruction response = true ↔
+      instruction.call.Accepts response.totalWires := by
+  exact descriptorHoldsCheck_eq_true_iff _ _
 
 /-- Everything Lean certifies before it advances past one instruction.  The
 arithmetic/hash/transform labels add no parallel semantics: acceptance is the
@@ -144,27 +335,30 @@ inductive SuffixOutcome (manifest : Manifest) (runner : PlanRunner)
 
 /-- Lean checker for one response.  Clause lookup is performed before the
 descriptor checks, so no unregistered native work can reach the continuation. -/
-noncomputable def checkInstruction (manifest : Manifest) (instruction : Instruction)
+def checkInstruction (manifest : Manifest) (instruction : Instruction)
     (response : KernelResponse instruction) :
     Sum Failure (CertifiedResponse manifest instruction response) := by
   match hclause : manifest.lookupClause instruction.clauseId with
   | none => exact .inl (.unregisteredClause instruction.clauseId)
   | some clause =>
-      if hcall : instruction.call.FullyWellFormed then
-        if hprefix : PublicPrefixExact instruction response then
-          if haccepts : instruction.call.Accepts response.totalWires then
+      if hcallCheck : kernelCallFullyWellFormedCheck instruction.call = true then
+        if hprefixCheck : publicPrefixExactCheck instruction response = true then
+          if hacceptsCheck : kernelCallAcceptsCheck instruction response = true then
             exact .inr
               { clauseRegistered := ⟨clause, hclause⟩
-                callWellFormed := hcall
-                publicPrefixExact := hprefix
-                descriptorAcceptance := haccepts }
+                callWellFormed :=
+                  (kernelCallFullyWellFormedCheck_eq_true_iff _).mp hcallCheck
+                publicPrefixExact :=
+                  (publicPrefixExactCheck_eq_true_iff _ _).mp hprefixCheck
+                descriptorAcceptance :=
+                  (kernelCallAcceptsCheck_eq_true_iff _ _).mp hacceptsCheck }
           else exact .inl (.descriptorRejected instruction.clauseId)
         else exact .inl (.publicPrefixMismatch instruction.clauseId)
       else exact .inl (.malformedCall instruction.clauseId)
 
 /-- Execute and check instructions in Lean-owned order.  The recursive call—and
 therefore the next native invocation—exists only in the certified branch. -/
-noncomputable def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
+def checkInstructions (manifest : Manifest) (runner : PlanRunner) :
     (instructions : List Instruction) → SuffixOutcome manifest runner instructions
   | [] => .checked .nil
   | instruction :: rest =>
@@ -194,7 +388,7 @@ def Outcome.IsVerified {manifest : Manifest} {plan : Plan}
 
 /-- Run the plan.  Manifest binding is checked before any native instruction is
 issued; all later continuation choices remain inside `checkInstructions`. -/
-noncomputable def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
+def run (manifest : Manifest) (plan : Plan) (runner : PlanRunner) :
     Outcome manifest plan runner :=
   if hmanifest : plan.manifestAddress = manifest.contentAddress then
     match checkInstructions manifest runner plan.instructions with
