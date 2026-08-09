@@ -85,45 +85,46 @@ theorem retarget_changes_wire {kind : ResourceKind} (request : Request kind)
     encodeRequest ⟨kind, request.retarget target⟩ ≠
       encodeRequest ⟨kind, request⟩ := by
   intro same
-  have packaged :
-      (⟨kind, request.retarget target⟩ : SomeRequest) = ⟨kind, request⟩ :=
-    encodeRequest_injective same
-  have requestsEqual : request.retarget target = request := by
-    cases packaged
-    rfl
-  exact Request.retarget_ne request target different requestsEqual
+  apply different
+  apply ResourceId.ext
+  simpa [encodeRequest, Request.retarget] using
+    congrArg RequestWire.target same
 
 /-! ## 2. Holder-aware attenuation and proof-relevant lineage -/
 
 /-- Holder attenuation is semantic inclusion: every subject covered by the child
 was already covered by the parent. -/
-def Holder.Narrows (child parent : Holder) : Prop :=
+namespace Holder
+
+def Narrows (child parent : Holder) : Prop :=
   ∀ subject, child.Covers subject → parent.Covers subject
 
-theorem Holder.narrows_refl (holder : Holder) : holder.Narrows holder := by
+theorem narrows_refl (holder : Holder) : holder.Narrows holder := by
   intro subject covered
   exact covered
 
-theorem Holder.narrows_trans {young middle old : Holder}
+theorem narrows_trans {young middle old : Holder}
     (first : young.Narrows middle) (second : middle.Narrows old) :
     young.Narrows old := by
   intro subject covered
   exact second subject (first subject covered)
 
-theorem Holder.subject_narrows_bearer (subject : SubjectId) :
+theorem subject_narrows_bearer (subject : SubjectId) :
     (Holder.subject subject).Narrows .bearer := by
   intro _ _
   trivial
 
 /-- Negative tooth: changing a subject-bound parent into a bearer child is an
 authority amplification and therefore cannot be a strict attenuation edge. -/
-theorem Holder.bearer_not_narrows_subject (subject : SubjectId) :
+theorem bearer_not_narrows_subject (subject : SubjectId) :
     ¬ Holder.bearer.Narrows (.subject subject) := by
   intro narrows
   let other : SubjectId := ⟨subject.value + 1⟩
   have equal : other = subject := narrows other (by trivial)
   have values := congrArg SubjectId.value equal
   simp [other] at values
+
+end Holder
 
 /-- Complete attenuation adds the holder order omitted by the transport-level
 `Capability.Attenuates` record. -/
