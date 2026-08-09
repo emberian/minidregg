@@ -246,7 +246,10 @@ theorem no_header_coordinate
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (header : BindingIx) :
     coordinate ≠ .inl header := by
-  have postOnly := canonical.coordinatesPostOnly coordinate member
+  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
+      postCoordinate ∈ (layout.spanAt slot).coordinates /\
+      coordinate = .inr (postCoordinate, .post) :=
+    canonical.coordinatesPostOnly coordinate member
   obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
   rw [coordinateExact]
   simp
@@ -256,7 +259,10 @@ theorem no_pre_coordinate
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
     coordinate ≠ .inr (key, .pre) := by
-  have postOnly := canonical.coordinatesPostOnly coordinate member
+  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
+      postCoordinate ∈ (layout.spanAt slot).coordinates /\
+      coordinate = .inr (postCoordinate, .post) :=
+    canonical.coordinatesPostOnly coordinate member
   obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
   rw [coordinateExact]
   simp
@@ -266,7 +272,10 @@ theorem no_touched_coordinate
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
     coordinate ≠ .inr (key, .touched) := by
-  have postOnly := canonical.coordinatesPostOnly coordinate member
+  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
+      postCoordinate ∈ (layout.spanAt slot).coordinates /\
+      coordinate = .inr (postCoordinate, .post) :=
+    canonical.coordinatesPostOnly coordinate member
   obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
   rw [coordinateExact]
   simp
@@ -342,7 +351,10 @@ variable
     {ref : TransclusionRef n F DisclosureAtom}
 
 local notation "Observed" =>
-  HeadObservation (SCommit := SCommit) ExactFinality PCSOpeningSound
+  HeadObservation (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (family := family)
+    (headerCells := headerCells) (C := C) (SCommit := SCommit)
+    ExactFinality PCSOpeningSound
     CommitmentBindingCR RandomOracleModel layout head ref
 
 theorem entry_mem (observation : Observed) :
@@ -528,7 +540,10 @@ variable
     {linkRelationId : Digest}
 
 local notation "Event" =>
-  HeadLinkEvent (SCommit := SCommit) ExactFinality PCSOpeningSound
+  HeadLinkEvent (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (family := family)
+    (headerCells := headerCells) (C := C) (SCommit := SCommit)
+    ExactFinality PCSOpeningSound
     CommitmentBindingCR RandomOracleModel historyProjection (content := content)
     layout head linkRelationId
 
@@ -540,7 +555,7 @@ def opening (event : Event) : RangeOrValueOpening n F where
 /-- The link opening is exact and post-only by construction. -/
 theorem opening_exact (event : Event) :
     event.opening.Exact event.entry.word := by
-  exact event.openingExact
+  simpa [opening] using event.openingExact
 
 theorem entry_mem (event : Event) : event.entry ∈ head.entries :=
   event.membership.mem
@@ -550,9 +565,12 @@ effect, not merely an unrelated entry with a colliding post root. -/
 theorem entry_post_is_accepted_projection (event : Event) :
     event.entry.claim.witness.core.post =
       historyProjection.project content.accepted.prepared.post := by
-  have claimCore := congrArg
-    (fun claim : BoundSemanticReceiptClaim n F => claim.witness.core.post)
-    event.acceptedClaimExact
+  have claimCore : event.entry.claim.witness.core.post =
+      (historyProjection.historyClaim headerCells event.entry.context
+        content.accepted).witness.core.post :=
+    congrArg
+      (fun claim : BoundSemanticReceiptClaim n F => claim.witness.core.post)
+      event.acceptedClaimExact
   simpa only [HistoryProjection.historyClaim_core,
     HistoryProjection.core_post] using claimCore
 
@@ -580,7 +598,7 @@ theorem cell_exact_of_same_encoding (event : Event)
     (sameEncoding : layout.encodeAt other = layout.encodeAt event.slot) :
     layout.cellAt other = event.write.postCell := by
   have sameSlot : other = event.slot :=
-    layout.encodeAtInjective sameEncoding
+    CanonicalPostLayout.encodeAtInjective layout sameEncoding
   rw [sameSlot]
   exact event.cellExact
 
