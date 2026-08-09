@@ -1,10 +1,12 @@
-//! Native `GF(2^256)` arithmetic kernels used by LogUp-style generated control.
+//! Native `Tower256` arithmetic kernels for a LogUp-style experiment.
 //!
-//! This module owns no statement, transcript, proof carrier, suite, profile,
-//! proving, verification, or acceptance logic.  Addresses, values, batching
-//! scalars, and fold challenges are all caller supplied.  The functions only
-//! perform incidence scattering, multilinear equality arithmetic,
-//! fraction-addition tree arithmetic, and round-polynomial evaluation.
+//! This module has no complete statement, transcript, proof carrier, verifier,
+//! or final acceptance predicate. It does, however, author an unverified native
+//! relation/profile: incidence-table order, fraction-tree layout, and the
+//! quadratic/cubic round probes and message arities below. Addresses, values,
+//! batching scalars, and fold challenges are caller supplied. No compiled
+//! generated adapter currently pins these conventions or invokes them as a
+//! Lean-owned LogUp suite.
 
 use core::fmt;
 

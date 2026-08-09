@@ -1,19 +1,16 @@
-//! `[PROVER-fri-wgsl]` — wgpu dispatch of OUR FRI fold kernel
-//! (`shaders/fri_fold.wgsl`; on ember's Mac the adapter is Metal).
+//! `[PROVER-fri-wgsl]` — wgpu dispatch of the bundled native FRI fold kernel
+//! (`shaders/fri_fold.wgsl`).
 //!
-//! Substrate, said out loud: UNVERIFIED COMPUTE FOLLOWING the verified emit
-//! seam. The kernel is OUR wgsl adopting breadstuffs' deployed fold MATH
-//! (Montgomery BabyBear, X^4 = 11 extension, the halve/beta/twiddle fold
-//! formula, bit-reversed twiddles) — not a file copy, not the Plonky3 stack.
-//! The implementation check is only native agreement: `fold_gpu` must equal
-//! the unverified CPU kernel `fri::fold` on exercised inputs — measured by
-//! `tests/gpu_fold_conformance.rs` on real GPU hardware, skipped loudly (not
-//! falsely passed) where no adapter exists. Running on a GPU and matching the
-//! CPU kernel is the whole empirical claim; neither kernel has semantics in
-//! the trusted argument.
+//! This is UNVERIFIED COMPUTE. The WGSL selects a concrete Montgomery BabyBear
+//! representation, `X^4 = 11` quotient, halve/beta/twiddle formula, and
+//! bit-reversed layout modeled after a breadstuffs experiment. No compiled
+//! generated adapter currently pins that profile or gives the WGSL trusted
+//! semantics. The only implementation evidence is empirical native agreement:
+//! `fold_gpu` matches the independently unverified CPU kernel `fri::fold` on
+//! exercised inputs in `tests/gpu_fold_conformance.rs`.
 //!
 //! Layout seam: `fri::fold` is natural-order; the kernel works bit-reversed
-//! (deployed convention: pairs adjacent, one shared bitrev twiddle table whose
+//! (this module's convention: pairs adjacent, one shared bitrev twiddle table whose
 //! per-round tables are its prefixes). This module permutes in and out with
 //! `fri::bit_reverse_permute`, so callers only ever see natural order.
 //! Arities beyond the kernel's 32-slot local window (`log_arity > 5`) chain
@@ -97,9 +94,10 @@ impl GpuFold {
         &self.adapter_name
     }
 
-    /// The arity-`2^log_arity` FRI fold on the GPU — natural-order in and out,
-    /// same signature and semantics as `fri::fold`. Chains dispatches for
-    /// `log_arity > 5` with the beta-squaring schedule.
+    /// The arity-`2^log_arity` native fold on the GPU — natural-order in and
+    /// out, with the same API and intended arithmetic as `fri::fold`.
+    /// Agreement is empirical, not semantic. Chains dispatches for
+    /// `log_arity > 5` with this module's beta-squaring schedule.
     pub fn fold(
         &self,
         codeword: &[Ext4],

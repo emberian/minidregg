@@ -1,27 +1,27 @@
-//! `[PROVER-fri-fold]` — the adopted FRI fold kernel, CPU reference.
+//! `[PROVER-fri-fold]` — a native CPU implementation of one FRI fold formula.
 //!
-//! Substrate, said out loud: UNVERIFIED COMPUTE following the verified emit seam.
-//! This is the MATH of breadstuffs' deployed `hidingfri_fold_ext4.wgsl` fold —
-//! per pair `(lo, hi)` with challenge `beta` and base twiddle `1/2 * g^{-j}`:
+//! This is UNVERIFIED COMPUTE. Rust selects the field representation, domain
+//! order, pair order, twiddle convention, and beta-squaring schedule used here.
+//! No compiled generated adapter currently pins those choices or connects this
+//! module to Lean-owned control. The per-pair formula is the one also used by
+//! breadstuffs' `hidingfri_fold_ext4.wgsl` experiment:
 //!
 //! ```text
 //! folded = halve(lo + hi) + base_mul(mul(sub(lo, hi), beta), twiddle)
 //! ```
 //!
-//! — adopted into OUR crate and wired to OUR verified spec: it computes exactly
-//! `Loom/Proximity.lean`'s `fold` — `Fold(f, beta)(x^2) = (f(x) + f(-x))/2 +
-//! beta * (f(x) - f(-x))/(2x)` — on the two-adic domain `x = g^j` (where
-//! `f(-x) = f(g^(j + n/2))`, since `g^(n/2) = -1`). Conformance to the verified
-//! fold is by vector (`prover/testdata/fri_conformance.json`, Lean-authored,
-//! kernel-pinned theorem-side), never refinement.
+//! Algebraically, that formula is intended to correspond to
+//! `Loom/Proximity.lean`'s `Fold(f, beta)(x^2) = (f(x) + f(-x))/2 +
+//! beta * (f(x) - f(-x))/(2x)` under the stated conventions. There is no
+//! refinement theorem or semantic relation for this Rust. The only
+//! cross-language evidence is agreement on the captured values in
+//! `prover/testdata/fri_conformance.json`.
 //!
 //! Layout: NATURAL order — element `j` is `f(g^j)`, pairs are `(j, j + n/2)`,
-//! twiddle `j` is `1/2 * g^{-j}`. The deployed wgsl works on bit-reversed
-//! storage (Plonky3 convention: pairs adjacent, twiddle table bit-reversed) —
-//! the SAME per-pair algebra under the bit-reversal permutation, demonstrated by
-//! `bitrev_layout_matches_natural_fold` below. The GPU buffer/dispatch and the
-//! bitrev working layout land at `[PROVER-fri-wgsl]`, not this rung — no wgpu
-//! dependency here.
+//! twiddle `j` is `1/2 * g^{-j}`. The bundled WGSL instead selects bit-reversed
+//! storage (pairs adjacent, twiddle table bit-reversed). A native Rust test
+//! compares the two layouts for exercised inputs; it is not a proof that either
+//! layout implements a Lean profile. This module has no wgpu dependency.
 
 use crate::field4::{binv, bmul, two_adic_generator, Ext4, HALF, TWO_ADIC_BITS};
 
@@ -41,10 +41,9 @@ pub fn halve_inv_powers(log_n: u32) -> Vec<u64> {
     out
 }
 
-/// The same table in the deployed kernel's BIT-REVERSED layout
-/// (`table[j] = 1/2 * g^{-bitrev(j)}`) — the order breadstuffs' wgsl reads its
-/// `halve_inv_powers` buffer in. Provided for `[PROVER-fri-wgsl]`; the CPU
-/// reference fold below works in natural order.
+/// The same table in the bundled WGSL's selected BIT-REVERSED layout
+/// (`table[j] = 1/2 * g^{-bitrev(j)}`). Provided for `[PROVER-fri-wgsl]`; the
+/// CPU implementation below works in natural order.
 pub fn halve_inv_powers_bitrev(log_n: u32) -> Vec<u64> {
     bit_reverse_permute(&halve_inv_powers(log_n))
 }
@@ -66,9 +65,10 @@ pub fn bit_reverse_permute<T: Copy>(v: &[T]) -> Vec<T> {
     (0..v.len()).map(|i| v[bit_reverse(i, bits)]).collect()
 }
 
-/// One 2-to-1 fold round at challenge `beta`: length `n -> n/2`, pairing
-/// `(j, j + n/2)`. This is Loom's `fold D f beta` on the order-`n` two-adic
-/// domain, in twiddle form.
+/// One native 2-to-1 fold round at challenge `beta`: length `n -> n/2`, pairing
+/// `(j, j + n/2)`. The formula is intended to mirror Loom's fold after the
+/// Rust-selected domain and representation conventions; no adapter establishes
+/// that correspondence.
 pub fn fold_once(codeword: &[Ext4], beta: Ext4) -> Vec<Ext4> {
     let n = codeword.len();
     assert!(
@@ -93,10 +93,10 @@ pub fn fold_once(codeword: &[Ext4], beta: Ext4) -> Vec<Ext4> {
         .collect()
 }
 
-/// The arity-`2^log_arity` FRI fold: `log_arity` pairwise rounds, squaring the
-/// challenge each round (`beta, beta^2, beta^4, ...`) — the adopted kernel's
-/// schedule. Equals Loom's iterated `fold` with challenge stream
-/// `[beta, beta^2, ...]`; `log_arity = 0` is the identity.
+/// The arity-`2^log_arity` native fold: `log_arity` pairwise rounds, squaring
+/// the challenge each round (`beta, beta^2, beta^4, ...`). This is a
+/// Rust-selected schedule intended to resemble Loom's iterated fold; no
+/// generated suite currently pins it. `log_arity = 0` is the identity.
 pub fn fold(codeword: &[Ext4], beta: Ext4, log_arity: usize) -> Vec<Ext4> {
     assert!(codeword.len().is_power_of_two());
     assert!(

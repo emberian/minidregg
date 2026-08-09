@@ -1,10 +1,12 @@
 //! Native multilinear-extension arithmetic.
 //!
-//! This module is deliberately below the proof/protocol boundary.  It has no
-//! statements, transcripts, proof carriers, suite identifiers, or acceptance
-//! predicates.  Callers supply tables, domains, and challenges selected by
-//! generated control; the functions here only perform arithmetic and reject
-//! malformed arithmetic shapes.
+//! This module contains no complete statements, transcripts, proof carriers,
+//! verifiers, or final acceptance predicates. It nevertheless authors native
+//! representation and transform conventions: LSB-first Boolean indexing,
+//! adjacent-variable folds, reversed-LCH basis/bit order, and multiplicative
+//! domain pairing. Callers supply tables, domains, and challenges directly.
+//! These conventions are unverified; no compiled generated adapter currently
+//! selects, checks, or invokes them as a Lean-owned profile.
 
 use core::fmt;
 

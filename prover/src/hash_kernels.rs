@@ -1,10 +1,13 @@
 //! Parameterized byte-hash and Merkle arithmetic.
 //!
-//! This module owns no hash suite, semantic domain, wire profile, or verifier
-//! verdict.  Generated control supplies every customization string, prefix,
-//! domain, frame tag, label, encoded index/level, and root width.  Merkle
-//! routines return constructed data or a recomputed root; comparison with an
-//! expected root belongs to the caller.
+//! This module does not choose a complete hash suite, semantic domain, or
+//! verifier verdict: callers supply customization strings, prefixes, domains,
+//! tags, labels, encoded indices/levels, and root widths. It nevertheless
+//! authors a native wire/structure profile: `append_labeled_frame` fixes
+//! little-endian `u64` lengths, and the Merkle helpers fix a power-of-two binary
+//! tree, leaf-to-root sibling order, LSB path directions, and level numbering.
+//! Those conventions are unverified and no compiled generated adapter currently
+//! pins them. Comparison with an expected root remains the caller's job.
 
 use core::fmt;
 
@@ -138,7 +141,7 @@ pub struct MerklePath {
     pub siblings: Vec<Vec<u8>>,
 }
 
-/// Complete prover-side tree data with no semantic domain attached.
+/// Complete native tree data with no semantic domain or suite identifier attached.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerkleTree {
     root_width: usize,

@@ -1,14 +1,16 @@
-//! Canonical BabyBear⁶ arithmetic for extension-field challenges.
+//! Native six-lane BabyBear quotient-ring arithmetic for candidate challenges.
 //!
 //! The carrier is `BabyBear[u] / (u⁶ - 31)`, in little-endian coefficient
-//! order.  `Compiler/Ext6Conformance.lean` proves that `X⁶ - 31` is irreducible
-//! over BabyBear and pins the same lane multiplication against `AdjoinRoot`.
-//! This file is intentionally not wired into the shared protocol yet: it is the
-//! isolated scalar layer for `[PROVER-challenge-field-unification]`.
+//! order. This Rust module selects the reduction constant and lane codec.
+//! `Compiler/Ext6Conformance.lean` proves irreducibility and multiplication
+//! facts in Lean's own model; those theorems do not prove this Rust code or pin
+//! its representation. Native gate and MLE kernels use this type directly, but
+//! no compiled generated adapter currently maps it to a Lean carrier or shared
+//! protocol profile.
 
 use crate::field4::{badd, bmul, bsub, P};
 
-/// The reduction relation is `u⁶ = 31`.
+/// The Rust-selected reduction relation is `u⁶ = 31`.
 pub const EXT6_W: u64 = 31;
 
 /// Rejection reason for a non-canonical coefficient lane.

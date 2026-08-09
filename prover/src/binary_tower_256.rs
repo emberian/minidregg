@@ -1,4 +1,4 @@
-//! Fixed-width `GF(2^256)` coordinates for wide Fiat--Shamir challenges.
+//! Fixed-width coordinates intended to represent `GF(2^256)` values.
 //!
 //! The representation is level eight of the same explicit Fan--Paar tower as
 //! [`crate::binary_tower`]:
@@ -12,15 +12,14 @@
 //! Four little-endian `u64` limbs hold the recursive basis coordinates.  The
 //! low 128 bits are the constant coordinate in `T_7`; the high 128 bits are
 //! the coefficient of `y_7`.  Recursing gives the existing `T_6 = GF(2^64)`
-//! representation in the low limb.  Addition is XOR, and multiplication is
-//! the exact three-product Fan--Paar/Karatsuba step at every level.
+//! representation in the low limb. Addition is XOR, and multiplication uses
+//! the selected three-product Fan--Paar/Karatsuba formula at every level.
 //!
-//! `Theory.BinaryTowerFanPaar` proves `fpGen_quadratic`,
-//! `towerPack_towerMulStep`, and `towerMul_eq_mul` at all levels;
-//! `Theory.BinaryTowerTrace.fanPaarRecursion_holds` closes the required
-//! generation fact. `[BTOWER256-RUST-UNVERIFIED]` is the honest seam: the
-//! four-limb operations are unverified compute behind generated Lean checks;
-//! Rust has no semantics to compare with the choice-selected Lean objects.
+//! `Theory.BinaryTowerFanPaar` and `Theory.BinaryTowerTrace` prove analogous
+//! identities for Lean's abstract tower. They do not prove this four-limb code
+//! or bind its byte representation. `[BTOWER256-RUST-UNVERIFIED]` is the honest
+//! seam: this is a Rust-selected profile with empirical native tests only, and
+//! no compiled generated adapter currently checks or invokes it.
 
 use core::fmt;
 
@@ -61,7 +60,8 @@ impl fmt::Display for Tower256Error {
 
 impl std::error::Error for Tower256Error {}
 
-/// An element of level-eight `T_8 = GF(2^256)` in recursive Fan--Paar basis.
+/// A Rust-selected level-eight `T_8` coordinate in recursive Fan--Paar basis,
+/// intended to represent an element of `GF(2^256)`.
 ///
 /// Every 256-bit string is a canonical element, so the exact 32-byte decoder
 /// is infallible.  The slice decoder rejects every non-32-byte encoding.
@@ -143,9 +143,9 @@ impl Tower256 {
     /// Multiplicative inverse by the fixed field exponent `2^256 - 2`.
     ///
     /// After iteration `i`, `acc = self^(2^(i+1)-1)`; the final square gives
-    /// `self^(2^256-2)`.  The field property is supplied abstractly by Loom's
-    /// all-level binary-tower development and tested here against this runtime
-    /// representation pending generated Lean authority; this Rust is unverified compute.
+    /// `self^(2^256-2)`. Lean proves a field property for its abstract tower;
+    /// that does not establish the property for this Rust-selected coordinate
+    /// implementation. Native tests provide only exercised-input evidence.
     pub fn inverse(self) -> Result<Self, Tower256Error> {
         if self.is_zero() {
             return Err(Tower256Error::DivisionByZero);
@@ -223,8 +223,8 @@ fn mul_by_generator_level7(value: [u64; 2]) -> [u64; 2] {
     [value[1], value[0] ^ mul_by_generator_small(6, value[1])]
 }
 
-/// Existing single-word recursion, repeated locally so [`TowerElem`]
-/// semantics and visibility remain untouched.
+/// Existing single-word recursion, repeated locally so [`TowerElem`]'s native
+/// arithmetic behavior and visibility remain untouched.
 fn mul_small(level: u8, left: u64, right: u64) -> u64 {
     if level == 0 {
         return left & right & 1;

@@ -1,24 +1,22 @@
-//! `[PROVER-fri-fold]` field layer: BabyBear and its degree-4 extension (X^4 = 11)
-//! — the arithmetic under the adopted FRI fold kernel.
+//! `[PROVER-fri-fold]` native BabyBear quotient-ring arithmetic (`X^4 = 11`).
 //!
-//! Substrate, said out loud: UNVERIFIED COMPUTE following the verified emit seam.
-//! This module ADOPTS the field math of breadstuffs' deployed
-//! `hidingfri_fold_ext4.wgsl` kernel (BabyBear^4 as four canonical `u64` lanes,
-//! X^4 = 11; the wgsl's Montgomery form is a GPU optimization this CPU reference
-//! does not need) into OUR crate — it never inherits the Plonky3 stack. The
-//! extension-multiplication FORMULA is theorem-tied on the Lean side
-//! (`Compiler/FriConformance.lean`'s `ext4Mul_correct`: the formula IS
-//! multiplication in `BabyBear[X]/(X^4 - 11)`), and this module reproduces the
-//! Lean-computed vectors (`prover/testdata/fri_conformance.json`) as diagnostic
-//! arithmetic data. Rust has no semantic relation to Lean.
+//! This is UNVERIFIED COMPUTE. Rust selects the modulus, `X^4 = 11` relation,
+//! four-`u64` coefficient layout, and canonical-representative convention. No
+//! compiled generated adapter currently pins or checks that profile. The
+//! choices model those in breadstuffs' `hidingfri_fold_ext4.wgsl` experiment.
+//! `Compiler/FriConformance.lean` proves a corresponding Lean-side
+//! quotient-ring multiplication formula; it does not prove this Rust code or
+//! codec. Cross-language evidence is limited to agreement on the captured
+//! values in `prover/testdata/fri_conformance.json`.
 //!
-//! NOT claimed anywhere: irreducibility of `X^4 - 11` over BabyBear (that the
-//! quotient is a FIELD, so the `|F| = p^4` soundness pricing of
-//! `Loom/SmallField.lean` applies to THIS concrete quotient) — named residual
+//! This module does not establish irreducibility of `X^4 - 11` over BabyBear,
+//! so it does not establish that the quotient is a field or justify applying
+//! `|F| = p^4` soundness pricing to this concrete profile. That remains
 //! `[PROVER-field-ext4-irred]`. `Ext4` deliberately implements no inversion.
 
-/// The BabyBear prime `p = 2^31 - 2^27 + 1` — the deployed base field
-/// (`[PROVER-field]`, proved prime on the Lean side in `Compiler/EmitSerialize`).
+/// The Rust-selected BabyBear modulus `p = 2^31 - 2^27 + 1`.
+/// Lean proves primality of the same numeric value, but no generated adapter
+/// currently binds that theorem to this constant.
 pub const P: u64 = 2013265921;
 
 /// The extension constant: `BabyBear^4 = BabyBear[X]/(X^4 - EXT_W)`.
@@ -31,8 +29,8 @@ pub const HALF: u64 = (P + 1) / 2;
 pub const TWO_ADIC_BITS: u32 = 27;
 
 /// The canonical generator of the order-`2^27` subgroup: `31^15 mod p`
-/// (31 generates the full multiplicative group). Pinned by tests below and
-/// against the Lean conformance domain.
+/// (31 generates the full multiplicative group). Checked locally and compared
+/// with captured Lean-side values; this is not a profile binding.
 pub const TWO_ADIC_GENERATOR: u64 = 440564289;
 
 /// Base-field addition on canonical representatives.
@@ -86,8 +84,8 @@ pub fn binv(a: u64) -> u64 {
 }
 
 /// The canonical generator of the order-`2^bits` subgroup: repeated squaring of
-/// `TWO_ADIC_GENERATOR` — the same descent the Lean conformance domain uses
-/// (`g_bits = g_27^(2^(27-bits))`).
+/// `TWO_ADIC_GENERATOR`, using the descent convention also represented in the
+/// captured Lean-side conformance data (`g_bits = g_27^(2^(27-bits))`).
 pub fn two_adic_generator(bits: u32) -> u64 {
     assert!(bits <= TWO_ADIC_BITS, "two_adic_generator: bits > 27");
     let mut g = TWO_ADIC_GENERATOR;
@@ -141,9 +139,9 @@ impl Ext4 {
         }
     }
 
-    /// The adopted extension multiplication, `X^4 = 11` (the deployed kernel's
-    /// formula; proved to be the quotient-ring multiplication on the Lean side,
-    /// `ext4Mul_correct`).
+    /// The Rust-selected quotient-ring multiplication formula, `X^4 = 11`.
+    /// Lean proves an analogous formula in its own model; it does not prove
+    /// this implementation.
     pub fn mul(self, o: Ext4) -> Ext4 {
         let a = &self.c;
         let b = &o.c;

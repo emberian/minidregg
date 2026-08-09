@@ -1,6 +1,6 @@
-//! A narrow executable coordinate model of Loom's Fan--Paar binary tower.
+//! A narrow native coordinate model for a Fan--Paar binary tower.
 //!
-//! This is **unverified compute**, and deliberately not a prover backend.  It
+//! This is **unverified compute**, and deliberately not a prover backend. Rust
 //! chooses the explicit basis
 //!
 //! ```text
@@ -9,11 +9,12 @@
 //! g_0 = 1, g_{k+1} = y_k,
 //! ```
 //!
-//! and stores `a + b*y_k` as the low and high halves of one `u64`.  This is
-//! the coordinate presentation certified abstractly by the Lean theorems
+//! and stores `a + b*y_k` as the low and high halves of one `u64`. Lean proves
+//! analogous identities for its own abstract tower objects in
 //! `fpGen_quadratic`, `towerPack_towerMulStep`, `fpGen_not_mem_range_all`, and
-//! `towerMul_eq_mul`.  Addition is XOR.  Multiplication is the exact
-//! three-submultiply Fan--Paar/Karatsuba step, with multiplication by the
+//! `towerMul_eq_mul`; those theorems do not certify this Rust representation or
+//! implementation. Addition is XOR. Multiplication uses the selected
+//! three-submultiply Fan--Paar/Karatsuba formula, with multiplication by the
 //! reduction generator implemented as a linear recursion.
 //!
 //! The distinction matters: Lean's `binaryTowerEmbed` and `fpGen` are selected
@@ -22,17 +23,18 @@
 //! equations (GF(4), GF(16), all generator relations, trace separation), not
 //! to the identity of choice-selected Lean values.
 //!
-//! One additive fold pair is included because its formula is already proved in
-//! `Theory.AdditiveNTT`: `friFold`, `friFold_coset_invariant`, and
-//! `friFold_eval_poly`.  It is a field operation only; there are no commitments,
-//! transcript, query schedule, or low-degree-test protocol here.
+//! One additive fold pair transcribes a formula analogous to the one studied in
+//! `Theory.AdditiveNTT`. There is no semantic relation between that Lean model
+//! and this Rust function. It is an arithmetic operation only; there are no
+//! commitments, transcript, query schedule, or low-degree-test protocol here.
 //!
 //! Status and honest residuals:
-//! * `[BTOWER-RUST-UNVERIFIED]`: this representation is unverified compute
-//!   behind generated Lean control. There is no Rust semantics and therefore
-//!   no cross-language semantic relation to state.
+//! * `[BTOWER-RUST-UNVERIFIED]`: this representation and its constants are
+//!   Rust-selected unverified compute. No compiled generated adapter currently
+//!   checks or invokes them, and there is no cross-language semantic relation.
 //! * `[ANTT-butterfly-runtime]`: implemented by the sibling
-//!   `additive_ntt.rs` fast forward/inverse schedule, with a dense oracle.
+//!   `additive_ntt.rs` fast forward/inverse schedule, with a dense native
+//!   reference implementation.
 //! * `[ANTT-protocol-runtime]`: additive commitments, transcript, queries, and
 //!   multi-round FRI integration.  Until those land, this module is arithmetic,
 //!   never an "additive backend".
@@ -128,8 +130,9 @@ impl TowerElem {
         Ok(Self::from_bits(level, 1u64 << high_bit))
     }
 
-    /// The Lean coefficient `towerMulCoeff k : T_k`: `1` at the bottom and
-    /// `fpGen (k-1)` thereafter.
+    /// The Rust coefficient matching the recurrence named `towerMulCoeff` in
+    /// Lean: `1` at the bottom and `fpGen (k-1)` thereafter. No adapter equates
+    /// the resulting coordinate value with Lean's choice-selected object.
     pub fn mul_coefficient(k: u8) -> Result<Self, TowerError> {
         if k == 0 {
             Self::one(0)
@@ -220,8 +223,8 @@ impl TowerElem {
         acc
     }
 
-    /// Multiplicative inverse via `a^(|T_k|-2)`.  Lean proves each tower level
-    /// is a field; the runtime field-law tests exercise the concrete model.
+    /// Multiplicative inverse via `a^(|T_k|-2)`. Lean proves field facts for its
+    /// abstract tower; native tests only exercise this concrete Rust model.
     pub fn inverse(self) -> Result<Self, TowerError> {
         if self.is_zero() {
             return Err(TowerError::DivisionByZero);
@@ -240,7 +243,8 @@ impl TowerElem {
         self.mul(rhs.inverse()?)
     }
 
-    /// Absolute Frobenius-orbit trace, mirroring Lean's `bTrace`.
+    /// Absolute Frobenius-orbit trace using the formula analogous to Lean's
+    /// `bTrace`; no representation relation is established.
     pub fn absolute_trace(self) -> Self {
         let mut term = self;
         let mut acc = Self::from_bits(self.level, 0);

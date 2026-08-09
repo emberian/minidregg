@@ -1,6 +1,8 @@
 //! Fast evaluation/interpolation in the unnormalised LCH novel basis.
 //!
-//! This is the executable counterpart of `Theory.AdditiveNTT.novelBasisTransform`.
+//! This is an unverified native transform whose formula is intended to resemble
+//! `Theory.AdditiveNTT.novelBasisTransform`. No compiled generated adapter or
+//! semantic relation currently connects the two.
 //! Given an ordered GF(2)-independent basis `beta[0..k]`, coefficients are
 //! indexed by a little-endian bit vector and represent
 //!
@@ -21,15 +23,15 @@
 //!
 //! Recursing gives exactly `n log2(n) / 2` butterflies and O(n log n) field
 //! operations.  The inverse reverses the same schedule.  A deliberately slow
-//! dense evaluator is kept as an executable oracle for conformance tests.
+//! dense evaluator is kept as a native reference for internal comparisons.
 //!
 //! This remains isolated arithmetic, not a prover backend.  Honest residuals:
 //!
 //! * `[ANTT-basis-coherence-runtime]`: formally identify this explicit bit
 //!   basis and domain order with Lean's choice-selected `binaryTower` values.
-//! * `[ANTT-RUST-UNVERIFIED]`: the Rust schedule is unverified compute; Lean
-//!   emits the authoritative interface and verifier rather than "refining" Rust
-//!   `novelBasisTransform`/its inverse in a semantics for Rust.
+//! * `[ANTT-RUST-UNVERIFIED]`: the schedule, basis order, and representation are
+//!   Rust-selected unverified compute. No compiled generated adapter currently
+//!   invokes or checks them, and there is no Rust/Lean refinement theorem.
 //! * `[ANTT-protocol-runtime]`: commitments, transcript, query scheduling, and
 //!   multi-round additive-FRI integration are not supplied by this module.
 
@@ -155,9 +157,10 @@ pub fn inverse(
     Ok(output)
 }
 
-/// Directly evaluate the Lean `novelBasisTransform` sum.
+/// Directly evaluate this module's Rust-selected novel-basis sum.
 ///
-/// This is O(n^2 log n), intended only as a small-domain specification oracle.
+/// This is O(n^2 log n), intended only as a small-domain native reference.
+/// Structural resemblance to the Lean definition is not a semantic relation.
 pub fn forward_dense_reference(
     coefficients: &[TowerElem],
     basis: &[TowerElem],
