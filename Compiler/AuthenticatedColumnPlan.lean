@@ -482,9 +482,15 @@ def Phase.ledger : Phase -> Ledger
   | .queryChallenged _ ledger => ledger
   | .openings _ ledger => ledger
 
+/-- The final checker retains the exact proposition decided by its Boolean.
+The proposition is selected by the Lean-authored plan before execution; native
+reply bytes cannot alter it.  Keeping the reflection theorem in the terminal
+object prevents an accepted trace from degenerating into an untyped `true`. -/
 structure FinalChecker (ledger : Ledger) where
   checkerId : Digest
+  Statement : Prop
   check : Bool
+  check_iff : check = true <-> Statement
 
 /-- Native constructors have one fixed `next`; reply bytes do not occur in its
 type.  Only controller-derived challenge values may index a continuation. -/
@@ -691,9 +697,31 @@ structure TerminalAttestation
   transcript : TranscriptState portal
   trace : ExecutionTrace portal transcriptDomain transcript
     ⟨roots, draws, native, openings, edges⟩
-  checkerId : Digest
-  finalCheck : Bool
-  finalAccepted : finalCheck = true
+  checker : FinalChecker ⟨roots, draws, native, openings, edges⟩
+  finalAccepted : checker.check = true
+
+/-- The terminal proposition actually proved by an accepted controller run. -/
+def TerminalAttestation.FinalStatement
+    {State : Type} {portal : GlobalTranscriptPortal State}
+    {transcriptDomain : Digest}
+    {roots : List RootRecord} {draws : List DrawRecord}
+    {native : List NativeRecord} {openings : List OpeningRecord}
+    {edges : List ReprEqRecord}
+    (attestation : TerminalAttestation portal transcriptDomain
+      roots draws native openings edges) : Prop :=
+  attestation.checker.Statement
+
+/-- Acceptance carries semantic evidence, not only a successful Boolean. -/
+theorem TerminalAttestation.finalStatement_proved
+    {State : Type} {portal : GlobalTranscriptPortal State}
+    {transcriptDomain : Digest}
+    {roots : List RootRecord} {draws : List DrawRecord}
+    {native : List NativeRecord} {openings : List OpeningRecord}
+    {edges : List ReprEqRecord}
+    (attestation : TerminalAttestation portal transcriptDomain
+      roots draws native openings edges) :
+    attestation.FinalStatement :=
+  attestation.checker.check_iff.mp attestation.finalAccepted
 
 inductive CheckFailure where
   | nativeReplyRejected (callSlotId : Digest)
@@ -789,8 +817,7 @@ def run
         .verified
           { transcript := state.transcript
             trace := state.trace
-            checkerId := checker.checkerId
-            finalCheck := checker.check
+            checker := checker
             finalAccepted := accepted }
       else .rejected (.finalCheckRejected checker.checkerId)
 
@@ -955,10 +982,15 @@ def transcriptDomain : Digest := id 7280
 
 def finalChecker (ledger : Ledger) : FinalChecker ledger where
   checkerId := id 7290
+  Statement :=
+    ledger.roots.length = 1 ∧ ledger.draws.length = 1 ∧
+      ledger.native.length = 1 ∧ ledger.openings.length = 1 ∧
+      ledger.edges.length = 1
   check := decide
     (ledger.roots.length = 1 ∧ ledger.draws.length = 1 ∧
       ledger.native.length = 1 ∧ ledger.openings.length = 1 ∧
       ledger.edges.length = 1)
+  check_iff := by simp
 
 def plan : Plan transcriptDomain .start :=
   .bindPublic [] <|
