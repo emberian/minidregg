@@ -103,11 +103,26 @@ The first formal substrate is already present in:
   cross-carrier fusion, and relational folds;
 - [`Theory/TypedAuthorization.lean`](Theory/TypedAuthorization.lean): request-indexed evidence,
   attenuation, epochs, ancestry, and revocation;
+- [`Theory/AuthorizationDeclaration.lean`](Theory/AuthorizationDeclaration.lean) and
+  [`Theory/EffectDeclaration.lean`](Theory/EffectDeclaration.lean): first-order executable plans
+  whose successful tokens carry exact-request authority, footprint, and balance proofs;
+- [`Theory/CellState.lean`](Theory/CellState.lean): logical state, canonical materialization, and
+  validated-only patches make root coherence, frame, rejection atomicity, and no-ghost state
+  structural;
 - [`Theory/PrivacyProfile.lean`](Theory/PrivacyProfile.lean): observer-indexed privacy vocabulary;
+- [`Theory/DisclosureDeclaration.lean`](Theory/DisclosureDeclaration.lean) and
+  [`Theory/PrivateComputationDeclaration.lean`](Theory/PrivateComputationDeclaration.lean):
+  same-opening, authorization, named representation bridges, and explicit ZK/MPC/FHE reveal or
+  declassification effects;
 - [`Theory/ReactiveReceipt.lean`](Theory/ReactiveReceipt.lean): frame-preserving receipt deltas,
   dependency-indexed lenses, drafts, and witness cursors;
 - [`Theory/GuardedAdvice.lean`](Theory/GuardedAdvice.lean): guarded external advice without
-  laundering an unproved value into the kernel.
+  laundering an unproved value into the kernel;
+- [`Compiler/SemanticManifest.lean`](Compiler/SemanticManifest.lean),
+  [`Compiler/SemanticArtifactBundle.lean`](Compiler/SemanticArtifactBundle.lean), and
+  [`Compiler/NativeKernelPlan.lean`](Compiler/NativeKernelPlan.lean): content-addressed first-order
+  declaration/phase artifacts and bounded native work whose arbitrary results are checked only by
+  Lean-owned control.
 
 ## Native dialects
 
