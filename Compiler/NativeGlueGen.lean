@@ -7,11 +7,12 @@ three native work-dispatch methods returning a buffer or an error.  It emits no
 validation routine, transcript implementation, statement construction,
 verifier Boolean, policy procedure, or proof/acceptance token.
 
-The complete artifact encoding is carried as its injective `Encodable` natural
-written in decimal.  Selected manifest identifiers and shape counts are also
-projected as data constants for convenient glue integration.  Rust is therefore
-generated plumbing or unverified compute only; all semantic checking remains in
-Lean-owned controllers.
+The complete artifact encoding is rendered through the bundle's existing bounded
+JSON projections and embedded as an escaped string.  In particular, this module
+never materializes `Encodable.encode` of a bundle.  Selected manifest identifiers
+and shape counts are also projected as data constants for convenient glue
+integration.  Rust is therefore generated plumbing or unverified compute only;
+all semantic checking remains in Lean-owned controllers.
 -/
 import Compiler.SemanticArtifactBundle
 
@@ -30,11 +31,41 @@ private def rustDecimalSlice (values : List Nat) : String :=
   let entries := values.map rustDecimal
   "&[" ++ String.intercalate ", " entries ++ "]"
 
+private def rustEscapeChar : Char → String
+  | '"' => "\\\""
+  | '\\' => "\\\\"
+  | '\n' => "\\n"
+  | '\r' => "\\r"
+  | '\t' => "\\t"
+  | character => character.toString
+
+private def rustStringLiteral (value : String) : String :=
+  "\"" ++ String.intercalate "" (value.toList.map rustEscapeChar) ++ "\""
+
+/-- Complete bounded JSON projection of the canonical encoding.  This mirrors
+`SemanticArtifactBundle`'s shared field projections but deliberately omits its
+Gödel-number content-address field, whose concrete evaluation is not a viable
+source-generation representation. -/
+def canonicalPayloadJson (wire : ArtifactBundleEncoding) : Lean.Json :=
+  Lean.Json.mkObj
+    [("schema", Lean.Json.str "minidregg/semantic-artifact-bundle/v1"),
+     ("canonicalEncoding", Lean.Json.str "minidregg/encodable/v1"),
+     ("manifest", manifestToJson wire.manifest),
+     ("authorization", authorizationToJson wire.authorization),
+     ("effects", Lean.Json.arr (wire.effects.map declarationToJson).toArray),
+     ("reactive", declarationToJson wire.reactive),
+     ("disclosure", declarationToJson wire.disclosure),
+     ("phasePlan", Lean.Json.arr
+       (wire.phasePlan.map fun phase => Lean.Json.str phase.name).toArray)]
+
+/-- Exact payload embedded by the generated Rust source. -/
+def canonicalPayloadText (wire : ArtifactBundleEncoding) : String :=
+  (canonicalPayloadJson wire).pretty ++ "\n"
+
 /-- Rust source generated from the closed first-order encoding, rather than from
 the higher-order declaration objects which produced it. -/
 def rustSourceFromEncoding (wire : ArtifactBundleEncoding) : String :=
   let manifest := wire.manifest
-  let canonicalCode := Encodable.encode wire
   let clauseIds := manifest.nativeClauses.map (·.clauseId)
   let codecIds := manifest.codecs.map (·.codecId)
   String.intercalate "\n"
@@ -42,8 +73,8 @@ def rustSourceFromEncoding (wire : ArtifactBundleEncoding) : String :=
      "// Data transport and opaque work dispatch only.",
      "",
      "pub const ARTIFACT_SCHEMA: &str = \"minidregg/semantic-artifact-bundle/v1\";",
-     "pub const ARTIFACT_CANONICAL_CODE_DECIMAL: &str = " ++
-       rustDecimal canonicalCode ++ ";",
+     "pub const ARTIFACT_CANONICAL_PAYLOAD_JSON: &str = " ++
+       rustStringLiteral (canonicalPayloadText wire) ++ ";",
      "pub const MANIFEST_VERSION_DECIMAL: &str = " ++
        rustDecimal manifest.manifestVersion ++ ";",
      "pub const ABI_ID_DECIMAL: &str = " ++ rustDecimal manifest.abiId ++ ";",
@@ -65,12 +96,12 @@ def rustSourceFromEncoding (wire : ArtifactBundleEncoding) : String :=
      "#[derive(Clone, Debug, PartialEq, Eq)]",
      "pub struct CanonicalArtifactDto {",
      "    pub schema: &'static str,",
-     "    pub canonical_code_decimal: &'static str,",
+     "    pub canonical_payload_json: &'static str,",
      "}",
      "",
      "pub const CANONICAL_ARTIFACT: CanonicalArtifactDto = CanonicalArtifactDto {",
      "    schema: ARTIFACT_SCHEMA,",
-     "    canonical_code_decimal: ARTIFACT_CANONICAL_CODE_DECIMAL,",
+     "    canonical_payload_json: ARTIFACT_CANONICAL_PAYLOAD_JSON,",
      "};",
      "",
      "#[derive(Clone, Debug, PartialEq, Eq)]",
