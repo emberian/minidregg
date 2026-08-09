@@ -11,6 +11,7 @@ import Theory.IndexedProgram  -- indexed free programs with response-dependent t
 import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verification, and durable replay refusal
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
+import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
 import Theory.Bignum  -- canonical fixed-width little-endian limbs + proved Nat/Int codec (wide digest/challenge substrate)
 import Theory.CrossModulus  -- one canonical integer with exact quotient/remainder views in two coprime moduli; CRT/range/canonicality seams for RNS/FHE bridges
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
