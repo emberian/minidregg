@@ -41,6 +41,7 @@ import Compiler.AuthenticatedColumnPlan -- typed columns, derived roots, one roo
 import Compiler.AuthenticatedColumnLogupBridge -- a terminal attestation's reflected LogUp statement and authentic first-draw root prefix discharge canonical linkage, Tower arithmetic, root binding, and exact indexed evaluation; PCS/CR/ROM remain explicit
 import Compiler.Tower256CshakeMerkleController -- shared Lean-selected cSHAKE framing, exact logarithmic cube-Merkle openings, Tower256 codec/profile obligations, and arbitrary-native-reply exactness; CR/ROM/PCS remain explicit
 import Compiler.BinaryTower256Profile -- inhabits the Tower256 controller profile with Lean's binaryTower 8 and exact 32-byte codec; no native representation claim
+import Compiler.Tower256NativeByteBoundary -- arbitrary native Tower256 compute returns bytes only; Lean's exact Fan--Paar decoder plus a reflected Lean checker are the sole path to an accepted semantic value
 import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round challenge, additive checkpoint before query challenge, exact Merkle openings, opaque fallible Tower work, and reflected Lean final semantics
 import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exact plan retains its reflected statement and four-root prefix, yielding indexed evaluation from explicit PCS/CR/ROM judgments
 import Compiler.SparseAuthenticatedStateLogupBridge -- exact sparse ROM/RAM/append buses compile to canonical Tower256 lookup indices while retaining Twist-style state continuity and explicit PCS/CR/ROM premises
