@@ -1,151 +1,108 @@
-# The prover: current reference surface and next joins
+# Native compute and proof construction plan
 
-Status: 2026-08-08. This document supersedes the original WGPU-first construction plan. The seven
-old rungs have largely landed in CPU reference form, and the GPU fold is now deliberately optional.
+Status: 2026-08-09. [`PROJECT.md`](../PROJECT.md) is the design constitution and
+[`GOAL.md`](../GOAL.md) is the evidence ledger. This file tracks only the boundary between
+Lean-owned proof control and unverified native computation.
 
-## What exists
+## Authority rule
 
-The `prover/` crate is **unverified compute downstream of the verified emit seam**. It consumes a
-`ConstraintDescriptor` produced by `Compiler/Emit.lean`; it does not author an AIR. Lean proves
-`emit_faithful`. Rust has no semantics in this project; native tests are only engineering evidence
-for unverified compute, whose outputs Lean-owned control must recheck.
+Rust has no semantics in this project. There is therefore no Rust “implementation” of a Lean
+semantics and no refinement theorem to seek. Lean owns:
 
-The crate contains:
+- the typed request, authorization, effects, state transition, disclosure, and receipt relation;
+- manifest and codec identifiers;
+- proof statements and native-clause registry;
+- phase and transcript order, challenges, and query schedule;
+- all descriptor/root/result comparisons; and
+- the only constructors for verified turns, releases, clauses, and history heads.
 
-- JSON descriptor parsing and validation;
-- deterministic trace generation and a mirror of `descriptorHolds`;
-- a Poseidon2-shaped demo permutation and Merkle commitments;
-- multilinear sumcheck and the descriptor gate-defect reduction;
-- BabyBear⁴ arithmetic, multiplicative FRI folding, commitments, query openings, and final checks;
-- a Fiat–Shamir transcript with Lean-authored conformance vectors;
-- proved Lean Ext6 factored-gate relations awaiting a Lean-owned executable controller; the former
-  handwritten native gate-verifier family was deleted;
-- a separate executable mirror of Loom's linear accumulator algebra; and
-- explicit Fan--Paar binary-tower arithmetic through `GF(2^64)`, fast additive NTT, and byte-native
-  hash/Merkle compute. The former handwritten sampled-FRI/OOD/evaluation-history admission stack was
-  deleted after its claimed degree bound was found unenforced.
+Native code receives a generated plan plus bounded buffers and returns candidate data or an
+engineering error. `Compiler.NativeKernelPlan.arbitraryRunner_integrity` and
+`Compiler.SemanticController.arbitraryOracle_integrity` are the present theorem shape: successful
+Lean control implies the Lean relations for every possible native response, without an honesty,
+determinism, or conformance premise.
 
-The deleted reference protocol performed:
+## Surviving native surface
 
-```text
-descriptor + assignment
-    -> satisfying trace
-    -> trace root
-    -> transcript-derived gate batching and sumcheck
-    -> deterministic RS encoding of the trace
-    -> transcript-derived FRI folds and queries
-    -> final-word and opening checks
-```
+The `prover/` crate has been reduced to:
 
-That flow is retained only as historical architecture context. Its Rust-owned transcript and final
-acceptance were not an admissible authority boundary.
+| Module | Allowed role |
+|---|---|
+| `field4`, `field6` | finite-field arithmetic on caller-selected canonical buffers |
+| `binary_tower`, `binary_tower_256` | Fan--Paar tower arithmetic |
+| `additive_ntt` | caller-parameterized additive transform arithmetic |
+| `fri` | one multiplicative fold kernel with caller-supplied schedule |
+| `mle_kernels` | Möbius, MLE, reversed-LCH, coefficient/word folds, linear dot |
+| `gate_kernels` | emitted-op residual arithmetic and caller-driven affine/quadratic folds |
+| `logup256_kernels` | incidence, equality weights, fraction trees, round messages, interpolation |
+| `hash_kernels` | caller-parameterized cSHAKE framing, tree construction, path/root recomputation |
+| `trace` | candidate wire generation only |
+| `descriptor` | temporary data-only JSON transport DTO |
+| `gpu` / `fri_fold_bench` | optional downstream fold experiment |
 
-## What that does not mean
+There is no surviving native proof object, prover/verifier API, transcript state machine, suite
+selector, statement validator, descriptor-acceptance predicate, or final verification Boolean.
+Hash customization strings, domains, frame tags, root widths, and expected-root equality belong to
+the generated Lean artifact and controller.
 
-The deleted `ReferenceProof` contained the whole trace. Verification was linear in the trace and
-full RS word. The path was therefore:
+## Deleted authority islands
 
-- **non-succinct**;
-- **non-zero-knowledge**;
-- a deleted demo/reference implementation rather than a production prover; and
-- unverified Rust, even where its behavior is conformance-matched to Lean objects.
+The following handwritten native families were deliberately deleted after their arithmetic was
+extracted where useful:
 
-The reference permutation parameters are intentionally small demo/conformance parameters.
-`[PROVER-poseidon-params]` / `[AIR-poseidon-params]` still names selection and analysis of a real
-parameter set. `[PROVER-digest-width]` is now closed at the runtime representation layer: every
-Merkle root and authentication sibling is a nine-limb canonical BabyBear `Digest`, and transcripts
-absorb a fixed-width, domain-separated encoding. The carrier has more than 248 bits of range, but
-range is not collision resistance. `Compiler.WideDigestAir` now pins the matching fixed-width
-encoding through emit. `[COMMIT-CR]`, production permutation/capacity analysis, raw-byte canonical
-decoding, and wire-sharing composition with the recursive sponge/full verifier remain load-bearing.
+- one-call reference prover/verifier and benchmark;
+- semantic turn/receipt/history/lookup adapters;
+- committed and generic accumulator verifiers;
+- sampled additive FRI, OOD, evaluation, and binary-history admission;
+- Ext6 gate, sumcheck, trace-functional, and MLE-terminal proof protocols;
+- Tower256 LogUp statement/transcript/proof/verifier;
+- binary and Ext6 transcript implementations;
+- legacy Poseidon/wide-digest commitment verifier; and
+- Rust-side descriptor satisfaction and Merkle equality verdicts.
 
-The historical one-call implementation was deleted. Native GF(2) arithmetic, transform, and
-byte-native hash/Merkle kernels remain, but no sampled
-binary FRI/OOD verifier is currently admissible. Lean-emitted rate-aware control must replace the
-deleted handwritten stack before a binary light-client proof returns.
+The sampled additive branch was not removed merely for architectural cleanliness: its verifier
+never enforced the advertised coefficient bound, so it was not an LDT and allowed a false OOD
+claim through a pointwise quotient. It stays absent until Lean-generated rate-aware control is
+joined to the proved additive theorem.
 
-## Accumulator boundary
+## Lean-owned control spine
 
-The handwritten native claim algebra and exhaustive committed-accumulator verifier were deleted.
-Loom owns batching, folding, extraction, and depth composition. The next implementation is the real
-outer accumulator/decider under Lean-owned transcript and statement control, not another Rust
-reference verifier.
+The active spine is:
 
-## WGPU is an optional experiment
+1. `Theory.IndexedProgram`, `TypedAuthorization`, `AuthorizationDeclaration`,
+   `EffectDeclaration`, `CellState`, `ReactiveController`, `DisclosureDeclaration`, and
+   `PrivateComputationDeclaration` declare the semantic machine.
+2. `Compiler.SemanticManifest` pins content-addressed codecs, carrier profiles, named bridges,
+   native clauses, dimensions, and bounds.
+3. `Compiler.SemanticArtifactBundle` emits first-order declaration and phase data.
+4. `Compiler.BignumKernelABI` and `NativeKernelPlan` schedule bounded computation whose result is
+   checked only by Lean relations.
+5. `Compiler.SemanticController` constructs the current verified frame-nucleus token against an
+   arbitrary oracle. Its scope must be extended to manifest-closed native clauses and the full
+   typed receipt header.
 
-The `wgpu-fold` Cargo feature contains a BabyBear⁴ WGSL fold adopted into this crate and tested for
-bit-for-bit agreement with the CPU fold. It is useful performance and conformance evidence, but:
+## Ordered proof-system joins
 
-- default builds do not depend on WGPU;
-- the deleted reference composition was CPU-only;
-- only the fold is accelerated, not the surrounding PCS/protocol; and
-- no future protocol is required to preserve this kernel or its data layout.
+1. **Generated codec and dispatch.** Materialize a concrete artifact bundle and generate the
+   native DTO/dispatcher from it. The temporary handwritten descriptor DTO then disappears.
+2. **Rate-aware additive controller.** Instantiate `AdditiveFriQuery` with generated roots-before-
+   challenge order, caller-independent rate data, parameterized cSHAKE/Merkle kernels, and exact
+   root comparisons in Lean.
+3. **Gate commitment/LDT.** Extend the proved seven-operand/eta algebra with generated commitment,
+   transcript, subfield, proximity, and final-LDT control. No native gate verifier is revived.
+4. **Lookup clause.** Emit the `LogupIndexLink` relation and drive only the extracted Tower256
+   arithmetic kernels; then extend indexed lookup to the chosen mutable RAM relation.
+5. **Outer history accumulator.** Instantiate a WARP/FACS-shaped accumulator, decider, and
+   extractor directly over the typed semantic receipt relation. A hash chain is not an
+   accumulator.
+6. **Privacy and FHE.** Join hiding/ZK adapters and the exact BFV signed-limb/carry equations under
+   the same request, representation, disclosure, and receipt identity.
+7. **Final compression and benchmarks.** Only after one real history path exists, select the final
+   light-client compressor and measure the protocol at its exact proved rate and security regime.
 
-The project can rewrite or delete this path when additive FRI, a different field, or a better
-prover architecture warrants it.
+## Performance discipline
 
-## Security labels
-
-Do not attach the formal 137-bit candidate to this runtime. `ErrorBudget120` uses one
-`BabyBear^6` cardinality for every challenge term and adds a 20-bit PoW price. The reference gate
-sumcheck uses base BabyBear, FRI uses BabyBear⁴, and the transcript has no nonce rule. `PowGrinding`
-proves the independent ideal-coordinate counting core, not that the demo sponge realizes those
-coordinates in one shared ROM execution.
-
-The older 55-bit BabyBear⁴ formula is also a theorem about named component interfaces and a threat
-model, not a claim that demo hash parameters make the current executable a 55-bit production
-system.
-
-## Next implementation joins
-
-The highest-value next steps are protocol joins, not GPU preservation:
-
-1. **Succinct gate-to-LDT linkage:** replace the clear trace with committed wire/selector openings
-   and a sound terminal claim. **Landed at sampled resolution:** the verifier receives no trace or
-   defect table. Remaining: proximity/subfield/CR/ROM composition, refinement, and final LDT join.
-2. **Additive refinement:** connect the running binary suite to the proved characteristic-two
-   adaptive/coherent theorem and its cryptographic assumptions.
-3. **Accumulator protocol:** generalize the fixed evaluation-channel append to receipt-native
-   functionals, then connect it to the staged RBR extractor and final compression.
-4. **Deployed ZK:** instantiate hiding committed-word-knowledge proofs and discharge the staged
-   roots-before-query game's shared-ROM fresh/hit/sampling ports.
-5. **One light-client proof:** the gate/binary conjunction now exists. Replace its separate component
-   schedules with the shared-ROM RBR/extractor/final-compression protocol before performance
-   promotion.
-6. **Concrete cryptography:** select real permutation parameters, connect the landed wide runtime
-   digest to the verifier AIR, define optional PoW nonce semantics, then prove the shared-ROM and
-   commitment-security bridges.
-7. **Field-consistent budget:** price the exact fields and challenge coordinates the implementation
-   uses, including base-field sumcheck if retained.
-
-## Performance gates
-
-The intended performance target is not “beat every Plonky3 configuration.” It is receipt-native,
-binary/word-heavy proof-carrying history: cheap incremental folds, low memory traffic, horizontal
-scaling, and one final compression. The additive backend should not be promoted to the main path
-until reproducible benchmarks show:
-
-1. fewer constraints and bytes moved on a native receipt/hash workload;
-2. append cost and peak memory that remain well behaved with history depth;
-3. useful multicore and multi-machine scaling;
-4. competitive final proof size and light-client verification after compression; and
-5. results measured at the exact proved rate/security regime, not an optimistic conjectural one.
-
-Measurements, commands, hardware, and interpretation live in
-[`docs/PERFORMANCE.md`](PERFORMANCE.md). The first entry is the full-trace reference baseline, not a
-claim of competitiveness.
-
-## Tests
-
-```sh
-cd prover
-cargo test
-
-# Optional hardware path. Tests skip if no compatible adapter is present.
-cargo test --features wgpu-fold
-cargo run --release --features wgpu-fold --bin fri_fold_bench
-```
-
-The tests are designed to have teeth—mutated public inputs, trace roots, sumcheck messages, FRI
-roots, openings, and final words reject—but they remain executable evidence, not machine-checked
-Rust correctness.
+Optimization begins from the selected proof path. Native kernels may be SIMD/GPU/distributed and
+may have diagnostic vector tests, but benchmark or verification matrices are not completion gates
+for semantic work. The opt-in WGPU fold is disposable. Historical measurements are archived in
+[`PERFORMANCE.md`](PERFORMANCE.md) and are not current runnable-protocol claims.

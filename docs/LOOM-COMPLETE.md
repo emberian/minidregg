@@ -8,8 +8,9 @@ honest claim is narrower:
 
 > Loom contains machine-checked protocol, compiler, proximity, accumulation, and game-theoretic
 > chains at explicit abstract interfaces. It does not give Rust a semantics, and therefore contains
-> no theorem relating native execution to Lean beyond Lean-side checks of native outputs. It also does not yet contain a proved connection from the
-> running Rust reference prover to one succinct, zero-knowledge, deployment-parameterized theorem.
+> no theorem relating native execution to Lean beyond Lean-side checks of native outputs. The old
+> Rust proof/verifier protocols were deleted; the project does not yet contain one succinct,
+> zero-knowledge, deployment-parameterized end-to-end theorem under generated Lean control.
 
 That distinction is the organizing principle below.
 

@@ -198,7 +198,7 @@ soundness claim.
 | `Compiler/` | AIR DSL, flattening, gadgets, emit/serialization, and verifier components. |
 | `Assurance/` | Cross-layer statements, manifests, and explicit security budgets. |
 | `Kernel/`, `Effects/`, `Pred/` | The proof-native application/computation substrate. |
-| `prover/` | Unverified Rust reference compute plus the opt-in WGPU fold experiment. |
+| `prover/` | Unverified, caller-parameterized arithmetic/transform/hash kernels plus the opt-in WGPU fold experiment. |
 
 ## Build and test
 
@@ -219,5 +219,5 @@ GPU tests skip cleanly when no compatible adapter is available.
 1. [`GOAL.md`](GOAL.md) — the live theorem/residual ledger.
 2. [`docs/LOOM-COMPLETE.md`](docs/LOOM-COMPLETE.md) — what “complete” means at each proof resolution.
 3. [`Assurance/LoomV0Manifest.lean`](Assurance/LoomV0Manifest.lean) — the machine-checked v0 index.
-4. [`docs/PROVER-PLAN.md`](docs/PROVER-PLAN.md) — the current reference-prover surface and its next bridges.
+4. [`docs/PROVER-PLAN.md`](docs/PROVER-PLAN.md) — the current native-kernel boundary and ordered Lean-control joins.
 5. [`ATLAS.md`](ATLAS.md) — architecture and design history.
