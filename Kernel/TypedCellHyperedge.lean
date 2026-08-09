@@ -390,9 +390,8 @@ def toHyperedge (commit : Commit law declaration) :
     exact commit.apexExact
   balanced := by
     funext coordinate
-    change (∑ incidence,
-      law.delta (declaration.legs incidence) coordinate) = 0
-    exact congrFun commit.aggregateBalanced coordinate
+    simpa only [halfEdge, Declaration.aggregateDelta, Finset.sum_apply,
+      Pi.zero_apply] using congrFun commit.aggregateBalanced coordinate
 
 @[simp] theorem hyperedge_apex (commit : Commit law declaration) :
     commit.toHyperedge.tid = declaration.apex :=
@@ -429,6 +428,16 @@ adapter.
 -/
 
 namespace LegacyAdapter
+
+local instance effectSchemaFieldDecidableEq :
+    DecidableEq Minidregg.Theory.DeclaredTurn.effectSchema.Field := by
+  change DecidableEq Minidregg.Theory.EffectDeclaration.StateKey
+  infer_instance
+
+local instance effectSchemaResourceDecidableEq :
+    DecidableEq Minidregg.Theory.DeclaredTurn.effectSchema.Resource := by
+  change DecidableEq Empty
+  infer_instance
 
 variable
     {legacyMaterializer : CellState.Materializer
