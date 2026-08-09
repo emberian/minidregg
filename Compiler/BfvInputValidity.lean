@@ -217,6 +217,7 @@ theorem every_row_call_uses_shared_identity {statement : InputStatement}
     (batch.rowCall rowIndex).callReference.rootId = statement.reference.rootId := by
   rw [(batch.rowCall rowIndex).row_reference_eq,
     (batch.rowCall rowIndex).call_reference_eq]
+  simp
 
 /-- Pairwise form: any two accepted rows/calls have the same complete witness reference. -/
 theorem row_call_references_pairwise_equal {statement : InputStatement}
@@ -227,6 +228,7 @@ theorem row_call_references_pairwise_equal {statement : InputStatement}
     (batch.rowCall i).rowReference = (batch.rowCall j).callReference := by
   rw [(batch.rowCall i).row_reference_eq, (batch.rowCall j).row_reference_eq,
     (batch.rowCall i).call_reference_eq, (batch.rowCall j).call_reference_eq]
+  simp
 
 /-- Consequently every generated row names the same collective key, ciphertext set,
 message table, parameter set, and relation digest. -/
@@ -246,6 +248,7 @@ theorem every_row_uses_statement_public_inputs {statement : InputStatement}
     (batch.rowCall rowIndex).source.publicInputs.relationDigest =
         statement.reference.publicInputs.relationDigest := by
   rw [(batch.rowCall rowIndex).source_eq]
+  simp [InputStatement.equationSource]
 
 /-- Accepted call means the existing nested descriptor holds; identity metadata adds no
 second acceptance relation. -/
@@ -268,12 +271,15 @@ end AcceptedBatch
 
 /-! ## Small exact table teeth -/
 
-example : (optionIndex (7 : Fin kindCount) (15 : Fin quantityCount)).val = 127 := by decide
+example : (optionIndex ⟨7, by norm_num [kindCount]⟩
+    ⟨15, by norm_num [quantityCount]⟩).val = 127 := by decide
 
-example : semanticSlotValue (2 : Fin kindCount) (5 : Fin quantityCount) =
+example : semanticSlotValue ⟨2, by norm_num [kindCount]⟩
+    ⟨5, by norm_num [quantityCount]⟩ =
     ![5, 5, 5, 0, 0, 0, 0, 0, 42] := by decide
 
-example : semanticSlotValue (6 : Fin kindCount) (3 : Fin quantityCount) =
+example : semanticSlotValue ⟨6, by norm_num [kindCount]⟩
+    ⟨3, by norm_num [quantityCount]⟩ =
     ![0, 0, 0, 0, 0, 0, 3, 3, 30] := by decide
 
 #print axioms ValidCommittedWitness.selector_boolean
