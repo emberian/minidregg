@@ -28,8 +28,8 @@ hotspots afterward.
 - **Accumulation — proved algebra, no authoritative native history:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
   quadratic language is iff a genuine `ReceiptDelta` and folds valid words through `AccClaim`.
-  Handwritten native history objects are non-authoritative prototypes scheduled for deletion; the
-  full typed relation and WARP/FACS outer accumulator, decider, extraction, and hiding join remain.
+  Handwritten native receipt/history objects have been deleted; the full typed relation and
+  WARP/FACS outer accumulator, decider, extraction, and hiding join remain.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate

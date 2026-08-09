@@ -139,8 +139,8 @@ A receipt binds at least:
   explicitly a charged committed transition);
 - prior receipt/history links and verifiable finality when finality is claimed.
 
-The canonical heterogeneous ABI is being moved from the former handwritten
-`prover/src/semantic_receipt.rs` prototype into a Lean-owned `SemanticManifest`. Native code will
+The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its replacement is a
+Lean-owned `SemanticManifest`: native code will
 receive bounded calls and return data; it will not construct or verify receipt meaning.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first

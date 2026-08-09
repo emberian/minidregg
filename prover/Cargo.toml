@@ -7,8 +7,8 @@ description = "Unverified prover for minidregg: reads the ConstraintDescriptor e
 [features]
 default = []
 # Historical BabyBear⁴/WGSL fold experiment.  It is deliberately outside the
-# protocol core: the reference prover is CPU-only, and future acceleration is
-# chosen for the protocol actually deployed rather than inherited from it.
+# generated protocol core; future acceleration is chosen for the protocol
+# actually deployed rather than inherited from this experiment.
 wgpu-fold = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dependencies]
