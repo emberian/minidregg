@@ -79,7 +79,7 @@ structure Clause
     (manifest : Manifest)
     (S : ∀ n, BindingCommitment (Root n) F
       (AdditiveFriLevels ell n) (Op n)) where
-  declaration : NativeClauseDecl
+  declaration : DialectClauseDecl
   manifestUnique : manifest.ClauseIdsUnique
   registered : manifest.lookupClause declaration.clauseId = some declaration
   controllerExact :
@@ -139,7 +139,7 @@ theorem roundBasis_exact (clause : BoundClause) (round : Nat) :
 
 /-- The manifest registry determines the declaration uniquely. -/
 theorem declaration_unique (clause : BoundClause)
-    {other : NativeClauseDecl}
+    {other : DialectClauseDecl}
     (found : manifest.lookupClause clause.declaration.clauseId = some other) :
     other = clause.declaration :=
   manifest.lookupClause_unique clause.manifestUnique found clause.registered

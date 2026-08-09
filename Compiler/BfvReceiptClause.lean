@@ -195,7 +195,7 @@ deriving DecidableEq, Repr
 
 /-- First-order clause pin.  Zero proof/controller pins are deliberate sentinels, not
 claims of a proof system.  Admission below still requires the proof-relevant AIR token. -/
-def bfvClauseDecl : NativeClauseDecl where
+def bfvClauseDecl : DialectClauseDecl where
   clauseId := bfvClauseId
   relationId := bfvRelationId
   carrierProfileId := bfvResidueCarrierId
@@ -206,7 +206,7 @@ def bfvClauseDecl : NativeClauseDecl where
   requiredBridgeIds := []
 
 structure ClausePin where
-  declaration : NativeClauseDecl
+  declaration : DialectClauseDecl
   proofSuiteStatus : ProofSuiteStatus
 
 def bfvClausePin : ClausePin := ⟨bfvClauseDecl, .unassigned⟩
@@ -222,7 +222,7 @@ theorem bfvClausePin_unassigned :
 Closure additionally requires an eventual concrete statement codec, carrier profile, and
 proof-suite/controller selection. -/
 def register (manifest : Manifest) : Manifest :=
-  { manifest with nativeClauses := bfvClauseDecl :: manifest.nativeClauses }
+  { manifest with dialectClauses := bfvClauseDecl :: manifest.dialectClauses }
 
 theorem lookup_register (manifest : Manifest) :
     (register manifest).lookupClause bfvClauseId = some bfvClauseDecl := by

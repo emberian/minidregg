@@ -23,7 +23,7 @@ import Compiler.GateFactoredExt6 -- seven sparse selector operands give the exac
 import Compiler.GateTraceRelationExt6 -- extends eta aggregation to the entire public prefix and zero padding, and proves the exact Ext6 subfield-evaluation bound behind sampled base-limb checks
 import Compiler.NextgenLightClientPublicInputs -- exact current binary light-client public schema: consuming decoder round-trip/injectivity, canonical BabyBear cells, exact framed length, and public-prefix uniqueness; handwritten native code remains unverified
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
-import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed native-clause registry, and history/admission bindings
+import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
 import Compiler.DeclaredEffectArtifact -- first-order effect artifact projected from the target-indexed Theory.EffectDeclaration, including the concrete v1 account move
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners return bounded data and cannot choose continuation or acceptance

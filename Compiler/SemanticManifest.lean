@@ -1,7 +1,7 @@
 /-
 # Compiler.SemanticManifest -- content-addressed proof-native ABI declaration
 
-This module is the first-order control manifest shared by every native proof dialect.
+This module is the first-order control manifest shared by every receipt proof dialect.
 It deliberately contains no executor, verifier callback, field coercion, or generic
 cross-carrier cast.  A carrier profile only pins representation parameters.  Movement
 between profiles is permitted only by naming a manifest-registered bridge relation.
@@ -14,7 +14,7 @@ deployment hash suite may hash the same value while retaining the theorem below 
 pre-hash canonicality boundary.
 
 `AdmissionContext` binds the complete request and every root needed before a semantic
-turn can be admitted.  Its well-formedness predicate closes native clause roots against
+turn can be admitted.  Its well-formedness predicate closes dialect clause roots against
 the manifest registry and enforces the genesis/history and rejected-turn atomicity
 conditions.  The request itself reuses `AuthorizationDeclaration`'s kind-restoring
 codec, rather than defining a second request wire format.
@@ -89,9 +89,10 @@ structure NamedBridgeRequirement where
   targetCodecId : Digest
 deriving DecidableEq, Repr
 
-/-- One verifier-owned native clause.  Required bridges are references into the
-manifest bridge registry, never caller-supplied conversion procedures. -/
-structure NativeClauseDecl where
+/-- One semantic receipt dialect relation.  Required bridges are references into the
+manifest bridge registry, never caller-supplied conversion procedures or native
+semantics. -/
+structure DialectClauseDecl where
   clauseId : Digest
   relationId : Digest
   carrierProfileId : Digest
@@ -112,7 +113,7 @@ structure Manifest where
   codecs : List CodecPin
   carriers : List CarrierProfile
   bridges : List NamedBridgeRequirement
-  nativeClauses : List NativeClauseDecl
+  dialectClauses : List DialectClauseDecl
   transcriptControllerDigest : Digest
   dimensions : List DimensionPin
   bounds : List BoundPin
@@ -232,7 +233,7 @@ def NamedBridgeEncoding.decode (wire : NamedBridgeEncoding) : NamedBridgeRequire
     (bridge : NamedBridgeRequirement) : bridge.canonicalEncoding.decode = bridge := by
   cases bridge <;> rfl
 
-structure NativeClauseEncoding where
+structure DialectClauseEncoding where
   clauseId : Nat
   relationId : Nat
   carrierProfileId : Nat
@@ -243,22 +244,22 @@ structure NativeClauseEncoding where
   requiredBridgeIds : List Nat
 deriving DecidableEq, Repr, Encodable
 
-def NativeClauseDecl.canonicalEncoding (clause : NativeClauseDecl) :
-    NativeClauseEncoding :=
+def DialectClauseDecl.canonicalEncoding (clause : DialectClauseDecl) :
+    DialectClauseEncoding :=
   ⟨clause.clauseId.value, clause.relationId.value, clause.carrierProfileId.value,
     clause.statementCodecId.value, clause.proofCodecId.value,
     clause.proofSuiteId.value, clause.verifierControllerDigest.value,
     clause.requiredBridgeIds.map Digest.value⟩
 
-def NativeClauseEncoding.decode (wire : NativeClauseEncoding) : NativeClauseDecl :=
+def DialectClauseEncoding.decode (wire : DialectClauseEncoding) : DialectClauseDecl :=
   ⟨⟨wire.clauseId⟩, ⟨wire.relationId⟩, ⟨wire.carrierProfileId⟩,
     ⟨wire.statementCodecId⟩, ⟨wire.proofCodecId⟩, ⟨wire.proofSuiteId⟩,
     ⟨wire.verifierControllerDigest⟩, wire.requiredBridgeIds.map Digest.mk⟩
 
-@[simp] theorem NativeClauseEncoding.decode_canonicalEncoding
-    (clause : NativeClauseDecl) : clause.canonicalEncoding.decode = clause := by
+@[simp] theorem DialectClauseEncoding.decode_canonicalEncoding
+    (clause : DialectClauseDecl) : clause.canonicalEncoding.decode = clause := by
   cases clause
-  simp [NativeClauseDecl.canonicalEncoding, NativeClauseEncoding.decode,
+  simp [DialectClauseDecl.canonicalEncoding, DialectClauseEncoding.decode,
     Function.comp_def]
 
 structure ManifestEncoding where
@@ -270,7 +271,7 @@ structure ManifestEncoding where
   codecs : List CodecPinEncoding
   carriers : List CarrierProfileEncoding
   bridges : List NamedBridgeEncoding
-  nativeClauses : List NativeClauseEncoding
+  dialectClauses : List DialectClauseEncoding
   transcriptControllerDigest : Nat
   dimensions : List DimensionPinEncoding
   bounds : List BoundPinEncoding
@@ -285,7 +286,7 @@ def Manifest.canonicalEncoding (manifest : Manifest) : ManifestEncoding where
   codecs := manifest.codecs.map CodecPin.canonicalEncoding
   carriers := manifest.carriers.map CarrierProfile.canonicalEncoding
   bridges := manifest.bridges.map NamedBridgeRequirement.canonicalEncoding
-  nativeClauses := manifest.nativeClauses.map NativeClauseDecl.canonicalEncoding
+  dialectClauses := manifest.dialectClauses.map DialectClauseDecl.canonicalEncoding
   transcriptControllerDigest := manifest.transcriptControllerDigest.value
   dimensions := manifest.dimensions.map DimensionPin.canonicalEncoding
   bounds := manifest.bounds.map BoundPin.canonicalEncoding
@@ -299,7 +300,7 @@ def ManifestEncoding.decode (wire : ManifestEncoding) : Manifest where
   codecs := wire.codecs.map CodecPinEncoding.decode
   carriers := wire.carriers.map CarrierProfileEncoding.decode
   bridges := wire.bridges.map NamedBridgeEncoding.decode
-  nativeClauses := wire.nativeClauses.map NativeClauseEncoding.decode
+  dialectClauses := wire.dialectClauses.map DialectClauseEncoding.decode
   transcriptControllerDigest := ⟨wire.transcriptControllerDigest⟩
   dimensions := wire.dimensions.map DimensionPinEncoding.decode
   bounds := wire.bounds.map BoundPinEncoding.decode
@@ -326,7 +327,7 @@ theorem Manifest.contentAddress_injective :
   apply Encodable.encode_injective
   exact congrArg Digest.value h
 
-/-! ## Closed registries and unique native clause lookup -/
+/-! ## Closed registries and unique dialect clause lookup -/
 
 def Manifest.lookupCodec (manifest : Manifest) (codecId : Digest) : Option CodecPin :=
   manifest.codecs.find? fun codec => decide (codec.codecId = codecId)
@@ -340,8 +341,8 @@ def Manifest.lookupBridge (manifest : Manifest) (bridgeId : Digest) :
   manifest.bridges.find? fun bridge => decide (bridge.bridgeId = bridgeId)
 
 def Manifest.lookupClause (manifest : Manifest) (clauseId : Digest) :
-    Option NativeClauseDecl :=
-  manifest.nativeClauses.find? fun clause => decide (clause.clauseId = clauseId)
+    Option DialectClauseDecl :=
+  manifest.dialectClauses.find? fun clause => decide (clause.clauseId = clauseId)
 
 def Manifest.CodecIdsUnique (manifest : Manifest) : Prop :=
   (manifest.codecs.map CodecPin.codecId).Nodup
@@ -353,7 +354,7 @@ def Manifest.BridgeIdsUnique (manifest : Manifest) : Prop :=
   (manifest.bridges.map NamedBridgeRequirement.bridgeId).Nodup
 
 def Manifest.ClauseIdsUnique (manifest : Manifest) : Prop :=
-  (manifest.nativeClauses.map NativeClauseDecl.clauseId).Nodup
+  (manifest.dialectClauses.map DialectClauseDecl.clauseId).Nodup
 
 /-- Registry closure: every referenced carrier, codec, and named bridge is declared in
 this same manifest. -/
@@ -361,7 +362,7 @@ structure Manifest.WellFormed (manifest : Manifest) : Prop where
   codecIdsUnique : manifest.CodecIdsUnique
   carrierIdsUnique : manifest.CarrierIdsUnique
   bridgeIdsUnique : manifest.BridgeIdsUnique
-  clauseIdsUnique : manifest.ClauseIdsUnique
+  dialectClauseIdsUnique : manifest.ClauseIdsUnique
   receiptCodecClosed : exists codec,
     manifest.lookupCodec manifest.receiptCodecId = some codec
   mpcBasesClosed : forall profile,
@@ -376,8 +377,8 @@ structure Manifest.WellFormed (manifest : Manifest) : Prop where
       (exists target, manifest.lookupCarrier bridge.targetCarrierId = some target) /\
       (exists sourceCodec, manifest.lookupCodec bridge.sourceCodecId = some sourceCodec) /\
       (exists targetCodec, manifest.lookupCodec bridge.targetCodecId = some targetCodec)
-  clausesClosed : forall clause,
-    clause ∈ manifest.nativeClauses ->
+  dialectClausesClosed : forall clause,
+    clause ∈ manifest.dialectClauses ->
       (exists carrier, manifest.lookupCarrier clause.carrierProfileId = some carrier) /\
       (exists statementCodec,
         manifest.lookupCodec clause.statementCodecId = some statementCodec) /\
@@ -386,9 +387,9 @@ structure Manifest.WellFormed (manifest : Manifest) : Prop where
         exists bridge, manifest.lookupBridge bridgeId = some bridge
 
 theorem Manifest.lookupClause_some_closed
-    {manifest : Manifest} {clauseId : Digest} {clause : NativeClauseDecl}
+    {manifest : Manifest} {clauseId : Digest} {clause : DialectClauseDecl}
     (found : manifest.lookupClause clauseId = some clause) :
-    clause ∈ manifest.nativeClauses /\ clause.clauseId = clauseId := by
+    clause ∈ manifest.dialectClauses /\ clause.clauseId = clauseId := by
   have hfind := (List.find?_eq_some_iff_append).mp found
   refine ⟨?_, of_decide_eq_true hfind.1⟩
   rcases hfind.2 with ⟨before, after, hlist, _⟩
@@ -396,8 +397,8 @@ theorem Manifest.lookupClause_some_closed
   simp
 
 private theorem clause_eq_of_unique_ids
-    {clauses : List NativeClauseDecl} {left right : NativeClauseDecl}
-    (unique : (clauses.map NativeClauseDecl.clauseId).Nodup)
+    {clauses : List DialectClauseDecl} {left right : DialectClauseDecl}
+    (unique : (clauses.map DialectClauseDecl.clauseId).Nodup)
     (leftMem : left ∈ clauses) (rightMem : right ∈ clauses)
     (sameId : left.clauseId = right.clauseId) : left = right := by
   induction clauses generalizing left right with
@@ -412,7 +413,7 @@ private theorem clause_eq_of_unique_ids
           rfl
         · exfalso
           have rightIdMem : right.clauseId ∈
-              tail.map NativeClauseDecl.clauseId :=
+              tail.map DialectClauseDecl.clauseId :=
             List.mem_map.mpr ⟨right, rightTail, rfl⟩
           rw [← sameId] at rightIdMem
           exact headFresh rightIdMem
@@ -420,7 +421,7 @@ private theorem clause_eq_of_unique_ids
         · subst right
           exfalso
           have leftIdMem : left.clauseId ∈
-              tail.map NativeClauseDecl.clauseId :=
+              tail.map DialectClauseDecl.clauseId :=
             List.mem_map.mpr ⟨left, leftTail, rfl⟩
           rw [sameId] at leftIdMem
           exact headFresh leftIdMem
@@ -430,15 +431,15 @@ private theorem clause_eq_of_unique_ids
 registered declaration. -/
 theorem Manifest.registeredClause_unique
     {manifest : Manifest} (unique : manifest.ClauseIdsUnique)
-    {left right : NativeClauseDecl}
-    (leftMem : left ∈ manifest.nativeClauses)
-    (rightMem : right ∈ manifest.nativeClauses)
+    {left right : DialectClauseDecl}
+    (leftMem : left ∈ manifest.dialectClauses)
+    (rightMem : right ∈ manifest.dialectClauses)
     (sameId : left.clauseId = right.clauseId) : left = right :=
   clause_eq_of_unique_ids unique leftMem rightMem sameId
 
 theorem Manifest.lookupClause_unique
     {manifest : Manifest} (unique : manifest.ClauseIdsUnique)
-    {clauseId : Digest} {left right : NativeClauseDecl}
+    {clauseId : Digest} {left right : DialectClauseDecl}
     (leftFound : manifest.lookupClause clauseId = some left)
     (rightFound : manifest.lookupClause clauseId = some right) : left = right := by
   obtain ⟨leftMem, leftId⟩ := Manifest.lookupClause_some_closed leftFound
@@ -453,8 +454,8 @@ inductive AdmissionOutcome where
   | committed
 deriving DecidableEq, Repr
 
-/-- Roots carried for one concrete native clause instance. -/
-structure NativeClauseRoots where
+/-- Roots carried for one concrete dialect clause instance. -/
+structure DialectClauseRoots where
   clauseId : Digest
   statementRoot : Digest
   proofRoot : Digest
@@ -475,7 +476,7 @@ structure AdmissionContext where
   effectRoot : Digest
   authorizationRoot : Digest
   disclosureRoot : Digest
-  nativeClauseRoots : List NativeClauseRoots
+  dialectClauseRoots : List DialectClauseRoots
 deriving DecidableEq, Repr
 
 structure RequestEncoding where
@@ -533,22 +534,22 @@ def AdmissionOutcomeEncoding.decode : AdmissionOutcomeEncoding -> AdmissionOutco
     (outcome : AdmissionOutcome) : outcome.canonicalEncoding.decode = outcome := by
   cases outcome <;> rfl
 
-structure NativeClauseRootsEncoding where
+structure DialectClauseRootsEncoding where
   clauseId : Nat
   statementRoot : Nat
   proofRoot : Nat
 deriving DecidableEq, Repr, Encodable
 
-def NativeClauseRoots.canonicalEncoding (roots : NativeClauseRoots) :
-    NativeClauseRootsEncoding :=
+def DialectClauseRoots.canonicalEncoding (roots : DialectClauseRoots) :
+    DialectClauseRootsEncoding :=
   ⟨roots.clauseId.value, roots.statementRoot.value, roots.proofRoot.value⟩
 
-def NativeClauseRootsEncoding.decode (wire : NativeClauseRootsEncoding) :
-    NativeClauseRoots :=
+def DialectClauseRootsEncoding.decode (wire : DialectClauseRootsEncoding) :
+    DialectClauseRoots :=
   ⟨⟨wire.clauseId⟩, ⟨wire.statementRoot⟩, ⟨wire.proofRoot⟩⟩
 
-@[simp] theorem NativeClauseRootsEncoding.decode_canonicalEncoding
-    (roots : NativeClauseRoots) : roots.canonicalEncoding.decode = roots := by
+@[simp] theorem DialectClauseRootsEncoding.decode_canonicalEncoding
+    (roots : DialectClauseRoots) : roots.canonicalEncoding.decode = roots := by
   cases roots <;> rfl
 
 structure AdmissionContextEncoding where
@@ -564,7 +565,7 @@ structure AdmissionContextEncoding where
   effectRoot : Nat
   authorizationRoot : Nat
   disclosureRoot : Nat
-  nativeClauseRoots : List NativeClauseRootsEncoding
+  dialectClauseRoots : List DialectClauseRootsEncoding
 deriving DecidableEq, Repr, Encodable
 
 def AdmissionContext.canonicalEncoding (context : AdmissionContext) :
@@ -582,7 +583,7 @@ def AdmissionContext.canonicalEncoding (context : AdmissionContext) :
   effectRoot := context.effectRoot.value
   authorizationRoot := context.authorizationRoot.value
   disclosureRoot := context.disclosureRoot.value
-  nativeClauseRoots := context.nativeClauseRoots.map NativeClauseRoots.canonicalEncoding
+  dialectClauseRoots := context.dialectClauseRoots.map DialectClauseRoots.canonicalEncoding
 
 def AdmissionContextEncoding.decode (wire : AdmissionContextEncoding) :
     Option AdmissionContext := do
@@ -600,7 +601,7 @@ def AdmissionContextEncoding.decode (wire : AdmissionContextEncoding) :
       effectRoot := ⟨wire.effectRoot⟩
       authorizationRoot := ⟨wire.authorizationRoot⟩
       disclosureRoot := ⟨wire.disclosureRoot⟩
-      nativeClauseRoots := wire.nativeClauseRoots.map NativeClauseRootsEncoding.decode }
+      dialectClauseRoots := wire.dialectClauseRoots.map DialectClauseRootsEncoding.decode }
 
 @[simp] theorem AdmissionContextEncoding.decode_canonicalEncoding
     (context : AdmissionContext) :
@@ -628,19 +629,19 @@ structure AdmissionContext.WellFormed
   rejectedAtomic : match context.outcome with
     | .rejected _ => context.postStateRoot = context.preStateRoot
     | .committed => True
-  nativeClauseIdsUnique :
-    (context.nativeClauseRoots.map NativeClauseRoots.clauseId).Nodup
-  nativeClausesClosed : forall roots,
-    roots ∈ context.nativeClauseRoots ->
+  dialectClauseIdsUnique :
+    (context.dialectClauseRoots.map DialectClauseRoots.clauseId).Nodup
+  dialectClausesClosed : forall roots,
+    roots ∈ context.dialectClauseRoots ->
     exists clause, manifest.lookupClause roots.clauseId = some clause
 
 theorem AdmissionContext.closedClause_unique
     {manifest : Manifest} (manifestUnique : manifest.ClauseIdsUnique)
     {context : AdmissionContext} (wellFormed : context.WellFormed manifest)
-    {roots : NativeClauseRoots} (rootsMem : roots ∈ context.nativeClauseRoots) :
+    {roots : DialectClauseRoots} (rootsMem : roots ∈ context.dialectClauseRoots) :
     ∃! clause,
       manifest.lookupClause roots.clauseId = some clause := by
-  obtain ⟨clause, found⟩ := wellFormed.nativeClausesClosed roots rootsMem
+  obtain ⟨clause, found⟩ := wellFormed.dialectClausesClosed roots rootsMem
   refine ⟨clause, found, ?_⟩
   intro other otherFound
   exact manifest.lookupClause_unique manifestUnique otherFound found

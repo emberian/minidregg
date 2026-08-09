@@ -112,7 +112,7 @@ arithmetic/hash/transform labels add no parallel semantics: acceptance is the
 existing generic call relation. -/
 structure CertifiedResponse (manifest : Manifest) (instruction : Instruction)
     (response : KernelResponse instruction) : Prop where
-  clause : NativeClauseDecl
+  clause : DialectClauseDecl
   clauseRegistered :
     manifest.lookupClause instruction.clauseId = some clause
   callWellFormed : instruction.call.FullyWellFormed
@@ -228,7 +228,7 @@ theorem arbitraryRunner_integrity
     (reached : (run manifest plan runner).IsVerified) :
     plan.manifestAddress = manifest.contentAddress ∧
     ∀ instruction, instruction ∈ plan.instructions →
-      ∃ clause : NativeClauseDecl,
+      ∃ clause : DialectClauseDecl,
         manifest.lookupClause instruction.clauseId = some clause ∧
         instruction.call.FullyWellFormed ∧
         PublicPrefixExact instruction (runner instruction) ∧

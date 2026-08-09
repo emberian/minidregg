@@ -4,7 +4,7 @@
 This module instantiates the generic semantic artifact boundary.  Every exported
 declaration is projected from an existing Lean declaration: the repository's typed
 authorization plan, a typed account-move declaration, a finite guarded reactive controller,
-and a same-opening disclosure declaration.  The native clauses remain opaque
+and a same-opening disclosure declaration.  The dialect clauses remain opaque
 relation/codec pins; no native verifier semantics are reproduced here.
 -/
 import Compiler.SemanticArtifactBundle
@@ -39,8 +39,8 @@ def disclosureCommitmentCodec : CodecPin := ⟨id 12, id 1012, 1⟩
 def disclosureRepresentationCodec : CodecPin := ⟨id 13, id 1013, 1⟩
 def disclosureReleaseCodec : CodecPin := ⟨id 14, id 1014, 1⟩
 def disclosureProofCodec : CodecPin := ⟨id 15, id 1015, 1⟩
-def nativeStatementCodec : CodecPin := ⟨id 16, id 1016, 1⟩
-def nativeProofCodec : CodecPin := ⟨id 17, id 1017, 1⟩
+def dialectStatementCodec : CodecPin := ⟨id 16, id 1016, 1⟩
+def dialectProofCodec : CodecPin := ⟨id 17, id 1017, 1⟩
 def gf2ValueCodec : CodecPin := ⟨id 18, id 1018, 1⟩
 def ext6ValueCodec : CodecPin := ⟨id 19, id 1019, 1⟩
 def residueRingValueCodec : CodecPin := ⟨id 20, id 1020, 1⟩
@@ -51,8 +51,8 @@ def codecRegistry : List CodecPin :=
    reactiveDeclarationCodec, reactiveRequestCodec, reactiveProofCodec,
    disclosureDeclarationCodec, disclosureRequestCodecPin,
    disclosureCommitmentCodec, disclosureRepresentationCodec,
-   disclosureReleaseCodec, disclosureProofCodec, nativeStatementCodec,
-   nativeProofCodec, gf2ValueCodec, ext6ValueCodec, residueRingValueCodec]
+   disclosureReleaseCodec, disclosureProofCodec, dialectStatementCodec,
+   dialectProofCodec, gf2ValueCodec, ext6ValueCodec, residueRingValueCodec]
 
 def gf2Carrier : CarrierProfile :=
   .gf2Tower (id 201) (id 211) (id 212) gf2ValueCodec.codecId 64
@@ -95,38 +95,38 @@ def bridgeRegistry : List NamedBridgeRequirement :=
 /-- Opaque controller/proof-suite pins.  Registration here does not claim that the
 named proof suites are implemented; a native implementation remains completeness-only
 until Lean rechecks the relation named by its clause. -/
-def gf2NativeClause : NativeClauseDecl where
+def gf2DialectClause : DialectClauseDecl where
   clauseId := id 401
   relationId := id 411
   carrierProfileId := gf2Carrier.id
-  statementCodecId := nativeStatementCodec.codecId
-  proofCodecId := nativeProofCodec.codecId
+  statementCodecId := dialectStatementCodec.codecId
+  proofCodecId := dialectProofCodec.codecId
   proofSuiteId := id 421
   verifierControllerDigest := id 431
   requiredBridgeIds := [gf2ToExt6Bridge.bridgeId]
 
-def ext6NativeClause : NativeClauseDecl where
+def ext6DialectClause : DialectClauseDecl where
   clauseId := id 402
   relationId := id 412
   carrierProfileId := ext6Carrier.id
-  statementCodecId := nativeStatementCodec.codecId
-  proofCodecId := nativeProofCodec.codecId
+  statementCodecId := dialectStatementCodec.codecId
+  proofCodecId := dialectProofCodec.codecId
   proofSuiteId := id 422
   verifierControllerDigest := id 432
   requiredBridgeIds := [ext6ToResidueRingBridge.bridgeId]
 
-def residueRingNativeClause : NativeClauseDecl where
+def residueRingDialectClause : DialectClauseDecl where
   clauseId := id 403
   relationId := id 413
   carrierProfileId := residueRingCarrier.id
-  statementCodecId := nativeStatementCodec.codecId
-  proofCodecId := nativeProofCodec.codecId
+  statementCodecId := dialectStatementCodec.codecId
+  proofCodecId := dialectProofCodec.codecId
   proofSuiteId := id 423
   verifierControllerDigest := id 433
   requiredBridgeIds := [ext6ToResidueRingBridge.bridgeId]
 
-def clauseRegistry : List NativeClauseDecl :=
-  [gf2NativeClause, ext6NativeClause, residueRingNativeClause]
+def clauseRegistry : List DialectClauseDecl :=
+  [gf2DialectClause, ext6DialectClause, residueRingDialectClause]
 
 /-! ## Concrete manifest and registry proofs -/
 
@@ -139,7 +139,7 @@ def manifest : Manifest where
   codecs := codecRegistry
   carriers := carrierRegistry
   bridges := bridgeRegistry
-  nativeClauses := clauseRegistry
+  dialectClauses := clauseRegistry
   transcriptControllerDigest := id 500
   dimensions :=
     [⟨id 501, 64⟩, ⟨id 502, 6⟩, ⟨id 503, 4096⟩, ⟨id 504, 4⟩]
@@ -157,7 +157,7 @@ theorem manifest_wellFormed : manifest.WellFormed where
   bridgeIdsUnique := by
     change ([id 301, id 302] : List Digest).Nodup
     decide
-  clauseIdsUnique := by
+  dialectClauseIdsUnique := by
     change ([id 401, id 402, id 403] : List Digest).Nodup
     decide
   receiptCodecClosed := ⟨receiptCodec, by decide⟩
@@ -183,32 +183,32 @@ theorem manifest_wellFormed : manifest.WellFormed where
          ⟨residueRingCarrier, by decide⟩,
          ⟨ext6ValueCodec, by decide⟩,
          ⟨residueRingValueCodec, by decide⟩⟩
-  clausesClosed := by
+  dialectClausesClosed := by
     intro clause member
     simp only [manifest, clauseRegistry, List.mem_cons, List.not_mem_nil, or_false] at member
     rcases member with rfl | rfl | rfl
     · refine
         ⟨⟨gf2Carrier, by decide⟩,
-         ⟨nativeStatementCodec, by decide⟩,
-         ⟨nativeProofCodec, by decide⟩, ?_⟩
+         ⟨dialectStatementCodec, by decide⟩,
+         ⟨dialectProofCodec, by decide⟩, ?_⟩
       intro bridgeId member
-      simp only [gf2NativeClause, List.mem_singleton] at member
+      simp only [gf2DialectClause, List.mem_singleton] at member
       subst bridgeId
       exact ⟨gf2ToExt6Bridge, by decide⟩
     · refine
         ⟨⟨ext6Carrier, by decide⟩,
-         ⟨nativeStatementCodec, by decide⟩,
-         ⟨nativeProofCodec, by decide⟩, ?_⟩
+         ⟨dialectStatementCodec, by decide⟩,
+         ⟨dialectProofCodec, by decide⟩, ?_⟩
       intro bridgeId member
-      simp only [ext6NativeClause, List.mem_singleton] at member
+      simp only [ext6DialectClause, List.mem_singleton] at member
       subst bridgeId
       exact ⟨ext6ToResidueRingBridge, by decide⟩
     · refine
         ⟨⟨residueRingCarrier, by decide⟩,
-         ⟨nativeStatementCodec, by decide⟩,
-         ⟨nativeProofCodec, by decide⟩, ?_⟩
+         ⟨dialectStatementCodec, by decide⟩,
+         ⟨dialectProofCodec, by decide⟩, ?_⟩
       intro bridgeId member
-      simp only [residueRingNativeClause, List.mem_singleton] at member
+      simp only [residueRingDialectClause, List.mem_singleton] at member
       subst bridgeId
       exact ⟨ext6ToResidueRingBridge, by decide⟩
 

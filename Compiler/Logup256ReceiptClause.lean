@@ -29,28 +29,26 @@ set_option autoImplicit false
 
 /-! ## A distinct, manifest-closed dialect relation pin -/
 
-def clausePin : NativeClauseDecl where
+def clausePin : DialectClauseDecl where
   clauseId := MinidreggV1Artifact.id 404
   relationId := MinidreggV1Artifact.id 414
   carrierProfileId := MinidreggV1Artifact.gf2Carrier.id
-  statementCodecId := MinidreggV1Artifact.nativeStatementCodec.codecId
-  proofCodecId := MinidreggV1Artifact.nativeProofCodec.codecId
+  statementCodecId := MinidreggV1Artifact.dialectStatementCodec.codecId
+  proofCodecId := MinidreggV1Artifact.dialectProofCodec.codecId
   proofSuiteId := MinidreggV1Artifact.id 424
   verifierControllerDigest := MinidreggV1Artifact.id 434
   requiredBridgeIds := []
 
-/-- The v1 manifest extended only by this new opaque semantic relation pin.
-The word `NativeClauseDecl` is the existing manifest datatype name; it does not
-assert a Rust semantics or a native verifier. -/
+/-- The v1 manifest extended only by this new opaque semantic dialect relation pin. -/
 def manifest : Manifest :=
   { MinidreggV1Artifact.manifest with
-    nativeClauses := MinidreggV1Artifact.clauseRegistry ++ [clausePin] }
+    dialectClauses := MinidreggV1Artifact.clauseRegistry ++ [clausePin] }
 
 theorem manifest_wellFormed : manifest.WellFormed where
   codecIdsUnique := MinidreggV1Artifact.manifest_wellFormed.codecIdsUnique
   carrierIdsUnique := MinidreggV1Artifact.manifest_wellFormed.carrierIdsUnique
   bridgeIdsUnique := MinidreggV1Artifact.manifest_wellFormed.bridgeIdsUnique
-  clauseIdsUnique := by
+  dialectClauseIdsUnique := by
     change ([MinidreggV1Artifact.id 401, MinidreggV1Artifact.id 402,
       MinidreggV1Artifact.id 403, MinidreggV1Artifact.id 404] : List Digest).Nodup
     decide
@@ -60,17 +58,17 @@ theorem manifest_wellFormed : manifest.WellFormed where
     MinidreggV1Artifact.manifest_wellFormed.mpcBasesClosed
   bridgeEndpointsClosed :=
     MinidreggV1Artifact.manifest_wellFormed.bridgeEndpointsClosed
-  clausesClosed := by
+  dialectClausesClosed := by
     intro clause member
     simp only [manifest, List.mem_append, List.mem_singleton] at member
     rcases member with old | rfl
     · simpa [manifest, Manifest.lookupCarrier, Manifest.lookupCodec,
         Manifest.lookupBridge] using
-        (MinidreggV1Artifact.manifest_wellFormed.clausesClosed clause old)
+        (MinidreggV1Artifact.manifest_wellFormed.dialectClausesClosed clause old)
     · refine
         ⟨⟨MinidreggV1Artifact.gf2Carrier, by decide⟩,
-         ⟨MinidreggV1Artifact.nativeStatementCodec, by decide⟩,
-         ⟨MinidreggV1Artifact.nativeProofCodec, by decide⟩, ?_⟩
+         ⟨MinidreggV1Artifact.dialectStatementCodec, by decide⟩,
+         ⟨MinidreggV1Artifact.dialectProofCodec, by decide⟩, ?_⟩
       intro bridgeId member
       simp [clausePin] at member
 
@@ -82,9 +80,9 @@ theorem clause_pin_registry_closed :
     manifest.lookupCarrier clausePin.carrierProfileId =
         some MinidreggV1Artifact.gf2Carrier ∧
     manifest.lookupCodec clausePin.statementCodecId =
-        some MinidreggV1Artifact.nativeStatementCodec ∧
+        some MinidreggV1Artifact.dialectStatementCodec ∧
     manifest.lookupCodec clausePin.proofCodecId =
-        some MinidreggV1Artifact.nativeProofCodec ∧
+        some MinidreggV1Artifact.dialectProofCodec ∧
     clausePin.requiredBridgeIds = [] := by
   decide
 

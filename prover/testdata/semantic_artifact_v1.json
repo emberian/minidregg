@@ -22,7 +22,7 @@
   "absorb_terminal",
   "derive_queries",
   "verify_openings",
-  "verify_native_clauses",
+  "verify_dialect_clauses",
   "bind_receipt",
   "commit"],
  "manifest":
@@ -30,7 +30,13 @@
   "semanticRelationId": 102,
   "semanticProgramId": 101,
   "receiptCodecId": 1,
-  "nativeClauses":
+  "manifestVersion": 1,
+  "dimensions":
+  [{"value": 64, "dimensionId": 501},
+   {"value": 6, "dimensionId": 502},
+   {"value": 4096, "dimensionId": 503},
+   {"value": 4, "dimensionId": 504}],
+  "dialectClauses":
   [{"verifierControllerDigest": 431,
     "statementCodecId": 16,
     "requiredBridgeIds": [301],
@@ -55,12 +61,6 @@
     "proofCodecId": 17,
     "clauseId": 403,
     "carrierProfileId": 203}],
-  "manifestVersion": 1,
-  "dimensions":
-  [{"value": 64, "dimensionId": 501},
-   {"value": 6, "dimensionId": 502},
-   {"value": 4096, "dimensionId": 503},
-   {"value": 4, "dimensionId": 504}],
   "codecs":
   [{"version": 1, "valueTypeId": 1001, "codecId": 1},
    {"version": 1, "valueTypeId": 1002, "codecId": 2},

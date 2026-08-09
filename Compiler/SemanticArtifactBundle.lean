@@ -66,7 +66,7 @@ inductive ControllerPhase where
   | absorbTerminal
   | deriveQueries
   | verifyOpenings
-  | verifyNativeClauses
+  | verifyDialectClauses
   | bindReceipt
   | commit
 deriving DecidableEq, Repr, Encodable
@@ -74,7 +74,7 @@ deriving DecidableEq, Repr, Encodable
 def canonicalControllerPlan : List ControllerPhase :=
   [.bindManifest, .decodeAdmission, .authorization, .effects, .reactive,
    .disclosure, .absorbPublic, .absorbCommitments, .proofRounds,
-   .absorbTerminal, .deriveQueries, .verifyOpenings, .verifyNativeClauses,
+   .absorbTerminal, .deriveQueries, .verifyOpenings, .verifyDialectClauses,
    .bindReceipt, .commit]
 
 /-- First-order projection of one declaration.  `declarationWords` is declaration data,
@@ -423,7 +423,7 @@ def bridgeToJson (bridge : SemanticManifest.NamedBridgeEncoding) : Json :=
      ("sourceCodecId", toJson bridge.sourceCodecId),
      ("targetCodecId", toJson bridge.targetCodecId)]
 
-def nativeClauseToJson (clause : SemanticManifest.NativeClauseEncoding) : Json :=
+def dialectClauseToJson (clause : SemanticManifest.DialectClauseEncoding) : Json :=
   Json.mkObj
     [("clauseId", toJson clause.clauseId), ("relationId", toJson clause.relationId),
      ("carrierProfileId", toJson clause.carrierProfileId),
@@ -446,7 +446,7 @@ def manifestToJson (manifest : SemanticManifest.ManifestEncoding) : Json :=
      ("codecs", Json.arr (manifest.codecs.map codecPinToJson).toArray),
      ("carriers", Json.arr (manifest.carriers.map carrierToJson).toArray),
      ("bridges", Json.arr (manifest.bridges.map bridgeToJson).toArray),
-     ("nativeClauses", Json.arr (manifest.nativeClauses.map nativeClauseToJson).toArray),
+     ("dialectClauses", Json.arr (manifest.dialectClauses.map dialectClauseToJson).toArray),
      ("transcriptControllerDigest", toJson manifest.transcriptControllerDigest),
      ("dimensions", Json.arr (manifest.dimensions.map fun pin =>
         namedValueToJson "dimensionId" pin.dimensionId pin.value).toArray),
@@ -490,7 +490,7 @@ def ControllerPhase.name : ControllerPhase -> String
   | .absorbTerminal => "absorb_terminal"
   | .deriveQueries => "derive_queries"
   | .verifyOpenings => "verify_openings"
-  | .verifyNativeClauses => "verify_native_clauses"
+  | .verifyDialectClauses => "verify_dialect_clauses"
   | .bindReceipt => "bind_receipt"
   | .commit => "commit"
 
