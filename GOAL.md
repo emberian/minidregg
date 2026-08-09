@@ -1,46 +1,141 @@
 # GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
-**Current priority (2026-08-09): turn the proved Loom core and the new binary/Ext6
-reference pieces into one genuinely succinct proof-carrying-history system.** GPU preservation is
-not a goal. Optimize the protocol and its proof obligations first; accelerate the actual resulting
-hotspots afterward.
+**Current priority (2026-08-09): join the Lean-owned semantic declarations, receipt clauses, and
+history relation into one genuinely succinct proof-carrying-history controller.** Lean is the sole
+source of semantics, protocol control, and acceptance. Rust is mechanically generated DTO/dispatch
+glue or opaque untrusted compute only; it is never a refinement. GPU preservation is not a goal.
+Optimize the protocol and its proof obligations first; accelerate the resulting hotspots afterward.
 
 ## Current system map
 
 - **Formal core — proved:** constrained RS claims, γ batching, sumcheck/MLE, multiplicative FRI,
   accumulator folding, exact/UD soundness, arbitrary-depth extraction, loss-free depth composition,
   Fiat–Shamir/RBR reductions, constrained masking, emitted AIR semantics, and verifier gadgets.
+- **Semantic declarations and control — exact landed seams:**
+  `Compiler.DeclaredEffectArtifact` derives the concrete typed account move from
+  `Theory.EffectDeclaration.Declaration.toWire.words`; `Theory.DeclaredTurn` derives request data
+  and roots, checks authorization before effects, and makes reject preserve the pre-state;
+  `Assurance.DeclaredTurnReceipt` names the declaration-indexed `DeclaredEffect`, derives
+  `executeCore` without a caller-authored receipt witness, proves the canonical
+  `SemanticTurnReceipt`/history core exact, and leaves manifest/header/code-membership entry
+  evidence explicit; `Assurance.PrivateComputationReceiptClause` maps an existing typed private
+  `Completion` into a request-bound committed disclosure event while leaving portal evidence and
+  manifest suite/bridge pins abstract;
+  `Theory.ReactiveCellTransition` proves exact accepted bindings/frame laws and requires an explicit
+  `HandlerPremise` before releasing a physical CAS/nullifier-backed post-cell;
+  `Theory.TurnTransition` preserves ordinary/resumed dependent indices in one delegated controller
+  and common root/footprint/`ReceiptDelta`/frame view, but intentionally performs neither history
+  admission nor physical commit. These are not yet one complete canonical receipt/header controller.
+- **Generated V1 artifact and native glue — metadata only:** `Compiler.MinidreggV1Artifact`
+  emits `prover/testdata/semantic_artifact_v1.json`; `Compiler.NativeGlueGen` and
+  `Compiler.MinidreggV1NativeGlue` emit `prover/generated/semantic_artifact_v1.rs` with constants,
+  `CanonicalArtifactDto`, `WorkRequestDto`, `KernelBufferDto`, `NativeErrorDto`, and opaque
+  arithmetic/hash/transform dispatch. There is no native validator, statement/transcript builder,
+  verifier Boolean, or receipt token. Base-V1 `DialectClauseDecl` values are registry pins, not
+  implementations. The generated file is not imported by `prover/src/lib.rs`; a live generated
+  request-to-kernel adapter remains open.
 - **Rates — exact boundary:** threshold halving gives an unconditional post-Johnson first round and
   proved UD tail. Haböck's exact Johnson constants/conventions are locally bridged; the
   BCIKS/GS/Hensel algebraic core remains the explicit `HaboeckTheorem2` premise. No unrestricted
   capacity claim is allowed.
-- **GF(2) suite — proved formal tower, native arithmetic only:** Lean closes the literal additive
-  quotient tower, authenticated coherent paths, adaptive earliest deviation, and the UD
-  challenge/query bound. Native Fan–Paar `GF(2^64)`, the reversed-LCH transform, and cSHAKE/Merkle
-  compute remain. The handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted:
-  it bound but never enforced its coefficient bound, so it was not a low-degree test.
-- **Ext6 gate suite — proved algebra, native verifiers deleted:** `X^6−31` is proved irreducible.
-  Lean proves emitted-descriptor residual provenance, seven factored operands, degree-two rounds,
-  terminal affine functionals, and eta aggregation with its bad-set bound. Commitment
-  authentication, transcript scheduling, subfield/proximity composition, and final LDT remain.
+- **GF(2) suite — proved formal tower and ideal clause, native arithmetic only:** Lean closes the
+  literal additive quotient tower, authenticated coherent paths, adaptive earliest deviation, and
+  the UD challenge/query bound. `Compiler.AdditiveFriReceiptClause` binds reversed/high-first basis
+  order, affine domain/rate schedule, roots-before-challenges, coherent queries, terminal, and
+  exactly that ideal predicate/bound. Concrete commitment/CR, cSHAKE-ROM transport, returned-buffer
+  checking, a base-V1 controller instance, and the outer accumulator remain. The handwritten
+  sampled-FRI/OOD/evaluation-history branch was deleted because it did not enforce low degree.
+- **Indexed lookup — exact semantic clause behind explicit premises:**
+  `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` joins canonical Boolean address
+  columns to the literal incidence/pushforward relation and exact indexed evaluation. Its
+  Tower256-arithmetic, PCS-opening, transcript-order, CR, semantic-root, and ROM premises remain
+  explicit. V1 now declares distinct profile `205`, degree `256`, and codec `21` in Lean, JSON, and
+  generated Rust artifact data; pin `404` selects it instead of degree-64 `gf2Carrier`. The clause
+  remains outside base-V1 clauses, and no native representation theorem follows from the pin.
+- **Ext6 gate suite — proved algebra, opaque V1 pin:** `X^6−31` is proved irreducible. Lean proves
+  emitted-descriptor residual provenance, seven factored operands, degree-two rounds, terminal
+  affine functionals, and eta aggregation with its bad-set bound. Base-V1's Ext6
+  `DialectClauseDecl` does not provide a receipt clause or verifier. Commitment authentication,
+  transcript/opening control, coherent proximity, base-subfield provenance/sampling, final LDT,
+  and CR/ROM composition remain.
+- **BFV receipt clause — exact integer consequence, unassigned proof pins:**
+  `Compiler.BfvReceiptClause.AcceptedToken` binds one committed witness to the ordered 384-row
+  modulus-major batch and a Lean-checked emitted-AIR buffer per row;
+  `every_exact_integer_equation` derives every signed `Int` equation. The carrier/statement codec,
+  proof codec/suite, and controller are not assigned; `register` does not establish manifest
+  closure or an online proof system.
 - **Accumulation — proof-relevant semantic history, no native authority:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
   quadratic language is iff a genuine `ReceiptDelta`; `SemanticHistoryAccumulator` admits both
   commit and atomic reject through the same word, exposes no raw predecessor input, preserves one
   folded `AccClaim`, and reaches the exact full-opening decider/extraction theorem at every
-  constructed depth. The explicit fold-recommitment premise, all-position openings, retained entry
-  list, WARP/FACS PCS, sampled extraction, and hiding join remain.
+  constructed depth. The head retains the complete proof-relevant entry list; append requires an
+  explicit `FoldRecommitment`; and extraction uses all authenticated openings/full opening. It is
+  not a WARP/FACS PCS, succinct history, hiding/ZK composition, or compressed structural hash
+  chain. `SemanticHistoryStraightlinePcs` adds an exact same-carrier/prefix-root/one-transcript
+  extraction interface and error-ledger envelope, but does not instantiate a PCS, `Reduction`,
+  Fiat–Shamir ROM, Merkle CR, sampled decider, or lagged-root hiding schedule.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
   error assemblies are proved behind explicit shared-ROM fresh/hit/sampling and CR/ZK ports.
 - **Security — candidate, not label:** the unified BabyBear⁶ arithmetic budget is 137 bits; the old
-  base/Ext4 executable path is not. cSHAKE supplies atomic Ext6 draws and 48-byte roots, but concrete
-  CR/shared-ROM/PoW composition and recursive-verifier wiring remain before the runtime inherits the
+  base/Ext4 executable path is not. A caller-parameterized cSHAKE/hash kernel exists, but no native
+  default or suite selects the semantic profile. Lean-owned transcript scheduling, concrete
+  CR/shared-ROM/PoW composition, and recursive-verifier wiring remain before runtime inherits the
   candidate number.
 
 ## Active completion frontier
 
+- 2026-08-09 ★★★★★ **Declaration-derived effect, turn, and reactive cell seams** ✓:
+  `Compiler.DeclaredEffectArtifact.accountMoveArtifact_exact` pins the typed account move's wire
+  word; `Theory.DeclaredTurn.execute_committed_sound` and `execute_rejected_unchanged` pin the
+  authorization/effect order and atomic reject;
+  `Theory.ReactiveCellTransition.Accepted.exact_bindings`, `Accepted.field_frame`, and
+  `Accepted.resource_frame` pin accepted state changes, while
+  `Accepted.releaseAfterPhysicalCommit` requires the physical handler receipt.
+  `Assurance.DeclaredTurnReceipt.executeCore_valid`, `canonical_core_exact`, and
+  `historyClaim_core_exact` close the bounded core join to semantic receipt/history. Remaining:
+  manifest/header/code-membership evidence, reactive admission, and dialect clauses in one
+  canonical controller.
+- 2026-08-09 ★★★★★ **Typed private completion → committed disclosure clause** ✓ at the semantic
+  boundary: `ReceiptEvent.ofCompletion` preserves the declaration's existing authorization,
+  input-identity, computation, and output-release evidence; `recordCompletion` binds the event to
+  the exact common turn request; `rejected_not_released` and `empty_disclosures_not_released` fail
+  closed. `ClauseBinding` is only manifest/dialect/bridge registration, not a cryptographic proof.
+- 2026-08-09 ★★★★★ **One typed ordinary/resumed transition surface** ✓:
+  `Theory.TurnTransition.control` delegates without erasing branch indices; ordinary rejection and
+  reactive blocked/rejected outcomes materialize to the pre-cell; `TransitionFacts.frame` exposes
+  the common exact-footprint frame law. History admission and physical CAS/nullifier commit are
+  deliberately outside the module.
+- 2026-08-09 ★★★★★ **BFV checked buffers → exact receipt equations** ✓ at clause resolution:
+  `Compiler.BfvReceiptClause.AcceptedToken.every_row_bound` fixes identifiers, witness reference,
+  and row equation; `every_exact_integer_equation` derives all exact signed equations from emitted
+  AIR acceptance. `bfvClausePin_unassigned` proves the proof codec/suite/controller sentinels are
+  zero; no closed manifest or deployed proof system follows.
+- 2026-08-09 ★★★★★ **Straightline semantic-history PCS interface** ✓ at interface resolution:
+  `FoldRootSchedule.foldRoot_commits_folded_word` pins literal folds;
+  `StraightlinePcsExtraction.extract_eq_semantic_head` and
+  `extract_satisfies_semantic_head` recover the exact head/witness from one accepted transcript
+  outside the explicit KS failure event; `knowledge_failure_le_totalEnvelope` exposes the supplied
+  WARP-shaped ledger. No concrete PCS, game reduction, ROM/CR composition, or sampled verifier is
+  constructed.
+- 2026-08-09 ★★★★★ **Generated V1 artifact and native DTO seam** ✓:
+  `Compiler.MinidreggV1Artifact` produces the canonical V1 artifact and
+  `Compiler.MinidreggV1NativeGlue` deterministically generates its Rust DTO/dispatch projection.
+  The generated file is data and opaque work calls only. The three base dialect declarations are
+  pins; lookup pin `404` and the generic additive clause are not admitted by base V1.
+- 2026-08-09 ★★★★★ **Lean-owned additive and indexed-lookup clauses** ✓ at their stated resolution:
+  `Compiler.AdditiveFriReceiptClause` reuses the exact adaptive coherent acceptance predicate and UD
+  theorem; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact lookup
+  conclusion behind named external premises. Neither is evidence of a native verifier or a
+  completed base-V1 online controller.
+- 2026-08-09 ★★★★★ **LogUp carrier mismatch corrected at artifact resolution** ✓: the original
+  clause reused `GF(2^64)` while its premises and arithmetic are `GF(2^256)`. V1 now declares
+  `tower256ValueCodec`, `gf2Tower256Carrier` profile `205`, and degree `256`; generated JSON/Rust
+  artifact data agree; clause `404` selects the new profile and adds characteristic/cardinality
+  premises. Remaining: clause `404` is extension-only, and native limb/basis correspondence is
+  unproved.
 - 2026-08-09 ★★★★★ **Arbitrary-native-oracle semantic integrity** ✓:
   `Compiler.SemanticController` compiles authorization and receipt checking into a phased indexed
   controller. A native oracle can return only bounded echoed data and descriptor wires; it cannot
@@ -49,18 +144,26 @@ hotspots afterward.
   `descriptorHolds`, with no hypothesis about native behavior. Result mismatch and descriptor
   failure have explicit non-acceptance teeth.
 
-1. Refine the landed characteristic-two sampled theorem to the binary runtime and compose its
-   cSHAKE/Merkle assumptions.
-2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, emit its
-   Lean-owned controller, then connect it to the final LDT.
-3. Replace the landed semantic-history fold's explicit recommitment/full-opening seam with a real
-   WARP/FACS-style PCS, sampled decider, and extractor; the former handwritten functional-history
-   node was deleted.
-4. Instantiate hiding committed-word-knowledge proofs and discharge the staged ZK game's explicit
+1. Instantiate the landed characteristic-two clause in Lean-owned online control and compose its
+   concrete commitment, cSHAKE-ROM, buffer-checking, and Merkle assumptions.
+2. Admit the lookup clause only after its Tower256/PCS/CR/ROM premises are discharged, the native
+   representation boundary is generated or rechecked, and clause `404` is integrated into a
+   controller; then build the mutable-state layer. Replace the opaque Ext6 V1 pin with a real Lean
+   clause/controller, close coherent proximity and base-subfield boundaries, and connect it to the
+   final LDT.
+3. Extend the landed `DeclaredTurnReceipt` core and private-completion disclosure joins with
+   manifest/header/code-membership evidence, `TurnTransition`, remaining disclosures, and dialect
+   clauses to form the canonical header/receipt admission controller.
+4. Instantiate the landed `SemanticHistoryStraightlinePcs` interface with a real WARP/FACS-style
+   PCS, transcript/ROM/CR reduction, and sampled decider; the retained-entry/full-opening semantic
+   history and caller-supplied error ledger are not that deployment.
+5. Instantiate hiding committed-word-knowledge proofs and discharge the staged ZK game's explicit
    shared-ROM horn ports.
-5. Build the intended shared-ROM, RBR/extractor, and final-compression protocol from Lean-owned
+6. Build the intended shared-ROM, RBR/extractor, and final-compression protocol from Lean-owned
    clauses and controllers, then benchmark that protocol—not any deleted native conjunction or
    superseded full-opening/reference path.
+7. Assign concrete carrier/statement/proof codecs and Lean controller semantics to the BFV clause,
+   prove manifest closure, and join its exact integer batch token to the common receipt.
 
 ## Claim discipline
 
@@ -90,6 +193,11 @@ commitment/query/protocol join over the fast tower arithmetic. WGPU is explicitl
 disposable.
 
 ## Done-log (recent)
+
+This log records how the present tree was reached. Entries marked **RETRACTED** describe deleted
+experiments and are not current architecture evidence; the current system map and active frontier
+above are authoritative when an older entry says “runtime,” “deployed,” or “verifier.”
+
 - 2026-08-09 ★★★★★ **Lean-owned semantic receipt descriptor** ✓:
   `SemanticReceiptRuntimeCodec.lean` proves the bound runtime index equivalence, fixed digest-pair
   packing injectivity, relation satisfaction, and native `AccClaim` fold.
@@ -97,18 +205,19 @@ disposable.
   relation through the existing AIR and emit path, proves emitted descriptor acceptance iff the
   bound relation, and emits field/layout/tag/constraint metadata. The audit caught a Rust-only
   `Threshold` authorization mode absent from Lean; the handwritten Rust typed-turn verifier and
-  semantic lookup receipt adapter were deleted rather than called mirrors/refinements. Remaining:
+  semantic lookup receipt adapter were deleted rather than treated as semantic equivalents. Remaining:
   extend Lean emission to the full header/auth/effect/disclosure/native-clause semantics and then
   build the real WARP/FACS outer accumulator.
 - 2026-08-09 ★★★★★ **Tower256 indexed lookup → semantic root bundle** ✓:
   `Loom/LogupIndexLink.lean` proves that canonical decoded address-bit columns are Boolean, their
   incidence row is the literal unit vector at the fixed index, and incidence scattering equals
-  `logupPushforward`. Runtime LogUp v2 now runs a roots-before-challenge cubic Booleanity zerocheck
-  plus sampled opening for every index root, then binds the ordered root vector and shape into one
-  cSHAKE semantic bundle. That native protocol object and the former receipt adapter have now been
-  deleted after extracting incidence, equality-weight, fraction-tree, interpolation, and round
-  arithmetic. Its exact relation/controller must be emitted from Lean. Proximity/CR/ROM and mutable
-  RAM remain.
+  `logupPushforward`. `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` now derives the
+  exact indexed-table conclusion behind explicit Tower256 arithmetic, PCS-opening, transcript,
+  semantic-root, CR, and ROM premises. Its distinct clause pin `404` is registered only in the
+  module's locally extended manifest, not base V1. The former native protocol/receipt objects were
+  deleted; only incidence, equality-weight, fraction-tree, interpolation, and round arithmetic
+  kernels remain. Discharging those premises, base-V1/controller integration, additive proximity,
+  and mutable RAM remain.
 - 2026-08-09 ★★★★★ **Typed receipt admission → accumulated core** ✓:
   `Assurance/SemanticTurnReceipt.lean` requires every committed outcome to carry authorization
   indexed by the complete request, an exact effect digest and effect-to-`ReceiptDelta` semantics,
@@ -127,17 +236,13 @@ disposable.
   `foldClaims_satisfies` closure. A changed-but-untouched F5 cell is rejected. The former Rust
   receipt-relation mirror was deleted; the Lean-owned manifest/controller and WARP
   commitment/IOR/extractor remain named rather than inferred.
-- 2026-08-09 **RETRACTED and deleted native semantic-history claim:**
-  `proof_carrying_history.rs` verifies the real arbitrary-functional GF(2) append and Ext6
-  factored-gate conjunction, then reconstructs the complete canonical `semantic_receipt` envelope.
-  Its GF(2) pre/post roots are the actual append accumulator seam; Ext6 remains the proof backend,
-  not a fake cross-characteristic fold lane. One focused two-node chain rejects predecessor-proof,
-  turn-metadata, and transcript-suite substitution. The result is authenticated uncompressed
-  history; `[PCH-OUTER-ACCUMULATOR]` names the real WARP/FACS relation, hiding, and extraction join
-  still required. `PROJECT.md` now pins the clean-sheet semantic-computer constitution and poster
-  gate separately from this evidence ledger. Audit subsequently established that this Rust object
-  authors statement/history meaning and cannot be proof authority; it and the handwritten
-  functional receipt/receipt-relation wrappers were deleted.
+- 2026-08-09 **RETRACTED and deleted native semantic-history claim:** the former
+  `proof_carrying_history.rs` and handwritten functional receipt/relation wrappers authored
+  statement and history meaning in Rust, so none is proof authority and all were deleted. The
+  exact surviving replacement is `Assurance.SemanticHistoryAccumulator`: it retains every
+  proof-relevant entry, requires an explicit `FoldRecommitment` at append, and supplies the
+  all-authenticated-openings/full-opening decider and extraction theorem. Succinct PCS, sampled
+  extraction, and hiding remain open.
 - 2026-08-09 **RETRACTED and deleted native light-client conjunction:** the former
   `nextgen_light_client.rs` depended on an OOD path whose additive-FRI verifier never enforced the
   claimed coefficient bound. The whole binary evaluation-history branch was removed rather than
@@ -155,15 +260,13 @@ disposable.
   root preimages before a domain-separated query, binds the response, transports accepted FS logs
   into sub-UD recovery, and prices full-domain or allowed-coordinate sampling. Shared-ROM
   fresh/hit/sampling ports and a concrete hiding/ZK preimage proof remain explicit.
-- 2026-08-09 ★★★★ **Emitted gates → committed Ext6 MLE terminal joined** ✓: `gate_mle_ext6`
-  uses one cSHAKE/Ext6 transcript for the typed trace root, γ-batched descriptor defects, sumcheck
-  messages, Boolean-Möbius multiplicative-RS roots, terminal, and sampled paths. The clear verifier
-  recomputes the exact residual table/root and rejects a separately valid unrelated PCS.
+- 2026-08-09 ★★★★ **Emitted gates → Ext6 MLE terminal mathematics joined** ✓:
   `MultiplicativeMleTerminal` proves the Möbius/even-odd fold terminal is exactly `mle f r` and
   machine-refutes raw table values as coefficients; `GateMleExt6` proves descriptor ordering,
-  extension lift, batching, and terminal semantics. The native `gate_mle_ext6` and MLE-terminal
-  protocol objects were subsequently deleted; only their Lean mathematics and extracted native
-  arithmetic remain.
+  extension lift, batching, and terminal semantics. The former native `gate_mle_ext6` transcript,
+  proof, and clear verifier were deleted because they owned protocol control; only Lean mathematics
+  and opaque native arithmetic remain. Base-V1's Ext6 registry pin does not close the missing
+  commitment/transcript/opening, proximity, subfield, or final-LDT boundaries.
 - 2026-08-09 **RETRACTED and deleted sampled binary admission surface:** `AdditiveFriTower` and
   `AdditiveFriQuery` remain valid Lean mathematics, but the former Rust verifier checked only local
   full-depth fold consistency. Because `coefficient_bound` was unused, arbitrary words and
@@ -188,7 +291,11 @@ disposable.
 - 2026-08-08 ★★★ **Executable GF(2) tower arithmetic** ✓: `prover/src/binary_tower.rs` contains an unverified Fan--Paar compute kernel through `GF(2^64)` with conformance teeth. It is not a semantic implementation. Lean emission/generated control and `[BTOWER-RUST-UNVERIFIED]` remain explicit.
 - 2026-08-08 ★★★ **Owned bignums, emitted carry addition, and exact 248-bit carrier width** ✓: `Theory/Bignum` owns Nat+Int little-endian denotation, ranged/canonical fixed-width limbs, value→digits and digits→value inverse theorems, denotation injectivity, and a `Limbs base width ≃ Fin (base^width)` codec. `Compiler/AirBignum` reuses the existing range and emit pipeline for arbitrary-width radix-`2^k` addition, proves exact integer soundness under the no-field-wrap bound, pins both boundary carries, and rejects overflow. The deployment tooth proves exactly `BabyBear^8 < 2^248 ≤ BabyBear^9`: eight felt limbs are insufficient; nine suffice as a carrier.
 - 2026-08-09 ★★★ **Wide-digest AIR representation boundary** ✓: `Compiler/WideDigestAir` pins `WDG1 || domain || 9 limbs` through the existing flatten/emit pipeline, proves canonical BabyBear representatives, source/absorbed denotation equality, and 248-bit carrier capacity. Honest boundary: raw-byte `< p` decoding, sponge scheduling/full-verifier wire sharing, concrete permutation parameters, unverified Rust execution, and `[COMMIT-CR]` remain.
-- 2026-08-08 ★★★ **Owned nine-limb commitment carrier + fail-closed verifier** ✓: `prover/src/wide.rs` closes `[PROVER-digest-width]` as runtime representation: roots, Merkle siblings, FRI commitments, reference proofs, and transcript encodings use nine canonical BabyBear limbs with fixed serialization and domain separation. The hardening pass rejects noncanonical proof data without panic, enforces exact path heights and nonzero queries, uses unbiased query sampling, checks carried FS challenges against their derivation, and checks `descriptor_holds` exactly in the clear-trace verifier. Honest boundary: width is not collision resistance; `[COMMIT-CR]`, real permutation/capacity parameters, byte/sponge integration with the now-landed AIR representation boundary, and challenge-field unification remain.
+- 2026-08-08 **RETRACTED and deleted nine-limb native verifier surface:** the former
+  `prover/src/wide.rs` and its native proof/transcript/clear-verifier users were deleted with Rust
+  protocol authority. The surviving evidence is Lean's `Theory.Bignum`/`Compiler.WideDigestAir`
+  nine-limb carrier and exact emitted representation boundary. Width is not collision resistance;
+  raw-byte decoding, sponge scheduling, concrete permutation parameters, and `[COMMIT-CR]` remain.
 - 2026-08-08 ★★★ **120-bit candidate arithmetic + PoW grinding core** ✓: `ErrorBudget120` proves a BabyBear^6/20-bit-PoW candidate in `(2^-138,2^-137]`, with both levers load-bearing. `PowGrinding` proves exact `2^-bits` response density and an adaptive leave-one-out `work*epsilon/2^bits` ideal-coordinate bound. This is not yet the deployed prover's security number: shared-ROM/domain-separation composition remains, and Rust gate batching/sumcheck currently samples in base BabyBear rather than the priced extension field.
 - 2026-08-09 **RETRACTED and deleted committed-accumulator reference:** the former exhaustive
   `committed_accumulator.rs` verifier, transcript, claim algebra mirrors, benchmark, and test were
@@ -227,7 +334,11 @@ disposable.
 - 2026-08-08 **Theory/BinaryTowerFanPaar [BTOWER-fanpaar] ✓** (audited, 6424d94, tree green 2510): the Fan-Paar generators + the FAST multiplication. fpGen (generator sequence) + fpGen_base/fpGen_step (recursion relations, ALL k, unconditional; via exists_fanpaar_step_root — irreducible-factor degree ∣ 2 embeds T_{k+1}→T_{k+2}). towerMulStep = the Karatsuba step (3 products + coefficient reduction — the Binius fast cost structure); towerPack_towerMulStep proves it = the field product ALL k UNCONDITIONAL (not a model); towerMul_eq_mul (fast mult = field product given basis). The whole target COLLAPSES to ONE ∀: FanPaarTowerBasis [BTOWER-fanpaar-basis] = ∀k, fpGen k ∉ range (Wiedemann trace Tr(xₖ)=1; k=0,1 proved); fanPaarRecursion_of_towerBasis conditionally discharges FanPaarRecursion outright. ATLAS triple. Tower frontier: field✓ fast-mult✓; the recursion closes on one trace induction.
 - 2026-08-08 **Prover rung 3 — [PROVER-commit] ✓ (verified 21/21)** (f382dd8): Poseidon2 perm mirroring AirHash's roundExec EXACTLY (add-rc→S-box(full/partial)→MDS) + Merkle commit_trace/open/verify_open. CONFORMANCE: proverPermSpec (BabyBear, α=5, non-symmetric per-round matrices — catches transposed/reordered layers), permExec kernel-DECIDED to a reference, Rust asserts equality (permExec = permGadget_eval = the circuit, so matching the vector = matching the verified gadget); triply-pinned (kernel+#eval+Python). Merkle over the REAL rung-2 trace, all tampers rejected. Residual [PROVER-poseidon-params] (deployed BabyBear consts, α=7 — flagged α=5 not a bijection on BabyBear, honest deployment caveat). Also landed: **[EMIT-share] CSE measured 2,696,666→220 gates (12,258×)** + emit_ssa (every emitted descriptor is SSA) + cse_emit_accepts_iff (seam re-closed). Prover frontier: serialize✓ trace✓ commit✓; next [PROVER-sumcheck]. IT RUNS + COMMITS at the deployed field.
 - 2026-08-08 **Compiler/EmitShare [EMIT-share] CSE ✓** (audited, tree green 2509; station-harvested — lane left uncommitted): cse dedups identical gate records (HashMap subst); cse_faithful — satisfiability-equivalent under d.SSA (emitted descriptors ARE SSA via flattenSystem_gates_sorted). Both directions + subst/transfer machinery. ATLAS triple. [EMIT-share-count] DISCHARGED (lane follow-up): compiled #eval measures the spend descriptor 2,696,666 → 220 gates (≈12,258× — the demo spend's true DAG; zeros 8 + nWires unchanged), recorded in EmitShare §9; keystones: cse_holds fires on the honest witness, cse_emit_accepts_iff re-closes the seam (satisfiable at the demo spend + wrong-nullifier admits NO witness on the CSE'd descriptor). Axioms [propext, Classical.choice, Quot.sound]; emit_ssa choice-free. Residual [EMIT-share-compact] (wire renumbering + dead-gate sweep; structural sharing only). Emit frontier: seam ✓ + CSE ✓.
-- 2026-08-08 **Prover rungs 1-2 — [PROVER-serialize]+[PROVER-trace] ✓ (IT RUNS)** (verified, 16fe1b0, Lean tree green 2508, cargo 8/8): the WGPU-backend flagship's foundation. [PROVER-serialize]: Compiler/EmitSerialize (ConstraintDescriptor→JSON over ZMod p; [PROVER-field] BabyBear p=2^31-2^27+1 = the DEPLOYED field, so the whole emit-path theorem stack applies verbatim; round-trip #eval). [PROVER-trace]: prover/ crate (serde ONLY — NO plonky3 deps, adopt-not-port honored): Descriptor reader + generate_trace + descriptor_holds (LITERAL index-by-index mirror of the Lean descriptorHolds). Conformance 8/8: demo_header_matches_lean_emit, honest_trace_satisfies, all 23 tampers rejected, x=14 no-witness matches the Lean-decided fact, booleanity bites. SUBSTRATE: unverified compute FOLLOWING the verified seam — conformance vectors NOT refinement (no Rust semantics). Next: [PROVER-commit] (Poseidon2 Merkle matching AirHash) → sumcheck → FRI (adopt breadstuffs' wgsl fold). The prover READS the verified descriptor + cross-checks the trace at the deployed field.
+- 2026-08-08 **RETRACTED native descriptor interpreter; Lean serialization retained:**
+  `Compiler.EmitSerialize` retains the Lean-owned `ConstraintDescriptor` serialization evidence.
+  The former Rust descriptor reader, trace generator, and `descriptor_holds` mirror were diagnostic
+  conformance code with no semantics and were deleted. The current native boundary is generated V1
+  DTO/opaque dispatch plus caller-parameterized kernels; Lean performs every semantic check.
 - 2026-08-08 **Loom/SubUdSeam [ZK-RBR-extract] lemma A — resolved-by-split ✓** (audited, 4362c3f; literature status corrected 2026-08-08): the sub-UD seam. The COLUMN form REFUTED (no_column_extractor — sharp negative, full quantifier strength, CHOICE-FREE: no recovery function of column data exists below UD, even the whole family table); the mutual-CA WORD form REALIZED (subUdRecover pins the increment's codeword via the affine generator's mutual CA at UD radius — foldFamily_eq_comb + WHIR 4.10/4.11 fires verbatim + codeword uniqueness below dC/2). The t-window conflict (t+r≤d hiding vs d≤t recovery) DISSOLVES at word resolution (recovery never counts columns). subUdSeamCounterfactual + extractChain_subUdSeam re-prove the seam column-free. Coexistence: constrained-mask hiding at t=1<d=2 AND recovery. Teeth: family_pins_where_columns_cannot; old_route_decodes_wrong_on_corruption (recoverFromColumns confidently wrong at t=d on corruption, subUdRecover corrects). Residual [SUBUD-johnson] remains local formalization/integration work: hPG and the RS/polynomial-generator MCA theorem through Johnson (published in 2025/2051, 2025/2055, 2025/2110 but still represented here by the historical `WHIRConjecture412` hypothesis), the Johnson/OOD pin, and the sampling/deployment bridge. Capacity variants are false (2025/2046). ATLAS triple. 3rd of 4 frontiers landed.
 - 2026-08-08 **Compiler/Emit — the EMIT PATH ✓** (audited, 82fde20, tree green 2505): the verified Lean seam to an (unverified) prover. ConstraintDescriptor = first-order serializable data (ℕs/field-consts/lists, DecidableEq derived, a literal decide'd — NO functions inside, genuinely prover-consumable). emit (via flattenSystem, reuses AirFlatten's fold); emit_faithful (descriptorHolds ⟺ the Lean gate system, UNCONDITIONAL both directions, [propext,Quot.sound] CHOICE-FREE — checking the descriptor IS checking the Lean AIR); emit_accepts_iff (∃-witness ⟺ systemAccepts); emit_wellFormed (buffer-sizing from the header). Note-spend emitted → concrete descriptor (2.7M gates, honest #eval; wrong-nullifier admits no witness). Residuals: [EMIT-backend] (wire-format + WGPU BabyBear⁴ backend = unverified compute ADOPTING breadstuffs' gpu_hidingfri_fold into OUR work), [EMIT-sound] (prover-accepts⟹descriptorHolds inherits the FRI/STARK floor — stated not claimed), [EMIT-share] (CSE for gate dedup). ATLAS triple. **The prover checks bytes; the bytes provably mean the AIR.** 2nd of 4 frontiers landed.
 - 2026-08-08 **Theory/BinaryTower [OB-8-tower] ✓** (audited, c674ea1, tree green 2504): the GF(2)-tower field substrate (Binius path). binaryTower k = mathlib's GaloisField 2 (2^k) — REAL field (splitting-field construction, not a stub). binaryTower_card (2^(2^k)), finrank (2^k), char_two (1+1=0); binaryTowerEmbed (real AlgHom, injective + NON-surjective at every level = proper inclusion) + the chain; binaryTower_rs_eval_injective. binaryTower_one_fanpaar_base: the Fan-Paar level-1 generator ∃ x, x²+x+1=0 ∧ x∉{0,1} — concrete. Residuals [BTOWER-fanpaar] (the explicit generator recursion → fast tower multiplication, stated + base discharged) + [BTOWER-rs] (RS over the tower, Loom-side bridge). 16 decls ATLAS triple. First of the 4 beyond-v0 frontiers landed.

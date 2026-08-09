@@ -12,6 +12,11 @@ minidregg develops three things together:
 3. **Lean-owned semantic manifests and controllers** around a shrinking set of unverified native
    arithmetic, transform, hash, Merkle, and buffer-management kernels.
 
+Lean is the sole source of semantic meaning, protocol control, and acceptance. Rust is either
+mechanically generated data-only DTO/dispatch glue or opaque untrusted computation behind a
+Lean-owned interface. The project has no Rust operational semantics, so native code is never a
+refinement and never decides whether a receipt is accepted.
+
 The stable clean-sheet architecture and ordered construction plan live in
 [`PROJECT.md`](PROJECT.md); [`GOAL.md`](GOAL.md) is the evidence/status ledger.
 
@@ -27,20 +32,42 @@ experiment and can be replaced wholesale as the protocol evolves.
 | **Derived arithmetization** | `Compiler/Air` proves the executor and circuit readings agree; flattening produces degree-≤2 gates; `Compiler/Emit` produces a serializable descriptor with `emit_faithful`. `Theory/Bignum` owns fixed-width little-endian limbs, and `Compiler/AirBignum` emits range-checked carry addition with exact integer soundness and overflow rejection. | This proves what emitted constraints mean, including the landed bignum addition gadget. Rust/WGSL has no semantics here: it is unverified compute whose outputs must be rechecked by Lean-owned control. Multiplication and broader application-language lowering remain separate work. |
 | **Multiplicative RS proximity** | Ordinary unique-decoding results, an unconditional one-third-UD band, and `HalfThreshold*`: one round halves the radius outside at most one field challenge, followed by a proved UD tail. The committed transcript, adaptive earliest-deviation argument, and coherent runtime-shaped query paths are assembled at `m·b/|F| + (1−τ)^q`; the rate-1/2 `δ=3/10 → 3/20<1/6` specialization is machine-checked. | Concrete Merkle collision resistance and the single-ROM Fiat–Shamir reduction remain cryptographic/composition floors. The coherent theorem is multiplicative; it is not silently reused for characteristic-two additive folding. |
 | **Johnson/list regime** | `JohnsonRegime` proves the list-size inequality and exact sampling amplification. `JohnsonMcaBridge` imports the exact theorem interface and constants from Haböck 2025/2110, corrects the paper/Loom degree convention to `ρ_H=(d−1)/n`, and proves that one `m=max(3,d)` instance covers Loom's rounded Johnson target. | The hard BCIKS/GS/Hensel algebraic proof is still the explicit proposition `HaboeckTheorem2`, not a local theorem or axiom. Thus the Johnson MCA seam is exact and conditional, not yet machine-proved end to end. There is **no blanket capacity claim**: capacity-level variants have counterexamples. |
-| **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. Native code retains Fan–Paar `GF(2^64)`, a shift-aware `O(n log n)` transform, and cSHAKE/Merkle compute. | The former handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted after audit found that its bound was transcript-bound but never enforced. A Lean-emitted rate-aware controller, basis/order correspondence, CR/shared-XOF composition, and the outer accumulator remain. |
-| **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. Native Tower256 now retains only incidence, equality-weight, fraction-tree, interpolation, and round-message arithmetic kernels. | The handwritten LogUp statement/transcript/proof/verifier and receipt adapter were deleted. A Lean-owned lookup clause/controller, additive proximity, CR/ROM composition, and later Twist/Shout mutable-state layer remain. |
-| **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; `SemanticHistoryAccumulator` admits commit and reject through one codec-bound word, permits append only from a verified predecessor head, preserves one folded `AccClaim`, and supplies the existing full-opening decider/extraction theorem at every constructed depth. | The history head is proof-relevant and retains its entries; each fold still requires an explicit recommitment equation, and extraction currently assumes all authenticated openings. This is not a WARP/FACS PCS, a succinct history object, or a hiding/ZK composition. |
-| **Zero knowledge and extraction** | Native formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
-| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The handwritten Rust gate-verifier family was deleted. Coherent proximity, base-subfield sampling, CR/shared-ROM, Lean-owned verifier control, recursion, and PoW composition remain before calling 137 bits deployed. |
+| **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. `Compiler/AdditiveFriReceiptClause` binds the manifest declaration, reversed/high-first basis order, affine domain and rate schedule, roots-before-challenges, coherent queries, terminal, and exactly that ideal predicate/bound. | Concrete commitment binding/CR, cSHAKE-ROM transport, validation of native arithmetic buffers, an instantiated online controller, and the outer accumulator remain explicit. The generic clause is not an admitted base-V1 runtime clause. Rust retains opaque compute, but tower/LCH and hash/Merkle conventions are not yet generated pins. |
+| **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. `Compiler/Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation from a committed semantic trace behind explicit Tower256 arithmetic, PCS-opening, transcript-order, CR, and ROM premises. Native Tower256 retains arithmetic kernels only. | V1 now declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it in a locally extended manifest. The clause remains absent from base-V1 clauses, and the pin proves no Rust representation correspondence. External premises, proximity/composition, online control, and mutable state remain. |
+| **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; `SemanticHistoryAccumulator` admits commit and reject through one codec-bound word, permits append only from a verified predecessor head, preserves one folded `AccClaim`, and supplies the existing full-opening decider/extraction theorem at every constructed depth. `SemanticHistoryStraightlinePcs` adds a same-carrier, prefix-root, one-transcript extraction interface and recovers the exact semantic head through the existing erasure theorem. | The history head remains proof-relevant and retains its entries; append has an explicit recommitment equation. The new PCS module supplies an interface and caller-provided knowledge-error ledger, not a PCS, `Reduction`, Fiat–Shamir/ROM, Merkle CR, sampled decider, or hiding schedule. This is not yet a WARP/FACS deployment or succinct history object. |
+| **Zero knowledge and extraction** | Lean formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
+| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. Lean proves `X^6−31` irreducible, and `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | Base-V1's Ext6 `DialectClauseDecl` is an opaque pin, not a receipt clause or verifier. Coherent proximity, base-subfield provenance/sampling, commitment/transcript/opening control, final LDT, CR/shared-ROM, recursion, and PoW composition remain before calling 137 bits deployed. |
+| **BFV/residue-ring clause** | `Compiler/BfvReceiptClause` binds one committed witness and the ordered 384-row modulus-major equation family. Its `CheckedRowBuffer` requires the existing emitted weighted AIR checks, and `AcceptedToken.every_exact_integer_equation` derives each exact signed `Int` equation. | The clause's proof codec, proof suite, and controller digest are deliberately zero/unassigned, and registration does not close a manifest. Concrete carrier/statement codecs, proof/controller composition, commitment binding, and common application-receipt integration remain. |
+| **Semantic control and artifacts** | `Compiler/DeclaredEffectArtifact` derives a concrete typed account move from `Theory.EffectDeclaration.Declaration.toWire.words`. `Theory/DeclaredTurn` derives the request digest and roots, runs authorization before effects, and makes rejection preserve the pre-state. `Assurance/DeclaredTurnReceipt` names the declaration-indexed `DeclaredEffect`, derives `executeCore`, and proves its canonical receipt/history core is exactly that execution. `Assurance/PrivateComputationReceiptClause` records an existing typed private `Completion` as a request-bound disclosure only on a committed turn. `Theory/ReactiveCellTransition` proves exact accepted bindings/frame laws and keeps physical CAS/nullifier durability as an explicit handler premise; `Theory/TurnTransition` preserves ordinary/resumed indices in one delegated control sum and common transition facts. `Compiler/MinidreggV1Artifact` generates the canonical JSON, while `Compiler/NativeGlueGen` generates Rust constants, DTOs, and three opaque dispatch methods. | The semantic core and private-disclosure joins have landed, but manifest/header/code-membership entry evidence, reactive/history admission, complete dialect control, and emitted online control are not yet one canonical receipt/header controller. `TurnTransition` deliberately contains no history or physical commit. Private portal evidence remains abstract, and manifest suite/bridge pins are registry facts, not cryptographic verification. Generated DTO/dispatch glue contains no validator, transcript, verifier Boolean, or accepted token. |
 
 ## What runs today
 
 There is deliberately no authoritative Rust one-call prover/verifier API now. The former
 full-trace `reference_prove` / `reference_verify` composition and its benchmark were deleted because
-they authored transcript and acceptance semantics in Rust. Native code currently supplies
-unverified field/tower arithmetic, transforms, hash/Merkle operations, candidate trace data, and a
-data-only descriptor reader. The protocol wrappers for gate sumcheck, MLE openings, LogUp, and
-Fiat--Shamir have been deleted. Lean owns the relations, manifests, plans, and emitted descriptors.
+they authored transcript and acceptance semantics in Rust. `prover/src` now contains only
+unverified field/tower arithmetic, linear/MLE/gate/lookup kernels, transforms, parameterized
+cSHAKE/hash/Merkle data operations, and the optional WGPU fold. The protocol wrappers for gate
+sumcheck, MLE openings, LogUp, Fiat--Shamir, receipts, and proof history have been deleted. Lean owns
+the relations, manifests, plans, codecs, and emitted descriptors.
+
+“Kernel” does not yet mean “free of handwritten profile choices.” `gate_kernels` still fixes local
+row/read/residual and seven-operand gate layouts; `logup256_kernels` fixes incidence order,
+round-message polynomials, and probe sets; `hash_kernels` fixes cSHAKE framing and binary Merkle
+layout; and the tower/Ext6 modules fix representation conventions. These are untrusted candidate
+compute and generation/deletion debt. They acquire no semantic authority from resembling a Lean
+formula and cannot be admitted until Lean-owned control pins or rechecks the exact conventions.
+
+The generated [`prover/generated/semantic_artifact_v1.rs`](prover/generated/semantic_artifact_v1.rs)
+is a separate DTO seam: it contains canonical artifact constants, four data structures, and
+`run_arithmetic`/`run_hash`/`run_transform` dispatch only. It does not validate the JSON or native
+reply and does not construct a statement, transcript, verdict, or receipt. It is not imported by
+`prover/src/lib.rs`, so no live generated adapter currently connects those work requests to the
+native kernels.
+
+The lookup carrier mismatch is now corrected at the artifact-data level: V1's Lean bundle, JSON,
+and generated Rust payload include profile `205` at degree `256` with codec `21`, and the local
+lookup clause selects it instead of degree-64 `gf2Carrier`. Clause `404` is still extension-only,
+and profile identity alone does not validate native `Tower256` limb/basis representation.
 `Compiler.SemanticController` is now the first Lean-executable authority model at the fixed
 frame-nucleus descriptor boundary: for every arbitrary
 native oracle, its only successful outcome carries exact-request authorization, the bound semantic
@@ -84,6 +111,31 @@ and emit path and produces the first-order deployment artifact. The handwritten 
 verifier and lookup receipt adapter were deleted. `SemanticHistoryAccumulator` now closes the
 proof-relevant semantic append and exact full-opening decider/extraction layer; complete
 header-preimage/auth/effect/disclosure emission and the succinct WARP IOR/PCS remain.
+`SemanticHistoryStraightlinePcs` advances the latter only to an exact external interface: it binds
+prefix-scheduled roots and literal fold words to the same carrier/index, then extracts the semantic
+head from one accepted transcript outside a caller-priced failure event. It does not instantiate
+the PCS, reduction, transcript ROM/CR argument, sampled decider, or hiding schedule.
+
+The newer executable transaction seam is `Theory.DeclaredTurn`: it derives the effect digest and
+pre-state root from one request seed, a typed `EffectDeclaration.Declaration`, and canonical
+pre-state; checks authorization first; and recomputes the post-root. Its account-move projection is
+`Compiler.DeclaredEffectArtifact`, not the older generic `Effects.EffectSpec` projection.
+`Theory.ReactiveCellTransition` joins reactive decisions to validated patches and exposes durable
+physical commit only through `HandlerPremise`. `Assurance.DeclaredTurnReceipt` now supplies the
+bounded join from declared execution into `SemanticTurnReceipt` and `SemanticHistoryAccumulator`:
+its `executeCore` has no receipt/witness argument, and `canonical_core_exact` plus
+`historyClaim_core_exact` pin the accumulated core. The remaining manifest/header/code-membership,
+reactive, dialect-clause, and emitted-controller obligations are still explicit.
+`Assurance.PrivateComputationReceiptClause` closes one disclosure edge without inventing a proof
+system: `ReceiptEvent.ofCompletion` preserves the existing authorization, representation-identity,
+computation, and release evidence; `recordCompletion` attaches it to a committed turn; and
+`rejected_not_released` plus `empty_disclosures_not_released` fail closed. Its portal evidence and
+manifest pins remain abstract boundaries.
+
+`Theory.TurnTransition` unifies ordinary declared and resumed reactive execution without erasing
+their dependent types: `control` delegates to the two existing Lean controllers, refusal and block
+materialize to the pre-cell, and `TransitionFacts` exposes canonical roots, exact footprint,
+`ReceiptDelta`, and frame law. It does not admit history or perform physical commit.
 
 The former Rust receipt-relation and proof-history wrappers were deleted. Their replacement is not a
 new mirror: it is a Lean-owned manifest/controller whose only native interface is bounded compute
@@ -104,23 +156,26 @@ The active direction is to make the strongest pieces meet at one honest end-to-e
 - **Rates:** use the unconditional half-threshold route now, formalize the algebraic core behind the
   landed exact Haböck interface (or keep it visibly conditional), and tie every above-Johnson claim
   to exact hypotheses rather than extrapolating to capacity.
-- **Proximity:** compose the landed characteristic-two adaptive/coherent theorem with the concrete
-  binary commitment/XOF execution and replace handwritten protocol control with Lean emission.
+- **Proximity:** instantiate `AdditiveFriReceiptClause` with concrete commitment/XOF execution and
+  Lean-emitted online control; its current predicate and bound are exact but idealized.
 - **Tower arithmetic:** keep the proved additive tower and optimized native arithmetic/transform
   kernels, then emit the rate-aware FRI/OOD controller from Lean before any binary receipt is
   admissible again.
-- **Accumulation:** instantiate a real WARP/FACS PCS and sampled extractor for the landed
-  Lean-owned semantic-history fold. The former handwritten functional-history node was deleted
-  rather than promoted into the architecture; the current theorem is exact and full-opening, not
+- **Accumulation:** instantiate a real WARP/FACS PCS, transcript reduction, and sampled decider
+  behind the landed `SemanticHistoryStraightlinePcs` interface. Its prefix-typed roots,
+  one-transcript extractor, exact erasure join, and error-ledger shape are real; the PCS, ROM/CR
+  reduction, and hiding schedule are external. The retained-entry/full-opening history is still not
   succinct.
-- **Gate provenance:** extend the landed Lean factored-selector algebra with generated
-  transcript/opening control, close coherent proximity and base-subfield sampling, and join it to
-  final FRI.
+- **Lookup and gate clauses:** admit the locally pinned LogUp clause into a generated controller
+  only after discharging its explicit Tower256/PCS/CR/ROM boundaries; replace the opaque Ext6 V1
+  pin with a concrete clause around the landed factored-selector algebra, then close coherent
+  proximity, base-subfield provenance, and final FRI.
 - **Deployed ZK:** instantiate the staged roots-before-query game with hiding committed-word-
   knowledge proofs and discharge its explicit shared-ROM fresh/hit/sampling ports; never revive the
   vacuous existential or refuted hidden-state targets.
-- **Security:** compose the selected cSHAKE/Ext6 transcript, commitment CR, PoW if wanted, and
-  recursive verifier in one execution before attaching the idealized 137-bit label to runtime.
+- **Security:** let Lean select and schedule the parameterized cSHAKE/Ext6 transcript, then compose
+  commitment CR, PoW if wanted, and a recursive verifier in one execution before attaching the
+  idealized 137-bit label to runtime.
 
 ## Design point and performance thesis
 
@@ -161,6 +216,10 @@ Lean proves mathematical statements at their declared interfaces. Some interface
 or conditional: random-oracle behavior, concrete commitment/hash security, imported proximity
 results, and connections between abstract games and a deployed transcript. The source keeps those
 boundaries named, with small-field firing examples and false neighboring statements where useful.
+
+No Rust behavior participates in that semantic argument. Generated Rust glue is a first-order DTO
+and opaque-dispatch projection of a Lean artifact; handwritten Rust is only untrusted computation.
+Conformance tests can find bugs but cannot establish refinement, protocol meaning, or acceptance.
 
 The compiler result is similarly precise: for an emitted descriptor, `descriptorHolds` is
 equivalent to the Lean gate system. It does not by itself prove that an arbitrary external prover

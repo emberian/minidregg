@@ -54,11 +54,12 @@ BabyBear, MPC shares, and an FHE residue ring are the same algebra.
 1. **One declared denotation.** Executor, public view, receipt encoder, constraints, and explanation
    are derived interpretations of the same indexed program. Cross-carrier agreement is proved by
    fold fusion or a logical relation, not asserted by shared names.
-2. **Lean owns semantics.** A handwritten Rust type, validator, transcript, or verifier is never a
-   semantic implementation and cannot be called a refinement: this project has no Rust operational
-   semantics. Lean emits the descriptor, bytecode, codec, and API. Hand-optimized Rust is
-   unverified compute behind that generated interface; a bad kernel may hurt completeness or speed,
-   but a Lean-derived verifier must prevent it from creating a false accepted receipt.
+2. **Lean owns semantics, control, and acceptance.** A handwritten Rust type, validator,
+   transcript, scheduler, or verifier is never a semantic implementation and cannot be called a
+   refinement: this project has no Rust operational semantics. Lean emits the descriptor,
+   bytecode, codec, controller plan, and API. Rust is either mechanically generated DTO/dispatch
+   glue or opaque untrusted compute behind that interface. A bad kernel may hurt availability,
+   completeness, or speed; only Lean may decide the continuation or construct an accepted token.
 3. **Patch, then commit.** A failed request cannot leave an unreceipted mutation. Charged refusal,
    if supported, is a distinct committed outcome with its own receipt.
 4. **One admission judgment.** Every signature, capability, token, ZK proof, threshold decision, or
@@ -106,6 +107,9 @@ The first formal substrate is already present in:
 - [`Theory/AuthorizationDeclaration.lean`](Theory/AuthorizationDeclaration.lean) and
   [`Theory/EffectDeclaration.lean`](Theory/EffectDeclaration.lean): first-order executable plans
   whose successful tokens carry exact-request authority, footprint, and balance proofs;
+- [`Theory/DeclaredTurn.lean`](Theory/DeclaredTurn.lean): derives the complete request from one
+  request seed, typed effect declaration, and canonical pre-state, runs authorization before
+  effects, derives both roots, and makes rejection materialize to the exact pre-state;
 - [`Theory/CellState.lean`](Theory/CellState.lean): logical state, canonical materialization, and
   validated-only patches make root coherence, frame, rejection atomicity, and no-ghost state
   structural;
@@ -118,25 +122,70 @@ The first formal substrate is already present in:
   dependency-indexed lenses, drafts, and witness cursors;
 - [`Theory/GuardedAdvice.lean`](Theory/GuardedAdvice.lean): guarded external advice without
   laundering an unproved value into the kernel;
+- [`Theory/ReactiveCellTransition.lean`](Theory/ReactiveCellTransition.lean): joins the existing
+  reactive controller to validated cell patches, proves exact request/root/footprint bindings and
+  frame laws, and releases a logical post-cell only behind an explicit physical CAS/nullifier
+  receipt premise;
+- [`Theory/TurnTransition.lean`](Theory/TurnTransition.lean): preserves ordinary declared and
+  resumed reactive indices in one typed sum, delegates to their existing Lean controllers, and
+  exposes common canonical roots, exact footprint, `ReceiptDelta`, and frame facts without claiming
+  history admission or physical commit;
 - [`Compiler/SemanticManifest.lean`](Compiler/SemanticManifest.lean),
   [`Compiler/SemanticArtifactBundle.lean`](Compiler/SemanticArtifactBundle.lean), and
   [`Compiler/NativeKernelPlan.lean`](Compiler/NativeKernelPlan.lean): content-addressed first-order
   declaration/phase artifacts and bounded native work whose arbitrary results are checked only by
-  Lean-owned control.
+  Lean-owned control;
+- [`Compiler/DeclaredEffectArtifact.lean`](Compiler/DeclaredEffectArtifact.lean) and
+  [`Compiler/MinidreggV1Artifact.lean`](Compiler/MinidreggV1Artifact.lean): the concrete typed
+  account-move projection derived from `EffectDeclaration.Declaration.toWire.words` and the closed
+  V1 JSON artifact at [`prover/testdata/semantic_artifact_v1.json`](prover/testdata/semantic_artifact_v1.json);
+- [`Compiler/NativeGlueGen.lean`](Compiler/NativeGlueGen.lean) and
+  [`Compiler/MinidreggV1NativeGlue.lean`](Compiler/MinidreggV1NativeGlue.lean): deterministic
+  generation of [`prover/generated/semantic_artifact_v1.rs`](prover/generated/semantic_artifact_v1.rs),
+  containing constants, DTOs, and opaque work-dispatch methods only—no semantic validator,
+  transcript, verifier Boolean, or acceptance token. The generated file is not imported by
+  `prover/src/lib.rs`, so no live generated adapter currently connects its requests to kernels;
+- [`Assurance/DeclaredTurnReceipt.lean`](Assurance/DeclaredTurnReceipt.lean): defines the
+  declaration-indexed `DeclaredEffect`, derives the sole executable receipt core from
+  `DeclaredTurn.execute`, proves commit/reject validity, and fixes the `SemanticTurnReceipt` and
+  history-claim cores to that execution; manifest/header/code-membership entry obligations remain;
+- [`Assurance/PrivateComputationReceiptClause.lean`](Assurance/PrivateComputationReceiptClause.lean):
+  turns an existing typed private-computation `Completion` into a request-bound disclosure event,
+  records it only on a committed turn, and binds its dialect and representation bridges as manifest
+  facts without assigning cryptographic meaning to a native suite;
+- [`Assurance/SemanticHistoryStraightlinePcs.lean`](Assurance/SemanticHistoryStraightlinePcs.lean):
+  states the same-carrier, prefix-typed fold-root and one-transcript PCS extraction interface,
+  derives exact semantic-head recovery through the existing erasure theorem, and keeps the
+  knowledge-soundness and binding/ROM prices explicit rather than claiming a WARP instantiation.
 
 ## Native dialects
 
 | Dialect | Native work | Current proof direction | Boundary that must stay explicit |
 |---|---|---|---|
-| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)` execution, `GF(2^256)` challenges, additive LCH/FRI, trace-linear retirement | Rust kernels are unverified compute; generated Lean authority, CR/ROM composition, and an outer large-challenge accumulator remain |
-| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | A Lean-owned commitment/transcript/opening controller, coherent proximity, subfield provenance, and final LDT remain |
-| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses, unit-vector incidence, and the exact pushforward; native Tower256 retains arithmetic kernels only | Lean emission of the lookup clause/controller, CR/ROM/proximity, and the later Twist/Shout mutable-state layer remain; handwritten native proof and receipt adapters are deleted |
-| **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Exact bignum/cross-modulus equations and ring-native receipts | Naive field lookup over cyclotomic rings is unsound; canonical limbs/ranges or indexed ring protocols are mandatory |
+| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash/Merkle buffers, but its tower/LCH ordering and hash/Merkle framing conventions are not yet emitted pins. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not yet base-V1 admitted |
+| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves `X^6−31` irreducibility, descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | The V1 `ext6DialectClause` is only an opaque registry pin. Native `field6` limb/polynomial and `gate_kernels` operand-slot conventions are not connected to generated pins. No concrete Ext6 receipt clause or verifier follows. Commitment/transcript/opening control, coherent proximity, subfield provenance, final LDT, and CR/ROM composition remain |
+| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; native Tower256 retains arithmetic kernels only | V1 now declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it in a locally extended manifest. Clause `404` remains outside base-V1 clauses, and carrier metadata proves no Rust representation correspondence. Native `logup256_kernels` still fixes ungenerated incidence/probe conventions. PCS, CR/ROM, proximity, and mutable state remain |
+| **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Bignum/cross-modulus theory and `Compiler.BfvReceiptClause`: one proof-relevant token binds the committed witness and ordered 384-row modulus-major batch, checks each candidate BabyBear accumulator buffer through emitted AIR, and derives every exact signed `Int` equation | Its clause pin deliberately leaves proof codec, suite, and controller at zero/unassigned and does not close a manifest. Concrete carrier/statement codecs, proof system/controller, commitment binding, and full application receipt integration remain; naive field lookup over cyclotomic rings is unsound |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
 
 Tower256 exists because it lets binary semantics use cheap native operations while sampling
 security-sized challenges and bridging evaluations into a large-field PCS. It is not an attempt to
 interpret all computation as GF(2).
+
+The remaining handwritten kernels are not yet uniformly policy-free. In particular,
+`gate_kernels` fixes a local row/read/residual and seven-operand gate layout;
+`logup256_kernels` fixes incidence ordering, round-message polynomials, and interpolation probes;
+`hash_kernels` fixes cSHAKE framing and a binary Merkle layout; and the tower/Ext6 modules fix limb,
+basis, and polynomial representations. Until those conventions are generated from Lean or checked
+against exact Lean-owned pins, they are opaque untrusted candidate computation and may affect only
+availability/completeness—not semantics or acceptance.
+
+The Tower256 carrier distinction is load-bearing: a clause whose arithmetic premise is over
+`GF(2^256)` cannot be registered on the degree-64 `gf2Carrier`. V1 now includes
+`gf2Tower256Carrier` (profile `205`, degree `256`, distinct codec `21`) in Lean, JSON, and generated
+Rust artifact data, and clause `404` selects it. The clause itself is still extension-only, and
+carrier metadata does not prove that the four-`u64` native `Tower256` representation implements the
+profile.
 
 ## Receipt relation
 
@@ -155,8 +204,11 @@ A receipt binds at least:
 - prior receipt/history links and verifiable finality when finality is claimed.
 
 The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its replacement spine
-begins with a Lean-owned `SemanticManifest`: native code will
-receive bounded calls and return data; it will not construct or verify receipt meaning.
+begins with a Lean-owned `SemanticManifest`, the canonical V1 artifact, and generated native DTO
+glue. Native code receives bounded calls and returns data; it neither constructs nor verifies
+receipt meaning. Registry records named `DialectClauseDecl` are first-order pins, not claims that a
+native proof system or verifier exists. The generated Rust file is not yet compiled into the
+`prover` crate and therefore is an artifact/API target, not a live dispatch integration.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first
 common accumulator language: a fixed pre/post/touched word, Boolean-mask and frame quadratics, an
@@ -176,12 +228,31 @@ artifact. The handwritten Rust typed-turn verifier and lookup receipt adapter we
 native module may reconstruct those decisions. Full authorization/effect/disclosure/header-preimage
 arithmetization and emitted online control remain.
 
+`Theory.DeclaredTurn` now supplies the executable typed transaction boundary: request effect digest
+and pre-root are derived, authorization precedes the effect checker, commit carries the
+request-indexed `AuthorizedEffect`, post-root is recomputed, and rejection is definitionally the
+pre-state. `Compiler.DeclaredEffectArtifact` projects the concrete typed account move through
+`Declaration.toWire.words`; the old `Effects.EffectSpec` descriptor is not the semantic effect
+declaration. `Assurance.DeclaredTurnReceipt` names the resulting `DeclaredEffect`, defines
+`executeCore` with no caller-authored receipt witness, and proves `canonical_core_exact` and
+`historyClaim_core_exact` through the existing turn-receipt/history spine. This closes the semantic
+core join, not the complete canonical header controller: manifest well-formedness, exact header
+projection, code membership, reactive admission, complete dialect-clause control, and emitted online
+admission remain. `Assurance.PrivateComputationReceiptClause` separately closes one disclosure
+edge: a typed private `Completion` becomes a manifest/mode/request-bound `ReceiptEvent`, and
+`recordCompletion` can attach it only to a committed turn. Its abstract portal evidence and
+registry pins are not cryptographic verification.
+
 ## Reactive UI and tools
 
 The good idea from Breadstuffs/DeOS is retained. The target is to collapse the previously separate
-worlds onto the receipt relation; `ReactiveReceipt`, `GuardedAdvice`, `ReactiveController`, and
-`CellState` are the landed fragments, while durable CAS/nullifier handling and the executable
-tool/UI/agent join remain:
+worlds onto the receipt relation. `ReactiveReceipt`, `GuardedAdvice`, `ReactiveController`, and
+`CellState` are joined by `ReactiveCellTransition`: controller acceptance is rechecked against the
+validated cell patch, exact roots and footprint are exposed, and blocked/rejected outcomes preserve
+the pre-cell. Durable mutation remains outside Lean behind the explicit `HandlerPremise` binding one
+atomic CAS/nullifier receipt. `TurnTransition` supplies one typed ordinary/resumed control surface
+and common `TransitionFacts`; by design it contains neither history admission nor physical commit.
+The tool/UI/agent join remains:
 
 1. a projection is a pure, proved program from semantic state and observer policy to a typed view;
 2. it returns the exact dependency set used to produce that view;
@@ -207,19 +278,25 @@ extractable receipt composition are separate wrappers, not prose properties of t
 The implementation sequence is:
 
 1. **Dialect proof adapters.** Every accepted receipt clause is backed by a concrete Lean-owned
-   verifier/controller. The
-   Lean relations for gates and indexed lookup have landed; their former handwritten native
-   verifier adapters were deleted. Lean-owned clause controllers and emitted artifacts come next;
-   mutable RAM and FHE adapters follow.
+   verifier/controller. `AdditiveFriReceiptClause` owns the ideal characteristic-two clause and
+   exact bound; `Logup256ReceiptClause` owns the indexed lookup semantic conclusion behind named
+   external PCS/CR/ROM premises. Neither is yet an admitted base-V1 online controller. The Ext6
+   manifest entry remains only a pin. Concrete controllers/artifacts, mutable RAM, and FHE follow.
 2. **Stable common relation.** The pre/post/touched frame nucleus, typed request/auth/effect/
    disclosure wrapper, header-bound runtime word, and `AccClaim` fold have landed. A proof-relevant
    `SemanticHistoryAccumulator` admits commit/reject entries, enforces predecessor/state links, and
-   reaches Loom's exact full-opening decider at arbitrary constructed depth. The concrete lookup
-   receipt clause remains open. `SemanticManifest` owns the first-order content-addressed ABI;
-   emit its concrete codec/API and admit only manifest-closed clauses.
-3. **One honest outer accumulator.** Replace the explicit recommitment/full-opening seam with the
-   WARP/FACS-style transcript, PCS, sampled decider, and extractor. Do not call the current retained
-   entry list succinct, and do not name a structural hash chain an accumulator.
+   reaches Loom's exact full-opening decider at arbitrary constructed depth. `DeclaredTurnReceipt`
+   now fixes its receipt core to declared execution, and `PrivateComputationReceiptClause` records a
+   typed completion as a request-bound committed disclosure. The lookup semantic clause has landed,
+   but its external premises and integration into the base V1 manifest/controller remain.
+   `SemanticManifest` owns the first-order content-addressed ABI; admit only closed clauses whose
+   Lean controllers recheck their complete boundaries.
+3. **One honest outer accumulator.** `SemanticHistoryStraightlinePcs` now pins the WARP-shaped
+   interface: same carrier/index, prefix-only roots, literal fold commitments, one-transcript
+   extraction, and an explicit error ledger. It does not construct the PCS, `Reduction`,
+   `KStateFn`, Fiat–Shamir ROM, Merkle CR, or lagged-root hiding schedule. Instantiate those pieces
+   and a sampled decider before replacing the retained-entry/full-opening seam or calling history
+   succinct; do not name a structural hash chain an accumulator.
 4. **Privacy composition.** Add hiding commitments/ZK adapters and prove the shared-ROM and
    simulation/extraction composition.
 5. **Checkpoint compression.** Use additive RS/LCH or the selected code-switch PCS at explicit
@@ -240,8 +317,9 @@ Each development step closes **one edge in the composition graph**:
 Commits are the development journal: small, thematic, frequent, and never delayed for a broad
 verification ritual. A later compile or theorem failure becomes a new fix-forward commit.
 
-No step may add a second semantic implementation in Rust. New Rust is either generated glue or a
-clearly labeled unverified computational kernel invoked through a Lean-emitted interface.
+No step may add a second semantic implementation in Rust. New Rust is either generated data-only
+glue or a clearly labeled, caller-parameterized opaque compute kernel invoked through a
+Lean-emitted interface. It is never a refinement and never returns the project's acceptance bit.
 
 `Compiler.SemanticController.arbitraryOracle_integrity` now establishes that rule for the current
 fixed frame-nucleus descriptor model: for every
@@ -254,15 +332,16 @@ are used for genuinely expensive builds or measurements, not repetitive ritual.
 
 ## Ordered frontier
 
-1. Extend the landed Lean semantic-receipt artifact from the frame nucleus to the complete typed
-   request, authorization, effects, disclosures, native clauses, and header preimage; emit online
-   control from the same declaration.
-2. Instantiate one real succinct outer PCS and sampled extraction theorem for the landed
-   arbitrary-depth semantic-history fold.
+1. Extend the landed `DeclaredTurnReceipt` core and private-completion disclosure joins with
+   manifest/header/code-membership evidence, reactive declarations, and dialect clauses to form the complete canonical
+   receipt/header relation; emit online control from that same Lean declaration. The current V1
+   JSON/DTO artifact is metadata, not this completed checker.
+2. Instantiate a real succinct PCS, transcript/ROM/CR reduction, and sampled decider behind the
+   landed `SemanticHistoryStraightlinePcs` interface and arbitrary-depth semantic-history fold.
 3. Join `ReceiptDelta` to promises, UI projections, and tool completion receipts in the executable
    semantic machine.
-4. Add the residue-ring/FHE receipt adapter through exact limbs, carries, ranges, and canonical
-   cross-modulus equality.
+4. Close the landed BFV receipt clause's unassigned carrier/codec/proof/controller pins and join its
+   exact 384-row integer-equation token to the common application receipt.
 5. Add hiding/ZK and collaborative/MPC adapters under the same typed request and receipt relation.
 6. Only then optimize, benchmark against Plonky3/Binius/Flock/Mina, and produce the public poster.
 
@@ -271,7 +350,7 @@ are used for genuinely expensive builds or measurements, not repetitive ritual.
 The poster is ready when all of the following are true:
 
 - a typed semantic turn produces a canonical `ReceiptDelta`;
-- at least two native dialect adapters verify real statements and cannot be spliced;
+- at least two Lean-owned dialect-clause controllers verify real statements and cannot be spliced;
 - one lookup/RAM path is linked to semantic columns rather than caller-chosen metadata;
 - a multi-node receipt history is genuinely accumulated or compressed, not merely hashed;
 - the privacy, FHE, and external-tool stories identify executable receipt boundaries;
