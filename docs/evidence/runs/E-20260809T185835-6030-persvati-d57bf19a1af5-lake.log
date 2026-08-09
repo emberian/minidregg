@@ -1,0 +1,70 @@
+run=E-20260809T185835-6030-persvati-d57bf19a1af5-lake
+commit=d57bf19a1af572ec4911477d7bce676dd53935cf
+tree=0acf96c989fb4571ccca9e8f7b205de09f5a113a
+host_alias=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-d57bf19a1af5-RXn5syOl
+command=lake build Theory.CredentialAuthorityEffects 
+resolved_executable=/home/ember/.elan/bin/lake
+✔ [2943/2960] Built Theory.PrivacyProfile (1.9s)
+✔ [2944/2960] Built Theory.IndexedProgram (2.2s)
+✔ [2945/2960] Built Theory.ReactiveReceipt (2.2s)
+✔ [2946/2960] Built Theory.TypedAuthorization (2.6s)
+✔ [2947/2960] Built Theory.GuardedAdvice (1.7s)
+✔ [2948/2960] Built Theory.DisclosureDeclaration (1.9s)
+⚠ [2949/2960] Built Theory.AuthorizationDeclaration (2.6s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2950/2960] Built Theory.ReactiveController (2.6s)
+✔ [2951/2960] Built Theory.PrivateComputationDeclaration (2.4s)
+⚠ [2952/2960] Built Theory.CredentialAuthorityFamily (1.0s)
+warning: Theory/CredentialAuthorityFamily.lean:236:17: unused variable `keyEpochExact`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Theory/CredentialAuthorityFamily.lean:239:30: unused variable `semantic`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+info: Theory/CredentialAuthorityFamily.lean:442:0: 'Minidregg.Theory.CredentialAuthorityFamily.encodeRequest_injective' depends on axioms: [propext]
+info: Theory/CredentialAuthorityFamily.lean:443:0: 'Minidregg.Theory.CredentialAuthorityFamily.retarget_changes_wire' depends on axioms: [propext]
+info: Theory/CredentialAuthorityFamily.lean:444:0: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext,
+ Quot.sound]
+info: Theory/CredentialAuthorityFamily.lean:445:0: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible' depends on axioms: [propext, Quot.sound]
+info: Theory/CredentialAuthorityFamily.lean:446:0: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_has_no_bypass' depends on axioms: [propext,
+ Quot.sound]
+info: Theory/CredentialAuthorityFamily.lean:447:0: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_over_budget' depends on axioms: [propext,
+ Quot.sound]
+info: Theory/CredentialAuthorityFamily.lean:448:0: 'Minidregg.Theory.CredentialAuthorityFamily.demoToken_is_capability_evidence' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2953/2960] Built Theory.EffectDeclaration (2.3s)
+✔ [2954/2960] Built Theory.CellState (1.9s)
+✔ [2955/2960] Built Theory.DeclaredTurn (1.6s)
+✔ [2956/2960] Built Theory.ReactiveCellTransition (2.2s)
+✔ [2957/2960] Built Theory.CanonicalTransition (1.7s)
+✔ [2958/2960] Built Theory.AcceptedCellEffect (1.9s)
+⚠ [2959/2960] Built Theory.CredentialAuthorityState (1.6s)
+warning: Theory/CredentialAuthorityState.lean:176:2: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+info: Theory/CredentialAuthorityState.lean:178:0: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible' depends on axioms: [propext, Quot.sound]
+info: Theory/CredentialAuthorityState.lean:179:0: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Quot.sound]
+ℹ [2960/2960] Built Theory.CredentialAuthorityEffects (1.8s)
+info: Theory/CredentialAuthorityEffects.lean:639:0: 'Minidregg.Theory.CredentialAuthorityEffects.AttenuateEvidence.childLineageValid' depends on axioms: [propext,
+ Quot.sound]
+info: Theory/CredentialAuthorityEffects.lean:640:0: 'Minidregg.Theory.CredentialAuthorityEffects.authorization_consults_same_canonical_pre' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Theory/CredentialAuthorityEffects.lean:641:0: 'Minidregg.Theory.CredentialAuthorityEffects.revocation_post_is_authorizer_member' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Theory/CredentialAuthorityEffects.lean:642:0: 'Minidregg.Theory.CredentialAuthorityEffects.rotation_post_is_authorizer_epoch' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Theory/CredentialAuthorityEffects.lean:643:0: 'Minidregg.Theory.CredentialAuthorityEffects.revoke_frame' depends on axioms: [propext, Classical.choice, Quot.sound]
+Build completed successfully (2960 jobs).
+command_exit=0
+source_integrity_exit=0

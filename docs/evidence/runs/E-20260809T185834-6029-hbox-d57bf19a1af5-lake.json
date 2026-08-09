@@ -1,0 +1,104 @@
+{
+  "schema": "minidregg/remote-evidence/v3",
+  "runId": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake",
+  "source": {
+    "requestedRevision": "d57bf19",
+    "commit": "d57bf19a1af572ec4911477d7bce676dd53935cf",
+    "tree": "0acf96c989fb4571ccca9e8f7b205de09f5a113a",
+    "dirty": false,
+    "archiveSha256": "cfec50bd280c1ca16a9b74060e25abeea4d8d9afa16c3306ff805ab6e2bf27b2",
+    "leanToolchainSha256": "54727eec5cba149c18842e6deb5c41b369d66455c93ce135d7d5347c782b2325",
+    "lakeManifestSha256": "adfbabe1a7e53e7759216079326e26786c57f62203255595ebe6b7df4f1323bb",
+    "rustToolchainSha256": "09f4296a78c78a96f71b80d4feca5664cfdce14e8a2fd34498ef6a0eb4a916ec",
+    "beforeManifest": {
+      "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.source.sha256",
+      "sha256": "c4cc4db46361e3199c549dec94107646d6e88b8c3595d6dd8fe33cda3ce6bfd3"
+    },
+    "afterManifest": {
+      "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.source-after.sha256",
+      "sha256": "c4cc4db46361e3199c549dec94107646d6e88b8c3595d6dd8fe33cda3ce6bfd3"
+    },
+    "mutationPolicy": {
+      "default": "exact-manifest-equality",
+      "autoSync": false,
+      "allowlist": {
+        "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.generated-outputs.tsv",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outputs": []
+      }
+    }
+  },
+  "dependencies": {
+    "seedKey": "v2-54727eec5cba149c18842e6d-adfbabe1a7e53e7759216079",
+    "runLocalTree": true,
+    "copyMode": "hardlink-readonly-with-private-metadata",
+    "revisionManifest": {
+      "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.dependencies.tsv",
+      "sha256": "3e6a7faddbc876c072e8dfb7ebc5dcae2eb3b8ffed3e816365f27283132f428b"
+    }
+  },
+  "command": [
+    "lake",
+    "build",
+    "Theory.CredentialAuthorityEffects"
+  ],
+  "resolvedExecutable": "/home/hbox/.elan/bin/lake",
+  "worker": {
+    "hostname": "hbox",
+    "uname": "Linux hbox 6.11.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 13 20:29:41 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900",
+    "threads": 24,
+    "memoryKiB": 129319636,
+    "gpu": "00:02.0 Display controller: Intel Corporation AlderLake-S GT1 (rev 0c)\n03:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 22 [Radeon RX 6700/6700 XT/6750 XT / 6800M/6850M XT] (rev c0)",
+    "tools": {
+      "elan": {
+        "path": "/home/hbox/.elan/bin/elan",
+        "version": "elan 4.2.3 (b6cec7e10 2026-06-08)"
+      },
+      "lake": {
+        "path": "/home/hbox/.elan/bin/lake",
+        "version": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)"
+      },
+      "lean": {
+        "path": "/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0/bin/lean",
+        "version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)"
+      },
+      "cargo": {
+        "path": "/home/hbox/.cargo/bin/cargo",
+        "version": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)"
+      },
+      "rustc": {
+        "path": "/home/hbox/.cargo/bin/rustc",
+        "version": "rustc 1.98.0-nightly (8b6558a02 2026-06-20)"
+      }
+    },
+    "remoteRun": "/tank/dregg-build/minidregg-checks/runs/run-d57bf19a1af5-N0SYiXGB",
+    "alias": "hbox",
+    "limits": {
+      "cpuSet": "0-7",
+      "virtualMemoryKiB": 67108864,
+      "timeout": "45m",
+      "killAfterSeconds": 30
+    }
+  },
+  "startedAt": "2026-08-09T18:58:34Z",
+  "finishedAt": "2026-08-09T18:59:19Z",
+  "result": {
+    "runnerExit": 0,
+    "commandExit": 0,
+    "sourceIntegrityExit": 0
+  },
+  "rawLog": {
+    "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.log",
+    "sha256": "1cde87050a39422eceb95f9021b8cb2255960cc658e5a4faffe198da7322a513"
+  },
+  "projectOleans": {
+    "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.oleans.sha256",
+    "sha256": "77b7538c19c642fbcc2a14f336bb4653fd2276927c909b0cc0418e8ee9c57f09"
+  },
+  "sourceIntegrity": {
+    "file": "E-20260809T185834-6029-hbox-d57bf19a1af5-lake.source-integrity.log",
+    "sha256": "e394c19fa5a7fe3b13729692a5bad3183f2a3f5e1d4534e1af89aee0d9b82cc9"
+  },
+  "claimCeiling": "Exact explicit-commit source/dependency/build evidence with post-run source equality modulo explicitly hashed generated outputs only; not a benchmark, native-semantics claim, or cryptographic-security claim."
+}

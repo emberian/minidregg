@@ -27,6 +27,16 @@ worker-memory assumptions before these passing records were promoted. See
 [`D-0003`](decisions/D-0003-remote-evidence.md) and
 [`scripts/remote-check.sh`](../scripts/remote-check.sh).
 
+### Canonical credential-authority clean build
+
+Both workers independently built the exact committed snapshot
+`d57bf19a1af572ec4911477d7bce676dd53935cf`; the source-integrity check also passed.
+
+| Evidence | Host | Exact target | Result | Claim ceiling |
+|---|---|---|---:|---|
+| [`E-…5834`](evidence/runs/E-20260809T185834-6029-hbox-d57bf19a1af5-lake.json) | hbox, i9-12900 | `Theory.CredentialAuthorityEffects` | 2,960 jobs pass | This exact committed authority-state/effect target builds |
+| [`E-…5835`](evidence/runs/E-20260809T185835-6030-persvati-d57bf19a1af5-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Theory.CredentialAuthorityEffects` | 2,960 jobs pass | This exact committed authority-state/effect target builds |
+
 ### Writable private generator replay
 
 Commit `c300f7fa57366c96e706ea59d83fa9838cdb5715` exposed an evidence-runner bug: compiling
