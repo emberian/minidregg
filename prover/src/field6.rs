@@ -10,18 +10,6 @@ use crate::field4::{badd, bmul, bsub, P};
 
 /// The reduction relation is `u⁶ = 31`.
 pub const EXT6_W: u64 = 31;
-pub const EXT6_LEAF_BYTES: usize = 4 + 6 * 4;
-
-/// Temporary native payload for remaining compute prototypes. Lean-emitted
-/// control must select and bind the actual commitment framing.
-pub fn ext6_leaf_payload(value: Ext6) -> [u8; EXT6_LEAF_BYTES] {
-    let mut payload = [0u8; EXT6_LEAF_BYTES];
-    payload[..4].copy_from_slice(b"E6L1");
-    for (lane, &coefficient) in value.limbs().iter().enumerate() {
-        payload[4 + 4 * lane..8 + 4 * lane].copy_from_slice(&(coefficient as u32).to_le_bytes());
-    }
-    payload
-}
 
 /// Rejection reason for a non-canonical coefficient lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +21,7 @@ pub struct Ext6Error {
 /// One canonical element of `BabyBear[u] / (u⁶ - 31)`.
 ///
 /// Coefficients are private so malformed representatives cannot enter through a
-/// struct literal.  Proof decoding must use [`Ext6::try_from_limbs`].
+/// struct literal.  Native buffer decoding must use [`Ext6::try_from_limbs`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ext6 {
     limbs: [u64; 6],

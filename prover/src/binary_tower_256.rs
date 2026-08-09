@@ -18,9 +18,9 @@
 //! `Theory.BinaryTowerFanPaar` proves `fpGen_quadratic`,
 //! `towerPack_towerMulStep`, and `towerMul_eq_mul` at all levels;
 //! `Theory.BinaryTowerTrace.fanPaarRecursion_holds` closes the required
-//! generation fact. `[BTOWER256-RUST-UNVERIFIED]` is the honest seam: Rust's
-//! four-limb operations are unverified compute, not a refinement of Lean
-//! definitions, whose field elements and generators are choice-selected.
+//! generation fact. `[BTOWER256-RUST-UNVERIFIED]` is the honest seam: the
+//! four-limb operations are unverified compute behind generated Lean checks;
+//! Rust has no semantics to compare with the choice-selected Lean objects.
 
 use core::fmt;
 

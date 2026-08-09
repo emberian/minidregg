@@ -9,8 +9,8 @@
 //! extension-multiplication FORMULA is theorem-tied on the Lean side
 //! (`Compiler/FriConformance.lean`'s `ext4Mul_correct`: the formula IS
 //! multiplication in `BabyBear[X]/(X^4 - 11)`), and this module reproduces the
-//! Lean-computed vectors (`prover/testdata/fri_conformance.json`) — conformance,
-//! never refinement: there is no formal semantics of Rust.
+//! Lean-computed vectors (`prover/testdata/fri_conformance.json`) as diagnostic
+//! arithmetic data. Rust has no semantic relation to Lean.
 //!
 //! NOT claimed anywhere: irreducibility of `X^4 - 11` over BabyBear (that the
 //! quotient is a FIELD, so the `|F| = p^4` soundness pricing of
