@@ -40,6 +40,7 @@ import Compiler.TranscriptController -- Lean-owned phased transcript program: na
 import Compiler.AuthenticatedColumnPlan -- typed columns, derived roots, one roots-before-challenges transcript, checked opaque work/openings/representation edges, and a trace-indexed terminal attestation
 import Compiler.AuthenticatedColumnLogupBridge -- a terminal attestation's reflected LogUp statement and authentic first-draw root prefix discharge canonical linkage, Tower arithmetic, root binding, and exact indexed evaluation; PCS/CR/ROM remain explicit
 import Compiler.Tower256CshakeMerkleController -- shared Lean-selected cSHAKE framing, exact logarithmic cube-Merkle openings, Tower256 codec/profile obligations, and arbitrary-native-reply exactness; CR/ROM/PCS remain explicit
+import Compiler.Sp800185Cshake256 -- exact Lean Keccak-f[1600] + SP 800-185 framing instantiate the controller's 32-byte cSHAKE256 function; NIST/FIPS build-time vectors, no CR/ROM claim
 import Compiler.BinaryTower256Profile -- inhabits the Tower256 controller profile with Lean's binaryTower 8 and exact 32-byte codec; no native representation claim
 import Compiler.Tower256NativeByteBoundary -- arbitrary native Tower256 compute returns bytes only; Lean's exact Fan--Paar decoder plus a reflected Lean checker are the sole path to an accepted semantic value
 import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round challenge, additive checkpoint before query challenge, exact Merkle openings, opaque fallible Tower work, and reflected Lean final semantics
