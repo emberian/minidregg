@@ -3,8 +3,8 @@
 #
 # Every invocation gets a unique remote source/build tree.  The transferred git
 # archive, Lean pins, raw log, and resulting project-olean manifest are hashed.
-# Dependency packages come from a locked, immutable seed keyed by the Lean and
-# Lake manifests; project build output is never shared between runs.
+# Dependency packages come from a locked cache keyed by the Lean and Lake
+# manifests; project source and project build output are never shared.
 set -euo pipefail
 
 usage() {
@@ -108,9 +108,10 @@ tar -xf "$run/source.tar" -C "$run/source"
 printf '%s %s %s\n' "$commit" "$tree" "$archive_sha" > "$run/source.identity"
 REMOTE
 
-# Construct the dependency seed once under a host-local lock.  hbox starts from
+# Construct the dependency cache once under a host-local lock.  hbox starts from
 # a copy of its exact-revision warm package tree; persvati bootstraps with Lake.
-# The finished seed is made immutable before any run links it.
+# Lake package hooks may update package-local build artifacts, so the same lock
+# is held again while a run uses the cache.
 ssh -o BatchMode=yes "$host" bash -s -- \
   "$remote_root" "$remote_run" "$remote_source" "$seed_key" "$remote_lake" \
   "$package_candidate" "$mathlib_rev" "$manifest_sha" <<'REMOTE'
@@ -143,9 +144,9 @@ if [[ ! -f "$seed/.complete" ]]; then
   [[ "$(git -C "$incoming/packages/mathlib" rev-parse HEAD)" == "$mathlib_rev" ]]
   [[ "$(sha256sum "$source/lake-manifest.json" | awk '{print $1}')" == "$manifest_sha" ]]
   printf '%s\n' "$seed_key" > "$incoming/.complete"
-  chmod -R a-w "$incoming"
   mv "$incoming" "$seed"
 fi
+chmod -R u+w "$seed"
 mkdir -p "$source/.lake"
 ln -s "$seed/packages" "$source/.lake/packages"
 REMOTE
@@ -177,15 +178,19 @@ printf '\n' | tee -a "$log_path"
 command_b64=$(printf '%q ' "${command_args[@]}" | base64 | tr -d '\n')
 set +e
 ssh -o BatchMode=yes "$host" bash -s -- \
-  "$remote_source" "$remote_lake" "$remote_cargo" "$command_b64" <<'REMOTE' 2>&1 | tee -a "$log_path"
+  "$remote_source" "$remote_lake" "$remote_cargo" "$command_b64" \
+  "$remote_root/seeds/$seed_key.run.lock" <<'REMOTE' 2>&1 | tee -a "$log_path"
 set -euo pipefail
 source=$1
 lake=$2
 cargo=$3
 command_text=$(printf '%s' "$4" | base64 -d)
+cache_lock=$5
+exec 9>"$cache_lock"
+flock 9
 cd "$source"
 export PATH="$(dirname "$lake"):$(dirname "$cargo"):/usr/local/bin:/usr/bin:/bin"
-ulimit -v $((24 * 1024 * 1024))
+ulimit -v $((64 * 1024 * 1024))
 exec timeout --kill-after=30s 45m taskset -c 0-7 bash -lc "$command_text"
 REMOTE
 exit_code=${PIPESTATUS[0]}
@@ -224,7 +229,7 @@ jq -n \
     command:$command,
     worker:{alias:$hostAlias,hostname:$hostname,uname:$uname,cpu:$cpu,threads:$threads,
       memoryKiB:$memoryKiB,gpu:$gpu,lake:$lake,cargo:$cargo,remoteRun:$remoteRun,
-      limits:{cpuSet:"0-7",virtualMemoryGiB:24,timeoutMinutes:45}},
+      limits:{cpuSet:"0-7",virtualMemoryGiB:64,timeoutMinutes:45}},
     startedAt:$startedAt,finishedAt:$finishedAt,exitCode:$exitCode,
     rawLog:{file:$logFile,sha256:$logSha256},
     projectOleans:{file:$oleanFile,sha256:$oleanSha256},
