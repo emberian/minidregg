@@ -909,22 +909,22 @@ deriving DecidableEq
 
 abbrev DecodedMark :=
   Mark Hyperdocument.RunId Hyperdocument.AtomId Hyperdocument.MarkId
-    Hyperdocument.PrincipalRef MarkPayload Hyperdocument.VersionEventId
+    Hyperdocument.PrincipalRef MarkPayload Hyperdocument.OperationId
     TypedAuthorization.Digest
 
 abbrev DecodedAnnotation :=
   Annotation Hyperdocument.RunId Hyperdocument.AtomId Hyperdocument.AnnotationId
     Hyperdocument.PrincipalRef Empty Hyperdocument.DocumentId
-    Hyperdocument.VersionEventId TypedAuthorization.Digest
+    Hyperdocument.OperationId TypedAuthorization.Digest
 
 def markLifecycle (record : Hyperdocument.MarkRecord) :
-    Lifecycle Hyperdocument.PrincipalRef Hyperdocument.VersionEventId :=
+    Lifecycle Hyperdocument.PrincipalRef Hyperdocument.OperationId :=
   match record.tombstonedAt with
   | none => .active
   | some event => .retracted record.author event
 
 def annotationLifecycle (record : Hyperdocument.AnnotationRecord) :
-    Lifecycle Hyperdocument.PrincipalRef Hyperdocument.VersionEventId :=
+    Lifecycle Hyperdocument.PrincipalRef Hyperdocument.OperationId :=
   match record.tombstonedAt with
   | none => .active
   | some event => .retracted record.author event
@@ -943,7 +943,7 @@ def decodeMarkRecord?
           author := record.author
           target := target
           kind := { kind := record.kind, payload := record.payload }
-          created := record.event
+          created := record.operation
           lifecycle := markLifecycle record
           visibility := .indexed record.visibilityPolicy }
 
@@ -960,7 +960,7 @@ def decodeAnnotationRecord?
           author := record.author
           target := .document record.document
           content := .reference record.body
-          created := record.event
+          created := record.operation
           lifecycle := annotationLifecycle record
           visibility := .indexed record.visibilityPolicy }
   | some storedRange =>
@@ -972,7 +972,7 @@ def decodeAnnotationRecord?
               author := record.author
               target := .range target
               content := .reference record.body
-              created := record.event
+              created := record.operation
               lifecycle := annotationLifecycle record
               visibility := .indexed record.visibilityPolicy }
 
