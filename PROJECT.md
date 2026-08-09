@@ -136,8 +136,11 @@ The first formal substrate is already present in:
 - [`Compiler/SemanticManifest.lean`](Compiler/SemanticManifest.lean),
   [`Compiler/SemanticArtifactBundle.lean`](Compiler/SemanticArtifactBundle.lean), and
   [`Compiler/NativeKernelPlan.lean`](Compiler/NativeKernelPlan.lean): content-addressed first-order
-  declaration/phase artifacts and bounded native work whose arbitrary results are checked only by
-  Lean-owned control;
+  declaration/phase artifacts and fallible native work whose opaque errors block and whose bounded
+  successful results are checked only by Lean-owned control;
+- [`Compiler/MinidreggV1ArithmeticWork.lean`](Compiler/MinidreggV1ArithmeticWork.lean): an inhabited
+  one-instruction arithmetic extension (clause `406`) whose concrete `0+0=0` response reaches the
+  generic Lean certificate, while a native error reaches only the blocked outcome;
 - [`Compiler/DeclaredEffectArtifact.lean`](Compiler/DeclaredEffectArtifact.lean) and
   [`Compiler/MinidreggV1Artifact.lean`](Compiler/MinidreggV1Artifact.lean): the concrete typed
   account-move projection derived from `EffectDeclaration.Declaration.toWire.words` and the closed

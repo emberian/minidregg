@@ -183,7 +183,8 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
 
 SUBSTRATE (always): Lean-authored constraints/executor from compiler folds, never a hand-authored
 Rust AIR and never a claimed refinement of Rust (there is no Rust semantics). Native code returns
-candidate buffers only. Prefer statement-first closure and explicit counterexamples over
+opaque errors or candidate buffers only; errors block, and only Lean-owned checks can admit a
+successful buffer. Prefer statement-first closure and explicit counterexamples over
 convenient but false joins.
 
 ## PHASE 2 — beyond-v0 frontier (ember steered 2026-08-08: fan ALL FOUR)
