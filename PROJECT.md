@@ -348,18 +348,23 @@ worktrees. See [`D-0003`](docs/decisions/D-0003-remote-evidence.md).
 
 ## Ordered frontier
 
-1. Extend the landed `DeclaredTurnReceipt` core and private-completion disclosure joins with
-   manifest/header/code-membership evidence, reactive declarations, and dialect clauses to form the complete canonical
-   receipt/header relation; emit online control from that same Lean declaration. The current V1
-   JSON/DTO artifact is metadata, not this completed checker.
-2. Instantiate a real succinct PCS, transcript/ROM/CR reduction, and sampled decider behind the
-   landed `SemanticHistoryStraightlinePcs` interface and arbitrary-depth semantic-history fold.
-3. Join `ReceiptDelta` to promises, UI projections, and tool completion receipts in the executable
-   semantic machine.
-4. Close the landed BFV receipt clause's unassigned carrier/codec/proof/controller pins and join its
-   exact 384-row integer-equation token to the common application receipt.
-5. Add hiding/ZK and collaborative/MPC adapters under the same typed request and receipt relation.
-6. Only then optimize, benchmark against Plonky3/Binius/Flock/Mina, and produce the public poster.
+1. Derive the canonical receipt/history entry from `DeclaredHyperedge.CommittedHyperedge`; project
+   authorization state from the same canonical pre-state; compile ordinary, reactive, private, and
+   external-intent/completion effects into that common carrier. The current compatibility sums are
+   migration views, not the future kernel.
+2. Instantiate one Tower256/additive `AuthenticatedColumnPlan` with concrete codec, commitment,
+   cSHAKE/Merkle, PCS, transcript/ROM/CR reduction, and sampled decider. Use the same accepted
+   transcript to discharge semantic indexed lookup and the WARP/additive history checkpoint.
+3. Close the unshifted WARP claim reindexing and one common security game, then remove the
+   retained-entry/full-opening history seam only after the succinct path is real.
+4. Join verified deltas to promises, DeOS projections/invalidation, and typed external
+   `Intent → Pending → Completed/Failed` receipts without claiming physical handlers are proved.
+5. Close the BFV/RNS native-ring proof/controller and common-opening representations, then add
+   malicious MPC session evidence and separately authorized threshold release.
+6. Migrate one authorization/capability path, one DeOS reactive path, one Grain R3 chain, one
+   DreggCloud command, and one DreggNet funded lease/settlement before claiming kernel subsumption.
+7. Benchmark the completed protocol against matched Plonky3/Binius/Flock/Mina workloads and apply
+   the `D-0004` Loom kill criteria before producing the public poster.
 
 ## Poster gate
 

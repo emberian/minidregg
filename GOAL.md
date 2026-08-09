@@ -1,7 +1,8 @@
 # GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
-**Current priority (2026-08-09): join the Lean-owned semantic declarations, receipt clauses, and
-history relation into one genuinely succinct proof-carrying-history controller.** Lean is the sole
+**Current priority (2026-08-09): join the canonical cell-effect/hyperedge kernel, Lean-owned
+receipt clauses, authenticated-column controller, and history relation into one genuinely succinct
+proof-carrying semantic machine.** Lean is the sole
 source of semantics, protocol control, and acceptance. Rust is mechanically generated DTO/dispatch
 glue or opaque untrusted compute only; it is never a refinement. GPU preservation is not a goal.
 Optimize the protocol and its proof obligations first; accelerate the resulting hotspots afterward.
@@ -11,6 +12,15 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
 - **Formal core — proved:** constrained RS claims, γ batching, sumcheck/MLE, multiplicative FRI,
   accumulator folding, exact/UD soundness, arbitrary-depth extraction, loss-free depth composition,
   Fiat–Shamir/RBR reductions, constrained masking, emitted AIR semantics, and verifier gadgets.
+- **Canonical semantic kernel — executable Lean nucleus, consumer migration open:**
+  `Theory.CanonicalTransition` derives one typed post and exact field/resource delta from a validated
+  patch; `Theory.AcceptedCellEffect` joins the full authorization request, exact pre-root, mode
+  evidence, validated patch, and sealed-or-explicitly-released result; and
+  `Kernel.DeclaredHyperedge` executes a flat finite family of one-target incidences over one
+  canonical pre-state/shared apex, checks joint authorization/guards/shape/aggregate balance,
+  composes one post, and projects an actual `Kernel.Hyperedge`. This is the intended replacement for
+  the Mina-shaped call forest. A canonical authorization-state projection, hyperedge receipt/history
+  projection, physical CAS/nullifier handler, and Breadstuffs/DeOS/agent/cloud adapters remain.
 - **Semantic declarations and control — exact landed seams:**
   `Compiler.DeclaredEffectArtifact` derives the concrete typed account move from
   `Theory.EffectDeclaration.Declaration.toWire.words`; `Theory.DeclaredTurn` derives request data
@@ -78,9 +88,18 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   chain. Exact controller-resolved clause evidence is now required at every statement/proof root.
   `SemanticHistoryStraightlinePcs` adds the same-carrier/prefix-root extraction interface, and
   `SemanticAdditiveFriCheckpoint` canonically pads the same word into the additive code, derives
-  the same root, and recovers the authoritative head under KS-good extraction. They do not
-  instantiate a PCS, shared `Reduction`/Fiat–Shamir ROM game, Merkle CR, sampled decider, or
-  lagged-root hiding schedule.
+  the same root, and recovers the authoritative head under KS-good extraction.
+  `SemanticHistoryWARPAdditiveJoin` now commits each semantic link word before its challenge,
+  checks the literal post-challenge fold/root, projects the opened link stream to the unshifted BCS
+  schedule, and identifies the terminal root with the additive checkpoint root. The full reduction
+  still needs exact genesis/link-claim reindexing plus a concrete PCS, shared
+  `Reduction`/Fiat–Shamir ROM game, Merkle CR, sampled decider, and hiding schedule.
+- **Authenticated proof control — one typed spine, first concrete deployment open:**
+  `Compiler.AuthenticatedColumnPlan` owns typed column roots, global root-before-challenge draws,
+  opaque fallible native calls, Lean-checked openings, common-opening representation edges, exact
+  execution traces, and a sole terminal attestation. Its Tower256-shaped non-vacuity path proves
+  the controller is inhabited and native errors cannot accept. It does not yet instantiate the
+  deployed Tower codec, cSHAKE framing, Merkle commitment/CR, PCS, or lookup/history clause evidence.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -93,6 +112,18 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
 
 ## Active completion frontier
 
+- 2026-08-09 ★★★★★ **Canonical cell effect and flat hyperedge kernel** ✓ at the semantic carrier:
+  `CanonicalTransition.ofValidatedPatch` constructs the one canonical prepared post and frame
+  proof; `AcceptedCellEffect.acceptCompletionSealed` admits private work without implying release;
+  `DeclaredHyperedge.execute_committed_hyperedge_sound` recovers exact per-leg authorization and
+  the committed hyperedge; and the nonzero aggregate-balance tooth rejects. Remaining: derive the
+  canonical application receipt/history entry, project `AuthState` from the same pre-state, compile
+  all live effect families, and migrate consumers. Durable commit remains an external handler.
+- 2026-08-09 ★★★★★ **Authenticated columns and dual-root WARP/additive join** ✓ at interface
+  resolution: `AuthenticatedColumnPlan` makes a challenge before any root unrepresentable and
+  blocks native errors; `SemanticHistoryWARPAdditiveJoin` fixes link-root-before-γ and exact
+  fold-root-after-γ ordering and terminal checkpoint equality. Remaining: concrete commitment/PCS,
+  CR/ROM, claim reindexing, sampled decider, hiding, and one common security game.
 - 2026-08-09 ★★★★★ **Declaration-derived effect, turn, and reactive cell seams** ✓:
   `Compiler.DeclaredEffectArtifact.accountMoveArtifact_exact` pins the typed account move's wire
   word; `Theory.DeclaredTurn.execute_committed_sound` and `execute_rejected_unchanged` pin the
