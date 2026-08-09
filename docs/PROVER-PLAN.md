@@ -92,9 +92,11 @@ The active spine is:
    transcript, subfield, proximity, and final-LDT control. No native gate verifier is revived.
 4. **Lookup clause.** Emit the `LogupIndexLink` relation and drive only the extracted Tower256
    arithmetic kernels; then extend indexed lookup to the chosen mutable RAM relation.
-5. **Outer history accumulator.** Instantiate a WARP/FACS-shaped accumulator, decider, and
-   extractor directly over the typed semantic receipt relation. A hash chain is not an
-   accumulator.
+5. **Outer history PCS.** `SemanticHistoryAccumulator` already gives the proof-relevant typed
+   append, folded `AccClaim`, and exact full-opening decider/extraction theorem. Instantiate the
+   WARP/FACS-shaped transcript, recommitment PCS, sampled decider, and extractor without retaining
+   the entry list. A hash chain is not an accumulator, and the current exact theorem is not yet a
+   succinct protocol.
 6. **Privacy and FHE.** Join hiding/ZK adapters and the exact BFV signed-limb/carry equations under
    the same request, representation, disclosure, and receipt identity.
 7. **Final compression and benchmarks.** Only after one real history path exists, select the final

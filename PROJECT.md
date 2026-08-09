@@ -206,16 +206,20 @@ extractable receipt composition are separate wrappers, not prose properties of t
 
 The implementation sequence is:
 
-1. **Native proof adapters.** Every accepted receipt clause is backed by a concrete verifier. The
+1. **Dialect proof adapters.** Every accepted receipt clause is backed by a concrete Lean-owned
+   verifier/controller. The
    Lean relations for gates and indexed lookup have landed; their former handwritten native
    verifier adapters were deleted. Lean-owned clause controllers and emitted artifacts come next;
    mutable RAM and FHE adapters follow.
 2. **Stable common relation.** The pre/post/touched frame nucleus, typed request/auth/effect/
-   disclosure wrapper, native lookup clause, header-bound runtime word, and `AccClaim` fold have
-   landed. `SemanticManifest` now owns the first-order content-addressed ABI; emit its concrete
-   codec/API and admit only manifest-closed clauses.
-3. **One honest outer accumulator.** Implement the WARP/FACS-style relation, transcript, decider,
-   and extractor. Do not name a structural hash chain an accumulator.
+   disclosure wrapper, header-bound runtime word, and `AccClaim` fold have landed. A proof-relevant
+   `SemanticHistoryAccumulator` admits commit/reject entries, enforces predecessor/state links, and
+   reaches Loom's exact full-opening decider at arbitrary constructed depth. The concrete lookup
+   receipt clause remains open. `SemanticManifest` owns the first-order content-addressed ABI;
+   emit its concrete codec/API and admit only manifest-closed clauses.
+3. **One honest outer accumulator.** Replace the explicit recommitment/full-opening seam with the
+   WARP/FACS-style transcript, PCS, sampled decider, and extractor. Do not call the current retained
+   entry list succinct, and do not name a structural hash chain an accumulator.
 4. **Privacy composition.** Add hiding commitments/ZK adapters and prove the shared-ROM and
    simulation/extraction composition.
 5. **Checkpoint compression.** Use additive RS/LCH or the selected code-switch PCS at explicit
@@ -253,7 +257,8 @@ are used for genuinely expensive builds or measurements, not repetitive ritual.
 1. Extend the landed Lean semantic-receipt artifact from the frame nucleus to the complete typed
    request, authorization, effects, disclosures, native clauses, and header preimage; emit online
    control from the same declaration.
-2. Implement one real unbounded outer accumulation step and decider with its extraction statement.
+2. Instantiate one real succinct outer PCS and sampled extraction theorem for the landed
+   arbitrary-depth semantic-history fold.
 3. Join `ReceiptDelta` to promises, UI projections, and tool completion receipts in the executable
    semantic machine.
 4. Add the residue-ring/FHE receipt adapter through exact limbs, carries, ranges, and canonical

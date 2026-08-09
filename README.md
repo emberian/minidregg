@@ -29,7 +29,7 @@ experiment and can be replaced wholesale as the protocol evolves.
 | **Johnson/list regime** | `JohnsonRegime` proves the list-size inequality and exact sampling amplification. `JohnsonMcaBridge` imports the exact theorem interface and constants from Haböck 2025/2110, corrects the paper/Loom degree convention to `ρ_H=(d−1)/n`, and proves that one `m=max(3,d)` instance covers Loom's rounded Johnson target. | The hard BCIKS/GS/Hensel algebraic proof is still the explicit proposition `HaboeckTheorem2`, not a local theorem or axiom. Thus the Johnson MCA seam is exact and conditional, not yet machine-proved end to end. There is **no blanket capacity claim**: capacity-level variants have counterexamples. |
 | **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. Native code retains Fan–Paar `GF(2^64)`, a shift-aware `O(n log n)` transform, and cSHAKE/Merkle compute. | The former handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted after audit found that its bound was transcript-bound but never enforced. A Lean-emitted rate-aware controller, basis/order correspondence, CR/shared-XOF composition, and the outer accumulator remain. |
 | **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. Native Tower256 now retains only incidence, equality-weight, fraction-tree, interpolation, and round-message arithmetic kernels. | The handwritten LogUp statement/transcript/proof/verifier and receipt adapter were deleted. A Lean-owned lookup clause/controller, additive proximity, CR/ROM composition, and later Twist/Shout mutable-state layer remain. |
-| **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; Lean proves header-cell packing and the bound `AccClaim` fold. | The handwritten Rust receipt/admission/history objects have been deleted. This is not yet the final WARP/FACS protocol; hiding/ZK composition and the unbounded outer accumulator/decider remain. |
+| **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; `SemanticHistoryAccumulator` admits commit and reject through one codec-bound word, permits append only from a verified predecessor head, preserves one folded `AccClaim`, and supplies the existing full-opening decider/extraction theorem at every constructed depth. | The history head is proof-relevant and retains its entries; each fold still requires an explicit recommitment equation, and extraction currently assumes all authenticated openings. This is not a WARP/FACS PCS, a succinct history object, or a hiding/ZK composition. |
 | **Zero knowledge and extraction** | Native formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
 | **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The handwritten Rust gate-verifier family was deleted. Coherent proximity, base-subfield sampling, CR/shared-ROM, Lean-owned verifier control, recursion, and PoW composition remain before calling 137 bits deployed. |
 
@@ -81,8 +81,9 @@ bound roots; reject has no post-state. `SemanticReceiptRuntimeCodec` proves the
 `binding ++ 3*k+slot` layout, injectivity of the fixed 32-byte packing, and bound-claim fold.
 `Compiler/SemanticTurnReceiptDescriptor` compiles that existing relation through the existing AIR
 and emit path and produces the first-order deployment artifact. The handwritten Rust typed-turn
-verifier and lookup receipt adapter were deleted. Complete header-preimage/auth/effect/disclosure
-emission and the WARP IOR/decider/extractor remain.
+verifier and lookup receipt adapter were deleted. `SemanticHistoryAccumulator` now closes the
+proof-relevant semantic append and exact full-opening decider/extraction layer; complete
+header-preimage/auth/effect/disclosure emission and the succinct WARP IOR/PCS remain.
 
 The former Rust receipt-relation and proof-history wrappers were deleted. Their replacement is not a
 new mirror: it is a Lean-owned manifest/controller whose only native interface is bounded compute
@@ -108,9 +109,10 @@ The active direction is to make the strongest pieces meet at one honest end-to-e
 - **Tower arithmetic:** keep the proved additive tower and optimized native arithmetic/transform
   kernels, then emit the rate-aware FRI/OOD controller from Lean before any binary receipt is
   admissible again.
-- **Accumulation:** construct the common WARP/FACS relation, decider, and extractor from the
-  Lean-owned receipt relation. The former handwritten functional-history node was deleted rather
-  than promoted into the architecture.
+- **Accumulation:** instantiate a real WARP/FACS PCS and sampled extractor for the landed
+  Lean-owned semantic-history fold. The former handwritten functional-history node was deleted
+  rather than promoted into the architecture; the current theorem is exact and full-opening, not
+  succinct.
 - **Gate provenance:** extend the landed Lean factored-selector algebra with generated
   transcript/opening control, close coherent proximity and base-subfield sampling, and join it to
   final FRI.

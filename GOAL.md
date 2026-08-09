@@ -23,11 +23,13 @@ hotspots afterward.
   Lean proves emitted-descriptor residual provenance, seven factored operands, degree-two rounds,
   terminal affine functionals, and eta aggregation with its bad-set bound. Commitment
   authentication, transcript scheduling, subfield/proximity composition, and final LDT remain.
-- **Accumulation — proved algebra, no authoritative native history:** Loom's arbitrary-depth
+- **Accumulation — proof-relevant semantic history, no native authority:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
-  quadratic language is iff a genuine `ReceiptDelta` and folds valid words through `AccClaim`.
-  Handwritten native receipt/history objects have been deleted; the full typed relation and
-  WARP/FACS outer accumulator, decider, extraction, and hiding join remain.
+  quadratic language is iff a genuine `ReceiptDelta`; `SemanticHistoryAccumulator` admits both
+  commit and atomic reject through the same word, exposes no raw predecessor input, preserves one
+  folded `AccClaim`, and reaches the exact full-opening decider/extraction theorem at every
+  constructed depth. The explicit fold-recommitment premise, all-position openings, retained entry
+  list, WARP/FACS PCS, sampled extraction, and hiding join remain.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -51,8 +53,9 @@ hotspots afterward.
    cSHAKE/Merkle assumptions.
 2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, emit its
    Lean-owned controller, then connect it to the final LDT.
-3. Build a real unbounded WARP/FACS-style accumulator and decider directly over the stable Lean
-   receipt relation; the former handwritten functional-history node was deleted.
+3. Replace the landed semantic-history fold's explicit recommitment/full-opening seam with a real
+   WARP/FACS-style PCS, sampled decider, and extractor; the former handwritten functional-history
+   node was deleted.
 4. Instantiate hiding committed-word-knowledge proofs and discharge the staged ZK game's explicit
    shared-ROM horn ports.
 5. Build the intended shared-ROM, RBR/extractor, and final-compression protocol from Lean-owned
