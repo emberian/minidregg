@@ -55,39 +55,39 @@ abbrev Address (L : Layout.{u, v, w}) := Sigma L.Key
 
 /-- A sparse store.  `none` is unallocated and `some value` is allocated. -/
 abbrev Store (L : Layout.{u, v, w}) :=
-  (namespace : L.Namespace) -> L.Key namespace -> Option (L.Value namespace)
+  (space : L.Namespace) -> L.Key space -> Option (L.Value space)
 
 /-- Typed lookup through a packed address. -/
 def Store.lookup {L : Layout.{u, v, w}} (store : Store L) :
     (address : Address L) -> Option (L.Value address.1)
-  | ⟨namespace, key⟩ => store namespace key
+  | ⟨space, key⟩ => store space key
 
 /-- Update one exact typed address.  `none` deallocates it. -/
 def Store.set {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
-    (store : Store L) (namespace : L.Namespace) (key : L.Key namespace)
-    (value : Option (L.Value namespace)) : Store L :=
-  Function.update store namespace (Function.update (store namespace) key value)
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
+    (store : Store L) (space : L.Namespace) (key : L.Key space)
+    (value : Option (L.Value space)) : Store L :=
+  Function.update store space (Function.update (store space) key value)
 
 @[simp] theorem Store.set_eq {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
-    (store : Store L) (namespace : L.Namespace) (key : L.Key namespace)
-    (value : Option (L.Value namespace)) :
-    (store.set namespace key value) namespace key = value := by
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
+    (store : Store L) (space : L.Namespace) (key : L.Key space)
+    (value : Option (L.Value space)) :
+    (store.set space key value) space key = value := by
   simp [Store.set]
 
 /-- Updating one packed address frames every distinct packed address. -/
 theorem Store.set_ne {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
-    (store : Store L) (namespace : L.Namespace) (key : L.Key namespace)
-    (value : Option (L.Value namespace))
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
+    (store : Store L) (space : L.Namespace) (key : L.Key space)
+    (value : Option (L.Value space))
     (otherNamespace : L.Namespace) (otherKey : L.Key otherNamespace)
-    (different : (⟨otherNamespace, otherKey⟩ : Address L) != ⟨namespace, key⟩) :
-    (store.set namespace key value) otherNamespace otherKey =
+    (different : (⟨otherNamespace, otherKey⟩ : Address L) ≠ ⟨space, key⟩) :
+    (store.set space key value) otherNamespace otherKey =
       store otherNamespace otherKey := by
-  by_cases namespaceEq : otherNamespace = namespace
+  by_cases namespaceEq : otherNamespace = space
   · subst otherNamespace
-    have keyNe : otherKey != key := by
+    have keyNe : otherKey ≠ key := by
       intro keyEq
       subst otherKey
       exact different rfl
@@ -96,8 +96,8 @@ theorem Store.set_ne {L : Layout.{u, v, w}}
 
 /-- Allocation is exactly absence at an address. -/
 def Fresh {L : Layout.{u, v, w}} (store : Store L)
-    (namespace : L.Namespace) (key : L.Key namespace) : Prop :=
-  store namespace key = none
+    (space : L.Namespace) (key : L.Key space) : Prop :=
+  store space key = none
 
 /-! ## First-order typed memory operations -/
 
@@ -105,23 +105,23 @@ def Fresh {L : Layout.{u, v, w}} (store : Store L)
 frees retain the exact prior value, preventing an accepted trace from hiding a
 stale read.  Allocation carries no caller-authored freshness flag. -/
 inductive Op (L : Layout.{u, v, w})
-  | read (namespace : L.Namespace) (key : L.Key namespace)
-      (observed : Option (L.Value namespace))
-  | write (namespace : L.Namespace) (key : L.Key namespace)
-      (before after : L.Value namespace)
-  | allocate (namespace : L.Namespace) (key : L.Key namespace)
-      (value : L.Value namespace)
-  | free (namespace : L.Namespace) (key : L.Key namespace)
-      (before : L.Value namespace)
+  | read (space : L.Namespace) (key : L.Key space)
+      (observed : Option (L.Value space))
+  | write (space : L.Namespace) (key : L.Key space)
+      (before after : L.Value space)
+  | allocate (space : L.Namespace) (key : L.Key space)
+      (value : L.Value space)
+  | free (space : L.Namespace) (key : L.Key space)
+      (before : L.Value space)
 
 namespace Op
 
 /-- The sole address accessed by an operation. -/
 def address {L : Layout.{u, v, w}} : Op L -> Address L
-  | .read namespace key _ => ⟨namespace, key⟩
-  | .write namespace key _ _ => ⟨namespace, key⟩
-  | .allocate namespace key _ => ⟨namespace, key⟩
-  | .free namespace key _ => ⟨namespace, key⟩
+  | .read space key _ => ⟨space, key⟩
+  | .write space key _ _ => ⟨space, key⟩
+  | .allocate space key _ => ⟨space, key⟩
+  | .free space key _ => ⟨space, key⟩
 
 /-- The address modified by an operation, if any. -/
 def writeAddress? {L : Layout.{u, v, w}} : Op L -> Option (Address L)
@@ -143,29 +143,29 @@ def freeAddress? {L : Layout.{u, v, w}} : Op L -> Option (Address L)
 /-- Semantic precondition for one operation.  Mutation discipline and stale
 value checks are part of this relation, not proof-system side conditions. -/
 def Enabled {L : Layout.{u, v, w}} (store : Store L) : Op L -> Prop
-  | .read namespace key observed => store namespace key = observed
-  | .write namespace key before _ =>
-      L.discipline namespace = .ram /\ store namespace key = some before
-  | .allocate namespace key _ =>
-      L.discipline namespace != .rom /\ Fresh store namespace key
-  | .free namespace key before =>
-      L.discipline namespace = .ram /\ store namespace key = some before
+  | .read space key observed => store space key = observed
+  | .write space key before _ =>
+      L.discipline space = .ram /\ store space key = some before
+  | .allocate space key _ =>
+      L.discipline space ≠ .rom /\ Fresh store space key
+  | .free space key before =>
+      L.discipline space = .ram /\ store space key = some before
 
 /-- Operation application is total syntax interpretation.  Acceptance must
 also carry `Enabled`; application alone grants no authority or validity. -/
 def apply {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (store : Store L) : Op L -> Store L
   | .read _ _ _ => store
-  | .write namespace key _ after => store.set namespace key (some after)
-  | .allocate namespace key value => store.set namespace key (some value)
-  | .free namespace key _ => store.set namespace key none
+  | .write space key _ after => store.set space key (some after)
+  | .allocate space key value => store.set space key (some value)
+  | .free space key _ => store.set space key none
 
 /-- A fresh allocation is accepted only at an absent address. -/
 theorem allocate_enabled_fresh {L : Layout.{u, v, w}} (store : Store L)
-    (namespace : L.Namespace) (key : L.Key namespace) (value : L.Value namespace)
-    (enabled : Enabled store (.allocate namespace key value)) :
-    Fresh store namespace key :=
+    (space : L.Namespace) (key : L.Key space) (value : L.Value space)
+    (enabled : Enabled store (.allocate space key value)) :
+    Fresh store space key :=
   enabled.2
 
 /-- ROM cannot contain an enabled modifying operation. -/
@@ -175,13 +175,13 @@ theorem no_enabled_rom_write {L : Layout.{u, v, w}} (store : Store L)
     op.writeAddress? = none := by
   cases op with
   | read => rfl
-  | write namespace key before after =>
+  | write space key before after =>
       simp only [Enabled] at enabled
       exact (Discipline.noConfusion (enabled.1.trans rom.symm))
-  | allocate namespace key value =>
+  | allocate space key value =>
       simp only [Enabled] at enabled
       exact False.elim (enabled.1 rom)
-  | free namespace key before =>
+  | free space key before =>
       simp only [Enabled] at enabled
       exact (Discipline.noConfusion (enabled.1.trans rom.symm))
 
@@ -190,25 +190,25 @@ theorem enabled_appendOnly_modification_is_allocate
     {L : Layout.{u, v, w}} (store : Store L) (op : Op L)
     (enabled : Enabled store op)
     (appendOnly : L.discipline op.address.1 = .appendOnly)
-    (modifies : op.writeAddress? != none) :
+    (modifies : op.writeAddress? ≠ none) :
     op.allocationAddress? = some op.address := by
   cases op with
   | read => exact False.elim (modifies rfl)
-  | write namespace key before after =>
+  | write space key before after =>
       simp only [Enabled] at enabled
       exact False.elim (Discipline.noConfusion (enabled.1.trans appendOnly.symm))
   | allocate => rfl
-  | free namespace key before =>
+  | free space key before =>
       simp only [Enabled] at enabled
       exact False.elim (Discipline.noConfusion (enabled.1.trans appendOnly.symm))
 
 /-- One operation changes no address except its derived write address. -/
 theorem apply_frame {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (store : Store L) (op : Op L)
-    (namespace : L.Namespace) (key : L.Key namespace)
-    (outside : op.writeAddress? != some (⟨namespace, key⟩ : Address L)) :
-    (op.apply store) namespace key = store namespace key := by
+    (space : L.Namespace) (key : L.Key space)
+    (outside : op.writeAddress? ≠ some (⟨space, key⟩ : Address L)) :
+    (op.apply store) space key = store space key := by
   cases op with
   | read => rfl
   | write writeNamespace writeKey before after =>
@@ -250,7 +250,7 @@ def freeFootprint {L : Layout.{u, v, w}} [DecidableEq (Address L)]
 /-- Unconditional interpretation of a list.  Validity below checks each op at
 the exact state produced by its prefix. -/
 def run {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)] :
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)] :
     Store L -> List (Op L) -> Store L
   | store, [] => store
   | store, operation :: rest => run (operation.apply store) rest
@@ -258,7 +258,7 @@ def run {L : Layout.{u, v, w}}
 /-- Prefix-sensitive validity.  In particular, allocation freshness is tested
 after every preceding operation, not merely against the initial state. -/
 def ValidFrom {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)] :
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)] :
     Store L -> List (Op L) -> Prop
   | _, [] => True
   | store, operation :: rest =>
@@ -266,12 +266,12 @@ def ValidFrom {L : Layout.{u, v, w}}
 
 /-- The exact read/write trace relation.  There is no caller-selected post. -/
 def Executes {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (operations : List (Op L)) (post : Store L) : Prop :=
   ValidFrom pre operations /\ run pre operations = post
 
 @[simp] theorem run_append {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (left right : List (Op L)) :
     run pre (left ++ right) = run (run pre left) right := by
   induction left generalizing pre with
@@ -281,7 +281,7 @@ def Executes {L : Layout.{u, v, w}}
       exact induction (operation.apply pre)
 
 theorem validFrom_append {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (left right : List (Op L)) :
     ValidFrom pre (left ++ right) <->
       ValidFrom pre left /\ ValidFrom (run pre left) right := by
@@ -294,7 +294,7 @@ theorem validFrom_append {L : Layout.{u, v, w}}
 
 /-- Accepted traces compose by ordinary list append. -/
 theorem Executes.append {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {pre middle post : Store L} {left right : List (Op L)}
     (leftExecutes : Executes pre left middle)
     (rightExecutes : Executes middle right post) :
@@ -336,31 +336,31 @@ theorem mem_allocationFootprint_iff {L : Layout.{u, v, w}}
 
 /-- The whole-trace frame law. -/
 theorem run_frame {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (operations : List (Op L))
-    (namespace : L.Namespace) (key : L.Key namespace)
-    (outside : (⟨namespace, key⟩ : Address L) ∉ writeFootprint operations) :
-    (run pre operations) namespace key = pre namespace key := by
+    (space : L.Namespace) (key : L.Key space)
+    (outside : (⟨space, key⟩ : Address L) ∉ writeFootprint operations) :
+    (run pre operations) space key = pre space key := by
   induction operations generalizing pre with
   | nil => rfl
   | cons operation rest induction =>
       simp only [writeFootprint, List.filterMap_cons, List.toFinset_cons,
         Finset.mem_insert, not_or] at outside
       rw [run, induction (operation.apply pre) outside.2]
-      exact operation.apply_frame pre namespace key (by
+      exact operation.apply_frame pre space key (by
         intro equality
         exact outside.1 equality.symm)
 
 /-- Contrapositive frame: every actual post-state change is named by the exact
 derived write footprint. -/
 theorem changed_only_in_writeFootprint {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (operations : List (Op L))
-    (namespace : L.Namespace) (key : L.Key namespace)
-    (changed : (run pre operations) namespace key != pre namespace key) :
-    (⟨namespace, key⟩ : Address L) ∈ writeFootprint operations := by
+    (space : L.Namespace) (key : L.Key space)
+    (changed : (run pre operations) space key ≠ pre space key) :
+    (⟨space, key⟩ : Address L) ∈ writeFootprint operations := by
   by_contra outside
-  exact changed (run_frame pre operations namespace key outside)
+  exact changed (run_frame pre operations space key outside)
 
 end Trace
 
@@ -403,7 +403,7 @@ def Materialized.root {L : Layout.{u, v, w}} {Root : Type r}
 /-- An accepted execution retains only prefix validity.  Its post-state, bytes,
 root, and footprints are all derived projections. -/
 structure AcceptedExecution {L : Layout.{u, v, w}} {Root : Type r}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (materializer : Materializer L Root) (pre : Materialized materializer)
     (operations : List (Op L)) : Prop where
   valid : Trace.ValidFrom pre.logical operations
@@ -411,7 +411,7 @@ structure AcceptedExecution {L : Layout.{u, v, w}} {Root : Type r}
 namespace AcceptedExecution
 
 variable {L : Layout.{u, v, w}} {Root : Type r}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Root} {pre : Materialized materializer}
     {operations : List (Op L)}
 
@@ -436,18 +436,18 @@ theorem executes (accepted : AcceptedExecution materializer pre operations) :
   ⟨accepted.valid, rfl⟩
 
 theorem frame (accepted : AcceptedExecution materializer pre operations)
-    (namespace : L.Namespace) (key : L.Key namespace)
-    (outside : (⟨namespace, key⟩ : Address L) ∉
+    (space : L.Namespace) (key : L.Key space)
+    (outside : (⟨space, key⟩ : Address L) ∉
       Trace.writeFootprint operations) :
-    accepted.post.logical namespace key = pre.logical namespace key :=
-  Trace.run_frame pre.logical operations namespace key outside
+    accepted.post.logical space key = pre.logical space key :=
+  Trace.run_frame pre.logical operations space key outside
 
 theorem changed_only_declared
     (accepted : AcceptedExecution materializer pre operations)
-    (namespace : L.Namespace) (key : L.Key namespace)
-    (changed : accepted.post.logical namespace key != pre.logical namespace key) :
-    (⟨namespace, key⟩ : Address L) ∈ Trace.writeFootprint operations :=
-  Trace.changed_only_in_writeFootprint pre.logical operations namespace key changed
+    (space : L.Namespace) (key : L.Key space)
+    (changed : accepted.post.logical space key ≠ pre.logical space key) :
+    (⟨space, key⟩ : Address L) ∈ Trace.writeFootprint operations :=
+  Trace.changed_only_in_writeFootprint pre.logical operations space key changed
 
 end AcceptedExecution
 
@@ -465,29 +465,29 @@ inductive AccessKind
 structure BusRow (L : Layout.{u, v, w}) where
   clock : Nat
   kind : AccessKind
-  namespace : L.Namespace
-  key : L.Key namespace
-  before : Option (L.Value namespace)
-  after : Option (L.Value namespace)
+  space : L.Namespace
+  key : L.Key space
+  before : Option (L.Value space)
+  after : Option (L.Value space)
 
 /-- The bus row selected by one operation at one exact prefix state. -/
 def Op.busRow {L : Layout.{u, v, w}} (clock : Nat) (store : Store L) :
     Op L -> BusRow L
-  | .read namespace key observed =>
-      ⟨clock, .read, namespace, key, observed, observed⟩
-  | .write namespace key before after =>
-      ⟨clock, .write, namespace, key, some before, some after⟩
-  | .allocate namespace key value =>
-      ⟨clock, .allocate, namespace, key, none, some value⟩
-  | .free namespace key before =>
-      ⟨clock, .free, namespace, key, some before, none⟩
+  | .read space key observed =>
+      ⟨clock, .read, space, key, observed, observed⟩
+  | .write space key before after =>
+      ⟨clock, .write, space, key, some before, some after⟩
+  | .allocate space key value =>
+      ⟨clock, .allocate, space, key, none, some value⟩
+  | .free space key before =>
+      ⟨clock, .free, space, key, some before, none⟩
 
 namespace Trace
 
 /-- Derive one timestamped row per operation while threading exact prefix
 states.  This is the semantic source for a future LogUp*/Twist encoding. -/
 def busRowsFrom {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)] :
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)] :
     Nat -> Store L -> List (Op L) -> List (BusRow L)
   | _, _, [] => []
   | clock, store, operation :: rest =>
@@ -495,7 +495,7 @@ def busRowsFrom {L : Layout.{u, v, w}}
         busRowsFrom (clock + 1) (operation.apply store) rest
 
 def busRows {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (operations : List (Op L)) : List (BusRow L) :=
   busRowsFrom 0 pre operations
 
@@ -503,7 +503,7 @@ def busRows {L : Layout.{u, v, w}}
 of one enabled operation at its exact prefix state, and the next row consumes
 the state produced by that operation. -/
 inductive BusRelation {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)] :
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)] :
     Nat -> Store L -> List (Op L) -> List (BusRow L) -> Store L -> Prop
   | nil (clock : Nat) (store : Store L) :
       BusRelation clock store [] [] store
@@ -517,7 +517,7 @@ inductive BusRelation {L : Layout.{u, v, w}}
 
 /-- Prefix-valid execution generates an exact sequential bus relation. -/
 theorem busRelation_of_valid {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (clock : Nat) (pre : Store L) (operations : List (Op L))
     (valid : ValidFrom pre operations) :
     BusRelation clock pre operations (busRowsFrom clock pre operations)
@@ -530,7 +530,7 @@ theorem busRelation_of_valid {L : Layout.{u, v, w}}
 
 /-- The bus relation determines the derived row list exactly. -/
 theorem BusRelation.rows_exact {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {clock : Nat} {pre post : Store L} {operations : List (Op L)}
     {rows : List (BusRow L)}
     (relation : BusRelation clock pre operations rows post) :
@@ -543,7 +543,7 @@ theorem BusRelation.rows_exact {L : Layout.{u, v, w}}
 
 /-- The bus relation also determines the final store exactly. -/
 theorem BusRelation.post_exact {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {clock : Nat} {pre post : Store L} {operations : List (Op L)}
     {rows : List (BusRow L)}
     (relation : BusRelation clock pre operations rows post) :
@@ -554,7 +554,7 @@ theorem BusRelation.post_exact {L : Layout.{u, v, w}}
       simpa only [run] using induction
 
 @[simp] theorem busRowsFrom_length {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (clock : Nat) (pre : Store L) (operations : List (Op L)) :
     (busRowsFrom clock pre operations).length = operations.length := by
   induction operations generalizing clock pre with
@@ -563,7 +563,7 @@ theorem BusRelation.post_exact {L : Layout.{u, v, w}}
       simp [busRowsFrom, induction]
 
 @[simp] theorem busRows_length {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (pre : Store L) (operations : List (Op L)) :
     (busRows pre operations).length = operations.length := by
   exact busRowsFrom_length 0 pre operations
@@ -575,7 +575,7 @@ the canonical state roots above and rows are literal trace projections.  A
 proof compiler may encode this claim, but cannot replace either equality with
 a free digest or prover-selected row list. -/
 structure ExactBusClaim {L : Layout.{u, v, w}} {Root : Type r}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Root} {pre : Materialized materializer}
     {operations : List (Op L)}
     (accepted : AcceptedExecution materializer pre operations) where
@@ -589,7 +589,7 @@ structure ExactBusClaim {L : Layout.{u, v, w}} {Root : Type r}
     accepted.post.logical
 
 def AcceptedExecution.exactBusClaim {L : Layout.{u, v, w}} {Root : Type r}
-    [DecidableEq L.Namespace] [(namespace : L.Namespace) -> DecidableEq (L.Key namespace)]
+    [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Root} {pre : Materialized materializer}
     {operations : List (Op L)}
     (accepted : AcceptedExecution materializer pre operations) :
@@ -631,14 +631,14 @@ example : (allocateSeven.apply empty) .heap 7 = some 42 := by decide
 
 /-- Freshness has teeth: the same allocation cannot execute twice. -/
 theorem duplicate_allocation_rejected :
-    !(.allocate (.heap : Namespace) 7 42 : Op layout).Enabled
+    ¬ (.allocate (.heap : Namespace) 7 42 : Op layout).Enabled
       ((.allocate (.heap : Namespace) 7 42 : Op layout).apply empty) := by
   decide
 
 /-- ROM overwrite is not an enabled semantic operation. -/
 theorem rom_write_rejected :
-    !(.write (.code : Namespace) 0 1 2 : Op layout).Enabled
-      (fun namespace _ => if namespace = .code then some 1 else none) := by
+    ¬ (.write (.code : Namespace) 0 1 2 : Op layout).Enabled
+      (fun space _ => if space = .code then some 1 else none) := by
   decide
 
 end Example
