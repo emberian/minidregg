@@ -47,8 +47,8 @@ and gadget satisfiability are not current deployment evidence.
 - **Tower256 additive FRI — A:** `c7c05b5` closes deterministic control on the shared exact
   Tower/cSHAKE/Merkle backend. Lean decodes arbitrary native bytes/error, derives roots-before-
   challenge transcript/query seeds, checks openings/folds/final polynomial, reaches the ideal
-  clause, and admits it on one controller coin. Remaining **P/D/B** work is the same-coin
-  false-accept cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable reflected
+  clause, and admits it on one controller coin. Remaining **P/D/B** work is concrete instantiation
+  of the supplied failure cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable reflected
   checker, versioned proof codecs/IDs, artifact profile, and end-to-end benchmarks.
 - **Tower256 lookup — A, gated:** `a0df3f3` supplies an extension-local clause-404 controller with
   first-order query identity and exactly two keyed byte replies. Wrong count, duplicates, missing
@@ -64,9 +64,11 @@ and gadget satisfiability are not current deployment evidence.
 - **History/knowledge — S/A with conditional P shape:** retained history now reconstructs exact
   genesis/chain/link words and challenges, exact accumulator/fold/source alignment, unshifted BCS
   reduction, and PCS/binding/ROM `Good` events on one history coin (`26b049f`). Exact-head finality
-  and supported finite layouts are green. Concrete PCS/CR/ROM, MCA/errors, hiding/sub-UD, and the
-  end-to-end additive-checkpoint/knowledge common-cover theorem remain. The uncommitted checkpoint
-  experiment is not source evidence.
+  and supported finite layouts are green. `a504654` joins the history and Tower256 additive
+  predicates on one `Omega`, one existing ledger, exact terminal/initial root and schedule equality,
+  and a four-event bound without independence. The externally selected BCS false-accept predicate,
+  history/additive failure covers, MCA/code-exact premises, concrete PCS/CR/ROM, and hiding/sub-UD
+  still require instantiation.
 - **Artifact/native authority — D for identity, not compute correctness:** the canonical artifact
   authenticates native ABI codecs and its work catalog. Work `9101` (Tower256 dot product), carrier
   `205`, request codec `9001`, and response codec `21` are generated solely from that catalog.
@@ -83,8 +85,8 @@ and gadget satisfiability are not current deployment evidence.
 
 ### Active completion frontier
 
-1. Prove one same-coin additive/history false-accept cover and instantiate concrete
-   PositionBinding/CR, cSHAKE→ROM, proximity, PCS, MCA, and hiding prices.
+1. Instantiate the landed same-coin additive/history cover with concrete PositionBinding/CR,
+   cSHAKE→ROM, proximity, PCS, MCA/code-exactness, and hiding prices.
 2. Give Tower256 proof/query/container transport versioned codecs and authenticated native work
    profiles, then promote 404 only through the honest deployment join.
 3. Instantiate Ext6 PCS, base-subfield provenance, coherent proximity, binding/ROM, final LDT, and

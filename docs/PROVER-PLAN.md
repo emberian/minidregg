@@ -58,24 +58,25 @@ byte-identical. Rust execution remains opaque/fallible and returns bytes/error.
 | Path | S | A | P | D | B | Exact residual |
 |---|---|---|---|---|---|---|
 | derived AIR / clause 406 | executor/circuit equality, degree-2 flattening, faithful descriptor | deterministic descriptor controller | proof-system security not joined | controller admitted; no Rust byte work profile | none | emitted native work and full proof path |
-| Tower256 additive FRI | exact tower/Fan–Paar codec, additive proximity and ideal clause | exact cSHAKE/Merkle transcript, arbitrary bytes/error decoding, openings/folds/final polynomial, one controller coin | conditional only | absent from base/deployment | none end-to-end | same-coin false-accept cover; PositionBinding/CR; cSHAKE→ROM; proximity; codecs/IDs; executable checker |
+| Tower256 additive FRI | exact tower/Fan–Paar codec, additive proximity and ideal clause | exact cSHAKE/Merkle transcript, arbitrary bytes/error decoding, openings/folds/final polynomial, one controller coin | conditional only | absent from base/deployment | none end-to-end | instantiate supplied cover; PositionBinding/CR; cSHAKE→ROM; proximity; codecs/IDs; executable checker |
 | Tower256 indexed LogUp 404 | canonical addresses, exact incidence/indexed evaluation | extension-local exactly-two-reply controller; failures block | conditional only | absent from base/deployment | none | PCS/sampled decider, binding/CR/ROM, mutable RAM, catalog profile, history common game |
 | Ext6 gate proof | exact seven-operand descriptor algebra and eta relation | exact descriptor bytes/codecs/cSHAKE transcript and full algebraic checker | seven-event conditional ledger | absent from base/deployment | none | PCS, subfield, proximity, binding, ROM, final LDT, global game, recursion |
 | BFV 901 | pure sealed core and all 384 exact equations | parameterized local buffer recheck only | none | reserved; suite/controller pins zero | none | concrete codecs/digests/patch, controller, confidentiality/knowledge, PCS/CR/ROM, history |
-| semantic history | exact retained entries, folding, extraction, BCS reconstruction | exact-head admission and conditional history game | PCS/binding/ROM are explicit premises | no succinct deployed checkpoint | none | concrete reductions, hiding/sub-UD, additive/history common-cover theorem |
+| semantic history | exact retained entries, folding, extraction, BCS reconstruction | exact-head admission; one history/Tower256 `Omega`, ledger, root/schedule join, and four-event bound | external history/additive covers and PCS/binding/ROM remain premises | no succinct deployed checkpoint | none | instantiate BCS predicate/cover, MCA/codeExact, concrete reductions, hiding/sub-UD |
 
 ## Ordered construction
 
-### 1. Close one common additive/history game
+### 1. Instantiate the common additive/history game
 
-Use the landed additive controller and retained-history BCS reduction on one explicit coin. Prove
-the pointwise cover from false semantic acceptance into additive proximity, commitment binding,
-oracle transport, and history knowledge failures. Instantiate PositionBinding as the landed framed
-XOF collision reduction, then price concrete CR and cSHAKE→ROM.
+`SemanticHistoryTower256CheckpointGame` now puts the landed additive controller and retained-history
+BCS boundary on one explicit `Omega`, one existing ledger, exact terminal/initial root and schedule
+equalities, and one four-event union bound without independence. Its `JointGameFamily` intentionally
+takes the concrete BCS false-accept predicate and history failure cover as external fields, and
+reuses the additive family's cover; MCA and RS `codeExact` remain premises.
 
-The uncommitted `SemanticHistoryTower256CheckpointGame` experiment is not counted as source
-evidence until it lands. Even when a structural one-coin join lands, the pointwise cryptographic
-cover remains the hard **P** step unless proved in that commit.
+Instantiate those fields for the actual protocol. Connect PositionBinding to the landed framed-XOF
+collision reduction, then price concrete CR, cSHAKE→ROM, PCS/proximity, MCA, code exactness, and
+hiding. The structural common game is **S/A**; these instantiations are the hard **P** step.
 
 ### 2. Complete proof/container transport
 

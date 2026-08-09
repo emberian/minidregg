@@ -105,8 +105,8 @@ One controller-game coin owns schedule and ledger. This closes **A**, not deploy
 
 Open **P/D/B** obligations:
 
-- pointwise same-coin false-accept cover into additive proximity, commitment binding, or oracle
-  transport;
+- concrete instantiation of the supplied same-coin cover into additive proximity, commitment
+  binding, or oracle transport;
 - concrete PositionBinding and cSHAKE collision-resistance price;
 - cSHAKE→ROM transport and far-word/proximity Fiat–Shamir reduction;
 - emitted executable checker for the currently noncomputable Tower relation;
@@ -148,10 +148,15 @@ source alignment, semantic-to-finite claim/witness reindexing, roots/opened-colu
 actual unshifted semantic BCS reduction. PCS, commitment-binding, and ROM `Good` events share one
 history coin; private admission has only an `ofNotBad` constructor.
 
-This closes a conditional **P shape**, not the premises themselves. Concrete PCS opening, CR/
-binding, ROM transport, MCA/error hypotheses, hiding/sub-UD, and the end-to-end additive-controller/
-history common cover remain. The uncommitted Tower256 checkpoint experiment is not current source
-evidence.
+`SemanticHistoryTower256CheckpointGame` now joins the history and Tower256 additive predicates on
+one `Omega`, one existing `FailureLedger`, exact WARP-terminal/additive-initial root and schedule
+equalities, and one four-event union bound without independence. This closes the former structural
+“two ledgers” residual at that exact boundary.
+
+It remains a conditional **P shape**, not the premises themselves. `JointGameFamily` takes the
+externally selected BCS false-accept predicate and history reduction cover as fields and reuses the
+additive family's cover; MCA and RS `codeExact` remain premises. Concrete PCS opening, CR/binding,
+ROM transport, hiding/sub-UD, and those cover instantiations remain.
 
 ## Semantic and deployment joins
 
@@ -202,9 +207,10 @@ is superseded.
 
 ## What remains before a defensible whole
 
-1. Prove one same-coin additive/history false-accept cover.
-2. Instantiate PositionBinding/CR, cSHAKE→ROM, proximity/PCS, MCA, hiding, and sampled-decider
-   reductions at the actual controller parameters.
+1. Instantiate the landed same-coin history/additive cover with the actual BCS predicate, reduction
+   cover, MCA, and RS code-exactness.
+2. Instantiate PositionBinding/CR, cSHAKE→ROM, proximity/PCS, hiding, and sampled-decider reductions
+   at the actual controller parameters.
 3. Complete versioned proof/container/domain codecs and authenticated native work profiles.
 4. Close Ext6 PCS/subfield/proximity/final-LDT and global-game joins.
 5. Close a concrete BFV proof controller and separately authorized disclosure path.

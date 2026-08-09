@@ -64,8 +64,9 @@ provide dialect components; they do not define the semantic machine or their com
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: pre-challenge semantic link roots and exact
   post-challenge folds joined to the additive checkpoint.
 - The landed exact Tower256 codec/cSHAKE/Merkle/additive controller and gated LogUp dispatch.
-- One same-coin false-accept cover and concrete PositionBinding/CR, cSHAKE→ROM, proximity/PCS,
-  sampled-decider, and hiding instantiation shared by lookup and history.
+- The landed single-coin history/Tower256 checkpoint family, instantiated with the actual BCS
+  predicate/history cover, additive cover, MCA/code-exactness, concrete PositionBinding/CR,
+  cSHAKE→ROM, proximity/PCS, sampled-decider, and hiding reductions.
 - One BFV/RNS native-ring clause joined to exact bounded-integer consequences through checked
   representations.
 - End-to-end prover/verifier/proof-size/memory measurements on user/agent application workloads.

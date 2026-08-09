@@ -15,8 +15,11 @@ Semantic history uses a dual-root schedule: commit the exact link word before `g
 checkpoint. WARP-shaped accumulation remains the semantic/history accumulator; additive FRI is its
 checkpoint/PCS backend, not a replacement semantic accumulator. The retained-history BCS game now
 reconstructs exact genesis/chain/link words and challenges and keeps its PCS, binding, and ROM
-premises on one history coin. That does not yet supply the additive-checkpoint/knowledge
-false-accept cover on the same coin.
+premises on one history coin. `SemanticHistoryTower256CheckpointGame` now joins that history
+boundary to the Tower256 additive controller on one `Omega`, one existing ledger, exact root and
+schedule equality, and one four-event bound without independence. The concrete BCS false-accept
+predicate/history cover, additive cover, MCA/code-exactness, and cryptographic reductions remain
+explicit family premises.
 
 ## Hard invariants and non-claims
 
@@ -46,8 +49,9 @@ false-accept cover on the same coin.
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: exact dual-root/history/checkpoint join.
 - `Assurance.SemanticHistoryBcsGame`: exact retained-history BCS reconstruction and conditional
   single-coin ledger.
-- A concrete PositionBinding/CR price, cSHAKE→ROM transport, proximity/PCS reduction, sampled
-  decider, hiding schedule, and additive/history common-cover theorem before a deployment claim.
+- Instantiate the landed common-game family with a concrete BCS predicate/cover,
+  PositionBinding/CR price, cSHAKE→ROM transport, proximity/PCS reduction, MCA/code-exactness,
+  sampled decider, and hiding schedule before a deployment claim.
 - Remote evidence records must name the exact commit and command and may claim only that check.
 
 ## Revisit trigger
@@ -61,6 +65,7 @@ subsumes both WARP link attribution and additive checkpoints in the required tra
 - `Assurance/SemanticHistoryStraightlinePcs.lean`
 - `Assurance/SemanticAdditiveFriCheckpoint.lean`
 - `Assurance/SemanticHistoryBcsGame.lean`
+- `Assurance/SemanticHistoryTower256CheckpointGame.lean`
 - `Compiler/Tower256CshakeMerkleController.lean`
 - `Compiler/Tower256LogupClauseDispatch.lean`
 - `Compiler/AdditiveFriReceiptClause.lean`

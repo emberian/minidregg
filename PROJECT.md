@@ -234,7 +234,7 @@ or runtime object identity:
 
 | Dialect | Current strongest boundary | Exact residual |
 |---|---|---|
-| Tower256 additive FRI | **A:** shared concrete Tower/cSHAKE/Merkle backend; arbitrary native bytes/error; Lean transcript, decoding, openings, folds, final polynomial, ideal-clause bridge, one controller coin | same-coin false-accept cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable checker, deployed codecs/IDs, end-to-end benchmark |
+| Tower256 additive FRI | **A:** shared concrete Tower/cSHAKE/Merkle backend; arbitrary native bytes/error; Lean transcript, decoding, openings, folds, final polynomial, ideal-clause bridge, one controller coin | instantiate supplied failure cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable checker, deployed codecs/IDs, end-to-end benchmark |
 | Tower256 indexed LogUp | **A:** exact address/index semantics and gated two-byte-reply controller for clause 404 | clause 404 remains out of base/deployment; PCS/sampled decider, binding/CR/ROM, common-game/history join, mutable RAM, artifact work profile |
 | BabyBear/Ext6 | **A:** exact descriptor/gate algebra and deterministic Lean transcript/algebra controller; seven-event conditional admission ledger | PCS, subfield proof, proximity, binding, ROM, final LDT, global game, recursion, deployed security |
 | BFV/residue ring | **S/A arithmetic:** pure core and all 384 exact equations; native buffer candidate can be Lean-rechecked locally | proof suite/controller pins are zero; no confidentiality, knowledge, PCS/CR/ROM, concrete core codec/patch deployment, or history join |
@@ -284,14 +284,20 @@ budgets. Published or external algebraic inputs remain named interfaces rather t
 as locally proved.
 
 The semantic history construction retains exact entries, predecessor/state links, clause evidence,
-and one folded claim. The BCS history reduction now reconstructs genesis, chain/link words, and
+and one folded claim. The BCS history reduction reconstructs genesis, chain/link words, and
 challenges from the retained trace; binds roots/opened columns to that exact transcript; and keeps
 PCS, binding, and ROM `Good` events on one history coin. Exact finality is indexed by head, entry,
 occurrence, and derived receipt root.
 
-Open **P** work: concrete PCS opening, commitment CR/binding, ROM transport, MCA/error hypotheses,
-hiding/sub-UD, and one end-to-end cover joining additive checkpoint admission to the knowledge game.
-The uncommitted checkpoint experiment is not part of the current source claim.
+`SemanticHistoryTower256CheckpointGame` now joins that history predicate and the Tower256 additive
+controller predicate on one `Omega`, one existing `FailureLedger`, exact terminal/initial root and
+schedule equalities, and one four-event union bound without independence. Its family deliberately
+requires the external BCS false-accept predicate/history reduction cover and the additive cover;
+MCA and RS `codeExact` also remain premises.
+
+Open **P** work: instantiate those covers with concrete PCS opening, commitment CR/binding, ROM
+transport, MCA/error hypotheses, and hiding/sub-UD. The structural common game is landed; its
+cryptographic premises are not.
 
 ## Consumer migration
 
@@ -310,7 +316,8 @@ physical completion. Compatibility modules are migration views, not proof of cut
 
 ## Ordered frontier
 
-1. Close the end-to-end additive/history common-cover theorem and concrete CR/ROM/proximity prices.
+1. Instantiate the landed additive/history common-game cover with concrete CR/ROM/proximity/PCS,
+   MCA, code-exactness, and hiding prices.
 2. Give Tower256 additive and lookup work complete versioned proof/container/domain codecs and
    artifact-native work identities; emit an executable Lean-owned checker boundary.
 3. Instantiate a concrete Ext6 PCS/subfield/proximity/final-LDT controller and global ledger.
