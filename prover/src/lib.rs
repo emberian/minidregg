@@ -15,6 +15,7 @@ pub mod field4;
 pub mod field6;
 pub mod fri;
 pub mod gate_kernels;
+pub mod hash_kernels;
 #[cfg(feature = "wgpu-fold")]
 pub mod gpu;
 pub mod logup256_kernels;
