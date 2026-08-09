@@ -43,7 +43,7 @@ open Minidregg.Loom
 
 set_option autoImplicit false
 
-universe uSemantics uOp
+universe uSemantics uLeft uRight uOp
   uClauseInput uClauseQuery uClauseReply uClauseOutcome uClauseEvidence
 
 noncomputable section
@@ -139,6 +139,30 @@ structure EntrySemanticsFamily
       context.outcome = .rejected denial →
         claim.witness.core.post = claim.witness.core.pre
 
+namespace EntrySemanticsFamily
+
+variable {n : Nat} {F : Type*} [Field F] [DecidableEq F]
+
+/-- Proof-relevant disjoint union of semantic entry families.  This is the
+typed composition operation which lets one causal history contain, for
+example, both singular turns and flat hyperedges without weakening either
+evidence type to an unindexed blob. -/
+def sum
+    (left : EntrySemanticsFamily.{uLeft} n F)
+    (right : EntrySemanticsFamily.{uRight} n F) :
+    EntrySemanticsFamily.{max uLeft uRight} n F where
+  Evidence := fun context claim =>
+    Sum (left.Evidence context claim) (right.Evidence context claim)
+  rejectedCoreAtomic := by
+    intro context claim evidence denial rejected
+    cases evidence with
+    | inl leftEvidence =>
+        exact left.rejectedCoreAtomic leftEvidence rejected
+    | inr rightEvidence =>
+        exact right.rejectedCoreAtomic rightEvidence rejected
+
+end EntrySemanticsFamily
+
 section Entry
 
 variable {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -164,6 +188,54 @@ structure VerifiedEntry where
   codeword : claim.witness.encode ∈ C
 
 namespace VerifiedEntry
+
+/-- Change only the semantic evidence carrier.  The exact context, claim,
+manifest/clause proofs, binding equation, and codeword are retained
+definitionally. -/
+def mapFamily
+    {source : EntrySemanticsFamily.{uLeft} n F}
+    {target : EntrySemanticsFamily.{uRight} n F}
+    (mapEvidence : ∀ {context claim},
+      source.Evidence context claim → target.Evidence context claim)
+    (entry : VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := source)
+      (headerCells := headerCells) (C := C)) :
+    VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := target)
+      (headerCells := headerCells) (C := C) where
+  context := entry.context
+  claim := entry.claim
+  semantics := mapEvidence entry.semantics
+  contextWellFormed := entry.contextWellFormed
+  dialectEvidence := entry.dialectEvidence
+  bindingExact := entry.bindingExact
+  codeword := entry.codeword
+
+/-- Admit a left-family entry into a mixed-family history. -/
+def toSumLeft
+    {left : EntrySemanticsFamily.{uLeft} n F}
+    (right : EntrySemanticsFamily.{uRight} n F)
+    (entry : VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := left)
+      (headerCells := headerCells) (C := C)) :
+    VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence)
+      (family := EntrySemanticsFamily.sum left right)
+      (headerCells := headerCells) (C := C) :=
+  entry.mapFamily (fun evidence => .inl evidence)
+
+/-- Admit a right-family entry into a mixed-family history. -/
+def toSumRight
+    (left : EntrySemanticsFamily.{uLeft} n F)
+    {right : EntrySemanticsFamily.{uRight} n F}
+    (entry : VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := right)
+      (headerCells := headerCells) (C := C)) :
+    VerifiedEntry (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence)
+      (family := EntrySemanticsFamily.sum left right)
+      (headerCells := headerCells) (C := C) :=
+  entry.mapFamily (fun evidence => .inr evidence)
 
 /-- The exact runtime/Loom word. -/
 def word (entry : VerifiedEntry (manifest := manifest) (registry := registry)
@@ -406,6 +478,9 @@ end VerifiedHistoryHead
 end History
 
 #print axioms HistoryAdmissionContext.ofAdmissionContext_wellFormed
+#print axioms EntrySemanticsFamily.sum
+#print axioms VerifiedEntry.toSumLeft
+#print axioms VerifiedEntry.toSumRight
 #print axioms VerifiedEntry.word_reject_atomic
 #print axioms VerifiedHistoryHead.decider_complete_at_head
 #print axioms VerifiedHistoryHead.opened_decider_extracts_head
