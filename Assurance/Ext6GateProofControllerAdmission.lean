@@ -37,6 +37,7 @@ inductive Ext6FailureClass
   | proximity
   | binding
   | oracleTransport
+  | challengeSampling
   | finalLdt
 deriving DecidableEq, Fintype, Repr
 
@@ -54,6 +55,7 @@ def Bad (ledger : Ext6FailureLedger Omega) (omega : Omega) : Prop :=
   (ledger .proximity).event omega ∨
   (ledger .binding).event omega ∨
   (ledger .oracleTransport).event omega ∨
+  (ledger .challengeSampling).event omega ∨
   (ledger .finalLdt).event omega
 
 def total (ledger : Ext6FailureLedger Omega) : Real :=
@@ -63,6 +65,7 @@ def total (ledger : Ext6FailureLedger Omega) : Real :=
   (ledger .proximity).price +
   (ledger .binding).price +
   (ledger .oracleTransport).price +
+  (ledger .challengeSampling).price +
   (ledger .finalLdt).price
 
 def Good (ledger : Ext6FailureLedger Omega)
@@ -81,34 +84,43 @@ theorem good_of_not_bad (ledger : Ext6FailureLedger Omega) {omega : Omega}
   | binding => exact good (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad)))))
   | oracleTransport =>
       exact good (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad))))))
+  | challengeSampling =>
+      exact good
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl bad)))))))
   | finalLdt =>
       exact good
-        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr bad))))))
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr bad)))))))
 
 theorem bad_le_total (ledger : Ext6FailureLedger Omega) :
     uniformProb Omega ledger.Bad ≤ ledger.total := by
   have h1 := uniformProb_or_le (ledger .gateAlgebra).event (fun omega =>
     (ledger .gatePcs).event omega ∨ (ledger .subfield).event omega ∨
     (ledger .proximity).event omega ∨ (ledger .binding).event omega ∨
-    (ledger .oracleTransport).event omega ∨ (ledger .finalLdt).event omega)
+    (ledger .oracleTransport).event omega ∨
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
   have h2 := uniformProb_or_le (ledger .gatePcs).event (fun omega =>
     (ledger .subfield).event omega ∨ (ledger .proximity).event omega ∨
     (ledger .binding).event omega ∨ (ledger .oracleTransport).event omega ∨
-    (ledger .finalLdt).event omega)
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
   have h3 := uniformProb_or_le (ledger .subfield).event (fun omega =>
     (ledger .proximity).event omega ∨ (ledger .binding).event omega ∨
-    (ledger .oracleTransport).event omega ∨ (ledger .finalLdt).event omega)
+    (ledger .oracleTransport).event omega ∨
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
   have h4 := uniformProb_or_le (ledger .proximity).event (fun omega =>
     (ledger .binding).event omega ∨ (ledger .oracleTransport).event omega ∨
-    (ledger .finalLdt).event omega)
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
   have h5 := uniformProb_or_le (ledger .binding).event (fun omega =>
-    (ledger .oracleTransport).event omega ∨ (ledger .finalLdt).event omega)
-  have h6 := uniformProb_or_le (ledger .oracleTransport).event
+    (ledger .oracleTransport).event omega ∨
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
+  have h6 := uniformProb_or_le (ledger .oracleTransport).event (fun omega =>
+    (ledger .challengeSampling).event omega ∨ (ledger .finalLdt).event omega)
+  have h7 := uniformProb_or_le (ledger .challengeSampling).event
     (ledger .finalLdt).event
   unfold Bad total
   linarith [(ledger .gateAlgebra).bound, (ledger .gatePcs).bound,
     (ledger .subfield).bound, (ledger .proximity).bound,
     (ledger .binding).bound, (ledger .oracleTransport).bound,
+    (ledger .challengeSampling).bound,
     (ledger .finalLdt).bound]
 
 end Ext6FailureLedger
@@ -171,26 +183,32 @@ not a claimed implementation:
 * `gammaSound` turns a zero gamma-batched emitted residual into literal
   `descriptorHolds`.
 
-Supplying these fields is the exact residual.  This module constructs none of
-them from completeness or from native behavior. -/
+`challengeSampling` is separate from ROM: `digestToExt6` performs six
+radix-`babyBearP` reductions and is not asserted uniform.  A deployment must
+price that bias/reduction on the same coin.  This module constructs none of
+these laws from completeness or from native behavior. -/
 structure ReductionLaws (Omega : Type) [Fintype Omega]
     (ledger : Ext6FailureLedger Omega) where
   aggregateOpeningExact : ∀ omega (receipt : Receipt m),
     Accepts suite statement receipt ->
     ledger.Good .gatePcs omega -> ledger.Good .subfield omega ->
     ledger.Good .proximity omega -> ledger.Good .binding omega ->
-    ledger.Good .oracleTransport omega -> ledger.Good .finalLdt omega ->
+    ledger.Good .oracleTransport omega -> ledger.Good .challengeSampling omega ->
+    ledger.Good .finalLdt omega ->
     ∃ trace : Nat -> BabyBear, AuthenticatedAggregate statement receipt trace
   etaSound : ∀ omega (receipt : Receipt m) (trace : Nat -> BabyBear),
     Accepts suite statement receipt -> AuthenticatedAggregate statement receipt trace ->
     ledger.Good .gateAlgebra omega -> ledger.Good .oracleTransport omega ->
+    ledger.Good .challengeSampling omega ->
     AuthenticatedTraceRelation statement receipt trace
   sumcheckSound : ∀ omega (receipt : Receipt m) (trace : Nat -> BabyBear),
     Accepts suite statement receipt -> AuthenticatedTraceRelation statement receipt trace ->
     ledger.Good .gateAlgebra omega -> ledger.Good .oracleTransport omega ->
+    ledger.Good .challengeSampling omega ->
     gammaBatchedDescriptorResidual statement.descriptor trace receipt.gamma = 0
   gammaSound : ∀ omega (receipt : Receipt m) (trace : Nat -> BabyBear),
     ledger.Good .gateAlgebra omega -> ledger.Good .oracleTransport omega ->
+    ledger.Good .challengeSampling omega ->
     gammaBatchedDescriptorResidual statement.descriptor trace receipt.gamma = 0 ->
     descriptorHolds statement.descriptor trace
 
@@ -214,15 +232,16 @@ theorem semantic_of_not_bad (laws : ReductionLaws (suite := suite)
   have goodProximity := ledger.good_of_not_bad good .proximity
   have goodBinding := ledger.good_of_not_bad good .binding
   have goodOracle := ledger.good_of_not_bad good .oracleTransport
+  have goodSampling := ledger.good_of_not_bad good .challengeSampling
   have goodFinal := ledger.good_of_not_bad good .finalLdt
   obtain ⟨trace, aggregate⟩ := laws.aggregateOpeningExact omega receipt accepted
-    goodPcs goodSubfield goodProximity goodBinding goodOracle goodFinal
+    goodPcs goodSubfield goodProximity goodBinding goodOracle goodSampling goodFinal
   have relation := laws.etaSound omega receipt trace accepted aggregate
-    goodAlgebra goodOracle
+    goodAlgebra goodOracle goodSampling
   have residualZero := laws.sumcheckSound omega receipt trace accepted relation
-    goodAlgebra goodOracle
+    goodAlgebra goodOracle goodSampling
   exact ⟨trace, relation,
-    laws.gammaSound omega receipt trace goodAlgebra goodOracle residualZero⟩
+    laws.gammaSound omega receipt trace goodAlgebra goodOracle goodSampling residualZero⟩
 
 end ReductionLaws
 
@@ -260,7 +279,7 @@ theorem execution_runner_bytes
   exact (run_success_integrity suite statement verifier (family.runner omega)
     request reply (family.executionExact omega reply selected)).1
 
-/-- The exact deployment laws reduce false acceptance to one of the seven
+/-- The exact deployment laws reduce false acceptance to one of the eight
 Ext6 events on this same coin. -/
 theorem falseAccept_bad
     (family : GameFamily (suite := suite) (statement := statement)

@@ -10,7 +10,7 @@ the complete algebraic verifier relation.
 
 The transcript order is literal data:
 
-1. the canonical Lean-emitted descriptor bytes and trace root precede `gamma`;
+1. the canonical Lean statement preimage and trace root precede `gamma`;
 2. the seven operand roots are bound after `gamma`;
 3. round message `i` precedes round challenge `i`;
 4. all seven terminal values precede fresh `eta`; and
@@ -34,6 +34,7 @@ open Minidregg.Compiler.GateMleExt6
 open Minidregg.Compiler.GateTraceRelationExt6
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256CshakeMerkleController
+open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec)
 open Minidregg.Loom Polynomial
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
@@ -64,7 +65,6 @@ structure Statement (m nPadding : Nat) where
   encoding : Fin (descriptorResiduals descriptor (fun _ => 0)).length ↪
     (Fin m -> Bool)
   publicValues : Fin descriptor.nPublic -> BabyBear
-  statementBytes : List UInt8
 
 /-- The type of the residual list does not depend on the chosen trace values;
 this reuses one statement-owned encoding for every candidate trace. -/
@@ -76,6 +76,8 @@ def Statement.encodingFor {m nPadding : Nat} (statement : Statement m nPadding)
 /-- Proof-suite codecs and transcript domains.  They are Lean objects with
 round-trip laws, not claims about a native representation. -/
 structure Suite where
+  babyBearCodecPin : CodecPin
+  babyBearCodec : LawfulCodec BabyBear
   ext6CodecPin : CodecPin
   ext6Codec : LawfulCodec Ext6Q
   roundMessageCodecPin : CodecPin
@@ -105,6 +107,108 @@ def encodeExt6 (suite : Suite) (value : Ext6Q) : List UInt8 :=
 def encodeRoundMessage (suite : Suite) (message : Polynomial Ext6Q) : List UInt8 :=
   suite.roundMessageCodec.encode message
 
+/-! ## Canonical statement preimage -/
+
+variable {m nPadding : Nat}
+
+/-- First-order payload absorbed before any proof root.  Public values are
+already encoded by the suite's lawful BabyBear codec; cube rows are literal
+Boolean bytes in residual-index then coordinate-index order. -/
+structure StatementPreimagePayload where
+  descriptor : List UInt8
+  rounds : Nat
+  padding : Nat
+  publicRows : List (List UInt8)
+  encodingRows : List (List UInt8)
+deriving Repr
+
+private def statementPreimageWireStream :=
+  StreamCodec.product Tower256ConcreteBackend.bytesStream <|
+    StreamCodec.product StreamCodec.nat <|
+      StreamCodec.product StreamCodec.nat <|
+        StreamCodec.product
+          (StreamCodec.list Tower256ConcreteBackend.bytesStream)
+          (StreamCodec.list Tower256ConcreteBackend.bytesStream)
+
+/-- A single prefix-decodable codec fixes the statement framing; callers do
+not supply a free transcript byte string. -/
+def statementPreimageStream : StreamCodec StatementPreimagePayload :=
+  StreamCodec.xmap statementPreimageWireStream
+    (fun payload =>
+      (payload.descriptor,
+        (payload.rounds,
+          (payload.padding, (payload.publicRows, payload.encodingRows)))))
+    (fun wire =>
+      { descriptor := wire.1
+        rounds := wire.2.1
+        padding := wire.2.2.1
+        publicRows := wire.2.2.2.1
+        encodingRows := wire.2.2.2.2 })
+    (by intro payload; cases payload; rfl)
+
+def statementPreimageCodec : LawfulCodec StatementPreimagePayload :=
+  statementPreimageStream.toLawful
+
+def encodeBool : Bool -> UInt8
+  | false => 0
+  | true => 1
+
+/-- Canonical payload constructor factored out so the component-injectivity
+tooth below has no dependent-structure casts. -/
+def canonicalPayloadOf (suite : Suite) (m nPadding : Nat)
+    (descriptor : ConstraintDescriptor BabyBear)
+    (encoding : Fin (descriptorResiduals descriptor (fun _ => 0)).length ↪
+      (Fin m -> Bool))
+    (publicValues : Fin descriptor.nPublic -> BabyBear) :
+    StatementPreimagePayload where
+  descriptor := descriptorBytes descriptor
+  rounds := m
+  padding := nPadding
+  publicRows := List.ofFn fun j => suite.babyBearCodec.encode (publicValues j)
+  encodingRows := List.ofFn fun k => List.ofFn fun i => encodeBool (encoding k i)
+
+/-- The unique statement preimage absorbed by gamma. -/
+def canonicalStatementPreimage (suite : Suite)
+    (statement : Statement m nPadding) : List UInt8 :=
+  statementPreimageCodec.encode
+    (canonicalPayloadOf suite m nPadding statement.descriptor
+      statement.encoding statement.publicValues)
+
+private theorem lawfulCodec_encode_injective {alpha : Type}
+    (codec : LawfulCodec alpha) : Function.Injective codec.encode := by
+  intro left right equal
+  have decoded := congrArg codec.decode equal
+  rw [codec.decode_encode, codec.decode_encode] at decoded
+  exact Option.some.inj decoded
+
+/-- Changing either a public value or a cube-encoding bit changes the canonical
+preimage.  This is byte-preimage injectivity only; it claims no digest collision
+resistance. -/
+theorem canonicalStatementPreimage_components_injective
+    (suite : Suite) (m nPadding : Nat)
+    (descriptor : ConstraintDescriptor BabyBear)
+    (leftEncoding rightEncoding :
+      Fin (descriptorResiduals descriptor (fun _ => 0)).length ↪ (Fin m -> Bool))
+    (leftPublic rightPublic : Fin descriptor.nPublic -> BabyBear)
+    (equal : statementPreimageCodec.encode
+        (canonicalPayloadOf suite m nPadding descriptor leftEncoding leftPublic) =
+      statementPreimageCodec.encode
+        (canonicalPayloadOf suite m nPadding descriptor rightEncoding rightPublic)) :
+    leftPublic = rightPublic ∧ leftEncoding = rightEncoding := by
+  have payloadEqual := lawfulCodec_encode_injective statementPreimageCodec equal
+  have publicRowsEqual := congrArg StatementPreimagePayload.publicRows payloadEqual
+  have encodingRowsEqual := congrArg StatementPreimagePayload.encodingRows payloadEqual
+  constructor
+  · funext j
+    have rowEqual := congrFun (List.ofFn_inj.mp publicRowsEqual) j
+    exact lawfulCodec_encode_injective suite.babyBearCodec rowEqual
+  · apply DFunLike.coe_injective
+    funext k i
+    have outerEqual := congrFun (List.ofFn_inj.mp encodingRowsEqual) k
+    have bitEqual := congrFun (List.ofFn_inj.mp outerEqual) i
+    cases hleft : leftEncoding k i <;> cases hright : rightEncoding k i <;>
+      simp [encodeBool, hleft, hright] at bitEqual ⊢
+
 /-! ## Native receipt data -/
 
 /-- All proof data is inert until the Lean relation below accepts it.  PCS and
@@ -124,12 +228,12 @@ structure Receipt (m : Nat) where
 
 variable {m nPadding : Nat}
 
-/-- Prefix committed before `gamma`: exact statement bytes, exact canonical
-descriptor bytes, and the base-trace commitment root. -/
+/-- Prefix committed before `gamma`: the canonical statement preimage (exact
+descriptor, dimensions, public values, and cube encoding) and the base-trace
+commitment root. -/
 def gammaInput (suite : Suite) (statement : Statement m nPadding)
     (receipt : Receipt m) : List UInt8 :=
-  envelope statement.statementBytes ++
-    envelope (descriptorBytes statement.descriptor) ++
+  envelope (canonicalStatementPreimage suite statement) ++
     envelope (encodeDigest suite.gammaDomainId) ++
     envelope (encodeDigest receipt.traceRoot)
 
@@ -319,6 +423,7 @@ theorem roundInput_eq_of_same_current
 
 #print axioms run_success_integrity
 #print axioms roundInput_eq_of_same_current
+#print axioms canonicalStatementPreimage_components_injective
 
 end
 
