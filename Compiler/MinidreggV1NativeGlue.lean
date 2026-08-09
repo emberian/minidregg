@@ -15,6 +15,7 @@ namespace Minidregg.Compiler.MinidreggV1NativeGlue
 def buildTarget : Minidregg.Compiler.NativeGlueGen.BuildTarget where
   path := "prover/generated/semantic_artifact_v1.rs"
   bundle := Minidregg.Compiler.MinidreggV1Artifact.bundle
+  catalog := Minidregg.Compiler.NativeWorkProfiles.v1Catalog
 
 /- Materialize the generated data-only Rust integration surface. -/
 #eval buildTarget.run
