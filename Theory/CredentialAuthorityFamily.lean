@@ -172,7 +172,7 @@ inductive Lineage {kind : ResourceKind} : Capability kind → Type
 
 def Lineage.rootCapability {kind : ResourceKind}
     {cap : Capability kind} : cap.Lineage → Capability kind
-  | .root root .. => root
+  | .root rootCap _ _ _ => rootCap
   | .attenuate _ _ parentLineage _ => parentLineage.rootCapability
 
 /-- Every request admitted by a descendant was admitted by the witnessed root.
@@ -183,7 +183,7 @@ theorem Lineage.root_admissible {kind : ResourceKind}
     (lineage : cap.Lineage) (admitted : cap.Admissible state request) :
     lineage.rootCapability.Admissible state request := by
   induction lineage with
-  | root => exact admitted
+  | root => simpa [Lineage.rootCapability] using admitted
   | attenuate child parent parentLineage edge ih =>
       exact ih (strict_attenuation_admits_subset edge admitted)
 
