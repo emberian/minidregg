@@ -12,6 +12,7 @@ import Compiler.AirModularView  -- exact modular-view AIR plus wide fixed-modulu
 import Compiler.BignumKernelABI  -- Lean-owned versioned call envelope: metadata schedules native arithmetic only; acceptance remains exactly descriptorHolds
 import Compiler.BfvAllModuliKernelCalls  -- FHEgg q0/q1/q2 fixed-modulus calls in deployed order, with exact 10/10/11 radix-64 layouts and descriptorHolds acceptance
 import Compiler.BfvInputValidity  -- one committed owner witness binds selector/table validity, bounded BFV inputs, public relation identifiers, and all 384 modulus-major kernel calls
+import Compiler.BfvSignedAccumulatorAir  -- exact radix-64 weighted positive/negative accumulators over that same witness and accepted quotient call imply numerator = q * centered quotient
 import Compiler.BfvCompressedEquation  -- audited FHEgg 12,435-coordinate/384-row schema and the first exact q0 shifted-quotient AIR join; the full signed accumulator and Lean-owned transcript control stay explicit
 import Compiler.WideDigestAir  -- [AIR-wide-digest] WDG1/domain/9-limb encoding pinned through emit; canonicality and 248-bit capacity proved; sponge schedule, concrete permutation, native-output checks, and [COMMIT-CR] remain explicit
 import Compiler.WideDigestByteDecodeAir  -- raw four-byte little-endian limbs are range-checked and proved < BabyBear before field recomposition; raw p is universally rejected
