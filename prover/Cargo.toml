@@ -4,12 +4,24 @@ version = "0.1.0"
 edition = "2021"
 description = "Unverified prover for minidregg: reads the ConstraintDescriptor emitted by Compiler/Emit.lean. Consumes constraints; never authors them."
 
+[features]
+default = []
+# Historical BabyBear⁴/WGSL fold experiment.  It is deliberately outside the
+# protocol core: the reference prover is CPU-only, and future acceleration is
+# chosen for the protocol actually deployed rather than inherited from it.
+wgpu-fold = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# [PROVER-fri-wgsl]: the adopted GPU compute backend (wgpu -> Metal on ember's
-# Mac) for OUR fri_fold.wgsl kernel. Per docs/PROVER-PLAN.md: wgpu/pollster/
-# bytemuck are allowed; the Plonky3 stack (p3-*) is NOT.
-wgpu = "23"
-pollster = "0.4"
-bytemuck = { version = "1", features = ["derive"] }
+sha3 = "0.10"
+# `[PROVER-fri-wgsl]`: retained as an opt-in conformance experiment, not a
+# dependency of proving or verification.
+wgpu = { version = "23", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+[[bin]]
+name = "fri_fold_bench"
+path = "src/bin/fri_fold_bench.rs"
+required-features = ["wgpu-fold"]
