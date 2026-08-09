@@ -26,6 +26,11 @@ pub enum Logup256KernelError {
         address: usize,
         table_count: usize,
     },
+    BufferIndexOutOfRange {
+        item: usize,
+        index: usize,
+        buffer_len: usize,
+    },
     SizeOverflow,
     PointLength {
         expected: usize,
@@ -51,6 +56,14 @@ impl fmt::Display for Logup256KernelError {
                 f,
                 "row {row} has address {address}, outside table length {table_count}"
             ),
+            Self::BufferIndexOutOfRange {
+                item,
+                index,
+                buffer_len,
+            } => write!(
+                f,
+                "item {item} targets buffer index {index}, outside length {buffer_len}"
+            ),
             Self::SizeOverflow => write!(f, "arithmetic vector size overflows usize"),
             Self::PointLength { expected, actual } => {
                 write!(f, "point has length {actual}, expected {expected}")
@@ -68,47 +81,23 @@ impl From<Tower256Error> for Logup256KernelError {
     }
 }
 
-/// Caller-selected flattening of a `(row, address)` incidence matrix.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IncidenceLayout {
-    /// Entry `(row, address)` is stored at `row * table_count + address`.
-    RowMajor,
-    /// Entry `(row, address)` is stored at `address * row_count + row`.
-    AddressMajor,
-}
-
-impl IncidenceLayout {
-    fn offset(self, row: usize, address: usize, row_count: usize, table_count: usize) -> usize {
-        match self {
-            Self::RowMajor => row * table_count + address,
-            Self::AddressMajor => address * row_count + row,
-        }
-    }
-}
-
-/// Flatten `Y(row, address) = [addresses[row] = address]` in the layout supplied
-/// by the caller.
-pub fn incidence_table(
-    addresses: &[usize],
-    table_count: usize,
-    layout: IncidenceLayout,
+/// Scatter unit values to exact caller-supplied output positions.
+pub fn unit_scatter(
+    positions: &[usize],
+    output_len: usize,
 ) -> Result<Vec<Tower256>, Logup256KernelError> {
-    let len = addresses
-        .len()
-        .checked_mul(table_count)
-        .ok_or(Logup256KernelError::SizeOverflow)?;
-    let mut incidence = vec![Tower256::ZERO; len];
-    for (row, &address) in addresses.iter().enumerate() {
-        if address >= table_count {
-            return Err(Logup256KernelError::AddressOutOfRange {
-                row,
-                address,
-                table_count,
+    let mut output = vec![Tower256::ZERO; output_len];
+    for (item, &index) in positions.iter().enumerate() {
+        let Some(slot) = output.get_mut(index) else {
+            return Err(Logup256KernelError::BufferIndexOutOfRange {
+                item,
+                index,
+                buffer_len: output_len,
             });
-        }
-        incidence[layout.offset(row, address, addresses.len(), table_count)] = Tower256::ONE;
+        };
+        *slot = Tower256::ONE;
     }
-    Ok(incidence)
+    Ok(output)
 }
 
 /// Scatter one weight per row into address-indexed table slots.
@@ -422,29 +411,17 @@ mod tests {
     }
 
     #[test]
-    fn incidence_layout_is_caller_selected() {
+    fn unit_scatter_uses_exact_caller_positions() {
         let addresses = [2, 0, 2, 3];
-        let incidence = incidence_table(&addresses, 4, IncidenceLayout::AddressMajor).unwrap();
-        for address in 0..4 {
-            for row in 0..4 {
-                let expected = if addresses[row] == address {
-                    Tower256::ONE
-                } else {
-                    Tower256::ZERO
-                };
-                assert_eq!(incidence[address * 4 + row], expected);
-            }
-        }
-        let row_major = incidence_table(&addresses, 4, IncidenceLayout::RowMajor).unwrap();
-        for row in 0..4 {
-            for address in 0..4 {
-                let expected = if addresses[row] == address {
-                    Tower256::ONE
-                } else {
-                    Tower256::ZERO
-                };
-                assert_eq!(row_major[row * 4 + address], expected);
-            }
+        let positions = [8, 1, 10, 15];
+        let scattered = unit_scatter(&positions, 16).unwrap();
+        for index in 0..16 {
+            let expected = if positions.contains(&index) {
+                Tower256::ONE
+            } else {
+                Tower256::ZERO
+            };
+            assert_eq!(scattered[index], expected);
         }
 
         let weights = [t(1), t(2), t(4), t(8)];
