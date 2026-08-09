@@ -291,6 +291,32 @@ local notation "HistoryEntry" => VerifiedEntry
 
 abbrev ChannelCount := Fintype.card (BoundReceiptIx n)
 
+/-- Proof-relevant causal history.  Every constructor retains the exact
+genesis or append evidence; in particular the predecessor at a successor is
+computed from the preceding verified entry rather than supplied as a digest. -/
+inductive HistoryChain : List HistoryEntry → Prop
+  | start (entry : HistoryEntry)
+      (sequenceZero : entry.context.sequence = 0)
+      (noPredecessor : entry.context.previousReceiptRoot = none) :
+      HistoryChain [entry]
+  | append {entries : List HistoryEntry} {latest entry : HistoryEntry}
+      (prior : HistoryChain entries)
+      (latestIsLast : entries.getLast? = some latest)
+      (historyDomainExact :
+        entry.context.historyDomain = latest.context.historyDomain)
+      (sequenceExact : entry.context.sequence = entries.length)
+      (predecessorExact : entry.context.previousReceiptRoot =
+        some (latest.receiptRoot S))
+      (stateExact : entry.context.preStateRoot = latest.context.postStateRoot) :
+      HistoryChain (entries ++ [entry])
+
+local notation "LinkedEntries" => HistoryChain
+  (n := n) (F := F) (portal := portal) (authState := authState)
+  (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
+  (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
+  (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
+  manifest errorId headerCells C S
+
 /-- A verified head contains the complete proof-relevant entry list, its latest
 entry, the single folded Loom claim/word, exact satisfaction, and commitment
 binding.  The private constructor makes `start` and `append` the only public
@@ -300,6 +326,7 @@ structure VerifiedHistoryHead where
   entries : List HistoryEntry
   latest : HistoryEntry
   latestIsLast : entries.getLast? = some latest
+  linked : LinkedEntries entries
   accumulator : AccClaim Digest F (BoundReceiptIx n) (ChannelCount (n := n))
   foldedWord : BoundReceiptIx n → F
   satisfies : AccClaim.Satisfies C accumulator foldedWord
@@ -307,17 +334,24 @@ structure VerifiedHistoryHead where
   channelFixed : ∀ index,
     accumulator.weights index = boundEvalAt (boundReceiptCoord index)
 
+local notation "HistoryHead" => VerifiedHistoryHead
+  (n := n) (F := F) (portal := portal) (authState := authState)
+  (kind := kind) (Effect := Effect) (Disclosure := Disclosure)
+  (Error := Error) (Op := Op) (stateCommitment := stateCommitment)
+  (effectSemantics := effectSemantics) (disclosurePolicy := disclosurePolicy)
+  manifest errorId headerCells C S
+
 namespace VerifiedHistoryHead
 
 /-- History depth is the number of verified semantic entries retained by the
 proof-relevant head. -/
-def depth (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot) : Nat :=
+def depth (head : HistoryHead) : Nat :=
   head.entries.length
 
 /-- The only predecessor root exposed to the next append is derived from the
 verified latest entry and the binding commitment. -/
 def latestReceiptRoot
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot) : Digest :=
+    (head : HistoryHead) : Digest :=
   head.latest.receiptRoot S
 
 /-- Genesis from one verified entry.  The admission context itself must be the
@@ -327,21 +361,22 @@ def start
     (entry : HistoryEntry)
     (sequenceZero : entry.context.sequence = 0)
     (noPredecessor : entry.context.previousReceiptRoot = none) :
-    VerifiedHistoryHead manifest errorId headerCells C S foldRoot := by
+    HistoryHead := by
   let claim := entry.Claim
   let root := entry.receiptRoot S
   let accumulator := claim.acc root
   let word := entry.word
   have hsatisfies : AccClaim.Satisfies C accumulator word :=
     (claim.acc_satisfies_iff root word).mpr ⟨entry.codeword, rfl⟩
-  exact VerifiedHistoryHead.mk [entry] entry (by simp) accumulator word
-    hsatisfies rfl (fun _ => rfl)
+  exact VerifiedHistoryHead.mk [entry] entry (by simp)
+    (.start entry sequenceZero noPredecessor) accumulator word hsatisfies rfl
+    (fun _ => rfl)
 
 @[simp] theorem start_depth
     (entry : HistoryEntry)
     (sequenceZero : entry.context.sequence = 0)
     (noPredecessor : entry.context.previousReceiptRoot = none) :
-    (start manifest errorId headerCells C S foldRoot entry sequenceZero
+    (start manifest errorId headerCells C S entry sequenceZero
       noPredecessor).depth = 1 :=
   rfl
 
@@ -349,7 +384,7 @@ def start
 verified predecessor head; no raw digest parameter exists.  State continuity
 is included alongside the manifest's causal receipt-root link. -/
 structure AppendLink
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (entry : HistoryEntry) : Prop where
   historyDomainExact :
     entry.context.historyDomain = head.latest.context.historyDomain
@@ -363,7 +398,7 @@ structure AppendLink
 `foldRoot` must really commit the arithmetic folded word.  This is carried
 proof data, not an axiom and not inferred from hash syntax. -/
 structure FoldRecommitment
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (entry : HistoryEntry) (gamma : F) : Prop where
   rootExact :
     foldRoot head.accumulator.rt gamma (entry.receiptRoot S) =
@@ -374,12 +409,12 @@ claim.  The caller supplies only the new verified entry, a link indexed by the
 existing head, the Lean-controller challenge, and the explicit recommitment
 proof. -/
 def append
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (_link : AppendLink manifest errorId headerCells C S foldRoot head entry)
+    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
     (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
       head entry gamma) :
-    VerifiedHistoryHead manifest errorId headerCells C S foldRoot := by
+    HistoryHead := by
   let linkClaim := entry.Claim.acc (entry.receiptRoot S)
   let accumulator := foldClaims foldRoot head.accumulator linkClaim gamma
   let word := head.foldedWord + gamma • entry.word
@@ -398,13 +433,16 @@ def append
       accumulator.weights index = boundEvalAt (boundReceiptCoord index) := by
     intro index
     simpa [accumulator, foldClaims, AccClaim.weights] using head.channelFixed index
+  have hlinked : LinkedEntries (head.entries ++ [entry]) :=
+    .append head.linked head.latestIsLast link.historyDomainExact
+      link.sequenceExact link.predecessorExact link.stateExact
   exact VerifiedHistoryHead.mk (head.entries ++ [entry]) entry (by simp)
-    accumulator word hsatisfies hroot hfixed
+    hlinked accumulator word hsatisfies hroot hfixed
 
 @[simp] theorem append_depth
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (link : AppendLink manifest errorId headerCells C S foldRoot head entry)
+    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
     (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
       head entry gamma) :
     (append manifest errorId headerCells C S foldRoot head entry gamma link
@@ -412,9 +450,9 @@ def append
   simp [append, depth]
 
 @[simp] theorem append_latest
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (entry : HistoryEntry)
-    (gamma : F) (link : AppendLink manifest errorId headerCells C S foldRoot head entry)
+    (gamma : F) (link : AppendLink manifest errorId headerCells C S head entry)
     (recommit : FoldRecommitment manifest errorId headerCells C S foldRoot
       head entry gamma) :
     (append manifest errorId headerCells C S foldRoot head entry gamma link
@@ -427,32 +465,32 @@ def append
 one-time decider on its folded word.  This is directly the existing Loom
 completeness theorem applied to the satisfaction proof preserved by `append`. -/
 theorem decider_complete_at_head
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot) :
+    (head : HistoryHead) :
     decider C head.accumulator head.foldedWord :=
   Minidregg.Loom.decider_complete head.satisfies
 
 /-- The honest full-opening side of the PCS seam.  Loom's existing commitment
 theorem simultaneously supplies openings and the final decider result. -/
 theorem opening_decider_complete
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot) :
+    (head : HistoryHead) :
     (∀ index, S.verifyOpen head.accumulator.rt index (head.foldedWord index)
       (S.openAt head.foldedWord index)) ∧
       decider C head.accumulator head.foldedWord :=
-  S.decider_open_complete head.rootBound head.satisfies
+  Minidregg.Loom.decider_open_complete S head.rootBound head.satisfies
 
 /-- Binding/extraction tooth at arbitrary history depth: any fully opened word
 which passes the final Loom decider is exactly the head's committed folded
 word.  The deployed sampled-opening lift remains Loom's explicit
 `[ACC-extract-bind]`/`[DEC-proximity]` obligation. -/
 theorem opened_decider_extracts_head
-    (head : VerifiedHistoryHead manifest errorId headerCells C S foldRoot)
+    (head : HistoryHead)
     (opened : BoundReceiptIx n → F) (openings : BoundReceiptIx n → Op)
     (hopen : ∀ index,
       S.verifyOpen head.accumulator.rt index (opened index) (openings index))
     (hdecider : decider C head.accumulator opened) :
     opened = head.foldedWord ∧
       decider C head.accumulator head.foldedWord :=
-  S.decider_open_sound head.rootBound hopen hdecider
+  Minidregg.Loom.decider_open_sound S head.rootBound hopen hdecider
 
 end VerifiedHistoryHead
 
