@@ -144,10 +144,11 @@ The surviving historical boundary remains deliberate:
   `[COMMIT-CR]` or production permutation/capacity security. `Compiler.WideDigestAir` pins the
   corresponding eleven-field encoding through emit, while raw-byte decoding and composition with
   the recursive sponge/full verifier remain;
-- the path is multiplicative BabyBear, not the additive tower;
+- the deleted path was multiplicative BabyBear, not the additive tower;
 - the Rust/WGSL is unverified compute.
 
-So it is a useful end-to-end **reference path**, but it is non-succinct and non-ZK.
+So its old data is only a historical baseline; there is currently no native end-to-end reference
+verifier.
 
 The optional WGPU implementation accelerates only the BabyBear⁴ fold and is conformance-tested
 against the CPU version. It is outside the protocol core and imposes no compatibility constraint

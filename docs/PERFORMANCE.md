@@ -83,9 +83,12 @@ cargo test --release --manifest-path prover/Cargo.toml \
 Correctness tests compare the fast transform with the dense definition across coordinate and
 nontrivial triangular bases and offsets, exercise inverse round trips through 256 points over
 GF(256), and reject dependent bases and malformed shapes. Still open are exact Lean-selected basis
-coherence, formal schedule refinement, and commitment/transcript/query integration.
+coherence, Lean-owned scheduling, and commitment/transcript/query integration.
 
-### One full-opening additive-FRI round
+### Archived full-opening additive-FRI round
+
+The Rust proof/verifier and benchmark test were deleted. These are historical measurements of the
+discarded full-opening composition; the pure transform/fold kernels remain.
 
 `additive_fri_reference` fast-transforms coefficients, commits all `n` input evaluations, folds
 all `n/2` pairs, commits the complete folded word, and verifies both roots plus every equation. Its

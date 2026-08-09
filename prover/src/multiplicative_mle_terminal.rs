@@ -40,8 +40,7 @@ use crate::{
     binary_merkle::{verify_binary_opening, BinaryMerkleError, BinaryMerklePath, BinaryMerkleTree},
     binary_transcript::{BinaryShake256Transcript, TranscriptSuite},
     field4::{binv, bmul, bpow, two_adic_generator, HALF, P, TWO_ADIC_BITS},
-    field6::Ext6,
-    fri_ext6_reference::ext6_leaf_payload,
+    field6::{ext6_leaf_payload, Ext6},
     transcript_ext6::{Ext6Transcript, Ext6TranscriptError, WideExt6Backend},
 };
 

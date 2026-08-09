@@ -5,7 +5,6 @@
 //! Lean-owned generated control. Native code may return data; it may not choose a
 //! statement, transcript schedule, security profile, or final acceptance bit.
 
-pub mod additive_fri_reference;
 pub mod additive_mle_terminal;
 pub mod additive_mle_tower256;
 pub mod additive_ntt;
@@ -19,8 +18,6 @@ pub mod descriptor;
 pub mod field4;
 pub mod field6;
 pub mod fri;
-pub mod fri_ext6_reference;
-pub mod fri_protocol;
 pub mod gate_claim;
 #[cfg(feature = "wgpu-fold")]
 pub mod gpu;
@@ -34,6 +31,5 @@ pub mod sumcheck_streaming;
 pub mod trace;
 pub mod trace_linear_ext6;
 pub mod trace_linear_gf2;
-pub mod transcript;
 pub mod transcript_ext6;
 pub mod wide;
