@@ -31,7 +31,7 @@ experiment and can be replaced wholesale as the protocol evolves.
 | **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. The Rust Tower256 LogUp prototype checks each committed index column and binds the ordered roots into one bundle. | Its handwritten verifier/receipt adapter is not authoritative and must be replaced by Lean emission. The zerocheck/PCS also inherits additive proximity and CR/ROM assumptions; this is indexed evaluation, not yet mutable RAM. |
 | **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; Lean proves header-cell packing and the bound `AccClaim` fold. Rust has executable history prototypes. | The handwritten Rust receipt/admission/history objects are mirrors and are being replaced by Lean-emitted artifacts. This is not yet the final WARP/FACS protocol; hiding/ZK composition and the unbounded outer accumulator/decider remain. |
 | **Zero knowledge and extraction** | Native formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
-| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The Rust succinct verifier is an unverified compute prototype with no semantics. Coherent proximity, base-subfield sampling, CR/shared-ROM, Lean-owned verifier control, recursion, and PoW composition remain before calling 137 bits deployed. |
+| **Assurance arithmetic** | `ErrorBudget120` prices a unified BabyBear⁶ candidate in `(2^-138,2^-137]`; `MixedFieldBudget` proves the old base/Ext4 split is only 16 bits and Ext6+Ext4 only 75. `GateFactoredExt6` proves exact seven-operand provenance, degree-2 rounds, trace functionals, and η aggregation. | The handwritten Rust gate-verifier family was deleted. Coherent proximity, base-subfield sampling, CR/shared-ROM, Lean-owned verifier control, recursion, and PoW composition remain before calling 137 bits deployed. |
 
 ## What runs today
 
@@ -47,7 +47,7 @@ consistency but never used the advertised coefficient bound, so it was not a low
 could make a false OOD claim pass with a pointwise quotient. Reintroduction requires a Lean-emitted,
 genuinely rate-aware additive-FRI controller and a re-derived OOD theorem.
 
-The separate Ext6 gate prototype still demonstrates the intended algebraic decomposition:
+The proved Ext6 gate decomposition is:
 
 ```text
 emitted descriptor + public inputs + one trace root
@@ -56,13 +56,12 @@ emitted descriptor + public inputs + one trace root
     -> one aggregated committed-trace opening
 ```
 
-The new gate verifier receives neither trace nor residual table. Lean proves that seven sparse
+Lean proves that seven sparse
 selector operands have exactly the emitted descriptor's gamma-batched cube sum, that their outer
 sumcheck has individual degree two, and that their terminal values are public affine trace
-functionals. Rust binds those seven equations, the entire public prefix, and padding zeros with one
-fresh eta, then opens the aggregate against the same trace root fixed before gamma. Sampled
-round-zero checks reject non-base Ext6 witnesses. Coherent proximity, subfield sampling, CR/ROM,
-and generated Lean control remain explicit rather than being mistaken for code-level completion.
+functionals. The former Rust verifiers for that composition were deleted; their replacement is the
+Lean-owned transcript/controller path. Coherent proximity, subfield sampling, CR/ROM, and generated
+control remain explicit rather than being mistaken for code-level completion.
 
 The old `nextgen_light_client` conjunction was deleted with the unsound binary admission branch.
 The surviving handwritten Ext6 and history prototypes are not semantic authority and are scheduled

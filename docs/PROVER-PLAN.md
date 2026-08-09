@@ -18,8 +18,8 @@ The crate contains:
 - multilinear sumcheck and the descriptor gate-defect reduction;
 - BabyBear⁴ arithmetic, multiplicative FRI folding, commitments, query openings, and final checks;
 - a Fiat–Shamir transcript with Lean-authored conformance vectors;
-- a succinct Ext6 factored-gate verifier using one committed trace root and one aggregated
-  trace-functional opening;
+- proved Lean Ext6 factored-gate relations awaiting a Lean-owned executable controller; the former
+  handwritten native gate-verifier family was deleted;
 - a separate executable mirror of Loom's linear accumulator algebra; and
 - explicit Fan--Paar binary-tower arithmetic through `GF(2^64)`, fast additive NTT, and byte-native
   hash/Merkle compute. The former handwritten sampled-FRI/OOD/evaluation-history admission stack was

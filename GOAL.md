@@ -19,11 +19,12 @@ hotspots afterward.
   challenge/query bound. Native Fan–Paar `GF(2^64)`, the reversed-LCH transform, and cSHAKE/Merkle
   compute remain. The handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted:
   it bound but never enforced its coefficient bound, so it was not a low-degree test.
-- **Ext6 gate suite — succinct joined surface:** `X^6−31` is proved irreducible. One trace root is
+- **Ext6 gate suite — proved relation, native verifiers deleted:** `X^6−31` is proved irreducible. One trace root is
   fixed before gamma; a degree-2 factored-selector sumcheck reduces emitted gates to seven terminal
   trace functionals; eta aggregates those with public-prefix and padding equations; one sampled
   trace-linear opening retires the aggregate without revealing the trace/table. Lean proves the
-  seven-operand provenance, terminal functionals, and eta bad-set bound.
+  seven-operand provenance, terminal functionals, and eta bad-set bound. The handwritten Rust gate
+  verifier family was deleted pending Lean-owned transcript/control emission.
 - **Accumulation — proved algebra, no authoritative native history:** Loom's arbitrary-depth
   extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
   quadratic language is iff a genuine `ReceiptDelta` and folds valid words through `AccClaim`.
