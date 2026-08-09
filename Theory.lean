@@ -8,6 +8,7 @@ parameters only, no imports outside Mathlib + Theory itself (enforced by
 import Theory.Knowledge  -- the verify/find seam: Verifiable/Discharged/Searchable, Claim/Holds/Knower
 import Theory.PrivacyProfile  -- observer-indexed privacy axes, typed same-opening/release joins, and compositional noninterference
 import Theory.DisclosureDeclaration  -- first-order observer releases require both request-indexed authorization and a checked same-opening witness before VerifiedRelease exists
+import Theory.PrivateComputationDeclaration  -- typed ZK/MPC/FHE requests complete only with authorization, named representation bridges, same-opening, evidence, and an explicit disclosure effect
 import Theory.IndexedProgram  -- indexed free programs with response-dependent typestate, executable handlers, fold fusion, and cross-carrier logical-relation folds
 import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verification, and durable replay refusal
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
