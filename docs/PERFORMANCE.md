@@ -1,8 +1,12 @@
 # Performance ledger
 
 This file records reproducible measurements, including bad news. It is not a product benchmark
-page. Each row names the exact path measured, because the current full-trace reference protocol
-and the intended succinct additive protocol are different algorithms.
+page. Each row names the exact path measured. Deleted full-trace and full-opening protocols are
+archived algorithms; the intended succinct additive/history protocol is not yet an end-to-end
+benchmark target.
+
+Evidence boundaries used here are **S** semantic/formal, **A** controller, **P** cryptographic
+security, **D** deployment, and **B** benchmark. A **B** row never supplies **S/A/P/D** evidence.
 
 ## Remote committed-source build evidence — 2026-08-09
 
@@ -96,6 +100,39 @@ so both manifests remained exactly `d5768bed8a7b2bfa5d0a01f48d2355dcc0bd475041f4
 The project-olean manifests are identical across workers (`faa0ccd9754b445e847d62050389c4186bc5f336e2fb105338a0c031e6fe6d58`).
 The v3 evidence envelopes also retain both source manifests and the hashed empty allowlist. This is build
 and deterministic-generator evidence, not a performance or proof-security result.
+
+## Authenticated native dispatch overhead — 2026-08-09
+
+This is the first measurement of a live generated dispatch path whose work identity comes solely
+from the authenticated artifact catalog. Source commit `54295c629956b4dd3240c797d26fcf64b65d9872`
+adds the benchmark; evidence commit `4d1f290` retains the raw dual-host logs:
+
+- [`hbox raw log`](../prover/benchmarks/native_dispatch/2026-08-09-hbox.log)
+- [`persvati raw log`](../prover/benchmarks/native_dispatch/2026-08-09-persvati.log)
+
+The workload is Tower256 dot product work `9101`, carrier profile `205`, native request codec
+`9001`, and semantic response codec `21`. Every timed fixture first checks that direct execution and
+generated dispatch produce byte-identical responses. The deterministic input pattern is
+`xorshift64-four-limb/v1`.
+
+| vector length | request bytes | hbox dispatch/direct | persvati dispatch/direct |
+|---:|---:|---:|---:|
+| 1 | 68 | 1.0095 | 1.0012 |
+| 8 | 516 | 1.0016 | 0.9993 |
+| 64 | 4,100 | 0.9852 | 0.9848 |
+| 512 | 32,772 | 0.9984 | 0.9932 |
+| 4,096 | 262,148 | 0.9966 | 1.0254 |
+| 16,384 | 1,048,580 | 1.0404 | 0.9966 |
+
+Across these samples, the ratio range is approximately `0.985–1.040` on hbox and
+`0.985–1.025` on persvati. Values below 1 are measurement variation, not a claim that dispatch
+makes arithmetic faster. The narrow conclusion is that generated catalog validation/dispatch did
+not show a stable material surcharge relative to this comparatively expensive scalar Tower256 work
+on these two hosts.
+
+Claim ceiling: **B** evidence for byte identity and dispatch overhead of work 9101 only. There is no
+registered threshold, no statistical performance model, no Rust semantics, no FFI correctness
+proof, and no full prover/controller/security conclusion.
 
 ## Dense/sparse equality-functional crossover — 2026-08-09
 
@@ -302,10 +339,12 @@ dense evaluation and full-trace proof make proving roughly linear-to-superlinear
 range, and verification is deliberately linear in the trace. Plonky3, Binius, Mina, or any
 succinct production prover comparison would be misleading at this resolution.
 
-The next comparable rows should separately measure:
+The next comparable rows should separately measure actual admitted user/agent paths:
 
-1. the sampled, multi-round additive-FRI protocol around the now-measured full-opening round;
-2. a native binary receipt/hash trace, reporting constraints and bytes moved;
-3. the succinct/RBR accumulator on the same append-depth workload;
-4. the first succinct gate-to-LDT proof, including serialized proof bytes; and
-5. single-machine and distributed scaling at the exact rate and security parameters used.
+1. the Lean-controlled sampled, multi-round additive-FRI protocol, including proof/container codecs;
+2. indexed lookup over sparse and dense live-object workloads through clause-404 admission;
+3. the succinct BCS/history checkpoint on the same append-depth workload;
+4. the Ext6 gate-to-LDT proof, including serialized proof bytes;
+5. sealed BFV computation plus later disclosure as separate receipt events;
+6. Hyperdocument branch/merge/transclusion and reactive-agent workflows; and
+7. single-machine and distributed scaling at the exact rate, security, and checkpoint parameters.
