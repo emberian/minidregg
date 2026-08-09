@@ -5,12 +5,12 @@
 //! seam. The kernel is OUR wgsl adopting breadstuffs' deployed fold MATH
 //! (Montgomery BabyBear, X^4 = 11 extension, the halve/beta/twiddle fold
 //! formula, bit-reversed twiddles) — not a file copy, not the Plonky3 stack.
-//! The gate is CONFORMANCE: `fold_gpu` must equal `fri::fold` (the CPU
-//! reference, itself vector-conformant to `Loom/Proximity.lean`'s verified
-//! `fold`) EXACTLY on every input — exercised by
+//! The implementation check is only native agreement: `fold_gpu` must equal
+//! the unverified CPU kernel `fri::fold` on exercised inputs — measured by
 //! `tests/gpu_fold_conformance.rs` on real GPU hardware, skipped loudly (not
 //! falsely passed) where no adapter exists. Running on a GPU and matching the
-//! verified CPU fold is the whole claim; nothing here is verification.
+//! CPU kernel is the whole empirical claim; neither kernel has semantics in
+//! the trusted argument.
 //!
 //! Layout seam: `fri::fold` is natural-order; the kernel works bit-reversed
 //! (deployed convention: pairs adjacent, one shared bitrev twiddle table whose
