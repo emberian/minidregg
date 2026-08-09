@@ -122,8 +122,9 @@ theorem bearer_not_narrows_subject (subject : SubjectId) :
     ¬ Holder.bearer.Narrows (.subject subject) := by
   intro narrows
   let other : SubjectId := ⟨subject.value + 1⟩
-  have equal : other = subject := by
+  have bound : subject = other := by
     simpa [Holder.Covers] using narrows other (by trivial)
+  have equal : other = subject := bound.symm
   have values := congrArg SubjectId.value equal
   simp [other] at values
 
@@ -135,16 +136,20 @@ namespace Minidregg.Theory.CredentialAuthorityFamily
 open TypedAuthorization
 open AuthorizationDeclaration
 
+end Minidregg.Theory.CredentialAuthorityFamily
+
+namespace Minidregg.Theory.TypedAuthorization.Capability
+
 /-- Complete attenuation adds the holder order omitted by the transport-level
 `Capability.Attenuates` record. -/
-structure Capability.StrictAttenuates {kind : ResourceKind}
+structure StrictAttenuates {kind : ResourceKind}
     (child parent : Capability kind) : Prop where
   payload : child.Attenuates parent
   holder : child.holder.Narrows parent.holder
 
 /-- Strict attenuation is fully monotone; no extra caller-supplied parent-holder
 premise remains. -/
-theorem Capability.strict_attenuation_admits_subset {kind : ResourceKind}
+theorem strict_attenuation_admits_subset {kind : ResourceKind}
     {child parent : Capability kind} {state : AuthState}
     {request : Request kind}
     (edge : child.StrictAttenuates parent)
@@ -156,7 +161,7 @@ theorem Capability.strict_attenuation_admits_subset {kind : ResourceKind}
 /-- A capability's parent/root identifiers become meaningful only with this
 proof-relevant derivation.  Each non-root constructor carries the actual parent
 capability and the full strict attenuation theorem. -/
-inductive Capability.Lineage {kind : ResourceKind} : Capability kind → Type
+inductive Lineage {kind : ResourceKind} : Capability kind → Type
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
       (rootSelf : cap.root = cap.id)
@@ -165,7 +170,7 @@ inductive Capability.Lineage {kind : ResourceKind} : Capability kind → Type
       (parentLineage : parent.Lineage)
       (edge : child.StrictAttenuates parent) : child.Lineage
 
-def Capability.Lineage.rootCapability {kind : ResourceKind}
+def Lineage.rootCapability {kind : ResourceKind}
     {cap : Capability kind} : cap.Lineage → Capability kind
   | .root root .. => root
   | .attenuate _ _ parentLineage _ => parentLineage.rootCapability
@@ -173,14 +178,22 @@ def Capability.Lineage.rootCapability {kind : ResourceKind}
 /-- Every request admitted by a descendant was admitted by the witnessed root.
 This closes the old "parent id as historical ballast" shape: the derivation, not
 the identifier, is what proves non-amplification. -/
-theorem Capability.Lineage.root_admissible {kind : ResourceKind}
+theorem Lineage.root_admissible {kind : ResourceKind}
     {cap : Capability kind} {state : AuthState} {request : Request kind}
     (lineage : cap.Lineage) (admitted : cap.Admissible state request) :
     lineage.rootCapability.Admissible state request := by
   induction lineage with
   | root => exact admitted
   | attenuate child parent parentLineage edge ih =>
-      exact ih (Capability.strict_attenuation_admits_subset edge admitted)
+      exact ih (strict_attenuation_admits_subset edge admitted)
+
+end Capability
+end Minidregg.Theory.TypedAuthorization
+
+namespace Minidregg.Theory.CredentialAuthorityFamily
+
+open TypedAuthorization
+open AuthorizationDeclaration
 
 /-! ## 3. One semantic envelope for every existing evidence constructor -/
 
@@ -195,25 +208,29 @@ theorem exactRequestScope_covers {kind : ResourceKind} (request : Request kind) 
     (exactRequestScope request).Covers request := by
   exact ⟨by simp [exactRequestScope], by simp [exactRequestScope], by simp [exactRequestScope]⟩
 
-def Evidence.authorityHolder {portal : Portal} {state : AuthState}
+end Minidregg.Theory.CredentialAuthorityFamily
+
+namespace Minidregg.Theory.TypedAuthorization.Evidence
+
+def authorityHolder {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind} :
     Evidence portal state request → Holder
   | .signature .. => .subject request.subject
   | .proof .. => .subject request.subject
   | .capability cap .. => cap.holder
 
-def Evidence.authorityScope {portal : Portal} {state : AuthState}
+def authorityScope {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind} :
     Evidence portal state request → Scope kind
-  | .signature .. => exactRequestScope request
-  | .proof .. => exactRequestScope request
+  | .signature .. => CredentialAuthorityFamily.exactRequestScope request
+  | .proof .. => CredentialAuthorityFamily.exactRequestScope request
   | .capability cap .. => cap.scope
 
 /-- Mode-specific freshness is exposed under one name.  A proof portal verifies
 the exact request and may choose its own credential-freshness statement; current
 policy remains mandatory below.  Signature key epochs and all capability issuer /
 revocation facts are explicit here. -/
-def Evidence.Current {portal : Portal} {state : AuthState}
+def Current {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind} :
     Evidence portal state request → Prop
   | .signature _ keyEpochExact _ =>
@@ -229,34 +246,44 @@ def Evidence.Current {portal : Portal} {state : AuthState}
 
 /-- Capability evidence must carry a real attenuation derivation.  Direct
 signature/proof grants have no lineage and therefore use `PUnit`. -/
-def Evidence.LineageRequirement {portal : Portal} {state : AuthState}
+def LineageRequirement {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind} :
     Evidence portal state request → Type
   | .signature .. => PUnit
   | .proof .. => PUnit
   | .capability cap .. => cap.Lineage
 
-structure Evidence.SemanticEnvelope {portal : Portal} {state : AuthState}
+structure SemanticEnvelope {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence portal state request) : Prop where
   holder : evidence.authorityHolder.Covers request.subject
   scope : evidence.authorityScope.Covers request
   current : evidence.Current
 
-theorem Evidence.semanticEnvelope {portal : Portal} {state : AuthState}
+theorem semanticEnvelope {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence portal state request) : evidence.SemanticEnvelope := by
   cases evidence with
   | signature witness keyEpochExact verified =>
-      exact ⟨rfl, exactRequestScope_covers request, keyEpochExact⟩
+      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request,
+        keyEpochExact⟩
   | proof witness verified =>
-      exact ⟨rfl, exactRequestScope_covers request, trivial⟩
+      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request,
+        trivial⟩
   | capability cap commitment commitmentWitness membershipWitness issuerWitness
       selfRevocationWitness semantic commitmentVerified membershipVerified issuerVerified
       selfRevocationVerified ancestorVerified channelVerified =>
       exact ⟨semantic.holder, semantic.scope,
         semantic.issuerCurrent, semantic.selfNotRevoked,
         semantic.ancestorNotRevoked, semantic.channelNotRevoked⟩
+
+end Evidence
+end Minidregg.Theory.TypedAuthorization
+
+namespace Minidregg.Theory.CredentialAuthorityFamily
+
+open TypedAuthorization
+open AuthorizationDeclaration
 
 /-! ## 4. Credential carriers classify evidence; they do not authorize -/
 
@@ -267,10 +294,16 @@ inductive CarrierKind where
   | token
   deriving DecidableEq, Repr
 
+end Minidregg.Theory.CredentialAuthorityFamily
+
+namespace Minidregg.Theory.TypedAuthorization.Evidence
+
+open CredentialAuthorityFamily
+
 /-- A token-style carrier is supported only by capability evidence.  Thus a
 macaroon/Biscuit-like encoding may transport attenuation data, but cannot become
 an early-return authorization mode. -/
-def Evidence.Supports {portal : Portal} {state : AuthState}
+def Supports {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence portal state request) : CarrierKind → Prop :=
   match evidence with
@@ -278,12 +311,20 @@ def Evidence.Supports {portal : Portal} {state : AuthState}
   | .proof .. => fun carrier => carrier = .proof
   | .capability .. => fun carrier => carrier = .capability ∨ carrier = .token
 
-theorem Evidence.supports_token_iff_capability
+theorem supports_token_iff_capability
     {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence portal state request) :
     evidence.Supports .token ↔ evidence.Supports .capability := by
   cases evidence <;> simp [Evidence.Supports]
+
+end Evidence
+end Minidregg.Theory.TypedAuthorization
+
+namespace Minidregg.Theory.CredentialAuthorityFamily
+
+open TypedAuthorization
+open AuthorizationDeclaration
 
 /-- The single accepted credential family.  Its only authority field is the
 existing `Authorized`; therefore every carrier necessarily passes the same final
