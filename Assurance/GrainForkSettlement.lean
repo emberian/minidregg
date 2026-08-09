@@ -31,8 +31,6 @@ open Minidregg.Theory
 open Minidregg.Theory.CredentialAuthorityFamily
 open Minidregg.Theory.TypedAuthorization
 
-namespace Sparse := Minidregg.Kernel.SparseAuthenticatedState
-
 set_option autoImplicit false
 
 universe u v w x y z b p
@@ -123,10 +121,12 @@ sparse planes.  A selected sparse root is never supplied independently: it is
 projected from the exact materialized sparse state for that plane. -/
 structure StateFocus
     (S : CellState.Schema.{u, v, w, x})
-    (L : Sparse.Layout.{u, v, w})
-    (sparseMaterializer : Sparse.Materializer L Digest)
+    (L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w})
+    (sparseMaterializer :
+      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest)
     (Plane : Type p) [DecidableEq Plane]
-    (sparseState : Plane -> Sparse.Materialized sparseMaterializer) where
+    (sparseState : Plane ->
+      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer) where
   fields : Finset S.Field
   resources : Finset S.Resource
   sparsePlanes : Finset Plane
@@ -135,20 +135,24 @@ namespace StateFocus
 
 def sparseRootAt
     {S : CellState.Schema.{u, v, w, x}}
-    {L : Sparse.Layout.{u, v, w}}
-    {sparseMaterializer : Sparse.Materializer L Digest}
+    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
+    {sparseMaterializer :
+      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane -> Sparse.Materialized sparseMaterializer}
+    {sparseState : Plane ->
+      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
     (_focus : StateFocus S L sparseMaterializer Plane sparseState)
     (plane : Plane) : Digest :=
   (sparseState plane).root
 
 @[simp] theorem sparseRootAt_exact
     {S : CellState.Schema.{u, v, w, x}}
-    {L : Sparse.Layout.{u, v, w}}
-    {sparseMaterializer : Sparse.Materializer L Digest}
+    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
+    {sparseMaterializer :
+      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane -> Sparse.Materialized sparseMaterializer}
+    {sparseState : Plane ->
+      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
     (focus : StateFocus S L sparseMaterializer Plane sparseState)
     (plane : Plane) :
     focus.sparseRootAt plane = (sparseState plane).root :=
@@ -191,10 +195,12 @@ variable
     {portal : Portal} {projection : AuthorizationProjection S}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
     {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
-    {L : Sparse.Layout.{u, v, w}}
-    {sparseMaterializer : Sparse.Materializer L Digest}
+    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
+    {sparseMaterializer :
+      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane -> Sparse.Materialized sparseMaterializer}
+    {sparseState : Plane ->
+      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
 
 /-- The exact focus/cut presented for settlement.
 
@@ -229,7 +235,7 @@ theorem no_stale_canonical_pre
     {base : CanonicalHead}
     (cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration)
-    (stale : cut.canonical.head.stateRoot != declaration.pre.root) : False :=
+    (stale : cut.canonical.head.stateRoot ≠ declaration.pre.root) : False :=
   stale cut.canonicalPreStateExact
 
 end FocusCut
@@ -270,13 +276,13 @@ inductive MergeConflict
 /-- A typed commit contains the real conflict-freedom proof. -/
 theorem Commit.noMergeConflict
     (commit : Commit law declaration)
-    {left right : Incidence} (different : left != right) :
+    {left right : Incidence} (different : left ≠ right) :
     Not (MergeConflict declaration left right) := by
   intro conflict
   cases conflict with
   | field mode key leftWrites rightWrites =>
-      have disjoint := commit.shape.fieldsValid
-      rw [mode] at disjoint
+      have disjoint : declaration.FieldFootprintsDisjoint := by
+        simpa [mode] using commit.shape.fieldsValid
       exact (Finset.disjoint_left.mp disjoint leftWrites) rightWrites
   | resource key leftWrites rightWrites =>
       exact (Finset.disjoint_left.mp
@@ -297,10 +303,12 @@ variable
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
     {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
     {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
-    {L : Sparse.Layout.{u, v, w}}
-    {sparseMaterializer : Sparse.Materializer L Digest}
+    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
+    {sparseMaterializer :
+      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane -> Sparse.Materialized sparseMaterializer}
+    {sparseState : Plane ->
+      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
     {base : CanonicalHead}
     {cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration}
@@ -329,7 +337,7 @@ def hyperedge (settlement : AcceptedSettlement (law := law) cut) :
   settlement.commit.prepared_postRoot
 
 theorem noMergeConflict (settlement : AcceptedSettlement (law := law) cut)
-    {left right : Incidence} (different : left != right) :
+    {left right : Incidence} (different : left ≠ right) :
     Not (MergeConflict declaration left right) :=
   settlement.commit.noMergeConflict different
 
