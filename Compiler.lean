@@ -10,6 +10,7 @@ import Compiler.AirRange  -- [AIR-range] the bit-decomposition range gadget: k b
 import Compiler.AirBignum  -- fixed-width radix-2^k addition over Theory.Bignum: emitted range/carry constraints, exact integer soundness, overflow rejection
 import Compiler.AirModularView  -- exact modular-view AIR plus wide fixed-modulus scalar multiplication; FHEgg q0×24-bit quotient bounds are proved, while the signed/compressed equation frontend remains explicit
 import Compiler.BignumKernelABI  -- Lean-owned versioned call envelope: metadata schedules native arithmetic only; acceptance remains exactly descriptorHolds
+import Compiler.BfvAllModuliKernelCalls  -- FHEgg q0/q1/q2 fixed-modulus calls in deployed order, with exact 10/10/11 radix-64 layouts and descriptorHolds acceptance
 import Compiler.BfvCompressedEquation  -- audited FHEgg 12,435-coordinate/384-row schema and the first exact q0 shifted-quotient AIR join; the full signed accumulator and Lean-owned transcript control stay explicit
 import Compiler.WideDigestAir  -- [AIR-wide-digest] WDG1/domain/9-limb encoding pinned through emit; canonicality and 248-bit capacity proved; sponge schedule, concrete permutation, native-output checks, and [COMMIT-CR] remain explicit
 import Compiler.WideDigestByteDecodeAir  -- raw four-byte little-endian limbs are range-checked and proved < BabyBear before field recomposition; raw p is universally rejected
