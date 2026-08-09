@@ -207,6 +207,12 @@ structure CanonicalPostOpening
     ∃ slot ∈ sourceSlots, ∃ postCoordinate,
       postCoordinate ∈ (layout.spanAt slot).coordinates /\
       coordinate = .inr (postCoordinate, .post)
+  noHeaderCoordinate : ∀ coordinate ∈ opening.coordinates,
+    ∀ header : BindingIx, coordinate ≠ .inl header
+  noPreCoordinate : ∀ coordinate ∈ opening.coordinates,
+    ∀ key : Fin n, coordinate ≠ .inr (key, .pre)
+  noTouchedCoordinate : ∀ coordinate ∈ opening.coordinates,
+    ∀ key : Fin n, coordinate ≠ .inr (key, .touched)
   cellsExact : opening.cells =
     sourceSlots.flatMap layout.encodeAt
   openingExact : opening.Exact entry.word
@@ -245,40 +251,22 @@ theorem no_header_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (header : BindingIx) :
-    coordinate ≠ .inl header := by
-  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
-      postCoordinate ∈ (layout.spanAt slot).coordinates /\
-      coordinate = .inr (postCoordinate, .post) :=
-    canonical.coordinatesPostOnly coordinate member
-  obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
-  rw [coordinateExact]
-  simp
+    coordinate ≠ .inl header :=
+  canonical.noHeaderCoordinate coordinate member header
 
 theorem no_pre_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
-    coordinate ≠ .inr (key, .pre) := by
-  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
-      postCoordinate ∈ (layout.spanAt slot).coordinates /\
-      coordinate = .inr (postCoordinate, .post) :=
-    canonical.coordinatesPostOnly coordinate member
-  obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
-  rw [coordinateExact]
-  simp
+    coordinate ≠ .inr (key, .pre) :=
+  canonical.noPreCoordinate coordinate member key
 
 theorem no_touched_coordinate
     (canonical : CanonicalPostOpening layout entry opening)
     {coordinate : BoundReceiptIx n}
     (member : coordinate ∈ opening.coordinates) (key : Fin n) :
-    coordinate ≠ .inr (key, .touched) := by
-  have postOnly : ∃ slot ∈ canonical.sourceSlots, ∃ postCoordinate,
-      postCoordinate ∈ (layout.spanAt slot).coordinates /\
-      coordinate = .inr (postCoordinate, .post) :=
-    canonical.coordinatesPostOnly coordinate member
-  obtain ⟨_, _, postCoordinate, _, coordinateExact⟩ := postOnly
-  rw [coordinateExact]
-  simp
+    coordinate ≠ .inr (key, .touched) :=
+  canonical.noTouchedCoordinate coordinate member key
 
 end CanonicalPostOpening
 
@@ -357,9 +345,12 @@ local notation "Observed" =>
     ExactFinality PCSOpeningSound
     CommitmentBindingCR RandomOracleModel layout head ref
 
-theorem entry_mem (observation : Observed) :
-    observation.entry ∈ head.entries :=
-  observation.membership.mem
+/-- The observed entry is the exact value stored at its proof-relevant head
+index.  Keeping the `Fin` index visible avoids asking typeclass inference to
+reconstruct a heterogeneous list-membership carrier. -/
+theorem entry_index_exact (observation : Observed) :
+    head.entries.get observation.membership.index = observation.entry :=
+  observation.membership.entryExact
 
 theorem cells_authenticated (observation : Observed) :
     ref.opening.cells =
@@ -557,8 +548,10 @@ theorem opening_exact (event : Event) :
     event.opening.Exact event.entry.word := by
   simpa [opening] using event.openingExact
 
-theorem entry_mem (event : Event) : event.entry ∈ head.entries :=
-  event.membership.mem
+/-- The link event names the exact verified entry retained at its head index. -/
+theorem entry_index_exact (event : Event) :
+    head.entries.get event.membership.index = event.entry :=
+  event.membership.entryExact
 
 /-- The history word is the exact projection of the retained accepted content
 effect, not merely an unrelated entry with a colliding post root. -/
