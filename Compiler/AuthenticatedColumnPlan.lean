@@ -904,8 +904,16 @@ def towerBindingCommitment : BindingCommitmentScheme towerPort where
   toCommitmentScheme := towerCommitment
   binding := by
     intro root index left right leftProof rightProof hleft hright
-    simp only [towerCommitment] at hleft hright
-    simp at hleft hright
+    have leftBound :
+        root = id (left.val + 1) ∧ leftProof = [] := by
+      simpa [towerCommitment] using hleft
+    have rightBound :
+        root = id (right.val + 1) ∧ rightProof = [] := by
+      simpa [towerCommitment] using hright
+    have hroot : id (left.val + 1) = id (right.val + 1) :=
+      leftBound.1.symm.trans rightBound.1
+    have hnat : left.val + 1 = right.val + 1 :=
+      congrArg Digest.value hroot
     have hvalue : left.val = right.val := by
       omega
     exact Fin.ext hvalue
