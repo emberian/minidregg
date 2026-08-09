@@ -27,6 +27,7 @@ import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/decl
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners return bounded data and cannot choose continuation or acceptance
 import Compiler.NativeGlueGen -- deterministic data-only Rust DTO/dispatch text generated from the canonical Lean artifact; no native semantics or acceptance
 import Compiler.MinidreggV1Artifact -- concrete v1 declaration bundle and Lean-emitted canonical JSON payload; bridge/clause records are requirements, not implementation claims
+import Compiler.MinidreggV1NativeGlue -- writes the data-only native constants/DTO/buffer-dispatch surface from the concrete Lean artifact
 import Compiler.SemanticController -- arbitrary native oracle may return bounded data only; Lean owns authorization, challenge/order, descriptor checks, and the sole Verified token
 import Compiler.TranscriptController -- Lean-owned phased transcript program: native replies are data, challenges and query order are derived internally, and only the Lean checker can accept
 import Compiler.AirHash  -- [AIR-poseidon] the hash-permutation gadget: parameterized Poseidon2-style rounds (add-rc, S-box x^α full/partial, linear layer) as DSL terms; permGadget_eval (circuit ⟺ executor, all R rounds) + hashConstraint (nullifier ≐ hash(note), iff + teeth + complete); [AIR-poseidon-params] the deployed constants, [COMMIT-CR] the crypto floor
