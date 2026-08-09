@@ -400,13 +400,11 @@ structure RowAdmission {statement : InputStatement}
   certified : CertifiedResponse manifest template.instruction response
   responseValid : template.responseValidCheck response = true
 
-/-- Exact fallible shape of the generated native boundary.  The error payload is opaque;
-the success payload is only the instruction-indexed bounded buffer. -/
-abbrev FallibleRowRunner (Error : Type) :=
-  (instruction : Instruction) -> Except Error (KernelResponse instruction)
+/-- The row controller uses the generic fallible native boundary.  The error payload is
+opaque; the success payload is only the instruction-indexed bounded buffer. -/
+abbrev FallibleRowRunner (Error : Type) := PlanRunner Error
 
-inductive RowFailure (Error : Type)
-  | native (error : Error)
+inductive RowFailure
   | check (failure : NativeKernelPlan.Failure)
   | responseLink
 deriving Repr
@@ -415,7 +413,8 @@ inductive RowOutcome (Error : Type) {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
     (manifest : Manifest) (template : RowTemplate statement input rowIndex)
     (runner : FallibleRowRunner Error)
-  | rejected (failure : RowFailure Error)
+  | blocked (error : Error)
+  | rejected (failure : RowFailure)
   | admitted {response : KernelResponse template.instruction}
       (token : RowAdmission manifest template response)
 
@@ -426,7 +425,7 @@ def runRow {Error : Type} {statement : InputStatement}
     (manifest : Manifest) (template : RowTemplate statement input rowIndex)
     (runner : FallibleRowRunner Error) : RowOutcome Error manifest template runner :=
   match runner template.instruction with
-  | .error error => .rejected (.native error)
+  | .error error => .blocked error
   | .ok response =>
       match checkInstruction manifest template.instruction response with
       | .inl failure => .rejected (.check failure)
@@ -439,6 +438,7 @@ def RowOutcome.IsAdmitted {Error : Type} {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
     {manifest : Manifest} {template : RowTemplate statement input rowIndex}
     {runner : FallibleRowRunner Error} : RowOutcome Error manifest template runner -> Prop
+  | .blocked _ => False
   | .rejected _ => False
   | .admitted _ => True
 
@@ -455,13 +455,25 @@ theorem checkedResponse_reaches_admitted {Error : Type} {statement : InputStatem
     (runRow manifest template runner).IsAdmitted := by
   simp [runRow, returned, checked, linked, RowOutcome.IsAdmitted]
 
+/-- A native error on the sole row instruction also blocks the generic one-instruction
+plan before any certificate can be constructed. -/
+theorem nativeFailure_blocks_plan {Error : Type} {statement : InputStatement}
+    {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
+    (manifest : Manifest) (template : RowTemplate statement input rowIndex)
+    (runner : FallibleRowRunner Error) (error : Error)
+    (failed : runner template.instruction = .error error) :
+    NativeKernelPlan.run manifest (template.plan manifest) runner = .blocked error :=
+  firstInstructionError_blocks manifest (template.plan manifest) runner
+    template.instruction [] error rfl rfl failed
+
 theorem nativeFailure_stops {Error : Type} {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
     (manifest : Manifest) (template : RowTemplate statement input rowIndex)
     (runner : FallibleRowRunner Error) (error : Error)
     (failed : runner template.instruction = .error error) :
-    runRow manifest template runner = .rejected (.native error) := by
-  simp [runRow, failed]
+    runRow manifest template runner = .blocked error := by
+  unfold runRow
+  rw [failed]
 
 theorem RowAdmission.descriptorAcceptance {statement : InputStatement}
     {input : ValidCommittedWitness statement} {rowIndex : Fin equationsPerOwner}
