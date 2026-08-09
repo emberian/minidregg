@@ -28,6 +28,9 @@ structure OperationIntent where
   historyDomain : Digest
   document : DocumentId
   schema : CausalVersionDag.SchemaRef
+  /-- Causal object version, distinct from `schema.version`.  Generic causal
+  append evidence later proves that it increases from every selected parent. -/
+  semanticVersion : Nat
   parents : List VersionEventId
   author : PrincipalRef
   expectedContentRoot : Digest
