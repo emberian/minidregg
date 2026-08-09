@@ -12,9 +12,9 @@ use core::fmt;
 
 use crate::{
     additive_ntt::{forward, AdditiveNttError},
+    babybear::{binv, bmul, bpow, two_adic_generator, HALF, TWO_ADIC_BITS},
     binary_tower::{additive_fold_map, additive_fold_pair, TowerElem, TowerError, MAX_LEVEL},
     binary_tower_256::{Tower256, Tower256Error},
-    field4::{binv, bmul, bpow, two_adic_generator, HALF, TWO_ADIC_BITS},
     field6::Ext6,
 };
 
@@ -575,7 +575,7 @@ fn ext6_level_twiddle(log_n: u32, index: usize) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field4::bmul;
+    use crate::babybear::bmul;
 
     fn e(value: u64) -> Ext6 {
         Ext6::try_from_base(value).unwrap()

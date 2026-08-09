@@ -1,6 +1,6 @@
 //! Runtime teeth for `[PROVER-challenge-field-unification]`.
 
-use minidregg_prover::field4::{badd, bmul, P};
+use minidregg_prover::babybear::{badd, bmul, P};
 use minidregg_prover::field6::{Ext6, EXT6_W};
 use minidregg_prover::gate_kernels::{
     batch_lifted_residuals, evaluate_mle, table_sum, GateKernelError,

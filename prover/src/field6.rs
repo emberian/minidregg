@@ -8,7 +8,7 @@
 //! no compiled generated adapter currently maps it to a Lean carrier or shared
 //! protocol profile.
 
-use crate::field4::{badd, bmul, bsub, P};
+use crate::babybear::{badd, bmul, bsub, P};
 
 /// The Rust-selected reduction relation is `u⁶ = 31`.
 pub const EXT6_W: u64 = 31;

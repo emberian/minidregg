@@ -4,24 +4,5 @@ version = "0.1.0"
 edition = "2021"
 description = "Unverified native arithmetic, transform, hash, and buffer kernels for Lean-owned minidregg control."
 
-[features]
-default = []
-# Historical BabyBear⁴/WGSL fold experiment.  It is deliberately outside the
-# generated protocol core; future acceleration is chosen for the protocol
-# actually deployed rather than inherited from this experiment.
-wgpu-fold = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
-
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 sha3 = "0.10"
-# `[PROVER-fri-wgsl]`: retained as an opt-in conformance experiment, not a
-# dependency of proving or verification.
-wgpu = { version = "23", optional = true }
-pollster = { version = "0.4", optional = true }
-bytemuck = { version = "1", features = ["derive"], optional = true }
-
-[[bin]]
-name = "fri_fold_bench"
-path = "src/bin/fri_fold_bench.rs"
-required-features = ["wgpu-fold"]
