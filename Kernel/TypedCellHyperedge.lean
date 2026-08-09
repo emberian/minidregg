@@ -306,6 +306,8 @@ theorem leg_fieldFootprint_subset (commit : Commit law declaration)
       declaration.jointPatch.fieldFootprint := by
   intro field present
   have named : field ∈ (declaration.legPatch incidence).namedFields := by
+    change field ∈ (declaration.legs incidence).patch.fieldFootprint at present
+    change field ∈ (declaration.legs incidence).patch.namedFields
     rw [← (declaration.legs incidence).accepted.validated.fields_exact]
     exact present
   rcases (by
@@ -317,7 +319,7 @@ theorem leg_fieldFootprint_subset (commit : Commit law declaration)
         (declaration.legPatch index).fieldWrites := by
     rw [List.mem_flatMap]
     exact ⟨incidence, commit.shape.orderComplete.2 incidence, writePresent⟩
-  simp only [Declaration.jointPatch, Finset.mem_toFinset, List.mem_map]
+  simp only [Declaration.jointPatch, List.mem_toFinset, List.mem_map]
   exact ⟨write, inJoint, writeField⟩
 
 /-- Joint composition cannot omit a resource package declared by any accepted
@@ -330,6 +332,9 @@ theorem leg_resourceFootprint_subset (commit : Commit law declaration)
   intro resource present
   have named : resource ∈
       (declaration.legPatch incidence).namedResources := by
+    change resource ∈
+      (declaration.legs incidence).patch.resourceFootprint at present
+    change resource ∈ (declaration.legs incidence).patch.namedResources
     rw [← (declaration.legs incidence).accepted.validated.resources_exact]
     exact present
   rcases (by
@@ -341,7 +346,7 @@ theorem leg_resourceFootprint_subset (commit : Commit law declaration)
         (declaration.legPatch index).resourceWrites := by
     rw [List.mem_flatMap]
     exact ⟨incidence, commit.shape.orderComplete.2 incidence, writePresent⟩
-  simp only [Declaration.jointPatch, Finset.mem_toFinset, List.mem_map]
+  simp only [Declaration.jointPatch, List.mem_toFinset, List.mem_map]
   exact ⟨write, inJoint, writeResource⟩
 
 /-- Every incidence retains authority for its own exact request in the shared
@@ -353,9 +358,9 @@ def legAuthorization (commit : Commit law declaration) (incidence : Incidence) :
 
 /-! ## Projection to the abstract wide pullback -/
 
-def step (_state : CellState.Materialized M) (_turn : Commit law declaration) :
+def step (_state : CellState.Materialized M) (turn : Commit law declaration) :
     CellState.Materialized M :=
-  commit.prepared.post
+  turn.prepared.post
 
 def turnId (_incidence : Incidence) (state : CellState.Materialized M) : Digest :=
   state.root
@@ -418,8 +423,6 @@ adapter.
 
 namespace LegacyAdapter
 
-namespace Legacy := Minidregg.Kernel.DeclaredHyperedge
-
 variable
     {legacyMaterializer : CellState.Materializer
       Minidregg.Theory.DeclaredTurn.effectSchema Digest}
@@ -429,7 +432,8 @@ variable
 
 /-- The old authorization projection embeds without reinterpretation. -/
 def authorizationProjection
-    (legacy : Legacy.AuthorizationProjection legacyMaterializer) :
+    (legacy : Minidregg.Kernel.DeclaredHyperedge.AuthorizationProjection
+      legacyMaterializer) :
     AuthorizationProjection Minidregg.Theory.DeclaredTurn.effectSchema where
   project := legacy.project
 
@@ -438,8 +442,10 @@ kernel.  In particular, each accepted leg must execute the old leg's patch,
 the one joint post must execute the old joint patch, and the full-width legacy
 resource vector must be the generic conservation vector. -/
 structure Certificate
-    (legacyProjection : Legacy.AuthorizationProjection legacyMaterializer)
-    (legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence)
+    (legacyProjection : Minidregg.Kernel.DeclaredHyperedge.AuthorizationProjection
+      legacyMaterializer)
+    (legacy : Minidregg.Kernel.DeclaredHyperedge.Declaration
+      legacyPortal legacyMaterializer LegacyIncidence)
     (typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence)
@@ -472,8 +478,10 @@ structure Certificate
   aggregateExact : typed.aggregateDelta law = legacy.aggregateDelta
 
 theorem committed_post_matches_legacy
-    {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
-    {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
+    {legacyProjection : Minidregg.Kernel.DeclaredHyperedge.AuthorizationProjection
+      legacyMaterializer}
+    {legacy : Minidregg.Kernel.DeclaredHyperedge.Declaration
+      legacyPortal legacyMaterializer LegacyIncidence}
     {typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence}
@@ -489,8 +497,10 @@ theorem committed_post_matches_legacy
   certificate.jointPostLogicalExact commit.validated
 
 theorem committed_balance_matches_legacy
-    {legacyProjection : Legacy.AuthorizationProjection legacyMaterializer}
-    {legacy : Legacy.Declaration legacyPortal legacyMaterializer LegacyIncidence}
+    {legacyProjection : Minidregg.Kernel.DeclaredHyperedge.AuthorizationProjection
+      legacyMaterializer}
+    {legacy : Minidregg.Kernel.DeclaredHyperedge.Declaration
+      legacyPortal legacyMaterializer LegacyIncidence}
     {typed : Declaration
       Minidregg.Theory.DeclaredTurn.effectSchema legacyMaterializer legacyPortal
       (authorizationProjection legacyProjection) LegacyIncidence}

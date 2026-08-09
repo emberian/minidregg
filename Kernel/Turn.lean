@@ -29,7 +29,7 @@ import Mathlib.Data.Int.Basic
 
 namespace Minidregg.Kernel
 
-universe u v
+universe uCarrier uTurn uTurnId uBal v
 
 /-- **The turn as a wide pullback.** `ι` indexes incidences (a physical cell appearing in
 two slots is two incidences — what a hyperedge wants). `step` is the coalgebraic `next`;
@@ -37,7 +37,9 @@ two slots is two incidences — what a hyperedge wants). `step` is the coalgebra
 contribution. -/
 structure Hyperedge
     (ι : Type v) [Fintype ι]
-    (Carrier Turn TurnId Bal : Type u) [AddCommMonoid Bal] [DecidableEq TurnId]
+    (Carrier : Type uCarrier) (Turn : Type uTurn)
+    (TurnId : Type uTurnId) (Bal : Type uBal)
+    [AddCommMonoid Bal] [DecidableEq TurnId]
     (step : Carrier → Turn → Carrier)
     (turnId : ι → Carrier → TurnId)
     (halfEdge : ι → Carrier → Turn → Bal) where
@@ -53,7 +55,9 @@ structure Hyperedge
   balanced : (Finset.univ.sum fun i => halfEdge i (x i) t) = 0
 
 variable {ι : Type v} [Fintype ι]
-variable {Carrier Turn TurnId Bal : Type u} [AddCommMonoid Bal] [DecidableEq TurnId]
+variable {Carrier : Type uCarrier} {Turn : Type uTurn}
+variable {TurnId : Type uTurnId} {Bal : Type uBal}
+variable [AddCommMonoid Bal] [DecidableEq TurnId]
 variable {step : Carrier → Turn → Carrier}
 variable {turnId : ι → Carrier → TurnId} {halfEdge : ι → Carrier → Turn → Bal}
 
