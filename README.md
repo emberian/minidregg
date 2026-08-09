@@ -61,9 +61,9 @@ exact conventions.
 The generated [`prover/generated/semantic_artifact_v1.rs`](prover/generated/semantic_artifact_v1.rs)
 is a separate DTO seam: it contains canonical artifact constants, four data structures, and
 `run_arithmetic`/`run_hash`/`run_transform` dispatch only. It does not validate the JSON or native
-reply and does not construct a statement, transcript, verdict, or receipt. It is not imported by
-`prover/src/lib.rs`, so no live generated adapter currently connects those work requests to the
-native kernels.
+reply and does not construct a statement, transcript, verdict, or receipt. It is now compiled as
+`prover::semantic_artifact_v1`, but no dispatch implementation yet connects its generated work
+requests to native kernels.
 
 The lookup carrier mismatch is now corrected at the artifact-data level: V1's Lean bundle, JSON,
 and generated Rust payload include profile `205` at degree `256` with codec `21`, and the local

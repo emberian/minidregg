@@ -143,8 +143,8 @@ The first formal substrate is already present in:
   [`Compiler/MinidreggV1NativeGlue.lean`](Compiler/MinidreggV1NativeGlue.lean): deterministic
   generation of [`prover/generated/semantic_artifact_v1.rs`](prover/generated/semantic_artifact_v1.rs),
   containing constants, DTOs, and opaque work-dispatch methods only—no semantic validator,
-  transcript, verifier Boolean, or acceptance token. The generated file is not imported by
-  `prover/src/lib.rs`, so no live generated adapter currently connects its requests to kernels;
+  transcript, verifier Boolean, or acceptance token. The generated file is compiled by
+  `prover/src/lib.rs`, but no dispatch implementation currently connects its requests to kernels;
 - [`Assurance/DeclaredTurnReceipt.lean`](Assurance/DeclaredTurnReceipt.lean): defines the
   declaration-indexed `DeclaredEffect`, derives the sole executable receipt core from
   `DeclaredTurn.execute`, proves commit/reject validity, and fixes the `SemanticTurnReceipt` and
@@ -207,8 +207,8 @@ The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its r
 begins with a Lean-owned `SemanticManifest`, the canonical V1 artifact, and generated native DTO
 glue. Native code receives bounded calls and returns data; it neither constructs nor verifies
 receipt meaning. Registry records named `DialectClauseDecl` are first-order pins, not claims that a
-native proof system or verifier exists. The generated Rust file is not yet compiled into the
-`prover` crate and therefore is an artifact/API target, not a live dispatch integration.
+native proof system or verifier exists. The generated Rust file is compiled into the `prover`
+crate as artifact data and a trait surface, but it is not a live dispatch integration.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first
 common accumulator language: a fixed pre/post/touched word, Boolean-mask and frame quadratics, an

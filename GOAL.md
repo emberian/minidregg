@@ -32,7 +32,7 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   `CanonicalArtifactDto`, `WorkRequestDto`, `KernelBufferDto`, `NativeErrorDto`, and opaque
   arithmetic/hash/transform dispatch. There is no native validator, statement/transcript builder,
   verifier Boolean, or receipt token. Base-V1 `DialectClauseDecl` values are registry pins, not
-  implementations. The generated file is not imported by `prover/src/lib.rs`; a live generated
+  implementations. The generated file is compiled by `prover/src/lib.rs`, but a generated
   request-to-kernel adapter remains open.
 - **Rates — exact boundary:** threshold halving gives an unconditional post-Johnson first round and
   proved UD tail. Haböck's exact Johnson constants/conventions are locally bridged; the
