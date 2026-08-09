@@ -27,12 +27,10 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-universe uState
-
 noncomputable section
 
 variable {F : Type} [Field F] [Fintype F] [DecidableEq F]
-variable {ι : Type*} [Fintype ι] [DecidableEq ι]
+variable {ι : Type} [Fintype ι] [DecidableEq ι]
 variable {C : Submodule F (ι -> F)}
 variable {foldRoot : Digest -> F -> Digest -> Digest}
 variable {rounds openedCount degree : Nat}
@@ -44,7 +42,7 @@ variable {schedule : DualRootSchedule
 variable {domain : ι ↪ F}
 variable {queries : Fin openedCount -> Fin (FiniteCoordinateCount ι)}
 
-variable {State : Type uState}
+variable {State : Type}
 variable {portal : GlobalTranscriptPortal State}
 variable {transcriptDomain : Digest}
 variable {roots : List RootRecord} {draws : List DrawRecord}
