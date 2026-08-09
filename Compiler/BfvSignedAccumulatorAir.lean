@@ -166,11 +166,15 @@ theorem denote_weighted_columns (base : Nat) (scalar : Fin n -> Nat) :
       simp only [mul_add, add_mul, Finset.sum_add_distrib, Finset.mul_sum, mul_assoc]
       ring
 
-private theorem natCast_list_sum {p : Nat} (xs : List Nat) :
-    ((xs.sum : Nat) : ZMod p) = (xs.map fun x => (x : ZMod p)).sum := by
-  induction xs with
+private theorem cast_weightedList {p n : Nat} [NeZero p] {J : Type} (asg : J -> ZMod p)
+    (digit : Fin n -> Nat) (scalar : Fin n -> J) (indices : List (Fin n)) :
+    (((indices.map fun j => digit j * (asg (scalar j)).val).sum : Nat) : ZMod p) =
+      (indices.map fun j => (digit j : ZMod p) * asg (scalar j)).sum := by
+  induction indices with
   | nil => simp
-  | cons x xs ih => simp [ih]
+  | cons j rest ih =>
+      simp only [List.map_cons, List.sum_cons, Nat.cast_add, Nat.cast_mul, ih,
+        ZMod.natCast_zmod_val]
 
 /-- Exact integer soundness.  The two no-wrap premises are per-column numeric bounds; the
 deployed BFV instantiation below discharges them from one coarse universal budget. -/
@@ -210,8 +214,11 @@ theorem weightedSumGadget_sound {p n width limbBits carryBits constant : Nat}
           base * (asg (w.carry column.succ)).val := by
     intro column
     apply nat_eq_of_zmod_eq (hleft column) (hright column)
-    simp only [Nat.cast_add, Nat.cast_mul, natCast_list_sum, List.map_map,
-      ZMod.natCast_zmod_val]
+    have hcast := cast_weightedList asg
+      (fun j => AirModularView.constDigit base width (coefficient j) column)
+      scalar (List.finRange n)
+    rw [Nat.cast_add, Nat.cast_add, Nat.cast_add, Nat.cast_mul, hcast]
+    simp only [ZMod.natCast_zmod_val]
     simpa [base] using heq column
   have htel := AirModularView.mulCarryEquations_denote base 1
     (fun column => AirModularView.constDigit base width constant column +
@@ -259,65 +266,53 @@ def activeShift : Fin activeWidth -> Nat :=
       (Fin.append (fun _ : Fin degree => 32) (fun _ : Fin degree => 32)))
 
 def shiftedScalar (row : OwnerRow) : Fin activeWidth -> Nat :=
-  Fin.append (fun option => (row.selector option).toNat)
-    (Fin.append (fun j => (row.u j + 32).toNat)
-      (Fin.append (fun j => (row.e1 j + 32).toNat)
-        (fun j => (row.e2 j + 32).toNat)))
+  fun i => (row.activeValue i + (activeShift i : Int)).toNat
 
 def shiftedConstant (equation : DeployedEquation) : Int :=
   equation.publicConstant -
     ∑ i, equation.activeCoefficient i * (activeShift i : Int)
 
-set_option maxRecDepth 2048 in
-theorem shiftedScalar_recompose {statement : InputStatement}
+private theorem activeValue_add_shift_bounds {statement : InputStatement}
     (input : ValidCommittedWitness statement) (i : Fin activeWidth) :
-    ((shiftedScalar input.row i : Nat) : Int) =
-      input.row.activeValue i + (activeShift i : Int) := by
+    0 <= input.row.activeValue i + (activeShift i : Int) /\
+      input.row.activeValue i + (activeShift i : Int) < 64 := by
   refine Fin.addCases (m := optionCount) (n := degree + (degree + degree)) ?_ ?_ i
   · intro option
-    rcases input.selector_boolean option with h | h <;>
-      simp [shiftedScalar, OwnerRow.activeValue, activeShift, h]
+    simp only [OwnerRow.activeValue, activeShift, Fin.append_left, Nat.cast_zero, add_zero]
+    rcases input.selector_boolean option with h | h <;> omega
   · intro shortIndex
     refine Fin.addCases (m := degree) (n := degree + degree) ?_ ?_ shortIndex
     · intro j
       have h := input.rowRange.u_short j
-      simp [shiftedScalar, OwnerRow.activeValue, activeShift,
-        Int.toNat_of_nonneg (by omega : 0 <= input.row.u j + 32)]
-    · intro tail
-      refine Fin.addCases (m := degree) (n := degree) ?_ ?_ tail
-      · intro j
-        have h := input.rowRange.e1_short j
-        simp [shiftedScalar, OwnerRow.activeValue, activeShift,
-          Int.toNat_of_nonneg (by omega : 0 <= input.row.e1 j + 32)]
-      · intro j
-        have h := input.rowRange.e2_short j
-        simp [shiftedScalar, OwnerRow.activeValue, activeShift,
-          Int.toNat_of_nonneg (by omega : 0 <= input.row.e2 j + 32)]
-
-set_option maxRecDepth 2048 in
-theorem shiftedScalar_lt_64 {statement : InputStatement}
-    (input : ValidCommittedWitness statement) (i : Fin activeWidth) :
-    shiftedScalar input.row i < 64 := by
-  refine Fin.addCases (m := optionCount) (n := degree + (degree + degree)) ?_ ?_ i
-  · intro option
-    rcases input.selector_boolean option with h | h <;>
-      simp [shiftedScalar, h]
-  · intro shortIndex
-    refine Fin.addCases (m := degree) (n := degree + degree) ?_ ?_ shortIndex
-    · intro j
-      have h := input.rowRange.u_short j
-      simp [shiftedScalar]
+      simp only [OwnerRow.activeValue, activeShift, Fin.append_left, Fin.append_right,
+        Nat.cast_ofNat]
       omega
     · intro tail
       refine Fin.addCases (m := degree) (n := degree) ?_ ?_ tail
       · intro j
         have h := input.rowRange.e1_short j
-        simp [shiftedScalar]
+        simp only [OwnerRow.activeValue, activeShift, Fin.append_left, Fin.append_right,
+          Nat.cast_ofNat]
         omega
       · intro j
         have h := input.rowRange.e2_short j
-        simp [shiftedScalar]
+        simp only [OwnerRow.activeValue, activeShift, Fin.append_left, Fin.append_right,
+          Nat.cast_ofNat]
         omega
+
+theorem shiftedScalar_recompose {statement : InputStatement}
+    (input : ValidCommittedWitness statement) (i : Fin activeWidth) :
+    ((shiftedScalar input.row i : Nat) : Int) =
+      input.row.activeValue i + (activeShift i : Int) := by
+  unfold shiftedScalar
+  exact Int.toNat_of_nonneg (activeValue_add_shift_bounds input i).1
+
+theorem shiftedScalar_lt_64 {statement : InputStatement}
+    (input : ValidCommittedWitness statement) (i : Fin activeWidth) :
+    shiftedScalar input.row i < 64 := by
+  unfold shiftedScalar
+  exact (Int.toNat_lt_of_ne_zero (by omega : (64 : Nat) ≠ 0)).2
+    (activeValue_add_shift_bounds input i).2
 
 /-- Shifting every short by 32 changes only the public constant. -/
 theorem eval_eq_shifted {statement : InputStatement}
@@ -339,33 +334,55 @@ theorem eval_eq_shifted {statement : InputStatement}
 
 /-- Natural positive and negative masses after the deployed `+32` short normalization. -/
 def shiftedPositiveMass (equation : DeployedEquation) (row : OwnerRow) : Nat :=
-  posPart (shiftedConstant equation) +
-    ∑ i, posPart (equation.activeCoefficient i) * shiftedScalar row i
+  CompressedLinearEquation.posPart (shiftedConstant equation) +
+    ∑ i, CompressedLinearEquation.posPart (equation.activeCoefficient i) * shiftedScalar row i
 
 def shiftedNegativeMass (equation : DeployedEquation) (row : OwnerRow) : Nat :=
-  negPart (shiftedConstant equation) +
-    ∑ i, negPart (equation.activeCoefficient i) * shiftedScalar row i
+  CompressedLinearEquation.negPart (shiftedConstant equation) +
+    ∑ i, CompressedLinearEquation.negPart (equation.activeCoefficient i) * shiftedScalar row i
 
 /-- The positive accumulator includes the public offset product and a zero coefficient for
 the quotient scalar.  The negative accumulator gives that same scalar coefficient `q`. -/
 def positiveAccumulatorConstant (equation : DeployedEquation) : Nat :=
-  posPart (shiftedConstant equation) + equation.rns.value * quotientShift
+  CompressedLinearEquation.posPart (shiftedConstant equation) +
+    equation.rns.value * quotientShift
 
 def negativeAccumulatorConstant (equation : DeployedEquation) : Nat :=
-  negPart (shiftedConstant equation)
+  CompressedLinearEquation.negPart (shiftedConstant equation)
 
 def positiveAccumulatorCoefficient (equation : DeployedEquation) :
     Fin (activeWidth + 1) -> Nat :=
-  Fin.append (fun i => posPart (equation.activeCoefficient i)) (fun _ => 0)
+  Fin.append (fun i => CompressedLinearEquation.posPart (equation.activeCoefficient i))
+    (fun _ => 0)
 
 def negativeAccumulatorCoefficient (equation : DeployedEquation) :
     Fin (activeWidth + 1) -> Nat :=
-  Fin.append (fun i => negPart (equation.activeCoefficient i))
+  Fin.append (fun i => CompressedLinearEquation.negPart (equation.activeCoefficient i))
     (fun _ => equation.rns.value)
 
 def accumulatorScalarWire (active : Fin activeWidth -> Idx) (quotient : Idx) :
     Fin (activeWidth + 1) -> Idx :=
   Fin.append active (fun _ => quotient)
+
+private theorem positiveAccumulator_sum {J : Type} (asg : J -> BabyBear)
+    (equation : DeployedEquation) (active : Fin activeWidth -> J) (quotient : J) :
+    (∑ j, positiveAccumulatorCoefficient equation j *
+      (asg (accumulatorScalarWire active quotient j)).val) =
+      ∑ i, CompressedLinearEquation.posPart (equation.activeCoefficient i) *
+        (asg (active i)).val := by
+  unfold positiveAccumulatorCoefficient accumulatorScalarWire
+  rw [Fin.sum_univ_add]
+  simp only [Fin.append_left, Fin.append_right, Fin.sum_univ_one, zero_mul, add_zero]
+
+private theorem negativeAccumulator_sum {J : Type} (asg : J -> BabyBear)
+    (equation : DeployedEquation) (active : Fin activeWidth -> J) (quotient : J) :
+    (∑ j, negativeAccumulatorCoefficient equation j *
+      (asg (accumulatorScalarWire active quotient j)).val) =
+      (∑ i, CompressedLinearEquation.negPart (equation.activeCoefficient i) *
+        (asg (active i)).val) + equation.rns.value * (asg quotient).val := by
+  unfold negativeAccumulatorCoefficient accumulatorScalarWire
+  rw [Fin.sum_univ_add]
+  simp only [Fin.append_left, Fin.append_right, Fin.sum_univ_one]
 
 /-- Splitting the normalized signed coefficients into public positive/negative digit
 vectors is exact; there is no field cast in this identity. -/
@@ -378,17 +395,40 @@ theorem shifted_masses_sub_eq_numerator {statement : InputStatement}
   unfold shiftedPositiveMass shiftedNegativeMass
   have hc := eq_posPart_sub_negPart (shiftedConstant equation)
   have hi : forall i, equation.activeCoefficient i =
-      (posPart (equation.activeCoefficient i) : Int) -
-        (negPart (equation.activeCoefficient i) : Int) :=
+      (CompressedLinearEquation.posPart (equation.activeCoefficient i) : Int) -
+        (CompressedLinearEquation.negPart (equation.activeCoefficient i) : Int) :=
     fun i => eq_posPart_sub_negPart _
   push_cast
-  rw [Finset.sum_sub_distrib]
-  rw [hc]
-  apply congrArg (fun z : Int => shiftedConstant equation + z)
-  apply Finset.sum_congr rfl
-  intro i _
-  rw [hi i, sub_mul]
+  calc
+    (CompressedLinearEquation.posPart (shiftedConstant equation) : Int) +
+          ∑ i, (CompressedLinearEquation.posPart (equation.activeCoefficient i) : Int) *
+            (shiftedScalar input.row i : Int) -
+        ((CompressedLinearEquation.negPart (shiftedConstant equation) : Int) +
+          ∑ i, (CompressedLinearEquation.negPart (equation.activeCoefficient i) : Int) *
+            (shiftedScalar input.row i : Int)) =
+      ((CompressedLinearEquation.posPart (shiftedConstant equation) : Int) -
+          (CompressedLinearEquation.negPart (shiftedConstant equation) : Int)) +
+        ((∑ i, (CompressedLinearEquation.posPart
+              (equation.activeCoefficient i) : Int) * (shiftedScalar input.row i : Int)) -
+          (∑ i, (CompressedLinearEquation.negPart
+              (equation.activeCoefficient i) : Int) * (shiftedScalar input.row i : Int))) := by
+        ring
+    _ = ((CompressedLinearEquation.posPart (shiftedConstant equation) : Int) -
+          (CompressedLinearEquation.negPart (shiftedConstant equation) : Int)) +
+        ∑ i, ((CompressedLinearEquation.posPart
+              (equation.activeCoefficient i) : Int) * (shiftedScalar input.row i : Int) -
+          (CompressedLinearEquation.negPart
+              (equation.activeCoefficient i) : Int) * (shiftedScalar input.row i : Int)) := by
+        rw [Finset.sum_sub_distrib]
+    _ = shiftedConstant equation +
+        ∑ i, equation.activeCoefficient i * (shiftedScalar input.row i : Int) := by
+      rw [← hc]
+      apply congrArg (fun z : Int => shiftedConstant equation + z)
+      apply Finset.sum_congr rfl
+      intro i _
+      rw [← sub_mul, ← hi i]
 
+set_option maxRecDepth 10000 in
 /-- Two accepted weighted AIR instances sharing their result limbs enforce the exact
 unsigned positive/negative balance.  All capacity and no-wrap obligations are explicit;
 they are compile-time/range facts, not an additional acceptance relation. -/
@@ -457,6 +497,7 @@ theorem signedAccumulatorGadgets_sound {p width carryBits : Nat} [Fact p.Prime]
           ∑ j, negativeAccumulatorCoefficient equation j *
             (asg (accumulatorScalarWire active quotient j)).val := hright.2
 
+set_option maxRecDepth 10000 in
 /-- The substantive join: both accumulators use the shifted cells of the one committed
 `ValidCommittedWitness`, while their extra scalar is the scalar in the already accepted
 all-moduli kernel call.  AIR acceptance therefore implies the exact deployed signed BFV
@@ -466,20 +507,22 @@ theorem acceptedRowCall_accumulator_sound {statement : InputStatement}
     (accepted : AcceptedRowCall statement input rowIndex)
     {width carryBits : Nat}
     (hpositiveConstant : positiveAccumulatorConstant accepted.equation <
-      (2 ^ limbBits) ^ width)
+      (2 ^ BfvAllModuliKernelCalls.limbBits) ^ width)
     (hnegativeConstant : negativeAccumulatorConstant accepted.equation <
-      (2 ^ limbBits) ^ width)
+      (2 ^ BfvAllModuliKernelCalls.limbBits) ^ width)
     (hpositiveCoefficient : forall j,
-      positiveAccumulatorCoefficient accepted.equation j < (2 ^ limbBits) ^ width)
+      positiveAccumulatorCoefficient accepted.equation j <
+        (2 ^ BfvAllModuliKernelCalls.limbBits) ^ width)
     (hnegativeCoefficient : forall j,
-      negativeAccumulatorCoefficient accepted.equation j < (2 ^ limbBits) ^ width)
+      negativeAccumulatorCoefficient accepted.equation j <
+        (2 ^ BfvAllModuliKernelCalls.limbBits) ^ width)
     {J : Type} (asg : J -> BabyBear) (active : Fin activeWidth -> J) (quotient : J)
-    (left right : WeightedSumWires J width limbBits carryBits)
+    (left right : WeightedSumWires J width BfvAllModuliKernelCalls.limbBits carryBits)
     (hactive : forall i, (asg (active i)).val = shiftedScalar input.row i)
     (hquotient : (asg quotient).val =
       (accepted.assignment
         (BignumKernelABI.scalarMulWires (productWidth (modulusAt rowIndex))
-          limbBits scalarBits).scalar).val)
+          BfvAllModuliKernelCalls.limbBits scalarBits).scalar).val)
     (hresult : left.result = right.result)
     (hleftAccept : systemAccepts asg
       (weightedSumGadget (positiveAccumulatorConstant accepted.equation)
@@ -490,32 +533,35 @@ theorem acceptedRowCall_accumulator_sound {statement : InputStatement}
         (negativeAccumulatorCoefficient accepted.equation)
         (accumulatorScalarWire active quotient) right))
     (hleftNoWrap : forall column,
-      AirModularView.constDigit (2 ^ limbBits) width
+      AirModularView.constDigit (2 ^ BfvAllModuliKernelCalls.limbBits) width
           (positiveAccumulatorConstant accepted.equation) column +
         ((List.finRange (activeWidth + 1)).map fun j =>
-          AirModularView.constDigit (2 ^ limbBits) width
+          AirModularView.constDigit (2 ^ BfvAllModuliKernelCalls.limbBits) width
               (positiveAccumulatorCoefficient accepted.equation j) column *
             (asg (accumulatorScalarWire active quotient j)).val).sum +
         (asg (left.carry column.castSucc)).val < babyBearP)
     (hleftResultNoWrap : forall column,
       (asg (left.result column)).val +
-        2 ^ limbBits * (asg (left.carry column.succ)).val < babyBearP)
+        2 ^ BfvAllModuliKernelCalls.limbBits *
+          (asg (left.carry column.succ)).val < babyBearP)
     (hrightNoWrap : forall column,
-      AirModularView.constDigit (2 ^ limbBits) width
+      AirModularView.constDigit (2 ^ BfvAllModuliKernelCalls.limbBits) width
           (negativeAccumulatorConstant accepted.equation) column +
         ((List.finRange (activeWidth + 1)).map fun j =>
-          AirModularView.constDigit (2 ^ limbBits) width
+          AirModularView.constDigit (2 ^ BfvAllModuliKernelCalls.limbBits) width
               (negativeAccumulatorCoefficient accepted.equation j) column *
             (asg (accumulatorScalarWire active quotient j)).val).sum +
         (asg (right.carry column.castSucc)).val < babyBearP)
     (hrightResultNoWrap : forall column,
       (asg (right.result column)).val +
-        2 ^ limbBits * (asg (right.carry column.succ)).val < babyBearP)
+        2 ^ BfvAllModuliKernelCalls.limbBits *
+          (asg (right.carry column.succ)).val < babyBearP)
     (hcarryp : 2 ^ carryBits <= babyBearP) :
     accepted.equation.numerator input.row =
       (accepted.equation.rns.value : Int) * accepted.witness.quotient.value := by
   have hair := signedAccumulatorGadgets_sound
-    (p := babyBearP) (by norm_num [limbBits, babyBearP]) hcarryp accepted.equation
+    (p := babyBearP)
+    (by norm_num [BfvAllModuliKernelCalls.limbBits, babyBearP]) hcarryp accepted.equation
     hpositiveConstant hnegativeConstant hpositiveCoefficient hnegativeCoefficient
     asg active quotient left right hresult hleftAccept hrightAccept
     hleftNoWrap hleftResultNoWrap hrightNoWrap hrightResultNoWrap
@@ -527,11 +573,12 @@ theorem acceptedRowCall_accumulator_sound {statement : InputStatement}
           accepted.equation.rns.value * quotientShift =
         shiftedNegativeMass accepted.equation input.row +
           accepted.equation.rns.value * accepted.witness.quotient.encoded.toNat := by
-    simp_rw [Fin.sum_univ_add] at hair
-    simpa [positiveAccumulatorConstant, negativeAccumulatorConstant,
-      positiveAccumulatorCoefficient, negativeAccumulatorCoefficient,
-      accumulatorScalarWire, shiftedPositiveMass, shiftedNegativeMass,
-      hactive, hq] using hair
+    rw [positiveAccumulator_sum, negativeAccumulator_sum] at hair
+    simp_rw [hactive] at hair
+    rw [hq] at hair
+    unfold positiveAccumulatorConstant negativeAccumulatorConstant at hair
+    unfold shiftedPositiveMass shiftedNegativeMass
+    omega
   have hmass := shifted_masses_sub_eq_numerator input accepted.equation
   have hbalanceInt := congrArg (fun z : Nat => (z : Int)) hbalance
   have hvalue : accepted.witness.quotient.value =
