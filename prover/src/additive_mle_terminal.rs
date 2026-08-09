@@ -29,11 +29,12 @@
 use core::{convert::Infallible, fmt};
 
 use crate::{
-    additive_fri_sampled::tower_leaf_payload,
     additive_ntt::{forward, AdditiveNttError},
     binary_hash::{BinaryHashDomain, BinaryRoot, HashSuite},
     binary_merkle::{verify_binary_opening, BinaryMerkleError, BinaryMerklePath, BinaryMerkleTree},
-    binary_tower::{additive_fold_map, additive_fold_pair, TowerElem, TowerError},
+    binary_tower::{
+        additive_fold_map, additive_fold_pair, tower_leaf_payload, TowerElem, TowerError,
+    },
     binary_transcript::{BinaryShake256Transcript, TranscriptSuite},
 };
 

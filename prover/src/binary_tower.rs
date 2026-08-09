@@ -44,6 +44,25 @@ use core::fmt;
 /// wider representation and are rejected rather than silently truncated.
 pub const MAX_LEVEL: u8 = 6;
 
+/// Temporary native payload used by legacy prototype modules while their
+/// framing is moved into Lean-emitted control.  This function has no authority
+/// to select a transcript or commitment format.
+pub const fn tower_leaf_payload(value: TowerElem) -> [u8; 13] {
+    let mut payload = [0u8; 13];
+    payload[0] = b'B';
+    payload[1] = b'T';
+    payload[2] = b'L';
+    payload[3] = b'1';
+    payload[4] = value.level();
+    let bits = value.bits().to_le_bytes();
+    let mut i = 0;
+    while i < 8 {
+        payload[5 + i] = bits[i];
+        i += 1;
+    }
+    payload
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TowerError {
     LevelTooLarge(u8),

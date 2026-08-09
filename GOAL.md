@@ -14,24 +14,21 @@ hotspots afterward.
   proved UD tail. Haböck's exact Johnson constants/conventions are locally bridged; the
   BCIKS/GS/Hensel algebraic core remains the explicit `HaboeckTheorem2` premise. No unrestricted
   capacity claim is allowed.
-- **GF(2) suite — running with sampled soundness architecture proved:** Fan–Paar `GF(2^64)`, fast
-  reversed-LCH additive NTT, cSHAKE commitments/transcript, sampled multi-round additive FRI, OOD
-  evaluation PCS, and rate-bearing arbitrary-functional binary history append proofs run. Lean now
-  closes the literal additive quotient tower, authenticated coherent paths, adaptive earliest
-  deviation, and the UD challenge/query bound. The Rust implementation is unverified compute;
-  generated Lean authority and cryptographic composition remain.
+- **GF(2) suite — proved formal tower, native arithmetic only:** Lean closes the literal additive
+  quotient tower, authenticated coherent paths, adaptive earliest deviation, and the UD
+  challenge/query bound. Native Fan–Paar `GF(2^64)`, the reversed-LCH transform, and cSHAKE/Merkle
+  compute remain. The handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted:
+  it bound but never enforced its coefficient bound, so it was not a low-degree test.
 - **Ext6 gate suite — succinct joined surface:** `X^6−31` is proved irreducible. One trace root is
   fixed before gamma; a degree-2 factored-selector sumcheck reduces emitted gates to seven terminal
   trace functionals; eta aggregates those with public-prefix and padding equations; one sampled
   trace-linear opening retires the aggregate without revealing the trace/table. Lean proves the
   seven-operand provenance, terminal functionals, and eta bad-set bound.
-- **Accumulation — proved core plus proof-verified runtime history:** Loom's arbitrary-depth extraction
-  and soundness are real. Rust has history-depth-independent arbitrary-functional sampled append
-  proofs, and `proof_carrying_history` verifies their Ext6 gate conjunction, reconstructs the
-  canonical semantic envelope, and checks an exact two-node state/accumulator seam. Lean's
-  `SemanticReceiptRelation` proves the pre/post/touched quadratic language is iff a genuine
-  `ReceiptDelta` and folds valid words through `AccClaim`. This is still uncompressed history; the
-  runtime-codec refinement, full typed relation, and WARP/FACS RBR/runtime/hiding join remain.
+- **Accumulation — proved algebra, no authoritative native history:** Loom's arbitrary-depth
+  extraction and soundness are real. Lean's `SemanticReceiptRelation` proves the pre/post/touched
+  quadratic language is iff a genuine `ReceiptDelta` and folds valid words through `AccClaim`.
+  Handwritten native history objects are non-authoritative prototypes scheduled for deletion; the
+  full typed relation and WARP/FACS outer accumulator, decider, extraction, and hiding join remain.
 - **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
   `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
@@ -121,7 +118,7 @@ disposable.
   fixes both roots, and draws one atomic Ext6 challenge for the root-linked fold. This supersedes
   the briefly audited base-field fold rather than pricing it as secure; its focused smoke rejects
   frame, Boolean-mask, root, claim, and challenge substitution.
-- 2026-08-09 ★★★★★ **Proof-verified semantic history node** ✓:
+- 2026-08-09 **RETRACTED native semantic-history claim:**
   `proof_carrying_history.rs` verifies the real arbitrary-functional GF(2) append and Ext6
   factored-gate conjunction, then reconstructs the complete canonical `semantic_receipt` envelope.
   Its GF(2) pre/post roots are the actual append accumulator seam; Ext6 remains the proof backend,
@@ -129,21 +126,21 @@ disposable.
   turn-metadata, and transcript-suite substitution. The result is authenticated uncompressed
   history; `[PCH-OUTER-ACCUMULATOR]` names the real WARP/FACS relation, hiding, and extraction join
   still required. `PROJECT.md` now pins the clean-sheet semantic-computer constitution and poster
-  gate separately from this evidence ledger.
-- 2026-08-09 ★★★★★ **First succinct light-client conjunction** ✓: `nextgen_light_client.rs`
-  packages the binary evaluation-history append/output OOD proof with the private-trace succinct
-  factored-gate proof. An injective versioned encoding of both full input statements and the derived
-  output claim becomes the gate public prefix; neither words nor trace are carried, proof shape is
-  independent of history depth, and both splice directions reject. It is not recursive compression:
-  component transcript schedules and their shared-ROM composition remain explicit.
+  gate separately from this evidence ledger. Audit subsequently established that this Rust object
+  authors statement/history meaning and cannot be proof authority; it remains only until its
+  arithmetic is extracted and Lean-generated control replaces it.
+- 2026-08-09 **RETRACTED and deleted native light-client conjunction:** the former
+  `nextgen_light_client.rs` depended on an OOD path whose additive-FRI verifier never enforced the
+  claimed coefficient bound. The whole binary evaluation-history branch was removed rather than
+  relabeled. Reintroduction requires rate-aware Lean-emitted control and a re-derived OOD argument.
 - 2026-08-09 ★★★★★ **Succinct emitted-gate proof joined** ✓: `GateFactoredExt6` proves exact
   seven-operand selector provenance, degree-2 outer rounds, terminal trace functionals, and the
   fresh-eta bad-set bound. `succinct_factored_gate.rs` fixes one lifted trace root before gamma,
   runs the outer sumcheck, aggregates all seven terminal equations plus the public prefix and
   padding zeros, and retires one combined functional with a sampled MLE opening. Verification sees
   no trace or defect table; unrelated roots, public substitution, and sampled non-base Ext6 traces
-  reject. Honest boundaries: coherent proximity, subfield sampling composition, CR/ROM, and runtime
-  refinement.
+  reject. Honest boundaries: coherent proximity, subfield sampling composition, CR/ROM, and
+  replacement of the handwritten native verifier by Lean-owned control.
 - 2026-08-09 ★★★★ **Characteristic-two adaptive sampled soundness** ✓: `AdditiveFriQuery` uses the
   literal additive tower fold, authenticated openings, coherent modulo paths, and an
   earliest-deviation cover to prove `m*2^(ell-1)/|F| + (1-tau)^q` in the UD schedule. No
@@ -160,13 +157,11 @@ disposable.
   machine-refutes raw table values as coefficients; `GateMleExt6` proves descriptor ordering,
   extension lift, batching, and terminal semantics. The succinct factored-selector replacement is
   the later ★★★★★ entry above; this clear path remains a reference oracle.
-- 2026-08-09 ★★★★ **Sampled binary proving/history surface** ✓: the runtime has cSHAKE-authenticated
-  coherent additive FRI, an OOD quotient PCS, evaluation-claim proofs, and a fixed-size sampled
-  history append whose proof does not grow with append depth. `AdditiveFriTower` proves the
-  characteristic-two quotient levels, fold reindexing, pivots/transversals, RS embeddings, runtime
-  index equivalence, and coherent uniform marginals. `AdditiveFriQuery` later closes the adaptive
-  earliest-deviation theorem; generated execution authority, general receipt functionals, and
-  cryptographic composition remain.
+- 2026-08-09 **RETRACTED and deleted sampled binary admission surface:** `AdditiveFriTower` and
+  `AdditiveFriQuery` remain valid Lean mathematics, but the former Rust verifier checked only local
+  full-depth fold consistency. Because `coefficient_bound` was unused, arbitrary words and
+  pointwise false-claim OOD quotients could pass. The sampled FRI, OOD, evaluation-claim, and
+  evaluation-history modules and tests were deleted.
 - 2026-08-09 ★★★ **Hiding-window root attribution made explicit** ✓:
   `OracleLogLinkedOpenedSampling` replaces noncomputable root decoding with checked preimage data,
   proves arbitrary-`d,t` completeness, fixed-word sampling miss `(1-radius)^t`, and sub-UD

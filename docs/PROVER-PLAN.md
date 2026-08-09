@@ -21,11 +21,10 @@ The crate contains:
 - `reference_prove` / `reference_verify`, one-call composition under one transcript;
 - a succinct Ext6 factored-gate verifier using one committed trace root and one aggregated
   trace-functional opening;
-- `nextgen_light_client`, one depth-independent proof object conjoining a binary evaluation-history
-  append with the succinct private-trace gate proof through an injective public metadata encoding;
 - a separate executable mirror of Loom's linear accumulator algebra; and
-- explicit Fan--Paar binary-tower arithmetic through `GF(2^64)`, fast additive NTT, sampled
-  multi-round additive FRI, OOD evaluation openings, and fixed-size evaluation-history appends.
+- explicit Fan--Paar binary-tower arithmetic through `GF(2^64)`, fast additive NTT, and byte-native
+  hash/Merkle compute. The former handwritten sampled-FRI/OOD/evaluation-history admission stack was
+  deleted after its claimed degree bound was found unenforced.
 
 The reference protocol performs:
 
@@ -62,9 +61,9 @@ encoding through emit. `[COMMIT-CR]`, production permutation/capacity analysis, 
 decoding, and wire-sharing composition with the recursive sponge/full verifier remain load-bearing.
 
 The historical one-call implementation still uses multiplicative BabyBear⁴ rather than the binary
-suite. Separate next-generation APIs now implement the GF(2) transform, byte-native commitment/XOF,
-sampled additive FRI, OOD evaluation PCS, and evaluation-history append. They are not yet one final
-light-client proof and do not emit a proof-of-work nonce.
+suite. Native GF(2) arithmetic, transform, and byte-native hash/Merkle kernels remain, but no sampled
+binary FRI/OOD verifier is currently admissible. Lean-emitted rate-aware control must replace the
+deleted handwritten stack before a binary light-client proof returns.
 
 ## Accumulator boundary
 

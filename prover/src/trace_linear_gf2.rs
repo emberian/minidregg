@@ -35,14 +35,13 @@
 use core::fmt;
 
 use crate::{
-    additive_fri_sampled::tower_leaf_payload,
     additive_mle_terminal::{
         verify_additive_mle_terminal, AdditiveMleTerminalError, AdditiveMleTerminalProof,
         AdditiveMleTerminalProverState, AdditiveMleTerminalStatement,
         AdditiveMleTerminalTranscript,
     },
     binary_hash::{BinaryRoot, BinaryShake256V1, HashSuite},
-    binary_tower::{TowerElem, TowerError, MAX_LEVEL},
+    binary_tower::{tower_leaf_payload, TowerElem, TowerError, MAX_LEVEL},
     binary_transcript::{BinaryShake256Transcript, TranscriptSuite},
 };
 

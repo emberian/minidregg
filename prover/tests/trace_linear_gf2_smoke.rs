@@ -7,9 +7,6 @@ use minidregg_prover::{
 };
 
 // Path-load both new modules without editing `lib.rs` or shared protocol files.
-mod additive_fri_sampled {
-    pub use minidregg_prover::additive_fri_sampled::*;
-}
 mod additive_ntt {
     pub use minidregg_prover::additive_ntt::*;
 }

@@ -27,7 +27,7 @@ experiment and can be replaced wholesale as the protocol evolves.
 | **Derived arithmetization** | `Compiler/Air` proves the executor and circuit readings agree; flattening produces degree-≤2 gates; `Compiler/Emit` produces a serializable descriptor with `emit_faithful`. `Theory/Bignum` owns fixed-width little-endian limbs, and `Compiler/AirBignum` emits range-checked carry addition with exact integer soundness and overflow rejection. | This proves what emitted constraints mean, including the landed bignum addition gadget. Rust/WGSL has no semantics here: it is unverified compute whose outputs must be rechecked by Lean-owned control. Multiplication and broader application-language lowering remain separate work. |
 | **Multiplicative RS proximity** | Ordinary unique-decoding results, an unconditional one-third-UD band, and `HalfThreshold*`: one round halves the radius outside at most one field challenge, followed by a proved UD tail. The committed transcript, adaptive earliest-deviation argument, and coherent runtime-shaped query paths are assembled at `m·b/|F| + (1−τ)^q`; the rate-1/2 `δ=3/10 → 3/20<1/6` specialization is machine-checked. | Concrete Merkle collision resistance and the single-ROM Fiat–Shamir reduction remain cryptographic/composition floors. The coherent theorem is multiplicative; it is not silently reused for characteristic-two additive folding. |
 | **Johnson/list regime** | `JohnsonRegime` proves the list-size inequality and exact sampling amplification. `JohnsonMcaBridge` imports the exact theorem interface and constants from Haböck 2025/2110, corrects the paper/Loom degree convention to `ρ_H=(d−1)/n`, and proves that one `m=max(3,d)` instance covers Loom's rounded Johnson target. | The hard BCIKS/GS/Hensel algebraic proof is still the explicit proposition `HaboeckTheorem2`, not a local theorem or axiom. Thus the Johnson MCA seam is exact and conditional, not yet machine-proved end to end. There is **no blanket capacity claim**: capacity-level variants have counterexamples. |
-| **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` now close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. Rust has Fan–Paar `GF(2^64)`, a shift-aware `O(n log n)` transform, cSHAKE commitments/transcript, sampled multi-round FRI, an OOD quotient PCS, and arbitrary trace-linear retirement. | Those Rust paths are unverified compute/conformance oracles, not refinements. Generated Lean authority, basis/order correspondence, CR/shared-XOF composition, and the outer accumulator remain. |
+| **GF(2) tower and additive FRI** | `Theory/BinaryTower*` proves the tower/fold algebra; `Loom/AdditiveProximity`, `AdditiveFriTower`, and `AdditiveFriQuery` close the literal characteristic-two quotient tower, adaptive earliest-deviation cover, authenticated coherent paths, and the UD bound `m·2^(ell−1)/|F| + (1−τ)^q`. Native code retains Fan–Paar `GF(2^64)`, a shift-aware `O(n log n)` transform, and cSHAKE/Merkle compute. | The former handwritten sampled-FRI/OOD/evaluation-history admission branch was deleted after audit found that its bound was transcript-bound but never enforced. A Lean-emitted rate-aware controller, basis/order correspondence, CR/shared-XOF composition, and the outer accumulator remain. |
 | **Indexed lookup** | `LogupIndexLink` proves decoded Boolean address columns give literal unit-vector incidence and exactly the LogUp* pushforward. The Rust Tower256 LogUp prototype checks each committed index column and binds the ordered roots into one bundle. | Its handwritten verifier/receipt adapter is not authoritative and must be replaced by Lean emission. The zerocheck/PCS also inherits additive proximity and CR/ROM assumptions; this is indexed evaluation, not yet mutable RAM. |
 | **Accumulation** | Loom proves claim folding, exact/UD soundness, arbitrary-depth extraction, and depth composition. `SemanticReceiptRelation` proves that the clean-sheet pre/post/touched quadratic word is exactly a `ReceiptDelta`; Lean proves header-cell packing and the bound `AccClaim` fold. Rust has executable history prototypes. | The handwritten Rust receipt/admission/history objects are mirrors and are being replaced by Lean-emitted artifacts. This is not yet the final WARP/FACS protocol; hiding/ZK composition and the unbounded outer accumulator/decider remain. |
 | **Zero knowledge and extraction** | Native formal games, constrained masking, corrected OracleLog assembly, and sub-UD recovery are checked. `OracleLogLinkedTwoPhase*` freezes checked root preimages before a domain-separated query, binds the response to that query, transports accepted transcripts into sub-UD log extraction without `d≤t`, and assembles exact full-domain and allowed-coordinate sampling prices. | The staged reduction still exposes explicit shared-ROM fresh/hit/sampling ports. A concrete hiding deployment needs ZK proofs of committed-word knowledge rather than transparent all-word openings, plus CR/ZK errors; Rust is not ZK. |
@@ -60,18 +60,18 @@ encoding through the emitted constraint system. Raw byte decoding, its wire-shar
 with the recursive sponge/full verifier, concrete permutation/capacity analysis, and `[COMMIT-CR]`
 remain.
 
-The next-generation reference surfaces are now executable as separate joined APIs:
+The former sampled binary-history/OOD API is deliberately absent. Its verifier checked local fold
+consistency but never used the advertised coefficient bound, so it was not a low-degree test and
+could make a false OOD claim pass with a pointwise quotient. Reintroduction requires a Lean-emitted,
+genuinely rate-aware additive-FRI controller and a re-derived OOD theorem.
+
+The separate Ext6 gate prototype still demonstrates the intended algebraic decomposition:
 
 ```text
-binary history:  evaluation claim (additive OOD PCS)
-              -> sampled GF(2^64) append fold
-              -> one fixed-size output claim
-
-succinct gates:  emitted descriptor + public inputs + one trace root
-              -> Ext6 gamma + degree-2 factored-selector sumcheck
-              -> seven terminal trace functionals + fresh eta
-              -> one aggregated committed-trace opening
-              -> sampled multiplicative MLE terminal verification
+emitted descriptor + public inputs + one trace root
+    -> Ext6 gamma + degree-2 factored-selector sumcheck
+    -> seven terminal trace functionals + fresh eta
+    -> one aggregated committed-trace opening
 ```
 
 The new gate verifier receives neither trace nor residual table. Lean proves that seven sparse
@@ -82,19 +82,9 @@ fresh eta, then opens the aggregate against the same trace root fixed before gam
 round-zero checks reject non-base Ext6 witnesses. Coherent proximity, subfield sampling, CR/ROM,
 and executable refinement remain explicit rather than being mistaken for code-level completion.
 
-`nextgen_light_client` packages the binary evaluation-history proof and the succinct gate proof
-into one verifier object. A versioned, length-framed u16/BabyBear encoding binds both complete input
-evaluation statements and the append-derived output claim as the private gate trace's public prefix;
-valid proofs for different metadata cannot be spliced. This is a depth-independent conjunction,
-not recursive compression: the binary append, output OOD, and Ext6 gate transcript schedules remain
-domain-separated components whose shared-ROM composition is explicit.
-
-`proof_carrying_history` takes the stronger arbitrary-functional append, verifies the same succinct
-gate conjunction, and deterministically reconstructs its `semantic_receipt` envelope. The GF(2)
-root is the actual append accumulator; Ext6 is the gate proof backend rather than a fictitious
-cross-characteristic fold lane. A focused two-node chain rejects predecessor-proof, turn-metadata,
-and transcript-suite substitution. The remaining step is a real unbounded hiding/knowledge-sound
-outer accumulator over this now-concrete common relation.
+The old `nextgen_light_client` conjunction was deleted with the unsound binary admission branch.
+The surviving handwritten Ext6 and history prototypes are not semantic authority and are scheduled
+for replacement by a Lean-owned controller and one real outer accumulator.
 
 On the formal side, `Assurance/SemanticReceiptRelation` gives that phrase exact content: touched
 bits are Boolean; `(1−touched)·(post−pre)=0` enforces the frame; the zero set is iff a genuine
@@ -133,9 +123,9 @@ The active direction is to make the strongest pieces meet at one honest end-to-e
   to exact hypotheses rather than extrapolating to capacity.
 - **Proximity:** compose the landed characteristic-two adaptive/coherent theorem with the concrete
   binary commitment/XOF execution and replace handwritten protocol control with Lean emission.
-- **Tower arithmetic:** finish formal additive tower distance preservation; keep optimized Rust only
-  as unverified compute behind generated interfaces;
-  the sampled prover, cSHAKE transcript, OOD PCS, and fast transform now exist.
+- **Tower arithmetic:** keep the proved additive tower and optimized native arithmetic/transform
+  kernels, then emit the rate-aware FRI/OOD controller from Lean before any binary receipt is
+  admissible again.
 - **Accumulation:** lower the now-landed proof-verified arbitrary-functional history node into the
   common WARP/FACS relation, then replace its explicit proof chain with the intended unbounded
   hiding/RBR extractor and final-compression composition.

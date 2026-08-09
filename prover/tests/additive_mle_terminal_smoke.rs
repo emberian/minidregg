@@ -8,9 +8,6 @@ use minidregg_prover::{
 
 // Resolve crate-relative imports while the new module remains intentionally
 // unexported from `lib.rs` in this new-files-only lane.
-mod additive_fri_sampled {
-    pub use minidregg_prover::additive_fri_sampled::*;
-}
 mod additive_ntt {
     pub use minidregg_prover::additive_ntt::*;
 }

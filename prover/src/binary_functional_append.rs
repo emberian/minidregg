@@ -30,14 +30,13 @@
 use core::fmt;
 
 use crate::{
-    additive_fri_sampled::tower_leaf_payload,
     additive_mle_terminal::{
         additive_mle_initial_word_with_blowup, commit_additive_mle_word,
         verify_additive_mle_word_opening, AdditiveMleTerminalError,
     },
     binary_hash::{BinaryHashDomain, BinaryRoot, BinaryShake256V1, HashSuite},
     binary_merkle::{BinaryMerkleError, BinaryMerklePath, BinaryMerkleTree},
-    binary_tower::{TowerElem, TowerError, MAX_LEVEL},
+    binary_tower::{tower_leaf_payload, TowerElem, TowerError, MAX_LEVEL},
     binary_transcript::{BinaryShake256Transcript, TranscriptSuite},
     trace_linear_gf2::{
         commit_trace_linear_gf2_table_with_blowup, linear_functional_value_gf2,
