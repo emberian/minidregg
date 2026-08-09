@@ -14,12 +14,14 @@ precede challenges structurally rather than by a timestamp comparison.
 
 import Compiler.NativeKernelPlan
 import Compiler.SemanticManifest
+import Loom.Commitment
 import Theory.IndexedProgram
 
 namespace Minidregg.Compiler.AuthenticatedColumnPlan
 
 open Minidregg.Compiler.NativeKernelPlan (WorkKind)
 open Minidregg.Compiler.SemanticManifest
+open Minidregg.Loom
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 
@@ -72,14 +74,90 @@ structure ColumnPort (Semantic Representation Domain : Type) where
   domainCodec : LawfulCodec Domain
   represent : Semantic -> Representation
 
-/-- This is executable commitment/opening data, not a binding assumption. -/
+/-- Executable commitment/opening data. Honest opening generation and
+completeness are part of the scheme; binding remains the separate property
+below because a deployed Merkle realization prices it through collision
+resistance. -/
 structure CommitmentScheme
     {Semantic Representation Domain : Type}
     (port : ColumnPort Semantic Representation Domain) where
   suiteId : Digest
   proofCodecPin : CodecPin
   commit : (Domain -> Representation) -> Digest
+  openAt : (Domain -> Representation) -> Domain -> List UInt8
   verifyOpening : Digest -> Domain -> Representation -> List UInt8 -> Bool
+  verifyOpening_commit : forall column index,
+    verifyOpening (commit column) index (column index) (openAt column index) = true
+
+/-- Position binding for the exact executable opening checker. It is not
+derived from completeness: a deployed hash commitment must supply this under
+its collision-resistance assumption. -/
+def CommitmentScheme.PositionBinding
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : CommitmentScheme port) : Prop :=
+  forall root index left right leftProof rightProof,
+    scheme.verifyOpening root index left leftProof = true ->
+    scheme.verifyOpening root index right rightProof = true ->
+    left = right
+
+/-- The authenticated-column commitment carrying the same position-binding
+property consumed by Loom accumulation and extraction. -/
+structure BindingCommitmentScheme
+    {Semantic Representation Domain : Type}
+    (port : ColumnPort Semantic Representation Domain)
+    extends CommitmentScheme port where
+  binding : toCommitmentScheme.PositionBinding
+
+/-- Literal adapter from the controller's executable scheme to Loom's opening
+relation. No root, index, value, or proof codec is changed. -/
+def CommitmentScheme.toLoomOpeningScheme
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : CommitmentScheme port) :
+    OpeningScheme Digest Representation Domain (List UInt8) where
+  commit := scheme.commit
+  openAt := scheme.openAt
+  verifyOpen := fun root index value proof =>
+    scheme.verifyOpening root index value proof = true
+  verifyOpen_commit := scheme.verifyOpening_commit
+
+/-- A binding authenticated-column scheme is exactly a Loom binding
+commitment. This closes the formerly duplicated commitment interface between
+controller transcripts and proof-carrying history. -/
+def BindingCommitmentScheme.toLoom
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : BindingCommitmentScheme port) :
+    BindingCommitment Digest Representation Domain (List UInt8) where
+  toOpeningScheme := scheme.toCommitmentScheme.toLoomOpeningScheme
+  binding := scheme.binding
+
+@[simp] theorem BindingCommitmentScheme.toLoom_commit
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : BindingCommitmentScheme port)
+    (column : Domain -> Representation) :
+    scheme.toLoom.commit column = scheme.commit column :=
+  rfl
+
+@[simp] theorem BindingCommitmentScheme.toLoom_openAt
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : BindingCommitmentScheme port)
+    (column : Domain -> Representation) (index : Domain) :
+    scheme.toLoom.openAt column index = scheme.openAt column index :=
+  rfl
+
+theorem BindingCommitmentScheme.toLoom_verifyOpen_iff
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    (scheme : BindingCommitmentScheme port)
+    (root : Digest) (index : Domain) (value : Representation)
+    (proof : List UInt8) :
+    scheme.toLoom.verifyOpen root index value proof <->
+      scheme.verifyOpening root index value proof = true :=
+  Iff.rfl
 
 def ColumnPort.rootSlot
     {Semantic Representation Domain : Type}
@@ -144,6 +222,34 @@ structure ColumnOpening
   semanticExact : semanticValue = column.semantic index
   representationExact : representationValue = column.represented index
   verified : scheme.verifyOpening column.root index representationValue proofBytes = true
+
+/-- The canonical honest opening for a bound column. -/
+def BoundColumn.honestOpening
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    {scheme : CommitmentScheme port}
+    (column : BoundColumn port scheme)
+    (openingSlotId : Digest) (index : Domain) : ColumnOpening column where
+  openingSlotId := openingSlotId
+  index := index
+  semanticValue := column.semantic index
+  representationValue := column.represented index
+  proofBytes := scheme.openAt column.represented index
+  semanticExact := rfl
+  representationExact := rfl
+  verified := scheme.verifyOpening_commit column.represented index
+
+/-- A controller-accepted opening is the identical Loom opening relation for
+the adapted scheme. -/
+theorem ColumnOpening.verifiesInLoom
+    {Semantic Representation Domain : Type}
+    {port : ColumnPort Semantic Representation Domain}
+    {scheme : CommitmentScheme port}
+    {column : BoundColumn port scheme}
+    (opening : ColumnOpening column) :
+    scheme.toLoomOpeningScheme.verifyOpen column.root opening.index
+      opening.representationValue opening.proofBytes :=
+  opening.verified
 
 def ColumnOpening.record
     {Semantic Representation Domain : Type}
@@ -783,23 +889,40 @@ def towerCommitment : CommitmentScheme towerPort where
   suiteId := id 7250
   proofCodecPin := towerCodecPin
   commit := fun column => id ((column ⟨0, by decide⟩).val + 1)
+  openAt := fun _ _ => []
   verifyOpening := fun root _ value proof =>
     decide (root = id (value.val + 1) ∧ proof = [])
+  verifyOpening_commit := by
+    intro column index
+    have hindex : index = (0 : SingletonDomain) := Subsingleton.elim _ _
+    subst index
+    simp
+
+/-- The tiny executable example also carries a proved position-binding law,
+so the controller-to-Loom adapter is inhabited rather than premise-only. -/
+def towerBindingCommitment : BindingCommitmentScheme towerPort where
+  toCommitmentScheme := towerCommitment
+  binding := by
+    intro root index left right leftProof rightProof hleft hright
+    simp only [towerCommitment] at hleft hright
+    simp at hleft hright
+    have hvalue : left.val = right.val := by
+      omega
+    exact Fin.ext hvalue
+
+theorem towerBinding_toLoom_commit_exact
+    (column : SingletonDomain -> Tower256Value) :
+    towerBindingCommitment.toLoom.commit column =
+      towerCommitment.commit column :=
+  rfl
 
 def zeroColumn : BoundColumn towerPort towerCommitment where
   semantic := fun _ => 0
   represented := fun _ => 0
   representationExact := fun _ => rfl
 
-def zeroOpening : ColumnOpening zeroColumn where
-  openingSlotId := id 7260
-  index := 0
-  semanticValue := 0
-  representationValue := 0
-  proofBytes := []
-  semanticExact := rfl
-  representationExact := rfl
-  verified := by decide
+def zeroOpening : ColumnOpening zeroColumn :=
+  zeroColumn.honestOpening (id 7260) 0
 
 def zeroSameOpening : ReprEqEdge
     (sameOpeningSpec Tower256Value (id 7301)) zeroOpening zeroOpening where
@@ -870,6 +993,7 @@ end Tower256Example
 
 #print axioms challenge_before_root_unrepresentable
 #print axioms native_error_cannot_accept_query
+#print axioms Tower256Example.towerBinding_toLoom_commit_exact
 #print axioms Tower256Example.concrete_schedule_is_nonvacuous
 
 end Minidregg.Compiler.AuthenticatedColumnPlan
