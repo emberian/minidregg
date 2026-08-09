@@ -67,9 +67,8 @@ open Lean (Json toJson)
 
 /-! ## §1. `[PROVER-field]` — BabyBear, the deployed prover field. -/
 
-/-- **BabyBear** `p = 2^31 − 2^27 + 1` — the deployed prover-field instantiation
-(`[PROVER-field]`): 31-bit, high 2-adicity (`2^27 ∣ p − 1`), the field of the WGPU fold
-kernel the prover adopts. -/
+/-- **BabyBear** `p = 2^31 − 2^27 + 1`: the 31-bit, high-2-adicity
+(`2^27 ∣ p − 1`) prime-field instantiation used by the emitted examples and Ext6 model. -/
 def babyBearP : ℕ := 2013265921
 
 theorem babyBearP_eq : babyBearP = 2 ^ 31 - 2 ^ 27 + 1 := by norm_num [babyBearP]

@@ -41,8 +41,7 @@ here at matching shape and the cross-boundary lemma is the named residual
 
 * `Loom/Proximity.fold D f α = foldEven + α·foldOdd` where
   `foldEven f k = (f(x) + f(−x))/2` and `foldOdd f k = (f(x) − f(−x))/(2x)` at
-  `x = D.sec k` — the object `fold_preserves_code` is proved about, the fold our prover's
-  conformance vector (`Compiler/FriConformance`) is theorem-tied to.
+  `x = D.sec k` — the object `fold_preserves_code` is proved about.
 * `friFoldVal half β lo hi tw` below IS that formula with the two divisions rendered as
   the constant `half` and the witnessed wire `tw`: `friFoldVal_eq_div_twoX` proves
   `2·half = 1 → tw·(2x) = 1 → friFoldVal half β lo hi tw = (lo+hi)/2 + β·(lo−hi)/(2x)` —
@@ -112,8 +111,7 @@ variable {F : Type u} [Field F] {Idx : Type u} {rounds n : ℕ}
 /-- **The deployed fold formula, twiddle form**: `(lo + hi)·half + β·(lo − hi)·tw`. With
 `2·half = 1` and `tw·(2x) = 1` this IS `Loom/Proximity.fold`'s
 `(f(x)+f(−x))/2 + β·(f(x)−f(−x))/(2x)` at `f(x) = lo`, `f(−x) = hi`
-(`friFoldVal_eq_div_twoX` below) — the formula our prover's conformance vector is
-theorem-tied to in `Compiler/FriConformance`. -/
+(`friFoldVal_eq_div_twoX` below). -/
 def friFoldVal (half β lo hi tw : F) : F := (lo + hi) * half + β * (lo - hi) * tw
 
 /-- The last fold value: `next (rounds−1)`, or (junk, `rounds = 0` only, never a real

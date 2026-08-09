@@ -20,10 +20,10 @@ refinement and never decides whether a receipt is accepted.
 The stable clean-sheet architecture and ordered construction plan live in
 [`PROJECT.md`](PROJECT.md); [`GOAL.md`](GOAL.md) is the evidence/status ledger.
 
-This is a frontier research stack, not a production prover. In particular, preserving or reaching
-a particular “production GPU path” is **not** a project goal. Acceleration is an implementation
-choice downstream of the protocol. The existing WGPU fold is retained as an optional conformance
-experiment and can be replaced wholesale as the protocol evolves.
+This is a frontier research stack, not a production prover. Preserving a historical native or GPU
+path is **not** a project goal. Acceleration is an implementation choice downstream of a
+Lean-owned protocol. The old BabyBear⁴/FRI/WGPU experiment has been deleted rather than retained as
+a second, handwritten protocol profile.
 
 ## Status at a glance
 
@@ -45,17 +45,18 @@ experiment and can be replaced wholesale as the protocol evolves.
 There is deliberately no authoritative Rust one-call prover/verifier API now. The former
 full-trace `reference_prove` / `reference_verify` composition and its benchmark were deleted because
 they authored transcript and acceptance semantics in Rust. `prover/src` now contains only
-unverified field/tower arithmetic, linear/MLE/gate/lookup kernels, transforms, parameterized
-cSHAKE/hash/Merkle data operations, and the optional WGPU fold. The protocol wrappers for gate
+unverified field/tower arithmetic, linear/MLE/gate/lookup kernels, transforms, and parameterized
+cSHAKE/hash/Merkle data operations. The protocol wrappers for gate
 sumcheck, MLE openings, LogUp, Fiat--Shamir, receipts, and proof history have been deleted. Lean owns
 the relations, manifests, plans, codecs, and emitted descriptors.
 
-“Kernel” does not yet mean “free of handwritten profile choices.” `gate_kernels` still fixes local
-row/read/residual and seven-operand gate layouts; `logup256_kernels` fixes incidence order,
-round-message polynomials, and probe sets; `hash_kernels` fixes cSHAKE framing and binary Merkle
-layout; and the tower/Ext6 modules fix representation conventions. These are untrusted candidate
-compute and generation/deletion debt. They acquire no semantic authority from resembling a Lean
-formula and cannot be admitted until Lean-owned control pins or rechecks the exact conventions.
+“Kernel” does not yet mean “free of handwritten conventions.” The gate and LogUp modules now take
+tables, incidence layout, probe points, and challenges from their caller and retain arithmetic
+only. `hash_kernels` still fixes cSHAKE framing and binary-Merkle layout; `mle_kernels` fixes
+index/domain transforms; and the tower/Ext6 modules fix representation conventions. These are
+untrusted candidate compute and generation/deletion debt. They acquire no semantic authority from
+resembling a Lean formula and cannot be admitted until Lean-owned control pins or rechecks the
+exact conventions.
 
 The generated [`prover/generated/semantic_artifact_v1.rs`](prover/generated/semantic_artifact_v1.rs)
 is a separate DTO seam: it contains canonical artifact constants, four data structures, and
@@ -140,10 +141,6 @@ materialize to the pre-cell, and `TransitionFacts` exposes canonical roots, exac
 The former Rust receipt-relation and proof-history wrappers were deleted. Their replacement is not a
 new mirror: it is a Lean-owned manifest/controller whose only native interface is bounded compute
 calls and replies, followed by Lean-side checks and construction of the sole verified receipt token.
-
-The optional `wgpu-fold` feature contains a BabyBear⁴ WGSL fold that is bit-for-bit conformance
-tested against the CPU fold on supported hardware. It is not a dependency of proving or
-verification and is not the architectural center of the project.
 
 Conformance is not verification: the Rust tests compare executable behavior with Lean-authored
 vectors and theorem-defined formulas, but there is no formal semantics of Rust or WGSL in the
@@ -259,7 +256,7 @@ soundness claim.
 | `Compiler/` | AIR DSL, flattening, gadgets, emit/serialization, and verifier components. |
 | `Assurance/` | Cross-layer statements, manifests, and explicit security budgets. |
 | `Kernel/`, `Effects/`, `Pred/` | The proof-native application/computation substrate. |
-| `prover/` | Unverified, caller-parameterized arithmetic/transform/hash kernels plus the opt-in WGPU fold experiment. |
+| `prover/` | Opaque, untrusted, caller-parameterized arithmetic/transform/hash kernels. |
 
 ## Build and test
 
@@ -269,11 +266,7 @@ lake env lean Loom/HalfThresholdFriTower.lean
 
 cd prover
 cargo test
-cargo test --features wgpu-fold
-cargo run --release --features wgpu-fold --bin fri_fold_bench
 ```
-
-GPU tests skip cleanly when no compatible adapter is available.
 
 ## Reading order
 

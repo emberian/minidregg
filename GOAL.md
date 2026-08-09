@@ -80,7 +80,7 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
   error assemblies are proved behind explicit shared-ROM fresh/hit/sampling and CR/ZK ports.
 - **Security — candidate, not label:** the unified BabyBear⁶ arithmetic budget is 137 bits; the old
-  base/Ext4 executable path is not. A caller-parameterized cSHAKE/hash kernel exists, but no native
+  base/Ext4 executable path has been deleted. A caller-parameterized cSHAKE/hash kernel exists, but no native
   default or suite selects the semantic profile. Lean-owned transcript scheduling, concrete
   CR/shared-ROM/PoW composition, and recursive-verifier wiring remain before runtime inherits the
   candidate number.
@@ -176,8 +176,9 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   security proof.
 
 SUBSTRATE (always): Lean-authored constraints/executor from compiler folds, never a hand-authored
-Rust AIR. WGPU is an optional downstream experiment. Prefer statement-first closure and explicit
-counterexamples over convenient but false joins.
+Rust AIR and never a claimed refinement of Rust (there is no Rust semantics). Native code returns
+candidate buffers only. Prefer statement-first closure and explicit counterexamples over
+convenient but false joins.
 
 ## PHASE 2 — beyond-v0 frontier (ember steered 2026-08-08: fan ALL FOUR)
 The four original frontiers have moved materially: the Lean emit/controller path exists and the
@@ -189,14 +190,21 @@ work is stated by resolution: succinct openings and the extension-field challeng
 Lean-owned control,
 verifier root-word attribution plus sampling-to-closeness for the sub-UD linked log, formalization
 of the algebraic core behind the landed exact Johnson interface, and the additive
-commitment/query/protocol join over the fast tower arithmetic. WGPU is explicitly downstream and
-disposable.
+commitment/query/protocol join over the fast tower arithmetic. The historical WGPU/Ext4 path has
+been deleted rather than carried as a parallel protocol.
 
 ## Done-log (recent)
 
 This log records how the present tree was reached. Entries marked **RETRACTED** describe deleted
 experiments and are not current architecture evidence; the current system map and active frontier
 above are authoritative when an older entry says “runtime,” “deployed,” or “verifier.”
+
+- 2026-08-09 **RETRACTED and deleted Ext4/FRI/WGPU protocol island:** the BabyBear⁴ CPU fold,
+  WGSL implementation, conformance artifact, benchmark, feature/dependencies, and the Lean module
+  that emitted its native test vector were removed. They encoded a second handwritten protocol
+  profile rather than a Lean-emitted plan. Live Ext6/MLE code now depends only on a neutral
+  BabyBear scalar arithmetic module. The LogUp arithmetic kernel likewise no longer selects
+  incidence order, probe points, message arity, interpolation arity, or challenge history.
 
 - 2026-08-09 ★★★★★ **Lean-owned semantic receipt descriptor** ✓:
   `SemanticReceiptRuntimeCodec.lean` proves the bound runtime index equivalence, fixed digest-pair
@@ -304,8 +312,8 @@ above are authoritative when an older entry says “runtime,” “deployed,” 
 - 2026-08-08 **RETRACTED and deleted Rust reference-verifier authority:** the old
   `reference_prove`/`reference_verify` path bound a full trace, gate sumcheck, and FRI under a
   handwritten Rust transcript and returned the final acceptance bit. It was useful diagnostic code,
-  but it had no semantics and was deleted with its benchmark/test. Pure arithmetic, transform, and
-  optional WGPU compute remain pending Lean-emitted scheduling and checks.
+  but it had no semantics and was deleted with its benchmark/test. Pure arithmetic, transform,
+  and hash compute remain pending Lean-emitted scheduling and checks.
 - 2026-08-08 **Loom/OracleLogLinked — deployed-ZK: the guarded hit-horn CLOSED, TWO wrong statements caught** (audited, 83b05e2): the audit discipline twice. [ORACLE-LOG-linked] (last turn's repair) was ITSELF refutable — it tested alignment at the ADVERSARY's own statement channel with nothing tying statement→designation (the stmt∈Z guard dropped); oracleLogProgramLinked_accRbrError_false + refuter alnPrv MACHINE-CHECK the refutation. THE FIX: OracleLogLinkedAligned (guarded by LinkAligned on the adversary's statement); oracleLogLinkedAligned_proved (PROVED at the sharp 1/|F|, the contested hit-horn mass) [ATLAS triple]. Enabling lemmas: hitAt_answerOf (hit-horn answer IS the tested coin) + linkOpened_increment_pinned_free (erasure recovery is AFFINE in the columns — recoverFromColumns_line — the pin needs NO premise on the prior message). Reduction grown: accReductionBcsShiftedLinked (verify w/ LinkOpened); linked_completeness_F5; teeth progMsgs_linked_rejected (old refuter dies in-verifier) + alnGuarded_zero (new refuter's guarded event EMPTY — the guard load-bearing exactly where the unguarded died). deployedZK_adaptive_sound_linked NOT closed — residual [ORACLE-LOG-linked-resid] (a) fresh-horn UD pin (freshBad_le splitCoord) + (b) (t+k) assembly over Z_dep (gameSlotBound bookkeeping) — 'MECHANICAL over landed machinery, NO open structural question.' 13 theorems ATLAS triple. **Two false reductions caught + machine-refuted, the guarded truth proved; the deployed-ZK frontier precisely mapped, remaining mass mechanical.**
 - 2026-08-08 ★★★ **Assurance/ErrorBudget — THE COMPOSED BIT-SECURITY NUMBER: 55 bits, tight** ✓ (audited, 49ffeed, tree green 2538): the end-to-end soundness as ONE stated+bounded number. soundnessError = grindingTerm + sumcheckTerm + crTerm + proximityTerm; deployedBudget_secure (soundnessError deployedBudget ≤ 2^−55) + deployedBudget_ceiling (> 2^−56) — 55 BITS TIGHT at BabyBear⁴ (the HONEST prime p=2013265921, |F|=p⁴≈2^123.6, n=2^20, ρ=1/2, δ=1/8 in-UD, t=q=2^40, k=2^8), by EXACT integer arithmetic (norm_num). soundnessError_bound: the union-bound composition over the product coin space — REAL theorem (uniformProb_or_le + product marginals, NO independence used); mutual-CA DISCHARGED by hasMutualCorrelatedAgreement_UD (no free hypothesis); each summand a landed RHS verbatim. Dominant: grindingTerm=(t+k)k(n+1)/|F|≈2^−55.6, rest ≤2^−100 (proved); [LC-grinding-native] sharpening buys 8 bits (55→63). Residual [BUDGET-compose] (shared-one-oracle vs product measure — survives, union bound needs no independence). budget_fired (premise inhabited end-to-end). ATLAS triple. **The 'what is the actual security' answer: 55 bits, PROVEN (not conjectured), at unique decoding, floor named beside it. Budget-relative (prices a 2^40-query adversary; general formula in-file).**
 - 2026-08-08 ★★★ **Loom/SpongeIndiff — the LAST floor reduction advancing: [FS-ROM] → ideal permutation** ✓ (audited, 88698d8, tree green 2537): the sponge indifferentiability. sponge over any permutation; spongeSimulator (simFwd/simInv — the genuine BDPV construction, one shared log, completion? programs (H m, coin.cap) on rate-completing queries; consistency inherited VERBATIM from the landed handler laws — the simulator IS Oracle.respond at a computed value). walk_programs (the programming KEYSTONE — the sponge walk squeezes EXACTLY the RO's answer through the sim's log, ∀ log/state/msg); sponge_realizes_handler_step (the [FS-ROM] seam closed ONE STEP at a time vs the lazy-sampling handler); uniquePaths_simFwd/Inv (consistency off the bad event per step, both directions); capBad_le (capacity price O(q²/2^c), tight at q=2, birthday_bound cited). Residual [SPONGE-indiff-game] (the run-level assembly: run induction + adaptive avoid-set bridge + identical-until-bad + RP/RF switch — STANDARD GAME-HOPPING, real formalization not conjectural, named not faked) + [PERM-ideal] (the new floor). ATLAS triple. **THE FLOOR CONSOLIDATES: all three named assumptions reduce toward (ideal permutation + proximity) — CR→RO proved, RO→ideal-perm's core proved, proximity proved-on-a-band + additive-mirror = one domain-agnostic gap. The floor is proved DOWN to its irreducible endpoint, modulo standard game-hopping + the proximity lemma.**

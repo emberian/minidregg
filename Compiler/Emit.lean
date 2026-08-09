@@ -3,10 +3,10 @@
 descriptor, FAITHFULLY
 
 **Substrate, said out loud: the emit path is Lean-AUTHORED and its faithfulness is a THEOREM
-over the actual emitted object.** The prover that CONSUMES the descriptor is UNVERIFIED
-COMPUTE downstream of this seam — it will adopt breadstuffs' `gpu_hidingfri_fold` into OUR
-work where appropriate, never a raw port and NEVER a hand-authored Rust AIR. Rust only ever
-reads the `ConstraintDescriptor` this file emits; it never writes constraints.
+over the actual emitted object.** Native code has no semantics to refine and does not consume
+this descriptor today. It may only compute candidate buffers behind a Lean-owned plan; Lean
+checks those buffers against the emitted `ConstraintDescriptor` before constructing any
+accepted token.
 
 ## The construction
 
@@ -22,9 +22,9 @@ reads the `ConstraintDescriptor` this file emits; it never writes constraints.
   and `emit` maps the resulting gates/roots through the wire layout. A fold and a map —
   nothing else.
 * `descriptorHolds : ConstraintDescriptor F → (ℕ → F) → Prop` — the descriptor's OWN
-  satisfaction relation, reading gates purely by index into one total wire vector. This is
-  the relation the unverified prover establishes; it never mentions `Term`, `flatten`, or any
-  Lean function — a prover implementing exactly this check needs only the descriptor.
+  satisfaction relation, reading gates purely by index into one total wire vector. It never
+  mentions `Term`, `flatten`, or another compiler function. This relation remains in Lean;
+  native code may suggest a wire vector but cannot establish or decide it.
 
 ## The faithfulness (what is PROVED, and in which direction)
 
@@ -44,12 +44,10 @@ reads the `ConstraintDescriptor` this file emits; it never writes constraints.
 
 ## Residuals (named, none stubbed)
 
-* `[EMIT-backend]` — the concrete prover wire-format (field-element encoding, gate record
-  packing, the FRI/sumcheck transcript layout the GPU fold consumes) and the WGPU BabyBear⁴
-  backend itself: UNVERIFIED COMPUTE that reads `ConstraintDescriptor` and produces proofs,
-  adopting breadstuffs' `gpu_hidingfri_fold` into our work. The descriptor is the contract:
-  first-order data on this side of the seam, bytes on that side. Nothing on that side is a
-  theorem, and no Rust ever authors a constraint.
+* `[EMIT-backend]` — a Lean-emitted online plan that requests bounded native computation,
+  validates every returned buffer against this descriptor, and only then advances the
+  Lean-owned transcript/controller. The historical Rust descriptor reader and
+  BabyBear⁴/FRI/WGPU path were deleted; no current native module consumes this descriptor.
 * `[EMIT-sound]` — the deployed claim "the prover ACCEPTED, therefore `descriptorHolds`"
   inherits the FRI/STARK floor (`Loom`'s undischarged soundness residuals plus the backend's
   honest implementation of the IOP). This file proves the descriptor MEANS the Lean AIR; it
