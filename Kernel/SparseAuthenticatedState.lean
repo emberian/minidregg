@@ -177,13 +177,13 @@ theorem no_enabled_rom_write {L : Layout.{u, v, w}} (store : Store L)
   | read => rfl
   | write space key before after =>
       simp only [Enabled] at enabled
-      exact (Discipline.noConfusion (enabled.1.trans rom.symm))
+      exact False.elim (Discipline.noConfusion (enabled.1.symm.trans rom))
   | allocate space key value =>
       simp only [Enabled] at enabled
       exact False.elim (enabled.1 rom)
   | free space key before =>
       simp only [Enabled] at enabled
-      exact (Discipline.noConfusion (enabled.1.trans rom.symm))
+      exact False.elim (Discipline.noConfusion (enabled.1.symm.trans rom))
 
 /-- Append-only namespaces accept mutation only through fresh allocation. -/
 theorem enabled_appendOnly_modification_is_allocate
@@ -196,11 +196,11 @@ theorem enabled_appendOnly_modification_is_allocate
   | read => exact False.elim (modifies rfl)
   | write space key before after =>
       simp only [Enabled] at enabled
-      exact False.elim (Discipline.noConfusion (enabled.1.trans appendOnly.symm))
+      exact False.elim (Discipline.noConfusion (enabled.1.symm.trans appendOnly))
   | allocate => rfl
   | free space key before =>
       simp only [Enabled] at enabled
-      exact False.elim (Discipline.noConfusion (enabled.1.trans appendOnly.symm))
+      exact False.elim (Discipline.noConfusion (enabled.1.symm.trans appendOnly))
 
 /-- One operation changes no address except its derived write address. -/
 theorem apply_frame {L : Layout.{u, v, w}}
@@ -344,12 +344,23 @@ theorem run_frame {L : Layout.{u, v, w}}
   induction operations generalizing pre with
   | nil => rfl
   | cons operation rest induction =>
-      simp only [writeFootprint, List.filterMap_cons, List.toFinset_cons,
-        Finset.mem_insert, not_or] at outside
-      rw [run, induction (operation.apply pre) outside.2]
-      exact operation.apply_frame pre space key (by
+      have headOutside :
+          operation.writeAddress? ≠ some (⟨space, key⟩ : Address L) := by
         intro equality
-        exact outside.1 equality.symm)
+        exact outside ((mem_writeFootprint_iff (operation :: rest)
+          (⟨space, key⟩ : Address L)).2
+            ⟨operation, List.mem_cons_self, equality⟩)
+      have tailOutside :
+          (⟨space, key⟩ : Address L) ∉ writeFootprint rest := by
+        intro member
+        rcases (mem_writeFootprint_iff rest
+          (⟨space, key⟩ : Address L)).1 member with
+          ⟨tailOperation, tailMember, equality⟩
+        exact outside ((mem_writeFootprint_iff (operation :: rest)
+          (⟨space, key⟩ : Address L)).2
+            ⟨tailOperation, List.mem_cons_of_mem _ tailMember, equality⟩)
+      rw [run, induction (operation.apply pre) tailOutside]
+      exact operation.apply_frame pre space key headOutside
 
 /-- Contrapositive frame: every actual post-state change is named by the exact
 derived write footprint. -/
@@ -621,25 +632,41 @@ def layout : Layout where
     | .heap => .ram
     | .log => .appendOnly
 
+instance : DecidableEq layout.Namespace := by
+  change DecidableEq Namespace
+  infer_instance
+
+instance (space : layout.Namespace) : DecidableEq (layout.Key space) := by
+  change DecidableEq Nat
+  infer_instance
+
+instance (space : layout.Namespace) : DecidableEq (layout.Value space) := by
+  change DecidableEq Nat
+  infer_instance
+
 def empty : Store layout := fun _ _ => none
 
-def allocateSeven : Op layout := .allocate .heap 7 42
+def allocateSeven : Op layout :=
+  @Op.allocate layout .heap (7 : Nat) (42 : Nat)
 
-example : allocateSeven.Enabled empty := by decide
+example : allocateSeven.Enabled empty := by
+  simp [allocateSeven, Op.Enabled, layout, empty, Fresh]
 
-example : (allocateSeven.apply empty) .heap 7 = some 42 := by decide
+example : (allocateSeven.apply empty) .heap (7 : Nat) = some (42 : Nat) := by
+  decide
 
 /-- Freshness has teeth: the same allocation cannot execute twice. -/
 theorem duplicate_allocation_rejected :
-    ¬ (.allocate (.heap : Namespace) 7 42 : Op layout).Enabled
-      ((.allocate (.heap : Namespace) 7 42 : Op layout).apply empty) := by
-  decide
+    ¬ (@Op.allocate layout .heap (7 : Nat) (42 : Nat)).Enabled
+      ((@Op.allocate layout .heap (7 : Nat) (42 : Nat)).apply empty) := by
+  simp [Op.Enabled, Op.apply, layout, empty, Fresh, Store.set]
 
 /-- ROM overwrite is not an enabled semantic operation. -/
 theorem rom_write_rejected :
-    ¬ (.write (.code : Namespace) 0 1 2 : Op layout).Enabled
-      (fun space _ => if space = .code then some 1 else none) := by
-  decide
+    ¬ (@Op.write layout .code (0 : Nat) (1 : Nat) (2 : Nat)).Enabled
+      (show Store layout from fun (space : Namespace) (_ : Nat) =>
+        if space = Namespace.code then some (1 : Nat) else none) := by
+  simp [Op.Enabled, layout]
 
 end Example
 
