@@ -6,8 +6,7 @@ use minidregg_prover::{
     descriptor::Descriptor,
     field4::P,
     field6::Ext6,
-    gate_claim::gate_defect_table,
-    sumcheck_generic::{batch_lifted_residuals, claimed_sum},
+    gate_kernels::{batch_lifted_residuals, descriptor_defect_table, table_sum},
     trace::generate_trace,
 };
 
@@ -50,9 +49,9 @@ fn factored_gate_claim_streams_to_public_trace_selectors() {
         ext([11, 0, 0, 0, 0, 1]),
     ];
 
-    let residuals = gate_defect_table(&descriptor, &trace);
+    let residuals = descriptor_defect_table(&descriptor, &trace).unwrap();
     let existing = batch_lifted_residuals::<Ext6>(&residuals, gamma)
-        .and_then(|table| claimed_sum(&table))
+        .and_then(|table| table_sum(&table))
         .expect("existing gamma-batched claim");
 
     let tables = build_factored_gate_tables(&descriptor, &trace, gamma).unwrap();

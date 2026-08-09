@@ -2,9 +2,8 @@
 
 use minidregg_prover::field4::{badd, bmul, P};
 use minidregg_prover::field6::{Ext6, EXT6_W};
-use minidregg_prover::sumcheck_generic::{
-    batch_lifted_residuals, claimed_sum, evaluate_mle, prove, verify, BaseEmbedding, SumcheckError,
-    SumcheckScalar,
+use minidregg_prover::gate_kernels::{
+    batch_lifted_residuals, evaluate_mle, table_sum, GateKernelError,
 };
 
 fn e(limbs: [u64; 6]) -> Ext6 {
@@ -139,45 +138,10 @@ fn generic_sumcheck_matches_literal_ext6_mle_through_dimension_eight() {
             .map(|_| random_ext6(&mut seed))
             .collect();
         let point: Vec<Ext6> = (0..dimension).map(|_| random_ext6(&mut seed)).collect();
-        let proof = prove(&table, &point).expect("well-shaped sumcheck");
-        let claim = claimed_sum(&table).unwrap();
         let fast_terminal = evaluate_mle(&table, &point).unwrap();
         let literal_terminal = literal_mle(&table, &point);
         assert_eq!(fast_terminal, literal_terminal, "dimension {dimension}");
-        assert!(verify(claim, &proof, &point, literal_terminal).unwrap());
     }
-}
-
-#[test]
-fn every_ext6_round_limb_tamper_rejects() {
-    let table: Vec<Ext6> = [3, 1, 4, 1, 5, 9, 2, 6].into_iter().map(base).collect();
-    let point = [
-        e([2, 1, 0, 0, 0, 0]),
-        e([3, 0, 1, 0, 0, 0]),
-        e([5, 0, 0, 1, 0, 0]),
-    ];
-    let good = prove(&table, &point).unwrap();
-    let claim = claimed_sum(&table).unwrap();
-    let terminal = evaluate_mle(&table, &point).unwrap();
-    assert!(verify(claim, &good, &point, terminal).unwrap());
-
-    for round in 0..good.rounds.len() {
-        for endpoint in 0..2 {
-            for lane in 0..6 {
-                let mut bad = good.clone();
-                let mut limbs = *bad.rounds[round][endpoint].limbs();
-                limbs[lane] = badd(limbs[lane], 1);
-                bad.rounds[round][endpoint] = e(limbs);
-                assert!(
-                    !verify(claim, &bad, &point, terminal).unwrap(),
-                    "round {round}, endpoint {endpoint}, lane {lane}"
-                );
-            }
-        }
-    }
-
-    assert!(!verify(claim.add(Ext6::ONE), &good, &point, terminal).unwrap());
-    assert!(!verify(claim, &good, &point, terminal.add(Ext6::ONE)).unwrap());
 }
 
 #[test]
@@ -187,42 +151,15 @@ fn extension_gamma_batches_lifted_base_residuals() {
     // challenge produces genuine cross-lane residuals and does not escape.
     let residuals = [P - 1, 1];
     let at_one = batch_lifted_residuals::<Ext6>(&residuals, Ext6::ONE).unwrap();
-    assert_eq!(claimed_sum(&at_one).unwrap(), Ext6::ZERO);
+    assert_eq!(table_sum(&at_one).unwrap(), Ext6::ZERO);
 
     let u = e([0, 1, 0, 0, 0, 0]);
     let at_u = batch_lifted_residuals::<Ext6>(&residuals, u).unwrap();
     assert_eq!(at_u[1], u);
-    assert!(!claimed_sum(&at_u).unwrap().is_zero());
+    assert!(!table_sum(&at_u).unwrap().is_zero());
 
     assert_eq!(
         batch_lifted_residuals::<Ext6>(&[P], u),
-        Err(SumcheckError::NonCanonicalBase { value: P })
-    );
-}
-
-#[test]
-fn malformed_sumcheck_shapes_return_errors_without_panicking() {
-    let point = [Ext6::ONE];
-    assert_eq!(prove::<Ext6>(&[], &point), Err(SumcheckError::EmptyTable));
-    assert_eq!(
-        prove(&[Ext6::ZERO; 3], &point),
-        Err(SumcheckError::NonPowerOfTwo { len: 3 })
-    );
-    assert_eq!(
-        prove(&[Ext6::ZERO; 4], &point),
-        Err(SumcheckError::ChallengeCount {
-            expected: 2,
-            actual: 1
-        })
-    );
-
-    let table = [Ext6::ZERO; 2];
-    let proof = prove(&table, &point).unwrap();
-    assert_eq!(
-        verify(Ext6::ZERO, &proof, &[], Ext6::ZERO),
-        Err(SumcheckError::RoundCount {
-            expected: 0,
-            actual: 1
-        })
+        Err(GateKernelError::NonCanonicalBase { index: 0, value: P })
     );
 }

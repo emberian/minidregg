@@ -17,16 +17,13 @@ pub mod descriptor;
 pub mod field4;
 pub mod field6;
 pub mod fri;
-pub mod gate_claim;
+pub mod gate_kernels;
 #[cfg(feature = "wgpu-fold")]
 pub mod gpu;
 pub mod logup_tower256;
 pub mod mle_kernels;
 pub mod outer_factored_gate;
 pub mod poseidon;
-pub mod sumcheck;
-pub mod sumcheck_generic;
-pub mod sumcheck_streaming;
 pub mod trace;
 pub mod transcript_ext6;
 pub mod wide;
