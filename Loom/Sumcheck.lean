@@ -96,10 +96,11 @@ theorem uniformProb_mem_finset (S : Finset F) :
     rw [Nat.card_eq_fintype_card, Fintype.card_coe]
   rw [hc]
 
-omit [DecidableEq F] in
+omit [Field F] [DecidableEq F] in
 /-- **A single coordinate of a uniform tuple lands in a fixed set with the same
 probability `|S|/|F|`.** Slice the `i`-th coordinate out with `splitCoord` and
-apply the fibrewise `uniformProb_prod_le`. -/
+apply the fibrewise `uniformProb_prod_le`. (No field structure is used — any
+finite alphabet; `Loom/SpongeIndiff.lean` consumes it at the capacity type.) -/
 theorem uniformProb_coord_mem {v : ℕ} (i : Fin v) (S : Finset F) :
     uniformProb (Fin v → F) (fun r => r i ∈ S) ≤ (S.card : ℝ) / Fintype.card F := by
   have hkey : uniformProb (Fin v → F) (fun r => r i ∈ S)
