@@ -280,182 +280,45 @@ pub fn fraction_add_layer(
     Ok((next_numerators, next_denominators))
 }
 
-/// Leaf-to-root fraction-addition arithmetic.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FractionAddTree256 {
-    numerator_layers: Vec<Vec<Tower256>>,
-    denominator_layers: Vec<Vec<Tower256>>,
-}
-
-impl FractionAddTree256 {
-    pub fn new(
-        numerators: &[Tower256],
-        denominators: &[Tower256],
-    ) -> Result<Self, Logup256KernelError> {
-        if numerators.len() != denominators.len() {
+/// Evaluate one fraction-addition cubic expression at caller-supplied probes.
+pub fn fraction_round_message(
+    equality: &[Tower256],
+    p0: &[Tower256],
+    p1: &[Tower256],
+    q0: &[Tower256],
+    q1: &[Tower256],
+    batching_scalar: Tower256,
+    probes: &[Tower256],
+) -> Result<Vec<Tower256>, Logup256KernelError> {
+    let len = equality.len();
+    for other in [p0.len(), p1.len(), q0.len(), q1.len()] {
+        if other != len {
             return Err(Logup256KernelError::LengthMismatch {
-                left: numerators.len(),
-                right: denominators.len(),
+                left: len,
+                right: other,
             });
         }
-        if numerators.len() < 2 || !numerators.len().is_power_of_two() {
-            return Err(Logup256KernelError::InvalidLength {
-                role: "fraction leaves",
-                len: numerators.len(),
-            });
+    }
+    if len < 2 || !len.is_power_of_two() {
+        return Err(Logup256KernelError::InvalidLength {
+            role: "fraction round",
+            len,
+        });
+    }
+    let mut message = vec![Tower256::ZERO; probes.len()];
+    for index in 0..(len / 2) {
+        for (slot, &probe) in message.iter_mut().zip(probes) {
+            let equality = affine(equality[2 * index], equality[2 * index + 1], probe);
+            let p0 = affine(p0[2 * index], p0[2 * index + 1], probe);
+            let p1 = affine(p1[2 * index], p1[2 * index + 1], probe);
+            let q0 = affine(q0[2 * index], q0[2 * index + 1], probe);
+            let q1 = affine(q1[2 * index], q1[2 * index + 1], probe);
+            let numerator = p0.mul(q1).add(p1.mul(q0));
+            let denominator = q0.mul(q1);
+            *slot = slot.add(equality.mul(numerator.add(batching_scalar.mul(denominator))));
         }
-        let mut numerator_layers = vec![numerators.to_vec()];
-        let mut denominator_layers = vec![denominators.to_vec()];
-        while numerator_layers.last().expect("leaf layer exists").len() > 1 {
-            let (next_numerators, next_denominators) = fraction_add_layer(
-                numerator_layers.last().expect("numerator layer exists"),
-                denominator_layers.last().expect("denominator layer exists"),
-            )?;
-            numerator_layers.push(next_numerators);
-            denominator_layers.push(next_denominators);
-        }
-        Ok(Self {
-            numerator_layers,
-            denominator_layers,
-        })
     }
-
-    /// Root numerator and denominator.
-    pub fn root(&self) -> [Tower256; 2] {
-        [
-            self.numerator_layers.last().expect("root layer exists")[0],
-            self.denominator_layers.last().expect("root layer exists")[0],
-        ]
-    }
-
-    /// Number of fraction-addition steps from leaves to root.
-    pub fn depth(&self) -> usize {
-        self.numerator_layers.len() - 1
-    }
-
-    /// Numerator layers ordered leaves first and root last.
-    pub fn numerator_layers(&self) -> &[Vec<Tower256>] {
-        &self.numerator_layers
-    }
-
-    /// Denominator layers ordered leaves first and root last.
-    pub fn denominator_layers(&self) -> &[Vec<Tower256>] {
-        &self.denominator_layers
-    }
-}
-
-/// Arithmetic state for one fraction-addition layer's cubic reductions.
-///
-/// `batching_scalar` in [`Self::round_message`] and every challenge passed to
-/// [`Self::bind`] are supplied by the caller.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FractionRoundState256 {
-    equality: Vec<Tower256>,
-    p0: Vec<Tower256>,
-    p1: Vec<Tower256>,
-    q0: Vec<Tower256>,
-    q1: Vec<Tower256>,
-}
-
-impl FractionRoundState256 {
-    pub fn new(
-        parent_point: &[Tower256],
-        p0: &[Tower256],
-        p1: &[Tower256],
-        q0: &[Tower256],
-        q1: &[Tower256],
-    ) -> Result<Self, Logup256KernelError> {
-        let len = p0.len();
-        for other in [p1.len(), q0.len(), q1.len()] {
-            if other != len {
-                return Err(Logup256KernelError::LengthMismatch {
-                    left: len,
-                    right: other,
-                });
-            }
-        }
-        if len == 0 || !len.is_power_of_two() {
-            return Err(Logup256KernelError::InvalidLength {
-                role: "fraction round",
-                len,
-            });
-        }
-        let expected = len.trailing_zeros() as usize;
-        if parent_point.len() != expected {
-            return Err(Logup256KernelError::PointLength {
-                expected,
-                actual: parent_point.len(),
-            });
-        }
-        Ok(Self {
-            equality: equality_weights(parent_point)?,
-            p0: p0.to_vec(),
-            p1: p1.to_vec(),
-            q0: q0.to_vec(),
-            q1: q1.to_vec(),
-        })
-    }
-
-    /// Evaluate the current cubic arithmetic expression at caller-supplied probes.
-    pub fn round_message(
-        &self,
-        batching_scalar: Tower256,
-        probes: &[Tower256],
-    ) -> Result<Vec<Tower256>, Logup256KernelError> {
-        if self.equality.len() < 2 {
-            return Err(Logup256KernelError::InvalidLength {
-                role: "fraction round",
-                len: self.equality.len(),
-            });
-        }
-        let mut message = vec![Tower256::ZERO; probes.len()];
-        for index in 0..(self.equality.len() / 2) {
-            for (slot, &probe) in message.iter_mut().zip(probes) {
-                let equality = affine(
-                    self.equality[2 * index],
-                    self.equality[2 * index + 1],
-                    probe,
-                );
-                let p0 = affine(self.p0[2 * index], self.p0[2 * index + 1], probe);
-                let p1 = affine(self.p1[2 * index], self.p1[2 * index + 1], probe);
-                let q0 = affine(self.q0[2 * index], self.q0[2 * index + 1], probe);
-                let q1 = affine(self.q1[2 * index], self.q1[2 * index + 1], probe);
-                let numerator = p0.mul(q1).add(p1.mul(q0));
-                let denominator = q0.mul(q1);
-                *slot = slot.add(equality.mul(numerator.add(batching_scalar.mul(denominator))));
-            }
-        }
-        Ok(message)
-    }
-
-    /// Bind one caller-supplied challenge in every current arithmetic layer.
-    pub fn bind(&mut self, challenge: Tower256) -> Result<(), Logup256KernelError> {
-        self.equality = bind_affine_layer(&self.equality, challenge)?;
-        self.p0 = bind_affine_layer(&self.p0, challenge)?;
-        self.p1 = bind_affine_layer(&self.p1, challenge)?;
-        self.q0 = bind_affine_layer(&self.q0, challenge)?;
-        self.q1 = bind_affine_layer(&self.q1, challenge)?;
-        Ok(())
-    }
-
-    /// `[p0, p1, q0, q1]` after all variables have been bound.
-    pub fn terminal(&self) -> Result<[Tower256; 4], Logup256KernelError> {
-        for len in [
-            self.equality.len(),
-            self.p0.len(),
-            self.p1.len(),
-            self.q0.len(),
-            self.q1.len(),
-        ] {
-            if len != 1 {
-                return Err(Logup256KernelError::InvalidLength {
-                    role: "fraction terminal",
-                    len,
-                });
-            }
-        }
-        Ok([self.p0[0], self.p1[0], self.q0[0], self.q1[0]])
-    }
+    Ok(message)
 }
 
 /// Evaluate `sum eq * value * (value + 1)` at caller-supplied probes.
@@ -592,13 +455,13 @@ mod tests {
     }
 
     #[test]
-    fn fraction_tree_root_is_cross_multiplied_without_inversion() {
-        let tree = FractionAddTree256::new(&[t(3), t(5)], &[t(7), t(11)]).unwrap();
+    fn fraction_layer_is_cross_multiplied_without_inversion() {
+        let (numerators, denominators) =
+            fraction_add_layer(&[t(3), t(5)], &[t(7), t(11)]).unwrap();
         assert_eq!(
-            tree.root(),
-            [t(3).mul(t(11)).add(t(5).mul(t(7))), t(7).mul(t(11))]
+            [numerators[0], denominators[0]],
+            [t(3).mul(t(11)).add(t(5).mul(t(7))), t(7).mul(t(11))],
         );
-        assert_eq!(tree.depth(), 1);
     }
 
     #[test]
@@ -631,8 +494,9 @@ mod tests {
         let q1 = [t(13), t(14), t(15), t(16)];
         let batching_scalar = t(17);
         let probes = [t(0), t(1), t(2), t(3)];
-        let state = FractionRoundState256::new(&parent_point, &p0, &p1, &q0, &q1).unwrap();
-        let message = state.round_message(batching_scalar, &probes).unwrap();
+        let message =
+            fraction_round_message(&equality, &p0, &p1, &q0, &q1, batching_scalar, &probes)
+                .unwrap();
 
         let expected = (0..4).fold(Tower256::ZERO, |sum, index| {
             let numerator = p0[index].mul(q1[index]).add(p1[index].mul(q0[index]));
