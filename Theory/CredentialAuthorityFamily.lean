@@ -122,11 +122,13 @@ theorem bearer_not_narrows_subject (subject : SubjectId) :
     ¬ Holder.bearer.Narrows (.subject subject) := by
   intro narrows
   let other : SubjectId := ⟨subject.value + 1⟩
-  have equal : other = subject := narrows other (by trivial)
+  have equal : other = subject := by
+    simpa [Holder.Covers] using narrows other (by trivial)
   have values := congrArg SubjectId.value equal
   simp [other] at values
 
 end Holder
+end Minidregg.Theory.TypedAuthorization
 
 namespace Minidregg.Theory.CredentialAuthorityFamily
 
@@ -346,8 +348,8 @@ theorem AcceptedCredential.reject_over_budget
     {scheme : RequestDigestScheme} {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (accepted : AcceptedCredential scheme portal state request)
-    (over : accepted.authorization.evidence.authorityScope.maxCost < request.cost) : False := by
-  exact (Nat.not_lt_of_ge accepted.effect_scope_and_budget.cost) over
+    (overBudget : accepted.authorization.evidence.authorityScope.maxCost < request.cost) : False := by
+  exact (Nat.not_lt_of_ge accepted.effect_scope_and_budget.cost) overBudget
 
 /-- Negative tooth shared by every carrier: stale policy selection is
 incompatible with acceptance, including token-style presentations. -/
