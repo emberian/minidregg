@@ -22,6 +22,7 @@ pub mod gate_claim;
 #[cfg(feature = "wgpu-fold")]
 pub mod gpu;
 pub mod logup_tower256;
+pub mod mle_kernels;
 pub mod multiplicative_mle_terminal;
 pub mod outer_factored_gate;
 pub mod poseidon;
