@@ -27,6 +27,24 @@ worker-memory assumptions before these passing records were promoted. See
 [`D-0003`](decisions/D-0003-remote-evidence.md) and
 [`scripts/remote-check.sh`](../scripts/remote-check.sh).
 
+### Writable private generator replay
+
+Commit `c300f7fa57366c96e706ea59d83fa9838cdb5715` exposed an evidence-runner bug: compiling
+`Compiler.BinaryTower256Profile` intentionally evaluates the V1 artifact writer, but the unique remote
+source snapshot had been made read-only. The corrected runner permits writes only in that private snapshot
+and compares a complete post-run source manifest with the committed pre-run manifest. The default
+generated-output allowlist was empty in both reruns; the artifact rewrite reproduced the committed bytes,
+so both manifests remained exactly `d5768bed8a7b2bfa5d0a01f48d2355dcc0bd475041f47e9e4a20446da38d9c44`.
+
+| Evidence | Host | Exact targets | Result | Source policy |
+|---|---|---|---:|---|
+| [`E-…2254`](evidence/runs/E-20260809T182254-12421-hbox-c300f7fa5736-lake.json) | hbox, i9-12900 | `Compiler.BinaryTower256Profile`, `Assurance.BinaryTowerHeaderCodec` | 3,010 jobs pass | Empty allowlist; before = after |
+| [`E-…2251`](evidence/runs/E-20260809T182251-12422-persvati-c300f7fa5736-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | same | 3,010 jobs pass | Empty allowlist; before = after |
+
+The project-olean manifests are identical across workers (`faa0ccd9754b445e847d62050389c4186bc5f336e2fb105338a0c031e6fe6d58`).
+The v3 evidence envelopes also retain both source manifests and the hashed empty allowlist. This is build
+and deterministic-generator evidence, not a performance or proof-security result.
+
 ## Dense/sparse equality-functional crossover — 2026-08-09
 
 This is the first routing benchmark whose two paths target the same Lean expression.

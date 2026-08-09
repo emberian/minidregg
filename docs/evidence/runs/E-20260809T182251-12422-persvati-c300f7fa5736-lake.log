@@ -1,0 +1,444 @@
+run=E-20260809T182251-12422-persvati-c300f7fa5736-lake
+commit=c300f7fa57366c96e706ea59d83fa9838cdb5715
+tree=10a41f59295bacce547f2147f71d5c1cecfbc611
+host_alias=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-c300f7fa5736-6E3aDxll
+command=lake build Compiler.BinaryTower256Profile Assurance.BinaryTowerHeaderCodec 
+resolved_executable=/home/ember/.elan/bin/lake
+✔ [2947/3010] Built Kernel.Turn (3.3s)
+✔ [2948/3010] Built Theory.BinaryTower (3.7s)
+ℹ [2949/3010] Built Compiler.Signature (3.7s)
+info: Compiler/Signature.lean:426:0: Minidregg.Compiler.N3_opaque_payloads_forbid_second_reading : Prop
+ℹ [2950/3010] Built Loom.Rbr (4.2s)
+info: Loom/Rbr.lean:465:0: Minidregg.Loom.OB2_depth_composition : Prop
+✔ [2951/3010] Built Theory.PrivacyProfile (4.5s)
+✔ [2952/3010] Built Theory.IndexedProgram (5.3s)
+ℹ [2953/3010] Built Theory.Bignum (5.4s)
+info: Theory/Bignum.lean:354:0: 'Minidregg.Theory.Bignum.denoteInt_eq_natCast' depends on axioms: [propext]
+info: Theory/Bignum.lean:355:0: 'Minidregg.Theory.Bignum.denoteNat_lt_pow' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:356:0: 'Minidregg.Theory.Bignum.denoteNat_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:357:0: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:358:0: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext]
+info: Theory/Bignum.lean:359:0: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:360:0: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:361:0: 'Minidregg.Theory.Bignum.Limbs.toFin_ofFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:362:0: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:363:0: 'Minidregg.Theory.Bignum.Limbs.toNat_ofBounded' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:364:0: 'Minidregg.Theory.Bignum.bits_248_fit_nine_radix_2013265921_limbs' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2954/3010] Built Theory.ReactiveReceipt (6.2s)
+✔ [2955/3010] Built Compiler.Air (2.6s)
+✔ [2956/3010] Built Compiler.TranscriptController (6.5s)
+✔ [2957/3010] Built Theory.TypedAuthorization (7.3s)
+✔ [2958/3010] Built Loom.CorrelatedAgreement (8.3s)
+ℹ [2959/3010] Built Theory.BinaryTowerCodec (4.8s)
+info: Theory/BinaryTowerCodec.lean:114:0: 'Minidregg.Theory.BinaryTowerCodec.decode_encode' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/BinaryTowerCodec.lean:115:0: 'Minidregg.Theory.BinaryTowerCodec.encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/BinaryTowerCodec.lean:116:0: 'Minidregg.Theory.BinaryTowerCodec.cardinality' depends on axioms: [propext, Classical.choice, Quot.sound]
+✔ [2960/3010] Built Theory.GuardedAdvice (4.9s)
+✔ [2961/3010] Built Theory.CrossModulus (5.1s)
+✔ [2962/3010] Built Compiler.AirRange (4.8s)
+✔ [2963/3010] Built Theory.DisclosureDeclaration (5.8s)
+✔ [2964/3010] Built Compiler.AirFlatten (5.1s)
+✔ [2965/3010] Built Loom.Depth (7.4s)
+✔ [2966/3010] Built Loom.ReedSolomon (4.1s)
+⚠ [2967/3010] Built Theory.AuthorizationDeclaration (5.7s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2968/3010] Built Compiler.AirHash (2.1s)
+✔ [2969/3010] Built Theory.ReactiveController (4.0s)
+✔ [2970/3010] Built Loom.Sumcheck (2.3s)
+✔ [2971/3010] Built Compiler.AirMembership (2.1s)
+✔ [2972/3010] Built Loom.ConstrainedCode (2.7s)
+✔ [2973/3010] Built Theory.EffectDeclaration (2.9s)
+✔ [2974/3010] Built Theory.CellState (2.9s)
+✔ [2975/3010] Built Loom.SumcheckReduction (2.5s)
+✔ [2976/3010] Built Compiler.DeclaredEffectArtifact (1.0s)
+⚠ [2977/3010] Built Compiler.SemanticManifest (5.1s)
+warning: Compiler/SemanticManifest.lean:138:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:153:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:168:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:234:15: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:518:13: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:553:14: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+✔ [2978/3010] Built Loom.Accumulator (2.9s)
+✔ [2979/3010] Built Compiler.NoteSpend (2.0s)
+✔ [2980/3010] Built Theory.DeclaredTurn (2.2s)
+✔ [2981/3010] Built Loom.Decider (2.2s)
+✔ [2982/3010] Built Theory.ReactiveCellTransition (3.5s)
+✔ [2983/3010] Built Loom.MultilinearExtension (3.1s)
+✔ [2984/3010] Built Compiler.Emit (2.7s)
+⚠ [2985/3010] Built Assurance.SemanticReceiptRelation (2.9s)
+warning: Assurance/SemanticReceiptRelation.lean:37:7: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.ext`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:63:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.satisfies_iff`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:164:4: The namespace 'SemanticReceiptRelation' is duplicated in the declaration 'Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptRelation'
+
+Note: This linter can be disabled with `set_option linter.dupNamespace false`
+warning: Assurance/SemanticReceiptRelation.lean:199:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.receiptCoord_surjective`:
+  [DecidableEq Key]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Key] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:211:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_weights_shared`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:218:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_satisfies_iff`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+⚠ [2986/3010] Built Compiler.SemanticArtifactBundle (3.0s)
+warning: Compiler/SemanticArtifactBundle.lean:297:17: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+✔ [2987/3010] Built Loom.Commitment (1.9s)
+ℹ [2988/3010] Built Loom.BinaryLookup (1.8s)
+info: Loom/BinaryLookup.lean:158:0: 'Minidregg.Loom.binaryLookupEq_cubePt_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/BinaryLookup.lean:159:0: 'Minidregg.Loom.binaryTableDot_lookupEq_eq_mle' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/BinaryLookup.lean:160:0: 'Minidregg.Loom.BinaryLookupExample.boolean_sum_one_not_oneHot_charTwo' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2989/3010] Built Theory.CanonicalTransition (2.4s)
+✔ [2990/3010] Built Assurance.SemanticTurnReceipt (2.3s)
+ℹ [2991/3010] Built Compiler.AirBignum (3.2s)
+info: Compiler/AirBignum.lean:315:0: 'Minidregg.Compiler.AirBignum.addLimbTerm_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirBignum.lean:316:0: 'Minidregg.Compiler.AirBignum.addGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:317:0: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:318:0: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:319:0: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+✔ [2992/3010] Built Compiler.MinidreggV1Artifact (2.1s)
+ℹ [2993/3010] Built Compiler.EmitSerialize (3.7s)
+info: Compiler/EmitSerialize.lean:233:0: round-trip OK: 18 gates, 5 zeros, nWires = 23
+⚠ [2994/3010] Built Kernel.DeclaredHyperedge (2.5s)
+warning: Kernel/DeclaredHyperedge.lean:166:8: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.Declaration.authState_same_pre`:
+  [Fintype Incidence]
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Incidence] [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Kernel/DeclaredHyperedge.lean:271:12: This simp argument is unused:
+  outside
+
+Hint: Omit it from the simp argument list.
+  simp [̵o̵u̵t̵s̵i̵d̵e̵,̵ ̵i̵n̵d̵u̵c̵t̵i̵o̵n̵]̵[̲i̲n̲d̲u̲c̲t̲i̲o̲n̲]̲
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Kernel/DeclaredHyperedge.lean:289:12: This simp argument is unused:
+  outside
+
+Hint: Omit it from the simp argument list.
+  simp [̵o̵u̵t̵s̵i̵d̵e̵,̵ ̵i̵n̵d̵u̵c̵t̵i̵o̵n̵]̵[̲i̲n̲d̲u̲c̲t̲i̲o̲n̲]̲
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Kernel/DeclaredHyperedge.lean:411:8: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.Declaration.balanceCheck_eq_true_iff`:
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Kernel/DeclaredHyperedge.lean:454:0: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.Declaration.aggregateDelta_zero`:
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Kernel/DeclaredHyperedge.lean:516:8: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.Outcome.rejected_materialized`:
+  [Fintype Incidence]
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Incidence] [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Kernel/DeclaredHyperedge.lean:551:5: unused variable `declaration`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Kernel/DeclaredHyperedge.lean:610:8: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.CommittedHyperedge.prepared_preRoot`:
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Kernel/DeclaredHyperedge.lean:617:8: automatically included section variable(s) unused in theorem `Minidregg.Kernel.DeclaredHyperedge.CommittedHyperedge.prepared_postRoot`:
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+✔ [2995/3010] Built Compiler.NextgenLightClientPublicInputs (2.6s)
+⚠ [2996/3010] Built Compiler.DeclaredHyperedgeArtifact (1.9s)
+warning: Compiler/DeclaredHyperedgeArtifact.lean:91:8: automatically included section variable(s) unused in theorem `Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_preRoot`:
+  [Fintype Incidence]
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Incidence] [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/DeclaredHyperedgeArtifact.lean:97:8: automatically included section variable(s) unused in theorem `Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_apex`:
+  [Fintype Incidence]
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Incidence] [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Compiler/DeclaredHyperedgeArtifact.lean:119:8: automatically included section variable(s) unused in theorem `Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_leg_at`:
+  [Fintype Incidence]
+  [DecidableEq Incidence]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Incidence] [DecidableEq Incidence] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Compiler/DeclaredHyperedgeArtifact.lean:150:0: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.legArtifact_request_decodes' depends on axioms: [propext, Quot.sound]
+info: Compiler/DeclaredHyperedgeArtifact.lean:151:0: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_leg_count' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2997/3010] Built Compiler.AirModularView (4.2s)
+info: Compiler/AirModularView.lean:666:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:667:0: 'Minidregg.Compiler.AirModularView.mulCarryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:668:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:669:0: 'Minidregg.Compiler.AirModularView.modularViewGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:670:0: 'Minidregg.Compiler.AirModularView.accepted_has_modularView' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:671:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:672:0: 'Minidregg.Compiler.AirModularView.scalarMulCarryEquations_denote' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:673:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:674:0: 'Minidregg.Compiler.AirModularView.emit_scalarMulGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:675:0: 'Minidregg.Compiler.AirModularView.fheggQ0_scalar24_base64_fits' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:676:0: 'Minidregg.Compiler.AirModularView.emit_modularViewGadget_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [2998/3010] Built Assurance.SemanticReceiptRuntimeCodec (1.8s)
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:60:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_pre`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:65:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_post`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:70:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_touched`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:91:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_boolean`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:96:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_frame`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:102:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_zero_iff`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:118:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_refines_formal`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:191:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_binding`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:197:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_core`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Assurance/SemanticReceiptRuntimeCodec.lean:303:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticReceiptRuntimeCodec.lean:304:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundSemanticReceiptClaims_fold' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticReceiptRuntimeCodec.lean:305:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.HeaderBytes.bindingNatCells_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2999/3010] Built Compiler.SemanticTurnReceiptDescriptor (1.9s)
+info: Compiler/SemanticTurnReceiptDescriptor.lean:449:0: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.descriptor_accepts_iff_boundRelation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticTurnReceiptDescriptor.lean:450:0: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.committedTurn_descriptor_accepts' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3000/3010] Built Compiler.BignumKernelABI (2.4s)
+info: Compiler/BignumKernelABI.lean:453:0: 'Minidregg.Compiler.BignumKernelABI.KernelCall.accepts_iff_descriptor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:454:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/BignumKernelABI.lean:455:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:456:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:457:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_wellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:458:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:459:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3001/3010] Built Compiler.SemanticController (1.9s)
+info: Compiler/SemanticController.lean:444:0: 'Minidregg.Compiler.SemanticController.arbitraryOracle_integrity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticController.lean:445:0: 'Minidregg.Compiler.SemanticController.resultMismatch_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticController.lean:446:0: 'Minidregg.Compiler.SemanticController.descriptorFailure_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3002/3010] Built Compiler.NativeKernelPlan (1.0s)
+info: Compiler/NativeKernelPlan.lean:538:0: 'Minidregg.Compiler.NativeKernelPlan.arbitraryRunner_integrity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:539:0: 'Minidregg.Compiler.NativeKernelPlan.descriptorFailure_not_certified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:540:0: 'Minidregg.Compiler.NativeKernelPlan.manifestMismatch_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:541:0: 'Minidregg.Compiler.NativeKernelPlan.checkInstructions_headError' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:542:0: 'Minidregg.Compiler.NativeKernelPlan.firstInstructionError_blocks' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [3003/3010] Built Compiler.DialectClauseDispatch (1.7s)
+ℹ [3004/3010] Built Compiler.AuthenticatedColumnPlan (4.3s)
+info: Compiler/AuthenticatedColumnPlan.lean:1069:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.challenge_before_root_unrepresentable' depends on axioms: [propext]
+info: Compiler/AuthenticatedColumnPlan.lean:1070:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.native_error_cannot_accept_query' depends on axioms: [propext]
+info: Compiler/AuthenticatedColumnPlan.lean:1071:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.towerBinding_toLoom_commit_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AuthenticatedColumnPlan.lean:1072:0: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.concrete_schedule_is_nonvacuous' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3005/3010] Built Assurance.SemanticHistoryAccumulator (4.4s)
+info: Assurance/SemanticHistoryAccumulator.lean:579:0: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.decider_complete_at_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticHistoryAccumulator.lean:580:0: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.opened_decider_extracts_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [3006/3010] Built Compiler.Tower256CshakeMerkleController (1.8s)
+warning: Compiler/Tower256CshakeMerkleController.lean:98:4: unused variable `k`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+info: Compiler/Tower256CshakeMerkleController.lean:417:0: 'Minidregg.Compiler.Tower256CshakeMerkleController.recompute_cubePath' depends on axioms: [propext, Quot.sound]
+info: Compiler/Tower256CshakeMerkleController.lean:418:0: 'Minidregg.Compiler.Tower256CshakeMerkleController.bindingMerkle_toLoom_commit_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/Tower256CshakeMerkleController.lean:419:0: 'Minidregg.Compiler.Tower256CshakeMerkleController.checkedXofCall_reply_exact' depends on axioms: [propext]
+ℹ [3007/3010] Built Assurance.DeclaredHyperedgeReceipt (1.8s)
+info: Assurance/DeclaredHyperedgeReceipt.lean:284:0: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.executeCore_valid' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/DeclaredHyperedgeReceipt.lean:285:0: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.canonicalCore_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/DeclaredHyperedgeReceipt.lean:286:0: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.historyClaim_core_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/DeclaredHyperedgeReceipt.lean:287:0: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.SemanticOutcome.every_request_authorized' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3008/3010] Built Compiler.BinaryTower256Profile (1.5s)
+info: Compiler/BinaryTower256Profile.lean:49:0: 'Minidregg.Compiler.BinaryTower256Profile.profile_width_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BinaryTower256Profile.lean:50:0: 'Minidregg.Compiler.BinaryTower256Profile.profile_cardinality' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3009/3010] Built Assurance.DeclaredHyperedgeHistoryBinding (1.5s)
+info: Assurance/DeclaredHyperedgeHistoryBinding.lean:140:0: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.historyClaim_binding_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/DeclaredHyperedgeHistoryBinding.lean:141:0: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.historyClaim_core_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/DeclaredHyperedgeHistoryBinding.lean:142:0: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.history_binding_equal_implies_headers_equal_or_collision' does not depend on any axioms
+⚠ [3010/3010] Built Assurance.BinaryTowerHeaderCodec (1.5s)
+warning: Assurance/BinaryTowerHeaderCodec.lean:37:19: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: Assurance/BinaryTowerHeaderCodec.lean:47:19: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+info: Assurance/BinaryTowerHeaderCodec.lean:97:0: 'Minidregg.Assurance.BinaryTowerHeaderCodec.encodeCell_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BinaryTowerHeaderCodec.lean:98:0: 'Minidregg.Assurance.BinaryTowerHeaderCodec.codec_is_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BinaryTowerHeaderCodec.lean:99:0: 'Minidregg.Assurance.BinaryTowerHeaderCodec.tower256_card' depends on axioms: [propext, Classical.choice, Quot.sound]
+Build completed successfully (3010 jobs).
+command_exit=0
+source_integrity_exit=0
