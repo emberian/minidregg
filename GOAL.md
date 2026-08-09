@@ -104,9 +104,10 @@ disposable.
   incidence row is the literal unit vector at the fixed index, and incidence scattering equals
   `logupPushforward`. Runtime LogUp v2 now runs a roots-before-challenge cubic Booleanity zerocheck
   plus sampled opening for every index root, then binds the ordered root vector and shape into one
-  cSHAKE semantic bundle. The former handwritten Rust receipt adapter was deleted; its exact
-  relation/statement/bundle projection must be emitted from Lean. Proximity/CR/ROM and mutable RAM
-  remain.
+  cSHAKE semantic bundle. That native protocol object and the former receipt adapter have now been
+  deleted after extracting incidence, equality-weight, fraction-tree, interpolation, and round
+  arithmetic. Its exact relation/controller must be emitted from Lean. Proximity/CR/ROM and mutable
+  RAM remain.
 - 2026-08-09 ★★★★★ **Typed receipt admission → accumulated core** ✓:
   `Assurance/SemanticTurnReceipt.lean` requires every committed outcome to carry authorization
   indexed by the complete request, an exact effect digest and effect-to-`ReceiptDelta` semantics,
