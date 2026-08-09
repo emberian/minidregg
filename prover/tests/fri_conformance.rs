@@ -112,8 +112,14 @@ fn fold_matches_the_verified_lean_reference() {
 #[test]
 fn ext4_mul_matches_the_lean_known_answers() {
     let c = conformance();
-    assert_eq!(Ext4 { c: c.ext_a }.mul(Ext4 { c: c.ext_b }), Ext4 { c: c.ext_prod });
-    assert_eq!(Ext4 { c: c.ext_a2 }.mul(Ext4 { c: c.ext_b2 }), Ext4 { c: c.ext_prod2 });
+    assert_eq!(
+        Ext4 { c: c.ext_a }.mul(Ext4 { c: c.ext_b }),
+        Ext4 { c: c.ext_prod }
+    );
+    assert_eq!(
+        Ext4 { c: c.ext_a2 }.mul(Ext4 { c: c.ext_b2 }),
+        Ext4 { c: c.ext_prod2 }
+    );
 }
 
 /// Tampering teeth: any single perturbed codeword element, or a perturbed
@@ -127,8 +133,16 @@ fn tampering_breaks_the_vector() {
     for j in 0..c.codeword.len() {
         let mut bad = c.codeword.clone();
         bad[j] = (bad[j] + 1) % P;
-        assert_ne!(fold(&lift(&bad), beta, 1), reference, "tampered codeword[{j}] must show");
+        assert_ne!(
+            fold(&lift(&bad), beta, 1),
+            reference,
+            "tampered codeword[{j}] must show"
+        );
     }
     let bad_beta = Ext4::from_base((c.beta + 1) % P);
-    assert_ne!(fold(&lift(&c.codeword), bad_beta, 1), reference, "tampered beta must show");
+    assert_ne!(
+        fold(&lift(&c.codeword), bad_beta, 1),
+        reference,
+        "tampered beta must show"
+    );
 }

@@ -30,17 +30,23 @@
 //! challenges from the proof alone; TAMPERING any absorbed value (a round
 //! commitment, the final word, a sumcheck message) changes the re-derived
 //! challenges and the proof rejects — the FS binding, exercised, not proved.
-//! Named, not solved here: `squeeze_query`'s mod reduction carries the usual
-//! modulo bias (`p mod size != 0`), and the demo `PermSpec` is a conformance
-//! instantiation — the deployed constant set with its rate/capacity/domain-
-//! separation discipline is `[PROVER-poseidon-params]`.
+//! Query positions use rejection sampling, so `p mod size != 0` introduces no
+//! modulo bias in the ideal-uniform coordinate.  The demo `PermSpec` is still a
+//! conformance instantiation — the deployed constant set with its
+//! rate/capacity/domain-separation discipline is `[PROVER-poseidon-params]`.
+//! Sumcheck challenges
+//! are base BabyBear while FRI challenges are `Ext4`; a security budget that
+//! treats every challenge as the extension field needs the separate
+//! `[PROVER-challenge-field-unification]` bridge.
 
 use crate::descriptor::Fp;
 use crate::field4::{Ext4, P, TWO_ADIC_BITS};
-use crate::fri;
-use crate::fri_protocol::{commit_word, fri_prove, fri_verify, FriProof};
+use crate::fri_protocol::{fri_verify, FriDescent, FriProof};
 use crate::poseidon::{perm, PermSpec};
 use crate::sumcheck::{add_mod, prove_sumcheck, round_poly, verify_sumcheck, SumcheckProof};
+use crate::wide::Digest;
+
+const FRI_ROOT_DIGEST_TAG: Fp = 0x4652_5254; // "FRRT"
 
 /// The Fiat-Shamir transcript: a Poseidon2 duplex sponge. State starts
 /// all-zero; `absorb` mixes each element through the permutation; `squeeze_*`
@@ -57,7 +63,11 @@ impl Transcript {
     /// A fresh transcript: all-zero state.
     pub fn new(spec: PermSpec, p: u64) -> Transcript {
         assert!(spec.width >= 1, "transcript needs a wire 0");
-        Transcript { state: vec![0; spec.width], spec, p }
+        Transcript {
+            state: vec![0; spec.width],
+            spec,
+            p,
+        }
     }
 
     /// Absorb: each element is added into wire 0 and mixed by ONE permutation,
@@ -69,6 +79,18 @@ impl Transcript {
             self.state[0] = add_mod(self.state[0], x, self.p);
             self.state = perm(&self.spec, &self.state, self.p);
         }
+    }
+
+    /// Absorb `WDG1 || domain || nine canonical limbs`.
+    ///
+    /// Callers use distinct domains for distinct protocol objects.  Prover-side
+    /// malformed data is a contract violation; verifier paths validate the
+    /// digest before calling this method.
+    pub fn absorb_digest(&mut self, domain: Fp, digest: &Digest) {
+        let encoded = digest
+            .encode_with_domain(domain)
+            .expect("transcript digest and domain must be canonical");
+        self.absorb(&encoded);
     }
 
     /// Squeeze one base-field challenge: permute, read wire 0. The permuted
@@ -85,18 +107,37 @@ impl Transcript {
         let c1 = self.squeeze_challenge();
         let c2 = self.squeeze_challenge();
         let c3 = self.squeeze_challenge();
-        Ext4 { c: [c0, c1, c2, c3] }
+        Ext4 {
+            c: [c0, c1, c2, c3],
+        }
     }
 
-    /// Squeeze a query position in `[0, domain_size)`: one challenge reduced
-    /// mod the size. The mod reduction is biased when `p % domain_size != 0`
-    /// (at most `domain_size/p` per position here) — a deployed-parameter
-    /// concern named with `[PROVER-poseidon-params]`, priced where the
-    /// grinding bound is priced (Loom), not solved here.
+    /// Squeeze an unbiased ideal-coordinate query in `[0, domain_size)`.
+    /// Candidates at or above the largest multiple of `domain_size` below `p`
+    /// are rejected and the sponge is squeezed again.  Thus a uniform field
+    /// challenge maps exactly uniformly; the concrete sponge assumption remains
+    /// `[PROVER-poseidon-params]` / `[FS-ROM]`.
     pub fn squeeze_query(&mut self, domain_size: usize) -> usize {
         assert!(domain_size >= 1, "squeeze_query: empty domain");
-        (self.squeeze_challenge() as usize) % domain_size
+        assert!(
+            (domain_size as u128) <= self.p as u128,
+            "squeeze_query: domain exceeds field cardinality"
+        );
+        loop {
+            let candidate = self.squeeze_challenge();
+            if let Some(query) = reduce_query_candidate(candidate, self.p, domain_size) {
+                return query;
+            }
+        }
     }
+}
+
+/// One rejection-sampling step, factored so the exact bias boundary has teeth.
+fn reduce_query_candidate(candidate: Fp, p: u64, domain_size: usize) -> Option<usize> {
+    let size = domain_size as u64;
+    debug_assert!(size >= 1 && size <= p && candidate < p);
+    let limit = p - p % size;
+    (candidate < limit).then_some((candidate % size) as usize)
 }
 
 /// The FRI Fiat-Shamir schedule, replayed from PUBLIC data (the commitment
@@ -106,7 +147,7 @@ impl Transcript {
 /// word, then squeeze the query positions. `None` on non-canonical or
 /// unusable shape (conservative reject in the verify path).
 fn fri_schedule(
-    round_commitments: &[Fp],
+    round_commitments: &[Digest],
     final_codeword: &[Ext4],
     num_queries: usize,
     spec: &PermSpec,
@@ -114,14 +155,21 @@ fn fri_schedule(
 ) -> Option<(Vec<Ext4>, Vec<usize>)> {
     let m = round_commitments.len();
     let final_len = final_codeword.len();
-    if p != P || m == 0 || final_len == 0 || !final_len.is_power_of_two() {
+    if p != P
+        || spec.width < 2
+        || spec.validate(p).is_err()
+        || m == 0
+        || num_queries == 0
+        || final_len == 0
+        || !final_len.is_power_of_two()
+    {
         return None;
     }
     let n = match final_len.checked_shl(m as u32) {
         Some(v) if v.trailing_zeros() <= TWO_ADIC_BITS => v,
         _ => return None,
     };
-    if round_commitments.iter().any(|&r| r >= p)
+    if round_commitments.iter().any(|root| !root.is_canonical())
         || final_codeword.iter().any(|v| v.c.iter().any(|&c| c >= p))
         || (num_queries as u64) >= p
     {
@@ -130,8 +178,8 @@ fn fri_schedule(
     let mut tr = Transcript::new(spec.clone(), p);
     tr.absorb(&[n as Fp, m as Fp, num_queries as Fp]);
     let mut betas = Vec::with_capacity(m);
-    for &root in round_commitments {
-        tr.absorb(&[root]);
+    for root in round_commitments {
+        tr.absorb_digest(FRI_ROOT_DIGEST_TAG, root);
         betas.push(tr.squeeze_ext4());
     }
     for v in final_codeword {
@@ -144,10 +192,12 @@ fn fri_schedule(
 /// **The non-interactive FRI prover.** Draws the betas and query positions
 /// from the transcript — the interleaved schedule is the real FS: level `k`'s
 /// commitment is absorbed BEFORE `beta_k` is squeezed, so the prover cannot
-/// pick a word after seeing its challenge — then builds the proof with the
-/// ONE proof builder, `fri_prove`, at the drawn schedule (no twin). Returns
-/// the drawn `(betas, queries)` alongside the proof for callers that want the
-/// schedule (the verifier does NOT — it re-derives its own).
+/// pick a word after seeing its challenge. The one retained `FriDescent`
+/// stores each word and Merkle tree until the query positions are drawn; the
+/// proof and openings are assembled from that state without recomputing any
+/// fold or commitment. Returns the drawn `(betas, queries)` alongside the
+/// proof for callers that want the schedule (the verifier does NOT — it
+/// re-derives its own).
 pub fn fri_prove_fs(
     codeword: &[Ext4],
     num_rounds: usize,
@@ -158,35 +208,47 @@ pub fn fri_prove_fs(
     assert_eq!(p, P, "the fold layer is BabyBear-hardwired (field4)");
     let n = codeword.len();
     assert!(num_rounds >= 1, "fri_prove_fs: at least one fold round");
-    assert!(n.is_power_of_two() && n >= 2, "fri_prove_fs: codeword length must be a power of two >= 2");
-    assert!(n.trailing_zeros() <= TWO_ADIC_BITS, "fri_prove_fs: domain exceeds BabyBear 2-adicity");
-    assert!((num_rounds as u32) <= n.trailing_zeros(), "fri_prove_fs: more rounds than the word can halve");
+    assert!(num_queries >= 1, "fri_prove_fs: at least one query");
+    assert!(
+        n.is_power_of_two() && n >= 2,
+        "fri_prove_fs: codeword length must be a power of two >= 2"
+    );
+    assert!(
+        n.trailing_zeros() <= TWO_ADIC_BITS,
+        "fri_prove_fs: domain exceeds BabyBear 2-adicity"
+    );
+    assert!(
+        (num_rounds as u32) <= n.trailing_zeros(),
+        "fri_prove_fs: more rounds than the word can halve"
+    );
 
     let mut tr = Transcript::new(spec.clone(), p);
     tr.absorb(&[n as Fp, num_rounds as Fp, num_queries as Fp]);
-    let mut word = codeword.to_vec();
+    let mut descent = FriDescent::new(codeword);
     let mut betas = Vec::with_capacity(num_rounds);
-    let mut roots = Vec::with_capacity(num_rounds);
     for _ in 0..num_rounds {
-        let (root, _tree) = commit_word(spec, &word, p);
-        tr.absorb(&[root]);
+        let root = descent.commit_current(spec, p);
+        tr.absorb_digest(FRI_ROOT_DIGEST_TAG, &root);
         let beta = tr.squeeze_ext4();
-        word = fri::fold(&word, beta, 1);
-        roots.push(root);
+        descent.fold_committed(beta);
         betas.push(beta);
     }
-    for v in &word {
+    for v in descent.current_word() {
         tr.absorb(&v.c);
     }
     let queries: Vec<usize> = (0..num_queries).map(|_| tr.squeeze_query(n / 2)).collect();
 
-    let proof = fri_prove(codeword, &betas, &queries, spec, p);
-    // The FS absorb stream IS the proof's public stream — pinned, so the
-    // interleaved draw above and `fri_schedule`'s replay cannot drift apart.
-    assert_eq!(proof.round_commitments, roots, "FS absorbed commitments must be the proof's");
-    assert_eq!(proof.final_codeword, word, "FS absorbed final word must be the proof's");
+    let proof = descent.finish(&queries);
+    // The FS absorb stream IS the proof's public stream. Replay pins that the
+    // retained single-pass builder and verifier schedule cannot drift apart.
     debug_assert_eq!(
-        fri_schedule(&proof.round_commitments, &proof.final_codeword, num_queries, spec, p),
+        fri_schedule(
+            &proof.round_commitments,
+            &proof.final_codeword,
+            num_queries,
+            spec,
+            p
+        ),
         Some((betas.clone(), queries.clone())),
         "the replayed schedule must equal the interleaved draw"
     );
@@ -208,24 +270,37 @@ pub fn fri_verify_fs(
     spec: &PermSpec,
     p: u64,
 ) -> bool {
-    if proof.round_commitments.len() != num_rounds
+    if p != P
+        || spec.width < 2
+        || spec.validate(p).is_err()
+        || num_queries == 0
+        || proof.round_commitments.len() != num_rounds
         || proof.query_openings.len() != num_queries
     {
         return false;
     }
-    match fri_schedule(&proof.round_commitments, &proof.final_codeword, num_queries, spec, p) {
+    match fri_schedule(
+        &proof.round_commitments,
+        &proof.final_codeword,
+        num_queries,
+        spec,
+        p,
+    ) {
         Some((betas, queries)) => fri_verify(proof, &betas, &queries, spec, p),
         None => false,
     }
 }
 
-/// **The non-interactive sumcheck prover.** Absorbs the shape and the claim,
+/// **Demo-only context-free sumcheck FS prover.** Absorbs the shape and claim,
 /// then per round absorbs the message `g_i = [g_i(0), g_i(1)]` and squeezes
 /// challenge `r_i` — each challenge depends on the transcript prefix through
 /// its round, the `fiatShamir` shape. Builds the proof with the ONE builder,
 /// `prove_sumcheck`, at the drawn challenges (round messages only read the
 /// challenge prefix below their index — `roundSum_congr_prefix`'s mirror — so
 /// the interleaved draw and the batch build agree; pinned by the assert).
+/// It does not bind a statement or oracle identity; protocol code must seed a
+/// surrounding transcript as `protocol.rs` does instead of treating this
+/// standalone helper as a complete Fiat--Shamir transform.
 pub fn prove_sumcheck_fs(f: &[Fp], spec: &PermSpec, p: u64) -> SumcheckProof {
     assert!(
         !f.is_empty() && f.len().is_power_of_two(),
@@ -246,15 +321,19 @@ pub fn prove_sumcheck_fs(f: &[Fp], spec: &PermSpec, p: u64) -> SumcheckProof {
     }
     let proof = prove_sumcheck(f, &challenges, p);
     assert_eq!(proof.claim, claim, "FS absorbed claim must be the proof's");
-    assert_eq!(proof.rounds, rounds, "FS absorbed messages must be the proof's");
+    assert_eq!(
+        proof.rounds, rounds,
+        "FS absorbed messages must be the proof's"
+    );
     proof
 }
 
-/// **The non-interactive sumcheck verifier.** RE-DERIVES the round challenges
+/// **Demo-only context-free sumcheck FS verifier.** RE-DERIVES challenges
 /// from the proof's claim + round messages via a fresh transcript and runs the
-/// landed `verify_sumcheck` at them. The proof's carried `challenges` field is
-/// prover-side convenience and is NEVER read here — the FS verifier draws its
-/// own (`sumcheck_fs_ignores_carried_challenges` pins this).
+/// landed `verify_sumcheck` at them.  The carried vector is checked for exact
+/// canonical equality with that derivation, but never drives verification.
+/// Like the standalone prover above this helper does not bind statement/oracle
+/// identity and is not a complete protocol transform.
 pub fn verify_sumcheck_fs(
     proof: &SumcheckProof,
     f_oracle: impl Fn(&[Fp]) -> Fp,
@@ -262,7 +341,12 @@ pub fn verify_sumcheck_fs(
     p: u64,
 ) -> bool {
     let m = proof.rounds.len();
-    if proof.claim >= p || (m as u64) >= p {
+    if spec.width == 0
+        || spec.validate(p).is_err()
+        || proof.claim >= p
+        || (m as u64) >= p
+        || proof.challenges.len() != m
+    {
         return false;
     }
     let mut tr = Transcript::new(spec.clone(), p);
@@ -274,6 +358,9 @@ pub fn verify_sumcheck_fs(
         }
         tr.absorb(g);
         derived.push(tr.squeeze_challenge());
+    }
+    if proof.challenges != derived {
+        return false;
     }
     let fs_proof = SumcheckProof {
         claim: proof.claim,
@@ -291,12 +378,16 @@ mod tests {
     use crate::sumcheck::mle_eval;
 
     fn prng(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*seed >> 16) % P
     }
 
     fn prng_ext(seed: &mut u64) -> Ext4 {
-        Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] }
+        Ext4 {
+            c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+        }
     }
 
     /// An honest RS codeword: `codeword[j] = poly(g^j)` on the order-`2^log_n`
@@ -332,10 +423,30 @@ mod tests {
         t2.absorb(&[3, 1, 4, 1, 5]);
         let c1 = t1.squeeze_challenge();
         assert_eq!(c1, t2.squeeze_challenge(), "same absorbs, same challenge");
-        assert_ne!(c1, t1.squeeze_challenge(), "consecutive squeezes chain (state moved)");
+        assert_ne!(
+            c1,
+            t1.squeeze_challenge(),
+            "consecutive squeezes chain (state moved)"
+        );
         let mut t3 = Transcript::new(spec, P);
         t3.absorb(&[3, 1, 4, 2, 5]);
-        assert_ne!(c1, t3.squeeze_challenge(), "one changed element, different challenge");
+        assert_ne!(
+            c1,
+            t3.squeeze_challenge(),
+            "one changed element, different challenge"
+        );
+    }
+
+    #[test]
+    fn query_rejection_sampling_boundary_is_exact() {
+        // For p=13 and n=5, [0,10) contains exactly two representatives of
+        // each query.  The tail {10,11,12} must be resqueezed, not reduced.
+        assert_eq!(reduce_query_candidate(0, 13, 5), Some(0));
+        assert_eq!(reduce_query_candidate(4, 13, 5), Some(4));
+        assert_eq!(reduce_query_candidate(5, 13, 5), Some(0));
+        assert_eq!(reduce_query_candidate(9, 13, 5), Some(4));
+        assert_eq!(reduce_query_candidate(10, 13, 5), None);
+        assert_eq!(reduce_query_candidate(12, 13, 5), None);
     }
 
     /// prove_fs → verify_fs round-trips on an honest low-degree word: the
@@ -343,6 +454,8 @@ mod tests {
     /// cross the call), and it equals the prover's draw.
     #[test]
     fn fri_fs_round_trip() {
+        use crate::fri_protocol::fri_prove;
+
         let mut seed = 11u64;
         let coeffs: Vec<Ext4> = (0..1 << M).map(|_| prng_ext(&mut seed)).collect();
         let cw = rs_codeword(&coeffs, LOG_N);
@@ -356,6 +469,9 @@ mod tests {
         assert_eq!(queries, q2);
         // And the drawn schedule verifies through the interactive verifier too.
         assert!(fri_verify(&proof, &betas, &queries, &spec, P));
+        // Single-pass FS assembly is structurally identical to the public
+        // caller-supplied-schedule builder at that derived schedule.
+        assert_eq!(proof, fri_prove(&cw, &betas, &queries, &spec, P));
     }
 
     /// The FS binding, non-vacuously: tampering a round commitment changes the
@@ -371,13 +487,23 @@ mod tests {
         let (good, betas, queries) = fri_prove_fs(&cw, M, Q, &spec, P);
 
         let mut bad = good.clone();
-        bad.round_commitments[1] = (bad.round_commitments[1] + 1) % P;
+        bad.round_commitments[1].limbs[0] = (bad.round_commitments[1].limbs[0] + 1) % P;
         let (bad_betas, bad_queries) =
             fri_schedule(&bad.round_commitments, &bad.final_codeword, Q, &spec, P).unwrap();
-        assert_eq!(bad_betas[0], betas[0], "beta_0 precedes the tampered absorb");
-        assert_ne!(bad_betas[1..], betas[1..], "betas after the tampered commitment move");
+        assert_eq!(
+            bad_betas[0], betas[0],
+            "beta_0 precedes the tampered absorb"
+        );
+        assert_ne!(
+            bad_betas[1..],
+            betas[1..],
+            "betas after the tampered commitment move"
+        );
         assert_ne!(bad_queries, queries, "query positions move too");
-        assert!(!fri_verify_fs(&bad, M, Q, &spec, P), "tampered commitment rejects");
+        assert!(
+            !fri_verify_fs(&bad, M, Q, &spec, P),
+            "tampered commitment rejects"
+        );
     }
 
     /// Tampering the CLEAR final word also moves the transcript: the queries
@@ -397,7 +523,10 @@ mod tests {
         let (_, bad_queries) =
             fri_schedule(&bad.round_commitments, &bad.final_codeword, Q, &spec, P).unwrap();
         assert_ne!(bad_queries, queries, "queries re-derive differently");
-        assert!(!fri_verify_fs(&bad, M, Q, &spec, P), "forged final word rejects");
+        assert!(
+            !fri_verify_fs(&bad, M, Q, &spec, P),
+            "forged final word rejects"
+        );
     }
 
     /// Shape gates: wrong round/query counts against the verifier's protocol
@@ -409,14 +538,32 @@ mod tests {
         let cw = rs_codeword(&coeffs, LOG_N);
         let spec = demo_spec();
         let (good, _, _) = fri_prove_fs(&cw, M, Q, &spec, P);
-        assert!(!fri_verify_fs(&good, M - 1, Q, &spec, P), "wrong round count");
-        assert!(!fri_verify_fs(&good, M, Q - 1, &spec, P), "wrong query count");
+        assert!(
+            !fri_verify_fs(&good, M - 1, Q, &spec, P),
+            "wrong round count"
+        );
+        assert!(
+            !fri_verify_fs(&good, M, Q - 1, &spec, P),
+            "wrong query count"
+        );
         let mut bad = good.clone();
         bad.query_openings.pop();
         assert!(!fri_verify_fs(&bad, M, Q, &spec, P), "dropped opening");
+        let mut empty = good.clone();
+        empty.query_openings.clear();
+        assert!(!fri_verify_fs(&empty, M, 0, &spec, P), "zero queries");
+        assert!(
+            fri_schedule(&empty.round_commitments, &empty.final_codeword, 0, &spec, P).is_none()
+        );
+        let mut malformed_spec = spec.clone();
+        malformed_spec.width = 0;
+        assert!(!fri_verify_fs(&good, M, Q, &malformed_spec, P));
         let mut bad = good;
-        bad.round_commitments[0] += P; // non-canonical
-        assert!(!fri_verify_fs(&bad, M, Q, &spec, P), "non-canonical commitment");
+        bad.round_commitments[0].limbs[0] = P; // non-canonical
+        assert!(
+            !fri_verify_fs(&bad, M, Q, &spec, P),
+            "non-canonical commitment"
+        );
     }
 
     const FTAB: [Fp; 8] = [3, 1, 4, 1, 5, 9, 2, 6];
@@ -428,7 +575,12 @@ mod tests {
         let spec = demo_spec();
         let proof = prove_sumcheck_fs(&FTAB, &spec, P);
         assert_eq!(proof.rounds.len(), 3);
-        assert!(verify_sumcheck_fs(&proof, |pt| mle_eval(&FTAB, pt, P), &spec, P));
+        assert!(verify_sumcheck_fs(
+            &proof,
+            |pt| mle_eval(&FTAB, pt, P),
+            &spec,
+            P
+        ));
         // Determinism: proving again draws the same challenges.
         assert_eq!(proof, prove_sumcheck_fs(&FTAB, &spec, P));
     }
@@ -451,18 +603,28 @@ mod tests {
         }
         let mut bad = good;
         bad.claim = (bad.claim + 1) % P;
-        assert!(!verify_sumcheck_fs(&bad, |pt| mle_eval(&FTAB, pt, P), &spec, P));
+        assert!(!verify_sumcheck_fs(
+            &bad,
+            |pt| mle_eval(&FTAB, pt, P),
+            &spec,
+            P
+        ));
     }
 
-    /// The FS verifier draws its OWN challenges: the carried `challenges`
-    /// field is never read (tampering it changes nothing), while the plain
-    /// interactive verifier — which does trust it — rejects the same tamper.
+    /// The FS verifier draws its OWN challenges and requires the carried
+    /// encoding to equal them.  A second challenge vector cannot be a malleable
+    /// alternate serialization of the same proof.
     #[test]
-    fn sumcheck_fs_ignores_carried_challenges() {
+    fn sumcheck_fs_rejects_mismatched_carried_challenges() {
         let spec = demo_spec();
         let mut proof = prove_sumcheck_fs(&FTAB, &spec, P);
         proof.challenges[1] = (proof.challenges[1] + 1) % P;
-        assert!(verify_sumcheck_fs(&proof, |pt| mle_eval(&FTAB, pt, P), &spec, P));
+        assert!(!verify_sumcheck_fs(
+            &proof,
+            |pt| mle_eval(&FTAB, pt, P),
+            &spec,
+            P
+        ));
         assert!(!verify_sumcheck(&proof, |pt| mle_eval(&FTAB, pt, P), P));
     }
 
@@ -473,6 +635,11 @@ mod tests {
         let spec = demo_spec();
         let proof = prove_sumcheck_fs(&FTAB, &spec, P);
         let other: [Fp; 8] = [3, 1, 4, 1, 5, 9, 2, 7];
-        assert!(!verify_sumcheck_fs(&proof, |pt| mle_eval(&other, pt, P), &spec, P));
+        assert!(!verify_sumcheck_fs(
+            &proof,
+            |pt| mle_eval(&other, pt, P),
+            &spec,
+            P
+        ));
     }
 }

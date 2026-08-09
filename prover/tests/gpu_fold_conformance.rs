@@ -1,3 +1,5 @@
+#![cfg(feature = "wgpu-fold")]
+
 //! `[PROVER-fri-wgsl]` conformance: the GPU fold must equal `fri::fold` — the
 //! CPU reference, itself vector-conformant to `Loom/Proximity.lean`'s verified
 //! `fold` — EXACTLY, on random codewords across sizes and arities.
@@ -12,12 +14,16 @@ use minidregg_prover::fri;
 use minidregg_prover::gpu::{GpuFold, NO_ADAPTER};
 
 fn prng(seed: &mut u64) -> u64 {
-    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*seed >> 16) % P
 }
 
 fn prng_ext(seed: &mut u64) -> Ext4 {
-    Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] }
+    Ext4 {
+        c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+    }
 }
 
 fn prng_word(seed: &mut u64, n: usize) -> Vec<Ext4> {
@@ -82,7 +88,9 @@ fn gpu_fold_chains_large_arities() {
         let cw = prng_word(&mut seed, 1 << log_n);
         let beta = prng_ext(&mut seed);
         let cpu = fri::fold(&cw, beta, log_arity);
-        let gpu_out = gpu.fold(&cw, beta, log_arity).expect("chained GPU fold must run");
+        let gpu_out = gpu
+            .fold(&cw, beta, log_arity)
+            .expect("chained GPU fold must run");
         assert_eq!(
             gpu_out, cpu,
             "chained GPU fold diverges at log_n={log_n} log_arity={log_arity}"
@@ -105,5 +113,8 @@ fn gpu_fold_sees_tampered_input() {
     let mut bad = cw.clone();
     bad[17].c[3] = (bad[17].c[3] + 1) % P;
     let tampered = gpu.fold(&bad, beta, 2).expect("GPU fold must run");
-    assert_ne!(tampered, reference, "a tampered element must show in the GPU fold");
+    assert_ne!(
+        tampered, reference,
+        "a tampered element must show in the GPU fold"
+    );
 }

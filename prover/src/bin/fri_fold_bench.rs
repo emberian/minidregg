@@ -15,12 +15,16 @@ use minidregg_prover::fri;
 use minidregg_prover::gpu::{GpuFold, NO_ADAPTER};
 
 fn prng(seed: &mut u64) -> u64 {
-    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*seed >> 16) % P
 }
 
 fn prng_ext(seed: &mut u64) -> Ext4 {
-    Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] }
+    Ext4 {
+        c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+    }
 }
 
 fn main() {
@@ -67,7 +71,10 @@ fn main() {
         if let Some(gpu) = &gpu {
             // warmup (first dispatch pays shader specialization)
             let warm = gpu.fold(&codeword, beta, log_arity).expect("GPU fold");
-            assert_eq!(warm, cpu_out, "GPU diverged from CPU at log_arity {log_arity}");
+            assert_eq!(
+                warm, cpu_out,
+                "GPU diverged from CPU at log_arity {log_arity}"
+            );
 
             let gpu_iters = 5;
             let t = Instant::now();
@@ -76,7 +83,10 @@ fn main() {
                 gpu_out = gpu.fold(&codeword, beta, log_arity).expect("GPU fold");
             }
             let gpu_ms = t.elapsed().as_secs_f64() * 1e3 / gpu_iters as f64;
-            assert_eq!(gpu_out, cpu_out, "GPU diverged from CPU at log_arity {log_arity}");
+            assert_eq!(
+                gpu_out, cpu_out,
+                "GPU diverged from CPU at log_arity {log_arity}"
+            );
             println!(
                 "   GPU fold_gpu       {gpu_ms:9.3} ms  (avg of {gpu_iters}, incl. permutes+upload+readback)  speedup x{:.1}",
                 cpu_ms / gpu_ms

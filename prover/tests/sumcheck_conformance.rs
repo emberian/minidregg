@@ -37,7 +37,10 @@ struct ConformanceFile {
 }
 
 fn conformance() -> ConformanceFile {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/sumcheck_conformance.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/testdata/sumcheck_conformance.json"
+    );
     let s = std::fs::read_to_string(Path::new(path))
         .expect("read the Lean-written sumcheck conformance file");
     let c: ConformanceFile =
@@ -86,7 +89,10 @@ fn round_sum_matches_lean_reference() {
             );
         }
         // round_poly is the [g(0), g(1)] slice of the same values.
-        assert_eq!(round_poly(&c.table, &c.challenges, i, c.p), evals[..2].to_vec());
+        assert_eq!(
+            round_poly(&c.table, &c.challenges, i, c.p),
+            evals[..2].to_vec()
+        );
     }
 }
 
@@ -100,7 +106,11 @@ fn round_sum_matches_lean_reference() {
 fn chain_identities_hold_on_lean_reference_values() {
     let c = conformance();
     let add = |a: Fp, b: Fp| (a + b) % c.p;
-    assert_eq!(add(c.rounds[0][0], c.rounds[0][1]), c.claim, "roundSum_zero on the vector");
+    assert_eq!(
+        add(c.rounds[0][0], c.rounds[0][1]),
+        c.claim,
+        "roundSum_zero on the vector"
+    );
     for k in 0..c.m - 1 {
         let g_k_at_r = eval_affine(&c.rounds[k][..2], c.challenges[k], c.p);
         assert_eq!(
@@ -129,18 +139,31 @@ fn chain_identities_hold_on_lean_reference_values() {
 fn prove_verify_on_the_vector() {
     let c = conformance();
     let proof = prove_sumcheck(&c.table, &c.challenges, c.p);
-    assert_eq!(proof.claim, c.claim, "the transcript's claim is the Lean claim");
+    assert_eq!(
+        proof.claim, c.claim,
+        "the transcript's claim is the Lean claim"
+    );
     for (i, g) in proof.rounds.iter().enumerate() {
-        assert_eq!(g[..], c.rounds[i][..2], "round {i} message matches the Lean reference");
+        assert_eq!(
+            g[..],
+            c.rounds[i][..2],
+            "round {i} message matches the Lean reference"
+        );
     }
     let oracle = |pt: &[Fp]| mle_eval(&c.table, pt, c.p);
-    assert!(verify_sumcheck(&proof, oracle, c.p), "honest transcript verifies");
+    assert!(
+        verify_sumcheck(&proof, oracle, c.p),
+        "honest transcript verifies"
+    );
 
     for i in 0..c.m {
         for j in 0..2 {
             let mut bad = proof.clone();
             bad.rounds[i][j] = (bad.rounds[i][j] + 1) % c.p;
-            assert!(!verify_sumcheck(&bad, oracle, c.p), "tampered g_{i}({j}) rejected");
+            assert!(
+                !verify_sumcheck(&bad, oracle, c.p),
+                "tampered g_{i}({j}) rejected"
+            );
         }
     }
     let mut bad = proof;

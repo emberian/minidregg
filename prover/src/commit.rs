@@ -15,15 +15,15 @@
 //!
 //! Construction: leaves are the trace's field elements in wire order (the rung-2
 //! trace is one wire vector; a columns-of-a-matrix layout arrives with the later
-//! rungs). Each leaf is hashed to a digest `perm([v, 0, …])[0]`, the leaf level is
-//! zero-padded to a power of two, and adjacent digests compress pairwise
-//! `perm([l, r, 0, …])[0]` up to the root. Leaf and node compressions share one
-//! permutation with no domain tag — real deployments domain-separate; that
-//! discipline travels with `[PROVER-poseidon-params]`/`[COMMIT-CR]`, named here,
-//! not solved.
+//! rungs).  Leaves, padding, and internal nodes use distinct domains and every
+//! digest is nine canonical BabyBear limbs (`wide.rs`).  This removes the former
+//! single-field root representation.  It does **not** establish 248-bit
+//! collision resistance: the underlying permutation parameters remain the demo
+//! `[PROVER-poseidon-params]` / `[COMMIT-CR]` residual.
 
 use crate::descriptor::Fp;
-use crate::poseidon::{perm, PermSpec};
+use crate::poseidon::{PermSpec, BABY_BEAR_P};
+use crate::wide::{hash_fields, hash_pair, Digest, DigestDomain};
 
 /// The Merkle tree, all levels: `levels[0]` is the (padded) leaf-digest level,
 /// each next level halves, `levels.last()` is `[root]`.
@@ -32,47 +32,42 @@ pub struct MerkleTree {
     /// Number of real (unpadded) leaves committed.
     pub n_leaves: usize,
     /// Digest levels, leaf level first, root level (length 1) last.
-    pub levels: Vec<Vec<Fp>>,
+    pub levels: Vec<Vec<Digest>>,
 }
 
 impl MerkleTree {
     /// The root — the commitment.
-    pub fn root(&self) -> Fp {
+    pub fn root(&self) -> Digest {
         self.levels.last().expect("tree has a root level")[0]
     }
 }
 
-/// 2-to-1 compression: `perm([l, r, 0, …])[0]`. Requires width ≥ 2.
-fn compress(spec: &PermSpec, l: Fp, r: Fp, p: u64) -> Fp {
-    assert!(spec.width >= 2, "2-to-1 compression needs width >= 2");
-    let mut st = vec![0u64; spec.width];
-    st[0] = l;
-    st[1] = r;
-    perm(spec, &st, p)[0]
+/// A scalar trace leaf, separated from FRI leaves, padding, and internal nodes.
+pub fn hash_trace_leaf(spec: &PermSpec, value: Fp, p: u64) -> Digest {
+    hash_fields(spec, DigestDomain::TraceLeaf, &[value], p)
 }
 
-/// A leaf's digest: `perm([v, 0, …])[0]` (see the module note on domain
-/// separation).
-fn hash_leaf(spec: &PermSpec, v: Fp, p: u64) -> Fp {
-    compress(spec, v, 0, p)
-}
-
-/// **Commit** — `OpeningScheme.commit`, realized: hash every trace element to a
-/// leaf digest, zero-pad to a power of two, compress pairwise to the root.
-/// Deterministic (a pure fold; the determinism test re-commits and compares).
-/// Panics on an empty trace — there is nothing to commit.
-pub fn commit_trace(spec: &PermSpec, trace: &[Fp], p: u64) -> (Fp, MerkleTree) {
-    assert!(!trace.is_empty(), "cannot commit an empty trace");
-    let n_leaves = trace.len();
+/// Build a binary Merkle tree from already domain-separated leaf digests.
+///
+/// The dedicated padding digest ensures a real zero leaf cannot equal padding
+/// merely because both carry the same scalar payload.
+pub fn commit_digests(spec: &PermSpec, leaves: &[Digest], p: u64) -> (Digest, MerkleTree) {
+    assert!(!leaves.is_empty(), "cannot commit an empty leaf sequence");
+    assert!(
+        leaves.iter().all(Digest::is_canonical),
+        "commitment leaves must be canonical"
+    );
+    let n_leaves = leaves.len();
     let padded = n_leaves.next_power_of_two();
-    let mut level: Vec<Fp> = trace.iter().map(|&v| hash_leaf(spec, v, p)).collect();
-    level.resize(padded, hash_leaf(spec, 0, p));
+    let padding = hash_fields(spec, DigestDomain::MerklePadding, &[], p);
+    let mut level = leaves.to_vec();
+    level.resize(padded, padding);
     let mut levels = vec![level];
-    while levels.last().unwrap().len() > 1 {
-        let prev = levels.last().unwrap();
-        let next: Vec<Fp> = prev
+    while levels.last().expect("leaf level exists").len() > 1 {
+        let prev = levels.last().expect("previous level exists");
+        let next: Vec<Digest> = prev
             .chunks_exact(2)
-            .map(|pair| compress(spec, pair[0], pair[1], p))
+            .map(|pair| hash_pair(spec, pair[0], pair[1], p))
             .collect();
         levels.push(next);
     }
@@ -80,12 +75,34 @@ pub fn commit_trace(spec: &PermSpec, trace: &[Fp], p: u64) -> (Fp, MerkleTree) {
     (tree.root(), tree)
 }
 
+/// **Commit** — `OpeningScheme.commit`, realized: hash every trace element to a
+/// leaf digest, pad to a power of two with the dedicated padding-domain digest,
+/// then compress pairwise to the root.
+/// Deterministic (a pure fold; the determinism test re-commits and compares).
+/// Panics on an empty trace — there is nothing to commit.
+pub fn commit_trace(spec: &PermSpec, trace: &[Fp], p: u64) -> (Digest, MerkleTree) {
+    assert!(!trace.is_empty(), "cannot commit an empty trace");
+    assert!(
+        trace.iter().all(|&value| value < p),
+        "trace leaves must be canonical"
+    );
+    let leaves: Vec<Digest> = trace
+        .iter()
+        .map(|&value| hash_trace_leaf(spec, value, p))
+        .collect();
+    commit_digests(spec, &leaves, p)
+}
+
 /// **Open** — `OpeningScheme.openAt`, realized: the authentication path for leaf
 /// `index`, as the sibling digest at every level, leaf level first. The path
 /// length is the tree height; `index`'s bits (LSB first) say which side each
 /// sibling is on. Panics if `index` is out of range.
-pub fn open(tree: &MerkleTree, index: usize) -> Vec<Fp> {
-    assert!(index < tree.n_leaves, "open: leaf index {index} out of range ({})", tree.n_leaves);
+pub fn open(tree: &MerkleTree, index: usize) -> Vec<Digest> {
+    assert!(
+        index < tree.n_leaves,
+        "open: leaf index {index} out of range ({})",
+        tree.n_leaves
+    );
     let mut path = Vec::with_capacity(tree.levels.len() - 1);
     let mut i = index;
     for level in &tree.levels[..tree.levels.len() - 1] {
@@ -100,21 +117,56 @@ pub fn open(tree: &MerkleTree, index: usize) -> Vec<Fp> {
 /// compare with the root. Also rejects an index that does not fit the path's
 /// height. Completeness on honest openings (`verifyOpen_commit`) is exercised by
 /// the round-trip test; binding rests on `[COMMIT-CR]`, not on this function.
-pub fn verify_open(root: Fp, index: usize, leaf: Fp, path: &[Fp], spec: &PermSpec, p: u64) -> bool {
-    if path.len() >= usize::BITS as usize || index >> path.len() != 0 {
+pub fn verify_digest_open(
+    root: Digest,
+    index: usize,
+    leaf_digest: Digest,
+    path: &[Digest],
+    spec: &PermSpec,
+    p: u64,
+) -> bool {
+    if p != BABY_BEAR_P
+        || spec.width < 2
+        || spec.validate(p).is_err()
+        || path.len() >= usize::BITS as usize
+        || index >> path.len() != 0
+    {
         return false;
     }
-    let mut digest = hash_leaf(spec, leaf, p);
+    // Proof-controlled malformed limbs must reject before reaching `perm`,
+    // whose executor intentionally asserts canonical field inputs.
+    if !root.is_canonical()
+        || !leaf_digest.is_canonical()
+        || path.iter().any(|sibling| !sibling.is_canonical())
+    {
+        return false;
+    }
+    let mut digest = leaf_digest;
     let mut i = index;
     for &sib in path {
         digest = if i & 1 == 0 {
-            compress(spec, digest, sib, p)
+            hash_pair(spec, digest, sib, p)
         } else {
-            compress(spec, sib, digest, p)
+            hash_pair(spec, sib, digest, p)
         };
         i >>= 1;
     }
     digest == root
+}
+
+/// Verify an opening of one scalar trace leaf.
+pub fn verify_open(
+    root: Digest,
+    index: usize,
+    leaf: Fp,
+    path: &[Digest],
+    spec: &PermSpec,
+    p: u64,
+) -> bool {
+    if leaf >= p {
+        return false;
+    }
+    verify_digest_open(root, index, hash_trace_leaf(spec, leaf, p), path, spec, p)
 }
 
 #[cfg(test)]
@@ -136,7 +188,20 @@ mod tests {
         assert_eq!(r1, r2);
         assert_eq!(tree1, tree2);
         // 6 leaves pad to 8: levels of 8, 4, 2, 1.
-        assert_eq!(tree1.levels.iter().map(Vec::len).collect::<Vec<_>>(), vec![8, 4, 2, 1]);
+        assert_eq!(
+            tree1.levels.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![8, 4, 2, 1]
+        );
+    }
+
+    #[test]
+    fn padding_is_not_a_real_zero_leaf() {
+        let spec = demo_spec();
+        let (_, tree) = commit_trace(&spec, &[9, 8, 0], BABY_BEAR_P);
+        assert_ne!(
+            tree.levels[0][2], tree.levels[0][3],
+            "domain-separated padding must differ from a live zero leaf"
+        );
     }
 
     #[test]
@@ -175,10 +240,12 @@ mod tests {
         let t = sample_trace();
         let (root, tree) = commit_trace(&spec, &t, BABY_BEAR_P);
         let mut path = open(&tree, 2);
-        path[1] = (path[1] + 1) % BABY_BEAR_P;
+        path[1].limbs[0] = (path[1].limbs[0] + 1) % BABY_BEAR_P;
         assert!(!verify_open(root, 2, t[2], &path, &spec, BABY_BEAR_P));
         let path = open(&tree, 2);
-        assert!(!verify_open((root + 1) % BABY_BEAR_P, 2, t[2], &path, &spec, BABY_BEAR_P));
+        let mut bad_root = root;
+        bad_root.limbs[0] = (bad_root.limbs[0] + 1) % BABY_BEAR_P;
+        assert!(!verify_open(bad_root, 2, t[2], &path, &spec, BABY_BEAR_P));
     }
 
     #[test]
@@ -201,5 +268,27 @@ mod tests {
         assert!(path.is_empty());
         assert!(verify_open(root, 0, 42, &path, &spec, BABY_BEAR_P));
         assert!(!verify_open(root, 0, 43, &path, &spec, BABY_BEAR_P));
+    }
+
+    #[test]
+    fn noncanonical_proof_data_rejects_without_panicking() {
+        let spec = demo_spec();
+        let t = sample_trace();
+        let (root, tree) = commit_trace(&spec, &t, BABY_BEAR_P);
+
+        let mut bad_path = open(&tree, 2);
+        bad_path[0].limbs[4] = BABY_BEAR_P;
+        assert!(!verify_open(root, 2, t[2], &bad_path, &spec, BABY_BEAR_P));
+
+        let mut bad_root = root;
+        bad_root.limbs[8] = BABY_BEAR_P;
+        assert!(!verify_open(
+            bad_root,
+            2,
+            t[2],
+            &open(&tree, 2),
+            &spec,
+            BABY_BEAR_P
+        ));
     }
 }

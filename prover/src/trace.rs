@@ -84,7 +84,11 @@ pub fn generate_trace(d: &Descriptor, vars: &[Fp]) -> Vec<Fp> {
 /// conjunct of the Lean `descriptorHolds`.
 pub fn gates_hold(d: &Descriptor, wires: &[Fp]) -> bool {
     d.gates.iter().all(|g| {
-        match (read_wire(wires, &g.a), read_wire(wires, &g.b), wires.get(g.out as usize)) {
+        match (
+            read_wire(wires, &g.a),
+            read_wire(wires, &g.b),
+            wires.get(g.out as usize),
+        ) {
             (Some(a), Some(b), Some(&out)) => g.op.denote(a, b, d.p) == out,
             _ => false,
         }

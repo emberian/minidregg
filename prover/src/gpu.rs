@@ -69,10 +69,9 @@ impl GpuFold {
             let info = adapter.get_info();
             format!("{} ({:?})", info.name, info.backend)
         };
-        let (device, queue) = pollster::block_on(
-            adapter.request_device(&wgpu::DeviceDescriptor::default(), None),
-        )
-        .map_err(|e| format!("request_device on {adapter_name}: {e}"))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+                .map_err(|e| format!("request_device on {adapter_name}: {e}"))?;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fri_fold"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fri_fold.wgsl").into()),
@@ -85,7 +84,12 @@ impl GpuFold {
             compilation_options: Default::default(),
             cache: None,
         });
-        Ok(GpuFold { device, queue, pipeline, adapter_name })
+        Ok(GpuFold {
+            device,
+            queue,
+            pipeline,
+            adapter_name,
+        })
     }
 
     /// The adapter this context runs on, e.g. `Apple M2 Max (Metal)`.
@@ -96,9 +100,17 @@ impl GpuFold {
     /// The arity-`2^log_arity` FRI fold on the GPU — natural-order in and out,
     /// same signature and semantics as `fri::fold`. Chains dispatches for
     /// `log_arity > 5` with the beta-squaring schedule.
-    pub fn fold(&self, codeword: &[Ext4], beta: Ext4, log_arity: usize) -> Result<Vec<Ext4>, String> {
+    pub fn fold(
+        &self,
+        codeword: &[Ext4],
+        beta: Ext4,
+        log_arity: usize,
+    ) -> Result<Vec<Ext4>, String> {
         if !codeword.len().is_power_of_two() {
-            return Err(format!("fold_gpu: length {} not a power of two", codeword.len()));
+            return Err(format!(
+                "fold_gpu: length {} not a power of two",
+                codeword.len()
+            ));
         }
         if log_arity as u32 > codeword.len().trailing_zeros() {
             return Err(format!(
@@ -131,7 +143,9 @@ impl GpuFold {
         let n_out = n >> k;
         let workgroups = (n_out as u32).div_ceil(WORKGROUP_SIZE).max(1);
         if workgroups > 65535 {
-            return Err(format!("fold_gpu: {n_out} outputs exceed the 1-D dispatch limit"));
+            return Err(format!(
+                "fold_gpu: {n_out} outputs exceed the 1-D dispatch limit"
+            ));
         }
 
         // natural -> bitrev (the kernel's working layout), canonical u32 lanes
@@ -148,21 +162,27 @@ impl GpuFold {
             beta: pack(&beta),
         };
 
-        let src_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fri_fold src"),
-            contents: bytemuck::cast_slice(&src),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let twid_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fri_fold twiddles"),
-            contents: bytemuck::cast_slice(&twiddles),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let params_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fri_fold params"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let src_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fri_fold src"),
+                contents: bytemuck::cast_slice(&src),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let twid_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fri_fold twiddles"),
+                contents: bytemuck::cast_slice(&twiddles),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let params_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fri_fold params"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let out_bytes = (n_out * 16) as u64;
         let dst_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("fri_fold dst"),
@@ -180,16 +200,30 @@ impl GpuFold {
             label: Some("fri_fold"),
             layout: &self.pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: src_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: twid_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: dst_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: src_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: twid_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: dst_buf.as_entire_binding(),
+                },
             ],
         });
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("fri_fold") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fri_fold"),
+            });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("fri_fold"),
@@ -213,7 +247,10 @@ impl GpuFold {
             .map_err(|e| format!("fold_gpu: buffer map failed: {e}"))?;
         let folded_rev: Vec<Ext4> = {
             let data = slice.get_mapped_range();
-            bytemuck::cast_slice::<u8, [u32; 4]>(&data).iter().map(unpack).collect()
+            bytemuck::cast_slice::<u8, [u32; 4]>(&data)
+                .iter()
+                .map(unpack)
+                .collect()
         };
         staging.unmap();
 
@@ -229,7 +266,14 @@ fn pack(x: &Ext4) -> [u32; 4] {
 }
 
 fn unpack(w: &[u32; 4]) -> Ext4 {
-    Ext4 { c: [u64::from(w[0]), u64::from(w[1]), u64::from(w[2]), u64::from(w[3])] }
+    Ext4 {
+        c: [
+            u64::from(w[0]),
+            u64::from(w[1]),
+            u64::from(w[2]),
+            u64::from(w[3]),
+        ],
+    }
 }
 
 /// One-shot GPU fold: build a context, fold, tear down. `Err` starting with

@@ -13,8 +13,7 @@ use std::path::Path;
 
 use minidregg_prover::descriptor::Descriptor;
 use minidregg_prover::gate_claim::{
-    batch_defect_table, gate_claim_len, gate_cube_dim, gate_defect_table, prove_gates,
-    verify_gates,
+    batch_defect_table, gate_claim_len, gate_cube_dim, gate_defect_table, prove_gates, verify_gates,
 };
 use minidregg_prover::sumcheck::{mle_eval, verify_sumcheck};
 use minidregg_prover::trace::{descriptor_holds, generate_trace};
@@ -48,7 +47,10 @@ fn honest_trace_zero_table_and_round_trip() {
     let d = demo();
     let w = generate_trace(&d, &HONEST_VARS);
     let table = gate_defect_table(&d, &w);
-    assert!(table.iter().all(|&v| v == 0), "honest defect table must be all-zero");
+    assert!(
+        table.iter().all(|&v| v == 0),
+        "honest defect table must be all-zero"
+    );
     assert!(descriptor_holds(&d, &w));
 
     let proof = prove_gates(&d, &w, GAMMA, &CHAL);
@@ -73,7 +75,10 @@ fn table_zero_iff_descriptor_holds_under_tampers() {
             descriptor_holds(&d, &w),
             "wire {wi}: table-zero must mirror descriptorHolds"
         );
-        assert!(!descriptor_holds(&d, &w), "wire {wi} tamper must violate the descriptor");
+        assert!(
+            !descriptor_holds(&d, &w),
+            "wire {wi} tamper must violate the descriptor"
+        );
     }
 }
 
@@ -89,7 +94,10 @@ fn every_single_wire_tamper_caught() {
         let mut w = honest.clone();
         w[wi] = (w[wi] + 1) % d.p;
         let proof = prove_gates(&d, &w, GAMMA, &CHAL);
-        assert_ne!(proof.claim, 0, "wire {wi}: batched defect sum must be nonzero at fixed γ");
+        assert_ne!(
+            proof.claim, 0,
+            "wire {wi}: batched defect sum must be nonzero at fixed γ"
+        );
         let batched = batch_defect_table(&gate_defect_table(&d, &w), GAMMA, d.p);
         assert!(
             verify_sumcheck(&proof, |pt| mle_eval(&batched, pt, d.p), d.p),

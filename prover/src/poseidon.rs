@@ -69,7 +69,11 @@ impl PermSpec {
         }
         for (ri, r) in self.rounds.iter().enumerate() {
             if r.rc.len() != self.width {
-                return Err(format!("round {ri}: rc has {} entries, width {}", r.rc.len(), self.width));
+                return Err(format!(
+                    "round {ri}: rc has {} entries, width {}",
+                    r.rc.len(),
+                    self.width
+                ));
             }
             if r.m.len() != self.width || r.m.iter().any(|row| row.len() != self.width) {
                 return Err(format!("round {ri}: m is not {0}x{0}", self.width));
@@ -127,10 +131,9 @@ fn round_exec(alpha: u64, r: &Round, state: &[Fp], p: u64) -> Vec<Fp> {
         .collect();
     (0..state.len())
         .map(|i| {
-            sboxed
-                .iter()
-                .enumerate()
-                .fold(0u64, |acc, (j, &s)| add_mod(acc, mul_mod(r.m[i][j], s, p), p))
+            sboxed.iter().enumerate().fold(0u64, |acc, (j, &s)| {
+                add_mod(acc, mul_mod(r.m[i][j], s, p), p)
+            })
         })
         .collect()
 }
@@ -139,8 +142,15 @@ fn round_exec(alpha: u64, r: &Round, state: &[Fp], p: u64) -> Vec<Fp> {
 /// to right over the state. `state` must have length `spec.width`, entries
 /// canonical mod `p`.
 pub fn perm(spec: &PermSpec, state: &[Fp], p: u64) -> Vec<Fp> {
-    assert_eq!(state.len(), spec.width, "state length must equal the spec width");
-    assert!(state.iter().all(|&x| x < p), "state entries must be canonical mod p");
+    assert_eq!(
+        state.len(),
+        spec.width,
+        "state length must equal the spec width"
+    );
+    assert!(
+        state.iter().all(|&x| x < p),
+        "state entries must be canonical mod p"
+    );
     spec.rounds
         .iter()
         .fold(state.to_vec(), |st, r| round_exec(spec.alpha, r, &st, p))
@@ -169,9 +179,21 @@ pub fn demo_spec() -> PermSpec {
         alpha: 5,
         width: 2,
         rounds: vec![
-            Round { rc: vec![3, 5], full: true, m: m1.clone() },
-            Round { rc: vec![1, 7], full: false, m: m2 },
-            Round { rc: vec![2, 4], full: true, m: m1 },
+            Round {
+                rc: vec![3, 5],
+                full: true,
+                m: m1.clone(),
+            },
+            Round {
+                rc: vec![1, 7],
+                full: false,
+                m: m2,
+            },
+            Round {
+                rc: vec![2, 4],
+                full: true,
+                m: m1,
+            },
         ],
     }
 }
@@ -194,9 +216,21 @@ mod tests {
             alpha: 5,
             width: 2,
             rounds: vec![
-                Round { rc: vec![3, 5], full: true, m: m.clone() },
-                Round { rc: vec![1, 7], full: false, m: m.clone() },
-                Round { rc: vec![2, 4], full: true, m },
+                Round {
+                    rc: vec![3, 5],
+                    full: true,
+                    m: m.clone(),
+                },
+                Round {
+                    rc: vec![1, 7],
+                    full: false,
+                    m: m.clone(),
+                },
+                Round {
+                    rc: vec![2, 4],
+                    full: true,
+                    m,
+                },
             ],
         };
         spec.validate(13).unwrap();
@@ -220,7 +254,11 @@ mod tests {
         let spec = PermSpec {
             alpha: 3,
             width: 2,
-            rounds: vec![Round { rc: vec![1, 1], full: false, m: id }],
+            rounds: vec![Round {
+                rc: vec![1, 1],
+                full: false,
+                m: id,
+            }],
         };
         // wire 0: (2+1)^3 = 27 mod 97; wire 1: 4+1 = 5, no S-box.
         assert_eq!(perm(&spec, &[2, 4], 97), vec![27, 5]);

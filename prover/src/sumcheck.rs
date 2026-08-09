@@ -65,7 +65,11 @@ fn cube_dim(f: &[Fp]) -> usize {
 /// `b` given as an index (bit `i` = coordinate `i`).
 pub fn chi_eval(b: usize, point: &[Fp], p: u64) -> Fp {
     point.iter().enumerate().fold(1 % p, |acc, (i, &x)| {
-        let factor = if (b >> i) & 1 == 1 { x % p } else { sub_mod(1 % p, x, p) };
+        let factor = if (b >> i) & 1 == 1 {
+            x % p
+        } else {
+            sub_mod(1 % p, x, p)
+        };
         mul_mod(acc, factor, p)
     })
 }
@@ -75,10 +79,15 @@ pub fn chi_eval(b: usize, point: &[Fp], p: u64) -> Fp {
 /// chi-basis sum, matching the Lean definition shape for shape.
 pub fn mle_eval(f: &[Fp], point: &[Fp], p: u64) -> Fp {
     let m = cube_dim(f);
-    assert_eq!(point.len(), m, "point dimension {} != table dimension {m}", point.len());
-    f.iter()
-        .enumerate()
-        .fold(0, |acc, (b, &v)| add_mod(acc, mul_mod(v % p, chi_eval(b, point, p), p), p))
+    assert_eq!(
+        point.len(),
+        m,
+        "point dimension {} != table dimension {m}",
+        point.len()
+    );
+    f.iter().enumerate().fold(0, |acc, (b, &v)| {
+        add_mod(acc, mul_mod(v % p, chi_eval(b, point, p), p), p)
+    })
 }
 
 /// Mirror of `roundSum` at `g = mle f`: round `i`'s partial sum
@@ -86,7 +95,12 @@ pub fn mle_eval(f: &[Fp], point: &[Fp], p: u64) -> Fp {
 /// `m`; entries at positions ≥ `i` are never read (`roundSum_congr_prefix`).
 pub fn round_sum(f: &[Fp], r: &[Fp], i: usize, t: Fp, p: u64) -> Fp {
     let m = cube_dim(f);
-    assert_eq!(r.len(), m, "challenge vector length {} != dimension {m}", r.len());
+    assert_eq!(
+        r.len(),
+        m,
+        "challenge vector length {} != dimension {m}",
+        r.len()
+    );
     assert!(i < m, "round index {i} out of range (m = {m})");
     let suffix = m - i - 1;
     let mut point: Vec<Fp> = Vec::with_capacity(m);
@@ -114,7 +128,11 @@ pub fn round_poly(f: &[Fp], r: &[Fp], i: usize, p: u64) -> Vec<Fp> {
 /// the two-point interpolation `(1 − t)·g(0) + t·g(1)` (`roundSum_affine`'s
 /// right-hand side).
 pub fn eval_affine(evals: &[Fp], t: Fp, p: u64) -> Fp {
-    assert_eq!(evals.len(), 2, "degree-<=1 round polynomial has exactly 2 evals");
+    assert_eq!(
+        evals.len(),
+        2,
+        "degree-<=1 round polynomial has exactly 2 evals"
+    );
     add_mod(
         mul_mod(sub_mod(1 % p, t, p), evals[0], p),
         mul_mod(t % p, evals[1], p),
@@ -142,11 +160,22 @@ pub struct SumcheckProof {
 /// tests EXERCISE these identities, they do not prove them.
 pub fn prove_sumcheck(f: &[Fp], challenges: &[Fp], p: u64) -> SumcheckProof {
     let m = cube_dim(f);
-    assert_eq!(challenges.len(), m, "need one challenge per round (m = {m})");
-    assert!(challenges.iter().all(|&r| r < p), "challenges must be canonical mod p");
+    assert_eq!(
+        challenges.len(),
+        m,
+        "need one challenge per round (m = {m})"
+    );
+    assert!(
+        challenges.iter().all(|&r| r < p),
+        "challenges must be canonical mod p"
+    );
     let claim = f.iter().fold(0, |acc, &v| add_mod(acc, v % p, p));
     let rounds = (0..m).map(|i| round_poly(f, challenges, i, p)).collect();
-    SumcheckProof { claim, rounds, challenges: challenges.to_vec() }
+    SumcheckProof {
+        claim,
+        rounds,
+        challenges: challenges.to_vec(),
+    }
 }
 
 /// The sumcheck verifier, mirroring `SumcheckAccepts`: every round's boolean
@@ -155,11 +184,7 @@ pub fn prove_sumcheck(f: &[Fp], challenges: &[Fp], p: u64) -> SumcheckProof {
 /// deployed protocol, an opening of the committed table; here, typically
 /// `|pt| mle_eval(f, pt, p)`). Conservative reject on any shape or canonicity
 /// violation. Runs; does not verify in the formal sense — no Rust semantics.
-pub fn verify_sumcheck(
-    proof: &SumcheckProof,
-    f_oracle: impl Fn(&[Fp]) -> Fp,
-    p: u64,
-) -> bool {
+pub fn verify_sumcheck(proof: &SumcheckProof, f_oracle: impl Fn(&[Fp]) -> Fp, p: u64) -> bool {
     if proof.rounds.len() != proof.challenges.len() {
         return false;
     }
@@ -243,7 +268,11 @@ mod tests {
         for i in 0..3 {
             let g = round_poly(&F97, &r, i, P97);
             for t in [2, 5, 96] {
-                assert_eq!(round_sum(&F97, &r, i, t, P97), eval_affine(&g, t, P97), "round {i} t {t}");
+                assert_eq!(
+                    round_sum(&F97, &r, i, t, P97),
+                    eval_affine(&g, t, P97),
+                    "round {i} t {t}"
+                );
             }
         }
     }
@@ -253,9 +282,15 @@ mod tests {
         // roundSum_congr_prefix, exercised: round i reads r only below i.
         let r1 = [17, 42, 63];
         let r2 = [17, 42, 11];
-        assert_eq!(round_sum(&F97, &r1, 2, 7, P97), round_sum(&F97, &r2, 2, 7, P97));
+        assert_eq!(
+            round_sum(&F97, &r1, 2, 7, P97),
+            round_sum(&F97, &r2, 2, 7, P97)
+        );
         let r3 = [17, 5, 90];
-        assert_eq!(round_sum(&F97, &r1, 1, 7, P97), round_sum(&F97, &r3, 1, 7, P97));
+        assert_eq!(
+            round_sum(&F97, &r1, 1, 7, P97),
+            round_sum(&F97, &r3, 1, 7, P97)
+        );
     }
 
     #[test]
@@ -272,15 +307,25 @@ mod tests {
         // roundSum_zero, roundSum_succ, roundSum_last.
         let chal = [17, 42, 63];
         let proof = prove_sumcheck(&F97, &chal, P97);
-        assert_eq!(add_mod(proof.rounds[0][0], proof.rounds[0][1], P97), proof.claim);
+        assert_eq!(
+            add_mod(proof.rounds[0][0], proof.rounds[0][1], P97),
+            proof.claim
+        );
         for k in 0..2 {
             assert_eq!(
                 add_mod(proof.rounds[k + 1][0], proof.rounds[k + 1][1], P97),
                 eval_affine(&proof.rounds[k], chal[k], P97),
-                "g_{}(0)+g_{}(1) = g_{}(r_{})", k + 1, k + 1, k, k
+                "g_{}(0)+g_{}(1) = g_{}(r_{})",
+                k + 1,
+                k + 1,
+                k,
+                k
             );
         }
-        assert_eq!(eval_affine(&proof.rounds[2], chal[2], P97), mle_eval(&F97, &chal, P97));
+        assert_eq!(
+            eval_affine(&proof.rounds[2], chal[2], P97),
+            mle_eval(&F97, &chal, P97)
+        );
     }
 
     #[test]
@@ -322,7 +367,11 @@ mod tests {
         let chal = [17, 42, 63];
         let proof = prove_sumcheck(&F97, &chal, P97);
         let other: [Fp; 8] = [3, 1, 4, 1, 5, 9, 2, 7];
-        assert!(!verify_sumcheck(&proof, |pt| mle_eval(&other, pt, P97), P97));
+        assert!(!verify_sumcheck(
+            &proof,
+            |pt| mle_eval(&other, pt, P97),
+            P97
+        ));
     }
 
     #[test]

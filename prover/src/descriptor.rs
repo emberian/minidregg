@@ -107,12 +107,14 @@ impl Descriptor {
         }
         let check_wire = |what: &str, w: &Wire| -> Result<(), String> {
             match *w {
-                Wire::Const(c) if c >= self.p => {
-                    Err(format!("{what}: non-canonical constant {c} (mod {})", self.p))
-                }
-                Wire::Wire(n) if n >= self.n_wires => {
-                    Err(format!("{what}: wire index {n} out of range (nWires={})", self.n_wires))
-                }
+                Wire::Const(c) if c >= self.p => Err(format!(
+                    "{what}: non-canonical constant {c} (mod {})",
+                    self.p
+                )),
+                Wire::Wire(n) if n >= self.n_wires => Err(format!(
+                    "{what}: wire index {n} out of range (nWires={})",
+                    self.n_wires
+                )),
                 _ => Ok(()),
             }
         };
@@ -152,7 +154,12 @@ mod tests {
             n_public: 1,
             n_vars: 1,
             n_wires: 2,
-            gates: vec![Gate { op: GateOp::Mul, a: Wire::Wire(0), b: Wire::Wire(0), out: 0 }],
+            gates: vec![Gate {
+                op: GateOp::Mul,
+                a: Wire::Wire(0),
+                b: Wire::Wire(0),
+                out: 0,
+            }],
             zeros: vec![],
         };
         assert!(d.validate().is_err());
@@ -165,7 +172,12 @@ mod tests {
             n_public: 0,
             n_vars: 0,
             n_wires: 1,
-            gates: vec![Gate { op: GateOp::Add, a: Wire::Const(7), b: Wire::Const(0), out: 0 }],
+            gates: vec![Gate {
+                op: GateOp::Add,
+                a: Wire::Const(7),
+                b: Wire::Const(0),
+                out: 0,
+            }],
             zeros: vec![],
         };
         assert!(d.validate().is_err());

@@ -30,7 +30,10 @@ struct ConformanceFile {
 }
 
 fn conformance() -> ConformanceFile {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/poseidon_conformance.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/testdata/poseidon_conformance.json"
+    );
     let s = std::fs::read_to_string(Path::new(path))
         .expect("read the Lean-written poseidon conformance file");
     serde_json::from_str(&s).expect("parse the Lean-written poseidon conformance file")
@@ -43,7 +46,11 @@ fn rust_demo_spec_is_the_lean_spec() {
     let c = conformance();
     assert_eq!(c.p, BABY_BEAR_P);
     c.spec.validate(c.p).expect("Lean-written spec well-shaped");
-    assert_eq!(c.spec, demo_spec(), "Rust demo_spec must equal the Lean proverPermSpec");
+    assert_eq!(
+        c.spec,
+        demo_spec(),
+        "Rust demo_spec must equal the Lean proverPermSpec"
+    );
 }
 
 /// **The conformance vector**: the Rust permutation reproduces the Lean
@@ -85,8 +92,14 @@ fn demo_trace_commits_opens_verifies() {
 
     for (i, &leaf) in trace.iter().enumerate() {
         let path = open(&tree, i);
-        assert!(verify_open(root, i, leaf, &path, &spec, d.p), "leaf {i} opening verifies");
+        assert!(
+            verify_open(root, i, leaf, &path, &spec, d.p),
+            "leaf {i} opening verifies"
+        );
         let tampered = (leaf + 1) % d.p;
-        assert!(!verify_open(root, i, tampered, &path, &spec, d.p), "tampered leaf {i} rejected");
+        assert!(
+            !verify_open(root, i, tampered, &path, &spec, d.p),
+            "tampered leaf {i} rejected"
+        );
     }
 }

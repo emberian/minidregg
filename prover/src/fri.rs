@@ -52,7 +52,11 @@ pub fn halve_inv_powers_bitrev(log_n: u32) -> Vec<u64> {
 /// Reverse the low `bits` bits of `i`.
 #[inline]
 pub fn bit_reverse(i: usize, bits: u32) -> usize {
-    if bits == 0 { 0 } else { i.reverse_bits() >> (usize::BITS - bits) }
+    if bits == 0 {
+        0
+    } else {
+        i.reverse_bits() >> (usize::BITS - bits)
+    }
 }
 
 /// Permute a power-of-two-length slice into bit-reversed order (an involution).
@@ -67,16 +71,24 @@ pub fn bit_reverse_permute<T: Copy>(v: &[T]) -> Vec<T> {
 /// domain, in twiddle form.
 pub fn fold_once(codeword: &[Ext4], beta: Ext4) -> Vec<Ext4> {
     let n = codeword.len();
-    assert!(n >= 2 && n.is_power_of_two(), "fold_once: length must be a power of two >= 2");
+    assert!(
+        n >= 2 && n.is_power_of_two(),
+        "fold_once: length must be a power of two >= 2"
+    );
     let log_n = n.trailing_zeros();
-    assert!(log_n <= TWO_ADIC_BITS, "fold_once: domain exceeds BabyBear 2-adicity");
+    assert!(
+        log_n <= TWO_ADIC_BITS,
+        "fold_once: domain exceeds BabyBear 2-adicity"
+    );
     let twiddles = halve_inv_powers(log_n);
     let half = n / 2;
     (0..half)
         .map(|j| {
             let lo = codeword[j];
             let hi = codeword[j + half];
-            lo.add(hi).halve().add(lo.sub(hi).mul(beta).base_mul(twiddles[j]))
+            lo.add(hi)
+                .halve()
+                .add(lo.sub(hi).mul(beta).base_mul(twiddles[j]))
         })
         .collect()
 }
@@ -106,13 +118,17 @@ mod tests {
     use crate::field4::P;
 
     fn prng(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*seed >> 16) % P
     }
 
     fn prng_word(seed: &mut u64, n: usize) -> Vec<Ext4> {
         (0..n)
-            .map(|_| Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] })
+            .map(|_| Ext4 {
+                c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+            })
             .collect()
     }
 
@@ -120,7 +136,14 @@ mod tests {
     fn fold_halves_the_length_per_round() {
         let mut seed = 3u64;
         let cw = prng_word(&mut seed, 16);
-        let beta = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
+        let beta = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
         for k in 0..=4 {
             assert_eq!(fold(&cw, beta, k).len(), 16 >> k);
         }
@@ -130,7 +153,14 @@ mod tests {
     fn arity_fold_is_iterated_pairwise_with_beta_squaring() {
         let mut seed = 9u64;
         let cw = prng_word(&mut seed, 16);
-        let beta = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
+        let beta = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
         let two_rounds = fold_once(&fold_once(&cw, beta), beta.square());
         assert_eq!(fold(&cw, beta, 2), two_rounds);
         let three = fold_once(&two_rounds, beta.square().square());
@@ -142,8 +172,22 @@ mod tests {
         // a constant word is a degree-<1 codeword: (c+c)/2 + beta*(c-c)*tw = c,
         // for EVERY beta (fold_preserves_code at the base of the tower).
         let mut seed = 11u64;
-        let c = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
-        let beta = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
+        let c = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
+        let beta = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
         let cw = vec![c; 8];
         assert_eq!(fold(&cw, beta, 3), vec![c]);
     }
@@ -152,12 +196,23 @@ mod tests {
     fn tampered_element_changes_the_fold() {
         let mut seed = 5u64;
         let cw = prng_word(&mut seed, 16);
-        let beta = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
+        let beta = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
         let reference = fold(&cw, beta, 1);
         for j in 0..16 {
             let mut bad = cw.clone();
             bad[j].c[0] = (bad[j].c[0] + 1) % P;
-            assert_ne!(fold(&bad, beta, 1), reference, "tampering element {j} must show");
+            assert_ne!(
+                fold(&bad, beta, 1),
+                reference,
+                "tampering element {j} must show"
+            );
         }
     }
 
@@ -169,7 +224,14 @@ mod tests {
         // bit-reversal of our natural-order fold.
         let mut seed = 17u64;
         let cw = prng_word(&mut seed, 16);
-        let beta = Ext4 { c: [prng(&mut seed), prng(&mut seed), prng(&mut seed), prng(&mut seed)] };
+        let beta = Ext4 {
+            c: [
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+                prng(&mut seed),
+            ],
+        };
 
         let natural = fold_once(&cw, beta);
 
@@ -179,7 +241,9 @@ mod tests {
             .map(|j| {
                 let lo = cw_rev[2 * j];
                 let hi = cw_rev[2 * j + 1];
-                lo.add(hi).halve().add(lo.sub(hi).mul(beta).base_mul(tw_rev[j]))
+                lo.add(hi)
+                    .halve()
+                    .add(lo.sub(hi).mul(beta).base_mul(tw_rev[j]))
             })
             .collect();
 

@@ -40,14 +40,22 @@ pub const TWO_ADIC_GENERATOR: u64 = 440564289;
 pub fn badd(a: u64, b: u64) -> u64 {
     debug_assert!(a < P && b < P);
     let s = a + b;
-    if s >= P { s - P } else { s }
+    if s >= P {
+        s - P
+    } else {
+        s
+    }
 }
 
 /// Base-field subtraction on canonical representatives.
 #[inline]
 pub fn bsub(a: u64, b: u64) -> u64 {
     debug_assert!(a < P && b < P);
-    if a >= b { a - b } else { a + P - b }
+    if a >= b {
+        a - b
+    } else {
+        a + P - b
+    }
 }
 
 /// Base-field multiplication (u128 intermediate, exact).
@@ -142,7 +150,10 @@ impl Ext4 {
         let w = EXT_W;
         let c0 = badd(
             bmul(a[0], b[0]),
-            bmul(w, badd(badd(bmul(a[1], b[3]), bmul(a[2], b[2])), bmul(a[3], b[1]))),
+            bmul(
+                w,
+                badd(badd(bmul(a[1], b[3]), bmul(a[2], b[2])), bmul(a[3], b[1])),
+            ),
         );
         let c1 = badd(
             badd(bmul(a[0], b[1]), bmul(a[1], b[0])),
@@ -156,7 +167,9 @@ impl Ext4 {
             badd(badd(bmul(a[0], b[3]), bmul(a[1], b[2])), bmul(a[2], b[1])),
             bmul(a[3], b[0]),
         );
-        Ext4 { c: [c0, c1, c2, c3] }
+        Ext4 {
+            c: [c0, c1, c2, c3],
+        }
     }
 
     /// `self * self` — the beta-squaring step of the arity-`2^k` fold.
@@ -191,12 +204,16 @@ mod tests {
 
     /// Deterministic pseudorandom canonical elements (tiny LCG; test-only).
     fn prng(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*seed >> 16) % P
     }
 
     fn prng_ext(seed: &mut u64) -> Ext4 {
-        Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] }
+        Ext4 {
+            c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+        }
     }
 
     #[test]

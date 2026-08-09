@@ -66,10 +66,11 @@ use crate::sumcheck::{add_mod, mul_mod, prove_sumcheck, sub_mod, verify_sumcheck
 fn read(wires: &[Fp], w: &Wire, p: u64) -> Fp {
     match *w {
         Wire::Const(c) => c % p,
-        Wire::Wire(n) => *wires
-            .get(n as usize)
-            .unwrap_or_else(|| panic!("wire index {n} out of range — descriptor not validated?"))
-            % p,
+        Wire::Wire(n) => {
+            *wires.get(n as usize).unwrap_or_else(|| {
+                panic!("wire index {n} out of range — descriptor not validated?")
+            }) % p
+        }
     }
 }
 
@@ -78,10 +79,12 @@ fn read(wires: &[Fp], w: &Wire, p: u64) -> Fp {
 fn gate_defect(g: &Gate, wires: &[Fp], p: u64) -> Fp {
     let a = read(wires, &g.a, p);
     let b = read(wires, &g.b, p);
-    let out = *wires
-        .get(g.out as usize)
-        .unwrap_or_else(|| panic!("gate output {} out of range — descriptor not validated?", g.out))
-        % p;
+    let out = *wires.get(g.out as usize).unwrap_or_else(|| {
+        panic!(
+            "gate output {} out of range — descriptor not validated?",
+            g.out
+        )
+    }) % p;
     match g.op {
         GateOp::Add => sub_mod(add_mod(a, b, p), out, p),
         GateOp::Mul => sub_mod(mul_mod(a, b, p), out, p),
@@ -183,8 +186,18 @@ mod tests {
             n_vars: 1,
             n_wires: 3,
             gates: vec![
-                Gate { op: GateOp::Add, a: Wire::Wire(0), b: Wire::Const(2), out: 1 },
-                Gate { op: GateOp::Mul, a: Wire::Wire(1), b: Wire::Wire(0), out: 2 },
+                Gate {
+                    op: GateOp::Add,
+                    a: Wire::Wire(0),
+                    b: Wire::Const(2),
+                    out: 1,
+                },
+                Gate {
+                    op: GateOp::Mul,
+                    a: Wire::Wire(1),
+                    b: Wire::Wire(0),
+                    out: 2,
+                },
             ],
             zeros: vec![Wire::Wire(2)],
         };
@@ -286,9 +299,17 @@ mod tests {
         let d = exflat();
         let table = gate_defect_table(&d, &[3, 4, 1]);
         let survivors = (0..d.p)
-            .filter(|&g| batch_defect_table(&table, g, d.p).iter().fold(0, |a, &v| add_mod(a, v, d.p)) == 0)
+            .filter(|&g| {
+                batch_defect_table(&table, g, d.p)
+                    .iter()
+                    .fold(0, |a, &v| add_mod(a, v, d.p))
+                    == 0
+            })
             .count();
-        assert!(survivors <= 3, "γ-round survivors {survivors} exceed t−1 = 3");
+        assert!(
+            survivors <= 3,
+            "γ-round survivors {survivors} exceed t−1 = 3"
+        );
         assert!(survivors < d.p as usize, "some γ must catch the violation");
     }
 
@@ -308,7 +329,14 @@ mod tests {
 
     #[test]
     fn empty_system_trivially_holds() {
-        let d = Descriptor { p: 7, n_public: 0, n_vars: 0, n_wires: 0, gates: vec![], zeros: vec![] };
+        let d = Descriptor {
+            p: 7,
+            n_public: 0,
+            n_vars: 0,
+            n_wires: 0,
+            gates: vec![],
+            zeros: vec![],
+        };
         d.validate().expect("empty descriptor well-formed");
         assert_eq!(gate_defect_table(&d, &[]), vec![0]);
         assert_eq!(gate_cube_dim(&d), 0);

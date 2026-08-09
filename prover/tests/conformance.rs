@@ -20,7 +20,8 @@ const HONEST_VARS: [u64; 5] = [13, 1, 0, 1, 1];
 fn demo() -> Descriptor {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/demo_descriptor.json");
     let d = Descriptor::from_file(Path::new(path)).expect("parse the Lean-written demo descriptor");
-    d.validate().expect("demo descriptor well-formed (mirror of emit_wellFormed)");
+    d.validate()
+        .expect("demo descriptor well-formed (mirror of emit_wellFormed)");
     d
 }
 
@@ -45,7 +46,10 @@ fn honest_trace_satisfies_descriptor() {
     let d = demo();
     let trace = generate_trace(&d, &HONEST_VARS);
     assert_eq!(trace.len(), d.n_wires as usize);
-    assert!(descriptor_holds(&d, &trace), "honest trace must satisfy descriptorHolds");
+    assert!(
+        descriptor_holds(&d, &trace),
+        "honest trace must satisfy descriptorHolds"
+    );
 }
 
 /// Teeth, gate side: tampering ANY single wire of the honest trace is rejected.
@@ -75,8 +79,14 @@ fn any_single_wire_tamper_fails() {
 fn wrong_public_input_fails_zero_checks_only() {
     let d = demo();
     let trace = generate_trace(&d, &[14, 1, 0, 1, 1]);
-    assert!(gates_hold(&d, &trace), "honestly traced gates hold by construction");
-    assert!(!zeros_hold(&d, &trace), "the root zero-check must reject x = 14");
+    assert!(
+        gates_hold(&d, &trace),
+        "honestly traced gates hold by construction"
+    );
+    assert!(
+        !zeros_hold(&d, &trace),
+        "the root zero-check must reject x = 14"
+    );
     assert!(!descriptor_holds(&d, &trace));
 }
 
@@ -87,5 +97,8 @@ fn non_boolean_bit_fails() {
     let d = demo();
     let trace = generate_trace(&d, &[2, 2, 0, 0, 0]);
     assert!(gates_hold(&d, &trace));
-    assert!(!zeros_hold(&d, &trace), "booleanity zero-check must reject bit = 2");
+    assert!(
+        !zeros_hold(&d, &trace),
+        "booleanity zero-check must reject bit = 2"
+    );
 }

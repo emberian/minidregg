@@ -8,8 +8,8 @@
 //!
 //! * the prover's descent IS `FoldingTower.word`: round `k` folds the level-`k`
 //!   word 2-to-1 at challenge `betas[k]` (`word_succ`: `word (n+1) = fold
-//!   (data n) (word n) (αs n)`), computed by the LANDED fold — `fri::fold` /
-//!   the GPU kernel, whose per-pair algebra is vector-conformant to Loom's
+//!   (data n) (word n) (αs n)`), computed by the LANDED CPU reference
+//!   `fri::fold`, whose per-pair algebra is vector-conformant to Loom's
 //!   `fold D f α` (`Compiler/FriConformance`);
 //! * the final check IS the `deg m = 1` base check: the level-`m` word must be
 //!   CONSTANT (`mem_reedSolomonCode_one_iff` — "membership in `RS[dom, 1]` is
@@ -31,11 +31,13 @@
 //! the fold-consistency + Merkle checks catch a cheating final word; they do
 //! not price the error.
 //!
-//! Commitment layout: the Merkle layer (`commit.rs`) commits base-`Fp` leaves,
-//! so each `Ext4` element is first squeezed to one digest by chaining its four
-//! lanes through the `poseidon` permutation (same no-domain-tag caveat as
-//! `commit.rs` — the discipline travels with `[PROVER-poseidon-params]` /
-//! `[COMMIT-CR]`). One commitment per fold level `0..m`; the level-`m` word
+//! Commitment layout: each `Ext4` element is encoded into a domain-separated
+//! nine-BabyBear-limb digest and the Merkle tree carries wide digests throughout.
+//! This is the runtime `[PROVER-digest-width]` representation; collision
+//! resistance still travels with `[PROVER-poseidon-params]` / `[COMMIT-CR]`.
+//! The current scalar-root Lean recursive gadget is not a refinement of this
+//! format: widening that AIR/transcript surface is `[AIR-wide-digest]`.
+//! One commitment per fold level `0..m`; the level-`m` word
 //! travels IN THE CLEAR (it must be constant — sending it is the standard FRI
 //! final-polynomial move), bound to the chain by the last consistency check.
 //!
@@ -43,12 +45,11 @@
 //! from the Poseidon2 transcript, in the schedule `lightClientGrinding_sound`
 //! prices, is `[PROVER-fs]`, not this rung.
 
-use crate::commit::{commit_trace, open, verify_open, MerkleTree};
-use crate::descriptor::Fp;
+use crate::commit::{commit_digests, open, verify_digest_open, MerkleTree};
 use crate::field4::{binv, bmul, bpow, two_adic_generator, Ext4, HALF, P, TWO_ADIC_BITS};
 use crate::fri;
-use crate::gpu::GpuFold;
-use crate::poseidon::{perm, PermSpec};
+use crate::poseidon::PermSpec;
+use crate::wide::{hash_fields, Digest, DigestDomain};
 
 /// One query's opened pair at one fold level: `lo = f_k(x)`, `hi = f_k(−x)`
 /// (natural-order positions `q_k` and `q_k + n_k/2`), each with its Merkle
@@ -57,8 +58,8 @@ use crate::poseidon::{perm, PermSpec};
 pub struct RoundOpening {
     pub lo: Ext4,
     pub hi: Ext4,
-    pub lo_path: Vec<Fp>,
-    pub hi_path: Vec<Fp>,
+    pub lo_path: Vec<Digest>,
+    pub hi_path: Vec<Digest>,
 }
 
 /// One query's openings across all `m` fold levels.
@@ -71,35 +72,112 @@ pub struct QueryOpening {
 /// constant) level-`m` word in the clear, and the per-query openings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FriProof {
-    pub round_commitments: Vec<Fp>,
+    pub round_commitments: Vec<Digest>,
     pub final_codeword: Vec<Ext4>,
     pub query_openings: Vec<QueryOpening>,
 }
 
-/// 2-to-1 sponge step `perm([a, b, 0, …])[0]` (same shape as `commit.rs`).
-fn compress2(spec: &PermSpec, a: Fp, b: Fp, p: u64) -> Fp {
-    assert!(spec.width >= 2, "ext digest needs width >= 2");
-    let mut st = vec![0u64; spec.width];
-    st[0] = a;
-    st[1] = b;
-    perm(spec, &st, p)[0]
-}
-
-/// Squeeze an `Ext4` element to one base-field digest by chaining its lanes:
-/// the Merkle leaf the commitment binds.
-pub fn ext_digest(spec: &PermSpec, v: &Ext4, p: u64) -> Fp {
-    let d = compress2(spec, v.c[0], v.c[1], p);
-    let d = compress2(spec, d, v.c[2], p);
-    compress2(spec, d, v.c[3], p)
+/// Domain-separated wide encoding of one `Ext4` Merkle leaf.
+pub fn ext_digest(spec: &PermSpec, v: &Ext4, p: u64) -> Digest {
+    hash_fields(spec, DigestDomain::FriExtLeaf, &v.c, p)
 }
 
 /// Commit one fold level: per-element digests, then the `commit.rs` Merkle
 /// tree over them (level lengths are powers of two — no padding in play).
 /// `pub(crate)` for the `[PROVER-fs]` wiring (`transcript::fri_prove_fs` commits
 /// each level to absorb its root before drawing the next challenge).
-pub(crate) fn commit_word(spec: &PermSpec, word: &[Ext4], p: u64) -> (Fp, MerkleTree) {
-    let digests: Vec<Fp> = word.iter().map(|v| ext_digest(spec, v, p)).collect();
-    commit_trace(spec, &digests, p)
+pub(crate) fn commit_word(spec: &PermSpec, word: &[Ext4], p: u64) -> (Digest, MerkleTree) {
+    let digests: Vec<Digest> = word.iter().map(|v| ext_digest(spec, v, p)).collect();
+    commit_digests(spec, &digests, p)
+}
+
+/// The one retained FRI descent used by both interactive-schedule and
+/// Fiat–Shamir proving. Each level is committed before its challenge is used;
+/// words and trees stay resident until query positions are known, so building
+/// openings never recomputes the descent or its commitments.
+pub(crate) struct FriDescent {
+    words: Vec<Vec<Ext4>>,
+    committed: Vec<(Digest, MerkleTree)>,
+}
+
+impl FriDescent {
+    pub(crate) fn new(codeword: &[Ext4]) -> FriDescent {
+        assert!(
+            !codeword.is_empty(),
+            "FRI descent needs a nonempty codeword"
+        );
+        FriDescent {
+            words: vec![codeword.to_vec()],
+            committed: Vec::new(),
+        }
+    }
+
+    pub(crate) fn current_word(&self) -> &[Ext4] {
+        self.words.last().expect("FRI descent always has a word")
+    }
+
+    /// Commit the current level and retain its tree for the eventual openings.
+    pub(crate) fn commit_current(&mut self, spec: &PermSpec, p: u64) -> Digest {
+        assert_eq!(
+            self.words.len(),
+            self.committed.len() + 1,
+            "each FRI level is committed exactly once before folding"
+        );
+        let (root, tree) = commit_word(spec, self.current_word(), p);
+        self.committed.push((root, tree));
+        root
+    }
+
+    /// Fold the just-committed level with the canonical CPU reference.
+    pub(crate) fn fold_committed(&mut self, beta: Ext4) {
+        assert_eq!(
+            self.words.len(),
+            self.committed.len(),
+            "a FRI level must be committed before its challenge is applied"
+        );
+        let next = fri::fold(self.current_word(), beta, 1);
+        self.words.push(next);
+    }
+
+    /// Materialize Merkle openings after the transcript has fixed the queries.
+    pub(crate) fn finish(self, queries: &[usize]) -> FriProof {
+        assert_eq!(
+            self.words.len(),
+            self.committed.len() + 1,
+            "FRI descent must end on one uncommitted final word"
+        );
+        let n = self.words[0].len();
+        let m = self.committed.len();
+        for &q in queries {
+            assert!(q < n / 2, "FRI query {q} out of range (< {})", n / 2);
+        }
+
+        let query_openings = queries
+            .iter()
+            .map(|&q| QueryOpening {
+                rounds: (0..m)
+                    .map(|k| {
+                        let word = &self.words[k];
+                        let half = word.len() / 2;
+                        let q_k = q % half;
+                        let tree = &self.committed[k].1;
+                        RoundOpening {
+                            lo: word[q_k],
+                            hi: word[q_k + half],
+                            lo_path: open(tree, q_k),
+                            hi_path: open(tree, q_k + half),
+                        }
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        FriProof {
+            round_commitments: self.committed.iter().map(|(root, _)| *root).collect(),
+            final_codeword: self.words[m].clone(),
+            query_openings,
+        }
+    }
 }
 
 /// The per-pair fold — EXACTLY `fri::fold_once`'s algebra at one position
@@ -107,7 +185,9 @@ pub(crate) fn commit_word(spec: &PermSpec, word: &[Ext4], p: u64) -> (Fp, Merkle
 /// `Compiler/FriQueryVerifierAir`'s `friFoldVal` arithmetizes and Loom's
 /// `fold_sq` proves well-defined: `(lo + hi)/2 + β·(lo − hi)·(1/(2x))`.
 pub fn fold_pair(lo: Ext4, hi: Ext4, beta: Ext4, twiddle: u64) -> Ext4 {
-    lo.add(hi).halve().add(lo.sub(hi).mul(beta).base_mul(twiddle))
+    lo.add(hi)
+        .halve()
+        .add(lo.sub(hi).mul(beta).base_mul(twiddle))
 }
 
 /// The level twiddle at one position, computed directly:
@@ -127,10 +207,10 @@ fn canonical(v: &Ext4) -> bool {
 /// `q < n/2`, the opened `(lo, hi)` pairs with Merkle paths at every level
 /// (query positions telescope: `q_k = q mod n_k/2`).
 ///
-/// The fold runs on the GPU when an adapter exists (one reused [`GpuFold`]
-/// context — `fold_auto`'s exact semantics without rebuilding the pipeline per
-/// round), CPU `fri::fold` otherwise. Panics on contract violations (length not
-/// a power of two, too many rounds, query out of range) — prover-side inputs.
+/// The fold uses the canonical CPU `fri::fold` reference. Hardware experiments
+/// are deliberately outside this protocol builder. Panics on contract
+/// violations (length not a power of two, too many rounds, query out of range)
+/// — prover-side inputs.
 pub fn fri_prove(
     codeword: &[Ext4],
     betas: &[Ext4],
@@ -142,53 +222,31 @@ pub fn fri_prove(
     let n = codeword.len();
     let m = betas.len();
     assert!(m >= 1, "fri_prove: at least one fold round");
-    assert!(n.is_power_of_two() && n >= 2, "fri_prove: codeword length must be a power of two >= 2");
+    assert!(
+        n.is_power_of_two() && n >= 2,
+        "fri_prove: codeword length must be a power of two >= 2"
+    );
     let log_n = n.trailing_zeros();
-    assert!(log_n <= TWO_ADIC_BITS, "fri_prove: domain exceeds BabyBear 2-adicity");
-    assert!((m as u32) <= log_n, "fri_prove: more rounds than the word can halve");
+    assert!(
+        log_n <= TWO_ADIC_BITS,
+        "fri_prove: domain exceeds BabyBear 2-adicity"
+    );
+    assert!(
+        (m as u32) <= log_n,
+        "fri_prove: more rounds than the word can halve"
+    );
     for &q in queries {
         assert!(q < n / 2, "fri_prove: query {q} out of range (< {})", n / 2);
     }
 
-    // The descent: words[k] is FoldingTower.word at level k.
-    let gpu = GpuFold::new().ok();
-    let mut words: Vec<Vec<Ext4>> = vec![codeword.to_vec()];
+    // Retain both the words and their trees so query openings are assembled
+    // without a twin computation.
+    let mut descent = FriDescent::new(codeword);
     for &beta in betas {
-        let prev = words.last().unwrap();
-        let next = match &gpu {
-            Some(g) => g.fold(prev, beta, 1).unwrap_or_else(|_| fri::fold(prev, beta, 1)),
-            None => fri::fold(prev, beta, 1),
-        };
-        words.push(next);
+        descent.commit_current(spec, p);
+        descent.fold_committed(beta);
     }
-
-    let committed: Vec<(Fp, MerkleTree)> =
-        words[..m].iter().map(|w| commit_word(spec, w, p)).collect();
-    let query_openings = queries
-        .iter()
-        .map(|&q| QueryOpening {
-            rounds: (0..m)
-                .map(|k| {
-                    let word = &words[k];
-                    let half = word.len() / 2;
-                    let q_k = q % half;
-                    let tree = &committed[k].1;
-                    RoundOpening {
-                        lo: word[q_k],
-                        hi: word[q_k + half],
-                        lo_path: open(tree, q_k),
-                        hi_path: open(tree, q_k + half),
-                    }
-                })
-                .collect(),
-        })
-        .collect();
-
-    FriProof {
-        round_commitments: committed.iter().map(|(r, _)| *r).collect(),
-        final_codeword: words[m].clone(),
-        query_openings,
-    }
+    descent.finish(queries)
 }
 
 /// **The FRI verifier.** For each query: verify both opened values' Merkle
@@ -207,7 +265,7 @@ pub fn fri_verify(
     spec: &PermSpec,
     p: u64,
 ) -> bool {
-    if p != P {
+    if p != P || spec.width < 2 || spec.validate(p).is_err() {
         return false;
     }
     let m = betas.len();
@@ -215,6 +273,7 @@ pub fn fri_verify(
     if m == 0
         || (m as u32) > TWO_ADIC_BITS
         || proof.round_commitments.len() != m
+        || queries.is_empty()
         || proof.query_openings.len() != queries.len()
         || final_len == 0
         || !final_len.is_power_of_two()
@@ -225,7 +284,13 @@ pub fn fri_verify(
         Some(v) if v.trailing_zeros() <= TWO_ADIC_BITS => v,
         _ => return false,
     };
-    if !betas.iter().all(canonical) || !proof.final_codeword.iter().all(canonical) {
+    if !betas.iter().all(canonical)
+        || !proof.final_codeword.iter().all(canonical)
+        || proof
+            .round_commitments
+            .iter()
+            .any(|root| !root.is_canonical())
+    {
         return false;
     }
 
@@ -244,23 +309,43 @@ pub fn fri_verify(
             let half_k = n_k / 2;
             let q_k = q % half_k;
             let ro = &opening.rounds[k];
-            if !(canonical(&ro.lo) && canonical(&ro.hi)) {
+            let expected_path_len = n_k.trailing_zeros() as usize;
+            if !(canonical(&ro.lo) && canonical(&ro.hi))
+                || ro.lo_path.len() != expected_path_len
+                || ro.hi_path.len() != expected_path_len
+            {
                 return false;
             }
             // Merkle binding of the opened pair to level k's commitment.
             let root = proof.round_commitments[k];
-            if !verify_open(root, q_k, ext_digest(spec, &ro.lo, p), &ro.lo_path, spec, p)
-                || !verify_open(root, q_k + half_k, ext_digest(spec, &ro.hi, p), &ro.hi_path, spec, p)
+            if !verify_digest_open(root, q_k, ext_digest(spec, &ro.lo, p), &ro.lo_path, spec, p)
+                || !verify_digest_open(
+                    root,
+                    q_k + half_k,
+                    ext_digest(spec, &ro.hi, p),
+                    &ro.hi_path,
+                    spec,
+                    p,
+                )
             {
                 return false;
             }
             // Fold consistency: the folded value must be what level k+1 holds
             // at position q_k — the next opened pair's lo/hi side, or the clear
             // final word at the last round.
-            let folded = fold_pair(ro.lo, ro.hi, betas[k], level_twiddle(n_k.trailing_zeros(), q_k));
+            let folded = fold_pair(
+                ro.lo,
+                ro.hi,
+                betas[k],
+                level_twiddle(n_k.trailing_zeros(), q_k),
+            );
             let expected = if k + 1 < m {
                 let next = &opening.rounds[k + 1];
-                if q_k < half_k / 2 { next.lo } else { next.hi }
+                if q_k < half_k / 2 {
+                    next.lo
+                } else {
+                    next.hi
+                }
             } else {
                 proof.final_codeword[q_k]
             };
@@ -279,12 +364,16 @@ mod tests {
     use crate::poseidon::demo_spec;
 
     fn prng(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*seed >> 16) % P
     }
 
     fn prng_ext(seed: &mut u64) -> Ext4 {
-        Ext4 { c: [prng(seed), prng(seed), prng(seed), prng(seed)] }
+        Ext4 {
+            c: [prng(seed), prng(seed), prng(seed), prng(seed)],
+        }
     }
 
     fn prng_word(seed: &mut u64, n: usize) -> Vec<Ext4> {
@@ -331,7 +420,11 @@ mod tests {
         let folded = fold_once(&cw, beta);
         let tw = halve_inv_powers(4);
         for j in 0..8 {
-            assert_eq!(fold_pair(cw[j], cw[j + 8], beta, tw[j]), folded[j], "position {j}");
+            assert_eq!(
+                fold_pair(cw[j], cw[j + 8], beta, tw[j]),
+                folded[j],
+                "position {j}"
+            );
         }
     }
 
@@ -357,7 +450,10 @@ mod tests {
         let proof = fri_prove(&cw, &betas, &queries, &spec, P);
         // The descent really lands on a constant (fold_preserves_code, iterated).
         assert_eq!(proof.final_codeword.len(), 1 << (LOG_N as usize - M));
-        assert!(proof.final_codeword.iter().all(|&v| v == proof.final_codeword[0]));
+        assert!(proof
+            .final_codeword
+            .iter()
+            .all(|&v| v == proof.final_codeword[0]));
         assert!(fri_verify(&proof, &betas, &queries, &spec, P));
     }
 
@@ -370,7 +466,10 @@ mod tests {
         let (betas, queries) = setup(&mut seed);
         let spec = demo_spec();
         let proof = fri_prove(&cw, &betas, &queries, &spec, P);
-        assert!(!proof.final_codeword.iter().all(|&v| v == proof.final_codeword[0]));
+        assert!(!proof
+            .final_codeword
+            .iter()
+            .all(|&v| v == proof.final_codeword[0]));
         assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
     }
 
@@ -423,17 +522,26 @@ mod tests {
         let good = fri_prove(&cw, &betas, &queries, &spec, P);
 
         let mut proof = good.clone();
-        proof.query_openings[3].rounds[1].lo_path[0] =
-            (proof.query_openings[3].rounds[1].lo_path[0] + 1) % P;
-        assert!(!fri_verify(&proof, &betas, &queries, &spec, P), "tampered path");
+        proof.query_openings[3].rounds[1].lo_path[0].limbs[0] =
+            (proof.query_openings[3].rounds[1].lo_path[0].limbs[0] + 1) % P;
+        assert!(
+            !fri_verify(&proof, &betas, &queries, &spec, P),
+            "tampered path"
+        );
 
         let mut proof = good.clone();
-        proof.round_commitments[2] = (proof.round_commitments[2] + 1) % P;
-        assert!(!fri_verify(&proof, &betas, &queries, &spec, P), "tampered commitment");
+        proof.round_commitments[2].limbs[0] = (proof.round_commitments[2].limbs[0] + 1) % P;
+        assert!(
+            !fri_verify(&proof, &betas, &queries, &spec, P),
+            "tampered commitment"
+        );
 
-        let mut proof = good;
+        let mut proof = good.clone();
         proof.final_codeword[3].c[1] = (proof.final_codeword[3].c[1] + 1) % P;
-        assert!(!fri_verify(&proof, &betas, &queries, &spec, P), "tampered final word");
+        assert!(
+            !fri_verify(&proof, &betas, &queries, &spec, P),
+            "tampered final word"
+        );
     }
 
     /// Wrong challenges reject: the fold consistency is β-sensitive.
@@ -489,15 +597,39 @@ mod tests {
         proof.query_openings[0].rounds.pop();
         assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
 
+        // Authentication paths have the exact height of their level tree.
+        let mut proof = good.clone();
+        proof.query_openings[0].rounds[0].lo_path.pop();
+        assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
+        let mut proof = good.clone();
+        let extra = proof.query_openings[0].rounds[0].hi_path[0];
+        proof.query_openings[0].rounds[0].hi_path.push(extra);
+        assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
+
         // Commitment count / round count mismatch.
         let mut proof = good.clone();
         proof.round_commitments.pop();
         assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
 
         // Non-canonical opened lane.
-        let mut proof = good;
+        let mut proof = good.clone();
         proof.query_openings[0].rounds[0].lo.c[0] += P;
         assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
+
+        // A proof-controlled non-canonical path limb rejects before hashing.
+        let mut proof = fri_prove(&cw, &betas, &queries, &spec, P);
+        proof.query_openings[0].rounds[0].lo_path[0].limbs[3] = P;
+        assert!(!fri_verify(&proof, &betas, &queries, &spec, P));
+
+        // Malformed permutation descriptions reject instead of reaching an
+        // executor assertion through a proof-controlled opening.
+        let mut malformed_spec = spec.clone();
+        malformed_spec.width = 0;
+        assert!(!fri_verify(&good, &betas, &queries, &malformed_spec, P));
+
+        // Empty query schedules do not constitute a proximity test.
+        let no_queries = fri_prove(&cw, &betas, &[], &spec, P);
+        assert!(!fri_verify(&no_queries, &betas, &[], &spec, P));
 
         // Zero rounds is not a protocol.
         assert!(!fri_verify(
