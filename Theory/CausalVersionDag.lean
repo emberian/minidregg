@@ -16,10 +16,12 @@ only to callers carrying the explicit `BindingPremise`.
 `ValidAppend` is the causal admission boundary.  It resolves the ordered
 parent frontier against already admitted entries, rejects duplicate parents,
 missing parents, entry/request/effect replay, disconnected non-genesis events,
-and semantic or schema-version rollback.  The object-specific parent/pre-state
-law remains proof-relevant `ParentCompatible` evidence supplied by a Lean
-semantic family, so a linear edit and a multi-parent stitch cannot be silently
-identified.
+and semantic or schema-version rollback.  Parents need not still be current
+tips: offline/concurrent siblings may arrive after one another.  A tips-only
+rule is an explicit optional admission policy below, never generic DAG
+validity.  The object-specific parent/pre-state law remains proof-relevant
+`ParentCompatible` evidence supplied by a Lean semantic family, so a linear
+edit and a multi-parent stitch cannot be silently identified.
 
 Finally, `Replay` is relational execution over semantic states.  Its
 checkpoint/suffix theorem is about the actual family `Step` relation, not just
@@ -225,8 +227,6 @@ structure ValidAppend
     (prior = [] /\ event.preimage.parentFrontier = [] /\
       event.preimage.semanticVersion = 0) \/
     (prior ≠ [] /\ event.preimage.parentFrontier ≠ [])
-  parentTips :
-    event.preimage.parentFrontier.toFinset <= frontier prior
   resolvedParents : List Node
   resolvedParentsExact :
     resolvedParents.map VerifiedEvent.entryId = event.preimage.parentFrontier
@@ -249,6 +249,45 @@ structure ValidAppend
   parentCompatibility :
     family.ParentCompatible (resolvedParents.map VerifiedEvent.preimage)
       event.preimage
+
+/-! ## Optional frontier admission policy -/
+
+/-- Generic causal validity accepts any already admitted parent.  A deployment
+may separately require every parent to remain a current tip, but that policy
+must not redefine the DAG or rule out offline/concurrent sibling arrival. -/
+inductive ParentAdmissionPolicy where
+  | anyAdmitted
+  | currentTips
+  deriving DecidableEq, Repr
+
+/-- Policy predicate over an already causally valid append. -/
+def ParentAdmissionPolicy.Allows
+    (policy : ParentAdmissionPolicy) (prior : List Node) (event : Node) : Prop :=
+  match policy with
+  | .anyAdmitted => True
+  | .currentTips =>
+      event.preimage.parentFrontier.toFinset ⊆ frontier prior
+
+/-- Optional policy evidence wraps, rather than weakens or replaces, the exact
+generic `ValidAppend` token. -/
+structure PolicyAppend
+    (policy : ParentAdmissionPolicy)
+    (anchor : Anchor) (prior : List Node) (event : Node) : Type _ where
+  causal : ValidAppend anchor prior event
+  policyAllows : policy.Allows prior event
+
+def ValidAppend.withAnyAdmittedPolicy
+    {anchor : Anchor} {prior : List Node} {event : Node}
+    (valid : ValidAppend anchor prior event) :
+    PolicyAppend .anyAdmitted anchor prior event :=
+  ⟨valid, trivial⟩
+
+def ValidAppend.withCurrentTipsPolicy
+    {anchor : Anchor} {prior : List Node} {event : Node}
+    (valid : ValidAppend anchor prior event)
+    (parentsCurrent : event.preimage.parentFrontier.toFinset ⊆ frontier prior) :
+    PolicyAppend .currentTips anchor prior event :=
+  ⟨valid, parentsCurrent⟩
 
 namespace ValidAppend
 
@@ -306,6 +345,65 @@ theorem no_effect_replay
     {old : VerifiedEvent scheme family}
     (present : old ∈ prior) : old.effectId ≠ event.effectId :=
   valid.effectFresh old present
+
+/-- Adding an unrelated concurrent node to the chronological log does not
+invalidate an append whose parents were already present.  This is the generic
+offline-sibling admission theorem that the former tips-only field made
+impossible.  All three replay identities for the newly preceding node remain
+explicit premises. -/
+def survives_unrelated_append
+    (valid : ValidAppend anchor prior event)
+    (other : VerifiedEvent scheme family)
+    (priorNonempty : prior ≠ [])
+    (entryFresh : other.entryId ≠ event.entryId)
+    (requestFresh : other.requestId ≠ event.requestId)
+    (effectFresh : other.effectId ≠ event.effectId) :
+    ValidAppend anchor (prior ++ [other]) event where
+  anchorExact := valid.anchorExact
+  genesisShape := by
+    rcases valid.genesisShape with genesis | connected
+    · exact False.elim (priorNonempty genesis.1)
+    · exact Or.inr ⟨by simp [priorNonempty], connected.2⟩
+  resolvedParents := valid.resolvedParents
+  resolvedParentsExact := valid.resolvedParentsExact
+  resolvedParentsPresent := by
+    intro parent present
+    exact List.mem_append_left [other]
+      (valid.resolvedParentsPresent parent present)
+  parentAnchorExact := valid.parentAnchorExact
+  parentSchemaExact := valid.parentSchemaExact
+  schemaVersionMonotone := valid.schemaVersionMonotone
+  semanticVersionIncreases := valid.semanticVersionIncreases
+  entryFresh := by
+    intro old present
+    simp only [List.mem_append, List.mem_singleton] at present
+    rcases present with present | rfl
+    · exact valid.entryFresh old present
+    · exact entryFresh
+  requestFresh := by
+    intro old present
+    simp only [List.mem_append, List.mem_singleton] at present
+    rcases present with present | rfl
+    · exact valid.requestFresh old present
+    · exact requestFresh
+  effectFresh := by
+    intro old present
+    simp only [List.mem_append, List.mem_singleton] at present
+    rcases present with present | rfl
+    · exact valid.effectFresh old present
+    · exact effectFresh
+  parentCompatibility := valid.parentCompatibility
+
+theorem concurrent_sibling_append_inhabited
+    (valid : ValidAppend anchor prior event)
+    (other : VerifiedEvent scheme family)
+    (priorNonempty : prior ≠ [])
+    (entryFresh : other.entryId ≠ event.entryId)
+    (requestFresh : other.requestId ≠ event.requestId)
+    (effectFresh : other.effectId ≠ event.effectId) :
+    Nonempty (ValidAppend anchor (prior ++ [other]) event) :=
+  ⟨valid.survives_unrelated_append other priorNonempty entryFresh
+    requestFresh effectFresh⟩
 
 end ValidAppend
 
@@ -418,5 +516,8 @@ theorem cons_pre_root
 end Replay
 
 end History
+
+#print axioms ValidAppend.parent_present
+#print axioms ValidAppend.concurrent_sibling_append_inhabited
 
 end Minidregg.Theory.CausalVersionDag
