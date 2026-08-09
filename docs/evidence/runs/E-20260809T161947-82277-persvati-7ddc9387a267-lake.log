@@ -1,0 +1,472 @@
+run=E-20260809T161947-82277-persvati-7ddc9387a267-lake
+commit=7ddc9387a267344af65bc6994101d54c560eeefb
+host=persvati
+remote_run=/home/ember/minidregg-checks/runs/run-7ddc9387a267-sSEgCr7S
+command=lake build Assurance.BfvNativeBufferAdmission 
+ℹ [2947/2984] Built Compiler.Signature (1.6s)
+info: Compiler/Signature.lean:426:0: Minidregg.Compiler.N3_opaque_payloads_forbid_second_reading : Prop
+✔ [2948/2984] Built Theory.PrivacyProfile (2.4s)
+ℹ [2949/2984] Built Theory.Bignum (2.9s)
+info: Theory/Bignum.lean:354:0: 'Minidregg.Theory.Bignum.denoteInt_eq_natCast' depends on axioms: [propext]
+info: Theory/Bignum.lean:355:0: 'Minidregg.Theory.Bignum.denoteNat_lt_pow' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:356:0: 'Minidregg.Theory.Bignum.denoteNat_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:357:0: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:358:0: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext]
+info: Theory/Bignum.lean:359:0: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:360:0: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:361:0: 'Minidregg.Theory.Bignum.Limbs.toFin_ofFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:362:0: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:363:0: 'Minidregg.Theory.Bignum.Limbs.toNat_ofBounded' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:364:0: 'Minidregg.Theory.Bignum.bits_248_fit_nine_radix_2013265921_limbs' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2950/2984] Built Theory.ReactiveReceipt (3.1s)
+✔ [2951/2984] Built Theory.IndexedProgram (3.4s)
+✔ [2952/2984] Built Theory.TypedAuthorization (3.5s)
+✔ [2953/2984] Built Compiler.Air (1.0s)
+✔ [2954/2984] Built Loom.CorrelatedAgreement (3.7s)
+✔ [2955/2984] Built Theory.CrossModulus (2.5s)
+✔ [2956/2984] Built Theory.CompressedLinearEquation (2.9s)
+✔ [2957/2984] Built Compiler.AirRange (2.5s)
+✔ [2958/2984] Built Compiler.AirFlatten (2.7s)
+✔ [2959/2984] Built Theory.DisclosureDeclaration (3.0s)
+✔ [2960/2984] Built Loom.ReedSolomon (2.8s)
+⚠ [2961/2984] Built Theory.AuthorizationDeclaration (3.8s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2962/2984] Built Compiler.AirHash (1.6s)
+✔ [2963/2984] Built Loom.ConstrainedCode (2.1s)
+✔ [2964/2984] Built Theory.PrivateComputationDeclaration (2.2s)
+✔ [2965/2984] Built Compiler.AirMembership (1.8s)
+✔ [2966/2984] Built Loom.Accumulator (1.9s)
+⚠ [2967/2984] Built Compiler.SemanticManifest (3.6s)
+warning: Compiler/SemanticManifest.lean:138:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:153:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:168:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:234:15: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:518:13: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:553:14: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+✔ [2968/2984] Built Compiler.NoteSpend (1.8s)
+⚠ [2969/2984] Built Assurance.SemanticReceiptRelation (1.9s)
+warning: Assurance/SemanticReceiptRelation.lean:37:7: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.ext`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:63:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.satisfies_iff`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:164:4: The namespace 'SemanticReceiptRelation' is duplicated in the declaration 'Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptRelation'
+
+Note: This linter can be disabled with `set_option linter.dupNamespace false`
+warning: Assurance/SemanticReceiptRelation.lean:199:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.receiptCoord_surjective`:
+  [DecidableEq Key]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Key] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:211:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_weights_shared`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:218:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_satisfies_iff`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+✔ [2970/2984] Built Compiler.Emit (1.6s)
+✔ [2971/2984] Built Assurance.SemanticTurnReceipt (1.7s)
+ℹ [2972/2984] Built Compiler.AirBignum (2.7s)
+info: Compiler/AirBignum.lean:315:0: 'Minidregg.Compiler.AirBignum.addLimbTerm_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirBignum.lean:316:0: 'Minidregg.Compiler.AirBignum.addGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:317:0: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:318:0: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirBignum.lean:319:0: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [2973/2984] Built Compiler.EmitSerialize (3.1s)
+info: Compiler/EmitSerialize.lean:233:0: round-trip OK: 18 gates, 5 zeros, nWires = 23
+✔ [2974/2984] Built Assurance.PrivateComputationReceiptClause (2.4s)
+ℹ [2975/2984] Built Compiler.AirModularView (3.6s)
+info: Compiler/AirModularView.lean:666:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:667:0: 'Minidregg.Compiler.AirModularView.mulCarryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:668:0: 'Minidregg.Compiler.AirModularView.mulConstGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:669:0: 'Minidregg.Compiler.AirModularView.modularViewGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:670:0: 'Minidregg.Compiler.AirModularView.accepted_has_modularView' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:671:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/AirModularView.lean:672:0: 'Minidregg.Compiler.AirModularView.scalarMulCarryEquations_denote' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:673:0: 'Minidregg.Compiler.AirModularView.scalarMulGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:674:0: 'Minidregg.Compiler.AirModularView.emit_scalarMulGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/AirModularView.lean:675:0: 'Minidregg.Compiler.AirModularView.fheggQ0_scalar24_base64_fits' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AirModularView.lean:676:0: 'Minidregg.Compiler.AirModularView.emit_modularViewGadget_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2976/2984] Built Compiler.BfvCompressedEquation (1.0s)
+info: Compiler/BfvCompressedEquation.lean:359:0: 'Minidregg.Compiler.BfvCompressedEquation.DeployedEquation.eval_active_eq_numerator' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:360:0: 'Minidregg.Compiler.BfvCompressedEquation.RuntimeWitness.shifted_balance' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:361:0: 'Minidregg.Compiler.BfvCompressedEquation.q0ProductGadget_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:362:0: 'Minidregg.Compiler.BfvCompressedEquation.q0ProductCommonInteger_value' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:363:0: 'Minidregg.Compiler.BfvCompressedEquation.q0_row_bridge_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:364:0: 'Minidregg.Compiler.BfvCompressedEquation.q0_row_commonInteger_bridge_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:365:0: 'Minidregg.Compiler.BfvCompressedEquation.emit_q0ProductGadget_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvCompressedEquation.lean:366:0: 'Minidregg.Compiler.BfvCompressedEquation.babyBear_integer_cast_not_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2977/2984] Built Compiler.BignumKernelABI (2.3s)
+info: Compiler/BignumKernelABI.lean:453:0: 'Minidregg.Compiler.BignumKernelABI.KernelCall.accepts_iff_descriptor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:454:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/BignumKernelABI.lean:455:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:456:0: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:457:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_wellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:458:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BignumKernelABI.lean:459:0: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2978/2984] Built Compiler.BfvAllModuliKernelCalls (1.5s)
+info: Compiler/BfvAllModuliKernelCalls.lean:132:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.all_modulus_products_fit' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvAllModuliKernelCalls.lean:133:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.q2_max_product_not_width10' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvAllModuliKernelCalls.lean:134:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_schema' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvAllModuliKernelCalls.lean:135:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvAllModuliKernelCalls.lean:136:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_accepts_iff_descriptor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvAllModuliKernelCalls.lean:137:0: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_accepts_iff' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2979/2984] Built Compiler.NativeKernelPlan (1.9s)
+info: Compiler/NativeKernelPlan.lean:538:0: 'Minidregg.Compiler.NativeKernelPlan.arbitraryRunner_integrity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:539:0: 'Minidregg.Compiler.NativeKernelPlan.descriptorFailure_not_certified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:540:0: 'Minidregg.Compiler.NativeKernelPlan.manifestMismatch_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:541:0: 'Minidregg.Compiler.NativeKernelPlan.checkInstructions_headError' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/NativeKernelPlan.lean:542:0: 'Minidregg.Compiler.NativeKernelPlan.firstInstructionError_blocks' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2980/2984] Built Compiler.BfvInputValidity (1.7s)
+info: Compiler/BfvInputValidity.lean:285:0: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.selector_boolean' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvInputValidity.lean:286:0: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.selector_oneHot' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvInputValidity.lean:287:0: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.shorts_bounded' depends on axioms: [propext, Quot.sound]
+info: Compiler/BfvInputValidity.lean:288:0: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_uses_shared_witness' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvInputValidity.lean:289:0: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_call_uses_shared_identity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvInputValidity.lean:290:0: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_uses_statement_public_inputs' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvInputValidity.lean:291:0: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_call_is_descriptorHolds' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [2981/2984] Built Compiler.BfvSignedAccumulatorAir (2.6s)
+warning: Compiler/BfvSignedAccumulatorAir.lean:182:49: unused variable `hcarryp`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Compiler/BfvSignedAccumulatorAir.lean:299:54: This simp argument is unused:
+  Fin.append_left
+
+Hint: Omit it from the simp argument list.
+  simp only [OwnerRow.activeValue, activeShift, F̵i̵n̵.̵a̵p̵p̵e̵n̵d̵_̵l̵e̵f̵t̵,̵ ̵Fin.append_right, Nat.cast_ofNat]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+info: Compiler/BfvSignedAccumulatorAir.lean:598:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.weightedSumGadget_correct' depends on axioms: [propext, Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:599:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.denote_weighted_columns' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:600:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.weightedSumGadget_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:601:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.shiftedScalar_recompose' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:602:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.shiftedScalar_lt_64' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:603:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.eval_eq_shifted' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Compiler/BfvSignedAccumulatorAir.lean:604:0: 'Minidregg.Compiler.BfvSignedAccumulatorAir.deployed_column_budget' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2982/2984] Built Compiler.BfvReceiptClause (1.6s)
+info: Compiler/BfvReceiptClause.lean:245:0: 'Minidregg.Compiler.BfvReceiptClause.CheckedRowBuffer.exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvReceiptClause.lean:246:0: 'Minidregg.Compiler.BfvReceiptClause.AcceptedToken.every_row_bound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvReceiptClause.lean:247:0: 'Minidregg.Compiler.BfvReceiptClause.AcceptedToken.every_exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/BfvReceiptClause.lean:248:0: 'Minidregg.Compiler.BfvReceiptClause.bfvClausePin_unassigned' does not depend on any axioms
+info: Compiler/BfvReceiptClause.lean:249:0: 'Minidregg.Compiler.BfvReceiptClause.lookup_register' depends on axioms: [propext]
+info: Compiler/BfvReceiptClause.lean:250:0: 'Minidregg.Compiler.BfvReceiptClause.Admitted.every_exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [2983/2984] Built Assurance.BfvPrivateComputationJoin (1.6s)
+info: Assurance/BfvPrivateComputationJoin.lean:249:0: 'Minidregg.Assurance.BfvPrivateComputationJoin.program_crypto_pins_unassigned' does not depend on any axioms
+info: Assurance/BfvPrivateComputationJoin.lean:250:0: 'Minidregg.Assurance.BfvPrivateComputationJoin.Evidence.every_exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvPrivateComputationJoin.lean:251:0: 'Minidregg.Assurance.BfvPrivateComputationJoin.CheckedPrivateEvidence.bfv_bound_semantics' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvPrivateComputationJoin.lean:252:0: 'Minidregg.Assurance.BfvPrivateComputationJoin.receiptEvent_bfv_semantics' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [2984/2984] Built Assurance.BfvNativeBufferAdmission (8.6s)
+warning: Assurance/BfvNativeBufferAdmission.lean:66:63: unused variable `carryBits`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Assurance/BfvNativeBufferAdmission.lean:213:67: This simp argument is unused:
+  rightCarryBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+         ̵ ̵WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBi̵t̵B̵ase,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵r̵i̵g̵h̵t̵C̵a̵r̵r̵y̵B̵a̵s̵e̵,̵ ̵leftCarryBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲leftCarryBase, resultBitBase, resultBase,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:214:8: This simp argument is unused:
+  rightCarryBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase,
+        r̵i̵g̵h̵t̵C̵a̵r̵r̵y̵B̵a̵s̵e̵,̵ ̵leftCarryBitBase, leftCarryBase, resultBitBase, resultBase, activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:214:24: This simp argument is unused:
+  leftCarryBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase, rightCarryBase,
+  ̲  ̲ ̲ ̲ ̲ ̲l̵e̵f̵t̵C̵a̵r̵r̵y̵B̵i̵t̵B̵a̵s̵e̵,̵ ̵leftCarryBase, resultBitBase, resultBase, activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:214:42: This simp argument is unused:
+  leftCarryBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase, rightCarryBase,
+  ̲  ̲ ̲ ̲ ̲ ̲leftCarryBitBase, l̵e̵f̵t̵C̵a̵r̵r̵y̵B̵a̵s̵e̵,̵ ̵resultBitBase, resultBase, activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:214:57: This simp argument is unused:
+  resultBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase, rightCarryBase,
+  ̲  ̲ ̲ ̲ ̲ ̲leftCarryBitBase, leftCarryBase, r̵e̵s̵u̵l̵t̵B̵i̵t̵B̵a̵s̵e̵,̵ ̵resultBase, activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:214:72: This simp argument is unused:
+  resultBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase, rightCarryBase,
+  ̲  ̲ ̲ ̲ ̲ ̲leftCarryBitBase, leftCarryBase, resultBitBase, r̵e̵s̵u̵l̵t̵B̵a̵s̵e̵,̵activeBase, accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:215:8: This simp argument is unused:
+  activeBase
+
+Hint: Omit it from the simp argument list.
+  simp [rowKernelCall, rowSegments, scalarMulSegments, segmentsCoverFrom, emit,
+        WireSegment.visibilityFits, scalarCellCount, rowWireCount, rightCarryBitBase, rightCarryBase,
+  ̲  ̲ ̲ ̲ ̲ ̲leftCarryBitBase, leftCarryBase, resultBitBase, resultBase, a̵c̵t̵i̵v̵e̵B̵a̵s̵e̵,̵ ̵accumulatorCellCount,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarMulWireCount, mulCarryBitBase, mulCarryBase, productBitBase, productBase, scalarBitBase,
+  ̲  ̲ ̲ ̲ ̲ ̲scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:220:20: This simp argument is unused:
+  rightCarryBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲r̵i̵g̵h̵t̵C̵a̵r̵r̵y̵B̵i̵t̵B̵a̵s̵e̵,̵ ̵rightCarryBase, leftCarryBitBase, leftCarryBase, resultBitBase, resultBase, activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:220:39: This simp argument is unused:
+  rightCarryBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, r̵i̵g̵h̵t̵C̵a̵r̵r̵y̵B̵a̵s̵e̵,̵ ̵leftCarryBitBase, leftCarryBase, resultBitBase, resultBase, activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:220:55: This simp argument is unused:
+  leftCarryBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, rightCarryBase, l̵e̵f̵t̵C̵a̵r̵r̵y̵B̵i̵t̵B̵a̵s̵e̵,̵ ̵leftCarryBase, resultBitBase, resultBase, activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:220:73: This simp argument is unused:
+  leftCarryBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, rightCarryBase, leftCarryBitBase, l̵e̵f̵t̵C̵a̵r̵r̵y̵B̵a̵s̵e̵,̵resultBitBase, resultBase, activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:221:6: This simp argument is unused:
+  resultBitBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, rightCarryBase, leftCarryBitBase, leftCarryBase, r̵e̵s̵u̵l̵t̵B̵i̵t̵B̵a̵s̵e̵,̵ ̵resultBase, activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:221:21: This simp argument is unused:
+  resultBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, rightCarryBase, leftCarryBitBase, leftCarryBase, resultBitBase, r̵e̵s̵u̵l̵t̵B̵a̵s̵e̵,̵ ̵activeBase,
+  ̲  ̲ ̲ ̲scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:221:33: This simp argument is unused:
+  activeBase
+
+Hint: Omit it from the simp argument list.
+  simp [KernelCall.CallsWellShaped, rowKernelCall, scalarMulWitnessCall, emit,
+      WitnessCall.WellShaped, ScalarMulConstCall.WellShaped, WireSpan.inBounds, rowWireCount,
+  ̲  ̲ ̲ ̲rightCarryBitBase, rightCarryBase, leftCarryBitBase, leftCarryBase, resultBitBase, resultBase,
+  ̲  ̲ ̲ ̲a̵c̵t̵i̵v̵e̵B̵a̵s̵e̵,̵ ̵scalarCellCount, scalarMulWireCount, accumulatorCellCount, mulCarryBitBase, mulCarryBase,
+  ̲  ̲ ̲ ̲productBitBase, productBase, scalarBitBase, scalarBase]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: Assurance/BfvNativeBufferAdmission.lean:636:5: unused variable `admission`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+info: Assurance/BfvNativeBufferAdmission.lean:824:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.rowKernelCall_fullyWellFormed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:825:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.RowAdmission.descriptorAcceptance' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:826:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.RowAdmission.toCheckedRowBuffer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:827:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.BatchAdmission.every_exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:828:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.bfvManifest_wellFormed' depends on axioms: [propext, Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:829:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.issueReceiptEvent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/BfvNativeBufferAdmission.lean:830:0: 'Minidregg.Assurance.BfvNativeBufferAdmission.receiptEvent_every_exact_integer_equation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+Build completed successfully (2984 jobs).

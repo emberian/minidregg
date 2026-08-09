@@ -4,6 +4,24 @@ This file records reproducible measurements, including bad news. It is not a pro
 page. Each row names the exact path measured, because the current full-trace reference protocol
 and the intended succinct additive protocol are different algorithms.
 
+## Remote committed-source build evidence — 2026-08-09
+
+These are distributed build checks, not performance measurements. Both workers received the same
+hashed `git archive` for commit `7ddc9387a267344af65bc6994101d54c560eeefb`, built in unique
+project trees with Lean 4.30.0, and retained raw logs plus project-olean hash manifests. Package
+artifacts were cached under a host-local lock; no project build output was shared.
+
+| Evidence | Host | Exact target | Result | Claim ceiling |
+|---|---|---|---:|---|
+| [`E-…1944`](evidence/runs/E-20260809T161944-82276-hbox-7ddc9387a267-lake.json) | hbox, i9-12900 | `Assurance.SemanticAdditiveFriCheckpoint` | pass | This exact committed target builds |
+| [`E-…1947`](evidence/runs/E-20260809T161947-82277-persvati-7ddc9387a267-lake.json) | persvati, Ryzen AI 9 HX PRO 370 | `Assurance.BfvNativeBufferAdmission` | pass | This exact committed target builds |
+
+The records explicitly make no native-semantics, benchmark, or cryptographic-security claim. The
+initial runner trials also caught and fixed SSH argument transport, writable package-hook, and Lean
+worker-memory assumptions before these passing records were promoted. See
+[`D-0003`](decisions/D-0003-remote-evidence.md) and
+[`scripts/remote-check.sh`](../scripts/remote-check.sh).
+
 ## Archived full-trace reference baseline — 2026-08-09
 
 The benchmark and Rust-owned reference verifier were deleted. These numbers are historical evidence

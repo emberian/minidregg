@@ -1,0 +1,373 @@
+run=E-20260809T161944-82276-hbox-7ddc9387a267-lake
+commit=7ddc9387a267344af65bc6994101d54c560eeefb
+host=hbox
+remote_run=/tank/dregg-build/minidregg-checks/runs/run-7ddc9387a267-7i4JCAsD
+command=lake build Assurance.SemanticAdditiveFriCheckpoint 
+ℹ [2951/3017] Built Compiler.Signature (3.6s)
+info: Compiler/Signature.lean:426:0: Minidregg.Compiler.N3_opaque_payloads_forbid_second_reading : Prop
+ℹ [2952/3017] Built Loom.Rbr (4.2s)
+info: Loom/Rbr.lean:465:0: Minidregg.Loom.OB2_depth_composition : Prop
+✔ [2953/3017] Built Theory.PrivacyProfile (5.2s)
+✔ [2954/3017] Built Theory.BinaryTower (5.6s)
+✔ [2955/3017] Built Theory.IndexedProgram (6.1s)
+✔ [2956/3017] Built Theory.ReactiveReceipt (6.2s)
+ℹ [2957/3017] Built Theory.Bignum (6.4s)
+info: Theory/Bignum.lean:354:0: 'Minidregg.Theory.Bignum.denoteInt_eq_natCast' depends on axioms: [propext]
+info: Theory/Bignum.lean:355:0: 'Minidregg.Theory.Bignum.denoteNat_lt_pow' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:356:0: 'Minidregg.Theory.Bignum.denoteNat_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:357:0: 'Minidregg.Theory.Bignum.denoteInt_digitsLE' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:358:0: 'Minidregg.Theory.Bignum.digitsLE_denoteNat' depends on axioms: [propext]
+info: Theory/Bignum.lean:359:0: 'Minidregg.Theory.Bignum.denoteNat_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:360:0: 'Minidregg.Theory.Bignum.denoteInt_injective' depends on axioms: [propext]
+info: Theory/Bignum.lean:361:0: 'Minidregg.Theory.Bignum.Limbs.toFin_ofFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:362:0: 'Minidregg.Theory.Bignum.Limbs.ofFin_toFin' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Theory/Bignum.lean:363:0: 'Minidregg.Theory.Bignum.Limbs.toNat_ofBounded' depends on axioms: [propext, Quot.sound]
+info: Theory/Bignum.lean:364:0: 'Minidregg.Theory.Bignum.bits_248_fit_nine_radix_2013265921_limbs' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [2958/3017] Built Theory.TypedAuthorization (7.3s)
+✔ [2959/3017] Built Loom.CorrelatedAgreement (7.4s)
+✔ [2960/3017] Built Compiler.Air (4.9s)
+✔ [2961/3017] Built Theory.BinaryTowerFanPaar (5.1s)
+✔ [2962/3017] Built Loom.ReedSolomon (5.0s)
+✔ [2963/3017] Built Loom.Depth (8.7s)
+✔ [2964/3017] Built Compiler.AirRange (4.6s)
+✔ [2965/3017] Built Compiler.AirFlatten (5.0s)
+⚠ [2966/3017] Built Theory.AuthorizationDeclaration (7.9s)
+warning: Theory/AuthorizationDeclaration.lean:439:10: This simp argument is unused:
+  hlookup
+
+Hint: Omit it from the simp argument list.
+  simp ̵[̵h̵l̵o̵o̵k̵u̵p̵]̵
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+✔ [2967/3017] Built Theory.AdditiveNTT (5.5s)
+ℹ [2968/3017] Built Loom.FiatShamir (3.6s)
+info: Loom/FiatShamir.lean:653:0: @Oracle.respond_consistent : ∀ {Q C : Type} (O : Oracle Q C) (q : Q) (coin coin' : C),
+  ((O.respond q coin).2.respond q coin').1 = (O.respond q coin).1
+info: Loom/FiatShamir.lean:654:0: @srFinalChal_eq_lookup : ∀ {r : Reduction} {s t : ℕ} (P : SrProver r s) (c : Fin t → r.Chal) (d : Fin r.k → r.Chal)
+  (i : Fin r.k), srFinalChal P c d i = ((srHandlerRun P c).1.lookup ((srOut P c).query i)).getD (d i)
+info: Loom/FiatShamir.lean:655:0: Minidregg.Loom.fsStraightline_iff_sr (r : Reduction) (Z : Set (Stmt r)) (ε : ℕ → ℕ → ℝ → ℝ) :
+  FsStraightlineKnowledgeSoundness r Z ε ↔ StraightlineSrKnowledgeSoundness r Z ε
+info: Loom/FiatShamir.lean:656:0: Minidregg.Loom.fsOfRbrSound_iff_depth : FsOfRbrSound ↔ OB2_depth_composition_nonneg
+info: Loom/FiatShamir.lean:657:0: Minidregg.Loom.fsKeystone_proved : FsOfRbrKeystone
+✔ [2969/3017] Built Compiler.AirHash (4.4s)
+✔ [2970/3017] Built Loom.ConstrainedCode (5.2s)
+✔ [2971/3017] Built Loom.Proximity (6.2s)
+✔ [2972/3017] Built Compiler.AirMembership (3.6s)
+✔ [2973/3017] Built Theory.AdditiveNTTTransform (5.1s)
+✔ [2974/3017] Built Loom.Accumulator (4.7s)
+⚠ [2975/3017] Built Compiler.SemanticManifest (8.3s)
+warning: Compiler/SemanticManifest.lean:138:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:153:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:168:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:234:15: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:518:13: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: Compiler/SemanticManifest.lean:553:14: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+✔ [2976/3017] Built Loom.ProximityGapUD (5.5s)
+✔ [2977/3017] Built Compiler.NoteSpend (5.7s)
+✔ [2978/3017] Built Loom.AccExtract (4.7s)
+✔ [2979/3017] Built Loom.LightClient (5.3s)
+✔ [2980/3017] Built Loom.Decider (5.5s)
+✔ [2981/3017] Built Loom.ZK (5.0s)
+⚠ [2982/3017] Built Assurance.SemanticReceiptRelation (6.5s)
+warning: Assurance/SemanticReceiptRelation.lean:37:7: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.ext`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:63:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.ReceiptWitness.satisfies_iff`:
+  [Fintype Key]
+  [DecidableEq Key]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype Key] [DecidableEq Key] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:164:4: The namespace 'SemanticReceiptRelation' is duplicated in the declaration 'Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptRelation'
+
+Note: This linter can be disabled with `set_option linter.dupNamespace false`
+warning: Assurance/SemanticReceiptRelation.lean:199:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.receiptCoord_surjective`:
+  [DecidableEq Key]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Key] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:211:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_weights_shared`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRelation.lean:218:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRelation.SemanticReceiptClaim.acc_satisfies_iff`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+✔ [2983/3017] Built Loom.AccSound (6.6s)
+ℹ [2984/3017] Built Loom.AdditiveProximity (4.8s)
+info: Loom/AdditiveProximity.lean:362:0: 'Minidregg.Loom.additiveProximityGap_of_isProximityGenerator' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveProximity.lean:363:0: 'Minidregg.Loom.additiveProximityGap_UD' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveProximity.lean:364:0: 'Minidregg.Loom.additiveFold_distance_UD' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveProximity.lean:365:0: 'Minidregg.Loom.keystone_additiveProximityGap' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveProximity.lean:366:0: 'Minidregg.Loom.keystone_far_word_eighth' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveProximity.lean:367:0: 'Minidregg.Loom.keystone_additiveFold_distance_fires' depends on axioms: [propext, Classical.choice, Quot.sound]
+✔ [2985/3017] Built Compiler.Emit (4.3s)
+✔ [2986/3017] Built Loom.Commitment (3.5s)
+✔ [2987/3017] Built Loom.ZKHiding (4.3s)
+✔ [2988/3017] Built Loom.AccSoundRbr (3.6s)
+✔ [2989/3017] Built Loom.LightClientSound (4.3s)
+✔ [2990/3017] Built Assurance.SemanticTurnReceipt (5.5s)
+✔ [2991/3017] Built Loom.ConstrainedMask (2.0s)
+✔ [2992/3017] Built Loom.Erasure (2.0s)
+✔ [2993/3017] Built Loom.AccExtractChain (2.5s)
+ℹ [2994/3017] Built Compiler.EmitSerialize (5.8s)
+info: Compiler/EmitSerialize.lean:233:0: round-trip OK: 18 gates, 5 zeros, nWires = 23
+⚠ [2995/3017] Built Loom.ZkArgument (1.9s)
+warning: Loom/ZkArgument.lean:164:15: unused variable `f`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Loom/ZkArgument.lean:165:26: unused variable `h`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Loom/ZkArgument.lean:165:28: unused variable `h'`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Loom/ZkArgument.lean:165:31: unused variable `γ'`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+✔ [2996/3017] Built Loom.RbrZeroKnowledge (2.1s)
+✔ [2997/3017] Built Compiler.NextgenLightClientPublicInputs (3.0s)
+✔ [2998/3017] Built Loom.ZkTriangular (2.3s)
+⚠ [2999/3017] Built Assurance.SemanticReceiptRuntimeCodec (2.6s)
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:60:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_pre`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:65:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_post`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:70:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_touched`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:91:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_boolean`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:96:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_frame`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:102:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeResiduals_zero_iff`:
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:118:0: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.runtimeEncode_refines_formal`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:191:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_binding`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Assurance/SemanticReceiptRuntimeCodec.lean:197:8: automatically included section variable(s) unused in theorem `Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_core`:
+  [Field F]
+  [DecidableEq F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [DecidableEq F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Assurance/SemanticReceiptRuntimeCodec.lean:303:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticReceiptRuntimeCodec.lean:304:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundSemanticReceiptClaims_fold' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticReceiptRuntimeCodec.lean:305:0: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.HeaderBytes.bindingNatCells_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [3000/3017] Built Loom.ZkExtraction (2.4s)
+ℹ [3001/3017] Built Compiler.SemanticTurnReceiptDescriptor (2.5s)
+info: Compiler/SemanticTurnReceiptDescriptor.lean:449:0: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.descriptor_accepts_iff_boundRelation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticTurnReceiptDescriptor.lean:450:0: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.committedTurn_descriptor_accepts' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [3002/3017] Built Loom.SubUdSeam (2.3s)
+ℹ [3003/3017] Built Compiler.SemanticController (2.7s)
+info: Compiler/SemanticController.lean:444:0: 'Minidregg.Compiler.SemanticController.arbitraryOracle_integrity' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticController.lean:445:0: 'Minidregg.Compiler.SemanticController.resultMismatch_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/SemanticController.lean:446:0: 'Minidregg.Compiler.SemanticController.descriptorFailure_not_verified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [3004/3017] Built Compiler.DialectClauseDispatch (2.4s)
+ℹ [3005/3017] Built Assurance.SemanticHistoryAccumulator (5.5s)
+info: Assurance/SemanticHistoryAccumulator.lean:579:0: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.decider_complete_at_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticHistoryAccumulator.lean:580:0: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.opened_decider_extracts_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+✔ [3006/3017] Built Loom.JohnsonRegime (9.7s)
+ℹ [3007/3017] Built Loom.HalfThresholdRegime (2.3s)
+info: Loom/HalfThresholdRegime.lean:232:0: 'Minidregg.Loom.correlatedAgreement_of_two_half_close' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdRegime.lean:233:0: 'Minidregg.Loom.halfThreshold_pr_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdRegime.lean:234:0: 'Minidregg.Loom.HalfThresholdExample.halfThreshold_F5' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [3008/3017] Built Assurance.SemanticHistoryStraightlinePcs (3.7s)
+info: Assurance/SemanticHistoryStraightlinePcs.lean:348:0: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.FoldRootSchedule.foldRoot_commits_folded_word' depends on axioms: [propext,
+ Quot.sound]
+info: Assurance/SemanticHistoryStraightlinePcs.lean:349:0: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.extract_eq_semantic_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticHistoryStraightlinePcs.lean:350:0: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.extract_satisfies_semantic_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticHistoryStraightlinePcs.lean:351:0: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.knowledge_failure_le_totalEnvelope' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3009/3017] Built Loom.HalfThresholdFri (1.9s)
+info: Loom/HalfThresholdFri.lean:260:0: 'Minidregg.Loom.fold_eq_foldFamily' depends on axioms: [propext, Quot.sound]
+info: Loom/HalfThresholdFri.lean:261:0: 'Minidregg.Loom.foldComponents_not_correlated_of_far' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFri.lean:262:0: 'Minidregg.Loom.foldDistanceTransition_halfThreshold' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFri.lean:263:0: 'Minidregg.Loom.fold_halfThreshold_pr_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFri.lean:264:0: 'Minidregg.Loom.HalfThresholdFriExample.spike_halfThreshold_bad_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Loom/HalfThresholdFri.lean:265:0: 'Minidregg.Loom.HalfThresholdFriExample.half_postJohnson_tail_transition' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3010/3017] Built Loom.HalfThresholdFriTower (1.5s)
+info: Loom/HalfThresholdFriTower.lean:332:0: 'Minidregg.Loom.proximity_far_covering_schedule' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:333:0: 'Minidregg.Loom.proximity_sound_schedule' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:334:0: 'Minidregg.Loom.proximity_sound_halfThen' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:335:0: 'Minidregg.Loom.FoldingTower.card_level_le_zero' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:336:0: 'Minidregg.Loom.proximity_sound_halfThen_UD' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:337:0: 'Minidregg.Loom.proximity_sound_rateHalf_postJohnson' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTower.lean:338:0: 'Minidregg.Loom.HalfThresholdFriTowerExample.spike_scheduled_bound_attained' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3011/3017] Built Loom.HalfThresholdFriTranscript (1.6s)
+info: Loom/HalfThresholdFriTranscript.lean:529:0: 'Minidregg.Loom.openedFriQuery_pins' depends on axioms: [propext, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:530:0: 'Minidregg.Loom.friRound_query_miss_halfThreshold' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:531:0: 'Minidregg.Loom.committedWord_eq_towerWord' depends on axioms: [propext, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:532:0: 'Minidregg.Loom.friCommittedAccepts_implies_proximityTest' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:533:0: 'Minidregg.Loom.committedFri_sound_halfThen_UD' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:534:0: 'Minidregg.Loom.friEvent_fsOracle_iff' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:535:0: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_committed_accepts_three' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:536:0: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_committed_rejects_one' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Loom/HalfThresholdFriTranscript.lean:537:0: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_wrongChallenge_queryMiss_bound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3012/3017] Built Loom.HalfThresholdFriQuery (1.8s)
+info: Loom/HalfThresholdFriQuery.lean:523:0: 'Minidregg.Loom.FriAdaptiveTranscript.wordAt_congr' depends on axioms: [Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:524:0: 'Minidregg.Loom.friAdaptiveRoundQueries_pins' depends on axioms: [propext, Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:525:0: 'Minidregg.Loom.uniformProb_pi_coord_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:526:0: 'Minidregg.Loom.friRound_query_miss_uniform' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:527:0: 'Minidregg.Loom.friAdaptive_earliestDeviation_cover' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:528:0: 'Minidregg.Loom.friAdaptive_allRound_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriQuery.lean:529:0: 'Minidregg.Loom.friAdaptive_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [3013/3017] Built Loom.HalfThresholdFriCoherent (1.9s)
+info: Loom/HalfThresholdFriCoherent.lean:307:0: 'Minidregg.Loom.powerTwoCoherentRound_uniform' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriCoherent.lean:308:0: 'Minidregg.Loom.friAdaptive_coherent_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/HalfThresholdFriCoherent.lean:309:0: 'Minidregg.Loom.friAdaptive_coherent_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [3014/3017] Built Loom.AdditiveFriTower (2.1s)
+info: Loom/AdditiveFriTower.lean:413:0: 'Minidregg.Loom.additiveTowerMap_succ' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:414:0: 'Minidregg.Loom.additiveTower_foldMap_reindex' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:415:0: 'Minidregg.Loom.additiveTower_high_eq_low_add_pivot' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:416:0: 'Minidregg.Loom.additiveTower_domain_image' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:417:0: 'Minidregg.Loom.additiveTowerPoint_injective' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:418:0: 'Minidregg.Loom.additiveTowerPivot_ne_zero' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:419:0: 'Minidregg.Loom.additiveTower_transversal' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:420:0: 'Minidregg.Loom.additiveTower_domain_eq_pairDomain' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriTower.lean:421:0: 'Minidregg.Loom.additiveCoherentRound_uniform' depends on axioms: [propext, Classical.choice, Quot.sound]
+ℹ [3015/3017] Built Loom.AdditiveFriQuery (3.1s)
+info: Loom/AdditiveFriQuery.lean:821:0: 'Minidregg.Loom.openedAdditiveFriQuery_pins' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:822:0: 'Minidregg.Loom.additiveFriRound_query_miss_uniform' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:823:0: 'Minidregg.Loom.additiveFriAdaptive_earliestDeviation_cover' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:824:0: 'Minidregg.Loom.additiveFriAdaptive_coherent_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:825:0: 'Minidregg.Loom.additiveFriAdaptive_coherent_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:826:0: 'Minidregg.Loom.additiveFoldDistanceTransition_UD' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: Loom/AdditiveFriQuery.lean:827:0: 'Minidregg.Loom.additiveFriAdaptive_coherent_sampled_sound_UD' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+⚠ [3016/3017] Built Compiler.AdditiveFriReceiptClause (2.8s)
+warning: Compiler/AdditiveFriReceiptClause.lean:59:0: automatically included section variable(s) unused in theorem `Minidregg.Compiler.AdditiveFriReceiptClause.rootsBeforeChallenge_of_adaptive`:
+  [Field F]
+  [CharP F 2]
+  [Algebra (ZMod 2) F]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Field F] [CharP F 2] [Algebra (ZMod 2) F] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Compiler/AdditiveFriReceiptClause.lean:312:0: 'Minidregg.Compiler.AdditiveFriReceiptClause.rootsBeforeChallenge_of_adaptive' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Compiler/AdditiveFriReceiptClause.lean:313:0: 'Minidregg.Compiler.AdditiveFriReceiptClause.FarWordSoundnessCertificate.exact_ud_challenge_query_error' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+ℹ [3017/3017] Built Assurance.SemanticAdditiveFriCheckpoint (4.2s)
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:519:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.CoordinatePadding.paddedCommitment' depends on axioms: [propext,
+ Quot.sound]
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:520:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.checkpointClausePin_registered' depends on axioms: [propext]
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:521:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.Checkpoint.initial_root_eq_semantic_head' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:522:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.Checkpoint.initial_word_mem_code' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:523:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.StraightlineCheckpointExtraction.accepted_sample_extracts_checkpoint' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+info: Assurance/SemanticAdditiveFriCheckpoint.lean:524:0: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.StraightlineCheckpointExtraction.component_error_bounds' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+Build completed successfully (3017 jobs).
