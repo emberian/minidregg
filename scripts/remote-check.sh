@@ -168,7 +168,7 @@ remote_threads=$(ssh -o BatchMode=yes "$host" nproc)
 remote_mem_kib=$(ssh -o BatchMode=yes "$host" "awk '/MemTotal/{print \$2}' /proc/meminfo")
 remote_gpu=$(ssh -o BatchMode=yes "$host" "lspci 2>/dev/null | grep -Ei 'vga|3d|display' || true")
 lake_version=$(ssh -o BatchMode=yes "$host" "cd '$remote_source' && '$remote_lake' --version")
-cargo_version=$(ssh -o BatchMode=yes "$host" "'$remote_cargo' --version")
+cargo_version=$(ssh -o BatchMode=yes "$host" "cd '$remote_source' && '$remote_cargo' --version")
 
 printf 'run=%s\ncommit=%s\nhost=%s\nremote_run=%s\ncommand=' \
   "$run_id" "$commit" "$remote_hostname" "$remote_run" | tee "$log_path"
