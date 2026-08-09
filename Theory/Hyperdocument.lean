@@ -13,6 +13,7 @@ document store is one dependent sparse namespace and is definitionally mapped
 to the canonical `CellState` shape.  A lawful cell codec commits every typed
 value at the byte level; root binding remains a separate cryptographic claim.
 -/
+import Theory.CausalVersionDag
 import Theory.CredentialAuthorityState
 
 namespace Minidregg.Theory.Hyperdocument
@@ -187,6 +188,43 @@ structure PrincipalRef where
   capabilityKind : ResourceKind
   capabilityId : CapabilityId
   deriving DecidableEq, Repr
+
+/-- Small structural tag used only for the canonical principal identity below.
+This is not a hash or an authorization judgment. -/
+def resourceKindPrincipalTag : ResourceKind -> Nat
+  | .object => 0
+  | .account => 1
+  | .program => 2
+
+/-- The author identity retained by causal history is the exact typed subject. -/
+def PrincipalRef.authorId (principal : PrincipalRef) : Digest :=
+  ⟨principal.subject.value⟩
+
+/-- Canonical injective packing of capability kind and capability id.
+
+The pair `(authorId, principalId)` therefore retains every field of
+`PrincipalRef`; it is not an arbitrary caller-supplied provenance label. -/
+def PrincipalRef.principalId (principal : PrincipalRef) : Digest :=
+  ⟨3 * principal.capabilityId.value +
+    resourceKindPrincipalTag principal.capabilityKind⟩
+
+/-- The two causal identities determine the complete typed principal reference. -/
+theorem PrincipalRef.eq_of_history_ids
+    {left right : PrincipalRef}
+    (author : left.authorId = right.authorId)
+    (principal : left.principalId = right.principalId) :
+    left = right := by
+  cases left with
+  | mk leftSubject leftKind leftCapability =>
+    cases right with
+    | mk rightSubject rightKind rightCapability =>
+      simp only [PrincipalRef.authorId, PrincipalRef.principalId] at author principal
+      cases leftSubject
+      cases rightSubject
+      cases leftCapability
+      cases rightCapability
+      cases leftKind <;> cases rightKind <;>
+        simp_all [resourceKindPrincipalTag] <;> omega
 
 /-- A principal authenticated against one exact canonical authority cell at one
 height.  The stored lineage is opened from the typed capability slot and all
@@ -469,12 +507,220 @@ structure AnnotationRecord where
   deriving DecidableEq, Repr
 
 structure VersionEventRecord where
+  historyDomain : Digest
   document : DocumentId
+  schema : CausalVersionDag.SchemaRef
+  semanticVersion : Nat
+  semanticObjectRoot : Digest
   parents : List VersionEventId
-  baseRoot : Digest
-  effectDigest : Digest
+  preStateRoot : Digest
+  postStateRoot : Digest
+  requestId : Digest
+  effectId : Digest
   author : PrincipalRef
   deriving DecidableEq, Repr
+
+namespace VersionEventRecord
+
+/-- Total exact projection into the one generic causal semantic preimage.
+
+Every semantic field is projected from stored data.  The document digest is the
+history stream, parent event ids become the canonical parent frontier, and the
+two provenance digests are derived injectively from the typed principal. -/
+def toCausalPreimage (event : VersionEventRecord) :
+    CausalVersionDag.EventPreimage where
+  historyDomain := event.historyDomain
+  streamId := event.document.digest
+  schema := event.schema
+  semanticVersion := event.semanticVersion
+  semanticObjectRoot := event.semanticObjectRoot
+  preStateRoot := event.preStateRoot
+  postStateRoot := event.postStateRoot
+  parentFrontier := event.parents.map Identifier.digest
+  authorId := event.author.authorId
+  principalId := event.author.principalId
+  requestId := event.requestId
+  effectId := event.effectId
+
+/-- Reconstruct stored typed data from a causal preimage and the typed author.
+The converse theorem below requires that the preimage contains the identities
+canonically derived from that author. -/
+def ofCausalPreimage (author : PrincipalRef)
+    (event : CausalVersionDag.EventPreimage) : VersionEventRecord where
+  historyDomain := event.historyDomain
+  document := ⟨event.streamId⟩
+  schema := event.schema
+  semanticVersion := event.semanticVersion
+  semanticObjectRoot := event.semanticObjectRoot
+  parents := event.parentFrontier.map Identifier.mk
+  preStateRoot := event.preStateRoot
+  postStateRoot := event.postStateRoot
+  requestId := event.requestId
+  effectId := event.effectId
+  author := author
+
+/-- Stored event -> causal preimage -> stored event is exact. -/
+@[simp] theorem ofCausalPreimage_toCausalPreimage
+    (event : VersionEventRecord) :
+    ofCausalPreimage event.author event.toCausalPreimage = event := by
+  cases event
+  simp [ofCausalPreimage, toCausalPreimage, List.map_map, Function.comp_def]
+
+/-- A causal preimage in the typed-author image round-trips exactly. -/
+theorem toCausalPreimage_ofCausalPreimage
+    (author : PrincipalRef) (event : CausalVersionDag.EventPreimage)
+    (authorExact : event.authorId = author.authorId)
+    (principalExact : event.principalId = author.principalId) :
+    (ofCausalPreimage author event).toCausalPreimage = event := by
+  cases event
+  simp_all [ofCausalPreimage, toCausalPreimage, List.map_map,
+    Function.comp_def]
+
+/-- No two stored hyperdocument events project to the same causal preimage. -/
+theorem toCausalPreimage_injective :
+    Function.Injective toCausalPreimage := by
+  intro left right equal
+  have authorIdEqual := congrArg CausalVersionDag.EventPreimage.authorId equal
+  have principalIdEqual :=
+    congrArg CausalVersionDag.EventPreimage.principalId equal
+  have authorsEqual : left.author = right.author :=
+    PrincipalRef.eq_of_history_ids authorIdEqual principalIdEqual
+  calc
+    left = ofCausalPreimage left.author left.toCausalPreimage :=
+      (ofCausalPreimage_toCausalPreimage left).symm
+    _ = ofCausalPreimage left.author right.toCausalPreimage :=
+      congrArg (ofCausalPreimage left.author) equal
+    _ = ofCausalPreimage right.author right.toCausalPreimage :=
+      congrArg (fun author => ofCausalPreimage author right.toCausalPreimage)
+        authorsEqual
+    _ = right := ofCausalPreimage_toCausalPreimage right
+
+/-- Causal parent-frontier well-formedness is the sole stored parent-order law;
+Hyperdocument does not define a second DAG validity predicate. -/
+abbrev CausallyWellFormed (event : VersionEventRecord) : Prop :=
+  event.toCausalPreimage.WellFormed
+
+end VersionEventRecord
+
+/-! ## Exact weld to the generic causal history -/
+
+/-- Canonical domain-separated preimage for one typed version-event id. -/
+def versionEventIdPreimage
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage)
+    (event : VersionEventRecord) : IdPreimage .v1 .versionEvent :=
+  ⟨eventCodec.encode event.toCausalPreimage⟩
+
+/-- The typed version-event preimage remains injective before digesting. -/
+theorem versionEventIdPreimage_injective
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage) :
+    Function.Injective (versionEventIdPreimage eventCodec) := by
+  intro left right equal
+  apply VersionEventRecord.toCausalPreimage_injective
+  apply lawfulCodec_encode_injective eventCodec
+  exact congrArg IdPreimage.payload equal
+
+/-- Turn the lawful causal-event codec and Hyperdocument digest derivation into
+the generic causal addressing scheme.  The fixed `DR/v1/versionEvent` envelope
+is included before the abstract digest operation. -/
+def causalVersionAddressing
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage)
+    (derivation : DigestDerivation) : CausalVersionDag.ContentAddressing where
+  codec := eventCodec
+  digestBytes := fun bytes =>
+    derivation.digestBytes
+      (encodePreimage (IdPreimage.mk (version := .v1)
+        (domain := .versionEvent) bytes))
+
+/-- Derive the typed stored key from the exact same domain-separated causal
+bytes used by `causalVersionAddressing`. -/
+def deriveVersionEventId
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage)
+    (derivation : DigestDerivation) (event : VersionEventRecord) :
+    VersionEventId :=
+  deriveIdentifier derivation (versionEventIdPreimage eventCodec event)
+
+@[simp] theorem deriveVersionEventId_address_exact
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage)
+    (derivation : DigestDerivation) (event : VersionEventRecord) :
+    (deriveVersionEventId eventCodec derivation event).digest =
+      (causalVersionAddressing eventCodec derivation).address
+        event.toCausalPreimage :=
+  rfl
+
+/-- Proof token for one canonical sparse-store version event.
+
+Its typed key is the address of its exact causal preimage, and its parent list
+already satisfies the generic canonical-frontier law.  This is causal identity,
+not consensus or finality. -/
+structure StoredVersionEvent
+    (scheme : CausalVersionDag.ContentAddressing) where
+  key : VersionEventId
+  record : VersionEventRecord
+  wellFormed : record.CausallyWellFormed
+  keyExact : key.digest = scheme.address record.toCausalPreimage
+
+namespace StoredVersionEvent
+
+/-- The ordinary construction path derives the typed key; callers supply no
+identity or semantic override fields. -/
+def derive
+    (eventCodec : LawfulCodec CausalVersionDag.EventPreimage)
+    (derivation : DigestDerivation) (record : VersionEventRecord)
+    (wellFormed : record.CausallyWellFormed) :
+    StoredVersionEvent (causalVersionAddressing eventCodec derivation) where
+  key := deriveVersionEventId eventCodec derivation record
+  record := record
+  wellFormed := wellFormed
+  keyExact := deriveVersionEventId_address_exact eventCodec derivation record
+
+/-- Exact adapter into the generic addressed causal event. -/
+def toAddressedEvent
+    {scheme : CausalVersionDag.ContentAddressing}
+    (stored : StoredVersionEvent scheme) :
+    CausalVersionDag.AddressedEvent scheme where
+  preimage := stored.record.toCausalPreimage
+  entryId := stored.key.digest
+  entryIdExact := stored.keyExact
+  wellFormed := stored.wellFormed
+
+@[simp] theorem toAddressedEvent_preimage
+    {scheme : CausalVersionDag.ContentAddressing}
+    (stored : StoredVersionEvent scheme) :
+    stored.toAddressedEvent.preimage = stored.record.toCausalPreimage :=
+  rfl
+
+@[simp] theorem toAddressedEvent_entryId
+    {scheme : CausalVersionDag.ContentAddressing}
+    (stored : StoredVersionEvent scheme) :
+    stored.toAddressedEvent.entryId = stored.key.digest :=
+  rfl
+
+/-- Attach the concrete event-family evidence without introducing a parallel
+history judgment.  Parent compatibility and append validity remain the generic
+`CausalVersionDag.SemanticFamily` / `ValidAppend` types. -/
+def toVerifiedEvent
+    {State : Type u} {scheme : CausalVersionDag.ContentAddressing}
+    {family : CausalVersionDag.SemanticFamily State}
+    (stored : StoredVersionEvent scheme)
+    (semantics : family.Evidence stored.record.toCausalPreimage) :
+    CausalVersionDag.VerifiedEvent scheme family where
+  addressed := stored.toAddressedEvent
+  semantics := semantics
+
+/-- Equal typed keys bind equal stored semantic events only under the explicit
+ideal binding premise of the selected address scheme. -/
+theorem record_eq_of_key_eq
+    {scheme : CausalVersionDag.ContentAddressing}
+    (binding : scheme.BindingPremise)
+    {left right : StoredVersionEvent scheme}
+    (sameKey : left.key = right.key) :
+    left.record = right.record := by
+  apply VersionEventRecord.toCausalPreimage_injective
+  exact CausalVersionDag.AddressedEvent.preimage_eq_of_entryId_eq binding
+    (left := left.toAddressedEvent) (right := right.toAddressedEvent)
+    (congrArg Identifier.digest sameKey)
+
+end StoredVersionEvent
 
 structure DocumentRecord where
   rootElement : ElementId
