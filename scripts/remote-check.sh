@@ -174,15 +174,15 @@ printf 'run=%s\ncommit=%s\nhost=%s\nremote_run=%s\ncommand=' \
 printf '%q ' "${command_args[@]}" | tee -a "$log_path"
 printf '\n' | tee -a "$log_path"
 
-command_text=$(printf '%q ' "${command_args[@]}")
+command_b64=$(printf '%q ' "${command_args[@]}" | base64 | tr -d '\n')
 set +e
 ssh -o BatchMode=yes "$host" bash -s -- \
-  "$remote_source" "$remote_lake" "$remote_cargo" "$command_text" <<'REMOTE' 2>&1 | tee -a "$log_path"
+  "$remote_source" "$remote_lake" "$remote_cargo" "$command_b64" <<'REMOTE' 2>&1 | tee -a "$log_path"
 set -euo pipefail
 source=$1
 lake=$2
 cargo=$3
-command_text=$4
+command_text=$(printf '%s' "$4" | base64 -d)
 cd "$source"
 export PATH="$(dirname "$lake"):$(dirname "$cargo"):/usr/local/bin:/usr/bin:/bin"
 ulimit -v $((24 * 1024 * 1024))
