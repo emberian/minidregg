@@ -86,19 +86,15 @@ theorem retarget_changes_wire {kind : ResourceKind} (request : Request kind)
       encodeRequest ⟨kind, request⟩ := by
   intro same
   apply different
-  cases target with
-  | mk targetValue =>
-      cases request.target with
-      | mk requestValue =>
-          have values : targetValue = requestValue := by
-            simpa [encodeRequest, Request.retarget] using
-              congrArg RequestWire.target same
-          cases values
-          rfl
+  cases target
+  cases request
+  simp_all [encodeRequest, Request.retarget]
 
 /-! ## 2. Holder-aware attenuation and proof-relevant lineage -/
 
-namespace Holder
+end Minidregg.Theory.CredentialAuthorityFamily
+
+namespace Minidregg.Theory.TypedAuthorization.Holder
 
 /-- Holder attenuation is semantic inclusion: every subject covered by the child
 was already covered by the parent. -/
@@ -131,6 +127,11 @@ theorem bearer_not_narrows_subject (subject : SubjectId) :
   simp [other] at values
 
 end Holder
+
+namespace Minidregg.Theory.CredentialAuthorityFamily
+
+open TypedAuthorization
+open AuthorizationDeclaration
 
 /-- Complete attenuation adds the holder order omitted by the transport-level
 `Capability.Attenuates` record. -/
