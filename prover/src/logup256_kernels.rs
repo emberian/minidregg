@@ -1,12 +1,10 @@
 //! Native `Tower256` arithmetic kernels for a LogUp-style experiment.
 //!
 //! This module has no complete statement, transcript, proof carrier, verifier,
-//! or final acceptance predicate. It does, however, author an unverified native
-//! relation/profile: incidence-table order, fraction-tree layout, and the
-//! quadratic/cubic round probes and message arities below. Addresses, values,
-//! batching scalars, and fold challenges are caller supplied. No compiled
-//! generated adapter currently pins these conventions or invokes them as a
-//! Lean-owned LogUp suite.
+//! or final acceptance predicate. Addresses, values, incidence layout, batching
+//! scalars, round probes, and fold challenges are caller supplied. The functions
+//! retain only arithmetic and arithmetic-shape checks; no compiled generated
+//! adapter currently invokes them as a Lean-owned LogUp suite.
 
 use core::fmt;
 
@@ -33,9 +31,6 @@ pub enum Logup256KernelError {
         expected: usize,
         actual: usize,
     },
-    InterpolationArity {
-        actual: usize,
-    },
     Tower(Tower256Error),
 }
 
@@ -60,9 +55,6 @@ impl fmt::Display for Logup256KernelError {
             Self::PointLength { expected, actual } => {
                 write!(f, "point has length {actual}, expected {expected}")
             }
-            Self::InterpolationArity { actual } => {
-                write!(f, "round interpolation has unsupported arity {actual}")
-            }
             Self::Tower(error) => error.fmt(f),
         }
     }
@@ -76,13 +68,30 @@ impl From<Tower256Error> for Logup256KernelError {
     }
 }
 
-/// Flatten `Y(row, address) = [addresses[row] = address]` with the row
-/// coordinate varying fastest.
-///
-/// Entry `(row, address)` is stored at `address * addresses.len() + row`.
+/// Caller-selected flattening of a `(row, address)` incidence matrix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncidenceLayout {
+    /// Entry `(row, address)` is stored at `row * table_count + address`.
+    RowMajor,
+    /// Entry `(row, address)` is stored at `address * row_count + row`.
+    AddressMajor,
+}
+
+impl IncidenceLayout {
+    fn offset(self, row: usize, address: usize, row_count: usize, table_count: usize) -> usize {
+        match self {
+            Self::RowMajor => row * table_count + address,
+            Self::AddressMajor => address * row_count + row,
+        }
+    }
+}
+
+/// Flatten `Y(row, address) = [addresses[row] = address]` in the layout supplied
+/// by the caller.
 pub fn incidence_table(
     addresses: &[usize],
     table_count: usize,
+    layout: IncidenceLayout,
 ) -> Result<Vec<Tower256>, Logup256KernelError> {
     let len = addresses
         .len()
@@ -97,7 +106,7 @@ pub fn incidence_table(
                 table_count,
             });
         }
-        incidence[address * addresses.len() + row] = Tower256::ONE;
+        incidence[layout.offset(row, address, addresses.len(), table_count)] = Tower256::ONE;
     }
     Ok(incidence)
 }
@@ -346,7 +355,6 @@ pub struct FractionRoundState256 {
     p1: Vec<Tower256>,
     q0: Vec<Tower256>,
     q1: Vec<Tower256>,
-    challenges: Vec<Tower256>,
 }
 
 impl FractionRoundState256 {
@@ -385,25 +393,24 @@ impl FractionRoundState256 {
             p1: p1.to_vec(),
             q0: q0.to_vec(),
             q1: q1.to_vec(),
-            challenges: Vec::with_capacity(parent_point.len()),
         })
     }
 
-    /// Four evaluations of the current cubic round at [`cubic_probes`].
+    /// Evaluate the current cubic arithmetic expression at caller-supplied probes.
     pub fn round_message(
         &self,
         batching_scalar: Tower256,
-    ) -> Result<[Tower256; 4], Logup256KernelError> {
+        probes: &[Tower256],
+    ) -> Result<Vec<Tower256>, Logup256KernelError> {
         if self.equality.len() < 2 {
             return Err(Logup256KernelError::InvalidLength {
                 role: "fraction round",
                 len: self.equality.len(),
             });
         }
-        let probes = cubic_probes();
-        let mut message = [Tower256::ZERO; 4];
+        let mut message = vec![Tower256::ZERO; probes.len()];
         for index in 0..(self.equality.len() / 2) {
-            for (slot, &probe) in message.iter_mut().zip(&probes) {
+            for (slot, &probe) in message.iter_mut().zip(probes) {
                 let equality = affine(
                     self.equality[2 * index],
                     self.equality[2 * index + 1],
@@ -428,13 +435,7 @@ impl FractionRoundState256 {
         self.p1 = bind_affine_layer(&self.p1, challenge)?;
         self.q0 = bind_affine_layer(&self.q0, challenge)?;
         self.q1 = bind_affine_layer(&self.q1, challenge)?;
-        self.challenges.push(challenge);
         Ok(())
-    }
-
-    /// Caller-supplied challenges bound so far, in binding order.
-    pub fn challenges(&self) -> &[Tower256] {
-        &self.challenges
     }
 
     /// `[p0, p1, q0, q1]` after all variables have been bound.
@@ -457,12 +458,12 @@ impl FractionRoundState256 {
     }
 }
 
-/// Four evaluations of `sum eq * value * (value + 1)` at
-/// [`cubic_probes`].
+/// Evaluate `sum eq * value * (value + 1)` at caller-supplied probes.
 pub fn index_booleanity_round_message(
     equality: &[Tower256],
     values: &[Tower256],
-) -> Result<[Tower256; 4], Logup256KernelError> {
+    probes: &[Tower256],
+) -> Result<Vec<Tower256>, Logup256KernelError> {
     if equality.len() != values.len() {
         return Err(Logup256KernelError::LengthMismatch {
             left: equality.len(),
@@ -475,10 +476,9 @@ pub fn index_booleanity_round_message(
             len: equality.len(),
         });
     }
-    let probes = cubic_probes();
-    let mut message = [Tower256::ZERO; 4];
+    let mut message = vec![Tower256::ZERO; probes.len()];
     for index in 0..(equality.len() / 2) {
-        for (slot, &probe) in message.iter_mut().zip(&probes) {
+        for (slot, &probe) in message.iter_mut().zip(probes) {
             let eq_value = affine(equality[2 * index], equality[2 * index + 1], probe);
             let value = affine(values[2 * index], values[2 * index + 1], probe);
             *slot = slot.add(eq_value.mul(value).mul(value.add(Tower256::ONE)));
@@ -487,11 +487,12 @@ pub fn index_booleanity_round_message(
     Ok(message)
 }
 
-/// Three evaluations of `sum left * right` at [`quadratic_probes`].
+/// Evaluate `sum left * right` at caller-supplied probes.
 pub fn quadratic_product_round_message(
     left: &[Tower256],
     right: &[Tower256],
-) -> Result<[Tower256; 3], Logup256KernelError> {
+    probes: &[Tower256],
+) -> Result<Vec<Tower256>, Logup256KernelError> {
     if left.len() != right.len() {
         return Err(Logup256KernelError::LengthMismatch {
             left: left.len(),
@@ -504,10 +505,9 @@ pub fn quadratic_product_round_message(
             len: left.len(),
         });
     }
-    let probes = quadratic_probes();
-    let mut message = [Tower256::ZERO; 3];
+    let mut message = vec![Tower256::ZERO; probes.len()];
     for index in 0..(left.len() / 2) {
-        for (slot, &probe) in message.iter_mut().zip(&probes) {
+        for (slot, &probe) in message.iter_mut().zip(probes) {
             let left_value = affine(left[2 * index], left[2 * index + 1], probe);
             let right_value = affine(right[2 * index], right[2 * index + 1], probe);
             *slot = slot.add(left_value.mul(right_value));
@@ -516,35 +516,24 @@ pub fn quadratic_product_round_message(
     Ok(message)
 }
 
-/// Distinct quadratic-round probes `0, 1, theta`.
-pub const fn quadratic_probes() -> [Tower256; 3] {
-    [
-        Tower256::ZERO,
-        Tower256::ONE,
-        Tower256::from_limbs([2, 0, 0, 0]),
-    ]
-}
-
-/// Distinct cubic-round probes `0, 1, theta, 1 + theta`.
-pub const fn cubic_probes() -> [Tower256; 4] {
-    [
-        Tower256::ZERO,
-        Tower256::ONE,
-        Tower256::from_limbs([2, 0, 0, 0]),
-        Tower256::from_limbs([3, 0, 0, 0]),
-    ]
-}
-
-/// Evaluate a quadratic or cubic round interpolant at a caller-supplied point.
+/// Evaluate the interpolant through caller-supplied probes and samples.
 pub fn interpolate_round(
+    probes: &[Tower256],
     samples: &[Tower256],
     point: Tower256,
 ) -> Result<Tower256, Logup256KernelError> {
-    let probes: &[Tower256] = match samples.len() {
-        3 => &quadratic_probes(),
-        4 => &cubic_probes(),
-        actual => return Err(Logup256KernelError::InterpolationArity { actual }),
-    };
+    if probes.len() != samples.len() {
+        return Err(Logup256KernelError::LengthMismatch {
+            left: probes.len(),
+            right: samples.len(),
+        });
+    }
+    if probes.is_empty() {
+        return Err(Logup256KernelError::InvalidLength {
+            role: "interpolation probes",
+            len: 0,
+        });
+    }
     let mut value = Tower256::ZERO;
     for i in 0..samples.len() {
         let mut numerator = Tower256::ONE;
@@ -570,9 +559,9 @@ mod tests {
     }
 
     #[test]
-    fn incidence_and_weight_scatter_share_the_address_axis() {
+    fn incidence_layout_is_caller_selected() {
         let addresses = [2, 0, 2, 3];
-        let incidence = incidence_table(&addresses, 4).unwrap();
+        let incidence = incidence_table(&addresses, 4, IncidenceLayout::AddressMajor).unwrap();
         for address in 0..4 {
             for row in 0..4 {
                 let expected = if addresses[row] == address {
@@ -581,6 +570,17 @@ mod tests {
                     Tower256::ZERO
                 };
                 assert_eq!(incidence[address * 4 + row], expected);
+            }
+        }
+        let row_major = incidence_table(&addresses, 4, IncidenceLayout::RowMajor).unwrap();
+        for row in 0..4 {
+            for address in 0..4 {
+                let expected = if addresses[row] == address {
+                    Tower256::ONE
+                } else {
+                    Tower256::ZERO
+                };
+                assert_eq!(row_major[row * 4 + address], expected);
             }
         }
 
@@ -605,7 +605,8 @@ mod tests {
     fn quadratic_message_interpolates_to_the_bound_dot_product() {
         let left = [t(1), t(2), t(4), t(8)];
         let right = [t(3), t(5), t(7), t(11)];
-        let message = quadratic_product_round_message(&left, &right).unwrap();
+        let probes = [t(0), t(1), t(2)];
+        let message = quadratic_product_round_message(&left, &right, &probes).unwrap();
         assert_eq!(
             message[0].add(message[1]),
             dot_product(&left, &right).unwrap()
@@ -615,7 +616,7 @@ mod tests {
         let folded_left = bind_affine_layer(&left, challenge).unwrap();
         let folded_right = bind_affine_layer(&right, challenge).unwrap();
         assert_eq!(
-            interpolate_round(&message, challenge).unwrap(),
+            interpolate_round(&probes, &message, challenge).unwrap(),
             dot_product(&folded_left, &folded_right).unwrap()
         );
     }
@@ -629,8 +630,9 @@ mod tests {
         let q0 = [t(9), t(10), t(11), t(12)];
         let q1 = [t(13), t(14), t(15), t(16)];
         let batching_scalar = t(17);
+        let probes = [t(0), t(1), t(2), t(3)];
         let state = FractionRoundState256::new(&parent_point, &p0, &p1, &q0, &q1).unwrap();
-        let message = state.round_message(batching_scalar).unwrap();
+        let message = state.round_message(batching_scalar, &probes).unwrap();
 
         let expected = (0..4).fold(Tower256::ZERO, |sum, index| {
             let numerator = p0[index].mul(q1[index]).add(p1[index].mul(q0[index]));
