@@ -2,17 +2,14 @@
 // Lean-selected data transport and fallible opaque work dispatch only.
 
 pub const ARTIFACT_SCHEMA: &str = "minidregg/semantic-artifact-bundle/v1";
-pub const ARTIFACT_CANONICAL_PAYLOAD_JSON: &str = "{\"schema\": \"minidregg/semantic-artifact-bundle/v1\",\n \"reactive\":\n {\"schemaVersion\": 1,\n  \"phasePlan\": [\"reactive_guard\", \"reactive_effect\"],\n  \"parameterIds\": [702],\n  \"outputCodecIds\": [1],\n  \"kind\": \"reactive\",\n  \"inputCodecIds\": [8, 9],\n  \"declarationWords\": [[5, 2, 4, 0, 1], [1, 0]],\n  \"declarationId\": 603,\n  \"declarationCodecId\": 7},\n \"phasePlan\":\n [\"bind_manifest\",\n  \"decode_admission\",\n  \"authorization\",\n  \"effects\",\n  \"reactive\",\n  \"disclosure\",\n  \"absorb_public\",\n  \"absorb_commitments\",\n  \"proof_rounds\",\n  \"absorb_terminal\",\n  \"derive_queries\",\n  \"verify_openings\",\n  \"verify_dialect_clauses\",\n  \"bind_receipt\",\n  \"commit\"],\n \"manifest\":\n {\"transcriptControllerDigest\": 500,\n  \"semanticRelationId\": 102,\n  \"semanticProgramId\": 101,\n  \"receiptCodecId\": 1,\n  \"manifestVersion\": 1,\n  \"dimensions\":\n  [{\"value\": 64, \"dimensionId\": 501},\n   {\"value\": 6, \"dimensionId\": 502},\n   {\"value\": 4096, \"dimensionId\": 503},\n   {\"value\": 4, \"dimensionId\": 504}],\n  \"dialectClauses\": [],\n  \"codecs\":\n  [{\"version\": 1, \"valueTypeId\": 1001, \"codecId\": 1},\n   {\"version\": 1, \"valueTypeId\": 1002, \"codecId\": 2},\n   {\"version\": 1, \"valueTypeId\": 1003, \"codecId\": 3},\n   {\"version\": 1, \"valueTypeId\": 1004, \"codecId\": 4},\n   {\"version\": 1, \"valueTypeId\": 1005, \"codecId\": 5},\n   {\"version\": 1, \"valueTypeId\": 1006, \"codecId\": 6},\n   {\"version\": 1, \"valueTypeId\": 1007, \"codecId\": 7},\n   {\"version\": 1, \"valueTypeId\": 1008, \"codecId\": 8},\n   {\"version\": 1, \"valueTypeId\": 1009, \"codecId\": 9},\n   {\"version\": 1, \"valueTypeId\": 1010, \"codecId\": 10},\n   {\"version\": 1, \"valueTypeId\": 1011, \"codecId\": 11},\n   {\"version\": 1, \"valueTypeId\": 1012, \"codecId\": 12},\n   {\"version\": 1, \"valueTypeId\": 1013, \"codecId\": 13},\n   {\"version\": 1, \"valueTypeId\": 1014, \"codecId\": 14},\n   {\"version\": 1, \"valueTypeId\": 1015, \"codecId\": 15},\n   {\"version\": 1, \"valueTypeId\": 1016, \"codecId\": 16},\n   {\"version\": 1, \"valueTypeId\": 1017, \"codecId\": 17},\n   {\"version\": 1, \"valueTypeId\": 1018, \"codecId\": 18},\n   {\"version\": 1, \"valueTypeId\": 1019, \"codecId\": 19},\n   {\"version\": 1, \"valueTypeId\": 1020, \"codecId\": 20},\n   {\"version\": 1, \"valueTypeId\": 1021, \"codecId\": 21}],\n  \"carriers\":\n  [{\"towerId\": 211,\n    \"representationId\": 18,\n    \"profileId\": 201,\n    \"kind\": \"gf2_tower\",\n    \"degree\": 64,\n    \"basisId\": 212},\n   {\"representationId\": 19,\n    \"profileId\": 202,\n    \"kind\": \"ext6\",\n    \"definingPolynomialId\": 213,\n    \"baseModulus\": 2013265921},\n   {\"profileId\": 203,\n    \"plaintextModulus\": 1032193,\n    \"orderedModuli\": [68719403009, 68719230977, 137438822401],\n    \"nttRepresentationId\": 220,\n    \"kind\": \"residue_ring\",\n    \"degree\": 4096,\n    \"coefficientRepresentationId\": 20},\n   {\"transcriptAuthenticationId\": 232,\n    \"threshold\": 2,\n    \"protocolId\": 230,\n    \"profileId\": 204,\n    \"partyCount\": 3,\n    \"kind\": \"mpc_shared\",\n    \"federationId\": 231,\n    \"baseCarrierProfileId\": 201},\n   {\"towerId\": 211,\n    \"representationId\": 21,\n    \"profileId\": 205,\n    \"kind\": \"gf2_tower\",\n    \"degree\": 256,\n    \"basisId\": 212}],\n  \"bridges\":\n  [{\"targetCodecId\": 19,\n    \"targetCarrierId\": 202,\n    \"sourceCodecId\": 18,\n    \"sourceCarrierId\": 201,\n    \"relationId\": 311,\n    \"bridgeId\": 301},\n   {\"targetCodecId\": 20,\n    \"targetCarrierId\": 203,\n    \"sourceCodecId\": 19,\n    \"sourceCarrierId\": 202,\n    \"relationId\": 312,\n    \"bridgeId\": 302}],\n  \"bounds\":\n  [{\"value\": 1048576, \"boundId\": 511},\n   {\"value\": 3, \"boundId\": 512},\n   {\"value\": 65536, \"boundId\": 513}],\n  \"abiId\": 100},\n \"effects\":\n [{\"schemaVersion\": 1,\n   \"phasePlan\": [\"effect_descriptor\"],\n   \"parameterIds\": [701],\n   \"outputCodecIds\": [6],\n   \"kind\": \"effect\",\n   \"inputCodecIds\": [5, 6],\n   \"declarationWords\": [[1, 2, 0, 1, 2, 0, 1, 0, 4]],\n   \"declarationId\": 602,\n   \"declarationCodecId\": 4}],\n \"disclosure\":\n {\"schemaVersion\": 1,\n  \"phasePlan\": [\"disclosure_same_opening\", \"disclosure_permission\"],\n  \"parameterIds\": [703],\n  \"outputCodecIds\": [14],\n  \"kind\": \"disclosure\",\n  \"inputCodecIds\": [11, 12, 13, 15],\n  \"declarationWords\": [],\n  \"declarationId\": 604,\n  \"declarationCodecId\": 10},\n \"canonicalEncoding\": \"minidregg/encodable/v1\",\n \"authorization\":\n {\"schemaVersion\": 1,\n  \"requestFieldTags\": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],\n  \"requestCodecId\": 3,\n  \"modes\":\n  [{\"modeTag\": 1, \"checkTags\": [1, 2, 11, 12]},\n   {\"modeTag\": 2, \"checkTags\": [3, 11, 12]},\n   {\"modeTag\": 3, \"checkTags\": [4, 5, 6, 7, 8, 9, 10, 11, 12]}],\n  \"declarationId\": 601,\n  \"declarationCodecId\": 2}}\n";
+pub const ARTIFACT_CANONICAL_PAYLOAD_JSON: &str = "{\"schema\": \"minidregg/semantic-artifact-bundle/v1\",\n \"reactive\":\n {\"schemaVersion\": 1,\n  \"phasePlan\": [\"reactive_guard\", \"reactive_effect\"],\n  \"parameterIds\": [702],\n  \"outputCodecIds\": [1],\n  \"kind\": \"reactive\",\n  \"inputCodecIds\": [8, 9],\n  \"declarationWords\": [[5, 2, 4, 0, 1], [1, 0]],\n  \"declarationId\": 603,\n  \"declarationCodecId\": 7},\n \"phasePlan\":\n [\"bind_manifest\",\n  \"decode_admission\",\n  \"authorization\",\n  \"effects\",\n  \"reactive\",\n  \"disclosure\",\n  \"absorb_public\",\n  \"absorb_commitments\",\n  \"proof_rounds\",\n  \"absorb_terminal\",\n  \"derive_queries\",\n  \"verify_openings\",\n  \"verify_dialect_clauses\",\n  \"bind_receipt\",\n  \"commit\"],\n \"nativeWorkCatalog\":\n [{\"workId\": 9101,\n   \"responseCodec\":\n   {\"version\": 1,\n    \"valueTypeId\": 1021,\n    \"shape\": \"tower256_coordinate_le\",\n    \"registry\": \"semantic_manifest\",\n    \"codecId\": 21},\n   \"requestCodec\":\n   {\"version\": 1,\n    \"valueTypeId\": 9002,\n    \"shape\": \"tower256_pair_vectors_u32_le\",\n    \"registry\": \"native_abi\",\n    \"codecId\": 9001},\n   \"kernelTag\": \"tower256_dot_product\",\n   \"carrierProfileId\": 205}],\n \"nativeAbiCodecs\":\n [{\"version\": 1,\n   \"valueTypeId\": 9002,\n   \"shape\": \"tower256_pair_vectors_u32_le\",\n   \"registry\": \"native_abi\",\n   \"codecId\": 9001}],\n \"manifest\":\n {\"transcriptControllerDigest\": 500,\n  \"semanticRelationId\": 102,\n  \"semanticProgramId\": 101,\n  \"receiptCodecId\": 1,\n  \"manifestVersion\": 1,\n  \"dimensions\":\n  [{\"value\": 64, \"dimensionId\": 501},\n   {\"value\": 6, \"dimensionId\": 502},\n   {\"value\": 4096, \"dimensionId\": 503},\n   {\"value\": 4, \"dimensionId\": 504}],\n  \"dialectClauses\": [],\n  \"codecs\":\n  [{\"version\": 1, \"valueTypeId\": 1001, \"codecId\": 1},\n   {\"version\": 1, \"valueTypeId\": 1002, \"codecId\": 2},\n   {\"version\": 1, \"valueTypeId\": 1003, \"codecId\": 3},\n   {\"version\": 1, \"valueTypeId\": 1004, \"codecId\": 4},\n   {\"version\": 1, \"valueTypeId\": 1005, \"codecId\": 5},\n   {\"version\": 1, \"valueTypeId\": 1006, \"codecId\": 6},\n   {\"version\": 1, \"valueTypeId\": 1007, \"codecId\": 7},\n   {\"version\": 1, \"valueTypeId\": 1008, \"codecId\": 8},\n   {\"version\": 1, \"valueTypeId\": 1009, \"codecId\": 9},\n   {\"version\": 1, \"valueTypeId\": 1010, \"codecId\": 10},\n   {\"version\": 1, \"valueTypeId\": 1011, \"codecId\": 11},\n   {\"version\": 1, \"valueTypeId\": 1012, \"codecId\": 12},\n   {\"version\": 1, \"valueTypeId\": 1013, \"codecId\": 13},\n   {\"version\": 1, \"valueTypeId\": 1014, \"codecId\": 14},\n   {\"version\": 1, \"valueTypeId\": 1015, \"codecId\": 15},\n   {\"version\": 1, \"valueTypeId\": 1016, \"codecId\": 16},\n   {\"version\": 1, \"valueTypeId\": 1017, \"codecId\": 17},\n   {\"version\": 1, \"valueTypeId\": 1018, \"codecId\": 18},\n   {\"version\": 1, \"valueTypeId\": 1019, \"codecId\": 19},\n   {\"version\": 1, \"valueTypeId\": 1020, \"codecId\": 20},\n   {\"version\": 1, \"valueTypeId\": 1021, \"codecId\": 21}],\n  \"carriers\":\n  [{\"towerId\": 211,\n    \"representationId\": 18,\n    \"profileId\": 201,\n    \"kind\": \"gf2_tower\",\n    \"degree\": 64,\n    \"basisId\": 212},\n   {\"representationId\": 19,\n    \"profileId\": 202,\n    \"kind\": \"ext6\",\n    \"definingPolynomialId\": 213,\n    \"baseModulus\": 2013265921},\n   {\"profileId\": 203,\n    \"plaintextModulus\": 1032193,\n    \"orderedModuli\": [68719403009, 68719230977, 137438822401],\n    \"nttRepresentationId\": 220,\n    \"kind\": \"residue_ring\",\n    \"degree\": 4096,\n    \"coefficientRepresentationId\": 20},\n   {\"transcriptAuthenticationId\": 232,\n    \"threshold\": 2,\n    \"protocolId\": 230,\n    \"profileId\": 204,\n    \"partyCount\": 3,\n    \"kind\": \"mpc_shared\",\n    \"federationId\": 231,\n    \"baseCarrierProfileId\": 201},\n   {\"towerId\": 211,\n    \"representationId\": 21,\n    \"profileId\": 205,\n    \"kind\": \"gf2_tower\",\n    \"degree\": 256,\n    \"basisId\": 212}],\n  \"bridges\":\n  [{\"targetCodecId\": 19,\n    \"targetCarrierId\": 202,\n    \"sourceCodecId\": 18,\n    \"sourceCarrierId\": 201,\n    \"relationId\": 311,\n    \"bridgeId\": 301},\n   {\"targetCodecId\": 20,\n    \"targetCarrierId\": 203,\n    \"sourceCodecId\": 19,\n    \"sourceCarrierId\": 202,\n    \"relationId\": 312,\n    \"bridgeId\": 302}],\n  \"bounds\":\n  [{\"value\": 1048576, \"boundId\": 511},\n   {\"value\": 3, \"boundId\": 512},\n   {\"value\": 65536, \"boundId\": 513}],\n  \"abiId\": 100},\n \"effects\":\n [{\"schemaVersion\": 1,\n   \"phasePlan\": [\"effect_descriptor\"],\n   \"parameterIds\": [701],\n   \"outputCodecIds\": [6],\n   \"kind\": \"effect\",\n   \"inputCodecIds\": [5, 6],\n   \"declarationWords\": [[1, 2, 0, 1, 2, 0, 1, 0, 4]],\n   \"declarationId\": 602,\n   \"declarationCodecId\": 4}],\n \"disclosure\":\n {\"schemaVersion\": 1,\n  \"phasePlan\": [\"disclosure_same_opening\", \"disclosure_permission\"],\n  \"parameterIds\": [703],\n  \"outputCodecIds\": [14],\n  \"kind\": \"disclosure\",\n  \"inputCodecIds\": [11, 12, 13, 15],\n  \"declarationWords\": [],\n  \"declarationId\": 604,\n  \"declarationCodecId\": 10},\n \"canonicalEncoding\": \"minidregg/encodable/v1\",\n \"authorization\":\n {\"schemaVersion\": 1,\n  \"requestFieldTags\": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],\n  \"requestCodecId\": 3,\n  \"modes\":\n  [{\"modeTag\": 1, \"checkTags\": [1, 2, 11, 12]},\n   {\"modeTag\": 2, \"checkTags\": [3, 11, 12]},\n   {\"modeTag\": 3, \"checkTags\": [4, 5, 6, 7, 8, 9, 10, 11, 12]}],\n  \"declarationId\": 601,\n  \"declarationCodecId\": 2}}\n";
 pub const MANIFEST_VERSION_DECIMAL: &str = "1";
 pub const ABI_ID_DECIMAL: &str = "100";
 pub const SEMANTIC_PROGRAM_ID_DECIMAL: &str = "101";
 pub const SEMANTIC_RELATION_ID_DECIMAL: &str = "102";
 pub const RECEIPT_CODEC_ID_DECIMAL: &str = "1";
 pub const DIALECT_CLAUSE_IDS_DECIMAL: &[&str] = &[];
-pub const CODEC_IDS_DECIMAL: &[&str] = &[
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17",
-    "18", "19", "20", "21",
-];
+pub const CODEC_IDS_DECIMAL: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21"];
 pub const EFFECT_DECLARATION_COUNT: usize = 1;
 pub const OUTER_PHASE_COUNT: usize = 15;
 
@@ -67,10 +64,7 @@ pub struct NativeErrorDto {
 
 impl NativeWorkRequestDto {
     pub fn tower256_dot_product(request_bytes: Box<[u8]>) -> Self {
-        Self {
-            work: NativeWorkTag::Work0,
-            request_bytes,
-        }
+        Self { work: NativeWorkTag::Work0, request_bytes }
     }
 
     pub fn from_ids(
@@ -87,8 +81,7 @@ impl NativeWorkRequestDto {
             {
                 return Err(NativeErrorDto {
                     kind: NativeErrorKind::MalformedRequest,
-                    detail: "work identifier supplied with noncanonical profile or codec pins"
-                        .into(),
+                    detail: "work identifier supplied with noncanonical profile or codec pins".into(),
                 });
             }
             return Ok(Self::tower256_dot_product(request_bytes));
@@ -123,42 +116,30 @@ impl NativeWorkRequestDto {
         }
     }
 
-    pub fn request_bytes(&self) -> &[u8] {
-        &self.request_bytes
-    }
+    pub fn request_bytes(&self) -> &[u8] { &self.request_bytes }
 }
 
 impl NativeReplyDto {
-    pub fn response_bytes(&self) -> &[u8] {
-        &self.response_bytes
-    }
-    pub fn into_response_bytes(self) -> Box<[u8]> {
-        self.response_bytes
-    }
+    pub fn response_bytes(&self) -> &[u8] { &self.response_bytes }
+    pub fn into_response_bytes(self) -> Box<[u8]> { self.response_bytes }
 }
 
-pub fn dispatch_native(request: NativeWorkRequestDto) -> Result<NativeReplyDto, NativeErrorDto> {
+pub fn dispatch_native(
+    request: NativeWorkRequestDto,
+) -> Result<NativeReplyDto, NativeErrorDto> {
     match request.work {
         NativeWorkTag::Work0 => {
-            let response =
-                crate::native_dispatch::tower256_dot_product_bytes(&request.request_bytes)
-                    .map_err(|error| NativeErrorDto {
-                        kind: NativeErrorKind::ExecutionFailure,
-                        detail: error.to_string(),
-                    })?;
+            let response = crate::native_dispatch::tower256_dot_product_bytes(&request.request_bytes).map_err(|error| NativeErrorDto {
+                kind: NativeErrorKind::ExecutionFailure,
+                detail: error.to_string(),
+            })?;
             if response.len() != WORK_0_RESPONSE_WIDTH {
                 return Err(NativeErrorDto {
                     kind: NativeErrorKind::ExecutionFailure,
-                    detail: format!(
-                        "native response has {} bytes, expected {}",
-                        response.len(),
-                        WORK_0_RESPONSE_WIDTH
-                    ),
+                    detail: format!("native response has {} bytes, expected {}", response.len(), WORK_0_RESPONSE_WIDTH),
                 });
             }
-            Ok(NativeReplyDto {
-                response_bytes: response.into_boxed_slice(),
-            })
+            Ok(NativeReplyDto { response_bytes: response.into_boxed_slice() })
         }
     }
 }

@@ -25,6 +25,28 @@
   "verify_dialect_clauses",
   "bind_receipt",
   "commit"],
+ "nativeWorkCatalog":
+ [{"workId": 9101,
+   "responseCodec":
+   {"version": 1,
+    "valueTypeId": 1021,
+    "shape": "tower256_coordinate_le",
+    "registry": "semantic_manifest",
+    "codecId": 21},
+   "requestCodec":
+   {"version": 1,
+    "valueTypeId": 9002,
+    "shape": "tower256_pair_vectors_u32_le",
+    "registry": "native_abi",
+    "codecId": 9001},
+   "kernelTag": "tower256_dot_product",
+   "carrierProfileId": 205}],
+ "nativeAbiCodecs":
+ [{"version": 1,
+   "valueTypeId": 9002,
+   "shape": "tower256_pair_vectors_u32_le",
+   "registry": "native_abi",
+   "codecId": 9001}],
  "manifest":
  {"transcriptControllerDigest": 500,
   "semanticRelationId": 102,
