@@ -189,21 +189,26 @@ variable
       OutputTargetWitness ReleaseAuthorizationWitness DeclassificationAuthority Release)
 
 abbrev Request :=
+  let _declarationMarker := declaration
   PrivateComputationRequest language mode Observer Policy Recipient Purpose BridgeName
     AuthorizationContext CanonicalInput SemanticInput DeclassificationAuthority
 
 abbrev Outcome :=
+  let _declarationMarker := declaration
   PrivateComputationOutcome language mode OutputCommitment PrivateOutput
     DeclassificationAuthority Release
 
 def statementOf (request : declaration.Request) (outcome : declaration.Outcome) :
-    PrivateComputationStatement language mode SemanticInput OutputCommitment PrivateOutput where
-  program := request.program
-  inputValue := request.inputValue
-  inputArtifact := request.computationInput
-  outputCommitment := outcome.output.commitment
-  outputArtifact := outcome.output.representation
-  privateOutput := outcome.output.privateOutput
+    PrivateComputationStatement language mode SemanticInput OutputCommitment PrivateOutput :=
+  let _declarationMarker := declaration
+  {
+    program := request.program
+    inputValue := request.inputValue
+    inputArtifact := request.computationInput
+    outputCommitment := outcome.output.commitment
+    outputArtifact := outcome.output.representation
+    privateOutput := outcome.output.privateOutput
+  }
 
 /-- The completion token.  Every field is proof-relevant and indexed by the
 same request/outcome; no constructor permits authorization, input identity,
