@@ -12,6 +12,8 @@ import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclo
 import Assurance.DeclaredTurnReceipt  -- DeclaredTurn.execute derives the exact commit/reject receipt core and history claim; callers cannot supply post/touched/auth semantics
 import Assurance.SemanticReceiptRuntimeCodec  -- exact fixed key-major word/residual layout ↔ formal receipt relation; no native semantics is asserted
 import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject receipts fold only from a verified predecessor head; WARP/PCS recommitment stays explicit proof data
+import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
+import Assurance.PrivateComputationReceiptClause  -- ZK/MPC/FHE completions become manifest-bound receipt disclosures only through exact authorization, named same-opening bridges, evidence, and VerifiedRelease
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
 import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
