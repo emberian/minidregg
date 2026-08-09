@@ -44,6 +44,11 @@ and gadget satisfiability are not current deployment evidence.
   footprint, eager nullifier, and mode pins. It carries no reveal policy or second portal and is
   forced sealed. BFV binds all 384 equations. No confidentiality, ZK/MPC/FHE security, proof suite,
   deployed codecs/controller, or disclosure adapter is inferred.
+- **Sealed note-spend core — S/A relation acceptance:** `284f359` admits the exact Lean note-spend
+  constraint relation through the release-free computation core, retaining the public root/
+  nullifier, committed output, typed spend effect, request/effect digests, eager nullifier, and one
+  validated patch under the sole common authority. Proof-suite/controller pins are zero; no hiding,
+  proof of knowledge, CR/ROM/PCS, or native implementation is claimed.
 - **Tower256 additive FRI — A:** `c7c05b5` closes deterministic control on the shared exact
   Tower/cSHAKE/Merkle backend. Lean decodes arbitrary native bytes/error, derives roots-before-
   challenge transcript/query seeds, checks openings/folds/final polynomial, reaches the ideal

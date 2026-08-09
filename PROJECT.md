@@ -172,6 +172,12 @@ declassification, release, and a second authority portal.
 realization. Its release carrier is empty and every accepted core effect is sealed. BFV's current
 semantic core binds the exact program/relation/mode/input/output statement and all 384 equations.
 
+`NoteSpendCoreAcceptedCellEffect` supplies a second concrete positive core path: the exact
+Lean-authored note-spend relation, public nullifier/root, committed output, typed spend effect,
+complete request/effect digests, eager nullifier, and one validated patch enter the cell kernel.
+Its witness is ordinary Lean evidence and its proof-suite/controller pins are zero; this is relation
+acceptance, not a deployed ZK proof or hiding/knowledge claim.
+
 Residual: concrete BFV codecs/digests/patch adapter, proof suite and controller, PCS/CR/ROM,
 confidentiality/knowledge proof, shared-MPC dialects, and a later separately authorized disclosure
 effect linked to the output commitment.

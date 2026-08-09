@@ -175,6 +175,12 @@ The deployment registry is fail-closed: base V1 contains zero dialect clauses; 4
 control but no native byte profile; 404 is gated; BFV 901 is reserved with zero proof-suite and
 controller pins. A manifest record never supplies cryptographic evidence.
 
+The Lean-authored note-spend relation now enters the release-free computation core through one
+request-indexed authority, exact public root/nullifier, output commitment, typed effect, complete
+request/effect digests, eager nullifier, and validated patch. This is **S/A relation acceptance**.
+Its proof-suite/controller pins are zero; no ZK, hiding, knowledge, CR/ROM/PCS, or native proof path
+is inferred.
+
 ## Native compute boundary
 
 The canonical artifact authenticates native ABI codecs and a native work catalog. The current
