@@ -65,8 +65,8 @@ hotspots afterward.
 
 - **Machine-checked:** theorem statements at their explicit interfaces, with refuters beside false
   neighboring statements and no `sorry`/project axioms in the new modules.
-- **Executable reference:** Rust behavior and focused conformance/smoke evidence; Rust is not
-  formally refined to Lean.
+- **Native compute evidence:** focused conformance/smoke checks may diagnose arithmetic kernels,
+  but Rust has no semantic relation to refine; only Lean-owned checks can construct acceptance.
 - **Cryptographic floors:** `[COMMIT-CR]`, shared `[FS-ROM]`/XOF composition, and any imported
   proximity theorem remain named. Carrier width or a deterministic hash implementation is not a
   security proof.
@@ -76,11 +76,13 @@ Rust AIR. WGPU is an optional downstream experiment. Prefer statement-first clos
 counterexamples over convenient but false joins.
 
 ## PHASE 2 — beyond-v0 frontier (ember steered 2026-08-08: fan ALL FOUR)
-The four original frontiers have moved materially: emit and a one-call reference prover run; the
+The four original frontiers have moved materially: the Lean emit/controller path exists and the
+former one-call native verifier was deleted; the
 GF(2) tower, Fan--Paar multiplication, additive transform, and a macroscopic additive soundness
 band are proved; accumulator extraction is arbitrary-depth at its proved resolution; and the
 rate frontier now includes a machine-checked threshold-halving schedule above Johnson. Remaining
-work is stated by resolution: succinct openings and the extension-field challenge bridge in Rust,
+work is stated by resolution: succinct openings and the extension-field challenge bridge under
+Lean-owned control,
 verifier root-word attribution plus sampling-to-closeness for the sub-UD linked log, formalization
 of the algebraic core behind the landed exact Johnson interface, and the additive
 commitment/query/protocol join over the fast tower arithmetic. WGPU is explicitly downstream and
