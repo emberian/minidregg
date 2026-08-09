@@ -353,37 +353,7 @@ theorem existsHonestResponse :
   · intro index
     exact Fin.elim0 index
 
-/-! ## Fallible opaque execution, with Lean-owned checking -/
-
-/-- The generated Rust trait returns `Result<KernelBufferDto, NativeErrorDto>`.
-This type is its Lean boundary shape with an arbitrary opaque error payload.
-The success branch contains bounded response data only. -/
-abbrev FalliblePlanRunner (Error : Type) :=
-  (instruction : Instruction) → Except Error (KernelResponse instruction)
-
-/-- Concrete controller result.  Native failure is distinct from Lean rejection,
-and only the Lean-checked branch can carry `CertifiedResponse`. -/
-inductive Outcome (Error : Type)
-  | nativeFailure (error : Error)
-  | rejected (failure : NativeKernelPlan.Failure)
-  | verified {response : KernelResponse arithmeticInstruction}
-      (certificate : CertifiedResponse manifest
-        arithmeticInstruction response)
-
-def Outcome.IsVerified {Error : Type} : Outcome Error → Prop
-  | .nativeFailure _ => False
-  | .rejected _ => False
-  | .verified _ => True
-
-/-- Run exactly the declared arithmetic work.  A native error returns
-immediately; only a bounded buffer is passed to the existing Lean checker. -/
-def run {Error : Type} (runner : FalliblePlanRunner Error) : Outcome Error :=
-  match runner arithmeticInstruction with
-  | .error error => .nativeFailure error
-  | .ok response =>
-      match checkInstruction manifest arithmeticInstruction response with
-      | .inl failure => .rejected failure
-      | .inr certificate => .verified certificate
+/-! ## Lean-owned checking and the shared fallible controller -/
 
 /-- Completeness for any response satisfying the declared relation: executable
 reflection reduces the established facts to a Lean certificate. -/
@@ -433,16 +403,16 @@ theorem existsHonestCertifiedResponse :
 /-- A native error cannot be reinterpreted as a magic response buffer and cannot
 reach the certificate-bearing branch. -/
 theorem nativeFailure_stops {Error : Type}
-    (runner : FalliblePlanRunner Error) (error : Error)
+    (runner : PlanRunner Error) (error : Error)
     (failed : runner arithmeticInstruction = .error error) :
-    run runner = .nativeFailure error := by
-  unfold run
-  rw [failed]
+    NativeKernelPlan.run manifest arithmeticPlan runner = .blocked error := by
+  exact firstInstructionError_blocks manifest arithmeticPlan runner
+    arithmeticInstruction [] error plan_manifest_exact rfl failed
 
 theorem nativeFailure_not_verified {Error : Type}
-    (runner : FalliblePlanRunner Error) (error : Error)
+    (runner : PlanRunner Error) (error : Error)
     (failed : runner arithmeticInstruction = .error error) :
-    ¬ (run runner).IsVerified := by
+    ¬ (NativeKernelPlan.run manifest arithmeticPlan runner).IsVerified := by
   intro reached
   rw [nativeFailure_stops runner error failed] at reached
   exact reached
