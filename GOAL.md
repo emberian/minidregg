@@ -31,9 +31,11 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   `Compiler.MinidreggV1NativeGlue` emit `prover/generated/semantic_artifact_v1.rs` with constants,
   `CanonicalArtifactDto`, `WorkRequestDto`, `KernelBufferDto`, `NativeErrorDto`, and opaque
   arithmetic/hash/transform dispatch. There is no native validator, statement/transcript builder,
-  verifier Boolean, or receipt token. Base-V1 `DialectClauseDecl` values are registry pins, not
-  implementations. The generated file is compiled by `prover/src/lib.rs`, but a generated
-  request-to-kernel adapter remains open.
+  verifier Boolean, or receipt token. Base V1 intentionally contains no dialect clauses.
+  `Compiler.DialectClauseDispatch` adds the stronger requirement that every extension clause resolve
+  to an exact Lean controller before its response reaches that controller's Lean checker. The
+  generated file is compiled by `prover/src/lib.rs`, but a generated request-to-kernel adapter
+  remains open.
 - **Rates — exact boundary:** threshold halving gives an unconditional post-Johnson first round and
   proved UD tail. Haböck's exact Johnson constants/conventions are locally bridged; the
   BCIKS/GS/Hensel algebraic core remains the explicit `HaboeckTheorem2` premise. No unrestricted
@@ -52,10 +54,10 @@ Optimize the protocol and its proof obligations first; accelerate the resulting 
   explicit. V1 now declares distinct profile `205`, degree `256`, and codec `21` in Lean, JSON, and
   generated Rust artifact data; pin `404` selects it instead of degree-64 `gf2Carrier`. The clause
   remains outside base-V1 clauses, and no native representation theorem follows from the pin.
-- **Ext6 gate suite — proved algebra, opaque V1 pin:** `X^6−31` is proved irreducible. Lean proves
+- **Ext6 gate suite — proved algebra, no admitted dialect:** `X^6−31` is proved irreducible. Lean proves
   emitted-descriptor residual provenance, seven factored operands, degree-two rounds, terminal
-  affine functionals, and eta aggregation with its bad-set bound. Base-V1's Ext6
-  `DialectClauseDecl` does not provide a receipt clause or verifier. Commitment authentication,
+  affine functionals, and eta aggregation with its bad-set bound. Base V1 admits no Ext6 clause;
+  a concrete Lean controller must introduce one. Commitment authentication,
   transcript/opening control, coherent proximity, base-subfield provenance/sampling, final LDT,
   and CR/ROM composition remain.
 - **BFV receipt clause — exact integer consequence, unassigned proof pins:**
@@ -273,8 +275,8 @@ above are authoritative when an older entry says “runtime,” “deployed,” 
   machine-refutes raw table values as coefficients; `GateMleExt6` proves descriptor ordering,
   extension lift, batching, and terminal semantics. The former native `gate_mle_ext6` transcript,
   proof, and clear verifier were deleted because they owned protocol control; only Lean mathematics
-  and opaque native arithmetic remain. Base-V1's Ext6 registry pin does not close the missing
-  commitment/transcript/opening, proximity, subfield, or final-LDT boundaries.
+  and opaque native arithmetic remain. Base V1 admits no Ext6 dialect; a future controller must
+  close the commitment/transcript/opening, proximity, subfield, and final-LDT boundaries.
 - 2026-08-09 **RETRACTED and deleted sampled binary admission surface:** `AdditiveFriTower` and
   `AdditiveFriQuery` remain valid Lean mathematics, but the former Rust verifier checked only local
   full-depth fold consistency. Because `coefficient_bound` was unused, arbitrary words and

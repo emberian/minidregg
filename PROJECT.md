@@ -162,9 +162,9 @@ The first formal substrate is already present in:
 
 | Dialect | Native work | Current proof direction | Boundary that must stay explicit |
 |---|---|---|---|
-| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash/Merkle buffers, but its tower/LCH ordering and hash/Merkle framing conventions are not yet emitted pins. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not yet base-V1 admitted |
-| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves `X^6−31` irreducibility, descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | The V1 `ext6DialectClause` is only an opaque registry pin. Native `field6` limb/polynomial and `gate_kernels` operand-slot conventions are not connected to generated pins. No concrete Ext6 receipt clause or verifier follows. Commitment/transcript/opening control, coherent proximity, subfield provenance, final LDT, and CR/ROM composition remain |
-| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; native Tower256 retains arithmetic kernels only | V1 now declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it in a locally extended manifest. Clause `404` remains outside base-V1 clauses, and carrier metadata proves no Rust representation correspondence. Native `logup256_kernels` still fixes ungenerated incidence/probe conventions. PCS, CR/ROM, proximity, and mutable state remain |
+| **GF(2) towers** | Boolean control, words, hashes, bitwise code, binary MLEs | `GF(2^64)`/`GF(2^256)` algebra and additive LCH/FRI; `Compiler.AdditiveFriReceiptClause` binds basis order, affine domain, rate schedule, roots-before-challenges, coherent queries, and the exact ideal UD predicate/bound | Rust retains opaque arithmetic/transform/hash buffers, but its tower/LCH representation and chosen hash algorithm are not yet generated or checked from Lean pins. The concrete commitment/CR, cSHAKE-ROM transport, buffer checking, controller instance, and outer accumulator remain; the generic clause is not base-V1 admitted |
+| **BabyBear / Ext6** | Prime-field arithmetic, emitted degree-2 gates, selectors | Lean proves `X^6−31` irreducibility, descriptor provenance, seven factored operands, degree-two rounds, terminal affine functionals, and eta aggregation | Base V1 deliberately admits no Ext6 or other proof dialect. Native `field6` limb/polynomial conventions are not connected to generated pins. A concrete Ext6 clause/controller, commitment/transcript/opening control, coherent proximity, subfield provenance, final LDT, and CR/ROM composition remain |
+| **Lookup / RAM** | Range, decode, tables, sparse state buses | `LogupIndexLink` proves canonical Boolean addresses and exact pushforward; `Compiler.Logup256ReceiptClause.indexedTableReceiptClause` derives the exact indexed evaluation behind explicit Tower256/PCS/CR/ROM premises; native Tower256 retains arithmetic kernels only | V1 declares distinct `gf2Tower256Carrier` profile `205`, degree `256`, and codec `21`; clause `404` selects it only in a local extension. Caller-selected positions/probes/challenges feed stateless `logup256_kernels`; its fixed relation arithmetic and Tower representation remain unverified compute. PCS, CR/ROM, controller admission, proximity, and mutable state remain |
 | **Residue-ring FHE** | BFV/BGV/TFHE arithmetic, RNS/NTT, key switching | Bignum/cross-modulus theory and `Compiler.BfvReceiptClause`: one proof-relevant token binds the committed witness and ordered 384-row modulus-major batch, checks each candidate BabyBear accumulator buffer through emitted AIR, and derives every exact signed `Int` equation | Its clause pin deliberately leaves proof codec, suite, and controller at zero/unassigned and does not close a manifest. Concrete carrier/statement codecs, proof system/controller, commitment binding, and full application receipt integration remain; naive field lookup over cyclotomic rings is unsound |
 | **MPC / shared values** | Collaborative private turns and threshold outputs | Typed share/transcript receipt adapter | Malicious security, abort/fairness, and public output binding are separate from local proof soundness |
 
@@ -172,11 +172,10 @@ Tower256 exists because it lets binary semantics use cheap native operations whi
 security-sized challenges and bridging evaluations into a large-field PCS. It is not an attempt to
 interpret all computation as GF(2).
 
-The remaining handwritten kernels are not yet uniformly policy-free. In particular,
-`gate_kernels` fixes a local row/read/residual and seven-operand gate layout;
-`logup256_kernels` fixes incidence ordering, round-message polynomials, and interpolation probes;
-`hash_kernels` fixes cSHAKE framing and a binary Merkle layout; and the tower/Ext6 modules fix limb,
-basis, and polynomial representations. Until those conventions are generated from Lean or checked
+The remaining handwritten kernels are not yet uniformly convention-free. In particular,
+`logup256_kernels` fixes relation-polynomial arithmetic while accepting positions/probes/challenges
+from its caller; `hash_kernels` fixes only the cSHAKE256 algorithm; and the tower/Ext6 modules fix
+limb, basis, and polynomial representations. Until those conventions are generated from Lean or checked
 against exact Lean-owned pins, they are opaque untrusted candidate computation and may affect only
 availability/completeness—not semantics or acceptance.
 
@@ -204,10 +203,12 @@ A receipt binds at least:
 - prior receipt/history links and verifiable finality when finality is claimed.
 
 The handwritten `prover/src/semantic_receipt.rs` ABI prototype is deleted. Its replacement spine
-begins with a Lean-owned `SemanticManifest`, the canonical V1 artifact, and generated native DTO
+begins with a Lean-owned `SemanticManifest`, the canonical V1 artifact, generated native DTO
 glue. Native code receives bounded calls and returns data; it neither constructs nor verifies
-receipt meaning. Registry records named `DialectClauseDecl` are first-order pins, not claims that a
-native proof system or verifier exists. The generated Rust file is compiled into the `prover`
+receipt meaning, and `DialectClauseDispatch` requires a matching Lean controller registry before a
+clause can be resolved. Registry records named `DialectClauseDecl` are first-order pins, not claims
+that a native proof system or verifier exists. Base V1 therefore carries no dialect declarations.
+The generated Rust file is compiled into the `prover`
 crate as artifact data and a trait surface, but it is not a live dispatch integration.
 
 [`Assurance/SemanticReceiptRelation.lean`](Assurance/SemanticReceiptRelation.lean) owns the first
