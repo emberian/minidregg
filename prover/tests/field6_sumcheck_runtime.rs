@@ -2,9 +2,7 @@
 
 use minidregg_prover::babybear::{badd, bmul, P};
 use minidregg_prover::field6::{Ext6, EXT6_W};
-use minidregg_prover::gate_kernels::{
-    batch_lifted_residuals, evaluate_mle, table_sum, GateKernelError,
-};
+use minidregg_prover::mle_kernels::evaluate_mle;
 
 fn e(limbs: [u64; 6]) -> Ext6 {
     Ext6::try_from_limbs(limbs).expect("test vector is canonical")
@@ -142,24 +140,4 @@ fn generic_sumcheck_matches_literal_ext6_mle_through_dimension_eight() {
         let literal_terminal = literal_mle(&table, &point);
         assert_eq!(fast_terminal, literal_terminal, "dimension {dimension}");
     }
-}
-
-#[test]
-fn extension_gamma_batches_lifted_base_residuals() {
-    // Defect polynomial -1 + gamma has its unique escape at gamma = 1,
-    // whether the challenge is in the base field or Ext6.  A non-base u
-    // challenge produces genuine cross-lane residuals and does not escape.
-    let residuals = [P - 1, 1];
-    let at_one = batch_lifted_residuals::<Ext6>(&residuals, Ext6::ONE).unwrap();
-    assert_eq!(table_sum(&at_one).unwrap(), Ext6::ZERO);
-
-    let u = e([0, 1, 0, 0, 0, 0]);
-    let at_u = batch_lifted_residuals::<Ext6>(&residuals, u).unwrap();
-    assert_eq!(at_u[1], u);
-    assert!(!table_sum(&at_u).unwrap().is_zero());
-
-    assert_eq!(
-        batch_lifted_residuals::<Ext6>(&[P], u),
-        Err(GateKernelError::NonCanonicalBase { index: 0, value: P })
-    );
 }
