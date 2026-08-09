@@ -1,18 +1,13 @@
-//! Native arithmetic kernels for emitted gates and multilinear sumcheck.
+//! Low-level arithmetic kernels over explicit buffers and local instruction rows.
 //!
-//! This module has no proof or transcript types and makes no protocol decision.
-//! Every challenge is an explicit caller argument.  The only failures reported
-//! here are malformed arithmetic buffers, non-canonical representatives, or an
-//! unusable modulus.  In particular, descriptor policy, statement binding,
-//! suite selection, transcript order, and final acceptance belong to generated
-//! Lean control.
+//! This module produces candidate buffers and arithmetic messages only.  Every
+//! challenge and instruction row is explicit caller data.  Failures are limited
+//! to unusable moduli, non-canonical representatives, buffer shape, local row
+//! codes, and row execution order.
 
 use core::fmt;
 
-use crate::{
-    descriptor::{Descriptor, Gate, GateOp, Wire},
-    field6::Ext6,
-};
+use crate::field6::Ext6;
 
 /// Seven operand tables for the factored degree-two gate polynomial.
 pub const GATE_OPERAND_TABLES: usize = 7;
@@ -30,16 +25,15 @@ pub type GateOperandTables<E> = [Vec<E>; GATE_OPERAND_TABLES];
 /// The buffer in which a non-canonical base-field representative occurred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferKind {
-    Trace,
-    DescriptorConstant,
+    Candidate,
+    InstructionConstant,
     Residual,
     Challenge,
     Table,
     Point,
 }
 
-/// Arithmetic-kernel input failures.  Algebraic claim failures are deliberately
-/// absent: the Lean controller compares returned messages and terminal values.
+/// Arithmetic-kernel input and execution failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateKernelError {
     InvalidModulus {
@@ -58,13 +52,36 @@ pub enum GateKernelError {
         expected: usize,
         actual: usize,
     },
-    WireIndex {
+    BufferIndex {
         index: usize,
-        trace_len: usize,
+        buffer_len: usize,
     },
-    GateIndex {
+    InstructionIndex {
         index: usize,
-        gate_count: usize,
+        row_count: usize,
+    },
+    InvalidInstructionCode {
+        row: usize,
+        code: u8,
+    },
+    InvalidSourceKind {
+        row: usize,
+        kind: u8,
+    },
+    InputRegion {
+        input_len: usize,
+        buffer_len: usize,
+    },
+    ReadBeforeWrite {
+        row: usize,
+        index: usize,
+    },
+    OutputAlreadyWritten {
+        row: usize,
+        index: usize,
+    },
+    IncompleteCandidate {
+        index: usize,
     },
     NonCanonical {
         buffer: BufferKind,
@@ -104,11 +121,45 @@ impl fmt::Display for GateKernelError {
             Self::PointDimension { expected, actual } => {
                 write!(f, "point has dimension {actual}, expected {expected}")
             }
-            Self::WireIndex { index, trace_len } => {
-                write!(f, "wire index {index} is outside trace length {trace_len}")
+            Self::BufferIndex { index, buffer_len } => {
+                write!(
+                    f,
+                    "cell index {index} is outside buffer length {buffer_len}"
+                )
             }
-            Self::GateIndex { index, gate_count } => {
-                write!(f, "gate index {index} is outside gate count {gate_count}")
+            Self::InstructionIndex { index, row_count } => {
+                write!(
+                    f,
+                    "instruction index {index} is outside row count {row_count}"
+                )
+            }
+            Self::InvalidInstructionCode { row, code } => {
+                write!(f, "instruction row {row} has unsupported code {code}")
+            }
+            Self::InvalidSourceKind { row, kind } => {
+                write!(
+                    f,
+                    "instruction row {row} has unsupported source kind {kind}"
+                )
+            }
+            Self::InputRegion {
+                input_len,
+                buffer_len,
+            } => write!(
+                f,
+                "input length {input_len} exceeds candidate buffer length {buffer_len}"
+            ),
+            Self::ReadBeforeWrite { row, index } => {
+                write!(
+                    f,
+                    "instruction row {row} reads cell {index} before it is written"
+                )
+            }
+            Self::OutputAlreadyWritten { row, index } => {
+                write!(f, "instruction row {row} rewrites cell {index}")
+            }
+            Self::IncompleteCandidate { index } => {
+                write!(f, "candidate buffer leaves cell {index} unwritten")
             }
             Self::NonCanonical {
                 buffer,
@@ -205,107 +256,241 @@ pub fn mul_mod(a: u64, b: u64, modulus: u64) -> Result<u64, GateKernelError> {
     Ok(mul_mod_unchecked(a, b, modulus))
 }
 
-// --- Emitted-descriptor gate residuals -------------------------------------
+// --- Explicit local compute plans ------------------------------------------
 
-/// Gates plus zero checks, padded to an LSB-first Boolean cube.  An empty gate
-/// system has the singleton table length one.
-pub fn descriptor_defect_len(descriptor: &Descriptor) -> Result<usize, GateKernelError> {
-    descriptor
-        .gates
+pub const LOCAL_ADD: u8 = 0;
+pub const LOCAL_MUL: u8 = 1;
+pub const SOURCE_CONSTANT: u8 = 0;
+pub const SOURCE_BUFFER: u8 = 1;
+
+/// One primitive arithmetic row.  Source kinds and operation codes are numeric
+/// local-kernel tags; this row has no parser, callback, or decision field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalKernelRow {
+    pub code: u8,
+    pub left_kind: u8,
+    pub left: u64,
+    pub right_kind: u8,
+    pub right: u64,
+    pub output: usize,
+}
+
+/// One primitive buffer read included in the residual output table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalReadRow {
+    pub source_kind: u8,
+    pub source: u64,
+}
+
+/// Explicit low-level compute work.  The native boundary receives already
+/// materialized rows and buffers; it performs no file or byte-format decoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LowLevelComputePlan {
+    pub modulus: u64,
+    pub input_len: usize,
+    pub buffer_len: usize,
+    pub instruction_rows: Vec<LocalKernelRow>,
+    pub residual_reads: Vec<LocalReadRow>,
+}
+
+/// Arithmetic rows plus explicit residual reads, padded to an LSB-first Boolean
+/// cube.  An empty plan has the singleton table length one.
+pub fn residual_table_len(plan: &LowLevelComputePlan) -> Result<usize, GateKernelError> {
+    plan.instruction_rows
         .len()
-        .checked_add(descriptor.zeros.len())
+        .checked_add(plan.residual_reads.len())
         .ok_or(GateKernelError::SizeOverflow)?
         .checked_next_power_of_two()
         .ok_or(GateKernelError::SizeOverflow)
 }
 
-fn check_trace(descriptor: &Descriptor, trace: &[u64]) -> Result<(), GateKernelError> {
-    check_modulus(descriptor.p)?;
-    let expected = descriptor.n_wires as usize;
-    if trace.len() != expected {
+fn check_candidate(plan: &LowLevelComputePlan, candidate: &[u64]) -> Result<(), GateKernelError> {
+    check_modulus(plan.modulus)?;
+    if candidate.len() != plan.buffer_len {
         return Err(GateKernelError::Length {
-            expected,
-            actual: trace.len(),
+            expected: plan.buffer_len,
+            actual: candidate.len(),
         });
     }
-    check_canonical(trace, descriptor.p, BufferKind::Trace)
+    check_canonical(candidate, plan.modulus, BufferKind::Candidate)
 }
 
-fn read_wire(wire: &Wire, trace: &[u64], modulus: u64) -> Result<u64, GateKernelError> {
-    match *wire {
-        Wire::Const(value) if value >= modulus => Err(GateKernelError::NonCanonical {
-            buffer: BufferKind::DescriptorConstant,
+fn source_index(row: usize, kind: u8, value: u64) -> Result<Option<usize>, GateKernelError> {
+    match kind {
+        SOURCE_CONSTANT => Ok(None),
+        SOURCE_BUFFER => usize::try_from(value)
+            .map(Some)
+            .map_err(|_| GateKernelError::SizeOverflow),
+        _ => Err(GateKernelError::InvalidSourceKind { row, kind }),
+    }
+}
+
+fn read_source(
+    row: usize,
+    kind: u8,
+    value: u64,
+    candidate: &[u64],
+    modulus: u64,
+) -> Result<u64, GateKernelError> {
+    match source_index(row, kind, value)? {
+        None if value >= modulus => Err(GateKernelError::NonCanonical {
+            buffer: BufferKind::InstructionConstant,
             index: 0,
             value,
             modulus,
         }),
-        Wire::Const(value) => Ok(value),
-        Wire::Wire(index) => trace
-            .get(index as usize)
+        None => Ok(value),
+        Some(index) => candidate
+            .get(index)
             .copied()
-            .ok_or(GateKernelError::WireIndex {
-                index: index as usize,
-                trace_len: trace.len(),
+            .ok_or(GateKernelError::BufferIndex {
+                index,
+                buffer_len: candidate.len(),
             }),
     }
 }
 
-fn gate_residual_unchecked(
-    gate: &Gate,
-    trace: &[u64],
+fn row_result(
+    row_index: usize,
+    row: &LocalKernelRow,
+    candidate: &[u64],
     modulus: u64,
 ) -> Result<u64, GateKernelError> {
-    let left = read_wire(&gate.a, trace, modulus)?;
-    let right = read_wire(&gate.b, trace, modulus)?;
-    let output = trace
-        .get(gate.out as usize)
+    let left = read_source(row_index, row.left_kind, row.left, candidate, modulus)?;
+    let right = read_source(row_index, row.right_kind, row.right, candidate, modulus)?;
+    match row.code {
+        LOCAL_ADD => Ok(add_mod_unchecked(left, right, modulus)),
+        LOCAL_MUL => Ok(mul_mod_unchecked(left, right, modulus)),
+        code => Err(GateKernelError::InvalidInstructionCode {
+            row: row_index,
+            code,
+        }),
+    }
+}
+
+fn row_residual_unchecked(
+    row_index: usize,
+    row: &LocalKernelRow,
+    candidate: &[u64],
+    modulus: u64,
+) -> Result<u64, GateKernelError> {
+    let operation = row_result(row_index, row, candidate, modulus)?;
+    let output = candidate
+        .get(row.output)
         .copied()
-        .ok_or(GateKernelError::WireIndex {
-            index: gate.out as usize,
-            trace_len: trace.len(),
+        .ok_or(GateKernelError::BufferIndex {
+            index: row.output,
+            buffer_len: candidate.len(),
         })?;
-    let operation = match gate.op {
-        GateOp::Add => add_mod_unchecked(left, right, modulus),
-        GateOp::Mul => mul_mod_unchecked(left, right, modulus),
-    };
     Ok(sub_mod_unchecked(operation, output, modulus))
 }
 
-/// One canonical emitted-gate residual: `a+b-out` or `a*b-out`.
-///
-/// This checks only trace/canonical buffer contracts.  It does not decide
-/// descriptor well-formedness policy such as public/auxiliary wire partitions.
-pub fn descriptor_gate_residual(
-    descriptor: &Descriptor,
-    trace: &[u64],
-    gate_index: usize,
-) -> Result<u64, GateKernelError> {
-    check_trace(descriptor, trace)?;
-    let gate = descriptor
-        .gates
-        .get(gate_index)
-        .ok_or(GateKernelError::GateIndex {
-            index: gate_index,
-            gate_count: descriptor.gates.len(),
-        })?;
-    gate_residual_unchecked(gate, trace, descriptor.p)
+/// Generate the candidate buffer determined by the input prefix and local rows.
+/// This is a completeness helper only: it performs arithmetic and returns data.
+pub fn generate_candidate_trace(
+    plan: &LowLevelComputePlan,
+    inputs: &[u64],
+) -> Result<Vec<u64>, GateKernelError> {
+    check_modulus(plan.modulus)?;
+    if plan.input_len > plan.buffer_len {
+        return Err(GateKernelError::InputRegion {
+            input_len: plan.input_len,
+            buffer_len: plan.buffer_len,
+        });
+    }
+    if inputs.len() != plan.input_len {
+        return Err(GateKernelError::Length {
+            expected: plan.input_len,
+            actual: inputs.len(),
+        });
+    }
+    check_canonical(inputs, plan.modulus, BufferKind::Candidate)?;
+
+    let mut candidate = vec![0; plan.buffer_len];
+    let mut written = vec![false; plan.buffer_len];
+    candidate[..plan.input_len].copy_from_slice(inputs);
+    written[..plan.input_len].fill(true);
+
+    for (row_index, row) in plan.instruction_rows.iter().enumerate() {
+        for (kind, value) in [(row.left_kind, row.left), (row.right_kind, row.right)] {
+            if let Some(index) = source_index(row_index, kind, value)? {
+                if index >= candidate.len() {
+                    return Err(GateKernelError::BufferIndex {
+                        index,
+                        buffer_len: candidate.len(),
+                    });
+                }
+                if !written[index] {
+                    return Err(GateKernelError::ReadBeforeWrite {
+                        row: row_index,
+                        index,
+                    });
+                }
+            }
+        }
+        if row.output >= candidate.len() {
+            return Err(GateKernelError::BufferIndex {
+                index: row.output,
+                buffer_len: candidate.len(),
+            });
+        }
+        if written[row.output] {
+            return Err(GateKernelError::OutputAlreadyWritten {
+                row: row_index,
+                index: row.output,
+            });
+        }
+        candidate[row.output] = row_result(row_index, row, &candidate, plan.modulus)?;
+        written[row.output] = true;
+    }
+
+    if let Some(index) = written.iter().position(|is_written| !is_written) {
+        return Err(GateKernelError::IncompleteCandidate { index });
+    }
+    Ok(candidate)
 }
 
-/// The canonical padded defect table: gate residuals, zero-check reads, then
-/// zero padding.  This function computes data; it does not decide whether the
-/// residuals satisfy a statement.
-pub fn descriptor_defect_table(
-    descriptor: &Descriptor,
-    trace: &[u64],
+/// Compute one `left op right - output` row residual.
+pub fn instruction_residual(
+    plan: &LowLevelComputePlan,
+    candidate: &[u64],
+    row_index: usize,
+) -> Result<u64, GateKernelError> {
+    check_candidate(plan, candidate)?;
+    let row = plan
+        .instruction_rows
+        .get(row_index)
+        .ok_or(GateKernelError::InstructionIndex {
+            index: row_index,
+            row_count: plan.instruction_rows.len(),
+        })?;
+    row_residual_unchecked(row_index, row, candidate, plan.modulus)
+}
+
+/// Compute row residuals, explicit residual reads, and power-of-two padding.
+pub fn residual_table(
+    plan: &LowLevelComputePlan,
+    candidate: &[u64],
 ) -> Result<Vec<u64>, GateKernelError> {
-    check_trace(descriptor, trace)?;
-    let len = descriptor_defect_len(descriptor)?;
+    check_candidate(plan, candidate)?;
+    let len = residual_table_len(plan)?;
     let mut table = Vec::with_capacity(len);
-    for gate in &descriptor.gates {
-        table.push(gate_residual_unchecked(gate, trace, descriptor.p)?);
+    for (row_index, row) in plan.instruction_rows.iter().enumerate() {
+        table.push(row_residual_unchecked(
+            row_index,
+            row,
+            candidate,
+            plan.modulus,
+        )?);
     }
-    for zero in &descriptor.zeros {
-        table.push(read_wire(zero, trace, descriptor.p)?);
+    for (row_index, read) in plan.residual_reads.iter().enumerate() {
+        table.push(read_source(
+            plan.instruction_rows.len() + row_index,
+            read.source_kind,
+            read.source,
+            candidate,
+            plan.modulus,
+        )?);
     }
     table.resize(len, 0);
     Ok(table)
@@ -715,7 +900,7 @@ pub fn gate_operand_terminal<E: Copy>(
 }
 
 /// Evaluate `[g(0),g(1),g(2)]` at a caller challenge.  The caller also supplies
-/// the canonical field element `1/2`; no field or statement is selected here.
+/// the field element `1/2` explicitly.
 pub fn evaluate_quadratic<E: KernelScalar>(message: [E; 3], challenge: E, two_inverse: E) -> E {
     let [g0, g1, g2] = message;
     let linear = g1.sub(g0).mul(challenge);
@@ -734,35 +919,42 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_defects_and_base_mle_are_canonical() {
-        let descriptor = Descriptor {
-            p: 7,
-            n_public: 1,
-            n_vars: 1,
-            n_wires: 3,
-            gates: vec![
-                Gate {
-                    op: GateOp::Add,
-                    a: Wire::Wire(0),
-                    b: Wire::Const(2),
-                    out: 1,
+    fn local_plan_generates_candidate_and_residuals() {
+        let plan = LowLevelComputePlan {
+            modulus: 7,
+            input_len: 1,
+            buffer_len: 3,
+            instruction_rows: vec![
+                LocalKernelRow {
+                    code: LOCAL_ADD,
+                    left_kind: SOURCE_BUFFER,
+                    left: 0,
+                    right_kind: SOURCE_CONSTANT,
+                    right: 2,
+                    output: 1,
                 },
-                Gate {
-                    op: GateOp::Mul,
-                    a: Wire::Wire(1),
-                    b: Wire::Wire(0),
-                    out: 2,
+                LocalKernelRow {
+                    code: LOCAL_MUL,
+                    left_kind: SOURCE_BUFFER,
+                    left: 1,
+                    right_kind: SOURCE_BUFFER,
+                    right: 0,
+                    output: 2,
                 },
             ],
-            zeros: vec![Wire::Wire(2)],
+            residual_reads: vec![LocalReadRow {
+                source_kind: SOURCE_BUFFER,
+                source: 2,
+            }],
         };
-        let defects = descriptor_defect_table(&descriptor, &[3, 5, 0]).unwrap();
-        assert_eq!(defects, [0, 1, 0, 0]);
-        assert_eq!(base_evaluate_mle(&defects, &[2, 6], 7).unwrap(), 4);
+        assert_eq!(generate_candidate_trace(&plan, &[3]).unwrap(), [3, 5, 1]);
+        let residuals = residual_table(&plan, &[3, 5, 0]).unwrap();
+        assert_eq!(residuals, [0, 1, 0, 0]);
+        assert_eq!(base_evaluate_mle(&residuals, &[2, 6], 7).unwrap(), 4);
         assert!(matches!(
-            descriptor_defect_table(&descriptor, &[3, 7, 0]),
+            residual_table(&plan, &[3, 7, 0]),
             Err(GateKernelError::NonCanonical {
-                buffer: BufferKind::Trace,
+                buffer: BufferKind::Candidate,
                 ..
             })
         ));
