@@ -24,5 +24,4 @@ pub mod mle_kernels;
 pub mod outer_factored_gate;
 pub mod poseidon;
 pub mod trace;
-pub mod transcript_ext6;
 pub mod wide;
