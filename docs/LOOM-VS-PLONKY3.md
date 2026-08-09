@@ -1,10 +1,15 @@
 # Loom vs Plonky3 — the defensibility brief
 
+> Historical decision brief. Its architectural comparison remains useful, but several detailed
+> residuals in §6 have since closed. `README.md`, `GOAL.md`, and `docs/LOOM-COMPLETE.md` are the
+> authoritative current ledgers.
+
 *For the conversation that starts with a raised eyebrow. Written to be handed to a skeptical
 peer, so it quotes the pessimistic numbers and names what we give up. If this doc can't
 survive that reader, the decision can't either. Status 2026-08-07: Loom's v0 SOUNDNESS TOWER
 is proved (machine-checked, hand-audited) — the whole-history-aggregation promise is a Lean
-term — but there is still NO prover and performance is UNMEASURED; read §6 (honest state)
+term — and a deliberately non-succinct Rust reference path now runs. Competitive performance
+remains unmeasured; read §6 (honest state)
 before §3.*
 
 ## 0. The one honest sentence
@@ -88,10 +93,10 @@ Loom exists to make (1) a *theorem* and (2) *unnecessary*.
 
 - **Maturity.** Plonky3 is years-hardened and deployed; Loom is weeks old and unproven in
   production. This is the biggest real cost and no amount of theory buys it back quickly.
-- **Performance is UNMEASURED.** We have not benchmarked a Loom prover — there isn't one yet.
-  The honest-parameter stance (Johnson-regime, not capacity) costs ~2–4× prover vs the (now
-  falsified) conjectured rates. Loom could be slower than Plonky3 in practice; we do not know,
-  and claiming otherwise would be the flattering-number sin.
+- **Competitive performance is UNMEASURED.** A full-trace reference prover/verifier now runs, but
+  it is intentionally non-succinct and does not instantiate the additive GF(2) path or the
+  accumulator protocol. The honest-parameter stance also carries real rate costs. Loom could be
+  slower than Plonky3 in practice; only workload-matched, proved-parameter benchmarks can answer.
 - **Audit surface & ecosystem.** Plonky3 has external eyes, tooling, hiring pool. Loom has us.
   The mechanized proof is a *different kind* of assurance, not a replacement for adversarial
   external review of the implementation and the deployed field arithmetic.
@@ -150,8 +155,10 @@ satisfiability; binding a *forging prover*'s recommitments (straightline extract
 `[ACC-extract]`. The decider checks *exact* membership; the rate<1 proximity test (the WHIR
 low-degree test) is in flight, and with it `[OB3-c-prox]`/`[DEC-proximity]`. ZK is a hiding
 *shell* + its MDS opening-core; the full opening-leakage proof is `[OB-4-hiding-rbr]`, the
-contribution slot. And — unchanged and load-bearing — **there is still no prover, no verifier
-implementation, and no benchmarks; performance remains UNMEASURED** (§4). This is a proved
+contribution slot. There is now a one-call Rust reference prover/verifier, an executable linear
+accumulator mirror, and GF(2)-tower arithmetic, but the reference proof carries the full trace and
+the next-generation pieces are not joined into a benchmarkable succinct protocol. **Competitive
+performance therefore remains UNMEASURED** (§4). This is a proved
 soundness tower with a deployment layer in progress, not a system you can prove a block with
 tomorrow — but it is no longer an "early spine," and the promise it was built to make is kept.
 

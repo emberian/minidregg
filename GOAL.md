@@ -1,63 +1,198 @@
 # GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
-**Priority (ember, 2026-08-07 eve): LOOM IS VITAL, above kernel work.** Keep **2–6 lanes
-active on Loom at all times**, driving it toward maturity — enough that we understand the
-whole system (its resources, its soundness floor, why it beats plonky3) well enough to
-defend "we built our own proof system" to skeptical peers. Breadth AND depth, continuously.
+**Current priority (2026-08-09): turn the proved Loom core and the new binary/Ext6
+reference pieces into one genuinely succinct proof-carrying-history system.** GPU preservation is
+not a goal. Optimize the protocol and its proof obligations first; accelerate the actual resulting
+hotspots afterward.
 
-**All subagents run `model:"fable"`.** Lanes are bounded to mathlib + local Loom/Assurance
-files (NEVER large breadstuffs reads — that stalls the stream); construction facts go
-INLINE in prompts from the deep-read reports.
+## Current system map
 
-## The Loom map (what a defensible whole needs)
-- **Front:** sumcheck ✓ (round + adaptive union bound, PROVED).
-- **Code layer:** Reed-Solomon ✓ (Cor 4.11 UD); MCA-at-UD ✓. NEXT: constrained RS code
-  (CRS[F,L,m,ŵ,σ]) — the claim object; γ-power constraint batching (WHIR Constr 5.5).
-- **Accumulator (THE HEART, nothing yet):** the WARP claim (rt,α,μ,β,η); the γ-fold
-  (CRS×CRS→CRS closure); straightline erasure-extraction; unbounded-depth composition.
-- **Depth:** OB-2 tower ✓ modulo OB-2a (game-slot bound — close it).
-- **Transcript:** RBR vocabulary ✓ (Rbr.lean). NEXT: BCS/Fiat-Shamir (RBR→straightline NI).
-- **ZK (contribution slot):** OB-4 — hiding for hash-based straightline accumulation.
-- **Bridge:** OB-3 ✓ (receipt Q native to the accumulator, binding half; [OB3-d-fold]
-  closes once the accumulator lands).
+- **Formal core — proved:** constrained RS claims, γ batching, sumcheck/MLE, multiplicative FRI,
+  accumulator folding, exact/UD soundness, arbitrary-depth extraction, loss-free depth composition,
+  Fiat–Shamir/RBR reductions, constrained masking, emitted AIR semantics, and verifier gadgets.
+- **Rates — exact boundary:** threshold halving gives an unconditional post-Johnson first round and
+  proved UD tail. Haböck's exact Johnson constants/conventions are locally bridged; the
+  BCIKS/GS/Hensel algebraic core remains the explicit `HaboeckTheorem2` premise. No unrestricted
+  capacity claim is allowed.
+- **GF(2) suite — running with sampled soundness architecture proved:** Fan–Paar `GF(2^64)`, fast
+  reversed-LCH additive NTT, cSHAKE commitments/transcript, sampled multi-round additive FRI, OOD
+  evaluation PCS, and rate-bearing arbitrary-functional binary history append proofs run. Lean now
+  closes the literal additive quotient tower, authenticated coherent paths, adaptive earliest
+  deviation, and the UD challenge/query bound. The Rust implementation is unverified compute;
+  generated Lean authority and cryptographic composition remain.
+- **Ext6 gate suite — succinct joined surface:** `X^6−31` is proved irreducible. One trace root is
+  fixed before gamma; a degree-2 factored-selector sumcheck reduces emitted gates to seven terminal
+  trace functionals; eta aggregates those with public-prefix and padding equations; one sampled
+  trace-linear opening retires the aggregate without revealing the trace/table. Lean proves the
+  seven-operand provenance, terminal functionals, and eta bad-set bound.
+- **Accumulation — proved core plus proof-verified runtime history:** Loom's arbitrary-depth extraction
+  and soundness are real. Rust has history-depth-independent arbitrary-functional sampled append
+  proofs, and `proof_carrying_history` verifies their Ext6 gate conjunction, reconstructs the
+  canonical semantic envelope, and checks an exact two-node state/accumulator seam. Lean's
+  `SemanticReceiptRelation` proves the pre/post/touched quadratic language is iff a genuine
+  `ReceiptDelta` and folds valid words through `AccClaim`. This is still uncompressed history; the
+  runtime-codec refinement, full typed relation, and WARP/FACS RBR/runtime/hiding join remain.
+- **ZK/extraction — staged boundary:** corrected OracleLog assembly and sub-UD extraction without
+  `d≤t` are proved. A concrete staged Reduction freezes checked root preimages, then derives a
+  domain-separated query and binds responses; exact full-domain and constrained allowed-coordinate
+  error assemblies are proved behind explicit shared-ROM fresh/hit/sampling and CR/ZK ports.
+- **Security — candidate, not label:** the unified BabyBear⁶ arithmetic budget is 137 bits; the old
+  base/Ext4 executable path is not. cSHAKE supplies atomic Ext6 draws and 48-byte roots, but concrete
+  CR/shared-ROM/PoW composition and recursive-verifier wiring remain before the runtime inherits the
+  candidate number.
 
-## GOAL (ember, 2026-08-08): FINISH the formalization of Loom — ZK + accumulation + full recursion
+## Active completion frontier
 
-Completion map (be honest about the three tiers):
+1. Refine the landed characteristic-two sampled theorem to the binary runtime and compose its
+   cSHAKE/Merkle assumptions.
+2. Close the succinct gate path's coherent-proximity and base-subfield boundaries, replace the
+   handwritten Rust verifier with Lean-emitted control, then connect it to the final LDT.
+3. Lower the landed proof-verified arbitrary-functional history node into the stable common
+   receipt relation consumed by a real unbounded WARP/FACS-style accumulator and decider.
+4. Instantiate hiding committed-word-knowledge proofs and discharge the staged ZK game's explicit
+   shared-ROM horn ports.
+5. Upgrade the landed depth-independent light-client conjunction into the intended shared-ROM,
+   RBR/extractor, and final-compression protocol, then benchmark that protocol—not superseded
+   full-opening/reference paths.
 
-**TIER 1 — PROVED CORE (done):** accumulation (Accumulator + γ-fold + closure), FULL RECURSION
-(AccExtractChain unbounded-depth knowledge-soundness; LightClient whole-history aggregation; OB-2
-depth composition), the capstone (LoomV0.loomV0_holds), OB-3 receipt-native, the code layer
-(RS/MCA/ConstrainedCode/OOD/Proximity-LDT), sumcheck front, FiatShamir, deployed-field (OB-8),
-commitment binding, the single+multi-round+triangular ZK hiding, the arithmetization compiler
-(Air→AirFlatten→AirSumcheck linear face), the kernel (N2a/N2b/verbs/hidden-witness turn).
+## Claim discipline
 
-**TIER 2 — PROVABLE REMAINING (the finish list, drive to closure):**
-  ZK: [ZK-RBR-extract] (extraction flank, ZkExtraction weaving) · [ZK-RBR-triangular] (2 deployment
-  bridge lemmas) · [ACC-sound-rbr-game] (the full RBR game instance).
-  Arithmetization→sound private-turns: [SC-reshape]/MLE (MultilinearExtension weaving) →
-  [AIR-sumcheck-quadratic] (mul-gate soundness) → [AIR-range]/[AIR-poseidon]/[AIR-membership]
-  gadgets → [PRIVATE-TURN-air] (sound note-spend; shielded_exact_apex_v4 design ref).
-  Deployment bookkeeping: [LC-fs-adaptive] · [DEC-prox-query] · [DEC-succinct].
-  Better-rate (BIG research, honest): [ACC-sound-list]/Johnson · [OB-8-tower] binary · [CMASK-dual-distance].
+- **Machine-checked:** theorem statements at their explicit interfaces, with refuters beside false
+  neighboring statements and no `sorry`/project axioms in the new modules.
+- **Executable reference:** Rust behavior and focused conformance/smoke evidence; Rust is not
+  formally refined to Lean.
+- **Cryptographic floors:** `[COMMIT-CR]`, shared `[FS-ROM]`/XOF composition, and any imported
+  proximity theorem remain named. Carrier width or a deterministic hash implementation is not a
+  security proof.
 
-**TIER 3 — IRREDUCIBLE FLOOR (cannot be "proved" — the named cryptographic assumptions, minimal +
-INHABITED, same floor every hash-STARK carries; "finishing" = keep them named, not eliminate):**
-  [PROX-fold-distance] (the proximity-gap hPG) · [FS-ROM] (sponge realizes the RO; inhabited by
-  Oracle.empty) · [COMMIT-CR] (collision-resistant hash; idealCommitment inhabits it AXIOM-FREE).
-
-SUBSTRATE (always): Lean-authored; constraints/executor from the compiler/fold, NEVER hand-authored,
-NEVER the Rust AIR; no WGPU yet (needs the emit path). model:"fable" lanes, mathlib+local; STATION
-does targeted breadstuffs reads. Statement-first; hand-audit every lane; substrate out loud.
+SUBSTRATE (always): Lean-authored constraints/executor from compiler folds, never a hand-authored
+Rust AIR. WGPU is an optional downstream experiment. Prefer statement-first closure and explicit
+counterexamples over convenient but false joins.
 
 ## PHASE 2 — beyond-v0 frontier (ember steered 2026-08-08: fan ALL FOUR)
-v0 formalization COMPLETE (docs/LOOM-COMPLETE.md, LoomV0Manifest 75 re-exports, tree green 2503). ember picked all 4 beyond-v0 frontiers. Weaving: (1) Compiler/Emit — the emit path (gate system→descriptor+faithfulness; WGPU backend = unverified compute ADOPTING breadstuffs' fold into OUR work, NOT a raw port, per ember); (2) Loom/SubUdSeam — [ZK-RBR-extract] lemma A (sub-UD via mutual CA); (3) Loom/AccRbrBcsShifted — [ACC-rbr-bcs-resid](a) constrained-mask fold-root re-attribution; (4) Theory/BinaryTower — [OB-8-tower] GF(2)-tower field. SUBSTRATE: emit is Lean-verified, prover is unverified compute following it; NEVER raw-port breadstuffs, NEVER hand-authored Rust AIR.
+The four original frontiers have moved materially: emit and a one-call reference prover run; the
+GF(2) tower, Fan--Paar multiplication, additive transform, and a macroscopic additive soundness
+band are proved; accumulator extraction is arbitrary-depth at its proved resolution; and the
+rate frontier now includes a machine-checked threshold-halving schedule above Johnson. Remaining
+work is stated by resolution: succinct openings and the extension-field challenge bridge in Rust,
+verifier root-word attribution plus sampling-to-closeness for the sub-UD linked log, formalization
+of the algebraic core behind the landed exact Johnson interface, and the additive
+commitment/query/protocol join over the fast tower arithmetic. WGPU is explicitly downstream and
+disposable.
 
 ## Done-log (recent)
+- 2026-08-09 ★★★★★ **Typed runtime header → bound accumulated word** ✓:
+  `semantic_turn_receipt.rs` admits commit/reject through one verifier portal indexed by the complete
+  typed request, hashes the canonical header, and places the resulting 32-byte binding into sixteen
+  little-endian u16 cells ahead of the pre/post/touched relation word. Native clauses are ordered
+  relation/statement/root triples; `semantic_lookup.rs` now projects the Tower256 indexed lookup
+  into that exact header shape and verifies it without an external expected-root parameter.
+  `SemanticReceiptRuntimeCodec.lean` proves the bound runtime index equivalence, fixed digest-pair
+  packing injectivity, relation satisfaction, and native `AccClaim` fold. Focused tests reject
+  target, native-root, frame, header-binding, and rejection/post substitution. The remaining codec
+  seam is the full byte-for-byte Rust header encoder ↔ Lean typed wrapper theorem; the real
+  WARP/FACS outer accumulator remains next.
+- 2026-08-09 ★★★★★ **Tower256 indexed lookup → semantic root bundle** ✓:
+  `Loom/LogupIndexLink.lean` proves that canonical decoded address-bit columns are Boolean, their
+  incidence row is the literal unit vector at the fixed index, and incidence scattering equals
+  `logupPushforward`. Runtime LogUp v2 now runs a roots-before-challenge cubic Booleanity zerocheck
+  plus sampled opening for every index root, then binds the ordered root vector and shape into one
+  cSHAKE semantic bundle. `semantic_lookup.rs` binds the full native statement digest and verifies
+  the proof against an independently supplied receipt root; Booleanity-message, bundle, and
+  statement splices reject in the focused smoke. The typed runtime header now carries the exact
+  relation/statement/bundle triple; proximity/CR/ROM/refinement and mutable RAM remain.
+- 2026-08-09 ★★★★★ **Typed receipt admission → accumulated core** ✓:
+  `Assurance/SemanticTurnReceipt.lean` requires every committed outcome to carry authorization
+  indexed by the complete request, an exact effect digest and effect-to-`ReceiptDelta` semantics,
+  permitted disclosures, and bound pre/post roots. Rejection has no post-state and is atomically
+  pre-state by definition. The committed wrapper projects to `SemanticReceiptRelation` only after
+  those facts are proved; a target-substitution tooth shows all evidence modes still hit the same
+  policy gate. `SemanticReceiptRuntimeCodec.lean` proves the Rust key-major `3*k+slot` ordering is
+  injective and that its two residual lanes are literally the formal mask/frame constraints. The
+  larger heterogeneous envelope/request byte-codec refinement remains open.
+- 2026-08-09 ★★★★★ **Clean-sheet receipt relation → actual Loom accumulator** ✓:
+  `Assurance/SemanticReceiptRelation.lean` encodes pre, post, and touched into one fixed field word.
+  Two quadratic residuals per key enforce mask Booleanity and the anti-ghost frame; their zero set
+  is proved iff there exists a genuine `Theory.ReactiveReceipt.ReceiptDelta`. Encoding is
+  injective. A valid receipt becomes a native `AccClaim`, satisfaction is exactly code membership
+  plus equality to that word, and `semanticReceiptClaims_fold` is the real
+  `foldClaims_satisfies` closure. A changed-but-untouched F5 cell is rejected. The runtime envelope
+  refinement and WARP commitment/IOR/extractor remain named rather than inferred. The matching
+  `semantic_receipt_relation.rs` exhaustive reference validates the same equations, binds the
+  canonically lifted Ext6 word to a binary Merkle root, constructs its exact coordinate claim,
+  fixes both roots, and draws one atomic Ext6 challenge for the root-linked fold. This supersedes
+  the briefly audited base-field fold rather than pricing it as secure; its focused smoke rejects
+  frame, Boolean-mask, root, claim, and challenge substitution.
+- 2026-08-09 ★★★★★ **Proof-verified semantic history node** ✓:
+  `proof_carrying_history.rs` verifies the real arbitrary-functional GF(2) append and Ext6
+  factored-gate conjunction, then reconstructs the complete canonical `semantic_receipt` envelope.
+  Its GF(2) pre/post roots are the actual append accumulator seam; Ext6 remains the proof backend,
+  not a fake cross-characteristic fold lane. One focused two-node chain rejects predecessor-proof,
+  turn-metadata, and transcript-suite substitution. The result is authenticated uncompressed
+  history; `[PCH-OUTER-ACCUMULATOR]` names the real WARP/FACS relation, hiding, and extraction join
+  still required. `PROJECT.md` now pins the clean-sheet semantic-computer constitution and poster
+  gate separately from this evidence ledger.
+- 2026-08-09 ★★★★★ **First succinct light-client conjunction** ✓: `nextgen_light_client.rs`
+  packages the binary evaluation-history append/output OOD proof with the private-trace succinct
+  factored-gate proof. An injective versioned encoding of both full input statements and the derived
+  output claim becomes the gate public prefix; neither words nor trace are carried, proof shape is
+  independent of history depth, and both splice directions reject. It is not recursive compression:
+  component transcript schedules and their shared-ROM composition remain explicit.
+- 2026-08-09 ★★★★★ **Succinct emitted-gate proof joined** ✓: `GateFactoredExt6` proves exact
+  seven-operand selector provenance, degree-2 outer rounds, terminal trace functionals, and the
+  fresh-eta bad-set bound. `succinct_factored_gate.rs` fixes one lifted trace root before gamma,
+  runs the outer sumcheck, aggregates all seven terminal equations plus the public prefix and
+  padding zeros, and retires one combined functional with a sampled MLE opening. Verification sees
+  no trace or defect table; unrelated roots, public substitution, and sampled non-base Ext6 traces
+  reject. Honest boundaries: coherent proximity, subfield sampling composition, CR/ROM, and runtime
+  refinement.
+- 2026-08-09 ★★★★ **Characteristic-two adaptive sampled soundness** ✓: `AdditiveFriQuery` uses the
+  literal additive tower fold, authenticated openings, coherent modulo paths, and an
+  earliest-deviation cover to prove `m*2^(ell-1)/|F| + (1-tau)^q` in the UD schedule. No
+  multiplicative `two_ne` assumption or vacuous transport remains.
+- 2026-08-09 ★★★★ **Staged sub-UD ZK/OracleLog game** ✓: `OracleLogLinkedTwoPhase*` freezes checked
+  root preimages before a domain-separated query, binds the response, transports accepted FS logs
+  into sub-UD recovery, and prices full-domain or allowed-coordinate sampling. Shared-ROM
+  fresh/hit/sampling ports and a concrete hiding/ZK preimage proof remain explicit.
+- 2026-08-09 ★★★★ **Emitted gates → committed Ext6 MLE terminal joined** ✓: `gate_mle_ext6`
+  uses one cSHAKE/Ext6 transcript for the typed trace root, γ-batched descriptor defects, sumcheck
+  messages, Boolean-Möbius multiplicative-RS roots, terminal, and sampled paths. The clear verifier
+  recomputes the exact residual table/root and rejects a separately valid unrelated PCS.
+  `MultiplicativeMleTerminal` proves the Möbius/even-odd fold terminal is exactly `mle f r` and
+  machine-refutes raw table values as coefficients; `GateMleExt6` proves descriptor ordering,
+  extension lift, batching, and terminal semantics. The succinct factored-selector replacement is
+  the later ★★★★★ entry above; this clear path remains a reference oracle.
+- 2026-08-09 ★★★★ **Sampled binary proving/history surface** ✓: the runtime has cSHAKE-authenticated
+  coherent additive FRI, an OOD quotient PCS, evaluation-claim proofs, and a fixed-size sampled
+  history append whose proof does not grow with append depth. `AdditiveFriTower` proves the
+  characteristic-two quotient levels, fold reindexing, pivots/transversals, RS embeddings, runtime
+  index equivalence, and coherent uniform marginals. `AdditiveFriQuery` later closes the adaptive
+  earliest-deviation theorem; generated execution authority, general receipt functionals, and
+  cryptographic composition remain.
+- 2026-08-09 ★★★ **Hiding-window root attribution made explicit** ✓:
+  `OracleLogLinkedOpenedSampling` replaces noncomputable root decoding with checked preimage data,
+  proves arbitrary-`d,t` completeness, fixed-word sampling miss `(1-radius)^t`, and sub-UD
+  OracleLog extraction without `d≤t`. The later two-phase entries close roots-before-query ordering
+  and isolate constrained sampling; hiding/ZK committed-word-knowledge proofs remain rather than
+  the transparent all-word tooth.
+- 2026-08-09 ★★★ **First committed executable additive-FRI round** ✓: `additive_fri_reference.rs` fast-transforms novel-basis coefficients, commits the complete input word through an injective `BTL1 || level || u16 chunks` codec into wide digests, folds every last-direction pair with the landed formula, commits the folded word, and verifies both complete openings plus every equation. Tampering with words, roots, basis, offset, challenge, levels, and shapes rejects. At `n=256`, persvati folds 2.142 million output elements/s and full prove+verify takes 27.30 ms. Honest boundary: this is one round carrying `n+n/2` elements with an explicit challenge; sampled openings, FS, multi-round soundness, CR, coherence, and refinement remain.
+- 2026-08-09 ★★★ **Exact Johnson MCA literature bridge** ✓: `JohnsonMcaBridge` translates Haböck 2025/2110 into Loom without changing constants: the paper's degree-`≤k` convention means `ρ_H=(d−1)/n`, its finite bad-slope count becomes the affine-generator probability, and radius monotonicity supplies the lower band. The arithmetic theorem proves `m=max(3,d)` covers Loom's exact `sqrt(d/n)` target, while arbitrary caller errors require an explicit envelope. Honest boundary: the GS/BCIKS factorization, discriminant, Hensel, and line-extraction core remains the named hypothesis `HaboeckTheorem2`; it is neither axiomized nor claimed proved locally.
+- 2026-08-09 ★★★★ **Sub-UD linked-log transport + false state join refuted** ✓: `OracleLogLinkedSubUd` proves that Assembly's `d≤t` erasure premise excludes constrained-mask hiding, defines whole-word root attribution and a sub-UD message/log extractor, and proves exact recovery from a large-agreement premise with neither `d≤t` nor query injectivity. At F5 it fires at `t=1<d=2` simultaneously with hiding. A concrete position-binding commitment with an accepted junk root outside `commit`'s range machine-refutes adding attribution as a hidden Def. 4.1 state invariant. Remaining joins are now exact: add sound root-word attribution to the verifier/commitment interface, then compose sampling-to-closeness into the sub-UD log game.
+- 2026-08-09 ★★★ **Committed half-threshold FRI boundary** ✓: `Loom/HalfThresholdFriTranscript` defines statement-first committed level words and exact three-opening round checks, proves honest opening and binding-based fold pinning, derives the fixed-round adversarial query-miss bound `(1−τ)^q`, transfers all-position committed acceptance to the half-threshold/one-third-UD tower, and proves exact `fsOracle` event transport. F5 wrong-challenge teeth accept at one queried coordinate, reject at the differing coordinate, and fire the `1/2` miss bound. Remaining: adaptive multi-round earliest-deviation/query coupling, concrete Merkle/CR, and full FRI Reduction/FS composition.
+- 2026-08-09 ★★★ **Executable fast additive transform** ✓: `prover/src/additive_ntt.rs` implements full shift-aware unnormalised LCH forward and inverse schedules in `O(n log n)` over arbitrary validated GF(2)-independent bases and affine offsets, plus a literal dense transform oracle. It is unverified compute with conformance tests, not a refinement. Lean-selected basis/order authority, commitments, queries, transcript, and multi-round additive-FRI integration remain.
+- 2026-08-08 ★★★ **Convergence pass — threshold halving + additive proximity + honest rate ladder** ✓: `HalfThresholdRegime`, `HalfThresholdFri`, and `HalfThresholdFriTower` prove the one-bad-challenge kernel, the first `δ → δ/2` FRI transition, and an adaptive multi-round schedule whose tail is discharged by the unconditional one-third-UD theorem. The rate-1/2 example starts at `δ=3/10`, strictly above Johnson, and lands at `3/20<1/6`; the F5 tooth attains the challenge bound. `AdditiveProximity` bridges additive image domains into Loom's RS proximity generator and proves a macroscopic one-round additive gap/fold theorem with GF(16) teeth. Honest residual: committed query/Merkle/FS assembly and the executable additive tower path; no `(1-δ/2)^q` deployment claim yet.
+- 2026-08-08 ★★★★ **Corrected linked accumulator/ZK target CLOSED** ✓: `OracleLogLinkedTarget` first proves that the old unrestricted reduction existential is vacuous at zero error and replaces it with an exact shifted-log-reader target. `OracleLogLinkedAssembly` then proves linked acceptance data, the fresh fibre, fresh/hit horn cover, per-horn `1/|F|` bounds, the advertised `(t+k)` union, `linkedOracleLogReduction_exact`, and `deployedZKAdaptiveSoundLinkedTarget_proved`; the extractor equality is definitional and the F5 premises fire. Older Def.-4.2 state-design/sub-UD interfaces remain separate, but the corrected OracleLog target itself has no residual.
+- 2026-08-08 ★★★ **Executable GF(2) tower arithmetic** ✓: `prover/src/binary_tower.rs` contains an unverified Fan--Paar compute kernel through `GF(2^64)` with conformance teeth. It is not a semantic implementation. Lean emission/generated control and `[BTOWER-RUST-UNVERIFIED]` remain explicit.
+- 2026-08-08 ★★★ **Owned bignums, emitted carry addition, and exact 248-bit carrier width** ✓: `Theory/Bignum` owns Nat+Int little-endian denotation, ranged/canonical fixed-width limbs, value→digits and digits→value inverse theorems, denotation injectivity, and a `Limbs base width ≃ Fin (base^width)` codec. `Compiler/AirBignum` reuses the existing range and emit pipeline for arbitrary-width radix-`2^k` addition, proves exact integer soundness under the no-field-wrap bound, pins both boundary carries, and rejects overflow. The deployment tooth proves exactly `BabyBear^8 < 2^248 ≤ BabyBear^9`: eight felt limbs are insufficient; nine suffice as a carrier.
+- 2026-08-09 ★★★ **Wide-digest AIR representation boundary** ✓: `Compiler/WideDigestAir` pins `WDG1 || domain || 9 limbs` through the existing flatten/emit pipeline, proves canonical BabyBear representatives, source/absorbed denotation equality, and 248-bit carrier capacity. Honest boundary: raw-byte `< p` decoding, sponge scheduling/full-verifier wire sharing, concrete permutation parameters, unverified Rust execution, and `[COMMIT-CR]` remain.
+- 2026-08-08 ★★★ **Owned nine-limb commitment carrier + fail-closed verifier** ✓: `prover/src/wide.rs` closes `[PROVER-digest-width]` as runtime representation: roots, Merkle siblings, FRI commitments, reference proofs, and transcript encodings use nine canonical BabyBear limbs with fixed serialization and domain separation. The hardening pass rejects noncanonical proof data without panic, enforces exact path heights and nonzero queries, uses unbiased query sampling, checks carried FS challenges against their derivation, and checks `descriptor_holds` exactly in the clear-trace verifier. Honest boundary: width is not collision resistance; `[COMMIT-CR]`, real permutation/capacity parameters, byte/sponge integration with the now-landed AIR representation boundary, and challenge-field unification remain.
+- 2026-08-08 ★★★ **120-bit candidate arithmetic + PoW grinding core** ✓: `ErrorBudget120` proves a BabyBear^6/20-bit-PoW candidate in `(2^-138,2^-137]`, with both levers load-bearing. `PowGrinding` proves exact `2^-bits` response density and an adaptive leave-one-out `work*epsilon/2^bits` ideal-coordinate bound. This is not yet the deployed prover's security number: shared-ROM/domain-separation composition remains, and Rust gate batching/sumcheck currently samples in base BabyBear rather than the priced extension field.
+- 2026-08-09 ★★★ **Committed accumulator reference join** ✓: `committed_accumulator.rs` binds `AccClaim<Digest>` roots to complete ordered word openings, checks every path and exact tree height, recomputes the root, checks the linear channel and multiplicative RS membership by inverse DFT, and rechecks committed fold closure. `commit_fold_fs` removes the caller challenge by absorbing both complete claims and roots under a dedicated domain before squeezing. Tamper/malformed/partial/full-rate teeth reject. It is intentionally non-succinct; extension-field challenges, formal FS/RBR refinement, queried openings/FRI, and RBR extraction remain.
+- 2026-08-08 ★★★ **Reference prover + executable accumulator + GPU decoupling** ✓: Rust now has one `reference_prove`/`reference_verify` path binding descriptor, public inputs, trace root, gate sumcheck, and FS FRI in one transcript; it deliberately carries the full trace, so it is non-succinct and non-ZK. `accumulator.rs` mirrors Loom's proved linear batch/fold/channel algebra with malformed-input rejection and attained F5 teeth. The FRI prover now retains words+Merkle trees in one descent instead of recomputing the protocol, while WGPU dependencies/tests/bench are opt-in under `wgpu-fold` and absent from the default dependency tree.
 - 2026-08-08 **Loom/OracleLogLinked — deployed-ZK: the guarded hit-horn CLOSED, TWO wrong statements caught** (audited, 83b05e2): the audit discipline twice. [ORACLE-LOG-linked] (last turn's repair) was ITSELF refutable — it tested alignment at the ADVERSARY's own statement channel with nothing tying statement→designation (the stmt∈Z guard dropped); oracleLogProgramLinked_accRbrError_false + refuter alnPrv MACHINE-CHECK the refutation. THE FIX: OracleLogLinkedAligned (guarded by LinkAligned on the adversary's statement); oracleLogLinkedAligned_proved (PROVED at the sharp 1/|F|, the contested hit-horn mass) [ATLAS triple]. Enabling lemmas: hitAt_answerOf (hit-horn answer IS the tested coin) + linkOpened_increment_pinned_free (erasure recovery is AFFINE in the columns — recoverFromColumns_line — the pin needs NO premise on the prior message). Reduction grown: accReductionBcsShiftedLinked (verify w/ LinkOpened); linked_completeness_F5; teeth progMsgs_linked_rejected (old refuter dies in-verifier) + alnGuarded_zero (new refuter's guarded event EMPTY — the guard load-bearing exactly where the unguarded died). deployedZK_adaptive_sound_linked NOT closed — residual [ORACLE-LOG-linked-resid] (a) fresh-horn UD pin (freshBad_le splitCoord) + (b) (t+k) assembly over Z_dep (gameSlotBound bookkeeping) — 'MECHANICAL over landed machinery, NO open structural question.' 13 theorems ATLAS triple. **Two false reductions caught + machine-refuted, the guarded truth proved; the deployed-ZK frontier precisely mapped, remaining mass mechanical.**
 - 2026-08-08 ★★★ **Assurance/ErrorBudget — THE COMPOSED BIT-SECURITY NUMBER: 55 bits, tight** ✓ (audited, 49ffeed, tree green 2538): the end-to-end soundness as ONE stated+bounded number. soundnessError = grindingTerm + sumcheckTerm + crTerm + proximityTerm; deployedBudget_secure (soundnessError deployedBudget ≤ 2^−55) + deployedBudget_ceiling (> 2^−56) — 55 BITS TIGHT at BabyBear⁴ (the HONEST prime p=2013265921, |F|=p⁴≈2^123.6, n=2^20, ρ=1/2, δ=1/8 in-UD, t=q=2^40, k=2^8), by EXACT integer arithmetic (norm_num). soundnessError_bound: the union-bound composition over the product coin space — REAL theorem (uniformProb_or_le + product marginals, NO independence used); mutual-CA DISCHARGED by hasMutualCorrelatedAgreement_UD (no free hypothesis); each summand a landed RHS verbatim. Dominant: grindingTerm=(t+k)k(n+1)/|F|≈2^−55.6, rest ≤2^−100 (proved); [LC-grinding-native] sharpening buys 8 bits (55→63). Residual [BUDGET-compose] (shared-one-oracle vs product measure — survives, union bound needs no independence). budget_fired (premise inhabited end-to-end). ATLAS triple. **The 'what is the actual security' answer: 55 bits, PROVEN (not conjectured), at unique decoding, floor named beside it. Budget-relative (prices a 2^40-query adversary; general formula in-file).**
 - 2026-08-08 ★★★ **Loom/SpongeIndiff — the LAST floor reduction advancing: [FS-ROM] → ideal permutation** ✓ (audited, 88698d8, tree green 2537): the sponge indifferentiability. sponge over any permutation; spongeSimulator (simFwd/simInv — the genuine BDPV construction, one shared log, completion? programs (H m, coin.cap) on rate-completing queries; consistency inherited VERBATIM from the landed handler laws — the simulator IS Oracle.respond at a computed value). walk_programs (the programming KEYSTONE — the sponge walk squeezes EXACTLY the RO's answer through the sim's log, ∀ log/state/msg); sponge_realizes_handler_step (the [FS-ROM] seam closed ONE STEP at a time vs the lazy-sampling handler); uniquePaths_simFwd/Inv (consistency off the bad event per step, both directions); capBad_le (capacity price O(q²/2^c), tight at q=2, birthday_bound cited). Residual [SPONGE-indiff-game] (the run-level assembly: run induction + adaptive avoid-set bridge + identical-until-bad + RP/RF switch — STANDARD GAME-HOPPING, real formalization not conjectural, named not faked) + [PERM-ideal] (the new floor). ATLAS triple. **THE FLOOR CONSOLIDATES: all three named assumptions reduce toward (ideal permutation + proximity) — CR→RO proved, RO→ideal-perm's core proved, proximity proved-on-a-band + additive-mirror = one domain-agnostic gap. The floor is proved DOWN to its irreducible endpoint, modulo standard game-hopping + the proximity lemma.**
-- 2026-08-08 **Loom/JohnsonRegime [SUBUD-johnson] — the better-rate frontier to its honest boundary ✓** (audited, da4e938): PROVED hypothesis-free: johnson_list_bound (the classical Johnson list-size ≤ (dC−δ)/((1−δ)²−(1−dC)) via Cauchy-Schwarz + the pairwise cap from reedSolomonCode_minDist, no radius loss, blows up only at J); johnsonRadius J(ρ)=1−√ρ + ud_radius_lt_johnsonRadius + johnson_interval_extends_UD (gap (1−√ρ)²/2>0 ∀ρ<1); column_sampling_bridge ((1−δ)^t EXACT — the (iv) amplification). REDUCED (honest): WHIRConjecture412 (mutual CA past dC/2 = WHIR 2024/1586 Conj 4.12, LITERATURE-OPEN, named+inhabited, NEVER asserted) + mutualCA_johnson_of_conj (the reduction PROVED). RAZOR-SHARP boundary: whirConjecture412_of_ud_bound PROVES it exactly where B≥1−dC/2 (Lemma 4.10) — so the OPEN content is precisely B<1−dC/2 (the macroscopic regime). Johnson-beats-UD: J(1/2)∈(0.29,0.30)>1/4. Teeth: johnson_ball_past_UD (2 codewords past UD, Johnson-capped at 3). Residual (a) hPG at √ρ (BCIKS Thm 1.2 literature-proved-unformalized), (b) [OOD-pin-proximity]. 20 heads ATLAS triple. **The better-rate regime: the list-decoding math PROVED, the gap named as ONE conjecture with a sharp open/closed line — not faked.**
+- 2026-08-08 **Loom/JohnsonRegime [SUBUD-johnson] — the better-rate frontier to its honest LOCAL boundary ✓** (audited, da4e938; literature status corrected 2026-08-08): PROVED hypothesis-free: johnson_list_bound (the classical Johnson list-size ≤ (dC−δ)/((1−δ)²−(1−dC)) via Cauchy-Schwarz + the pairwise cap from reedSolomonCode_minDist, no radius loss, blows up only at J); johnsonRadius J(ρ)=1−√ρ + ud_radius_lt_johnsonRadius + johnson_interval_extends_UD (gap (1−√ρ)²/2>0 ∀ρ<1); column_sampling_bridge ((1−δ)^t EXACT — the (iv) amplification). REDUCED LOCALLY: WHIRConjecture412 retains the historical WHIR 2024/1586 Conj 4.12 name as an explicit local hypothesis, and mutualCA_johnson_of_conj proves the downstream reduction. CURRENT LITERATURE: 2025/2051 and 2025/2110 prove the needed RS/polynomial-generator MCA through Johnson, with 2025/2055 supplying related proximity consequences. The exact 2110 constants/convention have since landed in `JohnsonMcaBridge`; its hard algebraic core remains explicit. Capacity-level variants are false (2025/2046); above-Johnson threshold-halving/action-orbit routes are 2026/858 and 2026/861, not capacity extrapolations. Johnson-beats-UD: J(1/2)∈(0.29,0.30)>1/4. Teeth: johnson_ball_past_UD (2 codewords past UD, Johnson-capped at 3). Residual locally: formalize `HaboeckTheorem2`/hPG and compose [OOD-pin-proximity]. 20 heads ATLAS triple. **The better-rate regime is published through Johnson; this file proves the list/sampling mathematics and the newer bridge pins the exact remaining theorem.**
 - 2026-08-08 ★ **Loom/OracleLogProgram [ORACLE-LOG-program] SETTLED NEGATIVELY — the audit discipline working** (audited, 6111e6d): the per-slot lemma the deployed-ZK adaptive bound was reduced to is FALSE, MACHINE-CHECKED — NOT faked. Finding: accReductionBcsShifted.verify checks only column-openings + genesis + the LAST word vs the aggregate; it NEVER ties an intermediate increment to the committed link word, so 'end-acceptance must pay for programming' is WRONG (acceptance never reads what the programmer programs). progPrv (one-query zero-tether adversary; progEvent_total holds on EVERY coin; the log-read increment misses link-1 at all ρ, kernel-checked) → oracleLogProgram_accRbrError_false → adaptiveViaLog_accRbrError_false (the route target at εlog=accRbrError is FALSE: 1 ≤ 4·(1/5) fails). REPAIR (proved): LinkOpened (link-root opening + columnwise fold check); linkOpened_increment_pinned (under LinkOpened+binding the log-read increment IS the statement-committed word — fixed pair RE-ATTACHED) [ATLAS triple]; progLinkOpened_refuted (the refuting adversary's repaired event EMPTY). Sharp residual [ORACLE-LOG-linked]: the repaired per-slot bound = gameSlotBound choreography with the PINNED increment (now fixed-pair bookkeeping, NOT RO-programming) + the carve: accReductionBcsShifted.verify must GROW LinkOpened (derived-path). **A wrong reduction caught before proof effort sank in; the corrected path well-posed, the load-bearing repair proved.**
 - 2026-08-08 ★★ **Theory/AdditiveNTTTransform [ANTT-transform] CLOSED + [ANTT-fri] REDUCED — the Binius layer real** ✓ (audited, 520435b, tree green 2529): the additive-FRI substrate. [ANTT-transform] CLOSED OUTRIGHT — novelBasisTransform_bijective: the Binius change-of-basis is a genuine LINEAR BIJECTION at EVERY tower level, UNCONDITIONALLY (novelBasisBasis = a Basis of degreeLT(2^k); injectivity via Lagrange; the residual is GONE not reduced). [ANTT-fri] REDUCED with the REDUCTION PROVED — foldEven/foldOdd (coset-invariant), the challenge-affine identity friFold=E+λ·O, additiveFold_distance (fold distance-preservation, bad-set form, NO δ loss) GIVEN AdditiveProximityGap. [ANTT-proximity] EXACT regime PROVED unconditionally (b=1, two challenges determine both components). Residual: AdditiveProximityGap at macroscopic δ = the additive-coset analog of the multiplicative BCIKS/hPG floor — ELEGANT: the two SHOULD UNIFY into ONE domain-agnostic hPG (the floor is really one proximity assumption, mult-or-additive). Teeth: degree-<2^k load-bearing; the fold-distance. ATLAS triple. The Binius/additive-FRI layer complete modulo the same proximity floor as the multiplicative side.
 - 2026-08-08 ★★★ **Compiler/PredCompile [PRED-COMPILE] — THE GENERAL Pred→Air COMPILER (n=1 → n=∀, ATLAS law-11)** ★★★ (audited, 11740df, tree green 2527; REVIVED — the 7th/last walled lane home, 7/7 revival PERFECT): retires Compiler's 'gadget library, n=1' status. lower : Pred → ConstraintSystem (ONE lowering fold lowerA/lowerL over the AST — no per-predicate hand constraints); lower_correct (systemAccepts (∃ aux) ↔ Pred.eval — GENERAL by ONE mutual induction over ALL constructors eq/le/memberOf/writeOnce/monotone/witnessed/not/allL/anyL; the ∃-aux wire-forcing shape, split lower_sound [∀-aux forger-proof] + lower_complete [at the emitted generator]). lower_subsumes_boolGadget (the booleanity POLICY through the general theorem ↔ the hand boolGadget — n=1→n=∀ EXHIBITED). Fail-closed: lower_le_refuses/lower_monotone_refuses (le/monotone → LOUD unsat, law 10). DERIVED-PATH LAW LIVED: systemAccepts_append moved NoteSpend→AirRange (twin deleted). Residuals [PRED-COMPILE-order/oracle/quant] named. ATLAS triple. **SUBSTRATE PIVOT COMPLETE: derivation engine (Effects) + general compiler (PredCompile) + kernel executor+FFI (Gate/AdmissionAir) = the thesis engine is REAL. minidregg is now a proof-NATIVE computer, not just a proof system.**
@@ -83,7 +218,7 @@ v0 formalization COMPLETE (docs/LOOM-COMPLETE.md, LoomV0Manifest 75 re-exports, 
 - 2026-08-08 **Prover rung 3 — [PROVER-commit] ✓ (verified 21/21)** (f382dd8): Poseidon2 perm mirroring AirHash's roundExec EXACTLY (add-rc→S-box(full/partial)→MDS) + Merkle commit_trace/open/verify_open. CONFORMANCE: proverPermSpec (BabyBear, α=5, non-symmetric per-round matrices — catches transposed/reordered layers), permExec kernel-DECIDED to a reference, Rust asserts equality (permExec = permGadget_eval = the circuit, so matching the vector = matching the verified gadget); triply-pinned (kernel+#eval+Python). Merkle over the REAL rung-2 trace, all tampers rejected. Residual [PROVER-poseidon-params] (deployed BabyBear consts, α=7 — flagged α=5 not a bijection on BabyBear, honest deployment caveat). Also landed: **[EMIT-share] CSE measured 2,696,666→220 gates (12,258×)** + emit_ssa (every emitted descriptor is SSA) + cse_emit_accepts_iff (seam re-closed). Prover frontier: serialize✓ trace✓ commit✓; next [PROVER-sumcheck]. IT RUNS + COMMITS at the deployed field.
 - 2026-08-08 **Compiler/EmitShare [EMIT-share] CSE ✓** (audited, tree green 2509; station-harvested — lane left uncommitted): cse dedups identical gate records (HashMap subst); cse_faithful — satisfiability-equivalent under d.SSA (emitted descriptors ARE SSA via flattenSystem_gates_sorted). Both directions + subst/transfer machinery. ATLAS triple. [EMIT-share-count] DISCHARGED (lane follow-up): compiled #eval measures the spend descriptor 2,696,666 → 220 gates (≈12,258× — the demo spend's true DAG; zeros 8 + nWires unchanged), recorded in EmitShare §9; keystones: cse_holds fires on the honest witness, cse_emit_accepts_iff re-closes the seam (satisfiable at the demo spend + wrong-nullifier admits NO witness on the CSE'd descriptor). Axioms [propext, Classical.choice, Quot.sound]; emit_ssa choice-free. Residual [EMIT-share-compact] (wire renumbering + dead-gate sweep; structural sharing only). Emit frontier: seam ✓ + CSE ✓.
 - 2026-08-08 **Prover rungs 1-2 — [PROVER-serialize]+[PROVER-trace] ✓ (IT RUNS)** (verified, 16fe1b0, Lean tree green 2508, cargo 8/8): the WGPU-backend flagship's foundation. [PROVER-serialize]: Compiler/EmitSerialize (ConstraintDescriptor→JSON over ZMod p; [PROVER-field] BabyBear p=2^31-2^27+1 = the DEPLOYED field, so the whole emit-path theorem stack applies verbatim; round-trip #eval). [PROVER-trace]: prover/ crate (serde ONLY — NO plonky3 deps, adopt-not-port honored): Descriptor reader + generate_trace + descriptor_holds (LITERAL index-by-index mirror of the Lean descriptorHolds). Conformance 8/8: demo_header_matches_lean_emit, honest_trace_satisfies, all 23 tampers rejected, x=14 no-witness matches the Lean-decided fact, booleanity bites. SUBSTRATE: unverified compute FOLLOWING the verified seam — conformance vectors NOT refinement (no Rust semantics). Next: [PROVER-commit] (Poseidon2 Merkle matching AirHash) → sumcheck → FRI (adopt breadstuffs' wgsl fold). The prover READS the verified descriptor + cross-checks the trace at the deployed field.
-- 2026-08-08 **Loom/SubUdSeam [ZK-RBR-extract] lemma A — resolved-by-split ✓** (audited, 4362c3f): the sub-UD seam. The COLUMN form REFUTED (no_column_extractor — sharp negative, full quantifier strength, CHOICE-FREE: no recovery function of column data exists below UD, even the whole family table); the mutual-CA WORD form REALIZED (subUdRecover pins the increment's codeword via the affine generator's mutual CA at UD radius — foldFamily_eq_comb + WHIR 4.10/4.11 fires verbatim + codeword uniqueness below dC/2). The t-window conflict (t+r≤d hiding vs d≤t recovery) DISSOLVES at word resolution (recovery never counts columns). subUdSeamCounterfactual + extractChain_subUdSeam re-prove the seam column-free. Coexistence: constrained-mask hiding at t=1<d=2 AND recovery. Teeth: family_pins_where_columns_cannot; old_route_decodes_wrong_on_corruption (recoverFromColumns confidently wrong at t=d on corruption, subUdRecover corrects). Residual [SUBUD-johnson] sharpened to 4 (hPG realizer=provable near-term; CA past dC/2=WHIR Conj 4.12 literature-open; Johnson pin; sampling bridge=provable). ATLAS triple. 3rd of 4 frontiers landed.
+- 2026-08-08 **Loom/SubUdSeam [ZK-RBR-extract] lemma A — resolved-by-split ✓** (audited, 4362c3f; literature status corrected 2026-08-08): the sub-UD seam. The COLUMN form REFUTED (no_column_extractor — sharp negative, full quantifier strength, CHOICE-FREE: no recovery function of column data exists below UD, even the whole family table); the mutual-CA WORD form REALIZED (subUdRecover pins the increment's codeword via the affine generator's mutual CA at UD radius — foldFamily_eq_comb + WHIR 4.10/4.11 fires verbatim + codeword uniqueness below dC/2). The t-window conflict (t+r≤d hiding vs d≤t recovery) DISSOLVES at word resolution (recovery never counts columns). subUdSeamCounterfactual + extractChain_subUdSeam re-prove the seam column-free. Coexistence: constrained-mask hiding at t=1<d=2 AND recovery. Teeth: family_pins_where_columns_cannot; old_route_decodes_wrong_on_corruption (recoverFromColumns confidently wrong at t=d on corruption, subUdRecover corrects). Residual [SUBUD-johnson] remains local formalization/integration work: hPG and the RS/polynomial-generator MCA theorem through Johnson (published in 2025/2051, 2025/2055, 2025/2110 but still represented here by the historical `WHIRConjecture412` hypothesis), the Johnson/OOD pin, and the sampling/deployment bridge. Capacity variants are false (2025/2046). ATLAS triple. 3rd of 4 frontiers landed.
 - 2026-08-08 **Compiler/Emit — the EMIT PATH ✓** (audited, 82fde20, tree green 2505): the verified Lean seam to an (unverified) prover. ConstraintDescriptor = first-order serializable data (ℕs/field-consts/lists, DecidableEq derived, a literal decide'd — NO functions inside, genuinely prover-consumable). emit (via flattenSystem, reuses AirFlatten's fold); emit_faithful (descriptorHolds ⟺ the Lean gate system, UNCONDITIONAL both directions, [propext,Quot.sound] CHOICE-FREE — checking the descriptor IS checking the Lean AIR); emit_accepts_iff (∃-witness ⟺ systemAccepts); emit_wellFormed (buffer-sizing from the header). Note-spend emitted → concrete descriptor (2.7M gates, honest #eval; wrong-nullifier admits no witness). Residuals: [EMIT-backend] (wire-format + WGPU BabyBear⁴ backend = unverified compute ADOPTING breadstuffs' gpu_hidingfri_fold into OUR work), [EMIT-sound] (prover-accepts⟹descriptorHolds inherits the FRI/STARK floor — stated not claimed), [EMIT-share] (CSE for gate dedup). ATLAS triple. **The prover checks bytes; the bytes provably mean the AIR.** 2nd of 4 frontiers landed.
 - 2026-08-08 **Theory/BinaryTower [OB-8-tower] ✓** (audited, c674ea1, tree green 2504): the GF(2)-tower field substrate (Binius path). binaryTower k = mathlib's GaloisField 2 (2^k) — REAL field (splitting-field construction, not a stub). binaryTower_card (2^(2^k)), finrank (2^k), char_two (1+1=0); binaryTowerEmbed (real AlgHom, injective + NON-surjective at every level = proper inclusion) + the chain; binaryTower_rs_eval_injective. binaryTower_one_fanpaar_base: the Fan-Paar level-1 generator ∃ x, x²+x+1=0 ∧ x∉{0,1} — concrete. Residuals [BTOWER-fanpaar] (the explicit generator recursion → fast tower multiplication, stated + base discharged) + [BTOWER-rs] (RS over the tower, Loom-side bridge). 16 decls ATLAS triple. First of the 4 beyond-v0 frontiers landed.
 - 2026-08-08 **LoomV0Manifest → the COMPLETE v0 ✓** (audited, 8021e35, tree green 2503): 42 → 75 type-checked re-exports, ZERO drift (every one #check-verified). §8 ZK argument (loom_zk_argument, accFsSound_native, the extraction/hiding/triangular pieces + teeth), §9 arithmetization (eval_agrees_exec, airGateSystem_sound, MLE), §10 note-spend (noteSpend_correct/binds), §11 kernel (N2b, verbs, hidden-witness turn), §12 deployment (grinding, private-receipt). §13 residual ledger rewritten for the complete v0; §14 axiom audit (headliners ATLAS-triple; eval_agrees_exec choice-free; idealCommitment axiom-free). The peer-facing 'the complete v0 all compiles' artifact. **v0 FORMALIZATION COMPLETE + INDEXED + documented (docs/LOOM-COMPLETE.md).**

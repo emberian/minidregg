@@ -1,170 +1,182 @@
-# Loom — the formalization, and what "complete" honestly means
+# Loom: what is complete, at which boundary
 
-*Written to be handed to the skeptic who asks "you formalized a whole proof system — is it
-actually done?" The honest answer has three parts: what is PROVED end-to-end, the IRREDUCIBLE
-cryptographic FLOOR it stands on (named and inhabited, the same floor every hash-based SNARK
-carries), and the BEYOND-v0 RESEARCH that genuinely remains. Status 2026-08-08. Every theorem
-cited is machine-checked in Lean on the ATLAS axiom triple `[propext, Classical.choice,
-Quot.sound]`, hand-audited (statement read, not just "it compiled"), with a built non-vacuity
-witness — and where a claim has a false neighbor, the false statement is kept compiling beside
-the true one so the true one means exactly what it says.*
+Status: 2026-08-08.
 
-## 0. The one honest sentence
+This document used to call Loom “complete” in a way that collapsed several proof resolutions into
+one. The repository has since advanced substantially—and found important false targets—but the
+honest claim is narrower:
 
-**Loom's v0 soundness formalization is complete: a machine-checked chain from a kernel turn to a
-light client that learns the whole federation history — accumulation, unbounded-depth recursion,
-a non-interactive zero-knowledge argument of knowledge, a full-gate arithmetization retired by a
-proven sumcheck, and a sound shielded note-spend — all derived so drift is structurally
-impossible, standing on exactly three named, inhabited cryptographic assumptions and no more.**
+> Loom contains machine-checked protocol, compiler, proximity, accumulation, and game-theoretic
+> chains at explicit abstract interfaces. It does not yet contain a proved refinement from the
+> running Rust reference prover to one succinct, zero-knowledge, deployment-parameterized theorem.
 
-It is NOT a working prover, it has NO benchmarks, and its rate<1 soundness rides one standing
-proximity-gap hypothesis. Those are stated plainly below, not buried.
+That distinction is the organizing principle below.
 
-## 1. What is PROVED, end-to-end
+## Machine-checked core
 
-**Accumulation + full recursion (the product's core promise).**
-- `Loom/Accumulator`: the WARP-shape accumulated claim + the γ-fold, closure `foldClaims_satisfies`
-  (CRS × CRS → CRS) — the chain is one accumulated object.
-- `Loom/AccExtractChain.lean/lightClientKnowledgeSound`: **knowledge-soundness over the whole
-  chain at arbitrary depth** — the extractor recovers every link's actual witness. Full recursion.
-- `Loom/Depth.lean/OB2_depth_composition_nonneg_proved`: the whole-stack straightline depth
-  composition — the theorem whose absence was breadstuffs' laundered `EngineSound`; its false
-  form still compiles beside it.
-- `Loom/LightClient.lean/lightClient_attests` + `LightClientSound/lightClientSound` +
-  `LightClientFS/lightClientFS_sound`: the light client learns the whole history from one
-  aggregate, at one Fiat-Shamir schedule, sound at `≤ n·(err⋆(δ)+1/|F|)`.
-- `Assurance/LoomV0.loomV0_holds`: the **capstone** — a committed receipt chain verified at one
-  FS schedule is sound + knowledge-sound + commitment-bound + decided, the proof term being
-  exactly the four citations.
-- `Loom/LightClientGrinding.lightClientGrinding_sound`: soundness against a **grinding** adversary
-  (one that reorders/chooses the chain after querying the oracle) at the try-count-scaled bound —
-  the prefix-correlation kept honest, `phantomGrind_beats_fixed_bound` proving no fixed-chain bound
-  survives grinding.
+### Accumulation and chain extraction
 
-**The zero-knowledge argument of knowledge (OB-4, confirmed-absent-from-the-literature).**
-- `Loom/ZkRbrGame.loom_zk_argument`: Loom has a **machine-checked straightline non-interactive
-  zero-knowledge argument of knowledge** for the accumulated claim — completeness, knowledge-
-  soundness (via the two-point / chain extractor), zero-knowledge (perfect, via masked openings),
-  round error on the proven `accRbrError` scale, FS-composed.
-- `Loom/AccRbrInstance.accFsSound_native`: the argument is **fully native at the IOR resolution**
-  — FS fires on the accumulator's own Def-4.2 instance (all Def-4.1 clauses + `extract_sound`
-  proved), not a placeholder.
-- `Loom/AccRbrBcs.accFsSound_bcs`: the argument at the **deployed BCS/root alphabet** (whole-code-
-  mask / unique-decoding regime) — the proof string carries roots + opened columns + opening
-  proofs, the oracle hashes *those* not words, the verifier checks every opening, and
-  `bcs_extract_is_seam` proves the native extractor *is* `extractChain ∘ seamCounterfactual`
-  through binding. One honest residual named mid-build (`[ACC-rbr-bcs-resid]`): the *constrained*-
-  mask fold-root lags its challenge, so its root re-attribution is open packaging — the column
-  data is already seam-equivalent, but a literal fold-root instance mis-aligns the challenge that
-  folds the claim with the message that carries the word. Named, not papered over.
-- The novel content resolved along the way: `ZkExtraction` (the mask counterfactuals the
-  extractor needs are provably not computable from what the ZK distinguisher sees — quantifier
-  position confines them, `by rfl`); `ZkTriangular` (the deployed recommitment hiding, the
-  backward induction through the ∀-witness quantifier closes); `ConstrainedMask` (a mask that
-  respects the claim AND still hides).
+- `Loom/Accumulator.lean` defines the constrained Reed–Solomon claim, same-word batching, and
+  cross-word affine folding. Honest closure and the one-bad-challenge algebra have firing
+  small-field examples.
+- `Loom/AccExtractChain.lean`, `Loom/LightClient*.lean`, and the v0 assurance modules prove chain
+  extraction, fixed/adaptive soundness, and Fiat–Shamir/grinding statements at their declared
+  oracle and commitment interfaces.
+- These are protocol theorems, not evidence that `prover/src/accumulator.rs` implements the whole
+  protocol. The Rust module mirrors only the post-reduction linear channel.
 
-**The arithmetization compiler (the "make it real" spine, DERIVED).**
-- `Compiler/Air`: an arithmetization DSL whose circuit reading and executor reading are proved
-  EQUAL by initiality (`eval_agrees_exec`, on `[propext, Quot.sound]` — no choice; drift is not
-  avoided, it is impossible). This is N3 applied to arithmetization.
-- `Compiler/AirFlatten`: nested expressions → a degree-≤2 gate system with aux wires, wire-forcing
-  proved.
-- `Assurance/AirSumcheck` + `AirSumcheckQuadratic/airGateSystem_sound`: the FULL gate system
-  (linear ∧ quadratic) is retired by Loom's **proven** sumcheck — no unretired channel. The
-  derived arithmetization inherits the proof system's soundness, completely.
-- `Loom/MultilinearExtension`: the MLE (`[SC-reshape]` discharged), uniqueness and all.
+### Sumcheck and derived arithmetization
 
-**The sound shielded note-spend (the private-witness turn, SOUNDLY CONSTRAINING).**
-- Gadgets, all derived + iff-correct: `AirRange` (value range), `AirHash` (Poseidon-style
-  permutation, all rounds), `AirMembership` (Merkle, general depth).
-- `Compiler/NoteSpend.noteSpend_correct` + `noteSpend_binds`: the composed system accepts iff a
-  VALID shielded spend (value bounded ∧ nullifier = hash(note) ∧ note committed in the tree) — a
-  satisfying assignment IS a valid spend. It even exhibits a toy-hash collision to make
-  `[COMMIT-CR]`'s necessity visible.
-- The private-witness arc, machine-checked end-to-end: **hides** (`Assurance/PrivateReceipt`,
-  `PrivateTurn`, `Kernel/PrivateTurn`), **soundly constrains** (`NoteSpend`), **proved in ZK**
-  (`loom_zk_argument`).
+- `Loom/Sumcheck.lean` and `Loom/MultilinearExtension.lean` prove the algebraic sumcheck layer.
+- `Compiler/Air.lean` derives a circuit interpretation and proves it agrees with execution.
+- `Compiler/AirFlatten.lean` lowers into degree-≤2 gates, and the assurance sumcheck modules retire
+  the full linear-plus-quadratic gate system.
+- `Compiler/Emit.lean` produces first-order descriptor data and proves `emit_faithful`:
+  `descriptorHolds` means the emitted Lean gate system holds.
 
-**The recursive verifier (a proof verifies a proof — deployed recursion made concrete-circuit).**
-- `Compiler/MerkleBindAir.fullVerifier_correct`: the WHOLE light-client verifier arithmetized as
-  ONE AIR — FS-bound challenges (`FiatShamirAir`) ∧ sumcheck-verify (`SumcheckVerifierAir`) ∧
-  FRI-query fold-consistency (`FriQueryVerifierAir`, = Loom's `Proximity.fold` verbatim) ∧
-  Merkle-bound openings (`AirMembership`). `fullVerifier_binds`: no proof-carrying wire is free.
-  Via `emit` (whose faithfulness is `emit_faithful`), "the whole verifier accepts" is an emitted
-  Loom-provable statement — so a Loom proof can be verified *inside* a Loom circuit. The forgery
-  keystone makes `[COMMIT-CR]` concrete: a fold-consistent forgery passes every other check and is
-  rejected *exactly outside the committed root's hash-collision fiber*. Residual `[RECURSE-full-resid]`
-  (the remaining wire-binding: root absorption, oracle-opening, domain-point arithmetic) + the
-  named floors; the checks themselves are all proved, choice-free where they can be.
+This closes semantic drift inside the compiler. It does not formalize Rust or prove that every
+external proof accepted for a descriptor implies `descriptorHolds`.
 
-**The end-to-end security, as one number.** `Assurance/ErrorBudget.deployedBudget_secure`: the
-composed soundness error — grinding + sumcheck + collision-resistance-in-ROM + proximity, union-
-bounded over the product coin space (a real theorem; no independence assumed, mutual-CA
-*discharged* not hypothesized) — is `≤ 2⁻⁵⁵` and `> 2⁻⁵⁶` at deployed BabyBear⁴ parameters (the
-honest prime, exact integer arithmetic): **55 bits, tight**, at unique decoding, budget-relative to
-a `2⁴⁰`-query adversary, with the named floor contributing no silent summand. The dominant term is
-the grinding factor; the native-grinding sharpening (`[LC-grinding-native]`) would buy 8 bits.
+### Reed–Solomon proximity and the rate regimes
 
-**The kernel (the semantic substrate).** `Camera` (resource algebra), `State`, `Turn` (the
-hyperedge), `TurnLimit` (N2a — the turn's agreement half is a universal object), `TurnBalancedLimit`
-(N2b — the conserving turn is universal), `Receipt` (OB-3, the receipt is the accumulator's word),
-`Verbs` (create/gwrite/move conservation algebra), `PrivateTurn` (the hidden-witness turn).
+- The unique-decoding core and the unconditional band
+  `0 < δ < (1 - ρ) / 3` are proved locally.
+- `Loom/HalfThresholdRegime.lean` proves the characteristic-independent algebra behind threshold
+  halving: if two distinct affine folds are `δ/2`-close, the source pair has `δ` correlated
+  agreement, hence at most one challenge can be bad.
+- `Loom/HalfThresholdFri.lean` identifies the ordinary multiplicative FRI fold with that affine
+  family and proves the `δ -> δ/2` transition.
+- `Loom/HalfThresholdFriTower.lean` composes one halving round with a fixed `δ/2` tail. At rate
+  `1/2`, the concrete starting radius `3/10` is above the Johnson radius and the tail radius
+  `3/20` lies in the unconditional one-third-UD band.
 
-## 2. The IRREDUCIBLE cryptographic FLOOR (named, inhabited, not eliminable)
+The tower is a challenge-counting theorem over whole words. It does not yet price query misses or
+model adversarially recommitted intermediate words, Merkle openings, or a single Fiat–Shamir
+execution.
 
-These are assumptions, not gaps. Every hash-based SNARK stands on the same three. "Finishing"
-means keeping them minimal, named, and *inhabited* — never an unproved `axiom`, never
-`StarkSound`-with-zero-instances.
+### Johnson: published mathematics, local import outstanding
 
-- **`[PROX-fold-distance]` — the proximity-gap hypothesis** (`IsProximityGenerator`, WHIR Thm 4.8
-  / BCIKS). The rate<1 soundness rides it. **Now PARTIALLY DISCHARGED** (`Loom/ProximityGapUD`,
-  2026-08-08): the RS proximity gap is *proved, hypothesis-free*, on the macroscopic band
-  `δ ∈ (0, (1−ρ)/3)` for every rate `ρ<1` (deployed `ρ=1/2 → (0, 1/6)`) — so on that band the
-  mutual-CA consumers and the LDT are zero-hypothesis, and the trusted floor is genuinely smaller.
-  On `[(1−ρ)/3, (1−ρ)/2)` (the rest of unique decoding) it is now built end-to-end
-  (`Loom/ProximityGapUDTight`, Berlekamp–Welch over `F(Z)`) modulo a *single named classical lemma*
-  `[PROXGAP-BW-ps]` (Polishchuk–Spielman divisibility, BCIKS Lemma 4.4 — literature-true, a
-  formalization project of its own); beyond UD, the Johnson regime remains a hypothesis. (Sobering
-  context: the predecessor line had a *conjectured* 130-bit bound disproved to a proven 73 in Nov
-  2025 — this is the least-reported, most load-bearing axis in the transparent-STARK field, and we
-  quote it.)
-- **`[FS-ROM]` — the sponge realizes the random oracle.** Inhabited by `Oracle.empty` (a lazy-
-  sampling handler, no axiom).
-- **`[COMMIT-CR]` — the hash is collision-resistant. NOW REDUCED** (`Loom/CollisionResistanceROM`,
-  2026-08-08): provable *in the ROM* by an explicit birthday-bound adversary (`birthday_bound`,
-  `commitCR_of_RO` — the reduction lossless, the bound attained at q=2), modulo the adaptive-schedule
-  lift `[CR-ROM-adaptive]`. So CR is not a standalone assumption — it prices to the RO.
-  Originally: The `BindingCommitment` abstraction is
-  inhabited **axiom-free** by `idealCommitment`; binding is proven load-bearing (an equivocating
-  scheme breaks the extraction seam); `NoteSpend` exhibits a collision to make the assumption's
-  necessity concrete.
+`Loom/JohnsonRegime.lean` proves the classical Johnson list-size bound, shows the Johnson interval
+strictly extends unique decoding for every nontrivial rate, and proves the exact sampling bridge.
 
-## 3. BEYOND-v0 RESEARCH honestly remaining (Lean-authorable, not done)
+The status of mutual correlated agreement changed after WHIR:
 
-- **`[ZK-RBR-extract]` lemma A** — the sub-unique-decoding seam: recovering the recommitment
-  increment from `t < d` opened columns via mutual correlated agreement (the ZK argument's
-  soundness at UD is complete; below UD is this lemma). Beyond-UD list-decoding math.
-- **`[ACC-rbr-bcs]`** — the BCS/root-alphabet packaging of the native RBR instance (PMsg = root +
-  opened columns rather than the full word). All the algebra is landed (ZkExtraction/Commitment);
-  the packaging re-run at that alphabet remains.
-- **`[ACC-sound-list]` / Johnson regime, `[OB-8-tower]` / binary tower** — everything is proved at
-  *unique decoding* (the conservative ~2–4× regime); the better-rate Johnson regime and the
-  Binius-style binary-tower arithmetic are named, not proved.
+- WHIR's 2024 Conjecture 4.12 remains a named **local hypothesis** so the existing reductions retain
+  their historical shape.
+- The needed RS/polynomial-generator results through Johnson were subsequently published in
+  [2025/2051](https://eprint.iacr.org/2025/2051) and
+  [2025/2110](https://eprint.iacr.org/2025/2110), with related proximity consequences in
+  [2025/2055](https://eprint.iacr.org/2025/2055). Their proofs are not yet formalized here.
+- Capacity-level proximity-gap variants are false; see
+  [2025/2046](https://eprint.iacr.org/2025/2046). Loom therefore makes no blanket capacity claim.
+- Above Johnson, Loom now has the local threshold-halving route motivated by
+  [2026/858](https://eprint.iacr.org/2026/858). The distinct action–orbit route is
+  [2026/861](https://eprint.iacr.org/2026/861).
 
-## 4. What "complete" does NOT include (the pessimistic column)
+### GF(2) tower and additive proximity
 
-- **No prover, no verifier implementation, no benchmarks. Performance is UNMEASURED.** This is a
-  soundness SPECIFICATION — theorems about what the protocol guarantees — not running code. The
-  deployed compute (breadstuffs' WGPU BabyBear⁴ FRI fold) is exactly what these theorems cover, but
-  the emit path (Lean → constraint artifact → prover) is not built.
-- **Proven parameters only, unique-decoding regime.** No number on this label is a conjecture.
-- The one-transcript soundness/knowledge fusion (`loomV0_holds` bundles four separate guarantees)
-  and the FS-derived (vs uniform) schedule are proved at their stated resolutions; the deployment
-  fusions are the named residuals above.
+- `Theory/BinaryTower*.lean` constructs actual finite fields of cardinality `2^(2^k)`, proper
+  embeddings, Fan–Paar generators, the trace induction, and the proved fast multiplication
+  recurrence.
+- `Theory/AdditiveNTT*.lean` proves the additive domains, vanishing-polynomial fold structure,
+  novel-basis transform, and additive fold algebra.
+- `Loom/AdditiveProximity.lean` identifies the additive image domain with an ordinary
+  Reed–Solomon domain, transports proximity-generator results, and proves an unconditional
+  positive macroscopic additive-FRI band.
 
-**The defensible one-breath claim:** *we did not build a faster SNARK; we built a proof system
-whose soundness — accumulation, unbounded recursion, a zero-knowledge argument of knowledge, and a
-sound shielded turn — is a machine-checked Lean term standing on three named cryptographic
-assumptions, derived so the circuit can't drift from the semantics, honest enough to keep its own
-false theorems compiling in the margin. What remains is a prover, benchmarks, and two named pieces
-of beyond-unique-decoding mathematics — and we say so.*
+`prover/src/binary_tower.rs` now supplies an explicit Fan--Paar coordinate runtime through
+`GF(2^64)`, including field operations and one additive fold pair, with exhaustive small-field
+teeth. It is still arithmetic rather than an additive-FRI runtime: the fast novel-basis transform,
+commitments, query protocol, transcript integration, and Lean-emitted control around unverified
+Rust compute remain.
+
+### Zero knowledge: theorem resolution matters
+
+The native Loom games contain proved masking, completeness, extraction, and zero-knowledge
+results, including `loom_zk_argument` at its stated formal-game resolution. Sub-UD recovery is
+also proved at word/family resolution; the old premise that columns alone determine the increment
+below unique decoding is machine-refuted.
+
+Deployment-facing composition is not finished. `Loom/OracleLogLinkedTarget.lean` demonstrates why
+the distinction matters:
+
+- the former unrestricted `OracleLogReduction` extractor target is vacuous because an extractor
+  can return the already-designated witness without reading the oracle log;
+- the replacement pins the extractor definitionally to the shifted log and states the missing
+  opening-injectivity, code-membership, distance, and radius hypotheses;
+- a fresh-aggregate-challenge uniqueness kernel is proved; and
+- `Loom/OracleLogLinkedAssembly.lean` closes the corrected target: fresh-link and hit-slot horns,
+  the finite cover, the `(t+k)` union bound, the exact shifted-log extractor reduction, and an F₅
+  premise-firing example.
+
+This is the repaired linked OracleLog theorem at explicit UD/root/opening hypotheses. Older Def.
+4.2 state-design and sub-UD deployment boundaries remain separate. Accordingly, “native
+formal-game ZK theorem” is accurate; “the running prover is a succinct NIZK argument of knowledge”
+is not.
+
+### Assurance budgets
+
+- `Assurance/ErrorBudget.lean` proves the displayed BabyBear⁴ budget expression is at most `2^-55`
+  and greater than `2^-56`, under its explicit threat model and component interfaces.
+- `Assurance/ErrorBudget120.lean` proves a BabyBear⁶ challenge-coordinate plus 20-bit-PoW
+  expression lies in `(2^-138, 2^-137]`, and proves both levers are load-bearing at that point.
+- `Assurance/PowGrinding.lean` proves the finite ideal-coordinate core: exact `2^-bits` nonce
+  density, product factorization, and a leave-one-out adaptive `work * epsilon / 2^bits` bound.
+
+The 137-bit result is an exact theorem about that idealized formula, not a current runtime claim.
+The single `fieldCard = BabyBear^6` parameter prices all challenge terms, including sumcheck. The
+Rust reference sumcheck is presently over base BabyBear, its FRI challenges are BabyBear⁴, and it
+emits no PoW nonce. A mixed-field theorem plus the shared-ROM/domain-separation/runtime bridge is
+required before assigning that label to an implementation.
+
+## Running compute
+
+There is now a prover and verifier implementation, contrary to the old version of this document.
+`prover/src/protocol.rs` composes descriptor validation, trace generation, a trace commitment,
+gate sumcheck, trace-derived RS encoding, and FRI under one replayed transcript. The integration
+tests exercise the Lean-emitted demo descriptor and reject mutations.
+
+Its boundary is deliberate:
+
+- `ReferenceProof` carries the full witness trace;
+- verification recomputes the trace commitment and entire RS word;
+- the hash uses demo/conformance parameters, not a selected deployment set;
+- runtime roots, authentication paths, and transcript encodings are nine canonical BabyBear
+  limbs, closing `[PROVER-digest-width]` as a representation issue; this does not establish
+  `[COMMIT-CR]` or production permutation/capacity security. `Compiler.WideDigestAir` pins the
+  corresponding eleven-field encoding through emit, while raw-byte decoding and composition with
+  the recursive sponge/full verifier remain;
+- the path is multiplicative BabyBear, not the additive tower;
+- the Rust/WGSL is unverified compute.
+
+So it is a useful end-to-end **reference path**, but it is non-succinct and non-ZK.
+
+The optional WGPU implementation accelerates only the BabyBear⁴ fold and is conformance-tested
+against the CPU version. It is outside the protocol core and imposes no compatibility constraint
+on the next prover architecture.
+
+## What is not complete
+
+The principal remaining joins are:
+
+1. global adaptive earliest-deviation/query coupling for the landed committed half-threshold FRI
+   rounds, followed by concrete Merkle/CR and FS Reduction composition;
+2. formalize the `HaboeckTheorem2` algebraic core behind the landed exact Johnson MCA interface;
+3. connect the landed fast additive NTT to commitments, queries, transcript, multi-round FRI, and
+   its Lean refinement;
+4. replace the landed exhaustive commitment/code-linked accumulator reference with succinct
+   queried openings, transcript-derived challenges, and its RBR extractor;
+5. add verifier-level root-word attribution, then compose sampling-to-closeness into the landed
+   sub-UD linked-log transport and build the hiding-window Def. 4.2/runtime instance;
+6. succinct openings connecting the emitted nonlinear gate claim to the low-degree claim;
+7. concrete hash parameters and a one-execution ROM/PoW composition; and
+8. a concrete commitment hash, the wide-digest verifier-AIR bridge, and one field-consistent
+   security budget matching the runtime actually executed.
+
+The defensible one-breath claim is therefore:
+
+> minidregg has a large machine-checked proof-system and compiler core, new unconditional
+> post-Johnson and additive-proximity mathematics, and a running transparent reference prover.
+> Its remaining frontier is not “get the old GPU path into production”; it is to connect those
+> pieces into a succinct, ZK, field-consistent implementation without weakening their exact
+> theorem boundaries.

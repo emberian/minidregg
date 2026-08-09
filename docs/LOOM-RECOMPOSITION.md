@@ -181,7 +181,7 @@ Design rules banked from the reads:
 | OB-4 | ZK accumulation, hash-based, straightline | ⟲ **confirmed open in the literature — contribution slot.** Architecture ported (2026/289 Thm 1); opening-leakage hiding is the new mathematics | after OB-2 statements; design masked-opening experiment |
 | OB-5 | stateless accumulator variant | ⟲ subsumed: holography split adopted for the structure side (§3); witness side stays WARP-stateful (acceptable: one node, not distributed provers) | — |
 | OB-6 | unique-decoding mutual-CA realizer (v0 floor) | low; unconditional for every linear code at δ(C)/3 | early — it inhabits the carrier |
-| OB-6′ | ⟲ Johnson-regime WARP-over-RS upgrade note (2025/2051+2110 applied to WARP's conjectured-MCA remark) | low — an observation to state precisely and prove the import | parameter section of the Lean tree |
+| OB-6′ | ⟲ Johnson-regime WARP-over-RS upgrade (2025/2051+2110 applied to WARP's conjectured-MCA remark) | medium — `JohnsonMcaBridge` now pins 2110's exact reduced-rate constants and Loom interface; the GS/BCIKS/Hensel algebraic core remains to formalize | `Loom/JohnsonMcaBridge.lean` |
 | OB-7 | ⟲ GBF structure-claim batching integrated with derived descriptors | medium-low | after the IR fold-algebra lands |
 | OB-8 | ⟲ small-field accumulation without the O(λ) linearity loss (WARP App. D's open problem) | open research — second contribution slot | after v0 ships at extension-field sampling |
 
