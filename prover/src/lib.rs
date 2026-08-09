@@ -20,10 +20,9 @@
 //! `[PROVER-fri-fold]` (field4.rs + fri.rs — BabyBear⁴ (X⁴ = 11) and the CPU
 //! reference of breadstuffs' FRI fold kernel, ADOPTED into this crate and
 //! conformant to `Loom/Proximity.lean`'s verified `fold` on the Lean-authored
-//! vector `testdata/fri_conformance.json`), and `[PROVER-fri-wgsl]` (gpu.rs +
-//! shaders/fri_fold.wgsl — OUR wgsl kernel adopting the deployed fold MATH,
-//! dispatched via wgpu, conformance-gated to equal `fri::fold` exactly on
-//! GPU hardware; unverified compute, like everything here), and
+//! vector `testdata/fri_conformance.json`), and `[PROVER-fri-wgsl]` (the
+//! optional `wgpu-fold` conformance experiment in gpu.rs +
+//! shaders/fri_fold.wgsl; it is not part of the protocol core), and
 //! `[PROVER-fri]` (fri_protocol.rs — the FRI LDT protocol around that fold:
 //! commit → fold rounds → query spot-checks → final constant check, matching
 //! `Loom/Proximity.lean`'s tower descent, `mem_reedSolomonCode_one_iff` base
@@ -36,15 +35,63 @@
 //! from the proof's own commitment stream — soundness pricing, the `(t + k)`
 //! grinding factor, stays Loom's: `fsKeystone_proved` /
 //! `lightClientGrinding_sound`).
+//!
+//! `[PROVER-e2e-reference]` (`protocol.rs`) is the first ONE-call composition
+//! of those rungs.  Its proof carries the full trace and its verifier recomputes
+//! the trace-derived RS word, so it is an honest non-succinct, non-ZK reference
+//! path — not a production prover.  The succinct opening bridge is named there
+//! as `[PROVER-e2e-succinct-openings]`.
 
+pub mod accumulator;
+pub mod accumulator_generic;
+pub mod additive_fri_reference;
+pub mod additive_fri_sampled;
+pub mod additive_mle_terminal;
+pub mod additive_mle_tower256;
+pub mod additive_ntt;
+pub mod additive_pcs_ood;
+pub mod binary_evaluation_claim;
+pub mod binary_evaluation_history_append;
+pub mod binary_functional_append;
+pub mod binary_hash;
+pub mod binary_history_append;
+pub mod binary_merkle;
+pub mod binary_tower;
+pub mod binary_tower_256;
+pub mod binary_transcript;
 pub mod commit;
+pub mod committed_accumulator;
 pub mod descriptor;
 pub mod field4;
+pub mod field6;
 pub mod fri;
+pub mod fri_ext6_reference;
 pub mod fri_protocol;
-pub mod gpu;
+pub mod functional_nextgen_receipt;
 pub mod gate_claim;
+pub mod gate_mle_ext6;
+pub mod gate_oracle_commitment;
+pub mod gate_sumcheck_ext6;
+#[cfg(feature = "wgpu-fold")]
+pub mod gpu;
+pub mod logup_tower256;
+pub mod multiplicative_mle_terminal;
+pub mod nextgen_light_client;
+pub mod outer_factored_gate;
 pub mod poseidon;
+pub mod proof_carrying_history;
+pub mod protocol;
+pub mod semantic_lookup;
+pub mod semantic_receipt;
+pub mod semantic_receipt_relation;
+pub mod semantic_turn_receipt;
+pub mod succinct_factored_gate;
 pub mod sumcheck;
+pub mod sumcheck_generic;
+pub mod sumcheck_streaming;
 pub mod trace;
+pub mod trace_linear_ext6;
+pub mod trace_linear_gf2;
 pub mod transcript;
+pub mod transcript_ext6;
+pub mod wide;
