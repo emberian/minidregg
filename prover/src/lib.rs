@@ -30,7 +30,5 @@ pub mod sumcheck;
 pub mod sumcheck_generic;
 pub mod sumcheck_streaming;
 pub mod trace;
-pub mod trace_linear_ext6;
-pub mod trace_linear_gf2;
 pub mod transcript_ext6;
 pub mod wide;
