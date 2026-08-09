@@ -56,11 +56,19 @@ and gadget satisfiability are not current deployment evidence.
   `VerifiedExecution`. Clause 404 is still absent from base V1 and deployment. PCS/sampled decider,
   binding/CR/ROM, common-game history join, mutable RAM, and native artifact profile remain.
 - **Ext6 gate proof — A:** `996b29f` closes deterministic Lean transcript/algebra control around
-  `GateFactoredExt6`: exact descriptor bytes, codecs, cSHAKE challenges, transcript order, and full
+  `GateFactoredExt6`; `9c06721` removes caller-authored statement bytes and derives one lawful,
+  prefix-decodable statement preimage from descriptor, rounds, padding, public values, and cube
+  encoding. The controller fixes codecs, cSHAKE challenges, transcript order, and the full
   algebraic verifier relation over arbitrary native bytes/error. Admission names gate algebra,
-  PCS, subfield, proximity, binding, oracle-transport, and final-LDT events on one finite coin.
-  Those concrete reductions and global-ledger injection remain **P** residuals; no deployed IVC or
-  137-bit proof system is claimed.
+  PCS, subfield, proximity, binding, oracle transport, challenge sampling, and final LDT as eight
+  events on one finite coin. Those concrete reductions, sampling-bias price, and global-ledger
+  injection remain **P** residuals; no deployed IVC or 137-bit proof system is claimed.
+- **Hyperdocument user/agent interfaces — S/A negotiation:** `e38cab5` adds versioned first-order
+  content-read, mutation, and history-read identities. Direct reads are pure canonical projections
+  with exact footprints; backlink/version requests are typed history declarations; actions reuse
+  the ordinary operation declaration. Success retains the same complete request-indexed authority.
+  No callback, remote activation, host-index completeness, accepted effect, post-state, finality, or
+  persistence is manufactured.
 - **History/knowledge — S/A with conditional P shape:** retained history now reconstructs exact
   genesis/chain/link words and challenges, exact accumulator/fold/source alignment, unshifted BCS
   reduction, and PCS/binding/ROM `Good` events on one history coin (`26b049f`). Exact-head finality

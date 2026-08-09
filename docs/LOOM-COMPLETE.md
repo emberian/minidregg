@@ -130,16 +130,18 @@ remain.
 `GateFactoredExt6` proves descriptor residual provenance, seven factored operands, degree-two
 rounds, public affine terminal forms, and eta aggregation. The landed controller fixes:
 
-- exact Lean-emitted descriptor bytes;
+- one lawful prefix-decodable canonical statement preimage derived from the Lean descriptor,
+  rounds, padding, public values, and cube encoding—never caller-authored statement bytes;
 - lawful receipt/field/message codecs;
 - cSHAKE-derived gamma, round challenges, and eta;
 - exact transcript order; and
 - the full algebraic acceptance relation around arbitrary native bytes/error.
 
 The admission theorem names gate algebra, gate PCS, subfield, proximity, binding, oracle transport,
-and final LDT as seven events on one finite coin. Its reduction laws are premises. Concrete PCS,
-subfield proof, proximity, binding/ROM, final LDT, global-game injection, recursion, and deployed
-137-bit security remain.
+challenge sampling, and final LDT as eight events on one finite coin. Challenge sampling is
+separate because radix-`BabyBear` reduction of cSHAKE bytes is not asserted uniform. Its reduction
+laws are premises. Concrete PCS, subfield proof, proximity, binding/ROM, sampling-bias price, final
+LDT, global-game injection, recursion, and deployed 137-bit security remain.
 
 ### Semantic history and BCS game
 

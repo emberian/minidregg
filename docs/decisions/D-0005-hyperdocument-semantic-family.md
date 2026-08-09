@@ -37,6 +37,10 @@ because a later field stores its digest.
   sources always produce a provenance-bearing `ConflictRecord`. Marks and annotations are retained.
 - Proof-relevant ancestry distinguishes a selected base, ambiguous bases, and no base. It does not
   assert an arbitrary unique least common ancestor.
+- `HyperdocumentInterface` supplies versioned first-order content/mutation/history interface IDs,
+  lawful argument binding, exact request-indexed authority, pure direct-read projections, and
+  history-query declarations. It supplies no callback, remote activation, accepted effect,
+  host-index completeness, finality, or persistence.
 
 This is **S/A**, not physical persistence, finality, a full CRDT policy, or a migrated editor.
 

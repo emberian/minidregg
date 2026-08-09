@@ -79,8 +79,9 @@ They must not be reintroduced as handwritten parallel protocol profiles.
   transcript derivation, opening/fold/final-polynomial checks.
 - The extension-only clause-404 controller accepts exactly two keyed byte replies and blocks wrong,
   duplicate, or missing reply tables before the existing Lean plan may verify.
-- The Ext6 controller fixes descriptor bytes, codecs, cSHAKE challenges, transcript order, and the
-  algebraic verifier relation; its PCS/security reductions remain explicit.
+- The Ext6 controller derives the canonical statement preimage in Lean, fixes codecs, cSHAKE
+  challenges, transcript order, and the algebraic verifier relation; its PCS, challenge-sampling,
+  and other security reductions remain explicit.
 
 These are admission/control results, not Rust correctness theorems.
 

@@ -213,6 +213,13 @@ Residuals include the complete run/element/field/conflict operation grammar, con
 policies, rights/views/search, checkpoints/GC, integration of base selection into richer merge
 policies, concrete PCS/CR/ROM, physical persistence/finality, and migrated clients.
 
+`Theory.HyperdocumentInterface` now gives users and agents versioned first-order interface
+negotiation without importing DCOM/OLE remote-object authority. Direct link/annotation reads are
+pure canonical projections with exact finite footprints. Backlink/version requests are typed
+history declarations whose resolver must later prove authenticated completeness/finality. Actions
+reuse the ordinary Hyperdocument operation declaration. Negotiation retains the same complete
+request-indexed `Authorized` token but creates no accepted effect or post-state by itself.
+
 ### Compound-document design analogy
 
 DCOM/OLE, structured storage, and compound-document systems supply a useful comparison, not a
@@ -236,7 +243,7 @@ or runtime object identity:
 |---|---|---|
 | Tower256 additive FRI | **A:** shared concrete Tower/cSHAKE/Merkle backend; arbitrary native bytes/error; Lean transcript, decoding, openings, folds, final polynomial, ideal-clause bridge, one controller coin | instantiate supplied failure cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable checker, deployed codecs/IDs, end-to-end benchmark |
 | Tower256 indexed LogUp | **A:** exact address/index semantics and gated two-byte-reply controller for clause 404 | clause 404 remains out of base/deployment; PCS/sampled decider, binding/CR/ROM, common-game/history join, mutable RAM, artifact work profile |
-| BabyBear/Ext6 | **A:** exact descriptor/gate algebra and deterministic Lean transcript/algebra controller; seven-event conditional admission ledger | PCS, subfield proof, proximity, binding, ROM, final LDT, global game, recursion, deployed security |
+| BabyBear/Ext6 | **A:** exact descriptor/gate algebra, canonical prefix-decodable statement preimage, and deterministic Lean transcript/algebra controller; eight-event conditional ledger separates challenge sampling from ROM | PCS, subfield proof, proximity, binding, ROM, sampling-bias price, final LDT, global game, recursion, deployed security |
 | BFV/residue ring | **S/A arithmetic:** pure core and all 384 exact equations; native buffer candidate can be Lean-rechecked locally | proof suite/controller pins are zero; no confidentiality, knowledge, PCS/CR/ROM, concrete core codec/patch deployment, or history join |
 | MPC/shared values | **S only:** generic sealed computation shape | concrete protocol/dialect, malicious security, abort/fairness, output binding, separately authorized threshold release |
 
