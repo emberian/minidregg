@@ -423,6 +423,17 @@ structure AcceptedSparseBusLookup
     trace.index row = addressing.index (busAddress (rowAt power row))
   addressBits_exact : ∀ row,
     trace.addressBits row = binaryAddressBits addressLog (trace.index row)
+  addressColumnsBoolean : ∀ bit row,
+    committedAddressColumn (F := F) trace bit row = 0 ∨
+      committedAddressColumn (F := F) trace bit row = 1
+  incidenceIsCanonicalAddress : ∀ row,
+    committedIncidence (F := F) trace row =
+      binaryUnitVector (addressing.index (busAddress (rowAt power row)))
+  pushforwardExact :
+    committedIncidencePushforward trace claim.weights =
+      logupPushforward
+        (fun row => addressing.index (busAddress (rowAt power row)))
+        claim.weights
   indexedEvaluation :
     claim.claimedEvaluation =
       logupDot
@@ -472,6 +483,17 @@ theorem acceptedSparseBusLookup
   postRoot_exact := bus.postRoot_exact
   rowIndex_exact := rowIndexExact
   addressBits_exact := addressBitsExact
+  addressColumnsBoolean :=
+    run.indexedTableReceiptClause_of_attestation.addressColumnsBoolean
+  incidenceIsCanonicalAddress := by
+    intro row
+    rw [run.indexedTableReceiptClause_of_attestation.incidenceIsLiteralUnitVector,
+      rowIndexExact row]
+  pushforwardExact := by
+    rw [run.indexedTableReceiptClause_of_attestation.pushforwardExact]
+    apply congrArg (fun index => logupPushforward index claim.weights)
+    funext row
+    exact rowIndexExact row
   indexedEvaluation := by
     rw [run.indexedEvaluation_of_attestation]
     apply congrArg (fun values => logupDot values claim.weights)
