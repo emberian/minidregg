@@ -15,11 +15,13 @@ import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
 import Theory.CellState  -- typed logical cells, canonical materialization, and validated footprint patches make root coherence, frame, rejection atomicity, and no-ghost state structural
 import Theory.ReactiveCellTransition  -- declaration-derived reactive control plus validated typed patches; physical CAS/nullifier insertion is an explicit handler premise
+import Theory.CanonicalTransition  -- one canonical materialized post and proof-relevant typed delta unify ordinary and reactive prepared turns without a parallel store or caller-supplied roots
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token
 import Theory.DeclaredTurn  -- data-only authorization/effect execution with exact-post semantic certification and definitional rejection atomicity
 import Theory.TurnTransition  -- ordinary and resumed reactive turns share canonical roots, exact footprints/deltas, frame laws, and atomic refusal
+import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.Bignum  -- canonical fixed-width little-endian limbs + proved Nat/Int codec (wide digest/challenge substrate)
 import Theory.CrossModulus  -- one canonical integer with exact quotient/remainder views in two coprime moduli; CRT/range/canonicality seams for RNS/FHE bridges
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
