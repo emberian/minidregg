@@ -32,11 +32,33 @@ and untested. And `PcsCrRomReduction` is still assumed rather than derived.
 `Kernel/MultiCellHyperedge`; every rung the durable and history work stands on now
 bottoms out in built data. What remains is the carriers the sweep has not reached.
 
+**Sweep status — exhibited so far**
+
+| carrier | witness |
+|---|---|
+| `CellState.ValidatedPatch` | `Theory.CellStateWitness` (`17e639c`) |
+| `TypedAuthorization.Authorized` | `Theory.TypedAuthorizationWitness` (`e5146a8`) |
+| `AcceptedCellEffect` | `Theory.AcceptedCellEffectWitness` (`d4898a5`) |
+| `CanonicalTransition.PreparedTurn` | `Theory.CanonicalTransitionWitness` (`f5e6d1b`, root moves) |
+| `SemanticHistoryFamily.VerifiedHistoryHead` | `Assurance.HistoryHeadInhabitation` (`d257fe9`) |
+| `MultiCellHyperedge.Commit` | `Kernel.MultiCellHyperedgeWitness` (`b46a3d8`, two legs) |
+| `TypedCellHyperedge.Commit` | `Kernel.TypedCellHyperedgeWitness` (`5d02d05`) |
+
+**Not yet swept — the list to start from**
+
+- `HyperdocumentAgentOperation.AcceptedOperation` — the biggest one left, and the most
+  load-bearing: its only theorems are `no_wrong_version` and `no_outside_scope`, two
+  `IsEmpty` results that say nothing if the type is empty anyway. It is also the
+  workflow tonight's durable installation is about. Needs the Hyperdocument config /
+  declaration / portal stack, so expect it to be the longest construction of the set.
+- `Compiler.DialectClauseDispatch.VerifiedExecution` and `ResolvedClause`.
+- `Kernel.DeclaredHyperedge.CommittedHyperedge` — reachable through the executable
+  `execute` path, but this is the legacy integer-store carrier the tree itself calls
+  debt, so it ranks below the others.
+
 **Next 3 moves**
 
-1. Finish the sweep: `Compiler.DialectClauseDispatch.VerifiedExecution`,
-   `HyperdocumentAgentOperation.AcceptedOperation`, `Kernel.DeclaredHyperedge`. Anything
-   never constructed gets a witness or a recorded finding, same as the others.
+1. `AcceptedOperation`, per above.
 2. Two DIFFERENT schemas in the joint-commit witness — cross-schema heterogeneity is
    still typed but untested, and that is what `MultiCellHyperedge` is for.
 3. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
@@ -49,8 +71,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `716f148` — `3232` jobs — `E-20260810T061950-35463-local-nextop.local-716f148f91e2-lake`
 - `dfed208` — `3233` jobs — `E-20260810T062751-38501-local-nextop.local-dfed208fdcb5-lake`
 - `d4898a5` — `3236` jobs — `E-20260810T063734-41624-local-nextop.local-d4898a56ae20-lake`
+- `b46a3d8` — `3238` jobs — `E-20260810T064954-45327-local-nextop.local-b46a3d882e97-lake`
 
-Commits after `d4898a5` carry warm-tree builds only.
+Commits after `b46a3d8` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
@@ -178,6 +201,9 @@ the deployed ones.
   the carrier `DurablePlan` and tonight's `HyperdocumentDurableInstallation` quantify
   over, so those statements are no longer conditional on an unbuilt commit. Cross-SCHEMA
   heterogeneity is still typed but untested. `3238` jobs, exit `0`, boundary `0`.
+- `5d02d05` — `TypedCellHyperedge.Commit` exhibited, so the landed
+  `no_commit_of_nonzero_resource` is a contrast rather than a restatement of `IsEmpty`,
+  plus the matching `no_commit_of_wrong_apex`. `3239` jobs, exit `0`, boundary `0`.
 
 ---
 
