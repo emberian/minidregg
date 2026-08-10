@@ -38,6 +38,7 @@ import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller byte
 import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
 import Assurance.HyperdocumentHistoryAdmission  -- exact head membership, indexed finality, post-only openings, and accepted LinkRecord containment
 import Assurance.HyperdocumentAgentOperation  -- one composed user/agent link-or-annotation slice: negotiate, promise, notify, react, then the sole accepted effect at Finalize drives publication, invalidation, receipt/history, and the conditional durable plan
+import Assurance.HyperdocumentDurableInstallation  -- that slice's durable half with the handler premise DISCHARGED by the constructed WAL device: atomicity, marker installation, crash-before, and idempotent retry no longer quantify over a hypothetical correct store
 import Assurance.TransclusionBacklinkHistory  -- typed durable references, exact source/history/opening identity, authenticated forward welds, and coverage-relative complete backlinks
 import Assurance.SemanticHistoryRecursiveAir  -- stateless public history heads bind into the shared-wire recursive verifier AIR while soundness/KS/ZK/SE remain distinct evidence
 import Assurance.AuthenticatedColumnHistoryBridge  -- openings retained by one accepted authenticated-column trace become the identical binding BCS messages and exact semantic WARP link stream
