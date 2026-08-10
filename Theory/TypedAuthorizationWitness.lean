@@ -168,10 +168,15 @@ theorem authorized_isEmpty_of_staleEpoch :
       token.policyEpochExact
     exact absurd stale (by decide)⟩
 
-#print axioms authorized_nonempty
-#print axioms evidence_exists_at_policyClosedPortal
-#print axioms authorized_isEmpty_of_policyClosed
-#print axioms evidence_exists_at_rotatedState
-#print axioms authorized_isEmpty_of_staleEpoch
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorized_nonempty
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_policyClosedPortal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms evidence_exists_at_policyClosedPortal
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_policyClosed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorized_isEmpty_of_policyClosed
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_rotatedState' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms evidence_exists_at_rotatedState
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_staleEpoch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorized_isEmpty_of_staleEpoch
 
 end Minidregg.Theory.TypedAuthorizationWitness

@@ -60,10 +60,15 @@ theorem preparedTurn_moves : preparedTurn.preRoot ≠ preparedTurn.postRoot := b
 one. -/
 theorem preparedTurn_no_nullifier : preparedTurn.nullifier = none := rfl
 
-#print axioms preparedTurn_nonempty
-#print axioms preparedTurn_preRoot
-#print axioms preparedTurn_postRoot
-#print axioms preparedTurn_moves
-#print axioms preparedTurn_no_nullifier
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_nonempty
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_preRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_preRoot
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_postRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_postRoot
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_moves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_moves
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_no_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_no_nullifier
 
 end Minidregg.Theory.CanonicalTransitionWitness

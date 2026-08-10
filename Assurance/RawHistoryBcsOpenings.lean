@@ -468,17 +468,28 @@ theorem honestTranscript_columnsExact
       degreeLeOpened queries queriesDistinct).ColumnsExact j :=
   fun _ => rfl
 
-#print axioms RawHistoryBcsTranscript.bcsWord_eq_historyLink_of_columnsExact
-#print axioms RawHistoryBcsTranscript.columnsExact_or_equivocation
-#print axioms RawHistoryBcsTranscript.bcsRounds_exact_of_noEquivocation
-#print axioms RawHistoryBcsTranscript.attribution_split
-#print axioms equivocation_impossible_of_binding
-#print axioms equivocalScheme_not_binding
-#print axioms equivocalTranscript_rootPreimage
-#print axioms equivocalTranscript_equivocation
-#print axioms equivocalTranscript_not_columnsExact
-#print axioms honestTranscript_attribution
-#print axioms honestTranscript_columnsExact
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.bcsWord_eq_historyLink_of_columnsExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawHistoryBcsTranscript.bcsWord_eq_historyLink_of_columnsExact
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.columnsExact_or_equivocation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawHistoryBcsTranscript.columnsExact_or_equivocation
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.bcsRounds_exact_of_noEquivocation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawHistoryBcsTranscript.bcsRounds_exact_of_noEquivocation
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.attribution_split' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawHistoryBcsTranscript.attribution_split
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.equivocation_impossible_of_binding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms equivocation_impossible_of_binding
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.equivocalScheme_not_binding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms equivocalScheme_not_binding
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.equivocalTranscript_rootPreimage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms equivocalTranscript_rootPreimage
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.equivocalTranscript_equivocation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms equivocalTranscript_equivocation
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.equivocalTranscript_not_columnsExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms equivocalTranscript_not_columnsExact
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.honestTranscript_attribution' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestTranscript_attribution
+/-- info: 'Minidregg.Assurance.RawHistoryBcsOpenings.honestTranscript_columnsExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestTranscript_columnsExact
 
 end
 

@@ -144,11 +144,16 @@ theorem no_commit_with_wrong_apex
   rw [wrong] at exact
   exact absurd exact (by decide)
 
-#print axioms cellIds_distinct
-#print axioms schemas_heterogeneous
-#print axioms commit_nonempty
-#print axioms commit_jointCommit
-#print axioms no_commit_with_wrong_apex
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.cellIds_distinct' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cellIds_distinct
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.schemas_heterogeneous' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms schemas_heterogeneous
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.commit_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_nonempty
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.commit_jointCommit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_jointCommit
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.no_commit_with_wrong_apex' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_with_wrong_apex
 
 end
 

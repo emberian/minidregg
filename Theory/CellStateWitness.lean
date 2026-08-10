@@ -251,17 +251,29 @@ theorem underDeclaredPatch_rejected :
   rw [dif_neg
     (show ¬underDeclaredPatch.fieldFootprint = underDeclaredPatch.namedFields by decide)]
 
-#print axioms state_ext
-#print axioms cellTrue_root
-#print axioms cellB_root
-#print axioms honestPatchB_accepted
-#print axioms schemas_differ
-#print axioms honestPatchTrue_accepted
-#print axioms cell_root
-#print axioms honestPatch_accepted
-#print axioms validatedPatch_nonempty
-#print axioms stalePatch_rejected
-#print axioms overDeclaredPatch_rejected
-#print axioms underDeclaredPatch_rejected
+/-- info: 'Minidregg.Theory.CellStateWitness.state_ext' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms state_ext
+/-- info: 'Minidregg.Theory.CellStateWitness.cellTrue_root' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cellTrue_root
+/-- info: 'Minidregg.Theory.CellStateWitness.cellB_root' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cellB_root
+/-- info: 'Minidregg.Theory.CellStateWitness.honestPatchB_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestPatchB_accepted
+/-- info: 'Minidregg.Theory.CellStateWitness.schemas_differ' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms schemas_differ
+/-- info: 'Minidregg.Theory.CellStateWitness.honestPatchTrue_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestPatchTrue_accepted
+/-- info: 'Minidregg.Theory.CellStateWitness.cell_root' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cell_root
+/-- info: 'Minidregg.Theory.CellStateWitness.honestPatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestPatch_accepted
+/-- info: 'Minidregg.Theory.CellStateWitness.validatedPatch_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms validatedPatch_nonempty
+/-- info: 'Minidregg.Theory.CellStateWitness.stalePatch_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stalePatch_rejected
+/-- info: 'Minidregg.Theory.CellStateWitness.overDeclaredPatch_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms overDeclaredPatch_rejected
+/-- info: 'Minidregg.Theory.CellStateWitness.underDeclaredPatch_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms underDeclaredPatch_rejected
 
 end Minidregg.Theory.CellStateWitness

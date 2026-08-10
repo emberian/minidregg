@@ -112,10 +112,14 @@ theorem no_commit_of_wrong_apex :
     have collapsed : (⟨99⟩ : Digest) = ⟨1⟩ := by rw [← exact]; rfl
     exact absurd collapsed (by decide)⟩
 
-#print axioms shapeValid
-#print axioms jointPatch_accepted
-#print axioms commit_nonempty
-#print axioms no_commit_of_wrong_apex
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.shapeValid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms shapeValid
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.jointPatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms jointPatch_accepted
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.commit_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_nonempty
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.no_commit_of_wrong_apex' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_wrong_apex
 
 end
 

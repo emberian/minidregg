@@ -289,15 +289,24 @@ theorem no_restricted_columnEquivocation_of_merkleCollisionFree
     (cover.columnEquivocation_leaf (merkleCommitmentScheme domains port)
       equivocation)
 
-#print axioms positionBinding_iff
-#print axioms bindingFailure_of_columnEquivocation
-#print axioms extractedCollision_of_columnEquivocation
-#print axioms no_columnEquivocation_of_positionBinding
-#print axioms no_columnEquivocation_of_merkleCollisionFree
-#print axioms PowerTwoCover.padWord_leaf
-#print axioms PowerTwoCover.columnEquivocation_leaf
-#print axioms extractedCollision_of_restricted_equivocation
-#print axioms no_restricted_columnEquivocation_of_merkleCollisionFree
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.positionBinding_iff' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms positionBinding_iff
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.bindingFailure_of_columnEquivocation' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms bindingFailure_of_columnEquivocation
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.extractedCollision_of_columnEquivocation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms extractedCollision_of_columnEquivocation
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.no_columnEquivocation_of_positionBinding' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms no_columnEquivocation_of_positionBinding
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.no_columnEquivocation_of_merkleCollisionFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_columnEquivocation_of_merkleCollisionFree
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.PowerTwoCover.padWord_leaf' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms PowerTwoCover.padWord_leaf
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.PowerTwoCover.columnEquivocation_leaf' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms PowerTwoCover.columnEquivocation_leaf
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.extractedCollision_of_restricted_equivocation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms extractedCollision_of_restricted_equivocation
+/-- info: 'Minidregg.Assurance.RawHistoryCollisionBridge.no_restricted_columnEquivocation_of_merkleCollisionFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_restricted_columnEquivocation_of_merkleCollisionFree
 
 end
 

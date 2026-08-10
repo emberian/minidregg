@@ -277,13 +277,20 @@ theorem historyHead_nonempty :
       family headerCells code scheme // 0 < head.foldRounds } :=
   ⟨⟨linkedHead, linkedHead_hasLink⟩⟩
 
-#print axioms commitWord_injective
-#print axioms genesisContext_wellFormed
-#print axioms successorContext_wellFormed
-#print axioms genesisHead_foldRounds
-#print axioms linkedHead_foldRounds
-#print axioms linkedHead_linkWord
-#print axioms historyHead_nonempty
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.commitWord_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commitWord_injective
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.genesisContext_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms genesisContext_wellFormed
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.successorContext_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms successorContext_wellFormed
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.genesisHead_foldRounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms genesisHead_foldRounds
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.linkedHead_foldRounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedHead_foldRounds
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.linkedHead_linkWord' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedHead_linkWord
+/-- info: 'Minidregg.Assurance.HistoryHeadInhabitation.historyHead_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyHead_nonempty
 
 end
 

@@ -216,16 +216,35 @@ theorem framing_recovers :
       unframe (frame [0, 0] ++ [0]) = some ([0, 0], [0]) :=
   ⟨unframe_frame [0] [0, 0], unframe_frame [0, 0] [0]⟩
 
-#print axioms unframe_frame
-#print axioms natCodec
-#print axioms pairCodec
-#print axioms codecOfRetraction
-#print axioms decodeList_encodeList
-#print axioms listCodec
-#print axioms taggedCodec
-#print axioms sumCodec
-#print axioms concatenation_is_ambiguous
-#print axioms framing_disambiguates
-#print axioms framing_recovers
+/-! ## Axiom pins — exact-output, so the build fails on drift.
+
+`Effects/EffectSpec.lean` established this discipline: a bare `#print axioms` is a
+log line nobody reads, while a `#guard_msgs`-pinned one is an invariant. Every
+declaration below is inside the `{propext, Classical.choice, Quot.sound}` ceiling,
+and the teeth are axiom-free. -/
+
+/-- info: 'Minidregg.Theory.ByteCodecs.unframe_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unframe_frame
+
+/-- info: 'Minidregg.Theory.ByteCodecs.natCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natCodec
+
+/-- info: 'Minidregg.Theory.ByteCodecs.pairCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms pairCodec
+
+/-- info: 'Minidregg.Theory.ByteCodecs.codecOfRetraction' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms codecOfRetraction
+
+/-- info: 'Minidregg.Theory.ByteCodecs.listCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms listCodec
+
+/-- info: 'Minidregg.Theory.ByteCodecs.sumCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sumCodec
+
+/-- info: 'Minidregg.Theory.ByteCodecs.concatenation_is_ambiguous' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms concatenation_is_ambiguous
+
+/-- info: 'Minidregg.Theory.ByteCodecs.framing_disambiguates' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms framing_disambiguates
 
 end Minidregg.Theory.ByteCodecs

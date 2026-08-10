@@ -142,10 +142,15 @@ theorem requestCodec_separates_effectsDigest
   rw [requestCodec.decode_encode, requestCodec.decode_encode] at decoded
   exact congrArg Request.effectsDigest (Option.some.inj decoded)
 
-#print axioms objectVerbOfTag_tag
-#print axioms requestOfTuple_tuple
-#print axioms requestCodec
-#print axioms requestCodec_separates_target
-#print axioms requestCodec_separates_effectsDigest
+/-- info: 'Minidregg.Theory.TypedAuthorizationCodec.objectVerbOfTag_tag' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms objectVerbOfTag_tag
+/-- info: 'Minidregg.Theory.TypedAuthorizationCodec.requestOfTuple_tuple' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms requestOfTuple_tuple
+/-- info: 'Minidregg.Theory.TypedAuthorizationCodec.requestCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestCodec
+/-- info: 'Minidregg.Theory.TypedAuthorizationCodec.requestCodec_separates_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestCodec_separates_target
+/-- info: 'Minidregg.Theory.TypedAuthorizationCodec.requestCodec_separates_effectsDigest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestCodec_separates_effectsDigest
 
 end Minidregg.Theory.TypedAuthorizationCodec

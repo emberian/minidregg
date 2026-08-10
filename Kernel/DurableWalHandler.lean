@@ -405,18 +405,31 @@ theorem committedStep_changes :
 
 end ClosedInstance
 
-#print axioms WalState.recovered_append
-#print axioms WalState.recovered_checkpointOne
-#print axioms crashBefore_storeAfter
-#print axioms walRefinement
-#print axioms wal_no_partial_commit
-#print axioms install_ne
-#print axioms unguarded_append_breaks_refinement
-#print axioms crash_before_marker_loses_record
-#print axioms ClosedInstance.preflighted
-#print axioms ClosedInstance.retry_replays
-#print axioms ClosedInstance.checkpoint_preserves_recovery
-#print axioms ClosedInstance.retry_replays_after_checkpoint
-#print axioms ClosedInstance.committedStep_changes
+/-- info: 'Minidregg.Kernel.DurableWalHandler.WalState.recovered_append' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms WalState.recovered_append
+/-- info: 'Minidregg.Kernel.DurableWalHandler.WalState.recovered_checkpointOne' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms WalState.recovered_checkpointOne
+/-- info: 'Minidregg.Kernel.DurableWalHandler.crashBefore_storeAfter' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms crashBefore_storeAfter
+/-- info: 'Minidregg.Kernel.DurableWalHandler.walRefinement' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms walRefinement
+/-- info: 'Minidregg.Kernel.DurableWalHandler.wal_no_partial_commit' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wal_no_partial_commit
+/-- info: 'Minidregg.Kernel.DurableWalHandler.install_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms install_ne
+/-- info: 'Minidregg.Kernel.DurableWalHandler.unguarded_append_breaks_refinement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unguarded_append_breaks_refinement
+/-- info: 'Minidregg.Kernel.DurableWalHandler.crash_before_marker_loses_record' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms crash_before_marker_loses_record
+/-- info: 'Minidregg.Kernel.DurableWalHandler.ClosedInstance.preflighted' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms ClosedInstance.preflighted
+/-- info: 'Minidregg.Kernel.DurableWalHandler.ClosedInstance.retry_replays' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ClosedInstance.retry_replays
+/-- info: 'Minidregg.Kernel.DurableWalHandler.ClosedInstance.checkpoint_preserves_recovery' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms ClosedInstance.checkpoint_preserves_recovery
+/-- info: 'Minidregg.Kernel.DurableWalHandler.ClosedInstance.retry_replays_after_checkpoint' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ClosedInstance.retry_replays_after_checkpoint
+/-- info: 'Minidregg.Kernel.DurableWalHandler.ClosedInstance.committedStep_changes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ClosedInstance.committedStep_changes
 
 end Minidregg.Kernel.DurableWalHandler

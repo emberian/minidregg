@@ -159,11 +159,16 @@ theorem install_covers_every_incidence (plan : DurablePlan commit) :
     plan.intent.rootWrites.length = Fintype.card Incidence :=
   plan.intent_root_count
 
-#print axioms no_partial_commit_on_wal
-#print axioms marker_installs
-#print axioms crash_before_marker
-#print axioms retry_after_marker
-#print axioms install_covers_every_incidence
+/-- info: 'Minidregg.Assurance.HyperdocumentDurableInstallation.no_partial_commit_on_wal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_partial_commit_on_wal
+/-- info: 'Minidregg.Assurance.HyperdocumentDurableInstallation.marker_installs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms marker_installs
+/-- info: 'Minidregg.Assurance.HyperdocumentDurableInstallation.crash_before_marker' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms crash_before_marker
+/-- info: 'Minidregg.Assurance.HyperdocumentDurableInstallation.retry_after_marker' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retry_after_marker
+/-- info: 'Minidregg.Assurance.HyperdocumentDurableInstallation.install_covers_every_incidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms install_covers_every_incidence
 
 end
 
