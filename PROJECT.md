@@ -152,11 +152,19 @@ database atomicity by itself.
 ### Durable settlement
 
 The durable model closes the semantic shape of compare-and-swap, nullifier insertion, exact
-multi-cell charge, history append, idempotency, and crash behavior. A real deployment must supply
-`ImplementationRefinement` for its physical state/step representation, transaction linearization,
-WAL recovery, and replication/failover. It must also bind byte-size functions and tariff lanes to
-actual versioned codecs. No liveness, fairness, availability, digest collision resistance, or
-physical persistence follows from the model alone.
+multi-cell charge, history append, idempotency, and crash behavior. `ImplementationRefinement` is
+inhabited: `Kernel.DurableWalHandler` is a staged/committed/compacting write-ahead log whose
+recovery fold tracks the model, whose compaction is proved invisible to recovery, and whose
+guard-less append is representable by no schedule at all. That settles that the premise is
+satisfiable; it settles nothing else.
+
+That handler is a device MODEL. There is no `fsync`, torn or partially written record, byte codec,
+page cache, replication, fault domain, or clock. A real deployment must still supply
+`ImplementationRefinement` for ITS physical state/step representation — exhibiting its own state as
+a `WalState` and its own transitions as `WalStep`s — along with transaction linearization, WAL
+recovery, and replication/failover, and must bind byte-size functions and tariff lanes to actual
+versioned codecs. No liveness, fairness, availability, digest collision resistance, or physical
+persistence follows from the model alone.
 
 ## Private, reactive, and external work
 
