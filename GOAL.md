@@ -210,12 +210,19 @@ size, canonicality, and determinism — which is what
 and `Assurance`, and it wants a rested decision about whether the default belongs to the
 schema or the state. Surfacing it as debt rather than extending it, per the tree's rule.
 
-`Hyperdocument.cellSchema` has it too (`7311a60`): `Address` is infinite, the value type
-is `Option DocumentRecord`, same argument. So BOTH halves of what `AcceptedOperation`
-needed — `AuthenticatedPrincipal` and `ValidOperation` — are unsatisfiable as currently
-typed. Two schemas is enough to name the pattern: it happens whenever a sparse namespace
-is typed as a total function over an infinite key space, and
-`materializer_isEmpty_of_natBool_embedding` makes checking a third one three lines.
+**All three cells on the Hyperdocument publication path are uninhabitable.**
+`Hyperdocument.cellSchema` has it too (`7311a60`), and so does
+`HyperdocumentEventLog.cellSchema` (`df10328`) — so the atomic two-cell publication,
+content and its causal event committed together, is a theorem about an uninhabited
+carrier. `Hyperdocument.cellSchema` has `Address` infinite over `Option DocumentRecord`; the event log has
+`Sparse.Address` over `Option VersionEventRecord`. Same argument each time. BOTH halves
+of what `AcceptedOperation` needed — `AuthenticatedPrincipal` and `ValidOperation` — are
+unsatisfiable as typed.
+
+The pattern: it happens whenever a sparse namespace is typed as a total function over an
+infinite key space. `materializer_isEmpty_of_natBool_embedding` makes each new instance
+an embedding plus an injectivity proof — three lines — so a fourth suspected schema is
+cheap to check and does not need the argument restated.
 
 **The night's own mistake, recorded because it is the instructive one**
 
