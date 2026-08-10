@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-09
-- Updated through: authenticated native catalog `226b7af`, benchmark evidence `4d1f290`
+- Updated through: integrated source `3f74f63`, benchmark evidence `4d1f290`
 
 ## Decision
 
@@ -40,11 +40,12 @@ separate `nativeAbiCodecs` and `nativeWorkCatalog` fields. V1 proves:
 - the exact work carrier and request/response codecs are closed; and
 - the generator consumes only the catalog already contained in the authenticated bundle.
 
-The current catalog contains one work:
+Base V1 contains one work; the deployed clause-406 extension adds a second authenticated work:
 
 | Work | ID | Carrier | Request codec | Response codec | Meaning of closure |
 |---|---:|---:|---:|---:|---|
 | Tower256 dot product | `9101` | `205` | native ABI `9001` | semantic codec `21` | generated identity/transport selection only |
+| BabyBear add-1 descriptor | `9102` | BabyBear arithmetic | native ABI `9003` | semantic codec `9005` | generated 144-byte candidate response; Lean decodes and checks 36 canonical words |
 
 Standalone JSON and the Rust embedded payload are byte-identical. Generated Rust constants and
 dispatch are derived solely from `wire.nativeWorkCatalog`; there is no parallel handwritten work
@@ -60,7 +61,8 @@ Current native source is limited to:
 - `mle_kernels` generic transforms, folds, and dot products;
 - `tower256_kernels` generic vector/equality/MLE/rational-pair operations;
 - `hash_kernels` raw caller-customized cSHAKE XOF; and
-- generated `semantic_artifact_v1` DTO/dispatch data.
+- generated `semantic_artifact_v1` DTO/dispatch data plus `semantic_artifact_arithmetic.rs` for the
+  narrow clause-406 candidate computation.
 
 The Lean Tower codec, cSHAKE framing, and controller plans are exact formal objects. That does not
 prove Rust four-limb, polynomial, transform-order, or raw-XOF correspondence. Those conventions
@@ -82,6 +84,9 @@ They must not be reintroduced as handwritten parallel protocol profiles.
 - The Ext6 controller derives the canonical statement preimage in Lean, fixes codecs, cSHAKE
   challenges, transcript order, and the algebraic verifier relation; its PCS, challenge-sampling,
   and other security reductions remain explicit.
+- The deployed clause-406 extension sends an empty request to authenticated work `9102`. Rust
+  returns an opaque error or exactly 144 candidate bytes; Lean alone decodes 36 canonical
+  little-endian BabyBear words and checks the descriptor before certification.
 
 These are admission/control results, not Rust correctness theorems.
 

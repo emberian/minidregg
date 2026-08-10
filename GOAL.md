@@ -1,6 +1,6 @@
 # GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
-**Current priority (2026-08-09): close the cryptographic and deployment residuals between the
+**Current priority (2026-08-10): close the cryptographic and deployment residuals between the
 landed canonical semantic event, Lean-owned dialect controllers, durable settlement model,
 Hyperdocument causal medium, and proof-carrying history.** Lean is the sole source of semantics,
 protocol control, and acceptance. Rust is generated DTO/dispatch data or opaque fallible compute;
@@ -36,9 +36,10 @@ and gadget satisfiability are not current deployment evidence.
   accepted content+event effects, atomic two-cell publication, exact causal parents, exact-head
   history admission, and finite post layouts are landed. Concurrent merge retains every current
   parent, writes singleton fields, and stores provenance-bearing `ConflictRecord` for 2+ sources.
-  Proof-relevant ancestry can select, reject, or leave ambiguous a base; merge publication is an
-  actual multi-cell event. Physical persistence/finality, richer merge policy, PCS/CR/ROM, complete
-  operation grammar, and client cutover remain.
+  Proof-relevant ancestry can select, reject, or leave ambiguous a base; a selected base is opened
+  at its exact realized root and feeds the ordinary multi-cell publication inputs. Ambiguous or
+  unavailable bases remain explicitly absent. Physical persistence/finality, richer merge policy,
+  PCS/CR/ROM, complete operation grammar, and client cutover remain.
 - **Pure private computation — S/A arithmetic:** the authoritative core binds program/relation,
   canonical/native/semantic input identity and bridge, output commitment, resource effects,
   footprint, eager nullifier, and mode pins. It carries no reveal policy or second portal and is
@@ -47,14 +48,20 @@ and gadget satisfiability are not current deployment evidence.
 - **Sealed note-spend core — S/A relation acceptance:** `284f359` admits the exact Lean note-spend
   constraint relation through the release-free computation core, retaining the public root/
   nullifier, committed output, typed spend effect, request/effect digests, eager nullifier, and one
-  validated patch under the sole common authority. Proof-suite/controller pins are zero; no hiding,
-  proof of knowledge, CR/ROM/PCS, or native implementation is claimed.
+  validated patch under the sole common authority. `73f0949` adds a byte/error controller whose
+  statement is projected only from that accepted core, derives roots before its challenge, and
+  treats the native proof payload as inert bytes. Its proof-suite pin is still `0`; the soundness
+  laws are premises and no hiding construction, proof of knowledge, CR/ROM/PCS, or native semantic
+  implementation is claimed.
 - **Tower256 additive FRI — A:** `c7c05b5` closes deterministic control on the shared exact
   Tower/cSHAKE/Merkle backend. Lean decodes arbitrary native bytes/error, derives roots-before-
   challenge transcript/query seeds, checks openings/folds/final polynomial, reaches the ideal
-  clause, and admits it on one controller coin. Remaining **P/D/B** work is concrete instantiation
-  of the supplied failure cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable reflected
-  checker, versioned proof codecs/IDs, artifact profile, and end-to-end benchmarks.
+  clause, and admits it on one controller coin. `5500d13` removes the caller-supplied cover: the
+  game coin is the actual challenge/query sample, the additive event is literal ideal acceptance,
+  and the UD price and false-accept cover are Lean-derived. Remaining **P/D/B** work is exact
+  cSHAKE-to-uniform-ROM transport; a raw non-binding Merkle/PCS interface plus the adaptive framed-
+  XOF collision/CR reduction that derives position binding; far-word FS/proximity; an executable
+  reflected checker; versioned proof codecs/IDs; artifact profile; and end-to-end benchmarks.
 - **Tower256 lookup — A, gated:** `a0df3f3` supplies an extension-local clause-404 controller with
   first-order query identity and exactly two keyed byte replies. Wrong count, duplicates, missing
   replies, or plan check failure block; only the existing Lean plan can construct
@@ -66,8 +73,10 @@ and gadget satisfiability are not current deployment evidence.
   encoding. The controller fixes codecs, cSHAKE challenges, transcript order, and the full
   algebraic verifier relation over arbitrary native bytes/error. Admission names gate algebra,
   PCS, subfield, proximity, binding, oracle transport, challenge sampling, and final LDT as eight
-  events on one finite coin. Those concrete reductions, sampling-bias price, and global-ledger
-  injection remain **P** residuals; no deployed IVC or 137-bit proof system is claimed.
+  events on one finite coin. `8a9e31b` embeds those disjoint Ext6 classes in the global extensible
+  ledger on the same coin and preserves their event probabilities and finite union bound. The
+  concrete reductions and sampling-bias price remain **P** residuals; no deployed IVC or 137-bit
+  proof system is claimed.
 - **Hyperdocument user/agent interfaces — S/A negotiation:** `e38cab5` adds versioned first-order
   content-read, mutation, and history-read identities. Direct reads are pure canonical projections
   with exact footprints; backlink/version requests are typed history declarations; actions reuse
@@ -79,31 +88,45 @@ and gadget satisfiability are not current deployment evidence.
   reduction, and PCS/binding/ROM `Good` events on one history coin (`26b049f`). Exact-head finality
   and supported finite layouts are green. `a504654` joins the history and Tower256 additive
   predicates on one `Omega`, one existing ledger, exact terminal/initial root and schedule equality,
-  and a four-event bound without independence. The externally selected BCS false-accept predicate,
-  history/additive failure covers, MCA/code-exact premises, concrete PCS/CR/ROM, and hiding/sub-UD
-  still require instantiation.
+  and a four-event bound without independence. `f39ba67` removes the external history false-accept
+  proxy: the event is now the literal retained-history Fiat--Shamir verifier/knowledge failure and
+  is joined with the concrete additive controller on that same ledger. A concrete same-coin
+  `PcsCrRomReduction.classify`, exact common-coin/ROM realization, MCA/code-exact premises,
+  hiding/sub-UD, and the underlying PCS/CR/ROM reductions still require instantiation.
 - **Artifact/native authority — D for identity, not compute correctness:** the canonical artifact
   authenticates native ABI codecs and its work catalog. Work `9101` (Tower256 dot product), carrier
   `205`, request codec `9001`, and response codec `21` are generated solely from that catalog.
-  JSON and embedded Rust payload agree byte-for-byte. Rust remains opaque and fallible; there is no
-  Rust semantics, refinement, FFI proof, or cross-language correctness theorem.
+  The clause-406 deployment extension adds authenticated work `9102`, BabyBear carrier identity,
+  empty request codec `9003`, response codec `9005`, and generated 144-byte/36-canonical-word
+  candidate output. JSON and embedded Rust payload agree byte-for-byte. Rust remains opaque and
+  fallible; there is no Rust semantics, refinement, FFI proof, or cross-language correctness
+  theorem.
 - **Deployment join — A/D boundary:** `ComposableDeploymentManifest` derives clauses only from real
   controller entries and separately checks manifest, controller registry, artifact, and native
-  catalog. Base V1 has zero clauses; 406 has deterministic control but no Rust byte profile; 404 is
-  gated and absent; BFV 901 is reserved with zero suite/controller pins.
+  catalog. Base V1 has zero clauses. The deployment extension admits clause 406 through real work
+  `9102`: generated Rust returns an error or 144 candidate bytes, and Lean alone decodes 36
+  canonical BabyBear words and checks the descriptor. This is a narrow byte-backed **D** path, not
+  Rust semantics or proof-system security. Clause 404 is gated and absent; BFV 901 is reserved with
+  zero suite/controller pins.
 - **Native dispatch measurement — B, narrowly:** source `54295c6`, evidence `4d1f290` validates
   direct/generated byte identity for work 9101. Dispatch/direct ratios across lengths 1–16384 were
   `0.985–1.040` on hbox and `0.985–1.025` on persvati. This is empirical dispatch evidence, with no
   performance threshold and no semantic or proof-system claim.
+- **Integrated source evidence — build only:** hbox archive
+  `E-20260810T003037-13290-hbox-3f74f634e0e1-lake` built the integrated source at `3f74f63`
+  (`8729` jobs, command exit `0`, source-integrity exit `0`). The persvati replay is pending because
+  local Tailscale reports `NeedsLogin`. This establishes source/build integration only, not
+  semantics, cryptographic security, or performance.
 
 ### Active completion frontier
 
-1. Instantiate the landed same-coin additive/history cover with concrete PositionBinding/CR,
-   cSHAKE→ROM, proximity, PCS, MCA/code-exactness, and hiding prices.
+1. Instantiate exact additive cSHAKE-to-uniform-ROM transport and the raw-Merkle adaptive collision
+   reduction; instantiate the history same-coin PCS/CR/ROM classifier, MCA/code-exactness, and
+   hiding prices.
 2. Give Tower256 proof/query/container transport versioned codecs and authenticated native work
    profiles, then promote 404 only through the honest deployment join.
 3. Instantiate Ext6 PCS, base-subfield provenance, coherent proximity, binding/ROM, final LDT, and
-   global failure-ledger composition.
+   concrete reduction laws in the already-landed global extensible ledger.
 4. Bind the pure BFV core to concrete codecs/digests/patches and a controller; add disclosure later
    as a separately authorized causal effect.
 5. Instantiate one real durable handler including WAL/recovery and tariff codecs, then migrate one

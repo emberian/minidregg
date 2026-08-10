@@ -175,8 +175,10 @@ semantic core binds the exact program/relation/mode/input/output statement and a
 `NoteSpendCoreAcceptedCellEffect` supplies a second concrete positive core path: the exact
 Lean-authored note-spend relation, public nullifier/root, committed output, typed spend effect,
 complete request/effect digests, eager nullifier, and one validated patch enter the cell kernel.
-Its witness is ordinary Lean evidence and its proof-suite/controller pins are zero; this is relation
-acceptance, not a deployed ZK proof or hiding/knowledge claim.
+Its controller now derives a canonical statement from that accepted core, orders roots before its
+challenge, and accepts only opaque proof bytes/error. The proof-suite ID remains zero; PCS, CR, ROM,
+proof-of-knowledge, and hiding laws are distinct common-game premises. This is controlled relation
+admission, not a deployed ZK proof or hiding/knowledge claim.
 
 Residual: concrete BFV codecs/digests/patch adapter, proof suite and controller, PCS/CR/ROM,
 confidentiality/knowledge proof, shared-MPC dialects, and a later separately authorized disclosure
@@ -184,8 +186,12 @@ effect linked to the output commitment.
 
 ### Reactive lifecycle and tools
 
-Reactive decisions are joined to canonical patches and expose exact roots/footprint. Refusal and
-blocking preserve the pre-state. Physical commit remains a handler obligation.
+Reactive decisions are joined to canonical patches and expose exact roots/footprint. Promise shape
+now eagerly fixes the late-advice codec/carrier. Notification requires a complete verified history
+entry, finalization retains the observed pre-root, deadline, exact footprints, and replay nullifier,
+and the accepted effect is already a typed-hyperedge incidence/history projection. Expiration and
+break are likewise authenticated history alternatives. Physical commit and release remain explicit
+handler obligations.
 
 The target UI/agent model is:
 
@@ -213,7 +219,9 @@ Landed **S/A** construction includes accepted content and version effects, atomi
 publication, exact causal parents, first-order link admission, exact-head history/finality indices,
 finite injective multi-coordinate post layouts, proven ancestry, and merge publication. One field
 source writes a typed value; two or more sources always store a `ConflictRecord`. A common base is
-selected only from proof-relevant ancestry and can be ambiguous or absent.
+selected only from proof-relevant ancestry and can be ambiguous or absent. An ancestry-backed
+accepted merge now proves the selected base realization/root and every parent realization/root feed
+the existing publication inputs; the conflict record remains unchanged through publication.
 
 Residuals include the complete run/element/field/conflict operation grammar, conflict resolution
 policies, rights/views/search, checkpoints/GC, integration of base selection into richer merge
@@ -247,9 +255,9 @@ or runtime object identity:
 
 | Dialect | Current strongest boundary | Exact residual |
 |---|---|---|
-| Tower256 additive FRI | **A:** shared concrete Tower/cSHAKE/Merkle backend; arbitrary native bytes/error; Lean transcript, decoding, openings, folds, final polynomial, ideal-clause bridge, one controller coin | instantiate supplied failure cover, PositionBinding/CR, cSHAKE→ROM, far-word FS/proximity, executable checker, deployed codecs/IDs, end-to-end benchmark |
+| Tower256 additive FRI | **A + conditional P reduction:** accepted bytes select the literal ideal coin; the exact UD theorem supplies the additive event/price; false acceptance derives to additive or oracle-transport failure without a supplied cover | exact cSHAKE/common-coin transport; raw non-binding PCS/controller and collision→PositionBinding/CR; executable checker; deployed codecs/IDs; E2E benchmark |
 | Tower256 indexed LogUp | **A:** exact address/index semantics and gated two-byte-reply controller for clause 404 | clause 404 remains out of base/deployment; PCS/sampled decider, binding/CR/ROM, common-game/history join, mutable RAM, artifact work profile |
-| BabyBear/Ext6 | **A:** exact descriptor/gate algebra, canonical prefix-decodable statement preimage, and deterministic Lean transcript/algebra controller; eight-event conditional ledger separates challenge sampling from ROM | PCS, subfield proof, proximity, binding, ROM, sampling-bias price, final LDT, global game, recursion, deployed security |
+| BabyBear/Ext6 | **A:** exact descriptor/gate algebra and controller; eight Ext6 events inhabit a disjoint extensible global ledger with a same-coin union bound | PCS, subfield proof, proximity, binding, ROM, sampling-bias price, final LDT, recursion, deployed security; the registry adds no reduction |
 | BFV/residue ring | **S/A arithmetic:** pure core and all 384 exact equations; native buffer candidate can be Lean-rechecked locally | proof suite/controller pins are zero; no confidentiality, knowledge, PCS/CR/ROM, concrete core codec/patch deployment, or history join |
 | MPC/shared values | **S only:** generic sealed computation shape | concrete protocol/dialect, malicious security, abort/fairness, output binding, separately authorized threshold release |
 
@@ -268,11 +276,12 @@ range-checked fixed-width addition. Multiplication and broader language lowering
 
 ### Authenticated native catalog
 
-The canonical artifact's encoding, content address, JSON, and generated Rust authenticate separate
-native ABI codecs and a native work catalog. The current catalog contains Tower256 dot product work
-`9101`, carrier profile `205`, request codec `9001`, and response codec `21`. Build generation takes
-that authenticated catalog as its sole source; standalone JSON and embedded Rust payload are
-byte-identical.
+The base canonical artifact authenticates Tower256 dot product work `9101`, carrier `205`, request
+codec `9001`, and response codec `21`. The clause-406 deployment extends the authenticated artifact
+with BabyBear add-1 zero-witness work `9102`, empty request codec `9003`, and 144-byte response codec
+`9005`. Generated Rust returns the fixed candidate bytes; Lean decodes 36 canonical little-endian
+BabyBear words and runs the existing descriptor checker. Generation still takes the authenticated
+catalog as its sole source.
 
 This authenticates declared transport identity only. Rust remains fallible opaque computation;
 there is no Rust semantics, refinement, FFI proof, or cross-language correctness theorem.
@@ -284,7 +293,8 @@ and separately joins artifact, manifest, controller-registry, and native-catalog
 Gated or reserved clauses cannot project into deployment.
 
 - base V1: zero dialect clauses;
-- clause 406: deterministic Lean controller implemented, no emitted Rust byte profile;
+- clause 406: deployed narrow byte-backed artifact/controller/native-work loop; honest generated
+  bytes certify, malformed bytes reject, and transport errors block;
 - clause 404: security-gated, exact extension-local dispatch exists, still absent from base and
   deployment; and
 - BFV 901: reserved, with unclosed carrier and zero proof codec/suite/controller pins.
@@ -302,15 +312,14 @@ challenges from the retained trace; binds roots/opened columns to that exact tra
 PCS, binding, and ROM `Good` events on one history coin. Exact finality is indexed by head, entry,
 occurrence, and derived receipt root.
 
-`SemanticHistoryTower256CheckpointGame` now joins that history predicate and the Tower256 additive
-controller predicate on one `Omega`, one existing `FailureLedger`, exact terminal/initial root and
-schedule equalities, and one four-event union bound without independence. Its family deliberately
-requires the external BCS false-accept predicate/history reduction cover and the additive cover;
-MCA and RS `codeExact` also remain premises.
+`SemanticHistoryTower256DeployedBcs` replaces the external history proxy with the literal retained-
+history Fiat–Shamir verifier/knowledge-failure event, states its exact native-game price and common-
+coin transport, and joins that actual event to the additive controller on one four-event game. The
+remaining `PcsCrRomReduction.classify` is now precisely the same-coin computational obligation:
+actual history false acceptance must imply history PCS, binding/CR, or ROM/common-coin failure.
 
-Open **P** work: instantiate those covers with concrete PCS opening, commitment CR/binding, ROM
-transport, MCA/error hypotheses, and hiding/sub-UD. The structural common game is landed; its
-cryptographic premises are not.
+Open **P** work: construct that classifier and common-coin realization with concrete PCS opening,
+commitment CR/binding, ROM transport, MCA/code-exact hypotheses, and hiding/sub-UD.
 
 ## Consumer migration
 
@@ -329,11 +338,12 @@ physical completion. Compatibility modules are migration views, not proof of cut
 
 ## Ordered frontier
 
-1. Instantiate the landed additive/history common-game cover with concrete CR/ROM/proximity/PCS,
-   MCA, code-exactness, and hiding prices.
+1. Construct the actual-history same-coin PCS/CR/ROM classifier and instantiate common-coin
+   transport, MCA, code-exactness, and hiding.
 2. Give Tower256 additive and lookup work complete versioned proof/container/domain codecs and
    artifact-native work identities; emit an executable Lean-owned checker boundary.
-3. Instantiate a concrete Ext6 PCS/subfield/proximity/final-LDT controller and global ledger.
+3. Instantiate concrete Ext6 PCS/subfield/proximity/final-LDT reductions inside the landed
+   controller and extensible global ledger.
 4. Deploy the pure private-computation core for one BFV consumer, then add disclosure as a separate
    authorized event.
 5. Instantiate durable storage refinement for one consumer, including WAL recovery and tariffs.

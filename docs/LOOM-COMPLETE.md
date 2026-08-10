@@ -105,10 +105,10 @@ One controller-game coin owns schedule and ledger. This closes **A**, not deploy
 
 Open **P/D/B** obligations:
 
-- concrete instantiation of the supplied same-coin cover into additive proximity, commitment
-  binding, or oracle transport;
-- concrete PositionBinding and cSHAKE collision-resistance price;
-- cSHAKE→ROM transport and far-word/proximity Fiat–Shamir reduction;
+- exact cSHAKE-to-uniform-ROM transport;
+- a raw non-binding Merkle/PCS interface and adaptive framed-XOF collision reduction deriving
+  PositionBinding/CR (functional Merkle correctness is not collision resistance);
+- far-word/proximity Fiat–Shamir reduction;
 - emitted executable checker for the currently noncomputable Tower relation;
 - proof/container/domain/level codecs and authenticated work IDs; and
 - matched end-to-end prover/verifier benchmarks.
@@ -140,8 +140,10 @@ rounds, public affine terminal forms, and eta aggregation. The landed controller
 The admission theorem names gate algebra, gate PCS, subfield, proximity, binding, oracle transport,
 challenge sampling, and final LDT as eight events on one finite coin. Challenge sampling is
 separate because radix-`BabyBear` reduction of cSHAKE bytes is not asserted uniform. Its reduction
-laws are premises. Concrete PCS, subfield proof, proximity, binding/ROM, sampling-bias price, final
-LDT, global-game injection, recursion, and deployed 137-bit security remain.
+laws are premises. Those disjoint event classes are now registered in the global extensible ledger
+on the same coin, with exact base/extra event probabilities and a finite union bound. Concrete PCS,
+subfield proof, proximity, binding/ROM, sampling-bias price, final LDT, reduction laws, recursion,
+and deployed 137-bit security remain.
 
 ### Semantic history and BCS game
 
@@ -155,10 +157,11 @@ one `Omega`, one existing `FailureLedger`, exact WARP-terminal/additive-initial 
 equalities, and one four-event union bound without independence. This closes the former structural
 “two ledgers” residual at that exact boundary.
 
-It remains a conditional **P shape**, not the premises themselves. `JointGameFamily` takes the
-externally selected BCS false-accept predicate and history reduction cover as fields and reuses the
-additive family's cover; MCA and RS `codeExact` remain premises. Concrete PCS opening, CR/binding,
-ROM transport, hiding/sub-UD, and those cover instantiations remain.
+The history failure event is now the literal retained-history Fiat--Shamir verifier/knowledge
+failure rather than an external predicate, and the additive event/UD price and false-accept cover
+are Lean-derived. It remains a conditional **P shape**, not the premises themselves. A concrete
+same-coin `PcsCrRomReduction.classify`, exact common-coin realization, MCA and RS `codeExact`, PCS
+opening, CR/binding, ROM transport, and hiding/sub-UD remain.
 
 ## Semantic and deployment joins
 
@@ -171,21 +174,27 @@ Loom's proof claims meet the semantic kernel only through typed clauses:
   finite post layout; and
 - durable settlement has a semantic model but still needs physical implementation refinement.
 
-The deployment registry is fail-closed: base V1 contains zero dialect clauses; 406 has deterministic
-control but no native byte profile; 404 is gated; BFV 901 is reserved with zero proof-suite and
-controller pins. A manifest record never supplies cryptographic evidence.
+The deployment registry is fail-closed: base V1 contains zero dialect clauses. The positive
+extension deploys clause 406 through authenticated work `9102`, request codec `9003`, response
+codec `9005`, and error-or-144-byte native candidate output. Lean alone decodes 36 canonical
+BabyBear words and checks the descriptor. This is a narrow byte-backed deployment path, not Rust
+semantics or proof-system security. Clause 404 is gated; BFV 901 is reserved with zero proof-suite
+and controller pins. A manifest record never supplies cryptographic evidence.
 
 The Lean-authored note-spend relation now enters the release-free computation core through one
 request-indexed authority, exact public root/nullifier, output commitment, typed effect, complete
 request/effect digests, eager nullifier, and validated patch. This is **S/A relation acceptance**.
-Its proof-suite/controller pins are zero; no ZK, hiding, knowledge, CR/ROM/PCS, or native proof path
-is inferred.
+Its byte/error controller derives the canonical statement from that accepted core, fixes roots
+before its challenge, and treats proof payload bytes as inert. The proof-suite pin remains `0`, the
+soundness reduction laws are premises, and no ZK/hiding construction, knowledge proof, CR/ROM/PCS,
+or native semantic path is inferred.
 
 ## Native compute boundary
 
-The canonical artifact authenticates native ABI codecs and a native work catalog. The current
-generated catalog contains Tower256 dot product work `9101`, carrier `205`, request codec `9001`,
-and response codec `21`. This closes artifact identity and transport selection.
+The canonical artifact authenticates native ABI codecs and a native work catalog. Base V1 contains
+Tower256 dot product work `9101`, carrier `205`, request codec `9001`, and response codec `21`.
+The clause-406 deployment extension adds work `9102`, request codec `9003`, response codec `9005`,
+and generated 144-byte candidate output. This closes artifact identity and transport selection.
 
 Rust remains opaque and fallible. There is no Rust operational semantics, Lean↔Rust refinement,
 FFI proof, or cross-language correctness theorem. Deleted reference prover/verifier, WGPU, sampled
@@ -198,6 +207,11 @@ Source `54295c6` and evidence `4d1f290` validate byte identity and measure direc
 dispatch for work 9101. Ratios across lengths 1–16384 were `0.985–1.040` on hbox and
 `0.985–1.025` on persvati. This is an empirical dispatch microbenchmark with no threshold and no
 semantic, security, or complete-prover implication.
+
+Integrated source/build evidence is archived from hbox as
+`E-20260810T003037-13290-hbox-3f74f634e0e1-lake`: source `3f74f63`, 8729 jobs, command exit 0,
+and source-integrity exit 0. Persvati replay is pending because local Tailscale reports
+`NeedsLogin`. This is not benchmark, semantics, or security evidence.
 
 ## Historical claim corrections
 
@@ -215,12 +229,13 @@ is superseded.
 
 ## What remains before a defensible whole
 
-1. Instantiate the landed same-coin history/additive cover with the actual BCS predicate, reduction
-   cover, MCA, and RS code-exactness.
-2. Instantiate PositionBinding/CR, cSHAKE→ROM, proximity/PCS, hiding, and sampled-decider reductions
-   at the actual controller parameters.
+1. Instantiate the history same-coin `PcsCrRomReduction.classify`, common-coin realization, MCA,
+   and RS code-exactness.
+2. Instantiate exact additive ROM transport, raw-Merkle adaptive PositionBinding/CR, proximity/PCS,
+   hiding, and sampled-decider reductions at the actual controller parameters.
 3. Complete versioned proof/container/domain codecs and authenticated native work profiles.
-4. Close Ext6 PCS/subfield/proximity/final-LDT and global-game joins.
+4. Close Ext6 PCS/subfield/proximity/final-LDT and concrete reductions inside the landed global
+   extensible ledger.
 5. Close a concrete BFV proof controller and separately authorized disclosure path.
 6. Deploy one durable handler and migrate real user/agent consumers.
 7. Benchmark admitted end-to-end workloads against alternatives and apply Loom's kill criteria.

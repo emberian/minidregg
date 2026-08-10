@@ -17,9 +17,12 @@ checkpoint/PCS backend, not a replacement semantic accumulator. The retained-his
 reconstructs exact genesis/chain/link words and challenges and keeps its PCS, binding, and ROM
 premises on one history coin. `SemanticHistoryTower256CheckpointGame` now joins that history
 boundary to the Tower256 additive controller on one `Omega`, one existing ledger, exact root and
-schedule equality, and one four-event bound without independence. The concrete BCS false-accept
-predicate/history cover, additive cover, MCA/code-exactness, and cryptographic reductions remain
-explicit family premises.
+schedule equality, and one four-event bound without independence. The history event is now the
+literal retained-history Fiat--Shamir verifier/knowledge failure; the additive event is literal
+ideal acceptance and its UD-priced cover is Lean-derived. Exact additive ROM transport and a raw
+non-binding Merkle/PCS-to-PositionBinding/CR reduction remain, as do the history same-coin
+`PcsCrRomReduction.classify`, common-coin realization, MCA/code-exactness, and concrete
+cryptographic reductions.
 
 ## Hard invariants and non-claims
 
@@ -29,7 +32,7 @@ explicit family premises.
 - Capacity-regime soundness is not assumed; deployed rates use only an explicitly proved regime.
 - The landed Tower256 additive controller closes deterministic admission, not PCS/ROM/proximity
   security. The extension-local LogUp controller closes byte dispatch, not deployment.
-- Until a concrete PCS, CR, and shared-ROM game instantiate the common cover, this is not a
+- Until concrete PCS, CR, and shared-ROM reductions instantiate the common game, this is not a
   deployed succinct proof or security claim.
 
 ## Alternatives rejected
@@ -49,9 +52,10 @@ explicit family premises.
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: exact dual-root/history/checkpoint join.
 - `Assurance.SemanticHistoryBcsGame`: exact retained-history BCS reconstruction and conditional
   single-coin ledger.
-- Instantiate the landed common-game family with a concrete BCS predicate/cover,
-  PositionBinding/CR price, cSHAKE→ROM transport, proximity/PCS reduction, MCA/code-exactness,
-  sampled decider, and hiding schedule before a deployment claim.
+- Instantiate exact additive cSHAKE-to-uniform-ROM transport and raw-Merkle adaptive
+  collision-to-PositionBinding/CR; instantiate the history `PcsCrRomReduction.classify`,
+  common-coin realization, MCA/code-exactness, concrete PCS/CR/ROM, sampled decider, and hiding
+  schedule before a security or deployment claim.
 - Remote evidence records must name the exact commit and command and may claim only that check.
 
 ## Revisit trigger
@@ -66,6 +70,8 @@ subsumes both WARP link attribution and additive checkpoints in the required tra
 - `Assurance/SemanticAdditiveFriCheckpoint.lean`
 - `Assurance/SemanticHistoryBcsGame.lean`
 - `Assurance/SemanticHistoryTower256CheckpointGame.lean`
+- `Assurance/SemanticHistoryTower256DeployedBcs.lean`
+- `Assurance/Tower256AdditiveFriActualReduction.lean`
 - `Compiler/Tower256CshakeMerkleController.lean`
 - `Compiler/Tower256LogupClauseDispatch.lean`
 - `Compiler/AdditiveFriReceiptClause.lean`

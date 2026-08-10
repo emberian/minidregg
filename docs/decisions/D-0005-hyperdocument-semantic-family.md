@@ -35,8 +35,10 @@ because a later field stores its digest.
   supported finite injective post layout; concrete PCS/CR/ROM remains explicit.
 - Concurrent merge opens every current parent content root. One field source writes; two or more
   sources always produce a provenance-bearing `ConflictRecord`. Marks and annotations are retained.
-- Proof-relevant ancestry distinguishes a selected base, ambiguous bases, and no base. It does not
-  assert an arbitrary unique least common ancestor.
+- Proof-relevant ancestry distinguishes a selected base, ambiguous bases, and no base. A selected
+  base is opened at its exact realized root and feeds the ordinary accepted merge publication
+  inputs; ambiguous or unavailable bases remain explicitly absent. It does not assert an arbitrary
+  unique least common ancestor.
 - `HyperdocumentInterface` supplies versioned first-order content/mutation/history interface IDs,
   lawful argument binding, exact request-indexed authority, pure direct-read projections, and
   history-query declarations. It supplies no callback, remote activation, accepted effect,
@@ -84,8 +86,8 @@ proved definitions. Rust tests remain executable evidence, not semantics or refi
 The current merge deliberately takes the conservative option before a richer resolution algebra:
 it retains exact parent realizations and makes every multi-source field conflict explicit. A
 common-base identifier is absent unless ancestry proves it, and base selection may be ambiguous.
-Publication creates an accepted multi-cell semantic event but does not prove physical database
-atomicity or finality.
+When ancestry selects a base, exact base realization/root evidence is retained through the
+accepted multi-cell publication. This does not prove physical database atomicity or finality.
 
 ## Hard invariants and non-claims
 

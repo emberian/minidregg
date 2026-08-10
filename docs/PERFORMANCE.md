@@ -8,6 +8,27 @@ benchmark target.
 Evidence boundaries used here are **S** semantic/formal, **A** controller, **P** cryptographic
 security, **D** deployment, and **B** benchmark. A **B** row never supplies **S/A/P/D** evidence.
 
+## Integrated committed-source build evidence — 2026-08-10
+
+The hbox archive `E-20260810T003037-13290-hbox-3f74f634e0e1-lake` built exact source
+`3f74f634e0e1e6bab4ce98336bf605b6ee7c816f` with 8729 jobs. The command exited `0` and the
+post-run source-integrity check exited `0`. This is integrated build evidence for that immutable
+archive only; it is not benchmark, native-semantics, cryptographic-security, or consumer-deployment
+evidence.
+
+The equivalent persvati replay is pending because local Tailscale reports `NeedsLogin`. No
+cross-host equivalence is inferred until that replay is archived.
+
+### Local Lake cache-topology warning
+
+The local `.lake/packages/*` entries are symlinks through Breadstuffs into shared package checkouts.
+A local umbrella build allowed Lake to reconcile and delete rebuildable shared mathlib cache
+artifacts; source remained clean and the cache has since been rebuilt. This topology is unsafe for
+independent local builds even though the exact hbox archive above was unaffected. Future local
+integration builds should use immutable or copy-on-write local package seeds, as `remote-check`
+already does. This is an operational recommendation, not a proposal to destructively migrate the
+current shared checkouts.
+
 ## Remote committed-source build evidence — 2026-08-09
 
 These are distributed build checks, not performance measurements. Both workers received the same

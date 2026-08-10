@@ -14,8 +14,8 @@ Loom owns the typed joints between them: roots-before-challenges transcript caus
 security/error regimes, checked common-opening representation relations, native-failure
 non-authority, clause evidence, and proof-carrying history attribution. The first deterministic
 Tower256/additive controller and the extension-local indexed-lookup controller have landed at **A**;
-the first deployment target remains their shared concrete **P/D** history path, followed by a
-cross-carrier BFV receipt.
+clause 406 is the first narrow byte-backed **D** example. The next proof-system deployment target
+remains the shared concrete **P/D** Tower256/history path, followed by a cross-carrier BFV receipt.
 
 ## Why a composition layer is necessary
 
@@ -64,9 +64,13 @@ provide dialect components; they do not define the semantic machine or their com
 - `Assurance.SemanticHistoryWARPAdditiveJoin`: pre-challenge semantic link roots and exact
   post-challenge folds joined to the additive checkpoint.
 - The landed exact Tower256 codec/cSHAKE/Merkle/additive controller and gated LogUp dispatch.
-- The landed single-coin history/Tower256 checkpoint family, instantiated with the actual BCS
-  predicate/history cover, additive cover, MCA/code-exactness, concrete PositionBinding/CR,
-  cSHAKE→ROM, proximity/PCS, sampled-decider, and hiding reductions.
+- The landed literal same-coin history/Tower256 failure events and Lean-derived additive cover,
+  instantiated with
+  exact ROM/common-coin transport, a raw-Merkle adaptive PositionBinding/CR reduction, the history
+  `PcsCrRomReduction.classify`, MCA/code-exactness, concrete proximity/PCS, sampled-decider, and
+  hiding reductions.
+- The global extensible failure ledger retains Ext6's eight disjoint event classes and their union
+  bound; its concrete reduction laws and prices remain to be instantiated.
 - One BFV/RNS native-ring clause joined to exact bounded-integer consequences through checked
   representations.
 - End-to-end prover/verifier/proof-size/memory measurements on user/agent application workloads.
