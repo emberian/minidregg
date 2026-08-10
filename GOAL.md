@@ -4,21 +4,41 @@
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
 still governs; this block is the live trail.
 
-**Current thrust:** connect the landed WAL handler to a real consumer slice — the
-Hyperdocument agent operation's conditional durable plan — so one user-visible workflow
-runs end to end through canonical authority, accepted effect, receipt/history, and a
-durable handler that is now constructed rather than assumed.
+**Current thrust:** raise the evidence grade. Everything below was verified on one warm
+local tree; an isolated committed-source run over `HEAD` is in flight so the night's
+claims rest on a clean archive rather than on incremental oleans.
 
 **Next 3 moves**
 
-1. Feed `HyperdocumentAgentOperation`'s durable intent into `DurableWalHandler`:
-   one link-or-annotation operation whose `Intent` comes from the sole accepted
-   effect and whose installation is a `WalStep.commit`.
-2. Prove the crash/replay story at that slice: a lost response after the commit
-   marker replays idempotently; a crash before it loses nothing semantically.
-3. Then back to history: instantiate `RawHistoryBcsTranscript` at the concrete
-   Tower256 Merkle scheme so a retained `ColumnEquivocation` becomes an exact
-   `ExtractedCollision`.
+1. Record the isolated-runner result honestly, whichever way it goes, and reconcile
+   `PROJECT.md` / the `GOAL.md` snapshot below with what actually landed tonight.
+2. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
+   of `attribution_split` should name the ledger event it pays, with the retained
+   equivocation paying `commitmentBinding` through the collision bridge.
+3. Then breadth: a second consumer slice on the WAL handler, or the authorization
+   issue/attenuate/revoke path over canonical authority cells.
+
+**Open audit finding (2026-08-10, from tonight's adversarial pass — READ THIS)**
+
+`VerifiedHistoryHead` is **never constructed anywhere in the tree.** `start` and
+`append` are the only ways to build one and neither is applied outside its own defining
+module; every other occurrence is a bound hypothesis. So every theorem quantified over
+`head : HistoryHead` — the whole retained-history layer, `SemanticHistoryBcsGame`,
+`SemanticHistoryTower256DeployedBcs`, `HyperdocumentHistoryAdmission`,
+`SemanticHistoryPcsEventRealization`, and tonight's `RawHistoryBcsOpenings` — is
+**conditional on that type being inhabited, and nothing exhibits an inhabitant.**
+
+This is not a claim that the type IS empty. `VerifiedEntry` is constructible
+(`AcceptedCellEffectHistory.toVerifiedEntry`, `SemanticHistoryFamilyInstances.toVerifiedEntry`),
+and `start`/`append` look satisfiable — `FoldRecommitment.rootExact` can be discharged by
+choosing `foldRoot`, since `start` takes it as an argument. It is a claim that nobody has
+done it, so the layer currently has the exact shape a vacuous development would have.
+Closing it needs one exhibited head with `0 < foldRounds` at freely chosen parameters
+(`C := ⊤`, empty `dialectClauseRoots`, an `Evidence` carrying its own
+`rejectedCoreAtomic`, and a `BindingCommitment Digest F …` built from a finite-type
+injection into `Digest`).
+
+Until then, read every history maturity label as "S, conditional on head inhabitation".
 
 **Done-log**
 
@@ -40,6 +60,20 @@ durable handler that is now constructed rather than assumed.
   schedule at all. `ClosedInstance` discharges the commit premises by `decide` so the
   refinement is not carried by a handler that never writes. A device MODEL — no fsync,
   torn write, codec, replication, or liveness. `3230` jobs, exit `0`, boundary `0`.
+- `2e5151d` — the Hyperdocument agent operation's durable half no longer quantifies over
+  a handler nobody built: `no_partial_commit_on_wal`, `marker_installs`,
+  `crash_before_marker`, `retry_after_marker`, plus the constructed `install` step and
+  `install_covers_every_incidence`. Not consumer cutover — no editor, index, sync, or
+  client reads this path. `3231` jobs, exit `0`, boundary `0`.
+- `d8b49ac` + `716f148` — the retained equivocation now has somewhere to go.
+  `openingOf` forgets an executable `CommitmentScheme` to a Loom `OpeningScheme`
+  (`positionBinding_iff`: nothing smuggled); `bindingFailure_of_columnEquivocation`
+  shows a retained `ColumnEquivocation` IS the landed `BindingFailure`; and
+  `PowerTwoCover.restrict` makes the receipt-alphabet checker the deployed checker
+  restricted, so `extractedCollision_of_restricted_equivocation` reaches the framed
+  cSHAKE collision from any alphabet size. Teeth both ways: collision-freedom refutes
+  the equivocation. A reduction, not a bound — the collision price is unpaid.
+  `3232` jobs, exit `0`, boundary `0`.
 
 ---
 
@@ -162,6 +196,39 @@ and gadget satisfiability are not current deployment evidence.
   (`8729` jobs, command exit `0`, source-integrity exit `0`). The persvati replay is pending because
   local Tailscale reports `NeedsLogin`. This establishes source/build integration only, not
   semantics, cryptographic security, or performance.
+- **Binding-free BCS synthesis — S:** `437b8f8` moves `Loom`'s `ColsOpen`/`ColsConsistent`
+  to `OpeningScheme` (binding coerces; no call site changed) and makes
+  `bcsWord_of_colsExact` the core, with `bcsWord_committed` its corollary — binding's only
+  job is discharging column agreement. `ColumnEquivocation` names the retained attempt;
+  `AccRbrBcsExample.equivocalMsg_word_ne_committed` computes a case where
+  `bcsWord_committed`'s conclusion is FALSE at a non-binding scheme, so the premise is
+  load-bearing rather than decorative.
+- **Retained-history carrier — S:** `437b8f8` adds `RawHistoryBcsOpenings`, splitting the
+  adversary's message tape from root-preimage attribution and returning the three-way
+  `attribution_split`. `equivocation_impossible_of_binding` locates the old carrier's
+  erasure at its cause (the scheme's type), and `equivocalTranscript_equivocation`
+  exhibits the branch inhabited at a non-binding scheme. `toHistoryBcsOpenings` makes the
+  old structure a projection of this one. No probability or CR/ROM claim.
+- **History collision reduction — S/A:** `d8b49ac`, `716f148`. `openingOf` forgets an
+  executable `CommitmentScheme` to a Loom `OpeningScheme` with `positionBinding_iff`
+  proving nothing is smuggled; `bindingFailure_of_columnEquivocation` identifies a
+  retained equivocation with the landed `BindingFailure`; `PowerTwoCover.restrict` makes
+  the receipt-alphabet checker the deployed checker restricted, so
+  `extractedCollision_of_restricted_equivocation` reaches the exact framed cSHAKE
+  collision at any alphabet size. **P remains entirely open**: no collision probability,
+  no ROM realization, no deployed `MerkleDomains`/`ColumnPort` identity.
+- **Durable implementation refinement — S, first inhabitant:** `355fcc1`.
+  `Kernel.DurableWalHandler` is a staged/committed/compacting write-ahead log;
+  `recovered_checkpointOne` proves compaction invisible to recovery and `walRefinement`
+  is a real `ImplementationRefinement`. `unguarded_append_breaks_refinement` shows a
+  guard-less append is representable by no schedule, and `ClosedInstance` discharges the
+  commit premises by `decide`. This is a device MODEL — no fsync, torn record, byte codec,
+  page cache, replication, clock, or liveness. **D is not claimed.**
+- **Hyperdocument durable installation — S/A:** `2e5151d` discharges the handler premise
+  at one link-or-annotation slice: `no_partial_commit_on_wal`, `marker_installs`,
+  `crash_before_marker`, `retry_after_marker`, the constructed `install` step, and
+  `install_covers_every_incidence`. Not consumer cutover: no editor, index, sync, or
+  client reads this path, and the handler is still the device model above.
 
 ### Active completion frontier
 
@@ -174,8 +241,10 @@ and gadget satisfiability are not current deployment evidence.
    concrete reduction laws in the already-landed global extensible ledger.
 4. Bind the pure BFV core to concrete codecs/digests/patches and a controller; add disclosure later
    as a separately authorized causal effect.
-5. Instantiate one real durable handler including WAL/recovery and tariff codecs, then migrate one
-   authorization, reactive, Grains, private-compute, cloud, and hypermedia path.
+5. ~~Instantiate one real durable handler~~ — a WAL/recovery/compaction handler is landed
+   (`355fcc1`) and one Hyperdocument slice runs on it (`2e5151d`). What remains under this
+   number: tariff codecs, a physical store exhibiting itself as a `WalState`, and migrating
+   the authorization, reactive, Grains, private-compute, cloud, and hypermedia paths.
 6. Benchmark actual admitted end-to-end user/agent workflows; apply Loom's kill criteria rather than
    preserving a preferred implementation.
 
