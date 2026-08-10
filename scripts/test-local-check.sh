@@ -3,7 +3,21 @@
 # source snapshot successfully, then verifies that an otherwise-successful
 # command which mutates archived source is rejected with exit 86.  The live
 # worktree's README is hashed before and after as a sentinel against leakage.
+if (( BASH_VERSINFO[0] < 5 )); then
+  for minidregg_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$minidregg_bash" ]]; then
+      exec "$minidregg_bash" "$0" "$@"
+    fi
+  done
+  echo "test-local-check: Bash >= 5 is required (running $BASH_VERSION)" >&2
+  exit 2
+fi
 set -euo pipefail
+
+if [[ ${1:-} == --bash-bootstrap-only ]]; then
+  printf 'bash=%s\n' "$BASH_VERSION"
+  exit 0
+fi
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"

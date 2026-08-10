@@ -7,6 +7,15 @@
 # APFS-cloned) into that run tree with distinct inodes before Lake can touch
 # them.  Source, dependency, tool, and build-output manifests are retained as
 # evidence outside the repository.
+if (( BASH_VERSINFO[0] < 5 )); then
+  for minidregg_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$minidregg_bash" ]]; then
+      exec "$minidregg_bash" "$0" "$@"
+    fi
+  done
+  echo "local-check: Bash >= 5 is required (running $BASH_VERSION)" >&2
+  exit 2
+fi
 set -euo pipefail
 
 usage() {
@@ -68,17 +77,6 @@ source_manifest() {
   (
     cd "$source"
     LC_ALL=C find . -path './.lake' -prune -o -type f -print0 |
-      LC_ALL=C sort -z |
-      xargs -0 shasum -a 256
-  ) > "$output"
-}
-
-package_file_manifest() {
-  local packages=$1
-  local output=$2
-  (
-    cd "$packages"
-    LC_ALL=C find . -type f -print0 |
       LC_ALL=C sort -z |
       xargs -0 shasum -a 256
   ) > "$output"
@@ -385,7 +383,7 @@ while IFS=$'\t' read -r package_name package_rev; do
     die "Lake package '$package_name' is not pinned to a full Git revision"
 done < "$dependency_expected"
 dependency_manifest_sha=$(sha256_file "$dependency_expected")
-seed_key="v1-${toolchain_sha:0:24}-${lake_manifest_sha:0:24}"
+seed_key="v2-${toolchain_sha:0:24}-${lake_manifest_sha:0:24}"
 seed=$check_root/seeds/$seed_key
 
 if $dry_run; then
@@ -437,15 +435,15 @@ if [[ ! -f "$seed/.complete" ]]; then
       [[ "$(sha256_file lake-manifest.json)" == "$lake_manifest_sha" ]]
       "$lake_path" exe cache get
     )
-    mkdir "$incoming/packages"
-    cp -R "$bootstrap/source/.lake/packages/." "$incoming/packages/"
+    # The bootstrap belongs only to this seed construction.  Move its package
+    # tree instead of duplicating the multi-gigabyte cache; no other checkout
+    # or run ever retains an alias to these inodes.
+    mv "$bootstrap/source/.lake/packages" "$incoming/packages"
     verify_confined_symlinks "$incoming/packages"
     verify_package_revisions "$incoming/packages" "$dependency_expected" \
       "$incoming/dependency-revisions.tsv" || die "dependency seed revisions are not exact/clean"
-    package_file_manifest "$incoming/packages" "$incoming/package-files.sha256"
-    seed_files_sha=$(sha256_file "$incoming/package-files.sha256")
-    printf 'schema=v1\ntoolchain_sha256=%s\nlake_manifest_sha256=%s\ndependency_manifest_sha256=%s\npackage_files_sha256=%s\n' \
-      "$toolchain_sha" "$lake_manifest_sha" "$dependency_manifest_sha" "$seed_files_sha" \
+    printf 'schema=v2\ntoolchain_sha256=%s\nlake_manifest_sha256=%s\ndependency_manifest_sha256=%s\n' \
+      "$toolchain_sha" "$lake_manifest_sha" "$dependency_manifest_sha" \
       > "$incoming/identity"
     printf '%s\n' "$seed_key" > "$incoming/.complete"
     find "$incoming" ! -type l \( -type d -o -type f \) -exec chmod a-w {} +
@@ -465,13 +463,11 @@ fi
 verify_confined_symlinks "$seed/packages"
 verify_package_revisions "$seed/packages" "$dependency_expected" "$run/dependency-revisions.tsv" ||
   die "dependency seed revision verification failed"
-seed_manifest_before=$run/seed.before.sha256
-package_file_manifest "$seed/packages" "$seed_manifest_before"
-seed_files_sha=$(sha256_file "$seed_manifest_before")
-expected_seed_identity=$(printf 'schema=v1\ntoolchain_sha256=%s\nlake_manifest_sha256=%s\ndependency_manifest_sha256=%s\npackage_files_sha256=%s' \
-  "$toolchain_sha" "$lake_manifest_sha" "$dependency_manifest_sha" "$seed_files_sha")
+expected_seed_identity=$(printf 'schema=v2\ntoolchain_sha256=%s\nlake_manifest_sha256=%s\ndependency_manifest_sha256=%s' \
+  "$toolchain_sha" "$lake_manifest_sha" "$dependency_manifest_sha")
 [[ "$(cat "$seed/identity")" == "$expected_seed_identity" ]] ||
   die "dependency seed identity does not match the exact snapshot pins"
+seed_identity_sha=$(sha256_file "$seed/identity")
 
 mkdir -p "$source/.lake/packages" "$run/build/cargo"
 [[ ! -L "$source/.lake" && ! -L "$source/.lake/packages" ]] || die "run-local .lake path is unsafe"
@@ -635,18 +631,24 @@ dependency_integrity_exit=0
   verify_package_revisions "$source/.lake/packages" "$dependency_expected" \
     "$run/dependency-revisions.after.tsv"
   private_revision_status=$?
-  package_file_manifest "$seed/packages" "$run/seed.after.sha256"
-  cmp -s "$seed_manifest_before" "$run/seed.after.sha256"
-  seed_manifest_status=$?
+  verify_package_revisions "$seed/packages" "$dependency_expected" \
+    "$run/dependency-seed-revisions.after.tsv"
+  seed_revision_status=$?
+  if [[ "$(sha256_file "$seed/identity")" == "$seed_identity_sha" ]]; then
+    seed_identity_status=0
+  else
+    seed_identity_status=1
+  fi
   if [[ -z "$(find "$seed" ! -type l -perm +222 -print -quit)" ]]; then
     seed_permissions_status=0
   else
     seed_permissions_status=1
   fi
-  printf 'private_revision_status=%s\nseed_manifest_status=%s\nseed_permissions_status=%s\n' \
-    "$private_revision_status" "$seed_manifest_status" "$seed_permissions_status"
-  if [[ "$private_revision_status" -ne 0 || "$seed_manifest_status" -ne 0 ||
-        "$seed_permissions_status" -ne 0 ]]; then
+  printf 'private_revision_status=%s\nseed_revision_status=%s\nseed_identity_status=%s\nseed_permissions_status=%s\n' \
+    "$private_revision_status" "$seed_revision_status" "$seed_identity_status" \
+    "$seed_permissions_status"
+  if [[ "$private_revision_status" -ne 0 || "$seed_revision_status" -ne 0 ||
+        "$seed_identity_status" -ne 0 || "$seed_permissions_status" -ne 0 ]]; then
     dependency_integrity_exit=1
   fi
 } > "$run/dependency-integrity.log" 2>&1
@@ -708,7 +710,7 @@ jq -n \
   --arg dependencyAfterFile "$(basename "$dependency_after_path")" \
   --arg dependencyManifestSha256 "$(sha256_file "$dependency_path")" \
   --arg dependencyAfterSha256 "$(sha256_file "$dependency_after_path")" \
-  --arg seedKey "$seed_key" --arg seedFilesSha256 "$seed_files_sha" \
+  --arg seedKey "$seed_key" --arg seedIdentitySha256 "$seed_identity_sha" \
   --arg dependencyCopyMode "$dependency_copy_mode" --argjson command "$command_json" \
   --arg resolvedExecutable "$resolved_executable" --arg localRun "$run" \
   --arg hostname "$hostname_value" --arg uname "$uname_value" --arg os "$os_value" \
@@ -739,7 +741,7 @@ jq -n \
       afterManifest:{file:$postSourceFile,sha256:$postSourceSha256},
       mutationPolicy:{default:"exact-manifest-equality",autoSync:false,
         allowlist:{file:$allowlistFile,sha256:$allowlistSha256,outputs:$generatedOutputs}}},
-    dependencies:{seedKey:$seedKey,seedFilesSha256:$seedFilesSha256,
+    dependencies:{seedKey:$seedKey,seedIdentitySha256:$seedIdentitySha256,
       runLocalTree:true,copyMode:$dependencyCopyMode,sharedInodes:false,
       revisionManifest:{file:$dependencyFile,sha256:$dependencyManifestSha256},
       postRevisionManifest:{file:$dependencyAfterFile,sha256:$dependencyAfterSha256}},
