@@ -218,6 +218,15 @@ The target UI/agent model is:
 
 ## Hyperdocuments: the semantic medium
 
+> **Standing caveat (2026-08-10).** `Theory.MaterializerCardinality` proves
+> `Hyperdocument.Materializer Digest` and `CredentialAuthorityState.Materializer` are
+> empty: a materializer carries a `LawfulCodec` for the schema's entire `LogicalState`,
+> which is a total function over an infinite field index, and no encoding injects that
+> into `List UInt8`. Everything in this section that quantifies over a document or
+> authority cell is therefore vacuously true until `LogicalState` becomes finitely
+> supported. The claims below describe the intended construction; they do not yet
+> describe inhabited carriers.
+
 Hyperdocuments are not a UI feature bolted onto receipts. They are a semantic/history family:
 
 - typed document/schema/content identity;

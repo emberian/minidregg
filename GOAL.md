@@ -154,8 +154,10 @@ semantic, not mechanical: `Capability.Admissible`.
   (through `LawfulCodec Action`)
 - `8eab0e9` — `3241` jobs — `E-20260810T080143-73354-local-nextop.local-8eab0e9c8d12-lake`
   (through the capability-path witness)
+- `d9b9955` — `3242` jobs — `E-20260810T081222-76112-local-nextop.local-d9b99558f0df-lake`
+  (through the credential-authority emptiness proof)
 
-Commits after `8eab0e9` carry warm-tree builds only.
+Commits after `d9b9955` carry warm-tree builds only.
 
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be`)**
 
