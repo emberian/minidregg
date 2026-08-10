@@ -22,6 +22,7 @@ import Kernel.MultiCellHyperedgeWitness  -- ANTI-VACUITY: a built two-incidence 
 import Kernel.SparseAuthenticatedState  -- typed sparse ROM/RAM/append-only namespaces, fresh allocation, exact trace footprints/roots/bus rows
 import Kernel.HyperdocumentEventLog  -- final causal events occupy a separate append-only sparse cell with an exact canonical CellState adapter
 import Kernel.HyperdocumentVersionEffects  -- accepted content effects derive final causal records and append them through a separately authorized sparse log effect
+import Kernel.EventLogMaterializerLimit  -- COUNTING OBSTRUCTION, third schema: the event-log cell has no materializer either, so all three cells the Hyperdocument publication commit needs are uninhabitable
 import Kernel.HyperdocumentPublication  -- the exact accepted content and event-log legs form one two-cell MultiCellHyperedge commit with an explicit physical boundary
 import Kernel.HyperdocumentMerge  -- conservative causal joins retain exact parent values and explicit conflicts instead of erasing them
 import Kernel.HyperdocumentMergePublication  -- merge content and its append-only causal event publish as one heterogeneous two-cell commit
