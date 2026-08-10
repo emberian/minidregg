@@ -18,6 +18,7 @@ noncomputable because `Finset.toList` is, and a deployed transclusion reference
 would carry an explicitly ordered field rather than a set.
 -/
 import Compiler.TypedAuthorizationRequestCodec
+import Theory.HyperdocumentOperations
 import Theory.StableRanges
 
 namespace Minidregg.Compiler.HyperdocumentCodec
@@ -25,6 +26,7 @@ namespace Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.TypedAuthorizationRequestCodec
 open Minidregg.Theory.Hyperdocument
+open Minidregg.Theory.HyperdocumentOperations
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest ResourceKind CapabilityId SubjectId)
 
@@ -381,5 +383,152 @@ def stableRangeStream : StreamCodec (StableRange RunId AtomId) :=
     (fun value => (value.start, value.stop))
     (fun tuple => ⟨tuple.1, tuple.2⟩)
     (by intro value; rfl)
+
+/-! ## Operation payloads
+
+Six records over the leaves above.  Each is one `xmap` over a right-nested
+`product`, with the retraction `rfl` by structure eta. -/
+
+def createPayloadStream : StreamCodec CreatePayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .document)
+      (StreamCodec.product (identifierStream .v1 .element)
+        (StreamCodec.product digestStream elementBodyStream)))
+    (fun value => (value.documentId, value.rootElementId, value.schema,
+      value.rootBody))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+    (by intro value; rfl)
+
+def editAtomPayloadStream : StreamCodec EditAtomPayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .atom)
+      (StreamCodec.product atomRecordStream
+        (StreamCodec.product atomKindStream
+          (StreamCodec.product bytesStream StreamCodec.bool))))
+    (fun value => (value.atomId, value.before, value.kind, value.payload,
+      value.tombstone))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2⟩)
+    (by intro value; rfl)
+
+noncomputable def linkPayloadStream : StreamCodec LinkPayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .link)
+      (StreamCodec.product (identifierStream .v1 .document)
+        (StreamCodec.product (StreamCodec.option storedStableRangeStream)
+          (StreamCodec.product linkTargetStream digestStream))))
+    (fun value => (value.id, value.sourceDocument, value.source, value.target,
+      value.relation))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2⟩)
+    (by intro value; rfl)
+
+noncomputable def transcludePayloadStream : StreamCodec TranscludePayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .transclusion)
+      (StreamCodec.product (identifierStream .v1 .link)
+        (StreamCodec.product (identifierStream .v1 .document)
+          (StreamCodec.product (StreamCodec.option storedStableRangeStream)
+            (StreamCodec.product storedTransclusionRefStream
+              (StreamCodec.product digestStream digestStream))))))
+    (fun value => (value.id, value.forwardLinkId, value.hostDocument,
+      value.source, value.reference, value.relation, value.disclosurePolicy))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
+    (by intro value; rfl)
+
+def markPayloadStream : StreamCodec MarkPayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .mark)
+      (StreamCodec.product (identifierStream .v1 .document)
+        (StreamCodec.product storedStableRangeStream
+          (StreamCodec.product digestStream
+            (StreamCodec.product bytesStream digestStream)))))
+    (fun value => (value.id, value.document, value.range, value.kind,
+      value.payload, value.visibilityPolicy))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+    (by intro value; rfl)
+
+def annotatePayloadStream : StreamCodec AnnotatePayload :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .annotation)
+      (StreamCodec.product (identifierStream .v1 .document)
+        (StreamCodec.product (StreamCodec.option storedStableRangeStream)
+          (StreamCodec.product (identifierStream .v1 .document) digestStream))))
+    (fun value => (value.id, value.document, value.range, value.body,
+      value.visibilityPolicy))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2⟩)
+    (by intro value; rfl)
+
+/-! ## The action -/
+
+def actionTag : Action -> Nat
+  | .create _ => 0
+  | .editAtom _ => 1
+  | .link _ => 2
+  | .transclude _ => 3
+  | .mark _ => 4
+  | .annotate _ => 5
+
+noncomputable def actionStream : StreamCodec Action where
+  encode value :=
+    StreamCodec.nat.encode (actionTag value) ++
+      match value with
+      | .create payload => createPayloadStream.encode payload
+      | .editAtom payload => editAtomPayloadStream.encode payload
+      | .link payload => linkPayloadStream.encode payload
+      | .transclude payload => transcludePayloadStream.encode payload
+      | .mark payload => markPayloadStream.encode payload
+      | .annotate payload => annotatePayloadStream.encode payload
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => do
+        let (payload, suffix) ← createPayloadStream.decodePrefix afterTag
+        some (.create payload, suffix)
+    | 1 => do
+        let (payload, suffix) ← editAtomPayloadStream.decodePrefix afterTag
+        some (.editAtom payload, suffix)
+    | 2 => do
+        let (payload, suffix) ← linkPayloadStream.decodePrefix afterTag
+        some (.link payload, suffix)
+    | 3 => do
+        let (payload, suffix) ← transcludePayloadStream.decodePrefix afterTag
+        some (.transclude payload, suffix)
+    | 4 => do
+        let (payload, suffix) ← markPayloadStream.decodePrefix afterTag
+        some (.mark payload, suffix)
+    | _ => do
+        let (payload, suffix) ← annotatePayloadStream.decodePrefix afterTag
+        some (.annotate payload, suffix)
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [actionTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
+        createPayloadStream.decodePrefix_encode,
+        editAtomPayloadStream.decodePrefix_encode,
+        linkPayloadStream.decodePrefix_encode,
+        transcludePayloadStream.decodePrefix_encode,
+        markPayloadStream.decodePrefix_encode,
+        annotatePayloadStream.decodePrefix_encode]
+
+/-- **`LawfulCodec Action` exists.**  The second of the three codecs a
+`HyperdocumentOperations.Config` demands. -/
+noncomputable def actionCodec : LawfulCodec Action := actionStream.toLawful
+
+/-- And it composes, which is what `Declaration` will need. -/
+theorem actionStream_composes (value : Action) (suffix : List UInt8) :
+    actionStream.decodePrefix (actionStream.encode value ++ suffix) =
+      some (value, suffix) :=
+  actionStream.decodePrefix_encode value suffix
+
+/-! ## Axiom pins -/
+
+/-- info: 'Minidregg.Compiler.HyperdocumentCodec.actionCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms actionCodec
+/-- info: 'Minidregg.Compiler.HyperdocumentCodec.actionStream_composes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms actionStream_composes
 
 end Minidregg.Compiler.HyperdocumentCodec
