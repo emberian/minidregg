@@ -25,16 +25,22 @@ import Theory.EffectDeclaration  -- target-indexed effects derive exact footprin
 import Theory.DeclaredTurn  -- data-only authorization/effect execution with exact-post semantic certification and definitional rejection atomicity
 import Theory.TurnTransition  -- ordinary and resumed reactive turns share canonical roots, exact footprints/deltas, frame laws, and atomic refusal
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
+import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
 import Theory.CredentialAuthorityEffects  -- issuance, strict attenuation, revocation, and epoch rotation are sealed AcceptedCellEffect families with exact atomic patches and same-canonical-pre authorization
 import Theory.Hyperdocument  -- versioned domain-separated hyperdocument identity, authenticated principals, typed sparse namespaces, and exact canonical CellState mapping
+import Theory.StableRanges  -- insertion-stable atom/range anchors, explicit deletion policies, and exact adapters into durable Hyperdocument marks/annotations
 import Theory.HyperdocumentOperationIntent  -- acyclic pre-commit OperationId binds canonical action bytes but excludes post/request/effect/final-version identities
 import Theory.HyperdocumentOperations  -- first-order create/edit/link/transclude/mark/annotate declarations derive exact accepted content patches, requests, and concrete post records
+import Theory.HyperdocumentInterface  -- versioned capability-scoped interface negotiation for content/history reads and mutations; query never grants ambient object authority
+import Theory.CausalVersionDag  -- content-addressed causal events admit exact resolved parents and concurrent siblings; current-tip-only is an explicit optional policy
+import Theory.CausalVersionAncestry  -- admitted parent edges induce proof-relevant ancestry, acyclicity, and conservative common-base certificates without a fake unique LCA
 import Theory.Bignum  -- canonical fixed-width little-endian limbs + proved Nat/Int codec (wide digest/challenge substrate)
 import Theory.CrossModulus  -- one canonical integer with exact quotient/remainder views in two coprime moduli; CRT/range/canonicality seams for RNS/FHE bridges
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
 import Theory.BinaryTower  -- [OB-8-tower] the GF(2) binary-tower field substrate (Binius path)
 import Theory.BinaryTowerCodec  -- exact recursive Fan--Paar coordinates and fixed-width 32-byte round-trip; native code remains opaque
+import Theory.BinaryTowerFanPaarCodec  -- concrete recursive Fan--Paar coordinate codec and canonical fixed-width byte realization; still no native representation theorem
 import Theory.BinaryTowerFanPaar  -- [BTOWER-fanpaar] the Fan–Paar generator recursion + fast tower multiplication
 import Theory.BinaryTowerTrace  -- [BTOWER-fanpaar-basis] CLOSED (Wiedemann trace induction) — FanPaarRecursion holds
 import Theory.AdditiveNTT  -- [BTOWER-additive-fri] additive domains + subspace-vanishing (GF(2)-linear) + novelpolynomial basis + the additive FRI fold

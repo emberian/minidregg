@@ -19,18 +19,30 @@ import Assurance.SemanticHistoryFamily  -- request-shape-neutral, proof-relevant
 import Assurance.SemanticHistoryFamilyInstances  -- exact singular-turn and complete flat-hyperedge instances; no synthetic primary request
 import Assurance.AcceptedCellEffectHistory  -- accepted canonical cell effects derive their exact bounded core and enter the same request-shape-neutral verified history family without a legacy turn wrapper
 import Assurance.ReactiveLifecycleHistory  -- weak-hole Promise/Notify/React/Finalize/Expire/Break over authenticated history entries; finalization is an accepted cell effect/typed hyperedge leg and physical CAS remains explicit
+import Assurance.GrainForkSettlement  -- causally linked fork heads settle through one schema-polymorphic typed hyperedge while unresolved conflicts and capability liveness stay proof-relevant
 import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
 import Assurance.SemanticAdditiveFriCheckpoint  -- canonical zero-padding joins the exact semantic history word/root to additive FRI; KS-good extraction recovers the authoritative head
 import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold challenges, post-challenge fold roots commit exact words, and the terminal root is the additive-FRI initial root
 import Assurance.SemanticHistoryBcsClaimProjection  -- exact carrier reindex transports semantic AccClaims and folds into the existing unshifted BCS reduction
+import Assurance.SemanticHistoryBcsGame  -- retained history derives the exact unshifted BCS schedule; ideal mathematics and common-coin PCS/CR/ROM evidence stay separate
+import Assurance.SemanticHistoryTower256CheckpointGame  -- one coin/ledger and exact root schedule join retained-history BCS evidence to the concrete Tower256 additive checkpoint
+import Assurance.SemanticHistoryTower256DeployedBcs  -- the literal retained-history Fiat--Shamir failure event has its native MCA bound; concrete same-coin PCS/CR/ROM classification remains explicit
 import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedule and one tagged PCS/CR/ROM/FRI/OracleLog/ZK failure ledger; the union bound is over an actual common coin space
+import Assurance.ExtensibleProofCompositionGame  -- disjoint finite ledger extensions preserve every old event/price and add Ext6's eight failures on the same coin without tag reuse
 import Assurance.Tower256LogupControllerAdmission  -- exact verified Tower256 LogUp control admitted only with the canonical codec, real Merkle binding, and one common-game PCS/CR/ROM coin
+import Assurance.Tower256AdditiveFriControllerAdmission  -- byte-checked Tower256 additive-FRI control enters one explicit same-coin failure ledger
+import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller bytes derive the real Loom challenge/query event and UD price, leaving only exact ROM transport and pre-assumed position binding
+import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
+import Assurance.HyperdocumentHistoryAdmission  -- exact head membership, indexed finality, post-only openings, and accepted LinkRecord containment
+import Assurance.TransclusionBacklinkHistory  -- typed durable references, exact source/history/opening identity, authenticated forward welds, and coverage-relative complete backlinks
 import Assurance.SemanticHistoryRecursiveAir  -- stateless public history heads bind into the shared-wire recursive verifier AIR while soundness/KS/ZK/SE remain distinct evidence
 import Assurance.AuthenticatedColumnHistoryBridge  -- openings retained by one accepted authenticated-column trace become the identical binding BCS messages and exact semantic WARP link stream
 import Assurance.PrivateComputationReceiptClause  -- ZK/MPC/FHE completions become manifest-bound receipt disclosures only through exact authorization, named same-opening bridges, evidence, and VerifiedRelease
 import Assurance.BfvPrivateComputationJoin  -- the encrypted-RNS/FHE evidence lane instantiates the private receipt with one BFV token and all 384 exact integer equations; suite/privacy/knowledge remain unassigned
 import Assurance.BfvNativeBufferAdmission  -- fallible opaque BFV buffers are checked by Lean row descriptors/link constraints before the 384-row token and private receipt can exist
 import Assurance.BfvAcceptedCellEffect  -- checked all-row BFV admission fills typed private completion, then constructs a sealed canonical accepted effect and common history claim; release remains independent
+import Assurance.NoteSpendCoreAcceptedCellEffect  -- the note-spend AIR enters the release-free computation core as one sealed authorized canonical effect; hiding/PoK/PCS/CR/ROM remain explicit
+import Assurance.NoteSpendProofControllerAdmission  -- canonical proof control admits the sealed note-spend relation only outside separately priced PCS/PoK/CR/ROM failures; hiding is not inferred
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
 import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
