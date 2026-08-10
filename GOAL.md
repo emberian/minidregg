@@ -1,3 +1,48 @@
+# STANDING GOAL — night session of 2026-08-10
+
+**Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.** Solo: no
+subagents, no workflows. The authoritative snapshot below this block is unchanged and
+still governs; this block is the live trail.
+
+**Current thrust:** connect the landed WAL handler to a real consumer slice — the
+Hyperdocument agent operation's conditional durable plan — so one user-visible workflow
+runs end to end through canonical authority, accepted effect, receipt/history, and a
+durable handler that is now constructed rather than assumed.
+
+**Next 3 moves**
+
+1. Feed `HyperdocumentAgentOperation`'s durable intent into `DurableWalHandler`:
+   one link-or-annotation operation whose `Intent` comes from the sole accepted
+   effect and whose installation is a `WalStep.commit`.
+2. Prove the crash/replay story at that slice: a lost response after the commit
+   marker replays idempotently; a crash before it loses nothing semantically.
+3. Then back to history: instantiate `RawHistoryBcsTranscript` at the concrete
+   Tower256 Merkle scheme so a retained `ColumnEquivocation` becomes an exact
+   `ExtractedCollision`.
+
+**Done-log**
+
+- `3e28d95` — quiescent integration gate closed: the six wind-down modules are imported
+  into the umbrellas; `lake build Minidregg` exit `0` at `3228` jobs (was `3222`),
+  import boundary exit `0`. Local warm tree only — not an archive replay.
+- `437b8f8` — the history opening attempt is retained instead of erased. `Loom`'s
+  `ColsOpen`/`ColsConsistent` moved to `OpeningScheme` (binding coerces, 52 call sites
+  untouched); `bcsWord_of_colsExact` is the binding-free core and `bcsWord_committed`
+  its corollary; `Assurance.RawHistoryBcsOpenings` splits the message tape from root
+  attribution and returns the three-way `attribution_split`. Both audits present:
+  `equivocation_impossible_of_binding` (the old carrier's problem, located) and
+  `equivocalTranscript_equivocation` (the branch INHABITED at a non-binding scheme).
+  `3229` jobs, exit `0`, boundary `0`.
+- `355fcc1` — `ImplementationRefinement` has an inhabitant. `Kernel.DurableWalHandler`
+  is a staged/committed/compacting write-ahead log; `recovered_checkpointOne` proves
+  compaction invisible to recovery, `walRefinement` is a real refinement, and
+  `unguarded_append_breaks_refinement` shows a guard-less append is representable by no
+  schedule at all. `ClosedInstance` discharges the commit premises by `decide` so the
+  refinement is not carried by a handler that never writes. A device MODEL — no fsync,
+  torn write, codec, replication, or liveness. `3230` jobs, exit `0`, boundary `0`.
+
+---
+
 # GOAL — flesh out LOOM (the owned proof system) toward a defensible whole
 
 **Current priority (2026-08-10): close the cryptographic and deployment residuals between the
