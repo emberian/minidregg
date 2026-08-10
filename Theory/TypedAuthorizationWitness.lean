@@ -131,7 +131,98 @@ def authorizedB : Authorized permissivePortal authState requestB where
   policyEpochExact := rfl
   policyVerified := rfl
 
+/-! ## The capability path
+
+`proof`-mode evidence is the WEAKEST constructor: it carries a witness and a
+verifier bit and nothing semantic.  `capability` mode is the one that actually
+means something -- `Capability.Admissible` checks holder coverage, scope,
+validity window, policy and issuer currency, and three revocation facts, none
+of which a permissive portal can discharge.  Exhibiting it is the difference
+between "authority is inhabited" and "authority with semantics is inhabited".
+-/
+
+/-- A capability that genuinely admits `request`: subject-bound to its subject,
+scoped to its exact target and verb, funded above its cost, inside its validity
+window, current in both epochs, and unrevoked. -/
+def capability : Capability .object where
+  id := ⟨100⟩
+  root := ⟨100⟩
+  parent := none
+  issuer := ⟨200⟩
+  holder := .subject ⟨4⟩
+  scope :=
+    { targets := {⟨5⟩}
+      verbs := {.mutateObject}
+      maxCost := 20 }
+  notBefore := 0
+  notAfter := 100
+  issuerEpoch := 0
+  policyId := ⟨10⟩
+  policyEpoch := 0
+  ancestors := ∅
+  channels := ∅
+
+/-- **`Capability.Admissible` is inhabited**, at the same request the portal
+authorizes.  Every field is discharged by construction or computation; none of
+them is a portal verifier returning `true`. -/
+theorem capability_admissible : capability.Admissible authState request where
+  holder := rfl
+  scope :=
+    { target := by decide
+      verb := by decide
+      cost := by decide }
+  validFrom := by decide
+  validUntil := by decide
+  policyId := rfl
+  policyEpoch := rfl
+  policyCurrent := rfl
+  issuerCurrent := rfl
+  selfNotRevoked := by simp [capability, authState]
+  ancestorNotRevoked := fun _ member => absurd member (by simp [capability])
+  channelNotRevoked := fun _ member => absurd member (by simp [capability])
+
+/-- **Capability-mode evidence.**  The semantic admission above rides inside
+the constructor, alongside the portal's commitment, membership, issuer, and
+non-revocation checks -- which the permissive portal does discharge, and which
+is exactly why the semantic field is the load-bearing one. -/
+def capabilityEvidence : Evidence permissivePortal authState request :=
+  .capability capability ⟨300⟩ () () () () capability_admissible rfl rfl rfl rfl
+    (fun _ member => absurd member (by simp [capability]))
+    (fun _ member => absurd member (by simp [capability]))
+
+/-- Authority through the capability path. -/
+def capabilityAuthorized : Authorized permissivePortal authState request where
+  evidence := capabilityEvidence
+  policyWitness := ()
+  policyEpochExact := rfl
+  policyVerified := rfl
+
 /-! ## Teeth -/
+
+/-- **Scope is a real constraint.**  The same capability does not admit a
+request for a different target, even though every portal verifier still
+accepts and every epoch is still current. -/
+theorem capability_not_admissible_offTarget :
+    ¬capability.Admissible authState (request.retarget ⟨6⟩) := by
+  intro admitted
+  exact absurd admitted.scope.target (by decide)
+
+/-- **The validity window is a real constraint.** -/
+theorem capability_not_admissible_expired :
+    ¬capability.Admissible authState { request with height := 500 } := by
+  intro admitted
+  exact absurd admitted.validUntil (by decide)
+
+/-- **Revocation is a real constraint.**  Revoking the capability's own id in
+the authority state destroys admission without touching the portal. -/
+def revokedState : AuthState :=
+  { authState with revoked := {RevocationKey.capability ⟨100⟩} }
+
+theorem capability_not_admissible_revoked :
+    ¬capability.Admissible revokedState request := by
+  intro admitted
+  exact admitted.selfNotRevoked (by simp [revokedState, capability])
+
 
 /-- **The policy gate is a real gate.**  Evidence still exists at
 `policyClosedPortal` -- every verifier but the policy one accepts -- and
@@ -170,6 +261,14 @@ theorem authorized_isEmpty_of_staleEpoch :
 
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_nonempty
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_admissible' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms capability_admissible
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_offTarget' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_offTarget
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_expired' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_expired
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_revoked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_revoked
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.evidence_exists_at_policyClosedPortal' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evidence_exists_at_policyClosedPortal
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_isEmpty_of_policyClosed' depends on axioms: [propext, Quot.sound] -/
