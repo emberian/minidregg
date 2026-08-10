@@ -104,6 +104,36 @@ def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
     | inl value => simp [left.decodePrefix_encode]
     | inr value => simp [right.decodePrefix_encode]
 
+/-- Booleans as a one-byte tag. -/
+def bool : StreamCodec Bool where
+  encode value := [if value then 1 else 0]
+  decodePrefix
+    | [] => none
+    | value :: suffix => some (value == 1, suffix)
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;> rfl
+
+/-- Optional values, tagged.  `none` costs one byte and `some` costs one byte
+plus the payload, so the absent case never has to be encoded as a sentinel
+inside the payload's own alphabet. -/
+def option (codec : StreamCodec alpha) : StreamCodec (Option alpha) where
+  encode
+    | none => [0]
+    | some value => 1 :: codec.encode value
+  decodePrefix
+    | [] => none
+    | 0 :: suffix => some (none, suffix)
+    | 1 :: bytes => do
+        let (value, suffix) ← codec.decodePrefix bytes
+        some (some value, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value with
+    | none => rfl
+    | some value => simp [codec.decodePrefix_encode]
+
 def byte : StreamCodec UInt8 where
   encode value := [value]
   decodePrefix
