@@ -191,6 +191,27 @@ Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryH
   — **the session HEAD**, covering everything above including the four emptiness proofs,
   the documentation corrections, the proposed seventeenth law, and the sparse-state fix
   with its codec demonstration.
+- `a857532` — `3245` jobs — `E-20260810T144712-41378-local-nextop.local-a8575323fa0e-lake`
+  (through the store-to-sparse bridge)
+
+**Cross-machine evidence — the gap `QUIESCELOG.md` blamed on Tailscale.** The attribution
+was wrong. Both build boxes were up the whole time and reachable over plain local SSH;
+Tailscale merely reported stale offline state (hbox "15d" while up 25 days, persvati
+"42d" while up 31). Nobody had tried the front door.
+
+A persvati replay of `9d61e61` returned `runnerExit=0`, `commandExit=0`,
+`sourceIntegrityExit=0` at `3245` jobs in four minutes —
+`E-20260810T201633-25551-persvati-9d61e61aa1f1-lake`, schema
+`minidregg/remote-evidence/v3`, clean tree, mutation policy `exact-manifest-equality`
+with `autoSync` off and an **empty** generated-output allowlist, dependencies a run-local
+read-only hardlink tree at a pinned seed key, capped to `cpuSet 0-7` and 64 GiB of
+persvati's 84. That is the first evidence in this file that is not from one warm Mac.
+
+Two cautions on quoting it. The remote schema has **no** `dependencyIntegrityExit` — it
+pins the seed by revision manifest and a run-private tree instead, so do not report it as
+the local runner's third exit code. And hbox was deliberately not used: load 22.5 on 24
+cores, 96 of 123 GiB in use, 38 sessions — that is codex's datacake, and the house rule
+is to spare it.
 
 **THE MISSING MECHANISM — the actionable form of the finding below**
 
