@@ -86,8 +86,10 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `dfed208` — `3233` jobs — `E-20260810T062751-38501-local-nextop.local-dfed208fdcb5-lake`
 - `d4898a5` — `3236` jobs — `E-20260810T063734-41624-local-nextop.local-d4898a56ae20-lake`
 - `b46a3d8` — `3238` jobs — `E-20260810T064954-45327-local-nextop.local-b46a3d882e97-lake`
+- `5d02d05` — `3239` jobs — `E-20260810T065452-47259-local-nextop.local-5d02d0551c64-lake`
+- `eaf8055` — `3239` jobs — `E-20260810T065948-49166-local-nextop.local-eaf8055087d0-lake`
 
-Commits after `b46a3d8` carry warm-tree builds only.
+Commits after `eaf8055` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
@@ -218,6 +220,15 @@ the deployed ones.
 - `5d02d05` — `TypedCellHyperedge.Commit` exhibited, so the landed
   `no_commit_of_nonzero_resource` is a contrast rather than a restatement of `IsEmpty`,
   plus the matching `no_commit_of_wrong_apex`. `3239` jobs, exit `0`, boundary `0`.
+- `945b2de` — the accepted effect is shown to INHERIT the authority gate, not just carry
+  its two binding equations: close the policy gate or rotate the epoch and no accepted
+  effect exists, though evidence still verifies and the patch still validates. The
+  proofs are one-liners, which is the point — the propagation is structural and now
+  checked.
+- `d4e5073` — the WAL device runs a whole scenario at closed data: stage, commit,
+  compact, retry. `retry_replays_after_checkpoint` is the one a real log-structured
+  store gets wrong — compact the log, lose the idempotency record, charge the retry
+  twice.
 - `e1f6488` — and the joint turn is now genuinely heterogeneous: two incidences over two
   DIFFERENT schemas (one field key of `Bool` against two of `Unit`), with their own
   codecs, materializers, and roots, sharing only the apex. Every joint condition does
