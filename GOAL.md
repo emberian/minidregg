@@ -25,8 +25,7 @@ no ROM realization, no deployed `MerkleDomains`/`ColumnPort` identity. Every wit
 uses BUILT parameters — a minimal schema, a permissive portal, `ZMod 5` — so none of
 them says anything about deployed ones, and a permissive portal is exactly the portal a
 security claim may not use. No consumer has cut over: no editor, index, sync, or client
-reads any path landed tonight. Cross-SCHEMA heterogeneity in the joint commit is typed
-and untested. And `PcsCrRomReduction` is still assumed rather than derived.
+reads any path landed tonight. And `PcsCrRomReduction` is still assumed rather than derived.
 
 **Current thrust:** the anti-vacuity sweep has run from `Theory/CellState` up through
 `Kernel/MultiCellHyperedge`; every rung the durable and history work stands on now
@@ -41,7 +40,7 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 | `AcceptedCellEffect` | `Theory.AcceptedCellEffectWitness` (`d4898a5`) |
 | `CanonicalTransition.PreparedTurn` | `Theory.CanonicalTransitionWitness` (`f5e6d1b`, root moves) |
 | `SemanticHistoryFamily.VerifiedHistoryHead` | `Assurance.HistoryHeadInhabitation` (`d257fe9`) |
-| `MultiCellHyperedge.Commit` | `Kernel.MultiCellHyperedgeWitness` (`b46a3d8`, two legs) |
+| `MultiCellHyperedge.Commit` | `Kernel.MultiCellHyperedgeWitness` (`e1f6488`, two legs, two SCHEMAS) |
 | `TypedCellHyperedge.Commit` | `Kernel.TypedCellHyperedgeWitness` (`5d02d05`) |
 
 **Not yet swept — the list to start from**
@@ -58,12 +57,13 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 
 **Next 3 moves**
 
-1. `AcceptedOperation`, per above.
-2. Two DIFFERENT schemas in the joint-commit witness — cross-schema heterogeneity is
-   still typed but untested, and that is what `MultiCellHyperedge` is for.
-3. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
+1. `AcceptedOperation`, per above — the last big unexhibited carrier, and the one
+   tonight's durable installation is actually about.
+2. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
    of `attribution_split` should name the ledger event it pays, with the retained
    equivocation paying `commitmentBinding` through the collision bridge.
+3. Then breadth again: a second consumer slice on the WAL handler, or the authorization
+   issue/attenuate/revoke path over canonical authority cells.
 
 **Evidence grade.** Three isolated committed-source runs, all `command_exit=0`,
 `source_integrity_exit=0`, `dependency_integrity_exit=0`:
@@ -204,6 +204,11 @@ the deployed ones.
 - `5d02d05` — `TypedCellHyperedge.Commit` exhibited, so the landed
   `no_commit_of_nonzero_resource` is a contrast rather than a restatement of `IsEmpty`,
   plus the matching `no_commit_of_wrong_apex`. `3239` jobs, exit `0`, boundary `0`.
+- `e1f6488` — and the joint turn is now genuinely heterogeneous: two incidences over two
+  DIFFERENT schemas (one field key of `Bool` against two of `Unit`), with their own
+  codecs, materializers, and roots, sharing only the apex. Every joint condition does
+  work at built data. This closes the last gap the joint-commit witness named against
+  itself. `3239` jobs, exit `0`, boundary `0`.
 
 ---
 
