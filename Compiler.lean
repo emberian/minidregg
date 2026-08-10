@@ -14,6 +14,7 @@ import Compiler.BfvAllModuliKernelCalls  -- FHEgg q0/q1/q2 fixed-modulus calls i
 import Compiler.BfvInputValidity  -- one committed owner witness binds selector/table validity, bounded BFV inputs, public relation identifiers, and all 384 modulus-major kernel calls
 import Compiler.BfvSignedAccumulatorAir  -- exact radix-64 weighted positive/negative accumulators over that same witness and accepted quotient call imply numerator = q * centered quotient
 import Compiler.BfvReceiptClause  -- one committed BFV batch plus checked returned buffers yields all 384 exact integer equations; the native producer remains semantically opaque
+import Compiler.BfvProofController  -- deterministic BFV statement/receipt framing over opaque bytes; proof-codec/suite/controller pins stay zero and the succinct suite is deliberately uninstantiated
 import Compiler.BfvCompressedEquation  -- audited FHEgg 12,435-coordinate/384-row schema and the first exact q0 shifted-quotient AIR join; the full signed accumulator and Lean-owned transcript control stay explicit
 import Compiler.WideDigestAir  -- [AIR-wide-digest] WDG1/domain/9-limb encoding pinned through emit; canonicality and 248-bit capacity proved; sponge schedule, concrete permutation, native-output checks, and [COMMIT-CR] remain explicit
 import Compiler.WideDigestByteDecodeAir  -- raw four-byte little-endian limbs are range-checked and proved < BabyBear before field recomposition; raw p is universally rejected
@@ -52,6 +53,7 @@ import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round cha
 import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exact plan retains its reflected statement and four-root prefix, yielding indexed evaluation from explicit PCS/CR/ROM judgments
 import Compiler.Tower256LogupClauseDispatch -- extension-local clause-404 dispatch turns exactly two keyed opaque byte replies into the existing Lean-verified execution; base V1 remains empty
 import Compiler.Tower256AdditiveFriController -- exact cSHAKE-derived additive-FRI control over opaque proof bytes; Lean alone decodes and accepts
+import Compiler.Tower256AdditiveFriRawController -- the same additive checker with NO universal `PositionBinding`: an unequal accepted opening is retained and extracts a path-specific framed cSHAKE collision instead of vanishing
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
 import Compiler.ComposableDeploymentManifest -- deployment clauses are projected from actual controller entries; gated/reserved clauses do not enter by declaration alone
 import Compiler.SparseAuthenticatedStateLogupBridge -- exact sparse ROM/RAM/append buses compile to canonical Tower256 lookup indices while retaining Twist-style state continuity and explicit PCS/CR/ROM premises
