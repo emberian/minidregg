@@ -18,6 +18,13 @@ narratives quantify over: a validated patch, an authority token, an accepted cel
 effect, a canonical transition whose root actually moves, a retained-history head with a
 real fold round, and a two-leg joint commit balancing by cancellation.
 
+Later in the night three more things landed. The axiom ledger went from advisory to
+enforced tree-wide — 823 `#guard_msgs` pins, zero bare `#print axioms` — so an axiom
+regression fails the build. All three codecs a `HyperdocumentOperations.Config` demands
+were built on the landed `StreamCodec` framework, closing the gate that blocked the last
+unexhibited carrier. And I built, then deleted, a codec twin of that framework on a false
+premise — recorded below, because it is the most instructive thing here.
+
 *Merely an interface.* The WAL is a device MODEL — no fsync, torn record, byte codec,
 page cache, replication, clock, or liveness — so "durable" still means "modelled
 durable". The collision bridge is a reduction with no price: no collision probability,
@@ -27,9 +34,10 @@ them says anything about deployed ones, and a permissive portal is exactly the p
 security claim may not use. No consumer has cut over: no editor, index, sync, or client
 reads any path landed tonight. And `PcsCrRomReduction` is still assumed rather than derived.
 
-**Current thrust:** the anti-vacuity sweep has run from `Theory/CellState` up through
-`Kernel/MultiCellHyperedge`; every rung the durable and history work stands on now
-bottoms out in built data. What remains is the carriers the sweep has not reached.
+**Current thrust:** three sweeps are complete — carrier inhabitation from `Theory/CellState`
+up through `Kernel/MultiCellHyperedge`, the tree-wide axiom ledger, and the codec gate on
+`HyperdocumentOperations.Config`. What remains on the last unexhibited carrier is
+semantic, not mechanical: `Capability.Admissible`.
 
 **Sweep status — exhibited so far**
 
@@ -110,7 +118,7 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 3. Then breadth again: a second consumer slice on the WAL handler, or the authorization
    issue/attenuate/revoke path over canonical authority cells.
 
-**Evidence grade.** Three isolated committed-source runs, all `command_exit=0`,
+**Evidence grade.** Twelve isolated committed-source runs, all `command_exit=0`,
 `source_integrity_exit=0`, `dependency_integrity_exit=0`:
 
 - `716f148` — `3232` jobs — `E-20260810T061950-35463-local-nextop.local-716f148f91e2-lake`
@@ -125,8 +133,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `0eec65a` — `3241` jobs — `E-20260810T072232-57724-local-nextop.local-0eec65a8547d-lake`
 - `5e8692f` — `3240` jobs — `E-20260810T073849-65608-local-nextop.local-5e8692f187f7-lake`
   (the whole axiom-pin sweep plus the relocated request codec)
+- `e15dd49` — `3240` jobs — `E-20260810T074342-67723-local-nextop.local-e15dd49104e2-lake`
 
-Commits after `5e8692f` carry warm-tree builds only.
+Commits after `e15dd49` carry warm-tree builds only.
 
 **The night's own mistake, recorded because it is the instructive one**
 
