@@ -58,13 +58,18 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   the largest single piece of work: it demands `LawfulCodec Action`,
   `LawfulCodec Declaration`, and `LawfulCodec (Request .object)`, none of which exists.
 
-  **Codec scoping.** `Request .object` is fifteen flat wrapper fields, so it is roughly a
-  page of `xmap`/`product` over `StreamCodec`. `Action` will not be: its six payloads
-  reference `ElementBody`, `AtomRecord`, `AtomKind`, `StableRange`, `LinkTarget`, and
-  `StoredTransclusionRef`, each needing its own codec, and `StableRange` bottoms out in
-  stable points and anchors. Budget it as a walk of the Hyperdocument type tree —
-  mechanical, but broad. `Declaration` then needs `OperationIntent` and `RequestEnvelope`
-  on top.
+  **Codec scoping, and the framework is ready.** `LawfulCodec (Request .object)` is done
+  (`5e8692f`). `Action` is a walk of the Hyperdocument type tree — `ElementBody`,
+  `AtomRecord`, `AtomKind`, `StableRange`, `LinkTarget`, `StoredTransclusionRef`,
+  `EmbedRef`, `PrincipalRef`, `StoredSourceIdentity`, `OpeningDescriptor`,
+  `TransclusionMode`, `DisclosureAtom`, `Identifier` — none of them recursive, all of
+  them shapes `StreamCodec` now covers: `option` and `bool` (`e15dd49`) and `finset`
+  (`ea9c828`) closed the last gaps. It is mechanical and broad, not a design problem.
+  `Declaration` then needs `OperationIntent` and `RequestEnvelope` on top.
+
+  Note for whoever does it: `StreamCodec.finset` is noncomputable because
+  `Finset.toList` is. Fine for a witness; a deployed transclusion wire format would want
+  an explicitly ordered field instead.
 
   **The toolkit to build them with already exists**, in
   `Compiler.Tower256ConcreteBackend.StreamCodec`: a prefix codec with the append law
