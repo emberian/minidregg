@@ -111,6 +111,55 @@ theorem acceptedCellEffect_nonempty :
       (authState := authState) family request cell () ()) :=
   ⟨accepted⟩
 
+/-! ## A second accepted effect, at the other cell
+
+A joint turn needs more than one leg.  This is the same construction at the
+cell holding `true`, with its own effect digest and its own request, so the two
+legs are genuinely distinct accepted effects rather than one value used twice.
+-/
+
+/-- The second family: same shape, different effect digest, and the patch that
+writes the field back. -/
+def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit where
+  Declaration := Unit
+  declarationCodec := unitCodec
+  Outcome := fun _ => Unit
+  ModeEvidence := fun _ _ => Unit
+  outcomeCodec := fun _ => unitCodec
+  effectDigest := fun _ => ⟨17⟩
+  patch := fun _ _ => honestPatchTrue
+  nullifier := fun _ _ => none
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => release.elim
+  DisclosureAllowed := fun _ _ decision => decision = .sealed
+
+noncomputable def validatedPatchTrue :
+    ValidatedPatch materializer cellTrue (familyTrue.patch () ()) :=
+  honestPatchTrue_accepted.choose
+
+/-- **The second accepted effect.** -/
+noncomputable def acceptedTrue :
+    AcceptedCellEffect (portal := permissivePortal) (authState := authState)
+      familyTrue requestTrue cellTrue () () where
+  authorization := authorizedTrue
+  effectsDigestBound := rfl
+  preRootBound := by decide
+  modeEvidence := ()
+  validated := validatedPatchTrue
+  disclosure := .sealed
+  disclosureAllowed := rfl
+
+theorem acceptedTrue_nonempty :
+    Nonempty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) familyTrue requestTrue cellTrue () ()) :=
+  ⟨acceptedTrue⟩
+
+/-- The two legs really are distinct: different effect digests, so no joint
+turn below is one accepted effect wearing two hats. -/
+theorem legs_distinct : family.effectDigest () ≠ familyTrue.effectDigest () := by
+  decide
+
 /-! ## Teeth: the two binding equations are real
 
 The accepted effect binds the request to the family by two equations. If
@@ -153,6 +202,8 @@ theorem accepted_is_sealed : accepted.disclosure = .sealed := rfl
 
 #print axioms disclosure_forced_sealed
 #print axioms acceptedCellEffect_nonempty
+#print axioms acceptedTrue_nonempty
+#print axioms legs_distinct
 #print axioms wrongEffects_not_bound
 #print axioms stalePreRoot_not_bound
 #print axioms no_accepted_of_wrongEffects

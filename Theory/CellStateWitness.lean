@@ -117,6 +117,32 @@ theorem validatedPatch_nonempty :
     Nonempty (ValidatedPatch materializer cell honestPatch) :=
   ⟨honestPatch_accepted.choose⟩
 
+/-- A second cell, holding `true`, so a joint turn can carry two distinct
+canonical pre-states under one apex. -/
+def cellTrue : Materialized materializer := materialize materializer (stateOf true)
+
+theorem cellTrue_root : cellTrue.root = ⟨1⟩ := by decide
+
+/-- Its patch writes the field back to `false`. -/
+def honestPatchTrue : Patch schema Digest where
+  expectedPreRoot := ⟨1⟩
+  fieldFootprint := {()}
+  resourceFootprint := ∅
+  fieldWrites := [{ field := (), value := false }]
+  resourceWrites := []
+
+theorem honestPatchTrue_accepted :
+    ∃ validated : ValidatedPatch materializer cellTrue honestPatchTrue,
+      validate materializer cellTrue honestPatchTrue =
+        ValidationOutcome.accepted validated := by
+  unfold validate
+  rw [dif_pos (show honestPatchTrue.expectedPreRoot = cellTrue.root by decide)]
+  rw [dif_pos
+    (show honestPatchTrue.fieldFootprint = honestPatchTrue.namedFields by decide)]
+  rw [dif_pos
+    (show honestPatchTrue.resourceFootprint = honestPatchTrue.namedResources by decide)]
+  exact ⟨_, rfl⟩
+
 /-! ## Teeth: the validator is not a rubber stamp -/
 
 /-- A stale pre-root is rejected with the exact reason, by computation. -/
@@ -154,6 +180,8 @@ theorem underDeclaredPatch_rejected :
     (show ¬underDeclaredPatch.fieldFootprint = underDeclaredPatch.namedFields by decide)]
 
 #print axioms state_ext
+#print axioms cellTrue_root
+#print axioms honestPatchTrue_accepted
 #print axioms cell_root
 #print axioms honestPatch_accepted
 #print axioms validatedPatch_nonempty

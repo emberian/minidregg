@@ -80,6 +80,16 @@ def request : Request .object where
   policyEpoch := 0
   cost := 11
 
+/-- A second complete request, on a different target, quoting pre-state root
+`⟨1⟩` -- the second cell of a joint turn. -/
+def requestTrue : Request .object :=
+  { request with
+    target := ⟨6⟩
+    argsDigest := ⟨16⟩
+    effectsDigest := ⟨17⟩
+    nonce := 18
+    preStateRoot := ⟨1⟩ }
+
 /-! ## The authority token exists -/
 
 /-- Proof-mode evidence at the permissive portal. -/
@@ -96,6 +106,13 @@ def authorized : Authorized permissivePortal authState request where
 
 theorem authorized_nonempty :
     Nonempty (Authorized permissivePortal authState request) := ⟨authorized⟩
+
+/-- The same authority, granted for the second request. -/
+def authorizedTrue : Authorized permissivePortal authState requestTrue where
+  evidence := .proof () rfl
+  policyWitness := ()
+  policyEpochExact := rfl
+  policyVerified := rfl
 
 /-! ## Teeth -/
 
