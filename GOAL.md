@@ -4,41 +4,43 @@
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
 still governs; this block is the live trail.
 
-**Current thrust:** raise the evidence grade. Everything below was verified on one warm
-local tree; an isolated committed-source run over `HEAD` is in flight so the night's
-claims rest on a clean archive rather than on incremental oleans.
+**Current thrust:** keep hunting for the next vacuity of the kind found tonight — a
+type every theorem quantifies over that nothing inhabits — and close them the same way,
+with built witnesses rather than prose.
 
 **Next 3 moves**
 
-1. Record the isolated-runner result honestly, whichever way it goes, and reconcile
-   `PROJECT.md` / the `GOAL.md` snapshot below with what actually landed tonight.
+1. Sweep the other quantified-over carriers the same way `VerifiedHistoryHead` was
+   swept: `AcceptedCellEffect`, `MultiCellHyperedge.Commit`, `VerifiedExecution`,
+   `AcceptedOperation`. Anything never constructed gets a witness or a recorded finding.
 2. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
    of `attribution_split` should name the ledger event it pays, with the retained
    equivocation paying `commitmentBinding` through the collision bridge.
 3. Then breadth: a second consumer slice on the WAL handler, or the authorization
    issue/attenuate/revoke path over canonical authority cells.
 
-**Open audit finding (2026-08-10, from tonight's adversarial pass — READ THIS)**
+**Evidence grade.** An isolated committed-source run over `716f148` returned
+`command_exit=0`, `source_integrity_exit=0`, `dependency_integrity_exit=0` at `3232`
+jobs — evidence `E-20260810T061950-35463-local-nextop.local-716f148f91e2-lake`. Commits
+after that one carry warm-tree builds only.
 
-`VerifiedHistoryHead` is **never constructed anywhere in the tree.** `start` and
-`append` are the only ways to build one and neither is applied outside its own defining
-module; every other occurrence is a bound hypothesis. So every theorem quantified over
-`head : HistoryHead` — the whole retained-history layer, `SemanticHistoryBcsGame`,
-`SemanticHistoryTower256DeployedBcs`, `HyperdocumentHistoryAdmission`,
-`SemanticHistoryPcsEventRealization`, and tonight's `RawHistoryBcsOpenings` — is
-**conditional on that type being inhabited, and nothing exhibits an inhabitant.**
+**Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
-This is not a claim that the type IS empty. `VerifiedEntry` is constructible
-(`AcceptedCellEffectHistory.toVerifiedEntry`, `SemanticHistoryFamilyInstances.toVerifiedEntry`),
-and `start`/`append` look satisfiable — `FoldRecommitment.rootExact` can be discharged by
-choosing `foldRoot`, since `start` takes it as an argument. It is a claim that nobody has
-done it, so the layer currently has the exact shape a vacuous development would have.
-Closing it needs one exhibited head with `0 < foldRounds` at freely chosen parameters
-(`C := ⊤`, empty `dialectClauseRoots`, an `Evidence` carrying its own
-`rejectedCoreAtomic`, and a `BindingCommitment Digest F …` built from a finite-type
-injection into `Digest`).
+`VerifiedHistoryHead` was never constructed anywhere in the tree. `start` and `append`
+are the only ways to build one and neither was applied outside its own defining module;
+every other occurrence was a bound hypothesis. So the whole retained-history layer —
+`SemanticHistoryBcsGame`, `SemanticHistoryTower256DeployedBcs`,
+`HyperdocumentHistoryAdmission`, `SemanticHistoryPcsEventRealization`, and tonight's
+`RawHistoryBcsOpenings` — had exactly the shape a vacuous development would have.
 
-Until then, read every history maturity label as "S, conditional on head inhabitation".
+Closed by `d257fe9`: `Assurance.HistoryHeadInhabitation` builds the manifest, registry,
+clause-evidence family, entry semantics, header cells, code, commitment scheme, and two
+entries, then applies `start` and `append`. `linkedHead_foldRounds : ... = 1` discharges
+the `0 < foldRounds` hypothesis the reduction and the checkpoint game both require.
+
+Still open, and narrower: whether the **deployed** parameters admit a head. The witness
+uses `ZMod 5` and a finite-enumeration commitment — injective, so binding is a theorem,
+but not succinct and not the deployed scheme.
 
 **Done-log**
 
@@ -74,6 +76,10 @@ Until then, read every history maturity label as "S, conditional on head inhabit
   cSHAKE collision from any alphabet size. Teeth both ways: collision-freedom refutes
   the equivocation. A reduction, not a bound — the collision price is unpaid.
   `3232` jobs, exit `0`, boundary `0`.
+- `d257fe9` — the audit finding above, closed. `Assurance.HistoryHeadInhabitation` is the
+  first constructed `VerifiedHistoryHead`, with a real fold round, at built parameters.
+  Position binding is a theorem there (`commitWord_injective`), not a carried assumption.
+  `3233` jobs, exit `0`, boundary `0`.
 
 ---
 
