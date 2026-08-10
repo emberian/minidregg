@@ -120,20 +120,24 @@ variable {Root Root' Op : Type} {F : Type} [Field F] [Fintype F]
   [DecidableEq F] {m r t : ℕ}
 
 /-- The message's openings all verify against its root — the per-message
-commitment check the deployed verifier runs. -/
-def ColsOpen (S : BindingCommitment Root' F (Fin m) Op) (q : Fin t → Fin m)
+commitment check the deployed verifier runs. Stated at `OpeningScheme`,
+because running the verifier consumes no binding: a scheme that equivocates
+still HAS accepted openings, and refusing to say so is exactly how an
+adversary's opening attempt gets erased before a collision reduction can read
+it. Binding-typed call sites are unchanged — `BindingCommitment` coerces. -/
+def ColsOpen (S : OpeningScheme Root' F (Fin m) Op) (q : Fin t → Fin m)
     (π : BcsMsg Root' F Op t) : Prop :=
   ∀ j, S.verifyOpen π.root (q j) (π.cols j) (π.ops j)
 
 /-- **Committed-column consistency** of a transcript prefix: every completed
 round's columns open from its root — the clause `[ACC-rbr-bcs]` demanded of
 the knowledge state. -/
-def ColsConsistent (S : BindingCommitment Root' F (Fin m) Op)
+def ColsConsistent (S : OpeningScheme Root' F (Fin m) Op)
     (q : Fin t → Fin m) (rs : List (BcsMsg Root' F Op t × F)) : Prop :=
   ∀ e ∈ rs, ColsOpen S q e.1
 
 omit [Field F] [Fintype F] [DecidableEq F] in
-theorem colsConsistent_ofFn (S : BindingCommitment Root' F (Fin m) Op)
+theorem colsConsistent_ofFn (S : OpeningScheme Root' F (Fin m) Op)
     (q : Fin t → Fin m) {kk : ℕ} (πs : Fin kk → BcsMsg Root' F Op t)
     (ρs : Fin kk → F) :
     ColsConsistent S q (List.ofFn fun i => (πs i, ρs i))
@@ -157,17 +161,80 @@ noncomputable def bcsWord (dom : Fin m ↪ F) (d : ℕ) (q : Fin t → Fin m)
   recoverFromColumns dom d q π.cols
 
 omit [Fintype F] [DecidableEq F] in
+/-- **Synthesis needs column AGREEMENT, not binding.** If the message's
+columns are literally the codeword's symbols at the opened positions, erasure
+recovery (`recoverFromColumns_sound`, CITED) returns that codeword — no root,
+no verifier, no commitment scheme appears in this statement at all.
+
+This is the honest core of `bcsWord_committed` below, separated out because
+the two hypotheses are cryptographically very different: `hcols` is a fact
+about what the adversary actually submitted, while binding is a CR-priced
+assumption about what it could have submitted. A reduction that wants to
+extract a collision from an unequal submitted column must keep that column;
+if binding is consumed first, the column has already been rewritten and the
+collision branch is unreachable. -/
+theorem bcsWord_of_colsExact (dom : Fin m ↪ F) {d : ℕ} (hdt : d ≤ t)
+    {q : Fin t → Fin m} (hq : Function.Injective (dom ∘ q)) {wd : Fin m → F}
+    (hwd : wd ∈ reedSolomonCode dom d) {π : BcsMsg Root' F Op t}
+    (hcols : ∀ j, π.cols j = wd (q j)) :
+    bcsWord dom d q π = wd :=
+  recoverFromColumns_sound dom hdt hq hwd hcols
+
+omit [Fintype F] [DecidableEq F] in
 /-- **Binding pins the synthesis**: a message whose openings verify against a
 root committing a codeword synthesizes THAT codeword — `binding_columns`
-(CITED) attaches the columns, `recoverFromColumns_sound` (CITED) decodes
-them. The committed-column route of `[ACC-rbr-bcs]`, per message. -/
+(CITED) attaches the columns, then `bcsWord_of_colsExact` decodes them. The
+committed-column route of `[ACC-rbr-bcs]`, per message. Binding enters here
+and ONLY here: its whole job is to discharge `hcols`. -/
 theorem bcsWord_committed (S : BindingCommitment Root' F (Fin m) Op)
     (dom : Fin m ↪ F) {d : ℕ} (hdt : d ≤ t) {q : Fin t → Fin m}
     (hq : Function.Injective (dom ∘ q)) {wd : Fin m → F}
     (hwd : wd ∈ reedSolomonCode dom d) {π : BcsMsg Root' F Op t}
     (hrt : π.root = S.commit wd) (hver : ColsOpen S q π) :
     bcsWord dom d q π = wd :=
-  recoverFromColumns_sound dom hdt hq hwd (binding_columns S hrt hver)
+  bcsWord_of_colsExact dom hdt hq hwd (binding_columns S hrt hver)
+
+omit [Fintype F] [DecidableEq F] in
+/-- **The retained opening attempt.** At a scheme with no binding field, an
+accepted column that DISAGREES with the committed word is a real object: two
+openings of one root at one position carrying different values. This is the
+`BindingFailure` shape the deployed Merkle reduction consumes, stated here
+where the message alphabet lives. `bcsWord_committed` cannot produce it — its
+binding premise refutes the conclusion. -/
+def ColumnEquivocation (S : OpeningScheme Root' F (Fin m) Op)
+    (q : Fin t → Fin m) (π : BcsMsg Root' F Op t) (wd : Fin m → F) : Prop :=
+  ∃ j, S.verifyOpen π.root (q j) (π.cols j) (π.ops j) ∧
+    S.verifyOpen π.root (q j) (wd (q j)) (S.openAt wd (q j)) ∧
+    π.cols j ≠ wd (q j)
+
+omit [Fintype F] [DecidableEq F] in
+/-- **The honest split, binding-free.** An accepted message against a root
+that commits `wd` either has exactly `wd`'s columns — and therefore
+synthesizes `wd` — or exhibits a retained equivocation at a named position.
+No scheme property is assumed; the disjunction is where a deployment pays for
+collision-resistance instead of assuming it. -/
+theorem bcsWord_or_columnEquivocation (S : OpeningScheme Root' F (Fin m) Op)
+    (dom : Fin m ↪ F) {d : ℕ} (hdt : d ≤ t) {q : Fin t → Fin m}
+    (hq : Function.Injective (dom ∘ q)) {wd : Fin m → F}
+    (hwd : wd ∈ reedSolomonCode dom d) {π : BcsMsg Root' F Op t}
+    (hrt : π.root = S.commit wd) (hver : ColsOpen S q π) :
+    bcsWord dom d q π = wd ∨ ColumnEquivocation S q π wd := by
+  by_cases hcols : ∀ j, π.cols j = wd (q j)
+  · exact Or.inl (bcsWord_of_colsExact dom hdt hq hwd hcols)
+  · obtain ⟨j, hj⟩ := not_forall.mp hcols
+    exact Or.inr ⟨j, hver j, by rw [hrt]; exact S.verifyOpen_commit wd (q j), hj⟩
+
+omit [Fintype F] [DecidableEq F] in
+/-- Binding kills the second branch. This is the exact step that makes a
+binding-typed carrier unable to host a collision reduction: at a
+`BindingCommitment` the retained attempt does not merely go unused, it is
+REFUTED. -/
+theorem not_columnEquivocation (S : BindingCommitment Root' F (Fin m) Op)
+    {q : Fin t → Fin m} {π : BcsMsg Root' F Op t} {wd : Fin m → F} :
+    ¬ColumnEquivocation S q π wd := by
+  rintro ⟨j, hleft, hright, hne⟩
+  exact hne (S.binding π.root (q j) (π.cols j) (wd (q j)) (π.ops j)
+    (S.openAt wd (q j)) hleft hright)
 
 omit [Fintype F] [DecidableEq F] in
 /-- **Teeth — a root binds its columns, the columns determine the word**: two
@@ -881,6 +948,61 @@ theorem bcs_teeth_columns :
         (oneWord (qPair j)) () := by
   show ¬ ∀ j : Fin 2, msEx 1 (qPair j) = oneWord (qPair j)
   decide
+
+/-! ### Without binding: the retained attempt, exhibited
+
+`bcs_teeth_columns` above shows binding refuting an equivocation at `S₅`. The
+witnesses below are the other half of the same fact, and the half a collision
+reduction actually needs: at a scheme with NO binding field the attempt is not
+refuted, it is a built object, and the synthesized word is WRONG. -/
+
+/-- A message submitted to the equivocator carrying `oneWord`'s columns —
+against a root that commits `xWord`. Nothing here is hypothetical: every
+field is constructed. -/
+def equivocalMsg : BcsMsg Unit (ZMod 5) Unit 2 where
+  root := ()
+  cols := fun j => oneWord (qPair j)
+  ops := fun _ => ()
+
+/-- Its root IS the equivocator's commitment of `xWord` — the exact premise
+shape `bcsWord_committed` consumes. -/
+theorem equivocalMsg_root :
+    equivocalMsg.root = CommitExample.equivocal.commit xWord := rfl
+
+/-- Its openings all verify — the exact second premise. -/
+theorem equivocalMsg_opens :
+    ColsOpen CommitExample.equivocal qPair equivocalMsg := fun _ => trivial
+
+/-- **Satisfiable**: the retained equivocation is inhabited. Both premises of
+`bcsWord_committed` hold and the conclusion still fails, so the second branch
+of `bcsWord_or_columnEquivocation` is a real disjunct rather than dead code. -/
+theorem equivocalMsg_columnEquivocation :
+    ColumnEquivocation CommitExample.equivocal qPair equivocalMsg xWord :=
+  ⟨0, trivial, trivial, by decide⟩
+
+/-- **Computed**: the word this root synthesizes is `oneWord`, by erasure
+recovery from the submitted columns alone — `bcsWord_of_colsExact` with no
+scheme in sight. -/
+theorem equivocalMsg_word :
+    bcsWord dom₅ 2 qPair equivocalMsg = oneWord :=
+  bcsWord_of_colsExact dom₅ le_rfl qPair_inj oneWord_mem fun _ => rfl
+
+/-- **Teeth**: and it is NOT the committed word. A root committing `xWord`
+synthesizes `oneWord` at the equivocator, so `bcsWord_committed`'s conclusion
+is false here and its binding premise is doing real work. -/
+theorem equivocalMsg_word_ne_committed :
+    bcsWord dom₅ 2 qPair equivocalMsg ≠ xWord := by
+  rw [equivocalMsg_word]
+  decide
+
+/-- The same fact stated against the theorem it constrains: no
+`BindingCommitment` extends the equivocator, so `bcsWord_committed` is
+genuinely inapplicable to `equivocalMsg` — this is a refutation, not a gap in
+the library. -/
+theorem equivocalMsg_no_binding_route :
+    ¬ ∃ S : BindingCommitment Unit (ZMod 5) (Fin 4) Unit,
+        S.toOpeningScheme = CommitExample.equivocal :=
+  CommitExample.equivocal_no_binding_extension
 
 end AccRbrBcsExample
 

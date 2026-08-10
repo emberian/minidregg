@@ -124,6 +124,20 @@ structure BindingCommitment (Root : Type*) (F : Type*) (ι : Type*) (Op : Type*)
   /-- Position-binding — the field the seam theorems apply. -/
   binding : toOpeningScheme.PositionBinding
 
+/-! **Forgetting binding, silently.** A `BindingCommitment` may be handed to
+anything that needs only `commit`/`openAt`/`verifyOpen`, and the coercion is
+definitionally the parent projection — `S.verifyOpen` on either side is the
+same term. This exists so that predicates which do NOT consume binding can be
+STATED at `OpeningScheme` without a second copy at `BindingCommitment`: the
+weaker type is the real home, and every existing binding-typed call site keeps
+its syntax. Where binding IS consumed (`bcs_root_pins_word`, `binding_columns`,
+`word_binding`) the argument stays a `BindingCommitment` and the coercion never
+applies. -/
+attribute [coe] BindingCommitment.toOpeningScheme
+
+instance : CoeOut (BindingCommitment Root F ι Op) (OpeningScheme Root F ι Op) :=
+  ⟨BindingCommitment.toOpeningScheme⟩
+
 /-! ## Derived binding, word level -/
 
 /-- **Word binding**: two words fully opened from the SAME root are equal —
