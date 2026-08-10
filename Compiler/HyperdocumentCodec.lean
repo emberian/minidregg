@@ -204,7 +204,151 @@ def embedRefStream : StreamCodec EmbedRef :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; rfl)
 
-/-! ## Stable ranges -/
+/-! ## Stored stable ranges
+
+`Hyperdocument.StableRange` is the canonical stored/wire shape; the operational
+`StableRanges.StableRange` below is the adapter's view of the same thing. Both
+get codecs because both appear in payloads. -/
+
+def anchorBiasTag : AnchorBias -> Nat
+  | .before => 0
+  | .after => 1
+
+def anchorBiasOfTag : Nat -> AnchorBias
+  | 0 => .before
+  | _ => .after
+
+def anchorBiasStream : StreamCodec AnchorBias :=
+  StreamCodec.xmap StreamCodec.nat anchorBiasTag anchorBiasOfTag
+    (by intro value; cases value <;> rfl)
+
+def stablePointStream : StreamCodec StablePoint :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .run)
+      (StreamCodec.product (StreamCodec.option (identifierStream .v1 .atom))
+        (StreamCodec.product anchorBiasStream deathPolicyStream)))
+    (fun value => (value.run, value.neighbor, value.bias, value.death))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+    (by intro value; rfl)
+
+def storedStableRangeStream : StreamCodec StableRange :=
+  StreamCodec.xmap (StreamCodec.product stablePointStream stablePointStream)
+    (fun value => (value.start, value.finish))
+    (fun tuple => ⟨tuple.1, tuple.2⟩)
+    (by intro value; rfl)
+
+/-! ## Element bodies and link targets
+
+The two multi-way unions.  Both are written longhand rather than through
+`sum`, which would nest spuriously and force `Unit` payloads on the arms that
+carry nothing. -/
+
+def elementBodyTag : ElementBody -> Nat
+  | .container _ => 0
+  | .runs _ => 1
+  | .embed _ => 2
+  | .opaque _ _ => 3
+
+def elementBodyStream : StreamCodec ElementBody where
+  encode value :=
+    StreamCodec.nat.encode (elementBodyTag value) ++
+      match value with
+      | .container children =>
+          (StreamCodec.list (identifierStream .v1 .element)).encode children
+      | .runs runs => (StreamCodec.list (identifierStream .v1 .run)).encode runs
+      | .embed reference => embedRefStream.encode reference
+      | .opaque schema payload =>
+          digestStream.encode schema ++ bytesStream.encode payload
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => do
+        let (children, suffix) ←
+          (StreamCodec.list (identifierStream .v1 .element)).decodePrefix afterTag
+        some (.container children, suffix)
+    | 1 => do
+        let (runs, suffix) ←
+          (StreamCodec.list (identifierStream .v1 .run)).decodePrefix afterTag
+        some (.runs runs, suffix)
+    | 2 => do
+        let (reference, suffix) ← embedRefStream.decodePrefix afterTag
+        some (.embed reference, suffix)
+    | _ => do
+        let (schema, afterSchema) ← digestStream.decodePrefix afterTag
+        let (payload, suffix) ← bytesStream.decodePrefix afterSchema
+        some (.opaque schema payload, suffix)
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [elementBodyTag, List.append_assoc,
+        StreamCodec.nat.decodePrefix_encode,
+        (StreamCodec.list (identifierStream .v1 .element)).decodePrefix_encode,
+        (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
+        embedRefStream.decodePrefix_encode, digestStream.decodePrefix_encode,
+        bytesStream.decodePrefix_encode]
+
+def linkTargetTag : LinkTarget -> Nat
+  | .document _ => 0
+  | .element _ => 1
+  | .range _ _ => 2
+  | .transclusion _ _ => 3
+  | .external _ _ _ => 4
+
+noncomputable def linkTargetStream : StreamCodec LinkTarget where
+  encode value :=
+    StreamCodec.nat.encode (linkTargetTag value) ++
+      match value with
+      | .document target => (identifierStream .v1 .document).encode target
+      | .element target => (identifierStream .v1 .element).encode target
+      | .range document range =>
+          (identifierStream .v1 .document).encode document ++
+            storedStableRangeStream.encode range
+      | .transclusion target reference =>
+          (identifierStream .v1 .transclusion).encode target ++
+            storedTransclusionRefStream.encode reference
+      | .external scheme authority path =>
+          bytesStream.encode scheme ++ bytesStream.encode authority ++
+            bytesStream.encode path
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => do
+        let (target, suffix) ←
+          (identifierStream .v1 .document).decodePrefix afterTag
+        some (.document target, suffix)
+    | 1 => do
+        let (target, suffix) ←
+          (identifierStream .v1 .element).decodePrefix afterTag
+        some (.element target, suffix)
+    | 2 => do
+        let (document, afterDocument) ←
+          (identifierStream .v1 .document).decodePrefix afterTag
+        let (range, suffix) ← storedStableRangeStream.decodePrefix afterDocument
+        some (.range document range, suffix)
+    | 3 => do
+        let (target, afterTarget) ←
+          (identifierStream .v1 .transclusion).decodePrefix afterTag
+        let (reference, suffix) ←
+          storedTransclusionRefStream.decodePrefix afterTarget
+        some (.transclusion target reference, suffix)
+    | _ => do
+        let (scheme, afterScheme) ← bytesStream.decodePrefix afterTag
+        let (authority, afterAuthority) ← bytesStream.decodePrefix afterScheme
+        let (path, suffix) ← bytesStream.decodePrefix afterAuthority
+        some (.external scheme authority path, suffix)
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [linkTargetTag, List.append_assoc,
+        StreamCodec.nat.decodePrefix_encode,
+        (identifierStream .v1 .document).decodePrefix_encode,
+        (identifierStream .v1 .element).decodePrefix_encode,
+        (identifierStream .v1 .transclusion).decodePrefix_encode,
+        storedStableRangeStream.decodePrefix_encode,
+        storedTransclusionRefStream.decodePrefix_encode,
+        bytesStream.decodePrefix_encode]
+
+/-! ## Operational stable ranges -/
 
 open Minidregg.Theory.StableRanges in
 def locationStream : StreamCodec (Location RunId AtomId) :=
