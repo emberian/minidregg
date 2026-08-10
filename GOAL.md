@@ -151,8 +151,10 @@ semantic, not mechanical: `Capability.Admissible`.
 - `e15dd49` — `3240` jobs — `E-20260810T074342-67723-local-nextop.local-e15dd49104e2-lake`
 - `0801d48` — `3241` jobs — `E-20260810T075440-71165-local-nextop.local-0801d48af102-lake`
   (through `LawfulCodec Action`)
+- `8eab0e9` — `3241` jobs — `E-20260810T080143-73354-local-nextop.local-8eab0e9c8d12-lake`
+  (through the capability-path witness)
 
-Commits after `0801d48` carry warm-tree builds only.
+Commits after `8eab0e9` carry warm-tree builds only.
 
 **The night's own mistake, recorded because it is the instructive one**
 
