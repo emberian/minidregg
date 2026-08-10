@@ -44,7 +44,7 @@ semantic, not mechanical: `Capability.Admissible`.
 | carrier | witness |
 |---|---|
 | `CellState.ValidatedPatch` | `Theory.CellStateWitness` (`17e639c`) |
-| `TypedAuthorization.Authorized` | `Theory.TypedAuthorizationWitness` (`e5146a8`) |
+| `TypedAuthorization.Authorized` | `Theory.TypedAuthorizationWitness` (`e5146a8`; capability path and `Capability.Admissible` at `8b71ff5`) |
 | `AcceptedCellEffect` | `Theory.AcceptedCellEffectWitness` (`d4898a5`) |
 | `CanonicalTransition.PreparedTurn` | `Theory.CanonicalTransitionWitness` (`f5e6d1b`, root moves) |
 | `SemanticHistoryFamily.VerifiedHistoryHead` | `Assurance.HistoryHeadInhabitation` (`d257fe9`) |
@@ -71,10 +71,10 @@ semantic, not mechanical: `Capability.Admissible`.
   `LawfulCodec Declaration` (`Compiler.HyperdocumentCodec`), with `configCodecs` stating
   it. The `Config`'s other fields carry no proof obligations, so a `Config` is
   constructible. What remains on `AcceptedOperation` is the part codecs never touched:
-  `AuthenticatedPrincipal`, `ValidOperation`, an `AcceptedCellEffect` over the
-  Hyperdocument schema, and `Capability.Admissible` — semantic, checking scope, epoch,
-  and revocation, and it will NOT fall out of a permissive portal the way `Authorized`
-  did. Start there.
+  `AuthenticatedPrincipal`, `ValidOperation`, and an `AcceptedCellEffect` over the
+  Hyperdocument schema. `Capability.Admissible` — the part I flagged as the genuinely
+  semantic one — is now exhibited (`8b71ff5`), with teeth showing off-target, expired,
+  and revoked all fail while the portal keeps accepting. Start at `ValidOperation`.
 
   **Historical scoping note.** `LawfulCodec (Request .object)` is done
   (`5e8692f`). `Action` is a walk of the Hyperdocument type tree — `ElementBody`,
