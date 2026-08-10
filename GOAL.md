@@ -4,6 +4,30 @@
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
 still governs; this block is the live trail.
 
+**What became true tonight, and what is merely an interface**
+
+*Became true.* The six wind-down modules are integrated (`3e28d95`). `Loom`'s BCS
+synthesis no longer consumes binding to do a job binding is not needed for, and the
+retained-history carrier keeps the adversary's unequal opening instead of erasing it,
+with the branch shown inhabited at a non-binding scheme and shown refuted at a binding
+one. That retained equivocation now reaches the landed Merkle extractor from any
+alphabet size. `ImplementationRefinement` has an inhabitant — a staged/committed/
+compacting WAL whose guard-less append is representable by no schedule at all. And the
+anti-vacuity sweep exhibited, at built parameters, every carrier the kernel and history
+narratives quantify over: a validated patch, an authority token, an accepted cell
+effect, a canonical transition whose root actually moves, a retained-history head with a
+real fold round, and a two-leg joint commit balancing by cancellation.
+
+*Merely an interface.* The WAL is a device MODEL — no fsync, torn record, byte codec,
+page cache, replication, clock, or liveness — so "durable" still means "modelled
+durable". The collision bridge is a reduction with no price: no collision probability,
+no ROM realization, no deployed `MerkleDomains`/`ColumnPort` identity. Every witness
+uses BUILT parameters — a minimal schema, a permissive portal, `ZMod 5` — so none of
+them says anything about deployed ones, and a permissive portal is exactly the portal a
+security claim may not use. No consumer has cut over: no editor, index, sync, or client
+reads any path landed tonight. Cross-SCHEMA heterogeneity in the joint commit is typed
+and untested. And `PcsCrRomReduction` is still assumed rather than derived.
+
 **Current thrust:** the anti-vacuity sweep has run from `Theory/CellState` up through
 `Kernel/MultiCellHyperedge`; every rung the durable and history work stands on now
 bottoms out in built data. What remains is the carriers the sweep has not reached.
