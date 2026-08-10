@@ -78,13 +78,19 @@ Every substantial claim is labeled by the strongest boundary actually closed:
 
 ### The cells are not yet inhabitable
 
-`Theory.MaterializerCardinality` proves that `CredentialAuthorityState.Materializer` and
-`Hyperdocument.Materializer Digest` are **empty**. A materializer carries a
+`Theory.MaterializerCardinality` and `Kernel.EventLogMaterializerLimit` prove that **all
+four** `CellState.Schema` definitions in this repository admit **no materializer**:
+credential authority, Hyperdocument content, the Hyperdocument event log, and the legacy
+turn effect schema that `Kernel.DeclaredHyperedge` uses. A materializer carries a
 `LawfulCodec` for the schema's entire `LogicalState`, which is a total function over an
-infinite field index; no encoding injects that into `List UInt8`. Every theorem
-quantified over an authority cell or a document cell is therefore vacuously true —
-including credential issuance, attenuation, revocation, epoch rotation, and the whole
-Hyperdocument operations layer.
+infinite field index; no encoding injects that into `List UInt8`. Every theorem quantified over a
+`Materialized` cell at a deployed schema is therefore vacuously true — credential
+issuance, attenuation, revocation, epoch rotation, the whole Hyperdocument operations
+layer, the atomic two-cell publication, and the flat multi-incidence turn.
+
+Nothing proved is false, and the schemas themselves are not the problem. It is one
+type-level decision applied uniformly, and
+`materializer_nonempty_iff_countable` states exactly what replacing it must achieve.
 
 The fix is the vocabulary these modules already use about themselves: make `LogicalState`
 finitely supported — a finite map read through a default — and the state space is

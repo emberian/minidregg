@@ -161,10 +161,14 @@ semantic, not mechanical: `Capability.Admissible`.
 
 Commits after `47d7995` carry warm-tree builds only.
 
-**THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be`)**
+**THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
 
-`CredentialAuthorityState.Materializer` is **provably empty**, and so is any
-`CellState.Materializer` for a schema with infinitely many two-valued fields.
+**No `CellState.Materializer` in this tree has an inhabitant, at any of its schemas.**
+There are exactly four schema definitions in the repository and all four are proved
+empty: `CredentialAuthorityState.schema` (`70047be`), `Hyperdocument.cellSchema`
+(`7311a60`), `HyperdocumentEventLog.cellSchema` (`df10328`), and
+`DeclaredTurn.effectSchema` (`ed2cfed`) — the last of which is what
+`Kernel.DeclaredHyperedge`, the call-forest replacement carrier, is built on.
 
 The argument is three lines. A materializer carries `LawfulCodec (LogicalState S)`;
 `decode_encode` makes `encode` injective; so a materializer is an injection from the
@@ -172,10 +176,12 @@ schema's entire state space into `List UInt8`, which is countable. The authority
 has `AuthorityField.nullifier : Nat → AuthorityField` at value type `Bool`, so its state
 space contains `Nat → Bool`, which is not countable.
 
-Consequence, stated plainly: **every theorem quantified over a credential authority cell
-is vacuously true.** Issuance, strict attenuation, revocation, epoch rotation,
-`AuthenticatedPrincipal`, `HyperdocumentOperations.Accepted`, and `AcceptedOperation` all
-sit above a premise nothing can satisfy. They are not false. They are vacuous, which is
+Consequence, stated plainly: **every theorem anywhere in the tree that quantifies over a
+`Materialized` cell at a deployed schema is vacuously true.** Issuance, strict attenuation, revocation, epoch rotation,
+`AuthenticatedPrincipal`, `HyperdocumentOperations.Accepted`, `AcceptedOperation`, the
+atomic two-cell publication, and the flat multi-incidence turn all sit above a premise
+nothing can satisfy. The only cells that exist are the finite ones built tonight in
+`Theory.CellStateWitness` for the express purpose of not being vacuous. They are not false. They are vacuous, which is
 worse, because vacuous theorems read exactly like real ones — and this is the second time
 tonight that shape turned up (the first was `VerifiedHistoryHead`, closed in `d257fe9`).
 
