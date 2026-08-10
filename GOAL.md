@@ -19,10 +19,14 @@ with built witnesses rather than prose.
 3. Then breadth: a second consumer slice on the WAL handler, or the authorization
    issue/attenuate/revoke path over canonical authority cells.
 
-**Evidence grade.** An isolated committed-source run over `716f148` returned
-`command_exit=0`, `source_integrity_exit=0`, `dependency_integrity_exit=0` at `3232`
-jobs — evidence `E-20260810T061950-35463-local-nextop.local-716f148f91e2-lake`. Commits
-after that one carry warm-tree builds only.
+**Evidence grade.** Three isolated committed-source runs, all `command_exit=0`,
+`source_integrity_exit=0`, `dependency_integrity_exit=0`:
+
+- `716f148` — `3232` jobs — `E-20260810T061950-35463-local-nextop.local-716f148f91e2-lake`
+- `dfed208` — `3233` jobs — `E-20260810T062751-38501-local-nextop.local-dfed208fdcb5-lake`
+- `d4898a5` — `3236` jobs — `E-20260810T063734-41624-local-nextop.local-d4898a56ae20-lake`
+
+Commits after `d4898a5` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
@@ -132,6 +136,17 @@ the deployed ones.
   equation refuted at an otherwise-permissive portal; and a closed `AcceptedCellEffect`
   standing on both, forced sealed, with `no_accepted_of_wrongEffects` and
   `no_accepted_of_stalePreRoot`. `3236` jobs, exit `0`, boundary `0`.
+- `f5e6d1b` — and the transition MOVES. The witness schema was a singleton, which
+  inhabits every carrier below it while testing nothing about transition; it now carries
+  a `Bool` field encoded as one byte, so the cell sits at root `⟨0⟩` and the validated
+  patch reaches `⟨1⟩`. `CanonicalTransitionWitness.preparedTurn_moves` is the theorem a
+  singleton would have hidden. `3237` jobs, exit `0`, boundary `0`.
+
+  Cost recorded, because the house rules already warn about it: the post-root appeared
+  NOT to move for several iterations, `decide` agreeing, and the witness was right — the
+  `.olean` was stale. `lake env lean` on an edited file writes no olean, so an importing
+  file silently loads the previous version. A stale cache manufactures a RED as readily
+  as a green.
 
 ---
 
