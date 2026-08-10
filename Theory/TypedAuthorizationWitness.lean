@@ -90,6 +90,16 @@ def requestTrue : Request .object :=
     nonce := 18
     preStateRoot := ⟨1⟩ }
 
+/-- A third request, for the second schema's cell in a heterogeneous joint
+turn: same domain, its own target and digests, pre-state root `⟨0⟩`. -/
+def requestB : Request .object :=
+  { request with
+    target := ⟨7⟩
+    argsDigest := ⟨26⟩
+    effectsDigest := ⟨27⟩
+    nonce := 28
+    preStateRoot := ⟨0⟩ }
+
 /-! ## The authority token exists -/
 
 /-- Proof-mode evidence at the permissive portal. -/
@@ -109,6 +119,13 @@ theorem authorized_nonempty :
 
 /-- The same authority, granted for the second request. -/
 def authorizedTrue : Authorized permissivePortal authState requestTrue where
+  evidence := .proof () rfl
+  policyWitness := ()
+  policyEpochExact := rfl
+  policyVerified := rfl
+
+/-- The same authority, granted for the second schema's request. -/
+def authorizedB : Authorized permissivePortal authState requestB where
   evidence := .proof () rfl
   policyWitness := ()
   policyEpochExact := rfl

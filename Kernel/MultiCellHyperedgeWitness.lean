@@ -14,16 +14,16 @@ This builds one, standing on the `Theory` witnesses:
 their schema and materializer come from `CellStateWitness`, and their portal
 and authority state from `TypedAuthorizationWitness`.
 
-The turn has TWO incidences, which is what makes the witness worth having:
-`cellIdsDistinct` separates two real cell identities, the two legs are distinct
-accepted effects over distinct canonical pre-cells with distinct effect digests
-(`AcceptedCellEffectWitness.legs_distinct`), and the aggregate resource law
-balances by CANCELLATION -- one leg charges `+1`, the other `-1`, and the joint
-equation is what forces their sum to zero.
+The turn has two incidences over TWO DIFFERENT SCHEMAS, which is what this
+module is for.  One cell carries a single field key of type `Bool`; the other
+carries two field keys of type `Unit`, with its own materializer, codec, and
+canonical root.  Nothing about them is shared except the apex they join under.
 
-What is still not exercised: both incidences carry the same schema, so
-cross-SCHEMA heterogeneity is typed but untested.  A witness with two different
-schemas is the remaining improvement.
+Every joint condition therefore does work: `cellIdsDistinct` separates two real
+cell identities, the legs are accepted effects at different schemas with
+different effect digests, and the aggregate resource law balances by
+CANCELLATION -- one leg charges `+1`, the other `-1`, so `aggregateBalanced` is
+the equation forcing their sum to zero rather than a restatement of `0 = 0`.
 -/
 import Kernel.MultiCellHyperedge
 import Theory.AcceptedCellEffectWitness
@@ -45,10 +45,18 @@ noncomputable section
 materializer, portal, a constant authority projection, and DISTINCT cell
 identities. -/
 def cells : CellFamily.{0, 0, 0, 0, 0} Bool where
-  schema := fun _ => schema
-  fieldDecidableEq := fun _ => inferInstance
-  resourceDecidableEq := fun _ => inferInstance
-  materializer := fun _ => materializer
+  schema := fun incidence => match incidence with
+    | true => schemaB
+    | false => schema
+  fieldDecidableEq := fun incidence => match incidence with
+    | true => inferInstance
+    | false => inferInstance
+  resourceDecidableEq := fun incidence => match incidence with
+    | true => inferInstance
+    | false => inferInstance
+  materializer := fun incidence => match incidence with
+    | true => materializerB
+    | false => materializer
   portal := fun _ => permissivePortal
   projectAuthority := fun _ _ => authState
   cellId := fun incidence => if incidence then ⟨1⟩ else ⟨0⟩
@@ -62,12 +70,12 @@ def legFalse : LegData.{0, 0, 0, 0, 0, 0} cells false where
   declaration := ()
   outcome := ()
 
-/-- The leg at the cell holding `true`, with its own family and request. -/
+/-- The leg at the OTHER SCHEMA's cell, with its own family and request. -/
 def legTrue : LegData.{0, 0, 0, 0, 0, 0} cells true where
   Nullifier := Unit
-  family := AcceptedCellEffectWitness.familyTrue
+  family := AcceptedCellEffectWitness.familyB
   kind := .object
-  request := requestTrue
+  request := requestB
   declaration := ()
   outcome := ()
 
@@ -76,7 +84,7 @@ which is what `sharedDomain` demands of both legs. -/
 def declaration : Declaration.{0, 0, 0, 0, 0, 0} cells where
   header := { domain := ⟨1⟩, turnId := ⟨2⟩, apex := ⟨3⟩ }
   pre := fun incidence => match incidence with
-    | true => cellTrue
+    | true => cellB
     | false => cell
   legs := fun incidence => match incidence with
     | true => legTrue
@@ -85,7 +93,7 @@ def declaration : Declaration.{0, 0, 0, 0, 0, 0} cells where
 /-- Both accepted legs are the closed accepted effects from `Theory`. -/
 def acceptedLegs : declaration.AcceptedLegs := fun incidence =>
   match incidence with
-  | true => acceptedTrue
+  | true => acceptedB
   | false => accepted
 
 /-- A resource law that charges the two legs oppositely, so the joint balance
@@ -114,6 +122,12 @@ def commit : Commit law acceptedLegs boundary where
 constraint here rather than a consequence of a singleton index. -/
 theorem cellIds_distinct : cells.cellId false ≠ cells.cellId true := by decide
 
+/-- And the two incidences really carry different schemas: one field key of
+type `Bool` against two of type `Unit`. -/
+theorem schemas_heterogeneous :
+    (cells.schema false).Field = Unit ∧ (cells.schema true).Field = Bool :=
+  ⟨rfl, rfl⟩
+
 theorem commit_nonempty : Nonempty (Commit law acceptedLegs boundary) := ⟨commit⟩
 
 /-- The apex is the header's, by construction rather than by caller choice. -/
@@ -131,6 +145,7 @@ theorem no_commit_with_wrong_apex
   exact absurd exact (by decide)
 
 #print axioms cellIds_distinct
+#print axioms schemas_heterogeneous
 #print axioms commit_nonempty
 #print axioms commit_jointCommit
 #print axioms no_commit_with_wrong_apex

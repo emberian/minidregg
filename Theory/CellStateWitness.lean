@@ -143,6 +143,78 @@ theorem honestPatchTrue_accepted :
     (show honestPatchTrue.resourceFootprint = honestPatchTrue.namedResources by decide)]
   exact ⟨_, rfl⟩
 
+/-! ## A genuinely different schema
+
+The joint-turn witnesses need cells whose SCHEMAS differ, not just whose values
+do.  This one inverts the shape of the first: two field keys carrying a trivial
+value type, where the first had one key carrying `Bool`. -/
+
+/-- Two field keys, each carrying `Unit`, and no resources. -/
+def schemaB : Schema.{0, 0, 0, 0} where
+  Field := Bool
+  FieldType := fun _ => Unit
+  Resource := Empty
+  ResourceType := fun resource => resource.elim
+  Authority := fun resource => resource.elim
+  Evidence := fun resource => resource.elim
+
+instance : DecidableEq schemaB.Field := inferInstanceAs (DecidableEq Bool)
+instance : DecidableEq schemaB.Resource := fun resource => resource.elim
+
+/-- Its state space is a singleton, since every field carries `Unit`. -/
+def logicalB : LogicalState schemaB where
+  fields := fun _ => ()
+  resources := fun resource => resource.elim
+
+theorem logicalB_unique (state : LogicalState schemaB) : state = logicalB := by
+  cases state with
+  | mk fields resources =>
+      have hf : fields = logicalB.fields := funext fun _ => rfl
+      have hr : resources = logicalB.resources :=
+        funext fun resource => resource.elim
+      rw [hf, hr]
+
+def stateCodecB : LawfulCodec (LogicalState schemaB) where
+  encode := fun _ => []
+  decode := fun _ => some logicalB
+  decode_encode := fun state => by rw [logicalB_unique state]
+
+def materializerB : Materializer schemaB Digest where
+  codec := stateCodecB
+  rootBytes := fun bytes => ⟨bytes.length⟩
+
+def cellB : Materialized materializerB := materialize materializerB logicalB
+
+theorem cellB_root : cellB.root = ⟨0⟩ := rfl
+
+/-- A patch touching only the second field key, so its footprint is a proper
+subset of the schema's fields. -/
+def honestPatchB : Patch schemaB Digest where
+  expectedPreRoot := ⟨0⟩
+  fieldFootprint := {true}
+  resourceFootprint := ∅
+  fieldWrites := [{ field := true, value := () }]
+  resourceWrites := []
+
+theorem honestPatchB_accepted :
+    ∃ validated : ValidatedPatch materializerB cellB honestPatchB,
+      validate materializerB cellB honestPatchB =
+        ValidationOutcome.accepted validated := by
+  unfold validate
+  rw [dif_pos (show honestPatchB.expectedPreRoot = cellB.root from rfl)]
+  rw [dif_pos (show honestPatchB.fieldFootprint = honestPatchB.namedFields by decide)]
+  rw [dif_pos
+    (show honestPatchB.resourceFootprint = honestPatchB.namedResources by decide)]
+  exact ⟨_, rfl⟩
+
+/-- The two schemas differ observably: one field key carrying `Bool` against two
+field keys carrying `Unit`.  A joint turn over both is heterogeneous rather than
+one schema used twice. -/
+theorem schemas_differ :
+    schema.Field = Unit ∧ schemaB.Field = Bool ∧
+      schema.FieldType () = Bool ∧ schemaB.FieldType true = Unit :=
+  ⟨rfl, rfl, rfl, rfl⟩
+
 /-! ## Teeth: the validator is not a rubber stamp -/
 
 /-- A stale pre-root is rejected with the exact reason, by computation. -/
@@ -181,6 +253,9 @@ theorem underDeclaredPatch_rejected :
 
 #print axioms state_ext
 #print axioms cellTrue_root
+#print axioms cellB_root
+#print axioms honestPatchB_accepted
+#print axioms schemas_differ
 #print axioms honestPatchTrue_accepted
 #print axioms cell_root
 #print axioms honestPatch_accepted

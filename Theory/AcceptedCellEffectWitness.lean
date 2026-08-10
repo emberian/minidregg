@@ -160,6 +160,48 @@ turn below is one accepted effect wearing two hats. -/
 theorem legs_distinct : family.effectDigest () ≠ familyTrue.effectDigest () := by
   decide
 
+/-! ## A third accepted effect, over the OTHER schema
+
+Cross-schema heterogeneity needs an accepted effect whose schema and
+materializer differ, not just whose values do.  This one lives on `schemaB`:
+two field keys carrying `Unit`, against the first schema's one key carrying
+`Bool`. -/
+
+def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB materializerB Unit where
+  Declaration := Unit
+  declarationCodec := unitCodec
+  Outcome := fun _ => Unit
+  outcomeCodec := fun _ => unitCodec
+  ModeEvidence := fun _ _ => Unit
+  effectDigest := fun _ => ⟨27⟩
+  patch := fun _ _ => honestPatchB
+  nullifier := fun _ _ => none
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => release.elim
+  DisclosureAllowed := fun _ _ decision => decision = .sealed
+
+noncomputable def validatedPatchB :
+    ValidatedPatch materializerB cellB (familyB.patch () ()) :=
+  honestPatchB_accepted.choose
+
+/-- **The accepted effect over the second schema.** -/
+noncomputable def acceptedB :
+    AcceptedCellEffect (portal := permissivePortal) (authState := authState)
+      familyB requestB cellB () () where
+  authorization := authorizedB
+  effectsDigestBound := rfl
+  preRootBound := rfl
+  modeEvidence := ()
+  validated := validatedPatchB
+  disclosure := .sealed
+  disclosureAllowed := rfl
+
+theorem acceptedB_nonempty :
+    Nonempty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) familyB requestB cellB () ()) :=
+  ⟨acceptedB⟩
+
 /-! ## Teeth: the two binding equations are real
 
 The accepted effect binds the request to the family by two equations. If
@@ -203,6 +245,7 @@ theorem accepted_is_sealed : accepted.disclosure = .sealed := rfl
 #print axioms disclosure_forced_sealed
 #print axioms acceptedCellEffect_nonempty
 #print axioms acceptedTrue_nonempty
+#print axioms acceptedB_nonempty
 #print axioms legs_distinct
 #print axioms wrongEffects_not_bound
 #print axioms stalePreRoot_not_bound
