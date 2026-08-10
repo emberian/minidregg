@@ -106,8 +106,10 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `6b3425f` — `3241` jobs — `E-20260810T071230-53624-local-nextop.local-6b3425fd7c96-lake`
 - `4c16fd7` — `3241` jobs — `E-20260810T071558-54877-local-nextop.local-4c16fd7bfb8d-lake`
 - `0eec65a` — `3241` jobs — `E-20260810T072232-57724-local-nextop.local-0eec65a8547d-lake`
+- `5e8692f` — `3240` jobs — `E-20260810T073849-65608-local-nextop.local-5e8692f187f7-lake`
+  (the whole axiom-pin sweep plus the relocated request codec)
 
-Commits after `0eec65a` carry warm-tree builds only.
+Commits after `5e8692f` carry warm-tree builds only.
 
 **The night's own mistake, recorded because it is the instructive one**
 
