@@ -230,6 +230,14 @@ def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
     simp [List.append_assoc, nat.decodePrefix_encode,
       decodeMany_encodeMany]
 
+/-- Finite sets, through their canonical list.  `Finset.toList_toFinset` is what
+makes this lawful: decoding rebuilds the SET, so the codec is well defined even
+though the list it wrote is only one of the orderings that denote it. -/
+noncomputable def finset [DecidableEq alpha] (codec : StreamCodec alpha) :
+    StreamCodec (Finset alpha) :=
+  xmap (list codec) Finset.toList List.toFinset
+    (by intro value; exact Finset.toList_toFinset value)
+
 end StreamCodec
 
 /-! ## Primitive and controller-record codecs -/
