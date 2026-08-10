@@ -228,6 +228,19 @@ leaving a reader to check: every one of them — `CellStateWitness`,
 `finite_schema_state_countable` is that observation. They still say nothing about the
 deployed schemas, which is the point of the finding.
 
+**The design is decided and the first step has landed.** ember chose the Option-valued
+encoding, with the observation that makes the three-way choice go away: if the core is
+Option-valued, the other two designs are DERIVED, not rival. `Theory.SparseLogicalState`
+is that core — `read` is Option-valued, `readD` takes a default and gives you either the
+schema-side or the state-side convention, and `readD_empty` proves "no default" and
+"default everywhere" are one object seen two ways. `nonempty_lawfulCodec_sparse_effect`
+carries it to an actual codec for `DeclaredTurn.effectSchema`, the schema
+`effectMaterializer_isEmpty` proves empty as a total function.
+
+**Still staged.** `CellState.LogicalState` is untouched; the migration order and the
+reason each schema is separable are in the module. The endpoint is deletion of the
+total-function field.
+
 **The fix has an exact target.** `materializer_nonempty_iff_countable` proves a schema
 admits a materializer for a nonempty root exactly when its logical state space is
 nonempty and countable — so whatever replaces the total function (finite map with a
