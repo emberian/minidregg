@@ -258,14 +258,16 @@ the deployed ones.
   proofs are one-liners, which is the point — the propagation is structural and now
   checked.
 - `b59f978` + `d0ac458` + `11b086e` + `6e8174e` — the axiom ledger went from advisory to
-  enforced tree-wide: **793 pinned against 30 bare**, from 128 against 702. An axiom
+  enforced tree-wide (`767029e` closes it): **823 pinned, 0 bare**, from 128 pinned against
+  702 bare. An axiom
   regression anywhere now fails the build instead of printing a different list into a log
   nobody reads. The symmetric cost is intended: improving a proof to drop an axiom also
   fails until its pin is updated. `Effects/EffectSpec.lean` had this right from the start
   and said so; I only noticed reading it. Use `#guard_msgs (whitespace := lax) in` — Lean
   wraps the axiom list for long declaration names, so a strict pin passes for short names
-  and fails for long ones. The 30 stragglers are ones the generator would not guess a
-  name for; `grep -rn "^#print axioms"` finds them.
+  and fails for long ones. The last 30 were two generator bugs — fully-qualified source
+  names, and `?` missing from the name pattern — and both failed SAFELY, refusing to
+  guess and leaving the line bare, which is why what remained was exactly countable.
 - `5e8692f` — `LawfulCodec (Request .object)` rebuilt in `Compiler/` on the landed
   `StreamCodec`, which is where it belonged: logarithmic base-255 fields, the same verb
   numbering as `SemanticTurnReceiptDescriptor`, teeth on target and effects-digest
