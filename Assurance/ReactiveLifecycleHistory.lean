@@ -29,6 +29,7 @@ import Kernel.TypedCellHyperedge
 namespace Minidregg.Assurance.ReactiveLifecycleHistory
 
 open Minidregg.Assurance.AcceptedCellEffectHistory
+open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
@@ -165,22 +166,16 @@ variable
     {headerCells : HistoryAdmissionContext -> BindingIx -> F}
     {C : Submodule F (BoundReceiptIx n -> F)}
 
-local notation "HistoryEntry" =>
-  Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
-    (manifest := manifest) (registry := registry)
-    (clauseEvidence := clauseEvidence) (family := entryFamily)
-    (headerCells := headerCells) (C := C)
-
-local notation "Spec" => PromiseSpec U family Height Condition Continuation
-
 /-- Open logical promise token.  All load-bearing data lives in its exact
 `spec` index, so the token has no late shape fields. -/
-structure Promise (spec : Spec) where
+structure Promise
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
   opened : Unit
 
 /-- Open the unique logical promise shape.  This schedules no physical work. -/
-def Promise.open (spec : Spec) : Promise spec :=
+def Promise.open
+    (spec : PromiseSpec U family Height Condition Continuation) : Promise spec :=
   ⟨()⟩
 
 /--
@@ -192,34 +187,45 @@ recheck this root durably.
 -/
 structure Notification
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
-  entry : HistoryEntry
+  entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+    (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (family := entryFamily)
+    (headerCells := headerCells) (C := C)
   committed : entry.context.outcome = .committed
   withinDeadline : rules.observedHeight entry.context <= spec.deadline
   stateReady : entry.context.postStateRoot = spec.pre.root
-  matches : rules.Matches spec.condition entry.context entry.claim
+  conditionHolds : rules.Matches spec.condition entry.context entry.claim
 
 /-- Construct notification only from the complete verified history entry. -/
 def notify
     (rules : HistoryRules n F Height Condition BreakReason)
-    {spec : Spec} (_promise : Promise spec)
-    (entry : HistoryEntry)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (_promise : Promise spec)
+    (entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := entryFamily)
+      (headerCells := headerCells) (C := C))
     (committed : entry.context.outcome = .committed)
     (withinDeadline : rules.observedHeight entry.context <= spec.deadline)
     (stateReady : entry.context.postStateRoot = spec.pre.root)
-    (matches : rules.Matches spec.condition entry.context entry.claim) :
-    Notification rules spec :=
-  ⟨entry, committed, withinDeadline, stateReady, matches⟩
+    (conditionHolds : rules.Matches spec.condition entry.context entry.claim) :
+    Notification (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec :=
+  ⟨entry, committed, withinDeadline, stateReady, conditionHolds⟩
 
 /-- A reaction contains exactly one late value under the eager advice code.
 The proof binds its canonical bytes to the same authenticated entry which
 woke the promise. -/
 structure Reaction
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
-  notification : Notification rules spec
+  notification : Notification (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+    (headerCells := headerCells) (C := C) rules spec
   advice : spec.Advice
   adviceAllowed : rules.AdviceAllowed spec.condition
     notification.entry.context notification.entry.claim
@@ -228,39 +234,52 @@ structure Reaction
 /-- React to one authenticated notification with shape-free late advice. -/
 def react
     (rules : HistoryRules n F Height Condition BreakReason)
-    {spec : Spec} (notification : Notification rules spec)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (notification : Notification (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec)
     (advice : spec.Advice)
     (allowed : rules.AdviceAllowed spec.condition
       notification.entry.context notification.entry.claim
       (spec.encodeAdvice advice)) :
-    Reaction rules spec :=
+    Reaction (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec :=
   ⟨notification, advice, allowed⟩
-
-namespace Notification
-
-variable
-    {rules : HistoryRules n F Height Condition BreakReason}
-    {spec : Spec}
 
 /-- Notification exposes the actual accumulated claim, never a caller-authored
 summary of it. -/
-def authenticatedClaim (notification : Notification rules spec) :
+def authenticatedNotificationClaim
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (notification : Notification (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec) :
     BoundSemanticReceiptClaim n F :=
   notification.entry.claim
 
 /-- The observation point and finalization pre-cell have the same canonical
 state root. -/
-theorem observed_state_exact (notification : Notification rules spec) :
+theorem notificationObservedStateExact
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (notification : Notification (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec) :
     notification.entry.context.postStateRoot = spec.request.preStateRoot :=
   notification.stateReady.trans spec.requestPreRootExact.symm
 
 /-- One authenticated entry cannot simultaneously wake this promise on time
 and witness that its deadline has already passed. -/
-theorem not_after_deadline (notification : Notification rules spec) :
-    not (spec.deadline < rules.observedHeight notification.entry.context) :=
+theorem notificationNotAfterDeadline
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (notification : Notification (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec) :
+    ¬ (spec.deadline < rules.observedHeight notification.entry.context) :=
   not_lt_of_ge notification.withinDeadline
 
-end Notification
 
 /-! ## Finalize as an accepted cell effect and typed hyperedge incidence -/
 
@@ -273,9 +292,11 @@ advice.
 structure Finalized
     {portal : Portal} {authState : AuthState}
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
-  reaction : Reaction rules spec
+  reaction : Reaction (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+    (headerCells := headerCells) (C := C) rules spec
   accepted : AcceptedCellEffect (portal := portal) (authState := authState)
     family spec.request spec.pre spec.declaration
       (spec.interpretAdvice reaction.advice)
@@ -285,68 +306,98 @@ installation remains outside this function. -/
 def finalize
     {portal : Portal} {authState : AuthState}
     (rules : HistoryRules n F Height Condition BreakReason)
-    {spec : Spec} (reaction : Reaction rules spec)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (reaction : Reaction (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family spec.request spec.pre spec.declaration
         (spec.interpretAdvice reaction.advice)) :
-    Finalized (portal := portal) (authState := authState) rules spec :=
+    Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec :=
   ⟨reaction, accepted⟩
 
-namespace Finalized
-
-variable
+/-- Exact request-indexed authorization remains present. -/
+def finalizedAuthorization
     {portal : Portal} {authState : AuthState}
     {rules : HistoryRules n F Height Condition BreakReason}
-    {spec : Spec}
-
-/-- Exact request-indexed authorization remains present. -/
-def authorization
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     Authorized portal authState spec.request :=
   finalized.accepted.authorization
 
 /-- The final effect has the eager field footprint for every possible advice. -/
-@[simp] theorem fieldFootprint_exact
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+@[simp] theorem finalizedFieldFootprintExact
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     finalized.accepted.prepared.delta.fieldFootprint = spec.fieldFootprint := by
   simpa only [AcceptedCellEffect.prepared_fieldFootprint] using
     spec.fieldFootprintExact finalized.reaction.advice
 
 /-- The final effect has the eager resource footprint for every possible
 advice. -/
-@[simp] theorem resourceFootprint_exact
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+@[simp] theorem finalizedResourceFootprintExact
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     finalized.accepted.prepared.delta.resourceFootprint =
       spec.resourceFootprint := by
   simpa only [AcceptedCellEffect.prepared_resourceFootprint] using
     spec.resourceFootprintExact finalized.reaction.advice
 
 /-- The final effect retains the eager replay nullifier. -/
-@[simp] theorem nullifier_exact
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+@[simp] theorem finalizedNullifierExact
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     finalized.accepted.prepared.nullifier = some spec.nullifier := by
   simpa only [AcceptedCellEffect.prepared_nullifier] using
     spec.nullifierExact finalized.reaction.advice
 
 /-- The final effect starts at the state root authenticated by notification. -/
-theorem observed_preRoot_exact
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+theorem finalizedObservedPreRootExact
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     finalized.reaction.notification.entry.context.postStateRoot =
       finalized.accepted.prepared.preRoot := by
   rw [finalized.reaction.notification.stateReady]
-  exact finalized.accepted.preRootBound.symm
+  exact spec.requestPreRootExact.symm.trans
+    finalized.accepted.prepared_preRoot.symm
 
 /-- Finalization is already a generic typed-hyperedge incidence.  No legacy
 reactive turn wrapper or parallel store is synthesized. -/
-def toLeg
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
-    Leg (y := y) (z := z) portal authState spec.pre where
+def finalizedToLeg
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
+    Leg.{u, v, w, x, y, z} portal authState spec.pre where
   Nullifier := Nullifier
   family := family
   kind := spec.kind
@@ -356,20 +407,30 @@ def toLeg
   accepted := finalized.accepted
 
 /-- Receipt events are projections after acceptance, never notification input. -/
-def toReceiptEvent
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+def finalizedToReceiptEvent
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     Minidregg.Theory.ReceiptEvent family :=
   finalized.accepted.toReceiptEvent
 
 /-- Direct projection to the same bounded semantic-history claim used by all
 accepted cell effects. -/
-def historyClaim
+def finalizedHistoryClaim
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
     (projection : HistoryProjection family n F)
     (finalHeaderCells : HistoryAdmissionContext -> BindingIx -> F)
     (context : HistoryAdmissionContext)
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) :
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) :
     BoundSemanticReceiptClaim n F :=
   projection.historyClaim finalHeaderCells context finalized.accepted
 
@@ -378,15 +439,20 @@ Package finalization as the exact accepted-effect semantic evidence consumed by
 the generic history.  All public header equations are explicit arguments; no
 header field is copied from a host-authored receipt object.
 -/
-def historyEvidence
+def finalizedHistoryEvidence
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
     (projection : HistoryProjection family n F)
     (headerProjection :
       AcceptedCellEffectHistory.HistoryProjection.HeaderProjection
         (family := family))
     (finalHeaderCells : HistoryAdmissionContext -> BindingIx -> F)
     (context : HistoryAdmissionContext)
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec)
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec)
     (semanticObjectRootExact : context.semanticObjectRoot =
       headerProjection.semanticObjectRoot spec.request spec.pre
         spec.declaration
@@ -397,6 +463,8 @@ def historyEvidence
     (preStateExact : context.preStateRoot = spec.pre.root)
     (postStateExact :
       context.postStateRoot = finalized.accepted.prepared.postRoot)
+    (effectRootExact :
+      context.effectRoot = family.effectDigest spec.declaration)
     (authorizationRootExact : context.authorizationRoot =
       headerProjection.authorizationRoot spec.request)
     (disclosureRootExact : context.disclosureRoot =
@@ -419,11 +487,9 @@ def historyEvidence
   outcomeExact := outcomeExact
   preStateExact := preStateExact
   postStateExact := postStateExact
-  effectRootExact := rfl
+  effectRootExact := effectRootExact
   authorizationRootExact := authorizationRootExact
   disclosureRootExact := disclosureRootExact
-
-end Finalized
 
 /-! ## Authenticated terminal alternatives -/
 
@@ -431,43 +497,62 @@ end Finalized
 canonically projected height is strictly after the eager deadline. -/
 structure Expired
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
-  entry : HistoryEntry
+  entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+    (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (family := entryFamily)
+    (headerCells := headerCells) (C := C)
   committed : entry.context.outcome = .committed
   afterDeadline : spec.deadline < rules.observedHeight entry.context
 
 /-- Expire from history, never from a caller clock sample. -/
 def expire
     (rules : HistoryRules n F Height Condition BreakReason)
-    {spec : Spec} (_promise : Promise spec)
-    (entry : HistoryEntry)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (_promise : Promise spec)
+    (entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := entryFamily)
+      (headerCells := headerCells) (C := C))
     (committed : entry.context.outcome = .committed)
     (afterDeadline : spec.deadline < rules.observedHeight entry.context) :
-    Expired rules spec :=
+    Expired (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec :=
   ⟨entry, committed, afterDeadline⟩
 
 /-- A break is likewise an authenticated history event recognized under the
 exact eager cancellation request. -/
 structure Broken
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   private mk ::
   reason : BreakReason
-  entry : HistoryEntry
+  entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+    (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (family := entryFamily)
+    (headerCells := headerCells) (C := C)
   committed : entry.context.outcome = .committed
   authorizedBreak : rules.Breaks spec.cancelRequest reason
     entry.context entry.claim
 
 /-- Break from a verified cancellation event. -/
-def break
+def breakPromise
     (rules : HistoryRules n F Height Condition BreakReason)
-    {spec : Spec} (_promise : Promise spec)
-    (reason : BreakReason) (entry : HistoryEntry)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (_promise : Promise spec)
+    (reason : BreakReason)
+    (entry : Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := entryFamily)
+      (headerCells := headerCells) (C := C))
     (committed : entry.context.outcome = .committed)
     (authorizedBreak : rules.Breaks spec.cancelRequest reason
       entry.context entry.claim) :
-    Broken rules spec :=
+    Broken (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C) rules spec :=
   ⟨reason, entry, committed, authorizedBreak⟩
 
 /-! ## Explicit physical boundary -/
@@ -485,22 +570,29 @@ must be implemented and audited.
 structure PhysicalBoundary
     {portal : Portal} {authState : AuthState}
     (rules : HistoryRules n F Height Condition BreakReason)
-    (spec : Spec) where
+    (spec : PromiseSpec U family Height Condition Continuation) where
   SchedulerTicket : Type uBoundary
   DurableReceipt : Type uBoundary
   Scheduled : Promise spec -> SchedulerTicket -> Prop
-  Persisted : Finalized (portal := portal) (authState := authState)
-    rules spec -> DurableReceipt -> Prop
+  Persisted : Finalized (manifest := manifest) (registry := registry)
+    (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+    (headerCells := headerCells) (C := C)
+    (portal := portal) (authState := authState) rules spec ->
+    DurableReceipt -> Prop
 
 /-- Proof-relevant external discharge for one exact finalized value. -/
 structure PhysicalBoundary.CommitEvidence
     {portal : Portal} {authState : AuthState}
     {rules : HistoryRules n F Height Condition BreakReason}
-    {spec : Spec}
-    (boundary : PhysicalBoundary (portal := portal) (authState := authState)
-      rules spec)
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec) where
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (boundary : PhysicalBoundary (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec)
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec) where
   receipt : boundary.DurableReceipt
   persisted : boundary.Persisted finalized receipt
 
@@ -509,11 +601,15 @@ been discharged for this exact finalization. -/
 def Finalized.releaseAfterPhysicalCommit
     {portal : Portal} {authState : AuthState}
     {rules : HistoryRules n F Height Condition BreakReason}
-    {spec : Spec}
-    (finalized : Finalized (portal := portal) (authState := authState)
-      rules spec)
-    (boundary : PhysicalBoundary (portal := portal) (authState := authState)
-      rules spec)
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec)
+    (boundary : PhysicalBoundary (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec)
     (_physical : boundary.CommitEvidence finalized) :
     CellState.Materialized M :=
   finalized.accepted.prepared.post
@@ -521,13 +617,13 @@ def Finalized.releaseAfterPhysicalCommit
 end Lifecycle
 
 #print axioms PromiseSpec.decode_encode_advice
-#print axioms Notification.observed_state_exact
-#print axioms Notification.not_after_deadline
-#print axioms Finalized.fieldFootprint_exact
-#print axioms Finalized.resourceFootprint_exact
-#print axioms Finalized.nullifier_exact
-#print axioms Finalized.observed_preRoot_exact
-#print axioms Finalized.historyEvidence
+#print axioms notificationObservedStateExact
+#print axioms notificationNotAfterDeadline
+#print axioms finalizedFieldFootprintExact
+#print axioms finalizedResourceFootprintExact
+#print axioms finalizedNullifierExact
+#print axioms finalizedObservedPreRootExact
+#print axioms finalizedHistoryEvidence
 
 end
 
