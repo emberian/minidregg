@@ -14,7 +14,6 @@ import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verif
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
 import Theory.CellState  -- typed logical cells, canonical materialization, and validated footprint patches make root coherence, frame, rejection atomicity, and no-ghost state structural
-import Theory.ByteCodecs  -- lawful codecs are BUILDABLE: unary length-framing with a delimiter, `natCodec`, `pairCodec`, retraction lifting — the gate every `Config`-shaped carrier was stuck behind. Inhabitation only; NOT a deployment codec
 import Theory.CellStateWitness  -- ANTI-VACUITY: a closed schema/codec/materializer/cell whose patch actually reaches `ValidatedPatch` through `validate`, plus stale-root and both footprint-mismatch rejections computed
 import Theory.TypedAuthorizationWitness  -- ANTI-VACUITY: a built portal/state/request that reaches `Authorized`, with the policy gate and the epoch equation shown load-bearing as refutations (evidence exists; authority does not follow)
 import Theory.AcceptedCellEffectWitness  -- ANTI-VACUITY, the summit: a closed `AcceptedCellEffect` standing on the two witnesses above, forced sealed, with both request-binding equations exhibited as refutations
@@ -24,7 +23,6 @@ import Theory.CanonicalTransition  -- one canonical materialized post and proof-
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalReactiveView  -- observer-indexed typed lenses advance directly from canonical deltas; accepted guarded holes retain eager nullifiers without a parallel uniform post
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
-import Theory.TypedAuthorizationCodec  -- `LawfulCodec (Request .object)` BUILT from the `ByteCodecs` toolkit: fifteen fields, retraction by structure eta, with teeth that the encoding separates target and effects digest
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
 import Theory.CredentialAuthorityFamily  -- signature/proof/capability/token carriers share exact request digests, holder/scope/current-policy semantics, and proof-relevant strict attenuation without mode bypasses
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token

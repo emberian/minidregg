@@ -60,7 +60,7 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   anywhere in the tree** — the only two in the repo are for `Digest`
   (`Sp800185Cshake256.digestCodec` and `AuthenticatedColumnPlan.digestUnaryCodec`).
 
-  **Codec scoping, refined after building the toolkit.** `LawfulCodec (Request .object)`
+  **Codec scoping.** `LawfulCodec (Request .object)`
   was a page because every field is a flat wrapper. `LawfulCodec Action` will not be: its
   six payloads reference `ElementBody`, `AtomRecord`, `AtomKind`, `StableRange`,
   `LinkTarget`, and `StoredTransclusionRef`, each of which needs its own codec, and
@@ -68,12 +68,15 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   Hyperdocument type tree — mechanical with the toolkit, but broad. `Declaration` then
   needs `OperationIntent` and `RequestEnvelope` on top.
 
-  **The codec gate is now removed.** `Theory.ByteCodecs` (`031377d`, `9c9b704`) supplies
-  `natCodec`, `pairCodec`, `listCodec`, `codecOfRetraction`, and `subsingletonCodec` over
-  a unary length-framing with a delimiter, and `Theory.TypedAuthorizationCodec`
-  (`1a8c579`) already builds `LawfulCodec (Request .object)` — one of the `Config`'s
-  three — in a page. `Action` and `Declaration` should now be mechanical. What remains
-  genuinely hard is `Capability.Admissible`, which is semantic and will NOT fall out of a
+  **The toolkit to build them with already exists**, in
+  `Compiler.Tower256ConcreteBackend.StreamCodec`: a prefix codec with the append law
+  `decodePrefix (encode v ++ suffix) = some (v, suffix)`, plus `toLawful`, `xmap`,
+  `product` (no delimiter needed — prefix-decodability composes), `sum`, `byte`, `nat`
+  (base-255 little-endian, logarithmic), `list`, and about twenty derived codecs.
+  `Compiler/SemanticTurnReceiptDescriptor.lean` already has `resourceKindCodec`,
+  `verbCodec`, and `authorizationModeCodec`. A `Request` codec still does not exist, but
+  it belongs in `Compiler/` on `StreamCodec` — NOT in `Theory/`. What remains genuinely
+  hard is `Capability.Admissible`, which is semantic and will NOT fall out of a
   permissive portal.
 - `Compiler.DialectClauseDispatch.VerifiedExecution` and `ResolvedClause`.
 - `Kernel.DeclaredHyperedge.CommittedHyperedge` — reachable through the executable
@@ -247,12 +250,9 @@ the deployed ones.
   doing this the whole time; I only noticed reading it. Use
   `#guard_msgs (whitespace := lax) in` — Lean wraps the axiom list for long declaration
   names, so a strict pin passes for short names and fails for long ones.
-- `031377d` + `1a8c579` + `9c9b704` + `28f7d68` — lawful codecs are buildable. The repo had exactly
-  two, both for `Digest`, both hand-rolled, so every `Config`-shaped carrier was gated on
-  codecs nobody had written. `Theory.ByteCodecs` supplies the framing toolkit with teeth
-  (`concatenation_is_ambiguous` exhibits the collision bare concatenation would allow),
-  and `LawfulCodec (Request .object)` is built from it in a page. Unary, enormous, and
-  explicitly NOT a deployment codec.
+- `031377d` + `1a8c579` + `9c9b704` + `28f7d68` — **REVERTED, see the correction below.**
+  I built a codec toolkit in `Theory/` on the false premise that the repo had only two
+  lawful codecs. It has a complete and better one already.
 - `d4e5073` — the WAL device runs a whole scenario at closed data: stage, commit,
   compact, retry. `retry_replays_after_checkpoint` is the one a real log-structured
   store gets wrong — compact the log, lose the idempotency record, charge the retry
