@@ -64,6 +64,31 @@ Loom was built with thinned as the work moved into the newer semantic layers, an
 `Assurance/` and `Theory/` are where an empty-carrier theorem is least likely to be
 caught. `Assurance/` is exactly where tonight's hole was.
 
+**The sharp version of that measurement — check this first tomorrow**
+
+The five `Theory/` files carrying a computed keystone are `BinaryTowerFanPaar`,
+`AdditiveNTT`, `AdditiveNTTTransform`, `Bignum`, and `AuthorizationDeclaration` — four
+arithmetic modules and one. The **semantic-kernel** files carry none:
+
+- `Theory/CellState.lean` — `Schema`, `Materializer`, `Materialized`, `ValidatedPatch`
+  (private constructors, exported `validate`);
+- `Theory/AcceptedCellEffect.lean` — 792 lines, *the* common effect authority, whose
+  every theorem is quantified over an `AcceptedCellEffect` the file never exhibits;
+- `Theory/TypedAuthorization.lean` — `Portal`, `AuthState`, `Authorized`;
+- `Theory/CanonicalTransition.lean`.
+
+`AcceptedCellEffect` **is** constructed downstream (`ComputationCellEffect.accept` in
+`BfvAcceptedCellEffect`, `NoteSpendCoreAcceptedCellEffect`, `BfvPrivateComputationJoin`),
+but always from parameters that are themselves quantified, so the recursion never
+bottoms out in built data. Nothing in the tree exhibits a closed `AcceptedCellEffect`.
+
+That is a *finding, not a proof of emptiness* — the obligations look inhabitable
+(`ValidatedPatch` needs a root/footprint agreement, `Authorized` needs evidence plus a
+policy witness that verifies). The work is: a closed schema with its `LawfulCodec`, a
+materializer, a validated patch, a portal whose `verifyPolicy` accepts, and one
+`SemanticEffectFamily`. Doing it would ground the kernel narrative the way `d257fe9`
+grounded the history layer.
+
 **Done-log**
 
 - `3e28d95` — quiescent integration gate closed: the six wind-down modules are imported
