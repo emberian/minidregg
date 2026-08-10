@@ -119,6 +119,44 @@ def subsingletonCodec (value : alpha) (unique : ∀ other, other = value) :
   decode := fun _ => some value
   decode_encode := fun other => congrArg some (unique other).symm
 
+/-- Elements, each framed, laid end to end. -/
+def encodeList (base : LawfulCodec alpha) : List alpha -> List UInt8
+  | [] => []
+  | value :: rest => frame (base.encode value) ++ encodeList base rest
+
+/-- Read exactly `count` framed elements. -/
+def decodeList (base : LawfulCodec alpha) : Nat -> List UInt8 -> Option (List alpha)
+  | 0, _ => some []
+  | count + 1, bytes =>
+      match unframe bytes with
+      | none => none
+      | some (head, tail) =>
+          match base.decode head, decodeList base count tail with
+          | some value, some rest => some (value :: rest)
+          | _, _ => none
+
+theorem decodeList_encodeList (base : LawfulCodec alpha) (values : List alpha) :
+    decodeList base values.length (encodeList base values) = some values := by
+  induction values with
+  | nil => rfl
+  | cons value rest ih =>
+      rw [List.length_cons, encodeList, decodeList, unframe_frame]
+      simp only [base.decode_encode, ih]
+
+/-- Lists, by a framed unary count followed by framed elements. -/
+def listCodec (base : LawfulCodec alpha) : LawfulCodec (List alpha) where
+  encode := fun values => frame (natBytes values.length) ++ encodeList base values
+  decode := fun bytes =>
+    match unframe bytes with
+    | none => none
+    | some (countBytes, rest) =>
+        if countBytes.all (fun byte => byte == 0) then
+          decodeList base countBytes.length rest
+        else none
+  decode_encode := fun values => by
+    rw [unframe_frame]
+    simp [natBytes, decodeList_encodeList]
+
 /-! ## Teeth: the framing is not decoration
 
 If the delimiter or the length prefix could be dropped, concatenated payloads
@@ -145,6 +183,8 @@ theorem framing_recovers :
 #print axioms natCodec
 #print axioms pairCodec
 #print axioms codecOfRetraction
+#print axioms decodeList_encodeList
+#print axioms listCodec
 #print axioms concatenation_is_ambiguous
 #print axioms framing_disambiguates
 #print axioms framing_recovers
