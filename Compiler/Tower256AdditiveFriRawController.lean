@@ -28,6 +28,7 @@ open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Loom
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -99,7 +100,7 @@ def attemptAgainstWord (n : Nat)
   left := value
   right := word coordinate
   leftProof := proof
-  rightProof := (pcs.finiteScheme n).openAt (pcs.finiteWord n word)
+  rightProof := (pcs.finiteScheme n).openAt (finiteWord n word)
     (additiveFriLevelEquivPowerTwo ell n coordinate)
 
 /-- One unequal accepted raw opening extracts the landed path-specific framed
@@ -119,8 +120,9 @@ theorem accepted_value_eq_or_extractedCollision
     apply bindingFailure_implies_extractedCollision pcs.backend.merkle
       (pcs.level n).port
     refine ⟨accepted, ?_, equal⟩
-    rw [rootExact]
-    exact (pcs.opening n).verifyOpen_commit word coordinate
+    have honest := (pcs.finiteScheme n).verifyOpening_commit
+      (finiteWord n word) (additiveFriLevelEquivPowerTwo ell n coordinate)
+    simpa [attemptAgainstWord, opening, finiteScheme, finiteWord, rootExact] using honest
 
 end RawMerklePcs
 
@@ -129,8 +131,8 @@ end RawMerklePcs
 structure RawTranscript {ell : Nat} (pcs : RawMerklePcs ell) where
   word : forall n, (Fin n -> Tower256) -> AdditiveFriLevels ell n -> Tower256
   root : forall n, (Fin n -> Tower256) -> Digest
-  root_eq_commit : forall n prefix,
-    root n prefix = (pcs.opening n).commit (word n prefix)
+  root_eq_commit : forall n p,
+    root n p = (pcs.opening n).commit (word n p)
 
 namespace RawTranscript
 
@@ -157,7 +159,9 @@ def toIdeal (transcript : RawTranscript pcs) :
       (fun n => idealCommitment Tower256 (AdditiveFriLevels ell n)) where
   word := transcript.word
   root := transcript.word
-  root_eq_commit := by intro n prefix; rfl
+  root_eq_commit := by
+    intro n p
+    rfl
 
 @[simp] theorem toIdeal_wordAt (transcript : RawTranscript pcs)
     (challenges : Fin m -> Tower256) (n : Nat) (hn : n <= m) :
@@ -166,6 +170,8 @@ def toIdeal (transcript : RawTranscript pcs) :
   rfl
 
 end RawTranscript
+
+variable {ell m queryCount : Nat}
 
 structure Statement (pcs : RawMerklePcs ell) (m : Nat) where
   tower : AdditiveFriTower Tower256 ell m
@@ -332,6 +338,8 @@ theorem accepted_query_pins_or_collision
           (Nat.le_of_lt j.isLt)) opened.2.2.1
       rcases high with highExact | highCollision
       · left
+        change next k = statement.tower.fold j j.isLt current
+          (receipt.challenges j) k
         rw [← nextExact, opened.2.2.2, lowExact, highExact]
         rfl
       · exact Or.inr (Or.inr (Or.inl highCollision))
@@ -340,7 +348,7 @@ theorem accepted_query_pins_or_collision
 
 /-- The ideal predicate used by the landed additive soundness theorem, with
 identity commitments over exactly the raw transcript's words. -/
-def IdealAccept (statement : Statement pcs m)
+def IdealAccept {pcs : RawMerklePcs ell} (statement : Statement pcs m)
     (challenges : Fin m -> Tower256)
     (querySeed : Fin statement.queryCount -> PowerTwoFriLevels ell 1) : Prop :=
   AdditiveFriAdaptiveCoherentAccepts statement.tower
