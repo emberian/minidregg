@@ -19,16 +19,20 @@ its middle branch: not "some binding assumption was violated", but a named
 adversarial opening pair with two decoded depth-`k` paths to the same root and
 different leaf values.
 
-**The one residual, named.**  The Merkle collision extractor is stated at
-`Domain = Fin (2 ^ k)`, while a retained-history transcript is indexed by
-`ReceiptCoordinate n = Fin (Fintype.card (BoundReceiptIx n))`.
-`bindingFailure_of_columnEquivocation` holds at any `Fin m` and therefore
-already covers the receipt alphabet; `extractedCollision_of_columnEquivocation`
-does not, because it needs `Fintype.card (BoundReceiptIx n)` to BE a power of
-two.  Closing that gap is a padding embedding of the receipt coordinates,
-exactly as `additiveFriLevelEquivPowerTwo` supplies on the additive side.  That
-embedding is NOT built here, and no probability, collision-resistance, or ROM
-claim is made anywhere in this file.
+The Merkle collision extractor is stated at `Domain = Fin (2 ^ k)`, while a
+retained-history transcript is indexed by
+`ReceiptCoordinate n = Fin (Fintype.card (BoundReceiptIx n))`, whatever
+cardinal the receipt binding happens to have.  `PowerTwoCover` closes that in
+the deployment direction rather than by assuming the cardinal cooperates: the
+tree really does live over a power-of-two leaf domain, the receipt alphabet is
+its prefix, and the receipt-alphabet checker is the deployed checker
+`restrict`ed.  `extractedCollision_of_restricted_equivocation` then reaches the
+extractor from any alphabet size.
+
+**What is still not claimed anywhere in this file:** that any particular
+`MerkleDomains`/`ColumnPort` pair is the deployed one, that the extracted
+collision event is improbable, or that cSHAKE realizes a random oracle.  These
+are reductions.  The price is not here.
 -/
 import Assurance.RawHistoryBcsOpenings
 import Compiler.Tower256CshakeMerkleBinding
@@ -168,11 +172,132 @@ theorem no_columnEquivocation_of_merkleCollisionFree
   no_columnEquivocation_of_positionBinding _
     (positionBinding_of_merkleCollisionFree domains port collisionFree)
 
+/-! ## Closing the power-of-two gap
+
+The extractor above wants `Fin (2 ^ k)`; a retained-history transcript is
+indexed by `Fin (Fintype.card (BoundReceiptIx n))`, which is whatever cardinal
+the receipt binding happens to have.  The deployment direction is the honest
+one: the Merkle tree really does live over a power-of-two leaf domain, and the
+receipt alphabet is a PREFIX of it.  So the receipt-alphabet checker is not a
+separate scheme to be related to the deployed one -- it is the deployed one,
+restricted. -/
+
+/-- A power-of-two leaf domain covering the alphabet, plus the filler symbol
+the unused leaves carry.  Both are deployment data, not assumptions. -/
+structure PowerTwoCover (m : Nat) (Representation : Type) where
+  exponent : Nat
+  covers : m ≤ 2 ^ exponent
+  filler : Representation
+
+namespace PowerTwoCover
+
+variable (cover : PowerTwoCover m Representation)
+
+/-- The alphabet sits in the leaf domain as its prefix. -/
+def leaf (index : Fin m) : Fin (2 ^ cover.exponent) :=
+  ⟨index.val, lt_of_lt_of_le index.isLt cover.covers⟩
+
+theorem leaf_injective : Function.Injective cover.leaf := by
+  intro left right equal
+  simpa only [leaf, Fin.ext_iff] using equal
+
+/-- Extend a word over the alphabet to the whole leaf domain by filling the
+unused leaves.  The tree commits this; nothing about the semantic word
+changes. -/
+def padWord (word : Fin m -> Representation) :
+    Fin (2 ^ cover.exponent) -> Representation :=
+  fun index => if inside : index.val < m then word ⟨index.val, inside⟩ else cover.filler
+
+@[simp] theorem padWord_leaf (word : Fin m -> Representation) (index : Fin m) :
+    cover.padWord word (cover.leaf index) = word index := by
+  simp only [padWord, leaf, index.isLt, dif_pos]
+
+/-- **The receipt-alphabet checker is the deployed one, restricted.**  Commit
+the padded word, open at the corresponding leaf, verify at that leaf.  No
+binding field appears, so a retained equivocation over this view is still a
+retained equivocation. -/
+def restrict
+    {leafPort : ColumnPort Semantic Representation (Fin (2 ^ cover.exponent))}
+    (scheme : CommitmentScheme leafPort) :
+    OpeningScheme Digest Representation (Fin m) (List UInt8) where
+  commit word := scheme.commit (cover.padWord word)
+  openAt word index := scheme.openAt (cover.padWord word) (cover.leaf index)
+  verifyOpen root index value proof :=
+    scheme.verifyOpening root (cover.leaf index) value proof = true
+  verifyOpen_commit := by
+    intro word index
+    simpa only [padWord_leaf] using
+      scheme.verifyOpening_commit (cover.padWord word) (cover.leaf index)
+
+/-- A retained equivocation over the restricted view is literally one over the
+leaf domain, at the corresponding leaf coordinates and the padded word. -/
+theorem columnEquivocation_leaf
+    {leafPort : ColumnPort Semantic Representation (Fin (2 ^ cover.exponent))}
+    (scheme : CommitmentScheme leafPort)
+    {t : Nat} {q : Fin t -> Fin m}
+    {message : BcsMsg Digest Representation (List UInt8) t}
+    {word : Fin m -> Representation}
+    (equivocation : ColumnEquivocation (cover.restrict scheme) q message word) :
+    ColumnEquivocation (openingOf scheme) (cover.leaf ∘ q) message
+      (cover.padWord word) := by
+  obtain ⟨i, submitted, honest, unequal⟩ := equivocation
+  refine ⟨i, submitted, ?_, ?_⟩
+  · simpa only [Function.comp_apply, padWord_leaf] using honest
+  · simpa only [Function.comp_apply, padWord_leaf] using unequal
+
+end PowerTwoCover
+
+/-- **The residual is closed.**  A retained equivocation at the receipt
+alphabet -- any cardinality -- reaches the landed Merkle extractor through the
+cover, yielding the exact framed cSHAKE collision at a named query coordinate.
+
+What is still not claimed: that any particular `MerkleDomains`/`ColumnPort`
+pair is the deployed one, that the collision event is improbable, or that
+cSHAKE realizes a random oracle. This is the reduction; the price is not. -/
+theorem extractedCollision_of_restricted_equivocation
+    (cover : PowerTwoCover m Representation)
+    (domains : MerkleDomains cshake)
+    (port : ColumnPort Semantic Representation (Fin (2 ^ cover.exponent)))
+    {t : Nat} {q : Fin t -> Fin m}
+    {message : BcsMsg Digest Representation (List UInt8) t}
+    {word : Fin m -> Representation}
+    (equivocation : ColumnEquivocation
+      (cover.restrict (merkleCommitmentScheme domains port)) q message word) :
+    ∃ (i : Fin t) (attempt : OpeningPair Representation (Fin (2 ^ cover.exponent))),
+      attempt.root = message.root ∧ attempt.index = cover.leaf (q i) ∧
+        attempt.left = message.cols i ∧
+        attempt.right = cover.padWord word (cover.leaf (q i)) ∧
+        ExtractedCollision domains port attempt :=
+  extractedCollision_of_columnEquivocation domains port
+    (cover.columnEquivocation_leaf (merkleCommitmentScheme domains port)
+      equivocation)
+
+/-- And the restricted view inherits the same teeth: where the deployed tree is
+collision-free, the receipt alphabet admits no retained equivocation either, so
+closing the gap did not open a hole. -/
+theorem no_restricted_columnEquivocation_of_merkleCollisionFree
+    (cover : PowerTwoCover m Representation)
+    (domains : MerkleDomains cshake)
+    (port : ColumnPort Semantic Representation (Fin (2 ^ cover.exponent)))
+    (collisionFree : MerkleCollisionFree domains port.representationCodec)
+    {t : Nat} {q : Fin t -> Fin m}
+    {message : BcsMsg Digest Representation (List UInt8) t}
+    {word : Fin m -> Representation} :
+    ¬ColumnEquivocation (cover.restrict (merkleCommitmentScheme domains port)) q
+      message word := fun equivocation =>
+  no_columnEquivocation_of_merkleCollisionFree domains port collisionFree
+    (cover.columnEquivocation_leaf (merkleCommitmentScheme domains port)
+      equivocation)
+
 #print axioms positionBinding_iff
 #print axioms bindingFailure_of_columnEquivocation
 #print axioms extractedCollision_of_columnEquivocation
 #print axioms no_columnEquivocation_of_positionBinding
 #print axioms no_columnEquivocation_of_merkleCollisionFree
+#print axioms PowerTwoCover.padWord_leaf
+#print axioms PowerTwoCover.columnEquivocation_leaf
+#print axioms extractedCollision_of_restricted_equivocation
+#print axioms no_restricted_columnEquivocation_of_merkleCollisionFree
 
 end
 
