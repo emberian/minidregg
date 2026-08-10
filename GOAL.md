@@ -58,7 +58,17 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   the largest single piece of work: it demands `LawfulCodec Action`,
   `LawfulCodec Declaration`, and `LawfulCodec (Request .object)`, none of which exists.
 
-  **Codec scoping, and the framework is ready.** `LawfulCodec (Request .object)` is done
+  **The codec gate is CLOSED.** All three codecs a `Config` demands now exist:
+  `LawfulCodec (Request .object)` (`5e8692f`), `LawfulCodec Action` (`82e63dd`), and
+  `LawfulCodec Declaration` (`Compiler.HyperdocumentCodec`), with `configCodecs` stating
+  it. The `Config`'s other fields carry no proof obligations, so a `Config` is
+  constructible. What remains on `AcceptedOperation` is the part codecs never touched:
+  `AuthenticatedPrincipal`, `ValidOperation`, an `AcceptedCellEffect` over the
+  Hyperdocument schema, and `Capability.Admissible` — semantic, checking scope, epoch,
+  and revocation, and it will NOT fall out of a permissive portal the way `Authorized`
+  did. Start there.
+
+  **Historical scoping note.** `LawfulCodec (Request .object)` is done
   (`5e8692f`). `Action` is a walk of the Hyperdocument type tree — `ElementBody`,
   `AtomRecord`, `AtomKind`, `StableRange`, `LinkTarget`, `StoredTransclusionRef`,
   `EmbedRef`, `PrincipalRef`, `StoredSourceIdentity`, `OpeningDescriptor`,
@@ -67,9 +77,11 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   (`ea9c828`) closed the last gaps. It is mechanical and broad, not a design problem.
   `Declaration` then needs `OperationIntent` and `RequestEnvelope` on top.
 
-  Note for whoever does it: `StreamCodec.finset` is noncomputable because
-  `Finset.toList` is. Fine for a witness; a deployed transclusion wire format would want
-  an explicitly ordered field instead.
+  Note: the whole chain from `StoredTransclusionRef` upward — link and transclude
+  payloads, `Action`, `Declaration` — is noncomputable, because `StreamCodec.finset` goes
+  through `Finset.toList`. That is a fact about the Hyperdocument TYPES, not the codecs:
+  a deployed wire format would replace those two `Finset` fields with explicitly ordered
+  ones.
 
   **The toolkit to build them with already exists**, in
   `Compiler.Tower256ConcreteBackend.StreamCodec`: a prefix codec with the append law
