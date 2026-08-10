@@ -51,7 +51,8 @@ semantic, not mechanical: `Capability.Admissible`.
 | `MultiCellHyperedge.Commit` | `Kernel.MultiCellHyperedgeWitness` (`e1f6488`, two legs, two SCHEMAS) |
 | `TypedCellHyperedge.Commit` | `Kernel.TypedCellHyperedgeWitness` (`5d02d05`) |
 
-**Not yet swept — the list to start from**
+**Not yet swept — but read the materializer finding above first, because it changes what
+"swept" would even mean for anything sitting on an authority or document cell.**
 
 - `HyperdocumentAgentOperation.AcceptedOperation` — the biggest one left, and the most
   load-bearing: its only theorems are `no_wrong_version` and `no_outside_scope`, two
@@ -186,7 +187,12 @@ which is why `Theory.CellStateWitness` works.
 `Assurance`, and it wants a rested decision about whether the default belongs to the
 schema or the state. Surfacing it as debt rather than extending it, per the tree's rule.
 
-Check `Hyperdocument.Materializer` next — its schema looks like it has the same shape.
+`Hyperdocument.cellSchema` has it too (`7311a60`): `Address` is infinite, the value type
+is `Option DocumentRecord`, same argument. So BOTH halves of what `AcceptedOperation`
+needed — `AuthenticatedPrincipal` and `ValidOperation` — are unsatisfiable as currently
+typed. Two schemas is enough to name the pattern: it happens whenever a sparse namespace
+is typed as a total function over an infinite key space, and
+`materializer_isEmpty_of_natBool_embedding` makes checking a third one three lines.
 
 **The night's own mistake, recorded because it is the instructive one**
 
