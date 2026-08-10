@@ -157,6 +157,43 @@ def listCodec (base : LawfulCodec alpha) : LawfulCodec (List alpha) where
     rw [unframe_frame]
     simp [natBytes, decodeList_encodeList]
 
+/-- **Tagged unions.**  Frame a unary tag, then the variant's own bytes.  The
+caller supplies the tag, the payload encoding, and one total reconstruction
+with its round-trip law; this handles the framing so a six-way sum does not
+have to reinvent it. -/
+def taggedCodec (tag : alpha -> Nat) (payload : alpha -> List UInt8)
+    (rebuild : Nat -> List UInt8 -> Option alpha)
+    (roundTrip : ∀ value, rebuild (tag value) (payload value) = some value) :
+    LawfulCodec alpha where
+  encode := fun value => frame (natBytes (tag value)) ++ payload value
+  decode := fun bytes =>
+    match unframe bytes with
+    | none => none
+    | some (tagBytes, rest) =>
+        if tagBytes.all (fun byte => byte == 0) then
+          rebuild tagBytes.length rest
+        else none
+  decode_encode := fun value => by
+    rw [unframe_frame]
+    simpa [natBytes] using roundTrip value
+
+/-- Binary sums, as the smallest instance of the tagged pattern. -/
+def sumCodec (left : LawfulCodec alpha) (right : LawfulCodec beta) :
+    LawfulCodec (Sum alpha beta) :=
+  taggedCodec
+    (fun value => match value with | .inl _ => 0 | .inr _ => 1)
+    (fun value => match value with
+      | .inl first => left.encode first
+      | .inr second => right.encode second)
+    (fun tag bytes =>
+      match tag with
+      | 0 => (left.decode bytes).map Sum.inl
+      | _ => (right.decode bytes).map Sum.inr)
+    (fun value => by
+      cases value with
+      | inl first => simp [left.decode_encode]
+      | inr second => simp [right.decode_encode])
+
 /-! ## Teeth: the framing is not decoration
 
 If the delimiter or the length prefix could be dropped, concatenated payloads
@@ -185,6 +222,8 @@ theorem framing_recovers :
 #print axioms codecOfRetraction
 #print axioms decodeList_encodeList
 #print axioms listCodec
+#print axioms taggedCodec
+#print axioms sumCodec
 #print axioms concatenation_is_ambiguous
 #print axioms framing_disambiguates
 #print axioms framing_recovers
