@@ -107,8 +107,23 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `d4e5073` — `3239` jobs — `E-20260810T070437-51005-local-nextop.local-d4e50732c9d3-lake`
 - `6b3425f` — `3241` jobs — `E-20260810T071230-53624-local-nextop.local-6b3425fd7c96-lake`
 - `4c16fd7` — `3241` jobs — `E-20260810T071558-54877-local-nextop.local-4c16fd7bfb8d-lake`
+- `0eec65a` — `3241` jobs — `E-20260810T072232-57724-local-nextop.local-0eec65a8547d-lake`
 
-Commits after `4c16fd7` carry warm-tree builds only.
+Commits after `0eec65a` carry warm-tree builds only.
+
+**The night's own mistake, recorded because it is the instructive one**
+
+I built a byte-codec toolkit in `Theory/` (`031377d`, `1a8c579`, `9c9b704`, `28f7d68`) on
+the stated premise that the repository contained exactly two lawful codecs, both for
+`Digest`. It contains a complete and better framework —
+`Compiler.Tower256ConcreteBackend.StreamCodec`, a prefix codec with the append law, plus
+`xmap`/`product`/`sum`/`byte`/`nat` (base-255, logarithmic where mine was unary)/`list`
+and about twenty derived codecs. Reverted in `6efe4f3`; the twin is deleted and the false
+claim is corrected here and in `README.md`.
+
+The lesson is narrower than "search better", because I did search. A grep whose pattern
+list is guessed from the names I expected will confirm whatever I expected. For "does the
+tree already have X", grep for the TYPE and read the hits.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
