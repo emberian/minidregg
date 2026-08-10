@@ -249,6 +249,14 @@ the boundary instead — a store reachable from zero by a patch is finitely supp
 finite"; it is "only finitely supported stores can be materialized", which has always
 been true and was never said.
 
+`sparseOfStore` + `sparseOfStore_readD` complete the pieces step 1 needs: the bridge, and
+the theorem that reading it back with the zero default returns the original store at every
+key. Without that theorem the sparse encoding would be a new object with a plausible
+shape; with it, the successor to `logicalOfStore` is faithful by construction. What
+remains for step 1 is mechanical — point `DeclaredTurn`'s materialization at
+`sparseOfStore`, thread `finitelySupported_ofZero` through the callers, switch
+`effectSchema`'s cell.
+
 **Still staged.** `CellState.LogicalState` is untouched; the migration order and the
 reason each schema is separable are in the module. The endpoint is deletion of the
 total-function field.
