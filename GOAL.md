@@ -257,12 +257,20 @@ the deployed ones.
   effect exists, though evidence still verifies and the patch still validates. The
   proofs are one-liners, which is the point — the propagation is structural and now
   checked.
-- `b59f978` — all 101 `#print axioms` lines added tonight are now
-  `#guard_msgs`-pinned across 13 files, so axiom drift fails the build instead of
-  printing a different list into a log nobody reads. `Effects/EffectSpec.lean` has been
-  doing this the whole time; I only noticed reading it. Use
-  `#guard_msgs (whitespace := lax) in` — Lean wraps the axiom list for long declaration
-  names, so a strict pin passes for short names and fails for long ones.
+- `b59f978` + `d0ac458` + `11b086e` + `6e8174e` — the axiom ledger went from advisory to
+  enforced tree-wide: **793 pinned against 30 bare**, from 128 against 702. An axiom
+  regression anywhere now fails the build instead of printing a different list into a log
+  nobody reads. The symmetric cost is intended: improving a proof to drop an axiom also
+  fails until its pin is updated. `Effects/EffectSpec.lean` had this right from the start
+  and said so; I only noticed reading it. Use `#guard_msgs (whitespace := lax) in` — Lean
+  wraps the axiom list for long declaration names, so a strict pin passes for short names
+  and fails for long ones. The 30 stragglers are ones the generator would not guess a
+  name for; `grep -rn "^#print axioms"` finds them.
+- `5e8692f` — `LawfulCodec (Request .object)` rebuilt in `Compiler/` on the landed
+  `StreamCodec`, which is where it belonged: logarithmic base-255 fields, the same verb
+  numbering as `SemanticTurnReceiptDescriptor`, teeth on target and effects-digest
+  separation, and `requestStream_composes` — the prefix property `LawfulCodec` does not
+  carry and a `Declaration` codec will need.
 - `031377d` + `1a8c579` + `9c9b704` + `28f7d68` — **REVERTED, see the correction below.**
   I built a codec toolkit in `Theory/` on the false premise that the repo had only two
   lawful codecs. It has a complete and better one already.
