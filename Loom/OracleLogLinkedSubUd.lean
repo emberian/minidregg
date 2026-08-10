@@ -491,13 +491,21 @@ theorem subUd_root_transport_hiding_F5 :
 end OracleLogLinkedSubUdExample
 
 #print axioms committedWord?_eq_some_iff
-#print axioms linkedErasureRegime_excludes_constrainedMaskHiding
-#print axioms attributedIncrement_eq_at_query
-#print axioms attributedIncrement_agreesOn_queries
-#print axioms subUdMessageIncrement_pinned
-#print axioms linkedSubUdLogExtractor_pinned
-#print axioms OracleLogLinkedSubUdCounterexample.colsOpen_not_root_attributed
-#print axioms OracleLogLinkedSubUdCounterexample.linkedRootAttributedRbrTarget_false
-#print axioms OracleLogLinkedSubUdExample.subUd_root_transport_hiding_F5
+/-- info: 'Minidregg.Loom.linkedErasureRegime_excludes_constrainedMaskHiding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedErasureRegime_excludes_constrainedMaskHiding
+/-- info: 'Minidregg.Loom.attributedIncrement_eq_at_query' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributedIncrement_eq_at_query
+/-- info: 'Minidregg.Loom.attributedIncrement_agreesOn_queries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributedIncrement_agreesOn_queries
+/-- info: 'Minidregg.Loom.subUdMessageIncrement_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms subUdMessageIncrement_pinned
+/-- info: 'Minidregg.Loom.linkedSubUdLogExtractor_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedSubUdLogExtractor_pinned
+/-- info: 'Minidregg.Loom.OracleLogLinkedSubUdCounterexample.colsOpen_not_root_attributed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedSubUdCounterexample.colsOpen_not_root_attributed
+/-- info: 'Minidregg.Loom.OracleLogLinkedSubUdCounterexample.linkedRootAttributedRbrTarget_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedSubUdCounterexample.linkedRootAttributedRbrTarget_false
+/-- info: 'Minidregg.Loom.OracleLogLinkedSubUdExample.subUd_root_transport_hiding_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedSubUdExample.subUd_root_transport_hiding_F5
 
 end Minidregg.Loom

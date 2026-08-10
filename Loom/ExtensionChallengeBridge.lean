@@ -84,6 +84,7 @@ theorem card_lifted_batch_satisfying_le [Fintype K] [DecidableEq K]
 #check @lifted_constraint_residual
 #check @card_lifted_batch_satisfying_le
 
-#print axioms card_lifted_batch_satisfying_le
+/-- info: 'Minidregg.Loom.card_lifted_batch_satisfying_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms card_lifted_batch_satisfying_le
 
 end Minidregg.Loom

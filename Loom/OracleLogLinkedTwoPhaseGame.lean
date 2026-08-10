@@ -499,14 +499,23 @@ theorem allowedFrozenLinks_samplingFailure_uniform
 
 end AllowedAssembly
 
-#print axioms twoPhase_query_domainSeparated
-#print axioms twoPhase_verify_strengthens
-#print axioms twoPhase_fiatShamir_accept_data
-#print axioms twoPhaseGame_hitLogExtractor_pinned
-#print axioms twoPhaseCombinedBad_le
-#print axioms TwoPhaseFsErrorInterface.sound_le
-#print axioms twoPhaseCombined_fullDomain_rate
-#print axioms twoPhaseCombined_allowed_rate
-#print axioms allowedFrozenLinks_samplingFailure_uniform
+/-- info: 'Minidregg.Loom.twoPhase_query_domainSeparated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_query_domainSeparated
+/-- info: 'Minidregg.Loom.twoPhase_verify_strengthens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_verify_strengthens
+/-- info: 'Minidregg.Loom.twoPhase_fiatShamir_accept_data' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_fiatShamir_accept_data
+/-- info: 'Minidregg.Loom.twoPhaseGame_hitLogExtractor_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseGame_hitLogExtractor_pinned
+/-- info: 'Minidregg.Loom.twoPhaseCombinedBad_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseCombinedBad_le
+/-- info: 'Minidregg.Loom.TwoPhaseFsErrorInterface.sound_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms TwoPhaseFsErrorInterface.sound_le
+/-- info: 'Minidregg.Loom.twoPhaseCombined_fullDomain_rate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseCombined_fullDomain_rate
+/-- info: 'Minidregg.Loom.twoPhaseCombined_allowed_rate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseCombined_allowed_rate
+/-- info: 'Minidregg.Loom.allowedFrozenLinks_samplingFailure_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms allowedFrozenLinks_samplingFailure_uniform
 
 end Minidregg.Loom

@@ -526,14 +526,23 @@ end HalfThresholdFriTranscriptExample
   before the game encoding exists.
 -/
 
-#print axioms openedFriQuery_pins
-#print axioms friRound_query_miss_halfThreshold
-#print axioms committedWord_eq_towerWord
-#print axioms friCommittedAccepts_implies_proximityTest
-#print axioms committedFri_sound_halfThen_UD
-#print axioms friEvent_fsOracle_iff
-#print axioms HalfThresholdFriTranscriptExample.spike_committed_accepts_three
-#print axioms HalfThresholdFriTranscriptExample.spike_committed_rejects_one
-#print axioms HalfThresholdFriTranscriptExample.spike_wrongChallenge_queryMiss_bound
+/-- info: 'Minidregg.Loom.openedFriQuery_pins' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms openedFriQuery_pins
+/-- info: 'Minidregg.Loom.friRound_query_miss_halfThreshold' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friRound_query_miss_halfThreshold
+/-- info: 'Minidregg.Loom.committedWord_eq_towerWord' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedWord_eq_towerWord
+/-- info: 'Minidregg.Loom.friCommittedAccepts_implies_proximityTest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friCommittedAccepts_implies_proximityTest
+/-- info: 'Minidregg.Loom.committedFri_sound_halfThen_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedFri_sound_halfThen_UD
+/-- info: 'Minidregg.Loom.friEvent_fsOracle_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friEvent_fsOracle_iff
+/-- info: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_committed_accepts_three' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriTranscriptExample.spike_committed_accepts_three
+/-- info: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_committed_rejects_one' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriTranscriptExample.spike_committed_rejects_one
+/-- info: 'Minidregg.Loom.HalfThresholdFriTranscriptExample.spike_wrongChallenge_queryMiss_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriTranscriptExample.spike_wrongChallenge_queryMiss_bound
 
 end Minidregg.Loom

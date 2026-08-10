@@ -410,14 +410,23 @@ the impossible characteristic-two field `two_ne`), so there is no honest type
 to instantiate here without first extracting that generic transcript layer.
 -/
 
-#print axioms additiveTowerMap_succ
-#print axioms additiveTower_foldMap_reindex
-#print axioms additiveTower_high_eq_low_add_pivot
-#print axioms additiveTower_domain_image
-#print axioms additiveTowerPoint_injective
-#print axioms additiveTowerPivot_ne_zero
-#print axioms additiveTower_transversal
-#print axioms additiveTower_domain_eq_pairDomain
-#print axioms additiveCoherentRound_uniform
+/-- info: 'Minidregg.Loom.additiveTowerMap_succ' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTowerMap_succ
+/-- info: 'Minidregg.Loom.additiveTower_foldMap_reindex' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTower_foldMap_reindex
+/-- info: 'Minidregg.Loom.additiveTower_high_eq_low_add_pivot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTower_high_eq_low_add_pivot
+/-- info: 'Minidregg.Loom.additiveTower_domain_image' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTower_domain_image
+/-- info: 'Minidregg.Loom.additiveTowerPoint_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTowerPoint_injective
+/-- info: 'Minidregg.Loom.additiveTowerPivot_ne_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTowerPivot_ne_zero
+/-- info: 'Minidregg.Loom.additiveTower_transversal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTower_transversal
+/-- info: 'Minidregg.Loom.additiveTower_domain_eq_pairDomain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveTower_domain_eq_pairDomain
+/-- info: 'Minidregg.Loom.additiveCoherentRound_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveCoherentRound_uniform
 
 end Minidregg.Loom

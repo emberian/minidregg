@@ -414,8 +414,11 @@ theorem additiveOod_false_claim_query_miss_pr
 
 end CommittedQueries
 
-#print axioms additiveOodQuotient_channel
-#print axioms additiveOodEvaluationChannel_retires
-#print axioms additiveOod_false_claim_query_miss_pr
+/-- info: 'Minidregg.Loom.additiveOodQuotient_channel' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveOodQuotient_channel
+/-- info: 'Minidregg.Loom.additiveOodEvaluationChannel_retires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveOodEvaluationChannel_retires
+/-- info: 'Minidregg.Loom.additiveOod_false_claim_query_miss_pr' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveOod_false_claim_query_miss_pr
 
 end Minidregg.Loom

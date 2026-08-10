@@ -818,12 +818,19 @@ theorem additiveFriAdaptive_coherent_sampled_sound_UD
 
 end CoherentSoundness
 
-#print axioms openedAdditiveFriQuery_pins
-#print axioms additiveFriRound_query_miss_uniform
-#print axioms additiveFriAdaptive_earliestDeviation_cover
-#print axioms additiveFriAdaptive_coherent_query_miss
-#print axioms additiveFriAdaptive_coherent_sampled_sound
-#print axioms additiveFoldDistanceTransition_UD
-#print axioms additiveFriAdaptive_coherent_sampled_sound_UD
+/-- info: 'Minidregg.Loom.openedAdditiveFriQuery_pins' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms openedAdditiveFriQuery_pins
+/-- info: 'Minidregg.Loom.additiveFriRound_query_miss_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFriRound_query_miss_uniform
+/-- info: 'Minidregg.Loom.additiveFriAdaptive_earliestDeviation_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFriAdaptive_earliestDeviation_cover
+/-- info: 'Minidregg.Loom.additiveFriAdaptive_coherent_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFriAdaptive_coherent_query_miss
+/-- info: 'Minidregg.Loom.additiveFriAdaptive_coherent_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFriAdaptive_coherent_sampled_sound
+/-- info: 'Minidregg.Loom.additiveFoldDistanceTransition_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFoldDistanceTransition_UD
+/-- info: 'Minidregg.Loom.additiveFriAdaptive_coherent_sampled_sound_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFriAdaptive_coherent_sampled_sound_UD
 
 end Minidregg.Loom

@@ -398,7 +398,9 @@ theorem raw_values_terminal_differs_f5 :
 
 end MultiplicativeMleTerminalExample
 
-#print axioms foldMleVariables_booleanMobiusPolynomial
-#print axioms MultiplicativeMleTerminalExample.raw_values_terminal_differs_f5
+/-- info: 'Minidregg.Loom.foldMleVariables_booleanMobiusPolynomial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms foldMleVariables_booleanMobiusPolynomial
+/-- info: 'Minidregg.Loom.MultiplicativeMleTerminalExample.raw_values_terminal_differs_f5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms MultiplicativeMleTerminalExample.raw_values_terminal_differs_f5
 
 end Minidregg.Loom

@@ -229,8 +229,11 @@ end HalfThresholdExample
   restrictions.  Formalizing those newer full theorems remains separate.
 -/
 
-#print axioms correlatedAgreement_of_two_half_close
-#print axioms halfThreshold_pr_le
-#print axioms HalfThresholdExample.halfThreshold_F5
+/-- info: 'Minidregg.Loom.correlatedAgreement_of_two_half_close' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms correlatedAgreement_of_two_half_close
+/-- info: 'Minidregg.Loom.halfThreshold_pr_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms halfThreshold_pr_le
+/-- info: 'Minidregg.Loom.HalfThresholdExample.halfThreshold_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdExample.halfThreshold_F5
 
 end Minidregg.Loom

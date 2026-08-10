@@ -516,18 +516,31 @@ theorem linkedAdaptiveIncrementSound_F5 :
 
 end OracleLogLinkedAssemblyExample
 
-#print axioms uniformProb_le_inv_card_of_subsingleton_public
-#print axioms padSched_challengeVectorAt
-#print axioms linked_fiatShamir_accept_data
-#print axioms linkedFreshOutputFibre_le
-#print axioms linked_srFinalChal_split_of_none
-#print axioms linkedLogSoundEvent_cover
-#print axioms linkedFreshLink_le
-#print axioms linkedHitSlot_le
-#print axioms linkedLogSoundEvent_le_inv
-#print axioms linkedOracleLogReduction_exact
-#print axioms linkedAdaptiveIncrementSound_proved
-#print axioms deployedZKAdaptiveSoundLinkedTarget_proved
-#print axioms OracleLogLinkedAssemblyExample.linkedAdaptiveIncrementSound_F5
+/-- info: 'Minidregg.Loom.uniformProb_le_inv_card_of_subsingleton_public' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms uniformProb_le_inv_card_of_subsingleton_public
+/-- info: 'Minidregg.Loom.padSched_challengeVectorAt' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms padSched_challengeVectorAt
+/-- info: 'Minidregg.Loom.linked_fiatShamir_accept_data' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linked_fiatShamir_accept_data
+/-- info: 'Minidregg.Loom.linkedFreshOutputFibre_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedFreshOutputFibre_le
+/-- info: 'Minidregg.Loom.linked_srFinalChal_split_of_none' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linked_srFinalChal_split_of_none
+/-- info: 'Minidregg.Loom.linkedLogSoundEvent_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedLogSoundEvent_cover
+/-- info: 'Minidregg.Loom.linkedFreshLink_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedFreshLink_le
+/-- info: 'Minidregg.Loom.linkedHitSlot_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedHitSlot_le
+/-- info: 'Minidregg.Loom.linkedLogSoundEvent_le_inv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedLogSoundEvent_le_inv
+/-- info: 'Minidregg.Loom.linkedOracleLogReduction_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedOracleLogReduction_exact
+/-- info: 'Minidregg.Loom.linkedAdaptiveIncrementSound_proved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedAdaptiveIncrementSound_proved
+/-- info: 'Minidregg.Loom.deployedZKAdaptiveSoundLinkedTarget_proved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployedZKAdaptiveSoundLinkedTarget_proved
+/-- info: 'Minidregg.Loom.OracleLogLinkedAssemblyExample.linkedAdaptiveIncrementSound_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAssemblyExample.linkedAdaptiveIncrementSound_F5
 
 end Minidregg.Loom

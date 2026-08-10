@@ -304,8 +304,11 @@ theorem friAdaptive_coherent_sampled_sound
 
 end CoherentSoundness
 
-#print axioms powerTwoCoherentRound_uniform
-#print axioms friAdaptive_coherent_query_miss
-#print axioms friAdaptive_coherent_sampled_sound
+/-- info: 'Minidregg.Loom.powerTwoCoherentRound_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms powerTwoCoherentRound_uniform
+/-- info: 'Minidregg.Loom.friAdaptive_coherent_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptive_coherent_query_miss
+/-- info: 'Minidregg.Loom.friAdaptive_coherent_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptive_coherent_sampled_sound
 
 end Minidregg.Loom

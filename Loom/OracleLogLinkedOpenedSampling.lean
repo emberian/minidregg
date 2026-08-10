@@ -442,11 +442,17 @@ theorem preimage_oracleLog_source_relaxed [Nonempty (Fin m)]
 
 end PreimageOracleLog
 
-#print axioms RootPreimageScheme.check_sound
-#print axioms preimage_verify_accept_data
-#print axioms preimage_verify_honest
-#print axioms queryAgreementAmplification_failure_pr
-#print axioms preimage_hitLogExtractor_pinned
-#print axioms preimage_oracleLog_source_relaxed
+/-- info: 'Minidregg.Loom.RootPreimageScheme.check_sound' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms RootPreimageScheme.check_sound
+/-- info: 'Minidregg.Loom.preimage_verify_accept_data' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preimage_verify_accept_data
+/-- info: 'Minidregg.Loom.preimage_verify_honest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preimage_verify_honest
+/-- info: 'Minidregg.Loom.queryAgreementAmplification_failure_pr' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms queryAgreementAmplification_failure_pr
+/-- info: 'Minidregg.Loom.preimage_hitLogExtractor_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preimage_hitLogExtractor_pinned
+/-- info: 'Minidregg.Loom.preimage_oracleLog_source_relaxed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preimage_oracleLog_source_relaxed
 
 end Minidregg.Loom

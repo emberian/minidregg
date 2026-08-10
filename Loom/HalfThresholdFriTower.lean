@@ -329,12 +329,19 @@ miss event, or Fiat--Shamir.  Consequently no `(1-delta/2)^q` term appears in
 these theorem statements.
 -/
 
-#print axioms proximity_far_covering_schedule
-#print axioms proximity_sound_schedule
-#print axioms proximity_sound_halfThen
-#print axioms FoldingTower.card_level_le_zero
-#print axioms proximity_sound_halfThen_UD
-#print axioms proximity_sound_rateHalf_postJohnson
-#print axioms HalfThresholdFriTowerExample.spike_scheduled_bound_attained
+/-- info: 'Minidregg.Loom.proximity_far_covering_schedule' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms proximity_far_covering_schedule
+/-- info: 'Minidregg.Loom.proximity_sound_schedule' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms proximity_sound_schedule
+/-- info: 'Minidregg.Loom.proximity_sound_halfThen' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms proximity_sound_halfThen
+/-- info: 'Minidregg.Loom.FoldingTower.card_level_le_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FoldingTower.card_level_le_zero
+/-- info: 'Minidregg.Loom.proximity_sound_halfThen_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms proximity_sound_halfThen_UD
+/-- info: 'Minidregg.Loom.proximity_sound_rateHalf_postJohnson' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms proximity_sound_rateHalf_postJohnson
+/-- info: 'Minidregg.Loom.HalfThresholdFriTowerExample.spike_scheduled_bound_attained' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriTowerExample.spike_scheduled_bound_attained
 
 end Minidregg.Loom

@@ -1269,10 +1269,15 @@ reads: **ideal permutation + proximity**.
 #check @capBad_le
 #check @SpongeIndiffGame
 
-#print axioms walk_programs
-#print axioms sponge_realizes_handler_step
-#print axioms uniquePaths_respond_freshOut
-#print axioms capBad_le
-#print axioms advantage_zero_queries
+/-- info: 'Minidregg.Loom.walk_programs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms walk_programs
+/-- info: 'Minidregg.Loom.sponge_realizes_handler_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sponge_realizes_handler_step
+/-- info: 'Minidregg.Loom.uniquePaths_respond_freshOut' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms uniquePaths_respond_freshOut
+/-- info: 'Minidregg.Loom.capBad_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms capBad_le
+/-- info: 'Minidregg.Loom.advantage_zero_queries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms advantage_zero_queries
 
 end Minidregg.Loom

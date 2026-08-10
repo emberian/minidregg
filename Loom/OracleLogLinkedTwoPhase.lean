@@ -254,9 +254,13 @@ structure AllowedWithoutReplacementFallingPremise
 
 end SamplingAssembly
 
-#print axioms twoPhase_acceptance_subUd_pinned
-#print axioms twoPhase_hitLogExtractor_pinned
-#print axioms queryAgreementAmplification_failure_uniform
-#print axioms frozenLinks_samplingFailure_uniform
+/-- info: 'Minidregg.Loom.twoPhase_acceptance_subUd_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_acceptance_subUd_pinned
+/-- info: 'Minidregg.Loom.twoPhase_hitLogExtractor_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_hitLogExtractor_pinned
+/-- info: 'Minidregg.Loom.queryAgreementAmplification_failure_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms queryAgreementAmplification_failure_uniform
+/-- info: 'Minidregg.Loom.frozenLinks_samplingFailure_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms frozenLinks_samplingFailure_uniform
 
 end Minidregg.Loom

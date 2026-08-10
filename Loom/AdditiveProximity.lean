@@ -359,11 +359,17 @@ theorem keystone_additiveFold_distance_fires :
     (by simp) (fpGen_ne_zero 1) keystone_transversal
     (by norm_num) (by norm_num) (by norm_num) hfar
 
-#print axioms additiveProximityGap_of_isProximityGenerator
-#print axioms additiveProximityGap_UD
-#print axioms additiveFold_distance_UD
-#print axioms keystone_additiveProximityGap
-#print axioms keystone_far_word_eighth
-#print axioms keystone_additiveFold_distance_fires
+/-- info: 'Minidregg.Loom.additiveProximityGap_of_isProximityGenerator' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveProximityGap_of_isProximityGenerator
+/-- info: 'Minidregg.Loom.additiveProximityGap_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveProximityGap_UD
+/-- info: 'Minidregg.Loom.additiveFold_distance_UD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveFold_distance_UD
+/-- info: 'Minidregg.Loom.keystone_additiveProximityGap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keystone_additiveProximityGap
+/-- info: 'Minidregg.Loom.keystone_far_word_eighth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keystone_far_word_eighth
+/-- info: 'Minidregg.Loom.keystone_additiveFold_distance_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keystone_additiveFold_distance_fires
 
 end Minidregg.Loom

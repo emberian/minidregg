@@ -91,8 +91,11 @@ theorem canonical_indexed_lookup_pullback (k : Nat)
   rw [canonicalIncidencePushforward_eq_logupPushforward]
   exact logup_pullback_pushforward I X table
 
-#print axioms canonicalIncidence_eq_unitVector
-#print axioms canonicalIncidencePushforward_eq_logupPushforward
-#print axioms canonical_indexed_lookup_pullback
+/-- info: 'Minidregg.Loom.canonicalIncidence_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalIncidence_eq_unitVector
+/-- info: 'Minidregg.Loom.canonicalIncidencePushforward_eq_logupPushforward' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalIncidencePushforward_eq_logupPushforward
+/-- info: 'Minidregg.Loom.canonical_indexed_lookup_pullback' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonical_indexed_lookup_pullback
 
 end Minidregg.Loom

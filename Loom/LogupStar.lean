@@ -364,10 +364,15 @@ theorem wrong_defect_nonzero :
 
 end LogupStarExample
 
-#print axioms logup_pullback_pushforward
-#print axioms logup_logDerivative_complete
-#print axioms logupDefect_ne_zero_of_ne
-#print axioms logup_wrong_rational_accept_prob_le
-#print axioms LogupStarExample.wrong_rejected_at_two
+/-- info: 'Minidregg.Loom.logup_pullback_pushforward' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms logup_pullback_pushforward
+/-- info: 'Minidregg.Loom.logup_logDerivative_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms logup_logDerivative_complete
+/-- info: 'Minidregg.Loom.logupDefect_ne_zero_of_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms logupDefect_ne_zero_of_ne
+/-- info: 'Minidregg.Loom.logup_wrong_rational_accept_prob_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms logup_wrong_rational_accept_prob_le
+/-- info: 'Minidregg.Loom.LogupStarExample.wrong_rejected_at_two' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LogupStarExample.wrong_rejected_at_two
 
 end Minidregg.Loom

@@ -155,8 +155,11 @@ theorem boolean_sum_one_not_oneHot_charTwo :
 
 end BinaryLookupExample
 
-#print axioms binaryLookupEq_cubePt_eq_unitVector
-#print axioms binaryTableDot_lookupEq_eq_mle
-#print axioms BinaryLookupExample.boolean_sum_one_not_oneHot_charTwo
+/-- info: 'Minidregg.Loom.binaryLookupEq_cubePt_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms binaryLookupEq_cubePt_eq_unitVector
+/-- info: 'Minidregg.Loom.binaryTableDot_lookupEq_eq_mle' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms binaryTableDot_lookupEq_eq_mle
+/-- info: 'Minidregg.Loom.BinaryLookupExample.boolean_sum_one_not_oneHot_charTwo' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BinaryLookupExample.boolean_sum_one_not_oneHot_charTwo
 
 end Minidregg.Loom

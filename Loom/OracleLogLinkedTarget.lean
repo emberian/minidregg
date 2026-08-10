@@ -336,10 +336,15 @@ theorem freshAggregateChallenge_injective
 
 end FreshKernel
 
-#print axioms linked_relaxedMem_of_statementSet
-#print axioms knownWitnessOracleLogReduction
-#print axioms linkedTarget_pins_extractor
-#print axioms OracleLogLinkedTargetExample.knownWitness_not_logExtractor_F5
-#print axioms freshAggregateChallenge_injective
+/-- info: 'Minidregg.Loom.linked_relaxedMem_of_statementSet' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linked_relaxedMem_of_statementSet
+/-- info: 'Minidregg.Loom.knownWitnessOracleLogReduction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms knownWitnessOracleLogReduction
+/-- info: 'Minidregg.Loom.linkedTarget_pins_extractor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms linkedTarget_pins_extractor
+/-- info: 'Minidregg.Loom.OracleLogLinkedTargetExample.knownWitness_not_logExtractor_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedTargetExample.knownWitness_not_logExtractor_F5
+/-- info: 'Minidregg.Loom.freshAggregateChallenge_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms freshAggregateChallenge_injective
 
 end Minidregg.Loom

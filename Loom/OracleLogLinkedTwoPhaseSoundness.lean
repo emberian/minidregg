@@ -527,11 +527,16 @@ theorem twoPhaseOracleLogFsSoundness_le [Nonempty (Fin m)]
     · exact hcr
     · exact hzk
 
-#print axioms twoPhaseFreshOutputFibre_le
-#print axioms twoPhaseFreshAlgebraLink_le
-#print axioms twoPhase_gameCoinFstZero_le
-#print axioms twoPhaseLogSoundEvent_cover
-#print axioms twoPhaseOracleLogFsSoundness_le
+/-- info: 'Minidregg.Loom.twoPhaseFreshOutputFibre_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseFreshOutputFibre_le
+/-- info: 'Minidregg.Loom.twoPhaseFreshAlgebraLink_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseFreshAlgebraLink_le
+/-- info: 'Minidregg.Loom.twoPhase_gameCoinFstZero_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_gameCoinFstZero_le
+/-- info: 'Minidregg.Loom.twoPhaseLogSoundEvent_cover' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseLogSoundEvent_cover
+/-- info: 'Minidregg.Loom.twoPhaseOracleLogFsSoundness_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseOracleLogFsSoundness_le
 
 end Soundness
 

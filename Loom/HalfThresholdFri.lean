@@ -257,11 +257,17 @@ kernel `column_sampling_bridge_pr`; composing it with committed per-round
 oracles remains the explicitly named `[DEC-prox-query]` residual.
 -/
 
-#print axioms fold_eq_foldFamily
-#print axioms foldComponents_not_correlated_of_far
-#print axioms foldDistanceTransition_halfThreshold
-#print axioms fold_halfThreshold_pr_le
-#print axioms HalfThresholdFriExample.spike_halfThreshold_bad_exact
-#print axioms HalfThresholdFriExample.half_postJohnson_tail_transition
+/-- info: 'Minidregg.Loom.fold_eq_foldFamily' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_eq_foldFamily
+/-- info: 'Minidregg.Loom.foldComponents_not_correlated_of_far' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms foldComponents_not_correlated_of_far
+/-- info: 'Minidregg.Loom.foldDistanceTransition_halfThreshold' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms foldDistanceTransition_halfThreshold
+/-- info: 'Minidregg.Loom.fold_halfThreshold_pr_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fold_halfThreshold_pr_le
+/-- info: 'Minidregg.Loom.HalfThresholdFriExample.spike_halfThreshold_bad_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriExample.spike_halfThreshold_bad_exact
+/-- info: 'Minidregg.Loom.HalfThresholdFriExample.half_postJohnson_tail_transition' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HalfThresholdFriExample.half_postJohnson_tail_transition
 
 end Minidregg.Loom

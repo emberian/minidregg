@@ -498,21 +498,37 @@ theorem honest_hiding_word_satisfies_F5 :
 
 end OracleLogLinkedAttributedExample
 
-#print axioms RootAttribution.read_eq_of_commit
-#print axioms attributedRootWord_commit
-#print axioms attributed_verify_strengthens
-#print axioms attributedWord_verify_of_attributed_accept
-#print axioms attributed_verify_accept_data
-#print axioms attributed_acceptance_increment_agreesOn_queries
-#print axioms attributed_verify_honest_raw
-#print axioms attributedWord_verify_honest
-#print axioms attributed_verify_honest
-#print axioms OracleLogLinkedAttributedExample.old_junk_transcript_rejected
-#print axioms OracleLogLinkedAttributedExample.honest_roots_pass_F5
-#print axioms OracleLogLinkedAttributedExample.honest_hiding_transcript_accepted_F5
-#print axioms OracleLogLinkedAttributedExample.zero_not_hiding_target_F5
-#print axioms OracleLogLinkedAttributedExample.honest_hiding_output_not_relaxed_F5
-#print axioms OracleLogLinkedAttributedExample.honest_hiding_word_verifies_F5
-#print axioms OracleLogLinkedAttributedExample.honest_hiding_word_satisfies_F5
+/-- info: 'Minidregg.Loom.RootAttribution.read_eq_of_commit' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootAttribution.read_eq_of_commit
+/-- info: 'Minidregg.Loom.attributedRootWord_commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributedRootWord_commit
+/-- info: 'Minidregg.Loom.attributed_verify_strengthens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributed_verify_strengthens
+/-- info: 'Minidregg.Loom.attributedWord_verify_of_attributed_accept' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributedWord_verify_of_attributed_accept
+/-- info: 'Minidregg.Loom.attributed_verify_accept_data' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributed_verify_accept_data
+/-- info: 'Minidregg.Loom.attributed_acceptance_increment_agreesOn_queries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributed_acceptance_increment_agreesOn_queries
+/-- info: 'Minidregg.Loom.attributed_verify_honest_raw' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributed_verify_honest_raw
+/-- info: 'Minidregg.Loom.attributedWord_verify_honest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributedWord_verify_honest
+/-- info: 'Minidregg.Loom.attributed_verify_honest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attributed_verify_honest
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.old_junk_transcript_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.old_junk_transcript_rejected
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.honest_roots_pass_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.honest_roots_pass_F5
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.honest_hiding_transcript_accepted_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.honest_hiding_transcript_accepted_F5
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.zero_not_hiding_target_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.zero_not_hiding_target_F5
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.honest_hiding_output_not_relaxed_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.honest_hiding_output_not_relaxed_F5
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.honest_hiding_word_verifies_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.honest_hiding_word_verifies_F5
+/-- info: 'Minidregg.Loom.OracleLogLinkedAttributedExample.honest_hiding_word_satisfies_F5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms OracleLogLinkedAttributedExample.honest_hiding_word_satisfies_F5
 
 end Minidregg.Loom
