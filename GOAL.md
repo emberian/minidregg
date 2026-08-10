@@ -45,6 +45,23 @@ up through `Kernel/MultiCellHyperedge`, the tree-wide axiom ledger, and the code
 `HyperdocumentOperations.Config`. What remains on the last unexhibited carrier is
 semantic, not mechanical: `Capability.Admissible`.
 
+**One more unexhibited carrier, found on the way out — and note the DIFFERENT status**
+
+`SemanticHistoryTower256CheckpointGame.JointGameFamily` is defined in one file, consumed
+in two (`SemanticHistoryPcsEventRealization`, `SemanticHistoryTower256DeployedBcs`), and
+**constructed nowhere**. So the four-event end-to-end price — what the snapshot below
+calls "the sharpened four-event price" — is conditional on a carrier nobody has built.
+
+This is NOT the same status as the materializers, and the difference matters for how
+alarmed to be. The materializers are *provably empty*: no construction can exist.
+`JointGameFamily` is merely *unexhibited* — it is the `VerifiedHistoryHead` situation
+before `d257fe9`, and its fields look inhabitable (`checkpoint` contains a head, which is
+now built; `domain : BoundReceiptIx n ↪ TowerField` needs only a cardinality fit, which
+`TowerField` has room for). Someone should build one; nobody has.
+
+Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryHead`, which
+`HistoryHeadInhabitation` grounds, not over `JointGameFamily`.
+
 **Sweep status — exhibited so far**
 
 | carrier | witness |
@@ -168,6 +185,7 @@ semantic, not mechanical: `Capability.Admissible`.
 - `ec2d9f9` — `3243` jobs — `E-20260810T083034-82079-local-nextop.local-ec2d9f942251-lake`
   (through the third-schema obstruction)
 - `470fea2` — `3243` jobs — `E-20260810T083620-84178-local-nextop.local-470fea2a86d3-lake`
+- `1ab74a8` — `3243` jobs — `E-20260810T084158-85747-local-nextop.local-1ab74a827656-lake`
   — **the session HEAD**, covering everything above including the fourth schema, the
   documentation corrections, and the proposed seventeenth law.
 
