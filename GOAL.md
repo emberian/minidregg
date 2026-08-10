@@ -156,8 +156,10 @@ semantic, not mechanical: `Capability.Admissible`.
   (through the capability-path witness)
 - `d9b9955` — `3242` jobs — `E-20260810T081222-76112-local-nextop.local-d9b99558f0df-lake`
   (through the credential-authority emptiness proof)
+- `47d7995` — `3242` jobs — `E-20260810T081949-78547-local-nextop.local-47d7995edb95-lake`
+  (through the materializer characterization)
 
-Commits after `d9b9955` carry warm-tree builds only.
+Commits after `47d7995` carry warm-tree builds only.
 
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be`)**
 
