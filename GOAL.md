@@ -60,6 +60,14 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   anywhere in the tree** — the only two in the repo are for `Digest`
   (`Sp800185Cshake256.digestCodec` and `AuthenticatedColumnPlan.digestUnaryCodec`).
 
+  **Codec scoping, refined after building the toolkit.** `LawfulCodec (Request .object)`
+  was a page because every field is a flat wrapper. `LawfulCodec Action` will not be: its
+  six payloads reference `ElementBody`, `AtomRecord`, `AtomKind`, `StableRange`,
+  `LinkTarget`, and `StoredTransclusionRef`, each of which needs its own codec, and
+  `StableRange` bottoms out in stable points and anchors. Budget it as a walk of the
+  Hyperdocument type tree — mechanical with the toolkit, but broad. `Declaration` then
+  needs `OperationIntent` and `RequestEnvelope` on top.
+
   **The codec gate is now removed.** `Theory.ByteCodecs` (`031377d`, `9c9b704`) supplies
   `natCodec`, `pairCodec`, `listCodec`, `codecOfRetraction`, and `subsingletonCodec` over
   a unary length-framing with a delimiter, and `Theory.TypedAuthorizationCodec`
