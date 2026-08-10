@@ -576,8 +576,10 @@ end VerifiedHistoryHead
 end History
 
 
-#print axioms VerifiedHistoryHead.decider_complete_at_head
-#print axioms VerifiedHistoryHead.opened_decider_extracts_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.decider_complete_at_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedHistoryHead.decider_complete_at_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.opened_decider_extracts_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedHistoryHead.opened_decider_extracts_head
 
 end
 

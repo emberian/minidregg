@@ -629,14 +629,22 @@ theorem commit_conflict_cannot_be_erased
       (mergeDeclaration.operationId mergeConfig))] at retained
   cases retained
 
-#print axioms derivedEventDeclaration_record_exact
-#print axioms EventAccepted.post_contains
-#print axioms EventAccepted.pre_fresh
-#print axioms commit
-#print axioms commit_content_post_exact
-#print axioms commit_event_post_contains
-#print axioms commit_conflict_retained
-#print axioms commit_conflict_cannot_be_erased
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.derivedEventDeclaration_record_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms derivedEventDeclaration_record_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.EventAccepted.post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms EventAccepted.post_contains
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.EventAccepted.pre_fresh' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms EventAccepted.pre_fresh
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit_content_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_content_post_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit_event_post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_event_post_contains
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit_conflict_retained' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_conflict_retained
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit_conflict_cannot_be_erased' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_conflict_cannot_be_erased
 
 end EventAdapter
 

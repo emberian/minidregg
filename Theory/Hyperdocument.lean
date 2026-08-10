@@ -895,11 +895,17 @@ theorem semantically_effective_field_change_changes_canonical_bytes
     lawfulCodec_encode_injective materializer.codec encodedEqual
   exact changed (congrArg (fun state => state.fields address) stateEqual)
 
-#print axioms decodePreimage_encodePreimage
-#print axioms preimageCodec_encode_injective
-#print axioms preimage_encodings_disjoint
-#print axioms SparseStore.ofCellState_toCellState
-#print axioms SparseStore.toCellState_ofCellState
-#print axioms semantically_effective_field_change_changes_canonical_bytes
+/-- info: 'Minidregg.Theory.Hyperdocument.decodePreimage_encodePreimage' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms decodePreimage_encodePreimage
+/-- info: 'Minidregg.Theory.Hyperdocument.preimageCodec_encode_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms preimageCodec_encode_injective
+/-- info: 'Minidregg.Theory.Hyperdocument.preimage_encodings_disjoint' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms preimage_encodings_disjoint
+/-- info: 'Minidregg.Theory.Hyperdocument.SparseStore.ofCellState_toCellState' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SparseStore.ofCellState_toCellState
+/-- info: 'Minidregg.Theory.Hyperdocument.SparseStore.toCellState_ofCellState' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SparseStore.toCellState_ofCellState
+/-- info: 'Minidregg.Theory.Hyperdocument.semantically_effective_field_change_changes_canonical_bytes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms semantically_effective_field_change_changes_canonical_bytes
 
 end Minidregg.Theory.Hyperdocument

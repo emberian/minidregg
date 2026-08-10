@@ -94,8 +94,11 @@ theorem tower256_card : Nat.card Tower256 = 2 ^ 256 := by
 theorem tower256_char_two : CharP Tower256 2 :=
   binaryTower_char_two 8
 
-#print axioms encodeCell_injective
-#print axioms codec_is_injective
-#print axioms tower256_card
+/-- info: 'Minidregg.Assurance.BinaryTowerHeaderCodec.encodeCell_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeCell_injective
+/-- info: 'Minidregg.Assurance.BinaryTowerHeaderCodec.codec_is_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms codec_is_injective
+/-- info: 'Minidregg.Assurance.BinaryTowerHeaderCodec.tower256_card' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tower256_card
 
 end Minidregg.Assurance.BinaryTowerHeaderCodec

@@ -365,10 +365,14 @@ theorem SecurityEvidence.no_conflation
   ⟨evidence.ordinarySoundness, evidence.knowledgeSoundness,
     evidence.zeroKnowledge, evidence.simulationExtractability⟩
 
-#print axioms StatelessHistoryStatement.ofHead_realizes
-#print axioms recursiveHistoryVerifier_correct
-#print axioms RecursiveHistoryAirReceipt.initial_fri_root_is_semantic_head
-#print axioms RecursiveHistoryAirReceipt.component_acceptance
+/-- info: 'Minidregg.Assurance.SemanticHistoryRecursiveAir.StatelessHistoryStatement.ofHead_realizes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StatelessHistoryStatement.ofHead_realizes
+/-- info: 'Minidregg.Assurance.SemanticHistoryRecursiveAir.recursiveHistoryVerifier_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recursiveHistoryVerifier_correct
+/-- info: 'Minidregg.Assurance.SemanticHistoryRecursiveAir.RecursiveHistoryAirReceipt.initial_fri_root_is_semantic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RecursiveHistoryAirReceipt.initial_fri_root_is_semantic_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryRecursiveAir.RecursiveHistoryAirReceipt.component_acceptance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RecursiveHistoryAirReceipt.component_acceptance
 
 end
 

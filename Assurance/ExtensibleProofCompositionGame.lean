@@ -434,11 +434,16 @@ theorem semantic_of_global_not_bad
 
 end Ext6Instantiation
 
-#print axioms IndexedFailureLedger.bad_le_total
-#print axioms Ext6GlobalLedger.bad_le_total
-#print axioms Ext6Instantiation.falseAccept_globalBad
-#print axioms Ext6Instantiation.falseAccept_le_globalTotal
-#print axioms Ext6Instantiation.semantic_of_global_not_bad
+/-- info: 'Minidregg.Assurance.ExtensibleProofCompositionGame.IndexedFailureLedger.bad_le_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms IndexedFailureLedger.bad_le_total
+/-- info: 'Minidregg.Assurance.ExtensibleProofCompositionGame.Ext6GlobalLedger.bad_le_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Ext6GlobalLedger.bad_le_total
+/-- info: 'Minidregg.Assurance.ExtensibleProofCompositionGame.Ext6Instantiation.falseAccept_globalBad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Ext6Instantiation.falseAccept_globalBad
+/-- info: 'Minidregg.Assurance.ExtensibleProofCompositionGame.Ext6Instantiation.falseAccept_le_globalTotal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Ext6Instantiation.falseAccept_le_globalTotal
+/-- info: 'Minidregg.Assurance.ExtensibleProofCompositionGame.Ext6Instantiation.semantic_of_global_not_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Ext6Instantiation.semantic_of_global_not_bad
 
 end
 

@@ -341,8 +341,11 @@ def commit
         eventDeclaration.key eventConfig⟩ = some eventDeclaration.record :=
   event.post_contains
 
-#print axioms commit
-#print axioms commit_content_post_exact
-#print axioms commit_event_post_contains
+/-- info: 'Minidregg.Kernel.HyperdocumentPublication.commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit
+/-- info: 'Minidregg.Kernel.HyperdocumentPublication.commit_content_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_content_post_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentPublication.commit_event_post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commit_event_post_contains
 
 end Minidregg.Kernel.HyperdocumentPublication

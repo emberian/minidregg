@@ -821,12 +821,19 @@ theorem receiptEvent_every_exact_integer_equation
     rw [outputEq']
     exact event.evidence.checked.witness.every_exact_integer_equation rowIndex
 
-#print axioms rowKernelCall_fullyWellFormed
-#print axioms RowAdmission.descriptorAcceptance
-#print axioms RowAdmission.toCheckedRowBuffer
-#print axioms BatchAdmission.every_exact_integer_equation
-#print axioms bfvManifest_wellFormed
-#print axioms issueReceiptEvent
-#print axioms receiptEvent_every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.rowKernelCall_fullyWellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rowKernelCall_fullyWellFormed
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.RowAdmission.descriptorAcceptance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RowAdmission.descriptorAcceptance
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.RowAdmission.toCheckedRowBuffer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RowAdmission.toCheckedRowBuffer
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.BatchAdmission.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BatchAdmission.every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.bfvManifest_wellFormed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bfvManifest_wellFormed
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.issueReceiptEvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms issueReceiptEvent
+/-- info: 'Minidregg.Assurance.BfvNativeBufferAdmission.receiptEvent_every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms receiptEvent_every_exact_integer_equation
 
 end Minidregg.Assurance.BfvNativeBufferAdmission

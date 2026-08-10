@@ -240,11 +240,16 @@ noncomputable def historyClaimOfBatchSealed
     (acceptBatchSealed authority admission commitmentId adapter
       commonAuthorization effectsDigestBound preRootBound legs statementExact validated)
 
-#print axioms completionOfBatchAdmission
-#print axioms completion_every_exact_integer_equation
-#print axioms acceptBatchSealed
-#print axioms accepted_every_exact_integer_equation
-#print axioms historyClaimOfBatchSealed
+/-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.completionOfBatchAdmission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms completionOfBatchAdmission
+/-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.completion_every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms completion_every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.acceptBatchSealed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptBatchSealed
+/-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.accepted_every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.historyClaimOfBatchSealed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyClaimOfBatchSealed
 
 end
 

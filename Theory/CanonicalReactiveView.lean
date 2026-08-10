@@ -366,7 +366,9 @@ theorem PreparedReaction.changed_has_cause
   apply (lens.dirty_iff_cause observer reaction.prepared.delta).mp
   exact lens.dirty_of_project_ne observer reaction.prepared.delta changed
 
-#print axioms ObserverLens.project_eq_of_clean
-#print axioms PreparedReaction.changed_has_cause
+/-- info: 'Minidregg.Theory.CanonicalReactiveView.ObserverLens.project_eq_of_clean' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ObserverLens.project_eq_of_clean
+/-- info: 'Minidregg.Theory.CanonicalReactiveView.PreparedReaction.changed_has_cause' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedReaction.changed_has_cause
 
 end Minidregg.Theory.CanonicalReactiveView

@@ -137,8 +137,11 @@ theorem history_binding_equal_implies_headers_equal_or_collision
     left = right \/ commitment.Collision context left right :=
   binding_alias_implies_equal_or_collision commitment codec context left right equal
 
-#print axioms historyClaim_binding_exact
-#print axioms historyClaim_core_exact
-#print axioms history_binding_equal_implies_headers_equal_or_collision
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.historyClaim_binding_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyClaim_binding_exact
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.historyClaim_core_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyClaim_core_exact
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeHistoryBinding.history_binding_equal_implies_headers_equal_or_collision' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms history_binding_equal_implies_headers_equal_or_collision
 
 end Minidregg.Assurance.DeclaredHyperedgeHistoryBinding

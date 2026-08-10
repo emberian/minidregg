@@ -636,10 +636,15 @@ theorem revoke_nullifier_exact
       (revokeFamily domain pre codec effectDigest) request pre declaration ()) :
     accepted.prepared.nullifier = some declaration.operationNullifier := rfl
 
-#print axioms AttenuateEvidence.childLineageValid
-#print axioms authorization_consults_same_canonical_pre
-#print axioms revocation_post_is_authorizer_member
-#print axioms rotation_post_is_authorizer_epoch
-#print axioms revoke_frame
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.AttenuateEvidence.childLineageValid' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AttenuateEvidence.childLineageValid
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.authorization_consults_same_canonical_pre' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorization_consults_same_canonical_pre
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.revocation_post_is_authorizer_member' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revocation_post_is_authorizer_member
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.rotation_post_is_authorizer_epoch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rotation_post_is_authorizer_epoch
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.revoke_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revoke_frame
 
 end Minidregg.Theory.CredentialAuthorityEffects

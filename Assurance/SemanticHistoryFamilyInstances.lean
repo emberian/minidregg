@@ -357,11 +357,16 @@ end HyperedgeEvidence
 
 end Hyperedge
 
-#print axioms turnFamily
-#print axioms TurnEvidence.toVerifiedEntry
-#print axioms hyperedgeFamily
-#print axioms HyperedgeEvidence.toVerifiedEntry
-#print axioms HyperedgeEvidence.retainedOutcome
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamilyInstances.turnFamily' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms turnFamily
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamilyInstances.TurnEvidence.toVerifiedEntry' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms TurnEvidence.toVerifiedEntry
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamilyInstances.hyperedgeFamily' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hyperedgeFamily
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamilyInstances.HyperedgeEvidence.toVerifiedEntry' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HyperedgeEvidence.toVerifiedEntry
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamilyInstances.HyperedgeEvidence.retainedOutcome' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HyperedgeEvidence.retainedOutcome
 
 end
 

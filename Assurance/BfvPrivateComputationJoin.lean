@@ -465,13 +465,21 @@ theorem receiptEvent_bfv_semantics
     rw [outputEq']
     exact event.evidence.checked.witness.every_exact_integer_equation rowIndex
 
-#print axioms program_crypto_pins_unassigned
-#print axioms modeEvidencePins_crypto_unassigned
-#print axioms Evidence.every_exact_integer_equation
-#print axioms CheckedPrivateEvidence.bfv_bound_semantics
-#print axioms core_bfv_bound_semantics
-#print axioms acceptedCore_bfv_semantics
-#print axioms exact_owner_row_count
-#print axioms receiptEvent_bfv_semantics
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.program_crypto_pins_unassigned' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms program_crypto_pins_unassigned
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.modeEvidencePins_crypto_unassigned' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms modeEvidencePins_crypto_unassigned
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.Evidence.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Evidence.every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.CheckedPrivateEvidence.bfv_bound_semantics' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CheckedPrivateEvidence.bfv_bound_semantics
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.core_bfv_bound_semantics' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms core_bfv_bound_semantics
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.acceptedCore_bfv_semantics' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedCore_bfv_semantics
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.exact_owner_row_count' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms exact_owner_row_count
+/-- info: 'Minidregg.Assurance.BfvPrivateComputationJoin.receiptEvent_bfv_semantics' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms receiptEvent_bfv_semantics
 
 end Minidregg.Assurance.BfvPrivateComputationJoin

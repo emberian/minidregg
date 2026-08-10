@@ -482,12 +482,18 @@ theorem component_error_bounds
 
 end StraightlineCheckpointExtraction
 
-#print axioms CoordinatePadding.paddedCommitment
-#print axioms checkpointClausePin_registered
-#print axioms Checkpoint.initial_root_eq_semantic_head
-#print axioms Checkpoint.initial_word_mem_code
-#print axioms StraightlineCheckpointExtraction.accepted_sample_extracts_checkpoint
-#print axioms StraightlineCheckpointExtraction.component_error_bounds
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.CoordinatePadding.paddedCommitment' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoordinatePadding.paddedCommitment
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.checkpointClausePin_registered' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms checkpointClausePin_registered
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.Checkpoint.initial_root_eq_semantic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Checkpoint.initial_root_eq_semantic_head
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.Checkpoint.initial_word_mem_code' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Checkpoint.initial_word_mem_code
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.StraightlineCheckpointExtraction.accepted_sample_extracts_checkpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StraightlineCheckpointExtraction.accepted_sample_extracts_checkpoint
+/-- info: 'Minidregg.Assurance.SemanticAdditiveFriCheckpoint.StraightlineCheckpointExtraction.component_error_bounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StraightlineCheckpointExtraction.component_error_bounds
 
 end
 end Minidregg.Assurance.SemanticAdditiveFriCheckpoint

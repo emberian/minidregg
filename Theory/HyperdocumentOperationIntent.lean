@@ -126,8 +126,11 @@ theorem ActionBytesExact.intent_eq_of_action_bytes_eq
       simp_all
     _ = right := otherFields
 
-#print axioms idPreimage_injective
-#print axioms operation_id_independent_of_post_root
-#print axioms operation_version_preimage_domains_disjoint
+/-- info: 'Minidregg.Theory.HyperdocumentOperationIntent.idPreimage_injective' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms idPreimage_injective
+/-- info: 'Minidregg.Theory.HyperdocumentOperationIntent.operation_id_independent_of_post_root' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms operation_id_independent_of_post_root
+/-- info: 'Minidregg.Theory.HyperdocumentOperationIntent.operation_version_preimage_domains_disjoint' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms operation_version_preimage_domains_disjoint
 
 end Minidregg.Theory.HyperdocumentOperationIntent

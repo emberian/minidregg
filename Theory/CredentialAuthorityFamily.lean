@@ -439,12 +439,19 @@ theorem demoToken_is_capability_evidence :
     demoTokenAccepted.authorization.evidence.Supports .capability :=
   demoTokenAccepted.token_has_no_bypass rfl
 
-#print axioms encodeRequest_injective
-#print axioms retarget_changes_wire
-#print axioms Capability.strict_attenuation_admits_subset
-#print axioms Capability.Lineage.root_admissible
-#print axioms AcceptedCredential.token_has_no_bypass
-#print axioms AcceptedCredential.reject_over_budget
-#print axioms demoToken_is_capability_evidence
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.encodeRequest_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeRequest_injective
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.retarget_changes_wire' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms retarget_changes_wire
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.strict_attenuation_admits_subset' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Capability.strict_attenuation_admits_subset
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.Lineage.root_admissible' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Capability.Lineage.root_admissible
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.token_has_no_bypass' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedCredential.token_has_no_bypass
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.AcceptedCredential.reject_over_budget' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedCredential.reject_over_budget
+/-- info: 'Minidregg.Theory.CredentialAuthorityFamily.demoToken_is_capability_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms demoToken_is_capability_evidence
 
 end Minidregg.Theory.CredentialAuthorityFamily

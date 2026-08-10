@@ -866,13 +866,20 @@ theorem historyBcsBad_implies_commonBad
   · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl binding))))
   · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl rom)))))
 
-#print axioms traceAggregate_eq_accumulator
-#print axioms traceSource_aligned
-#print axioms HistoryBcsOpenings.bcsRounds_exact
-#print axioms historyBcsReduction_source
-#print axioms accRbrKnowledgeSoundBcs
-#print axioms accFsSound_bcs
-#print axioms historyBcsBad_le_price
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.traceAggregate_eq_accumulator' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms traceAggregate_eq_accumulator
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.traceSource_aligned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms traceSource_aligned
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.HistoryBcsOpenings.bcsRounds_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryBcsOpenings.bcsRounds_exact
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.historyBcsReduction_source' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyBcsReduction_source
+/-- info: 'Minidregg.Loom.accRbrKnowledgeSoundBcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accRbrKnowledgeSoundBcs
+/-- info: 'Minidregg.Loom.accFsSound_bcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accFsSound_bcs
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.historyBcsBad_le_price' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyBcsBad_le_price
 
 end
 

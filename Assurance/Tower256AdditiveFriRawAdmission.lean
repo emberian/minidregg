@@ -270,10 +270,14 @@ theorem falseAccept_le
 
 end RawGameFamily
 
-#print axioms FarSoundnessCertificate.ideal_accept_le
-#print axioms RawGameFamily.execution_runner_bytes
-#print axioms RawGameFamily.falseAccept_three_event_cover
-#print axioms RawGameFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriRawAdmission.FarSoundnessCertificate.ideal_accept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FarSoundnessCertificate.ideal_accept_le
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriRawAdmission.RawGameFamily.execution_runner_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawGameFamily.execution_runner_bytes
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriRawAdmission.RawGameFamily.falseAccept_three_event_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawGameFamily.falseAccept_three_event_cover
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriRawAdmission.RawGameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawGameFamily.falseAccept_le
 
 end
 

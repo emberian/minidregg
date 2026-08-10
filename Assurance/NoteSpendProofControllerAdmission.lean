@@ -344,12 +344,18 @@ theorem validSpend_of_not_soundnessBad
 
 end CommonGameFamily
 
-#print axioms CoreJoin.statementOf_exact
-#print axioms RelationWitness.validSpend
-#print axioms FailureLedger.soundnessBad_le
-#print axioms CommonGameFamily.falseAccept_le
-#print axioms CommonGameFamily.hidingFailure_le
-#print axioms CommonGameFamily.validSpend_of_not_soundnessBad
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.CoreJoin.statementOf_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_exact
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.RelationWitness.validSpend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RelationWitness.validSpend
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.FailureLedger.soundnessBad_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FailureLedger.soundnessBad_le
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.CommonGameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.CommonGameFamily.hidingFailure_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.hidingFailure_le
+/-- info: 'Minidregg.Assurance.NoteSpendProofControllerAdmission.CommonGameFamily.validSpend_of_not_soundnessBad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.validSpend_of_not_soundnessBad
 
 end
 

@@ -219,8 +219,11 @@ theorem transcriptOrdered
 
 end AdmittedLookup
 
-#print axioms ControllerGameSecurity.towerCodecExact
-#print axioms AdmittedLookup.ofVerifiedExecution
-#print axioms AdmittedLookup.indexedEvaluation
+/-- info: 'Minidregg.Assurance.Tower256LogupControllerAdmission.ControllerGameSecurity.towerCodecExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ControllerGameSecurity.towerCodecExact
+/-- info: 'Minidregg.Assurance.Tower256LogupControllerAdmission.AdmittedLookup.ofVerifiedExecution' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AdmittedLookup.ofVerifiedExecution
+/-- info: 'Minidregg.Assurance.Tower256LogupControllerAdmission.AdmittedLookup.indexedEvaluation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AdmittedLookup.indexedEvaluation
 
 end Minidregg.Assurance.Tower256LogupControllerAdmission

@@ -230,9 +230,13 @@ claim and no representation-refinement premise. -/
       representation.sparseMaterializer store).root := by
   rfl
 
-#print axioms Sparse.AcceptedAppend.post_contains
-#print axioms Sparse.AcceptedAppend.duplicate_rejected
-#print axioms Sparse.Store.ofCellState_toCellState
-#print axioms Representation.roots_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.post_contains' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.post_contains
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.duplicate_rejected' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.duplicate_rejected
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store.ofCellState_toCellState' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Sparse.Store.ofCellState_toCellState
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Representation.roots_exact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Representation.roots_exact
 
 end Minidregg.Kernel.HyperdocumentEventLog

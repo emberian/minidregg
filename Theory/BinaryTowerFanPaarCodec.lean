@@ -321,8 +321,11 @@ theorem cardinality : Nat.card Tower256 = 2 ^ 256 := by
 theorem characteristic : CharP Tower256 2 :=
   binaryTower_char_two 8
 
-#print axioms coordinateFieldEquiv
-#print axioms decode_encode
-#print axioms encode_injective
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.coordinateFieldEquiv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms coordinateFieldEquiv
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.decode_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decode_encode
+/-- info: 'Minidregg.Theory.BinaryTowerFanPaarCodec.encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encode_injective
 
 end Minidregg.Theory.BinaryTowerFanPaarCodec

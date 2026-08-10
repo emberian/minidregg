@@ -431,11 +431,17 @@ theorem no_commit_of_conflicting_cell
     IsEmpty (AdmittedCommit law boundary) :=
   ⟨fun admitted => different (admitted.2.cellIdsDistinct sameCell)⟩
 
-#print axioms Declaration.post_exact
-#print axioms Commit.toHyperedge
-#print axioms Admission.rejected_atomic
-#print axioms binaryCommit
-#print axioms no_commit_of_nonzero_balance
-#print axioms no_commit_of_conflicting_cell
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Declaration.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Declaration.post_exact
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.Admission.rejected_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Admission.rejected_atomic
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.binaryCommit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms binaryCommit
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.no_commit_of_nonzero_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_balance
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.no_commit_of_conflicting_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_conflicting_cell
 
 end Minidregg.Kernel.MultiCellHyperedge

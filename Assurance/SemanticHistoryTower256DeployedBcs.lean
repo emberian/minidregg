@@ -313,12 +313,18 @@ theorem jointFalseAccept_le (joint : BoundJoint)
 
 end CommonCoinHistoryRun
 
-#print axioms NativeHistoryRun.falseAccept_le
-#print axioms CommonCoinHistoryRun.falseAccept_le_of_uniform
-#print axioms PcsCrRomReduction.falseAccept_cover
-#print axioms PcsCrRomReduction.impossible_of_falseAccept_and_threeGood
-#print axioms CommonCoinHistoryRun.jointFalseAccept_bad
-#print axioms CommonCoinHistoryRun.jointFalseAccept_le
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.NativeHistoryRun.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms NativeHistoryRun.falseAccept_le
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.CommonCoinHistoryRun.falseAccept_le_of_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonCoinHistoryRun.falseAccept_le_of_uniform
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.PcsCrRomReduction.falseAccept_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PcsCrRomReduction.falseAccept_cover
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.PcsCrRomReduction.impossible_of_falseAccept_and_threeGood' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PcsCrRomReduction.impossible_of_falseAccept_and_threeGood
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.CommonCoinHistoryRun.jointFalseAccept_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonCoinHistoryRun.jointFalseAccept_bad
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256DeployedBcs.CommonCoinHistoryRun.jointFalseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonCoinHistoryRun.jointFalseAccept_le
 
 end
 

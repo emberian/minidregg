@@ -662,16 +662,26 @@ end DurablePlan
 
 end Durable
 
-#print axioms acceptedNegotiation
-#print axioms promiseSpec
-#print axioms AcceptedOperation.finalized_content_exact
-#print axioms AcceptedOperation.no_wrong_version
-#print axioms AcceptedOperation.no_outside_scope
-#print axioms AcceptedOperation.historyClaim
-#print axioms selected_view_dirty
-#print axioms DurablePlan.no_partial_commit
-#print axioms DurablePlan.retry_after_install
-#print axioms DurablePlan.physical_step_no_partial
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.acceptedNegotiation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedNegotiation
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.promiseSpec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms promiseSpec
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.AcceptedOperation.finalized_content_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedOperation.finalized_content_exact
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.AcceptedOperation.no_wrong_version' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedOperation.no_wrong_version
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.AcceptedOperation.no_outside_scope' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedOperation.no_outside_scope
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.AcceptedOperation.historyClaim' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedOperation.historyClaim
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.selected_view_dirty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms selected_view_dirty
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.DurablePlan.no_partial_commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DurablePlan.no_partial_commit
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.DurablePlan.retry_after_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DurablePlan.retry_after_install
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentOperation.DurablePlan.physical_step_no_partial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DurablePlan.physical_step_no_partial
 
 end
 

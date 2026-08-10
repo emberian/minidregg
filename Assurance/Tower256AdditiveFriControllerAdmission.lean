@@ -228,9 +228,12 @@ theorem falseAccept_impossible_of_all_good
 
 end CommonGameFamily
 
-#print axioms CommonCoinAdmission.acceptedSample
-#print axioms CommonGameFamily.falseAccept_bad
-#print axioms CommonGameFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.CommonCoinAdmission.acceptedSample' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonCoinAdmission.acceptedSample
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.CommonGameFamily.falseAccept_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.falseAccept_bad
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.CommonGameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.falseAccept_le
 
 end
 

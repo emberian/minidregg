@@ -303,15 +303,24 @@ theorem selected_base_conflict_is_published
       cases plan
       simp_all [Minidregg.Kernel.HyperdocumentMerge.FieldPlan.conflictRecord]
 
-#print axioms Accepted.selected_plan_base_exact
-#print axioms Accepted.ambiguous_plan_base_absent
-#print axioms Accepted.unavailable_plan_base_absent
-#print axioms Accepted.selectedReachesParent
-#print axioms Accepted.selected_realization_root_exact
-#print axioms Accepted.parent_realization_root_exact
-#print axioms publicationInputs
-#print axioms publicationInputs_record_unchanged
-#print axioms selected_base_conflict_is_published
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.selected_plan_base_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.selected_plan_base_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.ambiguous_plan_base_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.ambiguous_plan_base_absent
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.unavailable_plan_base_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.unavailable_plan_base_absent
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.selectedReachesParent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.selectedReachesParent
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.selected_realization_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.selected_realization_root_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.Accepted.parent_realization_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.parent_realization_root_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.publicationInputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms publicationInputs
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.publicationInputs_record_unchanged' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms publicationInputs_record_unchanged
+/-- info: 'Minidregg.Kernel.HyperdocumentMergeAncestry.selected_base_conflict_is_published' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms selected_base_conflict_is_published
 
 end AncestryMerge
 

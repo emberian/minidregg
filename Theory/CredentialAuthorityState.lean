@@ -175,7 +175,9 @@ theorem not_mem_authState_revoked_of_outside {M : Materializer}
     key ∉ (authState domain pre).revoked := by
   simpa [mem_authState_revoked_iff, outside]
 
-#print axioms LineageValid.root_admissible
-#print axioms mem_authState_revoked_iff
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff
 
 end Minidregg.Theory.CredentialAuthorityState

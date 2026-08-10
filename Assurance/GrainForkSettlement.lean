@@ -480,11 +480,16 @@ theorem CanonicalReceipt.post_root_exact
 
 end Settlement
 
-#print axioms BranchHistory.head_historyDomain
-#print axioms Commit.noMergeConflict
-#print axioms AcceptedSettlement.receiptClaim
-#print axioms AcceptedSettlement.mintReceipt
-#print axioms CanonicalReceipt.post_root_exact
+/-- info: 'Minidregg.Assurance.GrainForkSettlement.BranchHistory.head_historyDomain' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms BranchHistory.head_historyDomain
+/-- info: 'Minidregg.Assurance.GrainForkSettlement.Commit.noMergeConflict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.noMergeConflict
+/-- info: 'Minidregg.Assurance.GrainForkSettlement.AcceptedSettlement.receiptClaim' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedSettlement.receiptClaim
+/-- info: 'Minidregg.Assurance.GrainForkSettlement.AcceptedSettlement.mintReceipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedSettlement.mintReceipt
+/-- info: 'Minidregg.Assurance.GrainForkSettlement.CanonicalReceipt.post_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CanonicalReceipt.post_root_exact
 
 end
 

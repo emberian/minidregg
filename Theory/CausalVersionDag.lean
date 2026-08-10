@@ -517,7 +517,9 @@ end Replay
 
 end History
 
-#print axioms ValidAppend.parent_present
-#print axioms ValidAppend.concurrent_sibling_append_inhabited
+/-- info: 'Minidregg.Theory.CausalVersionDag.ValidAppend.parent_present' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidAppend.parent_present
+/-- info: 'Minidregg.Theory.CausalVersionDag.ValidAppend.concurrent_sibling_append_inhabited' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidAppend.concurrent_sibling_append_inhabited
 
 end Minidregg.Theory.CausalVersionDag

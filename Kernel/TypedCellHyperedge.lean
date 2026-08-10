@@ -545,11 +545,17 @@ Named construction residuals:
 
 end LegacyAdapter
 
-#print axioms Leg.request_preRoot
-#print axioms Commit.prepared_postRoot
-#print axioms Commit.leg_resourceFootprint_subset
-#print axioms Commit.toHyperedge
-#print axioms no_commit_of_nonzero_resource
-#print axioms LegacyAdapter.committed_post_matches_legacy
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Leg.request_preRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Leg.request_preRoot
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.prepared_postRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.prepared_postRoot
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_resourceFootprint_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.leg_resourceFootprint_subset
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_nonzero_resource' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_resource
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.LegacyAdapter.committed_post_matches_legacy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LegacyAdapter.committed_post_matches_legacy
 
 end Minidregg.Kernel.TypedCellHyperedge

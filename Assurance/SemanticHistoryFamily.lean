@@ -555,15 +555,24 @@ end VerifiedHistoryHead
 
 end History
 
-#print axioms HistoryAdmissionContext.ofAdmissionContext_wellFormed
-#print axioms EntrySemanticsFamily.sum
-#print axioms VerifiedEntry.toSumLeft
-#print axioms VerifiedEntry.toSumRight
-#print axioms VerifiedEntry.word_reject_atomic
-#print axioms HistoryFoldTrace.rounds_succ_entries_length
-#print axioms VerifiedHistoryHead.foldRounds_succ_depth
-#print axioms VerifiedHistoryHead.decider_complete_at_head
-#print axioms VerifiedHistoryHead.opened_decider_extracts_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.HistoryAdmissionContext.ofAdmissionContext_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryAdmissionContext.ofAdmissionContext_wellFormed
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.EntrySemanticsFamily.sum' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms EntrySemanticsFamily.sum
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry.toSumLeft' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedEntry.toSumLeft
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry.toSumRight' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedEntry.toSumRight
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry.word_reject_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedEntry.word_reject_atomic
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.HistoryFoldTrace.rounds_succ_entries_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryFoldTrace.rounds_succ_entries_length
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedHistoryHead.foldRounds_succ_depth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedHistoryHead.foldRounds_succ_depth
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedHistoryHead.decider_complete_at_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedHistoryHead.decider_complete_at_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryFamily.VerifiedHistoryHead.opened_decider_extracts_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedHistoryHead.opened_decider_extracts_head
 
 end
 

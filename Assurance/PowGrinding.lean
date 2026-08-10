@@ -242,6 +242,7 @@ Still named `[BUDGET-PoW-compose]`:
 #check @powAttempt_factor
 #check @powGrindingWin_le
 #check @powGrindingWin_le_grindingTermPoW
-#print axioms powGrindingWin_le_grindingTermPoW
+/-- info: 'Minidregg.Assurance.powGrindingWin_le_grindingTermPoW' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms powGrindingWin_le_grindingTermPoW
 
 end Minidregg.Assurance

@@ -158,9 +158,12 @@ theorem message_records_in_attestation
 
 end AuthenticatedLinkColumns
 
-#print axioms AuthenticatedLinkColumns.message_root_exact
-#print axioms AuthenticatedLinkColumns.message_columns_open
-#print axioms AuthenticatedLinkColumns.bcsRounds_exact_of_attestation
+/-- info: 'Minidregg.Assurance.AuthenticatedColumnHistoryBridge.AuthenticatedLinkColumns.message_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AuthenticatedLinkColumns.message_root_exact
+/-- info: 'Minidregg.Assurance.AuthenticatedColumnHistoryBridge.AuthenticatedLinkColumns.message_columns_open' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AuthenticatedLinkColumns.message_columns_open
+/-- info: 'Minidregg.Assurance.AuthenticatedColumnHistoryBridge.AuthenticatedLinkColumns.bcsRounds_exact_of_attestation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AuthenticatedLinkColumns.bcsRounds_exact_of_attestation
 
 end
 

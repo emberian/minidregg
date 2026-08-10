@@ -281,9 +281,13 @@ theorem SemanticOutcome.every_request_authorized
       (declaration.legs incidence).request) :=
   semantic.authorizations incidence
 
-#print axioms executeCore_valid
-#print axioms canonicalCore_exact
-#print axioms historyClaim_core_exact
-#print axioms SemanticOutcome.every_request_authorized
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.executeCore_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms executeCore_valid
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.canonicalCore_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalCore_exact
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.historyClaim_core_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyClaim_core_exact
+/-- info: 'Minidregg.Assurance.DeclaredHyperedgeReceipt.SemanticOutcome.every_request_authorized' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SemanticOutcome.every_request_authorized
 
 end Minidregg.Assurance.DeclaredHyperedgeReceipt

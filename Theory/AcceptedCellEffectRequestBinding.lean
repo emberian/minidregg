@@ -407,12 +407,19 @@ be defined here.  Closing that seam requires a separate Lean-authored carrier
 identification and common-request construction; accepting callbacks here would
 be a second interpreter, so this module intentionally provides none. -/
 
-#print axioms Bound.effectsDigest_exact
-#print axioms Bound.preRoot_exact
-#print axioms no_bound_of_args_mismatch
-#print axioms ofComputationAccepted
-#print axioms bindIssue
-#print axioms bindHyperdocument
-#print axioms hyperdocument_args_name_operation_intent
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.Bound.effectsDigest_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Bound.effectsDigest_exact
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.Bound.preRoot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Bound.preRoot_exact
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.no_bound_of_args_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_bound_of_args_mismatch
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.ofComputationAccepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ofComputationAccepted
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.bindIssue' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bindIssue
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.bindHyperdocument' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bindHyperdocument
+/-- info: 'Minidregg.Theory.AcceptedCellEffectRequestBinding.hyperdocument_args_name_operation_intent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hyperdocument_args_name_operation_intent
 
 end Minidregg.Theory.AcceptedCellEffectRequestBinding

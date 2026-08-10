@@ -300,8 +300,11 @@ theorem boundSemanticReceiptClaims_fold
   · exact (left.acc_satisfies_iff leftRoot _).mpr ⟨hleft, rfl⟩
   · exact (right.acc_satisfies_iff rightRoot _).mpr ⟨hright, rfl⟩
 
-#print axioms boundRuntimeEncode_injective
-#print axioms boundSemanticReceiptClaims_fold
-#print axioms HeaderBytes.bindingNatCells_injective
+/-- info: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundRuntimeEncode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms boundRuntimeEncode_injective
+/-- info: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.boundSemanticReceiptClaims_fold' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms boundSemanticReceiptClaims_fold
+/-- info: 'Minidregg.Assurance.SemanticReceiptRuntimeCodec.HeaderBytes.bindingNatCells_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HeaderBytes.bindingNatCells_injective
 
 end Minidregg.Assurance.SemanticReceiptRuntimeCodec

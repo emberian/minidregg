@@ -221,9 +221,13 @@ theorem secureBudget120_pow_price :
 #check @secureBudget120_secure_137
 #check @babyBear4_fails_120
 #check @noPoW_fails_120
-#print axioms secureBudget120_secure
-#print axioms secureBudget120_secure_137
-#print axioms babyBear4_fails_120
-#print axioms noPoW_fails_120
+/-- info: 'Minidregg.Assurance.secureBudget120_secure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms secureBudget120_secure
+/-- info: 'Minidregg.Assurance.secureBudget120_secure_137' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms secureBudget120_secure_137
+/-- info: 'Minidregg.Assurance.babyBear4_fails_120' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms babyBear4_fails_120
+/-- info: 'Minidregg.Assurance.noPoW_fails_120' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms noPoW_fails_120
 
 end Minidregg.Assurance

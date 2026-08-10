@@ -421,15 +421,24 @@ theorem semanticBcsReduction_target_iff
 
 end BcsReduction
 
-#print axioms reindexClaim_satisfies_iff
-#print axioms reindexClaim_foldClaims
-#print axioms reindexClaim_aggregate
-#print axioms reindexWord_foldWords
-#print axioms reindexedSourceRelation_iff
-#print axioms reindexedTargetRelation_iff
-#print axioms reindexHistoryHead_satisfies
-#print axioms semanticBcsReduction_source_iff
-#print axioms semanticBcsReduction_target_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexClaim_satisfies_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexClaim_satisfies_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexClaim_foldClaims' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexClaim_foldClaims
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexClaim_aggregate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexClaim_aggregate
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexWord_foldWords' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexWord_foldWords
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexedSourceRelation_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexedSourceRelation_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexedTargetRelation_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexedTargetRelation_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.reindexHistoryHead_satisfies' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reindexHistoryHead_satisfies
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.semanticBcsReduction_source_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms semanticBcsReduction_source_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryBcsClaimProjection.semanticBcsReduction_target_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms semanticBcsReduction_target_iff
 
 end
 

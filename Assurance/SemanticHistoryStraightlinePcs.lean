@@ -436,12 +436,18 @@ end StraightlinePcsExtraction
 
 end Semantic
 
-#print axioms FoldRootSchedule.foldRoot_commits_folded_word
-#print axioms FoldRootSchedule.wordAt_historyTrace
-#print axioms SemanticScheduleBinding.finalRootExact
-#print axioms StraightlinePcsExtraction.extract_eq_semantic_head
-#print axioms StraightlinePcsExtraction.extract_satisfies_semantic_head
-#print axioms StraightlinePcsExtraction.knowledge_failure_le_totalEnvelope
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.FoldRootSchedule.foldRoot_commits_folded_word' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FoldRootSchedule.foldRoot_commits_folded_word
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.FoldRootSchedule.wordAt_historyTrace' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FoldRootSchedule.wordAt_historyTrace
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.SemanticScheduleBinding.finalRootExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SemanticScheduleBinding.finalRootExact
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.extract_eq_semantic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StraightlinePcsExtraction.extract_eq_semantic_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.extract_satisfies_semantic_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StraightlinePcsExtraction.extract_satisfies_semantic_head
+/-- info: 'Minidregg.Assurance.SemanticHistoryStraightlinePcs.StraightlinePcsExtraction.knowledge_failure_le_totalEnvelope' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StraightlinePcsExtraction.knowledge_failure_le_totalEnvelope
 
 end
 

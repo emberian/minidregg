@@ -401,9 +401,13 @@ theorem Accepted.duplicate_rejected
       accepted.sparse.post.logical :=
   accepted.sparse.duplicate_rejected
 
-#print axioms SourceExact.post_root_exact
-#print axioms SourceExact.request_id_exact
-#print axioms Accepted.post_contains
-#print axioms Accepted.duplicate_rejected
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.SourceExact.post_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SourceExact.post_root_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.SourceExact.request_id_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SourceExact.request_id_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.Accepted.post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.Accepted.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.duplicate_rejected
 
 end Minidregg.Kernel.HyperdocumentVersionEffects

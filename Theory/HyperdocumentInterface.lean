@@ -584,15 +584,25 @@ structure VersionProjection
     projection.stored.key = id :=
   projection.keyExact
 
-#print axioms ContentQuery.lens
-#print axioms QueryConfig.decode_encode_argument
-#print axioms no_query_success_wrong_interface
-#print axioms no_query_success_reserved_version
-#print axioms no_query_success_outside_scope
-#print axioms no_query_success_wrong_target
-#print axioms no_action_success_wrong_version
-#print axioms no_action_success_outside_scope
-#print axioms no_action_success_wrong_target
-#print axioms rejected_ne_accepted
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.ContentQuery.lens' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ContentQuery.lens
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.QueryConfig.decode_encode_argument' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms QueryConfig.decode_encode_argument
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_interface' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_query_success_wrong_interface
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_reserved_version' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_query_success_reserved_version
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_outside_scope' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_query_success_outside_scope
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_target' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_query_success_wrong_target
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_version' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_action_success_wrong_version
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_outside_scope' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_action_success_outside_scope
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_target' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_action_success_wrong_target
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.rejected_ne_accepted' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rejected_ne_accepted
 
 end Minidregg.Theory.HyperdocumentInterface

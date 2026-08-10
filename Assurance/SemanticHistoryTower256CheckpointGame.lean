@@ -407,13 +407,20 @@ noncomputable def acceptedOfNotBad
       terminalRootExact := joint.terminalRoot_eq_receiptInitial reply
       sharedInitialRootsExact := joint.sharedInitialRoots_exact selected }
 
-#print axioms falseAccept_bad
-#print axioms bad_le_price
-#print axioms falseAccept_le
-#print axioms terminalRoot_eq_receiptInitial
-#print axioms sharedInitialRoots_exact
-#print axioms idealHistoryFiatShamir
-#print axioms acceptedOfNotBad
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.falseAccept_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms falseAccept_bad
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.bad_le_price' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bad_le_price
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms falseAccept_le
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.terminalRoot_eq_receiptInitial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms terminalRoot_eq_receiptInitial
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.sharedInitialRoots_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sharedInitialRoots_exact
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.idealHistoryFiatShamir' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms idealHistoryFiatShamir
+/-- info: 'Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily.acceptedOfNotBad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedOfNotBad
 
 end JointGameFamily
 

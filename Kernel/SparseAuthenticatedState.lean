@@ -670,11 +670,17 @@ theorem rom_write_rejected :
 
 end Example
 
-#print axioms Store.set_ne
-#print axioms Trace.run_frame
-#print axioms Trace.mem_writeFootprint_iff
-#print axioms Trace.BusRelation.rows_exact
-#print axioms AcceptedExecution.changed_only_declared
-#print axioms Example.duplicate_allocation_rejected
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Store.set_ne' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Store.set_ne
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.run_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Trace.run_frame
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.mem_writeFootprint_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Trace.mem_writeFootprint_iff
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.BusRelation.rows_exact' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Trace.BusRelation.rows_exact
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.AcceptedExecution.changed_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedExecution.changed_only_declared
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Example.duplicate_allocation_rejected' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Example.duplicate_allocation_rejected
 
 end Minidregg.Kernel.SparseAuthenticatedState

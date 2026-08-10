@@ -307,10 +307,14 @@ end Evidence
 
 end HistoryProjection
 
-#print axioms HistoryProjection.core_valid
-#print axioms HistoryProjection.request_preRoot_projected
-#print axioms HistoryProjection.entryFamily
-#print axioms HistoryProjection.Evidence.toVerifiedEntry
+/-- info: 'Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection.core_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryProjection.core_valid
+/-- info: 'Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection.request_preRoot_projected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryProjection.request_preRoot_projected
+/-- info: 'Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection.entryFamily' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryProjection.entryFamily
+/-- info: 'Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection.Evidence.toVerifiedEntry' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryProjection.Evidence.toVerifiedEntry
 
 end
 

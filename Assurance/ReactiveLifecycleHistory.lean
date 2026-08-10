@@ -616,14 +616,22 @@ def Finalized.releaseAfterPhysicalCommit
 
 end Lifecycle
 
-#print axioms PromiseSpec.decode_encode_advice
-#print axioms notificationObservedStateExact
-#print axioms notificationNotAfterDeadline
-#print axioms finalizedFieldFootprintExact
-#print axioms finalizedResourceFootprintExact
-#print axioms finalizedNullifierExact
-#print axioms finalizedObservedPreRootExact
-#print axioms finalizedHistoryEvidence
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.PromiseSpec.decode_encode_advice' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PromiseSpec.decode_encode_advice
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.notificationObservedStateExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms notificationObservedStateExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.notificationNotAfterDeadline' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms notificationNotAfterDeadline
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedFieldFootprintExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedFieldFootprintExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedResourceFootprintExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedResourceFootprintExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedNullifierExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedNullifierExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedObservedPreRootExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedObservedPreRootExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedHistoryEvidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedHistoryEvidence
 
 end
 

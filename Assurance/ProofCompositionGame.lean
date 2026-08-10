@@ -406,10 +406,14 @@ coin space.  Its CR and ZK predicates should populate the corresponding
 ledger entries on that identical type; this module intentionally does not
 postulate those bounds or transport them across a different coin space. -/
 
-#print axioms SharedOracleSchedule.roots_before_challenge
-#print axioms FailureLedger.bad_le_total
-#print axioms SecurityGame.falseAccept_le
-#print axioms additiveExternalPremises
+/-- info: 'Minidregg.Assurance.ProofCompositionGame.SharedOracleSchedule.roots_before_challenge' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms SharedOracleSchedule.roots_before_challenge
+/-- info: 'Minidregg.Assurance.ProofCompositionGame.FailureLedger.bad_le_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FailureLedger.bad_le_total
+/-- info: 'Minidregg.Assurance.ProofCompositionGame.SecurityGame.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SecurityGame.falseAccept_le
+/-- info: 'Minidregg.Assurance.ProofCompositionGame.additiveExternalPremises' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveExternalPremises
 
 end
 

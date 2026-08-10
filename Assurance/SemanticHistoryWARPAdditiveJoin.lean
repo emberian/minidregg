@@ -349,11 +349,16 @@ also requires an exact reindexing of the semantic genesis and every link
 `AccClaim` to its `Fin _` carrier, plus the existing mutual-correlated-
 agreement, ROM, commitment-CR, and PCS premises.  This boundary is recorded
 without asserting that carrier join here. -/
-#print axioms DualRootSchedule.foldedRoot_after_challenge
-#print axioms DualRootSchedule.foldedRoot_commits_folded_word
-#print axioms BcsLinkOpenings.bcsRounds_exact
-#print axioms historyDualRootSchedule_linkWord_exact
-#print axioms terminal_root_eq_additive_initial
+/-- info: 'Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin.DualRootSchedule.foldedRoot_after_challenge' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DualRootSchedule.foldedRoot_after_challenge
+/-- info: 'Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin.DualRootSchedule.foldedRoot_commits_folded_word' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DualRootSchedule.foldedRoot_commits_folded_word
+/-- info: 'Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin.BcsLinkOpenings.bcsRounds_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BcsLinkOpenings.bcsRounds_exact
+/-- info: 'Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin.historyDualRootSchedule_linkWord_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms historyDualRootSchedule_linkWord_exact
+/-- info: 'Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin.terminal_root_eq_additive_initial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms terminal_root_eq_additive_initial
 
 end
 

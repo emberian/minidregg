@@ -663,17 +663,28 @@ end HeadLinkEvent
 
 end LinkEvent
 
-#print axioms EntryAt.receiptRootAt_exact
-#print axioms canonicalPostOpening_exact
-#print axioms canonicalPostOpening_coordinates_post_only
-#print axioms canonicalPostOpening_no_header_coordinate
-#print axioms canonicalPostOpening_no_pre_coordinate
-#print axioms canonicalPostOpening_no_touched_coordinate
-#print axioms AcceptedLinkWrite.post_contains
-#print axioms HeadLinkEvent.opening_exact
-#print axioms HeadLinkEvent.accepted_post_contains_link
-#print axioms HeadLinkEvent.cell_exact_of_same_encoding
-#print axioms HeadLinkEvent.entry_post_is_accepted_projection
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.EntryAt.receiptRootAt_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms EntryAt.receiptRootAt_exact
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.canonicalPostOpening_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPostOpening_exact
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.canonicalPostOpening_coordinates_post_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPostOpening_coordinates_post_only
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.canonicalPostOpening_no_header_coordinate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPostOpening_no_header_coordinate
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.canonicalPostOpening_no_pre_coordinate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPostOpening_no_pre_coordinate
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.canonicalPostOpening_no_touched_coordinate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPostOpening_no_touched_coordinate
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.AcceptedLinkWrite.post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedLinkWrite.post_contains
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.HeadLinkEvent.opening_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HeadLinkEvent.opening_exact
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.HeadLinkEvent.accepted_post_contains_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HeadLinkEvent.accepted_post_contains_link
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.HeadLinkEvent.cell_exact_of_same_encoding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HeadLinkEvent.cell_exact_of_same_encoding
+/-- info: 'Minidregg.Assurance.HyperdocumentHistoryAdmission.HeadLinkEvent.entry_post_is_accepted_projection' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HeadLinkEvent.entry_post_is_accepted_projection
 
 end
 

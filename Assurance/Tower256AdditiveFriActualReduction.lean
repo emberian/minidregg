@@ -329,13 +329,20 @@ theorem falseAccept_impossible_of_all_good
 
 end ActualReductionFamily
 
-#print axioms additiveProximityFailure
-#print axioms acceptedIdealCoin_accepts
-#print axioms acceptedFinalReedSolomon
-#print axioms concreteLevelPositionBinding
-#print axioms ActualReductionFamily.schedule_challenges_eq_receipt
-#print axioms ActualReductionFamily.falseAccept_three_event_cover
-#print axioms ActualReductionFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.additiveProximityFailure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms additiveProximityFailure
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.acceptedIdealCoin_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedIdealCoin_accepts
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.acceptedFinalReedSolomon' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedFinalReedSolomon
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.concreteLevelPositionBinding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms concreteLevelPositionBinding
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.ActualReductionFamily.schedule_challenges_eq_receipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ActualReductionFamily.schedule_challenges_eq_receipt
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.ActualReductionFamily.falseAccept_three_event_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ActualReductionFamily.falseAccept_three_event_cover
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.ActualReductionFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ActualReductionFamily.falseAccept_le
 
 end
 

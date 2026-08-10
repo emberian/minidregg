@@ -476,13 +476,20 @@ theorem every_exact_integer_equation_of_not_bad
 
 end BfvCommonGame
 
-#print axioms CoreJoin.statementOf_exact
-#print axioms CoreJoin.statementOf_no_boundSuite
-#print axioms CoreJoin.run_success_integrity
-#print axioms RelationWitness.every_exact_integer_equation
-#print axioms FailureLedger.bad_le_total
-#print axioms CommonGameFamily.falseAccept_le
-#print axioms BfvCommonGame.every_exact_integer_equation_of_not_bad
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.statementOf_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_exact
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.statementOf_no_boundSuite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_no_boundSuite
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.run_success_integrity
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.RelationWitness.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RelationWitness.every_exact_integer_equation
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.FailureLedger.bad_le_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FailureLedger.bad_le_total
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CommonGameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.BfvCommonGame.every_exact_integer_equation_of_not_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BfvCommonGame.every_exact_integer_equation_of_not_bad
 
 end
 

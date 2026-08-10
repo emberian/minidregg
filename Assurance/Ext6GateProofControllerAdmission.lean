@@ -300,10 +300,14 @@ theorem falseAccept_le
 
 end GameFamily
 
-#print axioms Ext6FailureLedger.bad_le_total
-#print axioms ReductionLaws.semantic_of_not_bad
-#print axioms GameFamily.falseAccept_bad
-#print axioms GameFamily.falseAccept_le
+/-- info: 'Minidregg.Assurance.Ext6GateProofControllerAdmission.Ext6FailureLedger.bad_le_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Ext6FailureLedger.bad_le_total
+/-- info: 'Minidregg.Assurance.Ext6GateProofControllerAdmission.ReductionLaws.semantic_of_not_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ReductionLaws.semantic_of_not_bad
+/-- info: 'Minidregg.Assurance.Ext6GateProofControllerAdmission.GameFamily.falseAccept_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms GameFamily.falseAccept_bad
+/-- info: 'Minidregg.Assurance.Ext6GateProofControllerAdmission.GameFamily.falseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms GameFamily.falseAccept_le
 
 end
 

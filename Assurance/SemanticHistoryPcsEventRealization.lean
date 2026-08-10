@@ -175,11 +175,16 @@ theorem jointFalseAccept_le (joint : BoundJoint)
 
 end HistoryPcsEventRealization
 
-#print axioms no_retained_opening_mismatch
-#print axioms HistoryPcsEventRealization.falseAccept_le_historyPcs
-#print axioms HistoryPcsEventRealization.impossible_of_falseAccept_and_historyPcsGood
-#print axioms HistoryPcsEventRealization.pcsCrRomReduction_iff
-#print axioms HistoryPcsEventRealization.jointFalseAccept_le
+/-- info: 'Minidregg.Assurance.SemanticHistoryPcsEventRealization.no_retained_opening_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_retained_opening_mismatch
+/-- info: 'Minidregg.Assurance.SemanticHistoryPcsEventRealization.HistoryPcsEventRealization.falseAccept_le_historyPcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryPcsEventRealization.falseAccept_le_historyPcs
+/-- info: 'Minidregg.Assurance.SemanticHistoryPcsEventRealization.HistoryPcsEventRealization.impossible_of_falseAccept_and_historyPcsGood' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryPcsEventRealization.impossible_of_falseAccept_and_historyPcsGood
+/-- info: 'Minidregg.Assurance.SemanticHistoryPcsEventRealization.HistoryPcsEventRealization.pcsCrRomReduction_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryPcsEventRealization.pcsCrRomReduction_iff
+/-- info: 'Minidregg.Assurance.SemanticHistoryPcsEventRealization.HistoryPcsEventRealization.jointFalseAccept_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HistoryPcsEventRealization.jointFalseAccept_le
 
 end
 

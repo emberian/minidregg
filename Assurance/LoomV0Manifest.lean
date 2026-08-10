@@ -1402,17 +1402,29 @@ soundness), `noteSpend_correct` (the sound shielded spend),
 and `eval_agrees_exec` (the arithmetization initiality keystone) needs no
 `Classical.choice` — the circuit⟺executor agreement is choice-free. -/
 
-#print axioms manifest_loomV0_holds
-#print axioms manifest_loomV0_light_client
-#print axioms manifest_committed_extract_bind
-#print axioms manifest_idealCommitment
-#print axioms manifest_oneShot_lightClient_false
-#print axioms manifest_OB2_depth_composition_false
-#print axioms manifest_loom_zk_argument
-#print axioms manifest_airGateSystem_sound
-#print axioms manifest_noteSpend_correct
-#print axioms manifest_lightClientGrinding_sound
-#print axioms manifest_balanced_turn_universal
-#print axioms manifest_eval_agrees_exec
+/-- info: 'Minidregg.Assurance.manifest_loomV0_holds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_loomV0_holds
+/-- info: 'Minidregg.Assurance.manifest_loomV0_light_client' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_loomV0_light_client
+/-- info: 'Minidregg.Assurance.manifest_committed_extract_bind' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_committed_extract_bind
+/-- info: 'Minidregg.Assurance.manifest_idealCommitment' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_idealCommitment
+/-- info: 'Minidregg.Assurance.manifest_oneShot_lightClient_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_oneShot_lightClient_false
+/-- info: 'Minidregg.Assurance.manifest_OB2_depth_composition_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_OB2_depth_composition_false
+/-- info: 'Minidregg.Assurance.manifest_loom_zk_argument' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_loom_zk_argument
+/-- info: 'Minidregg.Assurance.manifest_airGateSystem_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_airGateSystem_sound
+/-- info: 'Minidregg.Assurance.manifest_noteSpend_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_noteSpend_correct
+/-- info: 'Minidregg.Assurance.manifest_lightClientGrinding_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_lightClientGrinding_sound
+/-- info: 'Minidregg.Assurance.manifest_balanced_turn_universal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_balanced_turn_universal
+/-- info: 'Minidregg.Assurance.manifest_eval_agrees_exec' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_eval_agrees_exec
 
 end Minidregg.Assurance

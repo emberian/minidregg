@@ -308,11 +308,16 @@ theorem accepted_kernel_bindings
       using accepted.eagerNullifierExact,
     accepted.computation.disclosure_sealed⟩
 
-#print axioms cryptographic_pins_unassigned
-#print axioms accepted_relation
-#print axioms accepted_validSpend
-#print axioms accepted_kernel_bindings
-#print axioms Accepted.validatedPatch
+/-- info: 'Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.cryptographic_pins_unassigned' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms cryptographic_pins_unassigned
+/-- info: 'Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.accepted_relation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_relation
+/-- info: 'Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.accepted_validSpend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_validSpend
+/-- info: 'Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.accepted_kernel_bindings' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_kernel_bindings
+/-- info: 'Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.Accepted.validatedPatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.validatedPatch
 
 end
 

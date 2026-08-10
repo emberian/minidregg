@@ -175,8 +175,11 @@ theorem unifiedExt6_ceiling :
 #check @unifiedExt6_secure_137
 #check @unifiedExt6_ceiling
 
-#print axioms baseGateExt4Fri_ceiling
-#print axioms ext6GateExt4Fri_ceiling
-#print axioms unifiedExt6_secure_137
+/-- info: 'Minidregg.Assurance.baseGateExt4Fri_ceiling' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms baseGateExt4Fri_ceiling
+/-- info: 'Minidregg.Assurance.ext6GateExt4Fri_ceiling' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ext6GateExt4Fri_ceiling
+/-- info: 'Minidregg.Assurance.unifiedExt6_secure_137' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unifiedExt6_secure_137
 
 end Minidregg.Assurance

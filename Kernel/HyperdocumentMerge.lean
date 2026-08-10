@@ -915,20 +915,34 @@ structure PublicationInputs
     (eventDeclaration accepted expectedLogRoot).record = recordOfAccepted accepted :=
   rfl
 
-#print axioms canonicalPair_swap
-#print axioms Accepted.post_contains_write
-#print axioms Accepted.field_frame
-#print axioms Accepted.changed_only_declared
-#print axioms Accepted.post_contains_mark
-#print axioms Accepted.post_contains_annotation
-#print axioms FieldPlan.two_sources_not_conflict_free
-#print axioms Declaration.conflicting_plan_not_conflict_free
-#print axioms concurrent_sibling_conflict_positive
-#print axioms LowestCommonBase.selected_unique
-#print axioms AmbiguousCommonBases.excludes_lowest
-#print axioms BaseDecision.unavailableOfAbsent
-#print axioms recordOfAccepted_parents_exact
-#print axioms eventDeclaration_record_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.canonicalPair_swap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalPair_swap
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_write
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.field_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.field_frame
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.changed_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.changed_only_declared
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_mark' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_mark
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_annotation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_annotation
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.FieldPlan.two_sources_not_conflict_free' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FieldPlan.two_sources_not_conflict_free
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Declaration.conflicting_plan_not_conflict_free' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Declaration.conflicting_plan_not_conflict_free
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.concurrent_sibling_conflict_positive' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms concurrent_sibling_conflict_positive
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.LowestCommonBase.selected_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LowestCommonBase.selected_unique
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.AmbiguousCommonBases.excludes_lowest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AmbiguousCommonBases.excludes_lowest
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.BaseDecision.unavailableOfAbsent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BaseDecision.unavailableOfAbsent
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.recordOfAccepted_parents_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recordOfAccepted_parents_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.eventDeclaration_record_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms eventDeclaration_record_exact
 
 end CausalParents
 

@@ -659,11 +659,17 @@ def Accepted.receiptEvent
     accepted.accepted.toReceiptEvent.request = declaration.toRequest config :=
   rfl
 
-#print axioms Declaration.patch_namedFields
-#print axioms Accepted.post_contains_fieldWrite
-#print axioms Accepted.post_contains_link
-#print axioms Accepted.post_contains_transclusion
-#print axioms Accepted.post_contains_transclusion_forward_link
-#print axioms Accepted.request_exact
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Declaration.patch_namedFields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Declaration.patch_namedFields
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_fieldWrite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_fieldWrite
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_link
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_transclusion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_transclusion
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_transclusion_forward_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_transclusion_forward_link
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.request_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.request_exact
 
 end Minidregg.Theory.HyperdocumentOperations
