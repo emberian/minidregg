@@ -185,6 +185,13 @@ whenever the index and values are, and the codec is the finite map's codec.
 `finite_schema_state_countable` records the other side: finite schemas are unobstructed,
 which is why `Theory.CellStateWitness` works.
 
+**Tonight's own witnesses are unaffected**, and it is worth saying why rather than
+leaving a reader to check: every one of them — `CellStateWitness`,
+`AcceptedCellEffectWitness`, `CanonicalTransitionWitness`, both `Kernel` commit witnesses
+— is built at a FINITE schema, whose state space is a `Fintype` and therefore countable.
+`finite_schema_state_countable` is that observation. They still say nothing about the
+deployed schemas, which is the point of the finding.
+
 **The fix has an exact target.** `materializer_nonempty_iff_countable` proves a schema
 admits a materializer for a nonempty root exactly when its logical state space is
 nonempty and countable — so whatever replaces the total function (finite map with a
@@ -306,8 +313,11 @@ the deployed ones.
   schedule at all. `ClosedInstance` discharges the commit premises by `decide` so the
   refinement is not carried by a handler that never writes. A device MODEL — no fsync,
   torn write, codec, replication, or liveness. `3230` jobs, exit `0`, boundary `0`.
-- `2e5151d` — the Hyperdocument agent operation's durable half no longer quantifies over
-  a handler nobody built: `no_partial_commit_on_wal`, `marker_installs`,
+- `2e5151d` — the durable half no longer quantifies over a handler nobody built. **Read
+  with the materializer finding**: these theorems are generic over the joint `Commit` and
+  are non-vacuous (`MultiCellHyperedgeWitness` inhabits it at finite schemas), but at the
+  actual Hyperdocument instantiation the commit is vacuous, so the module name promises
+  more than the theorems deliver. Caveat added to its header. `no_partial_commit_on_wal`, `marker_installs`,
   `crash_before_marker`, `retry_after_marker`, plus the constructed `install` step and
   `install_covers_every_incidence`. Not consumer cutover — no editor, index, sync, or
   client reads this path. `3231` jobs, exit `0`, boundary `0`.

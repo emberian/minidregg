@@ -19,6 +19,18 @@ handler premise left:
 * a lost response after the marker replays idempotently rather than charging
   the operation twice.
 
+**Caveat added after `Theory.MaterializerCardinality` (same night).**  Every
+theorem below is generic over the joint `Commit`, and that carrier IS inhabited
+-- `Kernel.MultiCellHyperedgeWitness` exhibits one at finite witness schemas, so
+none of these statements is vacuous.  But at the ACTUAL Hyperdocument
+instantiation the commit is currently vacuous: `HyperdocumentPublication`'s cell
+family demands a `Hyperdocument.Materializer Digest` and a
+`CredentialAuthorityState.Cell`, and both materializers are proved EMPTY.  So
+this module says "any joint commit installs durably like this", which is true
+and useful, and it does NOT yet say anything about a Hyperdocument publication
+in particular.  The file name promises more than the theorems deliver until
+`LogicalState` becomes finitely supported.
+
 The scope of "no longer assumed" is exact and narrow.  The handler is
 `Kernel.DurableWalHandler`'s device MODEL -- a staged slot, an append-only
 committed region, and a compacting checkpoint.  It has no `fsync`, no torn
