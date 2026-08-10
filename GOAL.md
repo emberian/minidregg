@@ -34,6 +34,12 @@ them says anything about deployed ones, and a permissive portal is exactly the p
 security claim may not use. No consumer has cut over: no editor, index, sync, or client
 reads any path landed tonight. And `PcsCrRomReduction` is still assumed rather than derived.
 
+**Where the session ended.** `QUIESCELOG.md`'s resume items 1–4 are done: clean base,
+integration gate, the raw retained-history carrier, and a durable handler that inhabits
+`ImplementationRefinement`. Item 5 — cut over one user/agent workflow — is **blocked, and
+the block is the finding**: the workflow's cells are uninhabitable, so the cutover cannot
+be done before the `LogicalState` refactor, which is a design decision I left to you.
+
 **Current thrust:** three sweeps are complete — carrier inhabitation from `Theory/CellState`
 up through `Kernel/MultiCellHyperedge`, the tree-wide axiom ledger, and the codec gate on
 `HyperdocumentOperations.Config`. What remains on the last unexhibited carrier is
@@ -161,8 +167,9 @@ semantic, not mechanical: `Capability.Admissible`.
 - `cd992ef` — `3242` jobs — `E-20260810T082546-80249-local-nextop.local-cd992ef5fa75-lake`
 - `ec2d9f9` — `3243` jobs — `E-20260810T083034-82079-local-nextop.local-ec2d9f942251-lake`
   (through the third-schema obstruction)
-
-Commits after `ec2d9f9` carry warm-tree builds only.
+- `470fea2` — `3243` jobs — `E-20260810T083620-84178-local-nextop.local-470fea2a86d3-lake`
+  — **the session HEAD**, covering everything above including the fourth schema, the
+  documentation corrections, and the proposed seventeenth law.
 
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
 
@@ -210,6 +217,14 @@ default, `Finsupp`, association list) is correct for this purpose **if and only 
 lands in a countable type, and then `nonempty_lawfulCodec_of_countable` guarantees a
 codec exists. There is exactly one thing to check, and the refactor cannot fail for a
 subtle reason.
+
+**One scoping fact for the refactor, checked rather than guessed.** The countability
+side is not free: `Countable AuthorityField` does not synthesize today (it wants a
+`deriving instance`), and the sigma of field/value pairs then needs `Countable` for
+`StoredCapability`, `Capability`, and the `Finset`s inside it. That instance plumbing IS
+part of the refactor's work, not a precondition someone else supplies. I did not build
+it, because building half of a refactor before its design decision is made is how the
+twin got written earlier tonight.
 
 Countability gives existence, not quality. A deployed encoding still has to be chosen for
 size, canonicality, and determinism — which is what
