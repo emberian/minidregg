@@ -60,10 +60,13 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   anywhere in the tree** — the only two in the repo are for `Digest`
   (`Sp800185Cshake256.digestCodec` and `AuthenticatedColumnPlan.digestUnaryCodec`).
 
-  Cheap route: `digestUnaryCodec`'s trick generalises. `encode n := List.replicate n 0`
-  with a `1` delimiter between fields gives an injective multi-field encoding whose
-  round-trip `simp`s, at the cost of unary size — irrelevant for a witness. Budget the
-  codecs as the bulk of the work, not the operation.
+  **The codec gate is now removed.** `Theory.ByteCodecs` (`031377d`, `9c9b704`) supplies
+  `natCodec`, `pairCodec`, `listCodec`, `codecOfRetraction`, and `subsingletonCodec` over
+  a unary length-framing with a delimiter, and `Theory.TypedAuthorizationCodec`
+  (`1a8c579`) already builds `LawfulCodec (Request .object)` — one of the `Config`'s
+  three — in a page. `Action` and `Declaration` should now be mechanical. What remains
+  genuinely hard is `Capability.Admissible`, which is semantic and will NOT fall out of a
+  permissive portal.
 - `Compiler.DialectClauseDispatch.VerifiedExecution` and `ResolvedClause`.
 - `Kernel.DeclaredHyperedge.CommittedHyperedge` — reachable through the executable
   `execute` path, but this is the legacy integer-store carrier the tree itself calls
@@ -72,7 +75,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 **Next 3 moves**
 
 1. `AcceptedOperation`, per above — the last big unexhibited carrier, and the one
-   tonight's durable installation is actually about.
+   tonight's durable installation is actually about. Its codec gate is gone; start at
+   `LawfulCodec Action`, then `Declaration`, then the `Capability.Admissible` obligation,
+   which is the part that will actually take thought.
 2. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
    of `attribution_split` should name the ledger event it pays, with the retained
    equivocation paying `commitmentBinding` through the collision bridge.
@@ -88,8 +93,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `b46a3d8` — `3238` jobs — `E-20260810T064954-45327-local-nextop.local-b46a3d882e97-lake`
 - `5d02d05` — `3239` jobs — `E-20260810T065452-47259-local-nextop.local-5d02d0551c64-lake`
 - `eaf8055` — `3239` jobs — `E-20260810T065948-49166-local-nextop.local-eaf8055087d0-lake`
+- `d4e5073` — `3239` jobs — `E-20260810T070437-51005-local-nextop.local-d4e50732c9d3-lake`
 
-Commits after `eaf8055` carry warm-tree builds only.
+Commits after `d4e5073` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
@@ -225,6 +231,12 @@ the deployed ones.
   effect exists, though evidence still verifies and the patch still validates. The
   proofs are one-liners, which is the point — the propagation is structural and now
   checked.
+- `031377d` + `1a8c579` + `9c9b704` — lawful codecs are buildable. The repo had exactly
+  two, both for `Digest`, both hand-rolled, so every `Config`-shaped carrier was gated on
+  codecs nobody had written. `Theory.ByteCodecs` supplies the framing toolkit with teeth
+  (`concatenation_is_ambiguous` exhibits the collision bare concatenation would allow),
+  and `LawfulCodec (Request .object)` is built from it in a page. Unary, enormous, and
+  explicitly NOT a deployment codec.
 - `d4e5073` — the WAL device runs a whole scenario at closed data: stage, commit,
   compact, retry. `retry_replays_after_checkpoint` is the one a real log-structured
   store gets wrong — compact the log, lose the idempotency record, charge the retry
