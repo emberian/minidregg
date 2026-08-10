@@ -192,6 +192,25 @@ Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryH
   the documentation corrections, the proposed seventeenth law, and the sparse-state fix
   with its codec demonstration.
 
+**THE MISSING MECHANISM — the actionable form of the finding below**
+
+`ATLAS` law 2 already required exactly what last night discovered: "declaration-level
+`satisfiable` + `teeth` + premise-inhabitation (`∃ s : PremiseType`), **CI-gated beside
+the axiom pin**", and it names the failure mode as "false by counting *at deployed
+parameters*". The law was bought with a breadstuffs wound before minidregg started.
+
+It was violated at scale for a year anyway, because **the gate was never built**. There
+is no census. Nothing asks "which load-bearing carriers have no witness?", so nothing
+noticed the answer was "all four cell schemas". I found it by hand, which is exactly the
+hand-count law 1 forbids.
+
+Half the gate now exists: 823 `#guard_msgs` axiom pins, where drift fails the build. The
+`satisfiable`/`teeth`/premise-inhabitation half has no query at all. **Building that
+census is the highest-leverage thing left in this file** — it is worth more than any
+individual witness, because it is what finds the next one without a person getting lucky.
+
+(I briefly proposed this as a new ATLAS law. It was a restatement of law 2; cut.)
+
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
 
 **No `CellState.Materializer` in this tree has an inhabitant, at any of its schemas.**

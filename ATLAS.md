@@ -182,8 +182,6 @@ n=1 and n=all coincide by construction. Nothing lands beside; everything replace
 
 ## 6. The design laws (each purchased with a documented wound)
 
-*Sixteen laws from breadstuffs; a seventeenth proposed 2026-08-10 and marked as such.*
-
 1. **Naming is faking.** A `class`/`def : Prop` hypothesis is an assumption
    `#assert_axioms` cannot see (the 07-09 retraction; StarkSound "instance" laundered
    from a 0-instance hypothesis; accept-everything `FriExtract` realization). → Carriers
@@ -240,19 +238,6 @@ n=1 and n=all coincide by construction. Nothing lands beside; everything replace
 16. **One lane can hold it.** The 19-concurrent-lanes-one-tree process produced the
     parked pins, the baseline laundering, the committed merge conflicts. Minidregg's
     size target is also a *process* target.
-17. **A carrier nobody has inhabited is a carrier nobody has checked.** *(Proposed
-    2026-08-10 — delete this entry if it does not earn its place.)* `LogicalState.fields`
-    was a TOTAL function over an infinite field index, so a `CellState.Materializer`'s
-    `LawfulCodec` had to inject an uncountable state space into `List UInt8`. All four
-    schemas in the tree were therefore uninhabitable, and every theorem over a deployed
-    cell — credential issuance and revocation, the Hyperdocument medium, the atomic
-    two-cell publication, the flat multi-incidence turn — was vacuously true for over a
-    year of work. Nothing was false; nothing was checked either, and vacuous theorems
-    read exactly like real ones. → Every load-bearing carrier carries a witness at built
-    parameters, and each witness carries refutations showing its equations are
-    constraints. When a carrier resists inhabitation, ask whether it CAN be inhabited
-    before assuming the construction is merely hard: `Theory.MaterializerCardinality`.
-
 ## 7. The architecture carve
 
 ```
