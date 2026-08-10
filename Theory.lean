@@ -31,6 +31,7 @@ import Theory.TurnTransition  -- ordinary and resumed reactive turns share canon
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
+import Theory.MaterializerCardinality  -- COUNTING OBSTRUCTION: a schema with infinitely many two-valued fields has an uncountable state space, so it admits NO materializer at all — `CredentialAuthorityState.Materializer` is proved EMPTY, which makes every authority-cell theorem vacuous until `LogicalState` becomes finitely supported
 import Theory.CredentialAuthorityEffects  -- issuance, strict attenuation, revocation, and epoch rotation are sealed AcceptedCellEffect families with exact atomic patches and same-canonical-pre authorization
 import Theory.Hyperdocument  -- versioned domain-separated hyperdocument identity, authenticated principals, typed sparse namespaces, and exact canonical CellState mapping
 import Theory.StableRanges  -- insertion-stable atom/range anchors, explicit deletion policies, and exact adapters into durable Hyperdocument marks/annotations
