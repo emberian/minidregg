@@ -158,8 +158,11 @@ semantic, not mechanical: `Capability.Admissible`.
   (through the credential-authority emptiness proof)
 - `47d7995` — `3242` jobs — `E-20260810T081949-78547-local-nextop.local-47d7995edb95-lake`
   (through the materializer characterization)
+- `cd992ef` — `3242` jobs — `E-20260810T082546-80249-local-nextop.local-cd992ef5fa75-lake`
+- `ec2d9f9` — `3243` jobs — `E-20260810T083034-82079-local-nextop.local-ec2d9f942251-lake`
+  (through the third-schema obstruction)
 
-Commits after `47d7995` carry warm-tree builds only.
+Commits after `ec2d9f9` carry warm-tree builds only.
 
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
 
