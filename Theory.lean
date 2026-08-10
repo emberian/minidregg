@@ -24,6 +24,7 @@ import Theory.CanonicalTransition  -- one canonical materialized post and proof-
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalReactiveView  -- observer-indexed typed lenses advance directly from canonical deltas; accepted guarded holes retain eager nullifiers without a parallel uniform post
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
+import Theory.TypedAuthorizationCodec  -- `LawfulCodec (Request .object)` BUILT from the `ByteCodecs` toolkit: fifteen fields, retraction by structure eta, with teeth that the encoding separates target and effects digest
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
 import Theory.CredentialAuthorityFamily  -- signature/proof/capability/token carriers share exact request digests, holder/scope/current-policy semantics, and proof-relevant strict attenuation without mode bypasses
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token
