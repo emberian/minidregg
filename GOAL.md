@@ -240,6 +240,15 @@ schema-side or the state-side convention, and `readD_empty` proves "no default" 
 carries it to an actual codec for `DeclaredTurn.effectSchema`, the schema
 `effectMaterializer_isEmpty` proves empty as a total function.
 
+**Migration step 1 is under way.** Scoping it changed its shape: `EffectDeclaration.Store`
+has 113 references but only 20 cross the materialization boundary, and the other 93 are
+semantics, which needs no codec. So `Theory.StoreFiniteSupport` states the invariant at
+the boundary instead — a store reachable from zero by a patch is finitely supported
+(`finitelySupported_ofZero`), and the constant-one store is not
+(`not_finitelySupported_one`), so the requirement bites. The claim is not "stores are
+finite"; it is "only finitely supported stores can be materialized", which has always
+been true and was never said.
+
 **Still staged.** `CellState.LogicalState` is untouched; the migration order and the
 reason each schema is separable are in the module. The endpoint is deletion of the
 total-function field.
