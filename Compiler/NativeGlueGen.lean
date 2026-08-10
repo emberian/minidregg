@@ -66,6 +66,8 @@ private def workTag (ordinal : Nat) : String :=
 private def responseWidth : ByteCodecShape → Nat
   | .tower256PairVectorsU32LE => 0
   | .tower256CoordinateLE => 32
+  | .empty => 0
+  | .babyBearAdd1DescriptorU32LE => 144
 
 private def requestShapeConstants (stem : String) : ByteCodecShape → List String
   | .tower256PairVectorsU32LE =>
@@ -74,12 +76,20 @@ private def requestShapeConstants (stem : String) : ByteCodecShape → List Stri
        "pub const " ++ stem ++ "_REQUEST_VECTOR_ARITY: usize = 2;"]
   | .tower256CoordinateLE =>
       ["pub const " ++ stem ++ "_REQUEST_COORDINATE_WIDTH: usize = 32;"]
+  | .empty =>
+      ["pub const " ++ stem ++ "_REQUEST_WIDTH: usize = 0;"]
+  | .babyBearAdd1DescriptorU32LE =>
+      ["pub const " ++ stem ++ "_REQUEST_WIRE_WIDTH: usize = 4;",
+       "pub const " ++ stem ++ "_REQUEST_WIRE_COUNT: usize = 36;"]
 
 private def kernelFunction : KernelTag → String
   | .tower256DotProduct => "crate::native_dispatch::tower256_dot_product_bytes"
+  | .babyBearAdd1ZeroWitness =>
+      "crate::native_dispatch::baby_bear_add1_zero_witness_bytes"
 
 private def kernelConstructor : KernelTag → String
   | .tower256DotProduct => "tower256_dot_product"
+  | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
 
 private def benchmarkConstants (stem : String) : KernelTag → List String
   | .tower256DotProduct =>
@@ -94,6 +104,21 @@ private def benchmarkConstants (stem : String) : KernelTag → List String
          rustByteSlice tower256DotProductBenchmarkSentinelRequestBytes ++ ";",
        "pub const " ++ stem ++ "_BENCHMARK_SENTINEL_RESPONSE: &[u8] = " ++
          rustByteSlice tower256DotProductBenchmarkSentinelResponseBytes ++ ";"]
+  | .babyBearAdd1ZeroWitness => []
+
+/-- Lean-emitted candidate for the fixed all-zero add-1 work item.  These are
+the gate-evaluated descriptor bytes, not a Rust-side arithmetic definition. -/
+def babyBearAdd1ZeroCandidateBytes : List UInt8 :=
+  (List.range 144).map fun index =>
+    if index = 35 ∨ index = 59 ∨ index = 83 ∨ index = 107 ∨ index = 115 then
+      120
+    else 0
+
+private def fixedCandidateConstants (stem : String) : KernelTag → List String
+  | .tower256DotProduct => []
+  | .babyBearAdd1ZeroWitness =>
+      ["pub const " ++ stem ++ "_FIXED_CANDIDATE_RESPONSE: &[u8] = " ++
+        rustByteSlice babyBearAdd1ZeroCandidateBytes ++ ";"]
 
 private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String :=
   let stem := workName ordinal
@@ -107,7 +132,8 @@ private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String 
    "pub const " ++ stem ++ "_RESPONSE_WIDTH: usize = " ++
      toString (responseWidth profile.responseCodec.shape) ++ ";"] ++
     requestShapeConstants stem profile.requestCodec.shape ++
-    benchmarkConstants stem profile.kernel
+    benchmarkConstants stem profile.kernel ++
+    fixedCandidateConstants stem profile.kernel
 
 private def requestConstructor (ordinal : Nat) (profile : WorkProfile) : List String :=
   ["    pub fn " ++ kernelConstructor profile.kernel ++ "(request_bytes: Box<[u8]>) -> Self {",

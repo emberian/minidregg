@@ -251,12 +251,15 @@ def DeclarationArtifact.ofDisclosure
 it is neither a semantic relation nor an acceptance predicate. -/
 inductive KernelTag where
   | tower256DotProduct
+  | babyBearAdd1ZeroWitness
 deriving DecidableEq, Repr, Encodable
 
 /-- Closed byte-layout vocabulary used by generated transport glue. -/
 inductive ByteCodecShape where
   | tower256PairVectorsU32LE
   | tower256CoordinateLE
+  | empty
+  | babyBearAdd1DescriptorU32LE
 deriving DecidableEq, Repr, Encodable
 
 /-- Codec identifiers live in one of two explicit registries.  Manifest codecs
@@ -584,10 +587,13 @@ def ControllerPhase.name : ControllerPhase -> String
 
 def KernelTag.name : KernelTag -> String
   | .tower256DotProduct => "tower256_dot_product"
+  | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
 
 def ByteCodecShape.name : ByteCodecShape -> String
   | .tower256PairVectorsU32LE => "tower256_pair_vectors_u32_le"
   | .tower256CoordinateLE => "tower256_coordinate_le"
+  | .empty => "empty"
+  | .babyBearAdd1DescriptorU32LE => "baby_bear_add1_descriptor_u32_le"
 
 def ByteCodecRegistry.name : ByteCodecRegistry -> String
   | .semanticManifest => "semantic_manifest"

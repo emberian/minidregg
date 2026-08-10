@@ -154,9 +154,10 @@ def tower256DotProductBenchmarkSentinelResponseBytes : List UInt8 :=
 
 @[simp] theorem benchmark_sentinel_request_length :
     tower256DotProductBenchmarkSentinelRequestBytes.length = 68 := by
-  simp [tower256DotProductBenchmarkSentinelRequestBytes,
-    Tower256DotProductRequest.encode_length,
-    tower256DotProductBenchmarkSentinelRequest]
+  rw [show tower256DotProductBenchmarkSentinelRequestBytes =
+      tower256DotProductBenchmarkSentinelRequest.encode by rfl,
+    Tower256DotProductRequest.encode_length]
+  norm_num [tower256DotProductBenchmarkSentinelRequest]
 
 @[simp] theorem benchmark_sentinel_response_length :
     tower256DotProductBenchmarkSentinelResponseBytes.length = 32 := by

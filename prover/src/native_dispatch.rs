@@ -10,6 +10,7 @@
 use core::fmt;
 
 use crate::binary_tower_256::{Tower256, Tower256Error};
+use crate::semantic_artifact_arithmetic::{WORK_1_FIXED_CANDIDATE_RESPONSE, WORK_1_REQUEST_WIDTH};
 use crate::semantic_artifact_v1::{
     WORK_0_REQUEST_COORDINATE_WIDTH, WORK_0_REQUEST_COUNT_WIDTH, WORK_0_REQUEST_VECTOR_ARITY,
 };
@@ -95,9 +96,24 @@ pub fn tower256_dot_product_bytes(request: &[u8]) -> Result<Vec<u8>, NativeDispa
     Ok(candidate.to_le_bytes().to_vec())
 }
 
+/// Return the exact Lean-emitted descriptor candidate for the fixed empty
+/// add-1 request.  This adapter neither interprets the bytes nor asserts that
+/// they satisfy anything; the generated dispatcher and Lean checker own those
+/// decisions.
+pub fn baby_bear_add1_zero_witness_bytes(request: &[u8]) -> Result<Vec<u8>, NativeDispatchError> {
+    if request.len() != WORK_1_REQUEST_WIDTH {
+        return Err(NativeDispatchError::EncodedLength {
+            actual: request.len(),
+            expected: WORK_1_REQUEST_WIDTH,
+        });
+    }
+    Ok(WORK_1_FIXED_CANDIDATE_RESPONSE.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::semantic_artifact_arithmetic as arithmetic;
     use crate::semantic_artifact_v1::{
         dispatch_native, NativeErrorKind, NativeWorkRequestDto, WORK_0_CARRIER_PROFILE_ID_DECIMAL,
         WORK_0_ID_DECIMAL, WORK_0_REQUEST_CODEC_ID_DECIMAL, WORK_0_RESPONSE_CODEC_ID_DECIMAL,
@@ -178,5 +194,31 @@ mod tests {
             NativeWorkRequestDto::tower256_dot_product(vec![1, 0, 0, 0].into_boxed_slice());
         let failure = dispatch_native(malformed).unwrap_err();
         assert_eq!(failure.kind, NativeErrorKind::ExecutionFailure);
+    }
+
+    #[test]
+    fn generated_arithmetic_dispatch_returns_only_the_lean_emitted_candidate() {
+        let request = arithmetic::NativeWorkRequestDto::from_ids(
+            arithmetic::WORK_1_ID_DECIMAL,
+            arithmetic::WORK_1_CARRIER_PROFILE_ID_DECIMAL,
+            arithmetic::WORK_1_REQUEST_CODEC_ID_DECIMAL,
+            arithmetic::WORK_1_RESPONSE_CODEC_ID_DECIMAL,
+            Vec::new().into_boxed_slice(),
+        )
+        .unwrap();
+        let reply = arithmetic::dispatch_native(request).unwrap();
+        assert_eq!(
+            reply.response_bytes(),
+            arithmetic::WORK_1_FIXED_CANDIDATE_RESPONSE
+        );
+    }
+
+    #[test]
+    fn arithmetic_nonempty_request_is_a_transport_error() {
+        let malformed = arithmetic::NativeWorkRequestDto::baby_bear_add1_zero_witness(
+            vec![0].into_boxed_slice(),
+        );
+        let failure = arithmetic::dispatch_native(malformed).unwrap_err();
+        assert_eq!(failure.kind, arithmetic::NativeErrorKind::ExecutionFailure);
     }
 }
