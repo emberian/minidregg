@@ -34,19 +34,21 @@ bash_path=$(command -v bash)
 
 revision=${1:-HEAD}
 test_root=${MINIDREGG_LOCAL_TEST_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/minidregg-local-check-test.XXXXXXXX")}
-mkdir -p "$test_root/checks" "$test_root/evidence"
+check_root=${MINIDREGG_LOCAL_TEST_CHECK_ROOT:-$test_root/checks}
+mkdir -p "$check_root" "$test_root/evidence"
 test_root=$(cd "$test_root" && pwd -P)
+check_root=$(cd "$check_root" && pwd -P)
 readme_before=$(shasum -a 256 README.md | awk '{print $1}')
 
 echo "test_root=$test_root"
 echo "clean check: lake env lean Theory/CanonicalTransition.lean"
-MINIDREGG_LOCAL_CHECK_ROOT="$test_root/checks" \
+MINIDREGG_LOCAL_CHECK_ROOT="$check_root" \
 MINIDREGG_EVIDENCE_DIR="$test_root/evidence" \
   "$runner" "$revision" -- lake env lean Theory/CanonicalTransition.lean
 
 echo "adversarial check: successful command mutates archived README.md"
 set +e
-MINIDREGG_LOCAL_CHECK_ROOT="$test_root/checks" \
+MINIDREGG_LOCAL_CHECK_ROOT="$check_root" \
 MINIDREGG_EVIDENCE_DIR="$test_root/evidence" \
   "$runner" "$revision" -- "$bash_path" -c \
     'printf "\nlocal-check mutation sentinel\n" >> README.md'

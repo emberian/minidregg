@@ -39,7 +39,8 @@ Optional environment:
   MINIDREGG_EVIDENCE_DIR       evidence directory outside the repo
                                (default: CHECK_ROOT/evidence)
   MINIDREGG_LOCAL_TIMEOUT      timeout duration: integer plus s/m/h (default: 45m)
-  MINIDREGG_LOCAL_MEMORY_KIB   address-space ceiling in KiB (default: 67108864)
+  MINIDREGG_LOCAL_MEMORY_KIB   address-space ceiling in KiB, auto, or none
+                               (default: auto; 64 GiB when RLIMIT_AS works)
   MINIDREGG_LOCAL_COPY_MODE    auto, clone, or copy (default: auto)
 
 Exit 86 means the command returned but source-integrity policy rejected its
@@ -264,12 +265,15 @@ command_args=("$@")
 [[ ${#command_args[@]} -gt 0 ]] || usage 2
 
 local_timeout=${MINIDREGG_LOCAL_TIMEOUT:-45m}
-local_memory_kib=${MINIDREGG_LOCAL_MEMORY_KIB:-67108864}
+requested_memory_kib=${MINIDREGG_LOCAL_MEMORY_KIB:-auto}
 local_copy_mode=${MINIDREGG_LOCAL_COPY_MODE:-auto}
 [[ "$local_timeout" =~ ^[1-9][0-9]*[smh]$ ]] ||
   die "invalid MINIDREGG_LOCAL_TIMEOUT '$local_timeout'"
-[[ "$local_memory_kib" =~ ^[1-9][0-9]*$ ]] ||
-  die "invalid MINIDREGG_LOCAL_MEMORY_KIB '$local_memory_kib'"
+case "$requested_memory_kib" in
+  auto|none) ;;
+  *) [[ "$requested_memory_kib" =~ ^[1-9][0-9]*$ ]] ||
+       die "invalid MINIDREGG_LOCAL_MEMORY_KIB '$requested_memory_kib'" ;;
+esac
 case "$local_copy_mode" in auto|clone|copy) ;; *)
   die "invalid MINIDREGG_LOCAL_COPY_MODE '$local_copy_mode'" ;;
 esac
@@ -285,6 +289,41 @@ rustc_path=$(command -v rustc) || die "required tool 'rustc' is missing"
 for tool_path in "$python_path" "$lake_path" "$elan_path" "$cargo_path" "$rustc_path"; do
   [[ "$tool_path" == /* && -x "$tool_path" ]] || die "tool path is not absolute/executable: $tool_path"
 done
+
+# Darwin's resource module currently exposes RLIMIT_AS but rejects lowering it
+# (Python reports "current limit exceeds maximum limit").  Probe in a disposable
+# process.  An explicit numeric request fails closed when unsupported; `auto`
+# records the absence and retains the independently enforced wall-clock timeout.
+memory_candidate=$requested_memory_kib
+[[ "$memory_candidate" != auto ]] || memory_candidate=67108864
+if [[ "$memory_candidate" == none ]]; then
+  local_memory_kib=0
+  memory_limit_mode=disabled-by-request
+else
+  set +e
+  memory_probe=$($python_path - "$memory_candidate" <<'PY' 2>&1
+import resource
+import sys
+
+ceiling = int(sys.argv[1]) * 1024
+soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+new_soft = ceiling if hard == resource.RLIM_INFINITY or ceiling <= hard else hard
+resource.setrlimit(resource.RLIMIT_AS, (new_soft, hard))
+print(new_soft // 1024)
+PY
+  )
+  memory_probe_status=$?
+  set -e
+  if [[ "$memory_probe_status" -eq 0 ]]; then
+    local_memory_kib=$memory_probe
+    memory_limit_mode=rlimit-as
+  elif [[ "$requested_memory_kib" == auto ]]; then
+    local_memory_kib=0
+    memory_limit_mode=unsupported-recorded
+  else
+    die "requested address-space limit is unsupported: $memory_probe"
+  fi
+fi
 
 # Git dependency acquisition is intentionally independent of user/global Git
 # configuration.  This also prevents a broken external config symlink from
@@ -397,8 +436,8 @@ if $dry_run; then
     "$dependency_manifest_sha" "$seed_key"
   printf 'generated_output_count=%s\ngenerated_output_allowlist_sha256=%s\n' \
     "$generated_output_count" "$generated_output_allowlist_sha"
-  printf 'limits=memory_kib:%s,timeout:%s\ncopy_mode=%s\ncommand=' \
-    "$local_memory_kib" "$local_timeout" "$local_copy_mode"
+  printf 'limits=memory_kib:%s,memory_mode:%s,timeout:%s\ncopy_mode=%s\ncommand=' \
+    "$local_memory_kib" "$memory_limit_mode" "$local_timeout" "$local_copy_mode"
   printf_command
   exit 0
 fi
@@ -560,8 +599,12 @@ if not argv:
     raise SystemExit(2)
 
 def limits():
+    if memory_kib == 0:
+        return
     ceiling = memory_kib * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    new_soft = ceiling if hard == resource.RLIM_INFINITY or ceiling <= hard else hard
+    resource.setrlimit(resource.RLIMIT_AS, (new_soft, hard))
 
 process = subprocess.Popen(argv, start_new_session=True, preexec_fn=limits)
 try:
@@ -722,7 +765,8 @@ jq -n \
   --arg cargoPath "$cargo_path" --arg cargoVersion "$cargo_version" \
   --arg rustcPath "$rustc_path" --arg rustcVersion "$rustc_version" \
   --arg timeout "$local_timeout" --argjson timeoutSeconds "$timeout_seconds" \
-  --argjson memoryKiB "$local_memory_kib" --arg runnerPythonSha256 "$runner_python_sha" \
+  --argjson memoryKiB "$local_memory_kib" --arg memoryLimitMode "$memory_limit_mode" \
+  --arg runnerPythonSha256 "$runner_python_sha" \
   --arg startedAt "$started" --arg finishedAt "$finished" \
   --argjson runnerExit "$runner_exit" --argjson commandExit "$command_exit" \
   --argjson sourceIntegrityExit "$source_integrity_exit" \
@@ -753,6 +797,7 @@ jq -n \
         lean:{path:$leanPath,version:$leanVersion},cargo:{path:$cargoPath,version:$cargoVersion},
         rustc:{path:$rustcPath,version:$rustcVersion}},
       limits:{addressSpaceKiB:$memoryKiB,timeout:$timeout,
+        addressSpaceMode:$memoryLimitMode,
         timeoutSeconds:$timeoutSeconds,killAfterSeconds:30,
         wrapperSha256:$runnerPythonSha256,cpuAffinity:null}},
     startedAt:$startedAt,finishedAt:$finishedAt,
