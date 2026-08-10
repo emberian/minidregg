@@ -156,6 +156,38 @@ semantic, not mechanical: `Capability.Admissible`.
 
 Commits after `8eab0e9` carry warm-tree builds only.
 
+**THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be`)**
+
+`CredentialAuthorityState.Materializer` is **provably empty**, and so is any
+`CellState.Materializer` for a schema with infinitely many two-valued fields.
+
+The argument is three lines. A materializer carries `LawfulCodec (LogicalState S)`;
+`decode_encode` makes `encode` injective; so a materializer is an injection from the
+schema's entire state space into `List UInt8`, which is countable. The authority schema
+has `AuthorityField.nullifier : Nat → AuthorityField` at value type `Bool`, so its state
+space contains `Nat → Bool`, which is not countable.
+
+Consequence, stated plainly: **every theorem quantified over a credential authority cell
+is vacuously true.** Issuance, strict attenuation, revocation, epoch rotation,
+`AuthenticatedPrincipal`, `HyperdocumentOperations.Accepted`, and `AcceptedOperation` all
+sit above a premise nothing can satisfy. They are not false. They are vacuous, which is
+worse, because vacuous theorems read exactly like real ones — and this is the second time
+tonight that shape turned up (the first was `VerifiedHistoryHead`, closed in `d257fe9`).
+
+The fix is already the tree's own vocabulary. `CredentialAuthorityState` calls its cell
+"one canonical typed sparse CellState"; `Kernel.SparseAuthenticatedState` calls them
+sparse namespaces. But `LogicalState.fields` is a TOTAL function. Make it finitely
+supported — a finite map read through a default — and the state space is countable
+whenever the index and values are, and the codec is the finite map's codec.
+`finite_schema_state_countable` records the other side: finite schemas are unobstructed,
+which is why `Theory.CellStateWitness` works.
+
+**I did not fix it.** It is a shared-interface change across `Theory`, `Kernel`, and
+`Assurance`, and it wants a rested decision about whether the default belongs to the
+schema or the state. Surfacing it as debt rather than extending it, per the tree's rule.
+
+Check `Hyperdocument.Materializer` next — its schema looks like it has the same shape.
+
 **The night's own mistake, recorded because it is the instructive one**
 
 I built a byte-codec toolkit in `Theory/` (`031377d`, `1a8c579`, `9c9b704`, `28f7d68`) on
