@@ -41,10 +41,10 @@ check_root=$(cd "$check_root" && pwd -P)
 readme_before=$(shasum -a 256 README.md | awk '{print $1}')
 
 echo "test_root=$test_root"
-echo "clean check: lake env lean Theory/CanonicalTransition.lean"
+echo "clean check: lake build Theory.CanonicalTransition"
 MINIDREGG_LOCAL_CHECK_ROOT="$check_root" \
 MINIDREGG_EVIDENCE_DIR="$test_root/evidence" \
-  "$runner" "$revision" -- lake env lean Theory/CanonicalTransition.lean
+  "$runner" "$revision" -- lake build Theory.CanonicalTransition
 
 echo "adversarial check: successful command mutates archived README.md"
 set +e
