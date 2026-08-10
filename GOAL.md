@@ -103,8 +103,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `eaf8055` — `3239` jobs — `E-20260810T065948-49166-local-nextop.local-eaf8055087d0-lake`
 - `d4e5073` — `3239` jobs — `E-20260810T070437-51005-local-nextop.local-d4e50732c9d3-lake`
 - `6b3425f` — `3241` jobs — `E-20260810T071230-53624-local-nextop.local-6b3425fd7c96-lake`
+- `4c16fd7` — `3241` jobs — `E-20260810T071558-54877-local-nextop.local-4c16fd7bfb8d-lake`
 
-Commits after `6b3425f` carry warm-tree builds only.
+Commits after `4c16fd7` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
@@ -240,7 +241,13 @@ the deployed ones.
   effect exists, though evidence still verifies and the patch still validates. The
   proofs are one-liners, which is the point — the propagation is structural and now
   checked.
-- `031377d` + `1a8c579` + `9c9b704` — lawful codecs are buildable. The repo had exactly
+- `b59f978` — all 101 `#print axioms` lines added tonight are now
+  `#guard_msgs`-pinned across 13 files, so axiom drift fails the build instead of
+  printing a different list into a log nobody reads. `Effects/EffectSpec.lean` has been
+  doing this the whole time; I only noticed reading it. Use
+  `#guard_msgs (whitespace := lax) in` — Lean wraps the axiom list for long declaration
+  names, so a strict pin passes for short names and fails for long ones.
+- `031377d` + `1a8c579` + `9c9b704` + `28f7d68` — lawful codecs are buildable. The repo had exactly
   two, both for `Digest`, both hand-rolled, so every `Config`-shaped carrier was gated on
   codecs nobody had written. `Theory.ByteCodecs` supplies the framing toolkit with teeth
   (`concatenation_is_ambiguous` exhibits the collision bare concatenation would allow),
