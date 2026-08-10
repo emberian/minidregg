@@ -74,7 +74,22 @@ semantic, not mechanical: `Capability.Admissible`.
   `AuthenticatedPrincipal`, `ValidOperation`, and an `AcceptedCellEffect` over the
   Hyperdocument schema. `Capability.Admissible` — the part I flagged as the genuinely
   semantic one — is now exhibited (`8b71ff5`), with teeth showing off-target, expired,
-  and revoked all fail while the portal keeps accepting. Start at `ValidOperation`.
+  and revoked all fail while the portal keeps accepting.
+
+  **What is left reduces to two cells**, which is a much smaller statement than it was
+  at the start of the night:
+
+  1. a `CredentialAuthorityState.Cell` from which `readCapability` returns a stored
+     capability — that is what `AuthenticatedPrincipal` opens, and it also wants
+     `LineageValid`, a validity window, and issuer currency, all of which the capability
+     built in `8b71ff5` already satisfies in shape;
+  2. a `Hyperdocument.Cell` against which a `Declaration` is `Canonical`, its
+     `packedWrites` addresses are `Nodup`, `ExpectedAt` holds, and
+     `RangesValidAt` holds — i.e. `ValidOperation`.
+
+  Both are sparse-cell constructions of the kind `Theory.CellStateWitness` already does
+  at a minimal schema, just at the real Hyperdocument and credential schemas. Neither
+  needs a new idea.
 
   **Historical scoping note.** `LawfulCodec (Request .object)` is done
   (`5e8692f`). `Action` is a walk of the Hyperdocument type tree — `ElementBody`,
