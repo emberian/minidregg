@@ -14,6 +14,7 @@ import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verif
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
 import Theory.CellState  -- typed logical cells, canonical materialization, and validated footprint patches make root coherence, frame, rejection atomicity, and no-ghost state structural
+import Theory.ByteCodecs  -- lawful codecs are BUILDABLE: unary length-framing with a delimiter, `natCodec`, `pairCodec`, retraction lifting — the gate every `Config`-shaped carrier was stuck behind. Inhabitation only; NOT a deployment codec
 import Theory.CellStateWitness  -- ANTI-VACUITY: a closed schema/codec/materializer/cell whose patch actually reaches `ValidatedPatch` through `validate`, plus stale-root and both footprint-mismatch rejections computed
 import Theory.TypedAuthorizationWitness  -- ANTI-VACUITY: a built portal/state/request that reaches `Authorized`, with the policy gate and the epoch equation shown load-bearing as refutations (evidence exists; authority does not follow)
 import Theory.AcceptedCellEffectWitness  -- ANTI-VACUITY, the summit: a closed `AcceptedCellEffect` standing on the two witnesses above, forced sealed, with both request-binding equations exhibited as refutations
