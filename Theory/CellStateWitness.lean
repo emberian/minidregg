@@ -38,7 +38,7 @@ set_option autoImplicit false
 
 /-- One trivial field and no resources: the smallest schema that still has a
 field footprint to get wrong. -/
-def schema : Schema where
+def schema : Schema.{0, 0, 0, 0} where
   Field := Unit
   FieldType := fun _ => Unit
   Resource := Empty
