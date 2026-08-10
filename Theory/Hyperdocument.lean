@@ -12,6 +12,16 @@ collision-resistance property is attached to that digest function.  The
 document store is one dependent sparse namespace and is definitionally mapped
 to the canonical `CellState` shape.  A lawful cell codec commits every typed
 value at the byte level; root binding remains a separate cryptographic claim.
+
+**KNOWN VACUOUS (2026-08-10).**  `Materializer Root` below is
+`CellState.Materializer cellSchema Root`, whose codec must inject the ENTIRE
+`LogicalState cellSchema` into `List UInt8`.  `Address` is infinite and the
+value type is `Option (Value _)`, which has at least two inhabitants, so that
+state space is uncountable.
+`Theory.MaterializerCardinality.hyperdocumentMaterializer_isEmpty` proves
+`Materializer Digest` is EMPTY, so every theorem here and downstream that
+quantifies over a document `Cell` is vacuously true.  The namespaces and their
+semantics are not the problem; the total function in `LogicalState` is.
 -/
 import Theory.CausalVersionDag
 import Theory.CredentialAuthorityState

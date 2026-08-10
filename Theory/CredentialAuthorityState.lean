@@ -11,6 +11,18 @@ the root of the same canonical materialization.
 Capability lineage is retained as first-order capability data.  Its Lean
 validity predicate checks every adjacent strict-attenuation edge, including
 holder narrowing, rather than trusting parent identifiers.
+
+**KNOWN VACUOUS (2026-08-10).**  `Materializer` below is
+`CellState.Materializer schema Digest`, whose codec must inject the ENTIRE
+`LogicalState schema` into `List UInt8`.  `AuthorityField.nullifier` is indexed
+by `Nat` at value type `Bool`, so that state space contains `Nat -> Bool` and is
+uncountable.  `Theory.MaterializerCardinality.authorityMaterializer_isEmpty`
+proves `Materializer` is EMPTY, so every theorem in this file and downstream
+that quantifies over a `Cell` is vacuously true.  The schema and its semantics
+are not the problem; the total function in `LogicalState` is.  The fix, with an
+exact target proved in that module, is to make `LogicalState` finitely
+supported -- which is what the phrase "canonical sparse authority state" above
+already says this is.
 -/
 import Theory.AcceptedCellEffect
 import Theory.CredentialAuthorityFamily
