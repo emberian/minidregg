@@ -34,7 +34,8 @@ them says anything about deployed ones, and a permissive portal is exactly the p
 security claim may not use. No consumer has cut over: no editor, index, sync, or client
 reads any path landed tonight. And `PcsCrRomReduction` is still assumed rather than derived.
 
-**Where the session ended.** `QUIESCELOG.md`'s resume items 1–4 are done: clean base,
+**Where the session ended (the night ran to mid-afternoon; sixteen isolated runs, all
+three integrity exits `0` on every one).** `QUIESCELOG.md`'s resume items 1–4 are done: clean base,
 integration gate, the raw retained-history carrier, and a durable handler that inhabits
 `ImplementationRefinement`. Item 5 — cut over one user/agent workflow — is **blocked, and
 the block is the finding**: the workflow's cells are uninhabitable, so the cutover cannot
@@ -186,8 +187,10 @@ Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryH
   (through the third-schema obstruction)
 - `470fea2` — `3243` jobs — `E-20260810T083620-84178-local-nextop.local-470fea2a86d3-lake`
 - `1ab74a8` — `3243` jobs — `E-20260810T084158-85747-local-nextop.local-1ab74a827656-lake`
-  — **the session HEAD**, covering everything above including the fourth schema, the
-  documentation corrections, and the proposed seventeenth law.
+- `66a39ea` — `3244` jobs — `E-20260810T140929-22038-local-nextop.local-66a39ea09e4c-lake`
+  — **the session HEAD**, covering everything above including the four emptiness proofs,
+  the documentation corrections, the proposed seventeenth law, and the sparse-state fix
+  with its codec demonstration.
 
 **THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
 
