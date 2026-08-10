@@ -524,11 +524,81 @@ theorem actionStream_composes (value : Action) (suffix : List UInt8) :
       some (value, suffix) :=
   actionStream.decodePrefix_encode value suffix
 
+/-! ## The declaration
+
+The third and last codec a `Config` demands.  `OperationIntent` and
+`RequestEnvelope` are flat records over shapes already covered. -/
+
+def schemaRefStream : StreamCodec Minidregg.Theory.CausalVersionDag.SchemaRef :=
+  StreamCodec.xmap (StreamCodec.product digestStream StreamCodec.nat)
+    (fun value => (value.schemaId, value.version))
+    (fun tuple => ⟨tuple.1, tuple.2⟩)
+    (by intro value; rfl)
+
+def operationIntentStream :
+    StreamCodec Minidregg.Theory.HyperdocumentOperationIntent.OperationIntent :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream
+      (StreamCodec.product (identifierStream .v1 .document)
+        (StreamCodec.product schemaRefStream
+          (StreamCodec.product StreamCodec.nat
+            (StreamCodec.product
+              (StreamCodec.list (identifierStream .v1 .versionEvent))
+              (StreamCodec.product principalRefStream
+                (StreamCodec.product digestStream
+                  (StreamCodec.product StreamCodec.nat bytesStream))))))))
+    (fun value => (value.historyDomain, value.document, value.schema,
+      value.semanticVersion, value.parents, value.author,
+      value.expectedContentRoot, value.nonce, value.actionBytes))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2.1,
+      tuple.2.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2.2⟩)
+    (by intro value; rfl)
+
+def requestEnvelopeStream : StreamCodec RequestEnvelope :=
+  StreamCodec.xmap
+    (StreamCodec.product federationIdStream
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product policyIdStream
+            (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+    (fun value => (value.federation, value.subjectKeyEpoch, value.height,
+      value.policyId, value.policyEpoch, value.cost))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+    (by intro value; rfl)
+
+noncomputable def declarationStream : StreamCodec Declaration :=
+  StreamCodec.xmap
+    (StreamCodec.product operationIntentStream
+      (StreamCodec.product requestEnvelopeStream actionStream))
+    (fun value => (value.intent, value.request, value.action))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
+    (by intro value; rfl)
+
+/-- **`LawfulCodec Declaration` exists.**  The third of the three. -/
+noncomputable def declarationCodec : LawfulCodec Declaration :=
+  declarationStream.toLawful
+
+/-- **All three codecs a `Config` demands now exist**, so the structure is
+constructible up to its non-codec fields: `intentAddressing`, two
+`DigestDerivation`s, and two identifier digests, none of which carry proof
+obligations. -/
+noncomputable def configCodecs :
+    LawfulCodec Action × LawfulCodec Declaration ×
+      LawfulCodec (Minidregg.Theory.TypedAuthorization.Request .object) :=
+  ⟨actionCodec, declarationCodec,
+    Minidregg.Compiler.TypedAuthorizationRequestCodec.requestCodec⟩
+
 /-! ## Axiom pins -/
 
 /-- info: 'Minidregg.Compiler.HyperdocumentCodec.actionCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms actionCodec
 /-- info: 'Minidregg.Compiler.HyperdocumentCodec.actionStream_composes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms actionStream_composes
+/-- info: 'Minidregg.Compiler.HyperdocumentCodec.declarationCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms declarationCodec
+/-- info: 'Minidregg.Compiler.HyperdocumentCodec.configCodecs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms configCodecs
 
 end Minidregg.Compiler.HyperdocumentCodec
