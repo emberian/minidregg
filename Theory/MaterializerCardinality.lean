@@ -29,6 +29,7 @@ The witness schemas in `Theory.CellStateWitness` are finite and are unaffected.
 -/
 import Theory.CellState
 import Theory.CredentialAuthorityState
+import Theory.Hyperdocument
 
 namespace Minidregg.Theory.MaterializerCardinality
 
@@ -121,6 +122,56 @@ theorem no_authority_cell :
   rintro ⟨materializer, _, _⟩
   exact authorityMaterializer_isEmpty.false materializer
 
+/-! ## And the Hyperdocument schema is another
+
+Same shape, different namespace: `cellSchema.Field` is `Address = Sigma Key`,
+the document keys are digest wrappers indexed by `Nat`, and the value type is
+`Option DocumentRecord`, which has at least two inhabitants.  So the obstruction
+is not a quirk of one schema; it is what happens whenever a sparse namespace is
+typed as a total function. -/
+
+open Minidregg.Theory.Hyperdocument in
+/-- A document record built from zeros, used only to make `Option` two-valued. -/
+def sampleDocument : DocumentRecord where
+  rootElement := ⟨⟨0⟩⟩
+  schema := ⟨0⟩
+  createdBy := { subject := ⟨0⟩, capabilityKind := .object, capabilityId := ⟨0⟩ }
+  createdAt := ⟨⟨0⟩⟩
+
+open Minidregg.Theory.Hyperdocument in
+/-- Mark document `n` present or absent according to `marked n`. -/
+def documentStateOf (marked : Nat -> Bool) : LogicalState cellSchema where
+  fields := fun address =>
+    match address with
+    | ⟨.documents, key⟩ =>
+        if marked key.digest.value then some sampleDocument else none
+    | _ => none
+  resources := fun resource => resource.elim
+
+open Minidregg.Theory.Hyperdocument in
+theorem documentStateOf_injective : Function.Injective documentStateOf := by
+  intro left right same
+  funext index
+  have fields := congrArg LogicalState.fields same
+  have point := congrFun fields ⟨.documents, ⟨⟨index⟩⟩⟩
+  simp only [documentStateOf] at point
+  by_cases hleft : left index = true
+  · by_cases hright : right index = true
+    · rw [hleft, hright]
+    · simp [hleft, hright] at point
+  · by_cases hright : right index = true
+    · simp [hleft, hright] at point
+    · simp only [Bool.not_eq_true] at hleft hright
+      rw [hleft, hright]
+
+open Minidregg.Theory.Hyperdocument in
+/-- **`Hyperdocument.Materializer Digest` is empty too.**  So there is no
+document cell either, and `ValidOperation` joins the vacuous list. -/
+theorem hyperdocumentMaterializer_isEmpty :
+    IsEmpty (CellState.Materializer Hyperdocument.cellSchema.{0, 0} Digest) :=
+  materializer_isEmpty_of_natBool_embedding (Root := Digest) documentStateOf
+    documentStateOf_injective
+
 /-! ## What the fix looks like
 
 The obstruction is the TOTAL function in `LogicalState`, not the schema's
@@ -167,6 +218,10 @@ theorem finite_schema_state_countable {S : Schema.{0, 0, 0, 0}}
 #guard_msgs (whitespace := lax) in #print axioms authorityStateOf_injective
 /-- info: 'Minidregg.Theory.MaterializerCardinality.authorityMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorityMaterializer_isEmpty
+/-- info: 'Minidregg.Theory.MaterializerCardinality.documentStateOf_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms documentStateOf_injective
+/-- info: 'Minidregg.Theory.MaterializerCardinality.hyperdocumentMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hyperdocumentMaterializer_isEmpty
 /-- info: 'Minidregg.Theory.MaterializerCardinality.no_authority_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_authority_cell
 /-- info: 'Minidregg.Theory.MaterializerCardinality.finite_schema_state_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
