@@ -172,6 +172,39 @@ theorem hyperdocumentMaterializer_isEmpty :
   materializer_isEmpty_of_natBool_embedding (Root := Digest) documentStateOf
     documentStateOf_injective
 
+/-! ## Countability is also SUFFICIENT
+
+The obstruction above is a counting one, so it is worth knowing that counting
+is the whole story: a nonempty countable state space always admits a lawful
+codec.  Together the two directions say a materializer exists exactly when the
+state space is countable, which tells a refactor precisely what to aim for
+rather than leaving it to taste. -/
+
+/-- Any nonempty countable type has a lawful codec.  Unary and absurd as a wire
+format -- it is an existence proof, not a proposal for how to encode. -/
+theorem nonempty_lawfulCodec_of_countable {alpha : Type} [Countable alpha]
+    [Nonempty alpha] : Nonempty (LawfulCodec alpha) := by
+  obtain ⟨encodable⟩ := nonempty_encodable alpha
+  refine ⟨{ encode := fun value => List.replicate (encodable.encode value) 0
+            decode := fun bytes => encodable.decode bytes.length
+            decode_encode := ?_ }⟩
+  intro value
+  simp [encodable.encodek]
+
+/-- **The characterization.**  A schema admits a materializer for some root
+type exactly when its logical state space is nonempty and countable.  The
+forward direction is the obstruction; the backward direction is the codec
+above, plus any root function at all. -/
+theorem materializer_nonempty_iff_countable {S : Schema.{0, 0, 0, 0}}
+    {Root : Type} [Nonempty (LogicalState S)] [Nonempty Root] :
+    Nonempty (Materializer S Root) ↔ Countable (LogicalState S) := by
+  constructor
+  · intro ⟨materializer⟩
+    exact (lawfulCodec_injective materializer.codec).countable
+  · intro countable
+    obtain ⟨codec⟩ := nonempty_lawfulCodec_of_countable (alpha := LogicalState S)
+    exact ⟨{ codec := codec, rootBytes := fun _ => Classical.arbitrary Root }⟩
+
 /-! ## What the fix looks like
 
 The obstruction is the TOTAL function in `LogicalState`, not the schema's
@@ -224,6 +257,10 @@ theorem finite_schema_state_countable {S : Schema.{0, 0, 0, 0}}
 #guard_msgs (whitespace := lax) in #print axioms hyperdocumentMaterializer_isEmpty
 /-- info: 'Minidregg.Theory.MaterializerCardinality.no_authority_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_authority_cell
+/-- info: 'Minidregg.Theory.MaterializerCardinality.nonempty_lawfulCodec_of_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms nonempty_lawfulCodec_of_countable
+/-- info: 'Minidregg.Theory.MaterializerCardinality.materializer_nonempty_iff_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms materializer_nonempty_iff_countable
 /-- info: 'Minidregg.Theory.MaterializerCardinality.finite_schema_state_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms finite_schema_state_countable
 
