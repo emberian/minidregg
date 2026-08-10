@@ -520,12 +520,19 @@ Still separate:
 * deployed Merkle collision resistance and Fiat--Shamir composition.
 -/
 
-#print axioms FriAdaptiveTranscript.wordAt_congr
-#print axioms friAdaptiveRoundQueries_pins
-#print axioms uniformProb_pi_coord_le
-#print axioms friRound_query_miss_uniform
-#print axioms friAdaptive_earliestDeviation_cover
-#print axioms friAdaptive_allRound_query_miss
-#print axioms friAdaptive_sampled_sound
+/-- info: 'Minidregg.Loom.FriAdaptiveTranscript.wordAt_congr' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FriAdaptiveTranscript.wordAt_congr
+/-- info: 'Minidregg.Loom.friAdaptiveRoundQueries_pins' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptiveRoundQueries_pins
+/-- info: 'Minidregg.Loom.uniformProb_pi_coord_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms uniformProb_pi_coord_le
+/-- info: 'Minidregg.Loom.friRound_query_miss_uniform' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friRound_query_miss_uniform
+/-- info: 'Minidregg.Loom.friAdaptive_earliestDeviation_cover' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptive_earliestDeviation_cover
+/-- info: 'Minidregg.Loom.friAdaptive_allRound_query_miss' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptive_allRound_query_miss
+/-- info: 'Minidregg.Loom.friAdaptive_sampled_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms friAdaptive_sampled_sound
 
 end Minidregg.Loom

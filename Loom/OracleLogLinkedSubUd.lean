@@ -490,7 +490,8 @@ theorem subUd_root_transport_hiding_F5 :
 
 end OracleLogLinkedSubUdExample
 
-#print axioms committedWord?_eq_some_iff
+/-- info: 'Minidregg.Loom.committedWord?_eq_some_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedWord?_eq_some_iff
 /-- info: 'Minidregg.Loom.linkedErasureRegime_excludes_constrainedMaskHiding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms linkedErasureRegime_excludes_constrainedMaskHiding
 /-- info: 'Minidregg.Loom.attributedIncrement_eq_at_query' depends on axioms: [propext, Classical.choice, Quot.sound] -/

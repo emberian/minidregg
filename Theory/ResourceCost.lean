@@ -432,6 +432,9 @@ theorem SettledDecision.admitted_exact
 
 end Minidregg.Theory.ResourceCost
 
-#print axioms Minidregg.Theory.ResourceCost.Quote.compose
-#print axioms Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow
-#print axioms Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact
+/-- info: 'Minidregg.Theory.ResourceCost.Quote.compose' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.Quote.compose
+/-- info: 'Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.WordLayout.encode?_none_of_overflow
+/-- info: 'Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceCost.SettledDecision.admitted_exact

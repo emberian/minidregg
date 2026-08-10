@@ -283,6 +283,9 @@ theorem executeMetered_rejected_atomic
 
 end Minidregg.Kernel.DeclaredHyperedgeCost
 
-#print axioms Minidregg.Kernel.DeclaredHyperedgeCost.CostSemantics.boundedPrepared
-#print axioms Minidregg.Kernel.DeclaredHyperedgeCost.Outcome.committed_exact_delta
-#print axioms Minidregg.Kernel.DeclaredHyperedgeCost.executeMetered_committed_sound
+/-- info: 'Minidregg.Kernel.DeclaredHyperedgeCost.CostSemantics.boundedPrepared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredHyperedgeCost.CostSemantics.boundedPrepared
+/-- info: 'Minidregg.Kernel.DeclaredHyperedgeCost.Outcome.committed_exact_delta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredHyperedgeCost.Outcome.committed_exact_delta
+/-- info: 'Minidregg.Kernel.DeclaredHyperedgeCost.executeMetered_committed_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredHyperedgeCost.executeMetered_committed_sound

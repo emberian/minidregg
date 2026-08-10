@@ -903,10 +903,17 @@ theorem physical_step_no_partial_commit
 
 end Minidregg.Kernel.DurableCommitProtocol
 
-#print axioms Minidregg.Kernel.DurableCommitProtocol.execute_no_partial_commit
-#print axioms Minidregg.Kernel.DurableCommitProtocol.execute_complete_ready
-#print axioms Minidregg.Kernel.DurableCommitProtocol.execute_retry_after_install
-#print axioms Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry
-#print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect
-#print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt
-#print axioms Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_no_partial_commit' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_no_partial_commit
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_complete_ready' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_complete_ready
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_retry_after_install' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_retry_after_install
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit

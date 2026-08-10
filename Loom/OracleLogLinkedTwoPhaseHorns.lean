@@ -607,13 +607,20 @@ theorem allowedTwoPhase_fixedScheduleBound
       simpa [frozen, padSched] using hprem u γ i)
   simpa [allowedTwoPhaseQuerySampler, frozen, padSched] using hb
 
-#print axioms twoPhase_queryHitSampling_fibre_le
-#print axioms twoPhase_queryHitSampling_le
-#print axioms twoPhase_queryFreshSampling_le
-#print axioms twoPhaseSamplingBad_cover
-#print axioms twoPhaseSamplingBad_le
-#print axioms fullDomainTwoPhase_fixedScheduleBound
-#print axioms allowedTwoPhase_fixedScheduleBound
+/-- info: 'Minidregg.Loom.twoPhase_queryHitSampling_fibre_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_queryHitSampling_fibre_le
+/-- info: 'Minidregg.Loom.twoPhase_queryHitSampling_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_queryHitSampling_le
+/-- info: 'Minidregg.Loom.twoPhase_queryFreshSampling_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhase_queryFreshSampling_le
+/-- info: 'Minidregg.Loom.twoPhaseSamplingBad_cover' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseSamplingBad_cover
+/-- info: 'Minidregg.Loom.twoPhaseSamplingBad_le' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms twoPhaseSamplingBad_le
+/-- info: 'Minidregg.Loom.fullDomainTwoPhase_fixedScheduleBound' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fullDomainTwoPhase_fixedScheduleBound
+/-- info: 'Minidregg.Loom.allowedTwoPhase_fixedScheduleBound' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms allowedTwoPhase_fixedScheduleBound
 
 end SamplingHit
 

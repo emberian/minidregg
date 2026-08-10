@@ -125,5 +125,7 @@ def profileCsv : String :=
 
 end Minidregg.Compiler.SparseEqualityWorkProfile
 
-#print axioms Minidregg.Compiler.SparseEqualityWorkProfile.mle_sparseTable
-#print axioms Minidregg.Compiler.SparseEqualityWorkProfile.profile_wellFormed
+/-- info: 'Minidregg.Compiler.SparseEqualityWorkProfile.mle_sparseTable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.SparseEqualityWorkProfile.mle_sparseTable
+/-- info: 'Minidregg.Compiler.SparseEqualityWorkProfile.profile_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.SparseEqualityWorkProfile.profile_wellFormed
