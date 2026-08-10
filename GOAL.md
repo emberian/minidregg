@@ -102,8 +102,9 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `5d02d05` — `3239` jobs — `E-20260810T065452-47259-local-nextop.local-5d02d0551c64-lake`
 - `eaf8055` — `3239` jobs — `E-20260810T065948-49166-local-nextop.local-eaf8055087d0-lake`
 - `d4e5073` — `3239` jobs — `E-20260810T070437-51005-local-nextop.local-d4e50732c9d3-lake`
+- `6b3425f` — `3241` jobs — `E-20260810T071230-53624-local-nextop.local-6b3425fd7c96-lake`
 
-Commits after `d4e5073` carry warm-tree builds only.
+Commits after `6b3425f` carry warm-tree builds only.
 
 **Audit finding of 2026-08-10 — RAISED AND CLOSED THE SAME NIGHT**
 
