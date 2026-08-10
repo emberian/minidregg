@@ -134,8 +134,10 @@ semantic, not mechanical: `Capability.Admissible`.
 - `5e8692f` — `3240` jobs — `E-20260810T073849-65608-local-nextop.local-5e8692f187f7-lake`
   (the whole axiom-pin sweep plus the relocated request codec)
 - `e15dd49` — `3240` jobs — `E-20260810T074342-67723-local-nextop.local-e15dd49104e2-lake`
+- `0801d48` — `3241` jobs — `E-20260810T075440-71165-local-nextop.local-0801d48af102-lake`
+  (through `LawfulCodec Action`)
 
-Commits after `e15dd49` carry warm-tree builds only.
+Commits after `0801d48` carry warm-tree builds only.
 
 **The night's own mistake, recorded because it is the instructive one**
 
