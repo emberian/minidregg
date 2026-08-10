@@ -64,30 +64,29 @@ Loom was built with thinned as the work moved into the newer semantic layers, an
 `Assurance/` and `Theory/` are where an empty-carrier theorem is least likely to be
 caught. `Assurance/` is exactly where tonight's hole was.
 
-**The sharp version of that measurement — check this first tomorrow**
+**The sharp version of that measurement — SWEPT, all four carriers exhibited**
 
-The five `Theory/` files carrying a computed keystone are `BinaryTowerFanPaar`,
+The five `Theory/` files carrying a computed keystone were `BinaryTowerFanPaar`,
 `AdditiveNTT`, `AdditiveNTTTransform`, `Bignum`, and `AuthorizationDeclaration` — four
-arithmetic modules and one. The **semantic-kernel** files carry none:
+arithmetic modules and one. The **semantic-kernel** files carried none:
+`Theory/CellState.lean`, `Theory/AcceptedCellEffect.lean`,
+`Theory/TypedAuthorization.lean`, `Theory/CanonicalTransition.lean`.
 
-- `Theory/CellState.lean` — `Schema`, `Materializer`, `Materialized`, `ValidatedPatch`
-  (private constructors, exported `validate`);
-- `Theory/AcceptedCellEffect.lean` — 792 lines, *the* common effect authority, whose
-  every theorem is quantified over an `AcceptedCellEffect` the file never exhibits;
-- `Theory/TypedAuthorization.lean` — `Portal`, `AuthState`, `Authorized`;
-- `Theory/CanonicalTransition.lean`.
-
-`AcceptedCellEffect` **is** constructed downstream (`ComputationCellEffect.accept` in
+`AcceptedCellEffect` *is* constructed downstream (`ComputationCellEffect.accept` in
 `BfvAcceptedCellEffect`, `NoteSpendCoreAcceptedCellEffect`, `BfvPrivateComputationJoin`),
 but always from parameters that are themselves quantified, so the recursion never
-bottoms out in built data. Nothing in the tree exhibits a closed `AcceptedCellEffect`.
+bottomed out in built data.
 
-That is a *finding, not a proof of emptiness* — the obligations look inhabitable
-(`ValidatedPatch` needs a root/footprint agreement, `Authorized` needs evidence plus a
-policy witness that verifies). The work is: a closed schema with its `LawfulCodec`, a
-materializer, a validated patch, a portal whose `verifyPolicy` accepts, and one
-`SemanticEffectFamily`. Doing it would ground the kernel narrative the way `d257fe9`
-grounded the history layer.
+Closed tonight, bottom-up: `17e639c` exhibits a `ValidatedPatch` through `validate`;
+`e5146a8` exhibits an `Authorized` and shows the policy gate and epoch equation are
+refutations; `d4898a5` stands on both to exhibit a closed `AcceptedCellEffect`, forced
+sealed, with both request-binding equations exhibited as refutations. With `d257fe9`
+(retained-history head) that is all four carriers the audit named.
+
+Still open: `Theory/CanonicalTransition.lean` has no keystone of its own, though it is
+now downstream of an exhibited `ValidatedPatch`. And every witness above uses BUILT
+parameters — a minimal schema, a permissive portal — so none of them says anything about
+the deployed ones.
 
 **Done-log**
 
@@ -127,6 +126,12 @@ grounded the history layer.
   first constructed `VerifiedHistoryHead`, with a real fold round, at built parameters.
   Position binding is a theorem there (`commitWord_injective`), not a carried assumption.
   `3233` jobs, exit `0`, boundary `0`.
+- `17e639c`, `e5146a8`, `d4898a5` — the anti-vacuity sweep, bottom-up through the kernel:
+  a `ValidatedPatch` obtained by running `validate` (with stale-root and both
+  footprint-mismatch rejections computed); an `Authorized` with the policy gate and epoch
+  equation refuted at an otherwise-permissive portal; and a closed `AcceptedCellEffect`
+  standing on both, forced sealed, with `no_accepted_of_wrongEffects` and
+  `no_accepted_of_stalePreRoot`. `3236` jobs, exit `0`, boundary `0`.
 
 ---
 
