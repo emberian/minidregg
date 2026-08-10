@@ -185,8 +185,20 @@ whenever the index and values are, and the codec is the finite map's codec.
 `finite_schema_state_countable` records the other side: finite schemas are unobstructed,
 which is why `Theory.CellStateWitness` works.
 
-**I did not fix it.** It is a shared-interface change across `Theory`, `Kernel`, and
-`Assurance`, and it wants a rested decision about whether the default belongs to the
+**The fix has an exact target.** `materializer_nonempty_iff_countable` proves a schema
+admits a materializer for a nonempty root exactly when its logical state space is
+nonempty and countable — so whatever replaces the total function (finite map with a
+default, `Finsupp`, association list) is correct for this purpose **if and only if** it
+lands in a countable type, and then `nonempty_lawfulCodec_of_countable` guarantees a
+codec exists. There is exactly one thing to check, and the refactor cannot fail for a
+subtle reason.
+
+Countability gives existence, not quality. A deployed encoding still has to be chosen for
+size, canonicality, and determinism — which is what
+`Compiler.Tower256ConcreteBackend.StreamCodec` is for.
+
+**I did not do the refactor.** It is a shared-interface change across `Theory`, `Kernel`,
+and `Assurance`, and it wants a rested decision about whether the default belongs to the
 schema or the state. Surfacing it as debt rather than extending it, per the tree's rule.
 
 `Hyperdocument.cellSchema` has it too (`7311a60`): `Address` is infinite, the value type
