@@ -282,12 +282,19 @@ example : semanticSlotValue ⟨6, by norm_num [kindCount]⟩
     ⟨3, by norm_num [quantityCount]⟩ =
     ![0, 0, 0, 0, 0, 0, 3, 3, 30] := by decide
 
-#print axioms ValidCommittedWitness.selector_boolean
-#print axioms ValidCommittedWitness.selector_oneHot
-#print axioms ValidCommittedWitness.shorts_bounded
-#print axioms AcceptedBatch.every_row_uses_shared_witness
-#print axioms AcceptedBatch.every_row_call_uses_shared_identity
-#print axioms AcceptedBatch.every_row_uses_statement_public_inputs
-#print axioms AcceptedBatch.every_call_is_descriptorHolds
+/-- info: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.selector_boolean' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidCommittedWitness.selector_boolean
+/-- info: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.selector_oneHot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidCommittedWitness.selector_oneHot
+/-- info: 'Minidregg.Compiler.BfvInputValidity.ValidCommittedWitness.shorts_bounded' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidCommittedWitness.shorts_bounded
+/-- info: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_uses_shared_witness' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedBatch.every_row_uses_shared_witness
+/-- info: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_call_uses_shared_identity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedBatch.every_row_call_uses_shared_identity
+/-- info: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_row_uses_statement_public_inputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedBatch.every_row_uses_statement_public_inputs
+/-- info: 'Minidregg.Compiler.BfvInputValidity.AcceptedBatch.every_call_is_descriptorHolds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedBatch.every_call_is_descriptorHolds
 
 end Minidregg.Compiler.BfvInputValidity

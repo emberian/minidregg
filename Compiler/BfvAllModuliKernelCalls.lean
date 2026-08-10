@@ -129,11 +129,17 @@ example : (kernelCallAt 1).calls =
 example : (kernelCallAt 2).calls =
     [scalarMulWitnessCall 137438822401 11 6 24] := by decide
 
-#print axioms all_modulus_products_fit
-#print axioms q2_max_product_not_width10
-#print axioms kernelCallAt_schema
-#print axioms kernelCallAt_fullyWellFormed
-#print axioms kernelCallAt_accepts_iff_descriptor
-#print axioms kernelCallAt_accepts_iff
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.all_modulus_products_fit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms all_modulus_products_fit
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.q2_max_product_not_width10' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms q2_max_product_not_width10
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_schema' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms kernelCallAt_schema
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_fullyWellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms kernelCallAt_fullyWellFormed
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_accepts_iff_descriptor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms kernelCallAt_accepts_iff_descriptor
+/-- info: 'Minidregg.Compiler.BfvAllModuliKernelCalls.kernelCallAt_accepts_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms kernelCallAt_accepts_iff
 
 end Minidregg.Compiler.BfvAllModuliKernelCalls

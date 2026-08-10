@@ -414,10 +414,14 @@ theorem run_success_integrity {Error : Type}
     accepts_additiveFriAdaptiveCoherentAccepts pcs clause verifier.pins
       reply.receipt reply.accepted⟩
 
-#print axioms MerklePcs.valueCodecExact
-#print axioms challengeInput_eq_of_samePrefix
-#print axioms accepts_additiveFriAdaptiveCoherentAccepts
-#print axioms run_success_integrity
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.MerklePcs.valueCodecExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms MerklePcs.valueCodecExact
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.challengeInput_eq_of_samePrefix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms challengeInput_eq_of_samePrefix
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.accepts_additiveFriAdaptiveCoherentAccepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepts_additiveFriAdaptiveCoherentAccepts
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_integrity
 
 end
 

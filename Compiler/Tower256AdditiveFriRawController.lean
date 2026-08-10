@@ -470,10 +470,14 @@ theorem run_success_integrity {Error : Type}
         exact ⟨returned, decoded, (verifier.check_iff receipt).mp checked⟩
       next rejected => simp at success
 
-#print axioms RawMerklePcs.accepted_value_eq_or_extractedCollision
-#print axioms accepted_query_pins_or_collision
-#print axioms accepts_ideal_or_receiptCollision
-#print axioms run_success_integrity
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.RawMerklePcs.accepted_value_eq_or_extractedCollision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RawMerklePcs.accepted_value_eq_or_extractedCollision
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.accepted_query_pins_or_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_query_pins_or_collision
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.accepts_ideal_or_receiptCollision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepts_ideal_or_receiptCollision
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_integrity
 
 end
 

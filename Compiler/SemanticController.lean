@@ -441,8 +441,11 @@ theorem descriptorFailure_not_verified
     · simp [checkReply, hissued, hrequest, Outcome.IsVerified]
   · simp [checkReply, hissued, Outcome.IsVerified]
 
-#print axioms arbitraryOracle_integrity
-#print axioms resultMismatch_not_verified
-#print axioms descriptorFailure_not_verified
+/-- info: 'Minidregg.Compiler.SemanticController.arbitraryOracle_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arbitraryOracle_integrity
+/-- info: 'Minidregg.Compiler.SemanticController.resultMismatch_not_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms resultMismatch_not_verified
+/-- info: 'Minidregg.Compiler.SemanticController.descriptorFailure_not_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms descriptorFailure_not_verified
 
 end Minidregg.Compiler.SemanticController

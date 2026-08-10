@@ -450,12 +450,19 @@ example : (scalarMulKernelCall 68719403009 10 6 24).descriptor.nVars = 370 := by
 example : (scalarMulKernelCall 68719403009 10 6 24).segments.map
     (fun segment => segment.offset) = [0, 1, 25, 35, 95, 106] := by decide
 
-#print axioms KernelCall.accepts_iff_descriptor
-#print axioms addKernelCall_wellFormed
-#print axioms addKernelCall_fullyWellFormed
-#print axioms addKernelCall_accepts_iff
-#print axioms scalarMulKernelCall_wellFormed
-#print axioms scalarMulKernelCall_fullyWellFormed
-#print axioms scalarMulKernelCall_accepts_iff
+/-- info: 'Minidregg.Compiler.BignumKernelABI.KernelCall.accepts_iff_descriptor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms KernelCall.accepts_iff_descriptor
+/-- info: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addKernelCall_wellFormed
+/-- info: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_fullyWellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addKernelCall_fullyWellFormed
+/-- info: 'Minidregg.Compiler.BignumKernelABI.addKernelCall_accepts_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addKernelCall_accepts_iff
+/-- info: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulKernelCall_wellFormed
+/-- info: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_fullyWellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulKernelCall_fullyWellFormed
+/-- info: 'Minidregg.Compiler.BignumKernelABI.scalarMulKernelCall_accepts_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulKernelCall_accepts_iff
 
 end Minidregg.Compiler.BignumKernelABI

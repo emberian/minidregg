@@ -361,14 +361,23 @@ theorem clause404_still_absent_from_base :
     MinidreggV1Artifact.manifest.lookupClause clausePin.clauseId = none := by
   decide
 
-#print axioms dispatchInputCodec
-#print axioms dispatchQueryCodec
-#print axioms dispatchReplyCodec
-#print axioms wrong_reply_count_blocks
-#print axioms duplicate_reply_slot_blocks
-#print axioms verifiedExecutionOfReply
-#print axioms gatedRegistry_wellFormed
-#print axioms resolved_controller_exact
-#print axioms clause404_still_absent_from_base
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.dispatchInputCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms dispatchInputCodec
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.dispatchQueryCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms dispatchQueryCodec
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.dispatchReplyCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms dispatchReplyCodec
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.wrong_reply_count_blocks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wrong_reply_count_blocks
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.duplicate_reply_slot_blocks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms duplicate_reply_slot_blocks
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.verifiedExecutionOfReply' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifiedExecutionOfReply
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.gatedRegistry_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms gatedRegistry_wellFormed
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.resolved_controller_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms resolved_controller_exact
+/-- info: 'Minidregg.Compiler.Tower256LogupClauseDispatch.clause404_still_absent_from_base' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms clause404_still_absent_from_base
 
 end Minidregg.Compiler.Tower256LogupClauseDispatch

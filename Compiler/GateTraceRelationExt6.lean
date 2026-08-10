@@ -275,8 +275,10 @@ theorem card_sampledOracle_in_baseImage_le (samples : Finset BabyBear) (d : Nat)
 #check @card_eval_in_baseImage_le
 #check @card_sampledOracle_in_baseImage_le
 
-#print axioms card_bad_extended_eta_le
-#print axioms card_eval_in_baseImage_le
+/-- info: 'Minidregg.Compiler.GateTraceRelationExt6.card_bad_extended_eta_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms card_bad_extended_eta_le
+/-- info: 'Minidregg.Compiler.GateTraceRelationExt6.card_eval_in_baseImage_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms card_eval_in_baseImage_le
 
 end GateTraceRelationExt6
 end Minidregg.Compiler

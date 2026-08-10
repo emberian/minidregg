@@ -740,7 +740,8 @@ theorem card_bad_eta_le {t : Nat} (challenges : Finset Ext6Q)
 #check @etaBatched_opening_identity
 #check @card_bad_eta_le
 
-#print axioms factoredRounds_terminal_of_openings
+/-- info: 'Minidregg.Compiler.GateFactoredExt6.factoredRounds_terminal_of_openings' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms factoredRounds_terminal_of_openings
 
 end GateFactoredExt6
 end Minidregg.Compiler

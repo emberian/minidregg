@@ -163,10 +163,15 @@ def tower256DotProductBenchmarkSentinelResponseBytes : List UInt8 :=
     tower256DotProductBenchmarkSentinelResponseBytes.length = 32 := by
   simp [tower256DotProductBenchmarkSentinelResponseBytes]
 
-#print axioms Tower256DotProductRequest.encode_length
-#print axioms encodeTower256Response_length
-#print axioms work_profile_exact
-#print axioms benchmark_sentinel_request_length
-#print axioms benchmark_sentinel_response_length
+/-- info: 'Minidregg.Compiler.NativeWorkProfiles.Tower256DotProductRequest.encode_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Tower256DotProductRequest.encode_length
+/-- info: 'Minidregg.Compiler.NativeWorkProfiles.encodeTower256Response_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeTower256Response_length
+/-- info: 'Minidregg.Compiler.NativeWorkProfiles.work_profile_exact' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms work_profile_exact
+/-- info: 'Minidregg.Compiler.NativeWorkProfiles.benchmark_sentinel_request_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms benchmark_sentinel_request_length
+/-- info: 'Minidregg.Compiler.NativeWorkProfiles.benchmark_sentinel_response_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms benchmark_sentinel_response_length
 
 end Minidregg.Compiler.NativeWorkProfiles

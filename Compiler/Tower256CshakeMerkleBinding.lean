@@ -507,11 +507,17 @@ def ofMerkleCollisionFree
 
 end Backend.SecurityPremises
 
-#print axioms parseEnvelope_envelope_append
-#print axioms recompute_some_path_length
-#print axioms accepted_different_values_imply_merkle_collision
-#print axioms positionBinding_of_merkleCollisionFree
-#print axioms bindingFailure_price_le_collision
-#print axioms Backend.SecurityPremises.ofMerkleCollisionFree
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.parseEnvelope_envelope_append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms parseEnvelope_envelope_append
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.recompute_some_path_length' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recompute_some_path_length
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.accepted_different_values_imply_merkle_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_different_values_imply_merkle_collision
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.positionBinding_of_merkleCollisionFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms positionBinding_of_merkleCollisionFree
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.bindingFailure_price_le_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bindingFailure_price_le_collision
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleBinding.Backend.SecurityPremises.ofMerkleCollisionFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Backend.SecurityPremises.ofMerkleCollisionFree
 
 end Minidregg.Compiler.Tower256CshakeMerkleBinding

@@ -147,7 +147,9 @@ theorem ofDeclaration_leg_count
     _ = Finset.univ.card := by rw [hfinset]
     _ = Fintype.card Incidence := Finset.card_univ
 
-#print axioms legArtifact_request_decodes
-#print axioms ofDeclaration_leg_count
+/-- info: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.legArtifact_request_decodes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms legArtifact_request_decodes
+/-- info: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_leg_count' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ofDeclaration_leg_count
 
 end Minidregg.Compiler.DeclaredHyperedgeArtifact

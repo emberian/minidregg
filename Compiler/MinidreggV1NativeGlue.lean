@@ -35,7 +35,9 @@ theorem generated_source_is_artifact_derived :
 /- Materialize the generated data-only Rust integration surface. -/
 #eval buildTarget.run
 
-#print axioms generated_catalog_is_authenticated
-#print axioms generated_source_is_artifact_derived
+/-- info: 'Minidregg.Compiler.MinidreggV1NativeGlue.generated_catalog_is_authenticated' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms generated_catalog_is_authenticated
+/-- info: 'Minidregg.Compiler.MinidreggV1NativeGlue.generated_source_is_artifact_derived' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms generated_source_is_artifact_derived
 
 end Minidregg.Compiler.MinidreggV1NativeGlue

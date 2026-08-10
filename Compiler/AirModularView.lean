@@ -663,16 +663,27 @@ example : ¬ (exists wv : Nat -> BabyBear,
   exact (by decide : ¬ systemAccepts demoTampered (modularViewGadget 13 demoWires))
     ((emit_accepts_iff_fin 81 4 demoTampered (modularViewGadget 13 demoWires)).mp h)
 
-#print axioms mulConstGadget_correct
-#print axioms mulCarryEquations_denote
-#print axioms mulConstGadget_sound
-#print axioms modularViewGadget_sound
-#print axioms accepted_has_modularView
-#print axioms scalarMulGadget_correct
-#print axioms scalarMulCarryEquations_denote
-#print axioms scalarMulGadget_sound
-#print axioms emit_scalarMulGadget_iff
-#print axioms fheggQ0_scalar24_base64_fits
-#print axioms emit_modularViewGadget_iff
+/-- info: 'Minidregg.Compiler.AirModularView.mulConstGadget_correct' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mulConstGadget_correct
+/-- info: 'Minidregg.Compiler.AirModularView.mulCarryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mulCarryEquations_denote
+/-- info: 'Minidregg.Compiler.AirModularView.mulConstGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mulConstGadget_sound
+/-- info: 'Minidregg.Compiler.AirModularView.modularViewGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms modularViewGadget_sound
+/-- info: 'Minidregg.Compiler.AirModularView.accepted_has_modularView' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_has_modularView
+/-- info: 'Minidregg.Compiler.AirModularView.scalarMulGadget_correct' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulGadget_correct
+/-- info: 'Minidregg.Compiler.AirModularView.scalarMulCarryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulCarryEquations_denote
+/-- info: 'Minidregg.Compiler.AirModularView.scalarMulGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scalarMulGadget_sound
+/-- info: 'Minidregg.Compiler.AirModularView.emit_scalarMulGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_scalarMulGadget_iff
+/-- info: 'Minidregg.Compiler.AirModularView.fheggQ0_scalar24_base64_fits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fheggQ0_scalar24_base64_fits
+/-- info: 'Minidregg.Compiler.AirModularView.emit_modularViewGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_modularViewGadget_iff
 
 end Minidregg.Compiler.AirModularView

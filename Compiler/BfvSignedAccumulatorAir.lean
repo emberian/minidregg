@@ -595,12 +595,19 @@ theorem deployed_column_budget :
   norm_num [activeWidth, optionCount, degree, scalarBits,
     BfvCompressedEquation.quotientBits, babyBearP]
 
-#print axioms weightedSumGadget_correct
-#print axioms denote_weighted_columns
-#print axioms weightedSumGadget_sound
-#print axioms shiftedScalar_recompose
-#print axioms shiftedScalar_lt_64
-#print axioms eval_eq_shifted
-#print axioms deployed_column_budget
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.weightedSumGadget_correct' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms weightedSumGadget_correct
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.denote_weighted_columns' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms denote_weighted_columns
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.weightedSumGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms weightedSumGadget_sound
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.shiftedScalar_recompose' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms shiftedScalar_recompose
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.shiftedScalar_lt_64' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms shiftedScalar_lt_64
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.eval_eq_shifted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms eval_eq_shifted
+/-- info: 'Minidregg.Compiler.BfvSignedAccumulatorAir.deployed_column_budget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_column_budget
 
 end Minidregg.Compiler.BfvSignedAccumulatorAir

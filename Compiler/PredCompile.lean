@@ -937,8 +937,10 @@ example : ∃ A : List ℕ → ℕ → ZMod 7,
   (lower_subsumes_boolGadget (x := 1) (by decide) (by decide)).mpr
     (by rw [boolGadget_correct]; exact Or.inr rfl)
 
-#print axioms lower_correct
-#print axioms lower_subsumes_boolGadget
+/-- info: 'Minidregg.Compiler.lower_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lower_correct
+/-- info: 'Minidregg.Compiler.lower_subsumes_boolGadget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lower_subsumes_boolGadget
 
 /-! ### Closing audit note
 

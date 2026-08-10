@@ -252,9 +252,13 @@ theorem indexedEvaluation_of_attestation
 
 end AcceptedLogupRun
 
-#print axioms RootPrefixSchedule.priorRootCount_le
-#print axioms RootPrefixSchedule.no_schedule_of_required_missing
-#print axioms AcceptedLogupRun.controllerStatement
-#print axioms AcceptedLogupRun.indexedTableReceiptClause_of_attestation
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.priorRootCount_le' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootPrefixSchedule.priorRootCount_le
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.RootPrefixSchedule.no_schedule_of_required_missing' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RootPrefixSchedule.no_schedule_of_required_missing
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.AcceptedLogupRun.controllerStatement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedLogupRun.controllerStatement
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnLogupBridge.AcceptedLogupRun.indexedTableReceiptClause_of_attestation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedLogupRun.indexedTableReceiptClause_of_attestation
 
 end Minidregg.Compiler.AuthenticatedColumnLogupBridge

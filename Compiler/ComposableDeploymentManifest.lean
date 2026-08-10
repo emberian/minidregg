@@ -496,11 +496,17 @@ does not fabricate such a family: each implemented clause must still provide
 its own history adapter before its roots can occur in `VerifiedEntry`.
 -/
 
-#print axioms arithmeticRegistry_wellFormed
-#print axioms arithmeticNativeCatalog_wellFormed
-#print axioms arithmetic_controller_exact
-#print axioms arithmetic_certified_accepts
-#print axioms tower256_backend_pins_exact
-#print axioms tower256Logup_absent_from_deployment
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.arithmeticRegistry_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arithmeticRegistry_wellFormed
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.arithmeticNativeCatalog_wellFormed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arithmeticNativeCatalog_wellFormed
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.arithmetic_controller_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arithmetic_controller_exact
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.arithmetic_certified_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arithmetic_certified_accepts
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.tower256_backend_pins_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tower256_backend_pins_exact
+/-- info: 'Minidregg.Compiler.ComposableDeploymentManifest.tower256Logup_absent_from_deployment' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tower256Logup_absent_from_deployment
 
 end Minidregg.Compiler.ComposableDeploymentManifest

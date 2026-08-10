@@ -421,9 +421,12 @@ theorem roundInput_eq_of_same_current
     rw [samePrior ⟨k, hkm⟩ prior]
   · rfl
 
-#print axioms run_success_integrity
-#print axioms roundInput_eq_of_same_current
-#print axioms canonicalStatementPreimage_components_injective
+/-- info: 'Minidregg.Compiler.Ext6GateProofController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_integrity
+/-- info: 'Minidregg.Compiler.Ext6GateProofController.roundInput_eq_of_same_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms roundInput_eq_of_same_current
+/-- info: 'Minidregg.Compiler.Ext6GateProofController.canonicalStatementPreimage_components_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatementPreimage_components_injective
 
 end
 

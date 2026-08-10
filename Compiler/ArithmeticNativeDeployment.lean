@@ -330,14 +330,23 @@ def rustBuildTarget : NativeGlueGen.BuildTarget where
 
 #eval rustBuildTarget.run
 
-#print axioms honestResponse_accepts
-#print axioms emitted_candidate_exact
-#print axioms artifact_contains_exact_native_surface
-#print axioms artifact_nativeCatalogWellFormed
-#print axioms registry_wellFormed
-#print axioms resolved_controller_exact
-#print axioms honest_bytes_certified
-#print axioms malformed_bytes_cannot_certify
-#print axioms native_error_blocks
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.honestResponse_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestResponse_accepts
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.emitted_candidate_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emitted_candidate_exact
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.artifact_contains_exact_native_surface' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms artifact_contains_exact_native_surface
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.artifact_nativeCatalogWellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms artifact_nativeCatalogWellFormed
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.registry_wellFormed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms registry_wellFormed
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.resolved_controller_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms resolved_controller_exact
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.honest_bytes_certified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honest_bytes_certified
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.malformed_bytes_cannot_certify' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms malformed_bytes_cannot_certify
+/-- info: 'Minidregg.Compiler.ArithmeticNativeDeployment.native_error_blocks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms native_error_blocks
 
 end Minidregg.Compiler.ArithmeticNativeDeployment

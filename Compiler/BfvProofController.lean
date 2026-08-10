@@ -358,11 +358,16 @@ theorem canonicalStatement_no_boundSuite
     rw [← bound.proofCodecBound]
     rfl)
 
-#print axioms controlCheck_iff
-#print axioms run_success_integrity
-#print axioms derivedChallenge_independent_of_proofBytes
-#print axioms canonicalStatement_exact
-#print axioms canonicalStatement_no_boundSuite
+/-- info: 'Minidregg.Compiler.BfvProofController.controlCheck_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms controlCheck_iff
+/-- info: 'Minidregg.Compiler.BfvProofController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_integrity
+/-- info: 'Minidregg.Compiler.BfvProofController.derivedChallenge_independent_of_proofBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms derivedChallenge_independent_of_proofBytes
+/-- info: 'Minidregg.Compiler.BfvProofController.canonicalStatement_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_exact
+/-- info: 'Minidregg.Compiler.BfvProofController.canonicalStatement_no_boundSuite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_no_boundSuite
 
 end
 

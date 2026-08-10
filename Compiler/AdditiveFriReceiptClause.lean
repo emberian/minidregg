@@ -309,8 +309,10 @@ theorem exact_ud_challenge_query_error
 
 end FarWordSoundnessCertificate
 
-#print axioms rootsBeforeChallenge_of_adaptive
-#print axioms FarWordSoundnessCertificate.exact_ud_challenge_query_error
+/-- info: 'Minidregg.Compiler.AdditiveFriReceiptClause.rootsBeforeChallenge_of_adaptive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rootsBeforeChallenge_of_adaptive
+/-- info: 'Minidregg.Compiler.AdditiveFriReceiptClause.FarWordSoundnessCertificate.exact_ud_challenge_query_error' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FarWordSoundnessCertificate.exact_ud_challenge_query_error
 
 end
 

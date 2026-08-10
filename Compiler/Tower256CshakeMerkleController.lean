@@ -414,8 +414,11 @@ theorem checkedXofCall_reply_exact (cshake : Cshake256)
     decide_eq_true_eq] at accepted
   exact accepted.1.1
 
-#print axioms recompute_cubePath
-#print axioms bindingMerkle_toLoom_commit_exact
-#print axioms checkedXofCall_reply_exact
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.recompute_cubePath' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recompute_cubePath
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.bindingMerkle_toLoom_commit_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bindingMerkle_toLoom_commit_exact
+/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.checkedXofCall_reply_exact' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms checkedXofCall_reply_exact
 
 end Minidregg.Compiler.Tower256CshakeMerkleController

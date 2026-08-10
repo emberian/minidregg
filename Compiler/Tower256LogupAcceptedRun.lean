@@ -279,7 +279,9 @@ theorem indexedEvaluation
 
 end VerifiedExecution
 
-#print axioms terminalFactsOfVerified
-#print axioms VerifiedExecution.indexedEvaluation
+/-- info: 'Minidregg.Compiler.Tower256LogupAcceptedRun.terminalFactsOfVerified' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms terminalFactsOfVerified
+/-- info: 'Minidregg.Compiler.Tower256LogupAcceptedRun.VerifiedExecution.indexedEvaluation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms VerifiedExecution.indexedEvaluation
 
 end Minidregg.Compiler.Tower256LogupAcceptedRun

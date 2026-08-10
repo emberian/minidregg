@@ -239,7 +239,9 @@ def execute {Error : Type}
 
 end ControllerInputs
 
-#print axioms LogupColumns.required_roles
-#print axioms logupFinalChecker_statement
+/-- info: 'Minidregg.Compiler.Tower256LogupControllerPlan.LogupColumns.required_roles' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LogupColumns.required_roles
+/-- info: 'Minidregg.Compiler.Tower256LogupControllerPlan.logupFinalChecker_statement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms logupFinalChecker_statement
 
 end Minidregg.Compiler.Tower256LogupControllerPlan

@@ -222,11 +222,17 @@ theorem arbitrary_runner_integrity {Error Input : Type}
     reply.decoded, reply.semanticDecoded, reply.bytesExact, reply.widthExact,
     reply.accepted⟩
 
-#print axioms decodeCoordinate_some_length
-#print axioms encodeCoordinate_of_decode_eq_some
-#print axioms semantic_decode_of_coordinate_decode
-#print axioms encodeSemantic_of_coordinate_decode
-#print axioms run_success_runner_bytes
-#print axioms arbitrary_runner_integrity
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.decodeCoordinate_some_length' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeCoordinate_some_length
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.encodeCoordinate_of_decode_eq_some' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeCoordinate_of_decode_eq_some
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.semantic_decode_of_coordinate_decode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms semantic_decode_of_coordinate_decode
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.encodeSemantic_of_coordinate_decode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeSemantic_of_coordinate_decode
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.run_success_runner_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_runner_bytes
+/-- info: 'Minidregg.Compiler.Tower256NativeByteBoundary.arbitrary_runner_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arbitrary_runner_integrity
 
 end Minidregg.Compiler.Tower256NativeByteBoundary

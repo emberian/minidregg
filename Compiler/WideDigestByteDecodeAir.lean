@@ -336,10 +336,15 @@ example : systemAccepts zeroAsg (byteDecodeGadget demoWires) := by decide
 example : systemAccepts maxCanonicalAsg (byteDecodeGadget demoWires) := by decide
 example : ¬ systemAccepts rawPAsg (byteDecodeGadget demoWires) := by decide
 
-#print axioms byteDecodeGadget_correct
-#print axioms byteDecodeGadget_sound
-#print axioms raw_babyBearP_rejected
-#print axioms emit_byteDecode_iff
-#print axioms emitted_raw_babyBearP_rejected
+/-- info: 'Minidregg.Compiler.WideDigestByteDecodeAir.byteDecodeGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms byteDecodeGadget_correct
+/-- info: 'Minidregg.Compiler.WideDigestByteDecodeAir.byteDecodeGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms byteDecodeGadget_sound
+/-- info: 'Minidregg.Compiler.WideDigestByteDecodeAir.raw_babyBearP_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms raw_babyBearP_rejected
+/-- info: 'Minidregg.Compiler.WideDigestByteDecodeAir.emit_byteDecode_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_byteDecode_iff
+/-- info: 'Minidregg.Compiler.WideDigestByteDecodeAir.emitted_raw_babyBearP_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emitted_raw_babyBearP_rejected
 
 end Minidregg.Compiler.WideDigestByteDecodeAir

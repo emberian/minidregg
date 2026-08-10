@@ -446,7 +446,9 @@ example : ¬ ∃ wireValues : Nat → BabyBear,
   have hframe := h (⟨0, by decide⟩, .frame)
   norm_num [ghostBound, ghostCore, ReceiptWitness.residual] at hframe
 
-#print axioms descriptor_accepts_iff_boundRelation
-#print axioms committedTurn_descriptor_accepts
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.descriptor_accepts_iff_boundRelation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms descriptor_accepts_iff_boundRelation
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.committedTurn_descriptor_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedTurn_descriptor_accepts
 
 end Minidregg.Compiler.SemanticTurnReceiptDescriptor

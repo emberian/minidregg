@@ -255,11 +255,17 @@ theorem hash_digest_lt_two_pow_256 (customization input : List UInt8) :
   simpa only [show (256 : Nat) = 2 ^ 8 by norm_num, ← pow_mul,
     Nat.reduceMul] using hash_digest_lt customization input
 
-#print axioms digestCodec
-#print axioms cshake256Bytes_length
-#print axioms hash_digest_lt
-#print axioms hash_digest_lt_two_pow_256
-#print axioms checkedXofCall_reply_bytes_exact
-#print axioms checkedXofCall_reply_width
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.digestCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms digestCodec
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.cshake256Bytes_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cshake256Bytes_length
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.hash_digest_lt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hash_digest_lt
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.hash_digest_lt_two_pow_256' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hash_digest_lt_two_pow_256
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.checkedXofCall_reply_bytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkedXofCall_reply_bytes_exact
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.checkedXofCall_reply_width' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkedXofCall_reply_width
 
 end Minidregg.Compiler.Sp800185Cshake256

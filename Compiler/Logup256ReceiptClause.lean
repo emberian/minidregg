@@ -296,8 +296,11 @@ theorem indexedTableReceiptClause
       _ = logupDot (fun row => claim.table (trace.index row)) claim.weights :=
         (logup_pullback_pushforward trace.index claim.weights claim.table).symm
 
-#print axioms committedIncidence_eq_unitVector
-#print axioms committedIncidencePushforward_eq_logupPushforward
-#print axioms indexedTableReceiptClause
+/-- info: 'Minidregg.Compiler.Logup256ReceiptClause.committedIncidence_eq_unitVector' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedIncidence_eq_unitVector
+/-- info: 'Minidregg.Compiler.Logup256ReceiptClause.committedIncidencePushforward_eq_logupPushforward' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedIncidencePushforward_eq_logupPushforward
+/-- info: 'Minidregg.Compiler.Logup256ReceiptClause.indexedTableReceiptClause' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms indexedTableReceiptClause
 
 end Minidregg.Compiler.Logup256ReceiptClause

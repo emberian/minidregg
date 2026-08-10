@@ -430,7 +430,9 @@ semantic-turn clause controller is the next integration seam, so manifest
 registration here must not be read as semantic-turn admission.
 -/
 
-#print axioms nativeFailure_not_verified
-#print axioms existsHonestCertifiedResponse
+/-- info: 'Minidregg.Compiler.MinidreggV1ArithmeticWork.nativeFailure_not_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms nativeFailure_not_verified
+/-- info: 'Minidregg.Compiler.MinidreggV1ArithmeticWork.existsHonestCertifiedResponse' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms existsHonestCertifiedResponse
 
 end Minidregg.Compiler.MinidreggV1ArithmeticWork

@@ -234,10 +234,15 @@ example : ¬ (exists wv : Nat -> BabyBear,
   (by decide : ¬ systemAccepts demoTampered (wideDigestAbsorbGadget demoWires))
     ((emit_accepts_iff_fin 21 11 demoTampered (wideDigestAbsorbGadget demoWires)).mp h)
 
-#print axioms wideDigestAbsorbGadget_correct
-#print axioms digestVals_canonical
-#print axioms digestVal_cast_exact
-#print axioms wideDigestAbsorbGadget_sound
-#print axioms emit_wideDigestAbsorb_iff
+/-- info: 'Minidregg.Compiler.WideDigestAir.wideDigestAbsorbGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wideDigestAbsorbGadget_correct
+/-- info: 'Minidregg.Compiler.WideDigestAir.digestVals_canonical' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms digestVals_canonical
+/-- info: 'Minidregg.Compiler.WideDigestAir.digestVal_cast_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms digestVal_cast_exact
+/-- info: 'Minidregg.Compiler.WideDigestAir.wideDigestAbsorbGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wideDigestAbsorbGadget_sound
+/-- info: 'Minidregg.Compiler.WideDigestAir.emit_wideDigestAbsorb_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_wideDigestAbsorb_iff
 
 end Minidregg.Compiler.WideDigestAir

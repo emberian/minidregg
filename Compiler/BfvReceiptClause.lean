@@ -242,11 +242,17 @@ theorem Admitted.every_exact_integer_equation {manifest : Manifest}
         (admitted.token.batch.rowCall rowIndex).witness.quotient.value :=
   admitted.token.every_exact_integer_equation rowIndex
 
-#print axioms CheckedRowBuffer.exact_integer_equation
-#print axioms AcceptedToken.every_row_bound
-#print axioms AcceptedToken.every_exact_integer_equation
-#print axioms bfvClausePin_unassigned
-#print axioms lookup_register
-#print axioms Admitted.every_exact_integer_equation
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.CheckedRowBuffer.exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CheckedRowBuffer.exact_integer_equation
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.AcceptedToken.every_row_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedToken.every_row_bound
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.AcceptedToken.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AcceptedToken.every_exact_integer_equation
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.bfvClausePin_unassigned' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms bfvClausePin_unassigned
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.lookup_register' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms lookup_register
+/-- info: 'Minidregg.Compiler.BfvReceiptClause.Admitted.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Admitted.every_exact_integer_equation
 
 end Minidregg.Compiler.BfvReceiptClause

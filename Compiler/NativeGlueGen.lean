@@ -377,7 +377,9 @@ structure BuildTarget where
 def BuildTarget.run (target : BuildTarget) : IO Unit :=
   writeRustSource target.path target.bundle target.nativeCatalogWellFormed
 
-#print axioms rustSource_eq_of_canonicalEncoding_eq
-#print axioms rustSourceFromEncoding_deterministic
+/-- info: 'Minidregg.Compiler.NativeGlueGen.rustSource_eq_of_canonicalEncoding_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rustSource_eq_of_canonicalEncoding_eq
+/-- info: 'Minidregg.Compiler.NativeGlueGen.rustSourceFromEncoding_deterministic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rustSourceFromEncoding_deterministic
 
 end Minidregg.Compiler.NativeGlueGen

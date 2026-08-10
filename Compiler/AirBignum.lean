@@ -312,10 +312,15 @@ example : ¬ (exists asg : Fin 21 -> ZMod 17,
   rw [heq, hx, hy] at hzlt
   norm_num [Bignum.denoteNat] at hzlt
 
-#print axioms addLimbTerm_correct
-#print axioms addGadget_correct
-#print axioms carryEquations_denote
-#print axioms addGadget_sound
-#print axioms emit_addGadget_iff
+/-- info: 'Minidregg.Compiler.AirBignum.addLimbTerm_correct' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addLimbTerm_correct
+/-- info: 'Minidregg.Compiler.AirBignum.addGadget_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addGadget_correct
+/-- info: 'Minidregg.Compiler.AirBignum.carryEquations_denote' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms carryEquations_denote
+/-- info: 'Minidregg.Compiler.AirBignum.addGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms addGadget_sound
+/-- info: 'Minidregg.Compiler.AirBignum.emit_addGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_addGadget_iff
 
 end Minidregg.Compiler.AirBignum

@@ -53,8 +53,11 @@ theorem profile_top_generator_index :
       (Minidregg.Theory.fpGen 7)).val = 2 ^ 128 :=
   Minidregg.Theory.BinaryTowerCodec.toFin_fpGen_seven
 
-#print axioms profile_width_exact
-#print axioms profile_cardinality
-#print axioms profile_top_generator_index
+/-- info: 'Minidregg.Compiler.BinaryTower256Profile.profile_width_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms profile_width_exact
+/-- info: 'Minidregg.Compiler.BinaryTower256Profile.profile_cardinality' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms profile_cardinality
+/-- info: 'Minidregg.Compiler.BinaryTower256Profile.profile_top_generator_index' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms profile_top_generator_index
 
 end Minidregg.Compiler.BinaryTower256Profile

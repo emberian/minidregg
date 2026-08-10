@@ -356,13 +356,21 @@ theorem babyBear_integer_cast_not_injective :
   · simp
   · norm_num [babyBearP]
 
-#print axioms DeployedEquation.eval_active_eq_numerator
-#print axioms RuntimeWitness.shifted_balance
-#print axioms q0ProductGadget_sound
-#print axioms q0ProductCommonInteger_value
-#print axioms q0_row_bridge_sound
-#print axioms q0_row_commonInteger_bridge_sound
-#print axioms emit_q0ProductGadget_iff
-#print axioms babyBear_integer_cast_not_injective
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.DeployedEquation.eval_active_eq_numerator' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms DeployedEquation.eval_active_eq_numerator
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.RuntimeWitness.shifted_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RuntimeWitness.shifted_balance
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.q0ProductGadget_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms q0ProductGadget_sound
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.q0ProductCommonInteger_value' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms q0ProductCommonInteger_value
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.q0_row_bridge_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms q0_row_bridge_sound
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.q0_row_commonInteger_bridge_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms q0_row_commonInteger_bridge_sound
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.emit_q0ProductGadget_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms emit_q0ProductGadget_iff
+/-- info: 'Minidregg.Compiler.BfvCompressedEquation.babyBear_integer_cast_not_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms babyBear_integer_cast_not_injective
 
 end Minidregg.Compiler.BfvCompressedEquation

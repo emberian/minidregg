@@ -263,10 +263,14 @@ theorem canonicalStatement_exact (argsDigest effectsDigest preRoot : Digest)
       statement.proofSuiteId = unassignedProofSuiteId := by
   exact ⟨rfl, rfl, rfl, rfl⟩
 
-#print axioms check_iff
-#print axioms run_success_integrity
-#print axioms derivedChallenge_independent_of_proofBytes
-#print axioms canonicalStatement_exact
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.check_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms check_iff
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_success_integrity
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.derivedChallenge_independent_of_proofBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms derivedChallenge_independent_of_proofBytes
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.canonicalStatement_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_exact
 
 end
 

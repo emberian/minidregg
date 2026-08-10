@@ -535,10 +535,15 @@ theorem manifestMismatch_not_verified
     exact (mismatch same).elim
   · exact reached
 
-#print axioms arbitraryRunner_integrity
-#print axioms descriptorFailure_not_certified
-#print axioms manifestMismatch_not_verified
-#print axioms checkInstructions_headError
-#print axioms firstInstructionError_blocks
+/-- info: 'Minidregg.Compiler.NativeKernelPlan.arbitraryRunner_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms arbitraryRunner_integrity
+/-- info: 'Minidregg.Compiler.NativeKernelPlan.descriptorFailure_not_certified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms descriptorFailure_not_certified
+/-- info: 'Minidregg.Compiler.NativeKernelPlan.manifestMismatch_not_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifestMismatch_not_verified
+/-- info: 'Minidregg.Compiler.NativeKernelPlan.checkInstructions_headError' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkInstructions_headError
+/-- info: 'Minidregg.Compiler.NativeKernelPlan.firstInstructionError_blocks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms firstInstructionError_blocks
 
 end Minidregg.Compiler.NativeKernelPlan

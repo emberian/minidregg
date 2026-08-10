@@ -266,7 +266,8 @@ theorem honestRounds_closes_committed
 #check @honestRounds_boolean_sum
 #check @honestRounds_closes_committed
 
-#print axioms honestRounds_closes_committed
+/-- info: 'Minidregg.Compiler.GateMleExt6.honestRounds_closes_committed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms honestRounds_closes_committed
 
 end GateMleExt6
 end Minidregg.Compiler

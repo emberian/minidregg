@@ -509,13 +509,21 @@ theorem cshakeOutputExact (customization input : List UInt8) :
   Sp800185Cshake256.controller_digest_encode_exact
     cshakeAlgorithmId digestCodecPin customization input
 
-#print axioms StreamCodec.decodeNatPrefix_encode
-#print axioms merklePathCodec
-#print axioms globalFrameCodec
-#print axioms globalDrawLabelCodec
-#print axioms towerExact
-#print axioms cshakeExact
-#print axioms customizationDomains_nodup
-#print axioms cshakeOutputExact
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.decodeNatPrefix_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms StreamCodec.decodeNatPrefix_encode
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.merklePathCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms merklePathCodec
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.globalFrameCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms globalFrameCodec
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.globalDrawLabelCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms globalDrawLabelCodec
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.towerExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms towerExact
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.cshakeExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cshakeExact
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.customizationDomains_nodup' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms customizationDomains_nodup
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.cshakeOutputExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cshakeOutputExact
 
 end Minidregg.Compiler.Tower256ConcreteBackend

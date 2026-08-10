@@ -1066,9 +1066,13 @@ theorem concrete_schedule_is_nonvacuous :
 
 end Tower256Example
 
-#print axioms challenge_before_root_unrepresentable
-#print axioms native_error_cannot_accept_query
-#print axioms Tower256Example.towerBinding_toLoom_commit_exact
-#print axioms Tower256Example.concrete_schedule_is_nonvacuous
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.challenge_before_root_unrepresentable' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms challenge_before_root_unrepresentable
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.native_error_cannot_accept_query' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms native_error_cannot_accept_query
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.towerBinding_toLoom_commit_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Tower256Example.towerBinding_toLoom_commit_exact
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.concrete_schedule_is_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Tower256Example.concrete_schedule_is_nonvacuous
 
 end Minidregg.Compiler.AuthenticatedColumnPlan

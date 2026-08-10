@@ -340,8 +340,11 @@ theorem ext6_edge_product : ext6Mul ext6EdgeA ext6EdgeB = ext6EdgeProduct := by 
 #check @ext6_known_product
 #check @ext6_edge_product
 
-#print axioms ext6Polynomial_irreducible
-#print axioms ext6Q_finrank
-#print axioms ext6Mul_correct
+/-- info: 'Minidregg.Compiler.ext6Polynomial_irreducible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ext6Polynomial_irreducible
+/-- info: 'Minidregg.Compiler.ext6Q_finrank' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ext6Q_finrank
+/-- info: 'Minidregg.Compiler.ext6Mul_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ext6Mul_correct
 
 end Minidregg.Compiler

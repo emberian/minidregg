@@ -501,10 +501,15 @@ theorem acceptedSparseBusLookup
     rw [rowIndexExact row]
   continuity := ExactBusClaim.twistContinuity bus
 
-#print axioms TwistContinuity.of_busRelation
-#print axioms ExactBusClaim.twistContinuity
-#print axioms committedBusTrace_canonicalAddressLinked
-#print axioms canonicalBus_finalStatement
-#print axioms acceptedSparseBusLookup
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.TwistContinuity.of_busRelation' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms TwistContinuity.of_busRelation
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.ExactBusClaim.twistContinuity' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms ExactBusClaim.twistContinuity
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.committedBusTrace_canonicalAddressLinked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms committedBusTrace_canonicalAddressLinked
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.canonicalBus_finalStatement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalBus_finalStatement
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.acceptedSparseBusLookup' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedSparseBusLookup
 
 end Minidregg.Compiler.SparseAuthenticatedStateLogupBridge
