@@ -55,18 +55,16 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
   `ValidOperation`, a real `Capability.Admissible` (scope, epoch, revocation — NOT
   discharged by a permissive portal, since admissibility is semantic), an
   `AcceptedCellEffect` over the Hyperdocument schema, and a `Config`. The `Config` is
-  the actual gate: it demands `LawfulCodec Action`, `LawfulCodec Declaration`, and
-  `LawfulCodec (Request .object)`, and **no lawful codec for any of those exists
-  anywhere in the tree** — the only two in the repo are for `Digest`
-  (`Sp800185Cshake256.digestCodec` and `AuthenticatedColumnPlan.digestUnaryCodec`).
+  the largest single piece of work: it demands `LawfulCodec Action`,
+  `LawfulCodec Declaration`, and `LawfulCodec (Request .object)`, none of which exists.
 
-  **Codec scoping.** `LawfulCodec (Request .object)`
-  was a page because every field is a flat wrapper. `LawfulCodec Action` will not be: its
-  six payloads reference `ElementBody`, `AtomRecord`, `AtomKind`, `StableRange`,
-  `LinkTarget`, and `StoredTransclusionRef`, each of which needs its own codec, and
-  `StableRange` bottoms out in stable points and anchors. Budget it as a walk of the
-  Hyperdocument type tree — mechanical with the toolkit, but broad. `Declaration` then
-  needs `OperationIntent` and `RequestEnvelope` on top.
+  **Codec scoping.** `Request .object` is fifteen flat wrapper fields, so it is roughly a
+  page of `xmap`/`product` over `StreamCodec`. `Action` will not be: its six payloads
+  reference `ElementBody`, `AtomRecord`, `AtomKind`, `StableRange`, `LinkTarget`, and
+  `StoredTransclusionRef`, each needing its own codec, and `StableRange` bottoms out in
+  stable points and anchors. Budget it as a walk of the Hyperdocument type tree —
+  mechanical, but broad. `Declaration` then needs `OperationIntent` and `RequestEnvelope`
+  on top.
 
   **The toolkit to build them with already exists**, in
   `Compiler.Tower256ConcreteBackend.StreamCodec`: a prefix codec with the append law
