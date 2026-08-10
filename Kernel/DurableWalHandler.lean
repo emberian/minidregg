@@ -355,6 +355,43 @@ def committedStep :
         staged := none } :=
   stageThenCommit device intent unrecorded preflighted
 
+/-- The device after the commit marker. -/
+def afterCommit : WalState Nat Nat Nat Nat where
+  checkpoint := device.checkpoint
+  committed := device.committed ++ [intent]
+  staged := none
+
+/-- **The retry is idempotent at closed data.**  Re-submitting the same
+transaction against the recovered snapshot replays under the ordinary complete
+schedule -- computed, not argued. -/
+theorem retry_replays :
+    execute .complete afterCommit.recovered intent =
+      Outcome.replayed intent := by
+  rw [show afterCommit.recovered = Snapshot.install device.recovered intent from
+    WalState.recovered_append device intent none]
+  exact execute_retry_after_install .complete device.recovered intent
+
+/-- Background compaction folds the one durable record into the checkpoint. -/
+def afterCheckpoint : WalState Nat Nat Nat Nat where
+  checkpoint := Snapshot.install afterCommit.checkpoint intent
+  committed := []
+  staged := afterCommit.staged
+
+/-- **Compaction is invisible at closed data too.**  The log is now empty and
+the checkpoint has absorbed the record, and a cold start reads exactly the same
+snapshot. -/
+theorem checkpoint_preserves_recovery :
+    afterCheckpoint.recovered = afterCommit.recovered :=
+  WalState.recovered_checkpointOne afterCommit intent [] rfl
+
+/-- And the retry stays idempotent after compaction: the journal survived the
+fold, so a replayed request is still recognized. -/
+theorem retry_replays_after_checkpoint :
+    execute .complete afterCheckpoint.recovered intent =
+      Outcome.replayed intent := by
+  rw [checkpoint_preserves_recovery]
+  exact retry_replays
+
 /-- And the resulting device recovers to a snapshot that differs from where it
 started -- the record is really durable. -/
 theorem committedStep_changes :
@@ -377,6 +414,9 @@ end ClosedInstance
 #print axioms unguarded_append_breaks_refinement
 #print axioms crash_before_marker_loses_record
 #print axioms ClosedInstance.preflighted
+#print axioms ClosedInstance.retry_replays
+#print axioms ClosedInstance.checkpoint_preserves_recovery
+#print axioms ClosedInstance.retry_replays_after_checkpoint
 #print axioms ClosedInstance.committedStep_changes
 
 end Minidregg.Kernel.DurableWalHandler
