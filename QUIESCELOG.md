@@ -292,8 +292,10 @@ acceptance does not imply FHE privacy or correctness of an opaque native impleme
   and dependency integrity all zero. A second fresh run intentionally mutated the archived
   `README.md` after a command exit of zero; the runner rejected it with exit 86, kept dependency
   integrity, and left the live README hash unchanged. Both runs used APFS clones with a complete
-  cross-seed/run distinct-inode audit. The runner must never repair the current shared `.lake`
-  topology by mutating or deleting user caches.
+  cross-seed/run audit: 120,167 seed files, 120,168 run-private files, and zero shared inodes.
+  macOS rejected the address-space `RLIMIT_AS` probe; the evidence records that honestly as
+  unsupported while retaining process-group wall-clock timeout enforcement. The runner must never
+  repair the current shared `.lake` topology by mutating or deleting user caches.
 - GPUs exist physically on both large hosts but no usable ROCm path was available during this
   session. Current evidence is CPU-only.
 
