@@ -17,6 +17,7 @@ import Theory.CellState  -- typed logical cells, canonical materialization, and 
 import Theory.CellStateWitness  -- ANTI-VACUITY: a closed schema/codec/materializer/cell whose patch actually reaches `ValidatedPatch` through `validate`, plus stale-root and both footprint-mismatch rejections computed
 import Theory.TypedAuthorizationWitness  -- ANTI-VACUITY: a built portal/state/request that reaches `Authorized`, with the policy gate and the epoch equation shown load-bearing as refutations (evidence exists; authority does not follow)
 import Theory.AcceptedCellEffectWitness  -- ANTI-VACUITY, the summit: a closed `AcceptedCellEffect` standing on the two witnesses above, forced sealed, with both request-binding equations exhibited as refutations
+import Theory.CanonicalTransitionWitness  -- ANTI-VACUITY: a `PreparedTurn` whose derived post-root actually MOVES (`⟨0⟩` to `⟨1⟩`) — a singleton state space would have inhabited the type while testing nothing
 import Theory.ReactiveCellTransition  -- declaration-derived reactive control plus validated typed patches; physical CAS/nullifier insertion is an explicit handler premise
 import Theory.CanonicalTransition  -- one canonical materialized post and proof-relevant typed delta unify ordinary and reactive prepared turns without a parallel store or caller-supplied roots
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition

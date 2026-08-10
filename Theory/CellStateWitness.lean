@@ -40,7 +40,7 @@ set_option autoImplicit false
 field footprint to get wrong. -/
 def schema : Schema.{0, 0, 0, 0} where
   Field := Unit
-  FieldType := fun _ => Unit
+  FieldType := fun _ => Bool
   Resource := Empty
   ResourceType := fun resource => resource.elim
   Authority := fun resource => resource.elim
@@ -49,34 +49,41 @@ def schema : Schema.{0, 0, 0, 0} where
 instance : DecidableEq schema.Field := inferInstanceAs (DecidableEq Unit)
 instance : DecidableEq schema.Resource := fun resource => resource.elim
 
-/-- The only logical state this schema has. -/
-def logical : LogicalState schema where
-  fields := fun _ => ()
+/-- A logical state is determined by its one field, since the resource family
+is empty. -/
+def stateOf (value : Bool) : LogicalState schema where
+  fields := fun _ => value
   resources := fun resource => resource.elim
 
-theorem logical_unique (state : LogicalState schema) : state = logical := by
+/-- The one field, read at `Bool` rather than at the schema's projection. -/
+def fieldValue (state : LogicalState schema) : Bool := state.fields ()
+
+theorem state_ext (state : LogicalState schema) :
+    state = stateOf (fieldValue state) := by
   cases state with
   | mk fields resources =>
-      have hf : fields = logical.fields := funext fun _ => rfl
-      have hr : resources = logical.resources := funext fun resource => resource.elim
+      have hf : fields = fun _ => fields () := funext fun _ => rfl
+      have hr : resources = fun resource => resource.elim :=
+        funext fun resource => resource.elim
       rw [hf, hr]
+      rfl
 
-/-- A lawful codec: the state space is a singleton, so the empty encoding
-round-trips.  `decode_encode` is a theorem about built functions, not a
-carried assumption. -/
+/-- A lawful codec: one byte carrying the one field.  `decode_encode` is a
+theorem about built functions, not a carried assumption. -/
 def stateCodec : LawfulCodec (LogicalState schema) where
-  encode := fun _ => []
-  decode := fun _ => some logical
-  decode_encode := fun state => by rw [logical_unique state]
+  encode := fun state => [if fieldValue state then 1 else 0]
+  decode := fun bytes => some (stateOf (decide (bytes = [1])))
+  decode_encode := fun state => by
+    rw [state_ext state]
+    cases hvalue : fieldValue state <;> simp [stateOf, fieldValue, hvalue]
 
-/-- Roots are the byte length, which is honest for a singleton state space and
-makes the pre-root check below compute. -/
+/-- The root is the one encoded byte, so a field change moves the root. -/
 def materializer : Materializer schema Digest where
   codec := stateCodec
-  rootBytes := fun bytes => ⟨bytes.length⟩
+  rootBytes := fun bytes => ⟨(bytes.headD 0).toNat⟩
 
-/-- **The cell exists.** -/
-def cell : Materialized materializer := materialize materializer logical
+/-- **The cell exists**, holding `false`. -/
+def cell : Materialized materializer := materialize materializer (stateOf false)
 
 theorem cell_root : cell.root = ⟨0⟩ := rfl
 
@@ -87,7 +94,7 @@ def honestPatch : Patch schema Digest where
   expectedPreRoot := ⟨0⟩
   fieldFootprint := {()}
   resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := () }]
+  fieldWrites := [{ field := (), value := true }]
   resourceWrites := []
 
 /-- **Validation accepts, by computation.**  The outcome is the accepted
@@ -146,7 +153,7 @@ theorem underDeclaredPatch_rejected :
   rw [dif_neg
     (show ¬underDeclaredPatch.fieldFootprint = underDeclaredPatch.namedFields by decide)]
 
-#print axioms logical_unique
+#print axioms state_ext
 #print axioms cell_root
 #print axioms honestPatch_accepted
 #print axioms validatedPatch_nonempty
