@@ -125,6 +125,12 @@ parallel authorization semantics.
     manifest pin or native kernel.
 19. Remote and benchmark evidence identifies exact committed source and supports only its stated
     claim ceiling.
+20. A theorem quantified over a type nothing inhabits is true and worthless. Load-bearing carriers
+    carry a witness at built parameters, and each witness carries refutations showing its equations
+    are constraints. Witness parameters are never mistaken for deployed ones.
+21. Axiom footprints are pinned, not printed. A declaration's `#print axioms` output rides in a
+    `#guard_msgs (whitespace := lax) in` so drift fails the build; a bare print is a log line nobody
+    reads. Use the lax form — Lean wraps the axiom list for long declaration names.
 
 ## Semantic machine
 
