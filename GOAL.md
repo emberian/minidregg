@@ -42,6 +42,28 @@ Still open, and narrower: whether the **deployed** parameters admit a head. The 
 uses `ZMod 5` and a finite-enumeration commitment — injective, so binding is a theorem,
 but not succinct and not the deployed scheme.
 
+**Where the next one is likely to be — a measured, not felt, claim**
+
+The `VerifiedHistoryHead` hole was not bad luck. Anti-vacuity discipline is unevenly
+distributed across the layers, and the distribution is measurable. Files containing a
+computed keystone (`by decide`, `#eval`, `native_decide`), as a fraction of `.lean` files
+in the directory:
+
+| layer | computed keystone | satisfiability/teeth marker |
+|---|---|---|
+| `Loom/` | 49/73 (67%) | 64/73 (88%) |
+| `Compiler/` | 38/72 (53%) | 36/72 (50%) |
+| `Kernel/` | 5/22 (23%) | 17/22 (77%) |
+| `Assurance/` | 11/56 (20%) | 22/56 (39%) |
+| `Theory/` | 5/40 (13%) | 17/40 (43%) |
+
+Read pessimistically and with the scope stated: these are **grep proxies over file
+counts, not a semantic audit** — a file can be fully grounded without a `decide`, and a
+`decide` can prove something irrelevant. What they do show is that the keystone habit
+Loom was built with thinned as the work moved into the newer semantic layers, and that
+`Assurance/` and `Theory/` are where an empty-carrier theorem is least likely to be
+caught. `Assurance/` is exactly where tonight's hole was.
+
 **Done-log**
 
 - `3e28d95` — quiescent integration gate closed: the six wind-down modules are imported
