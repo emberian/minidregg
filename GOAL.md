@@ -48,8 +48,22 @@ bottoms out in built data. What remains is the carriers the sweep has not reache
 - `HyperdocumentAgentOperation.AcceptedOperation` — the biggest one left, and the most
   load-bearing: its only theorems are `no_wrong_version` and `no_outside_scope`, two
   `IsEmpty` results that say nothing if the type is empty anyway. It is also the
-  workflow tonight's durable installation is about. Needs the Hyperdocument config /
-  declaration / portal stack, so expect it to be the longest construction of the set.
+  workflow tonight's durable installation is about.
+
+  **Scoped, so this is estimable rather than open-ended.** It reduces to
+  `HyperdocumentOperations.Accepted`, which needs an `AuthenticatedPrincipal`, a
+  `ValidOperation`, a real `Capability.Admissible` (scope, epoch, revocation — NOT
+  discharged by a permissive portal, since admissibility is semantic), an
+  `AcceptedCellEffect` over the Hyperdocument schema, and a `Config`. The `Config` is
+  the actual gate: it demands `LawfulCodec Action`, `LawfulCodec Declaration`, and
+  `LawfulCodec (Request .object)`, and **no lawful codec for any of those exists
+  anywhere in the tree** — the only two in the repo are for `Digest`
+  (`Sp800185Cshake256.digestCodec` and `AuthenticatedColumnPlan.digestUnaryCodec`).
+
+  Cheap route: `digestUnaryCodec`'s trick generalises. `encode n := List.replicate n 0`
+  with a `1` delimiter between fields gives an injective multi-field encoding whose
+  round-trip `simp`s, at the cost of unary size — irrelevant for a witness. Budget the
+  codecs as the bulk of the work, not the operation.
 - `Compiler.DialectClauseDispatch.VerifiedExecution` and `ResolvedClause`.
 - `Kernel.DeclaredHyperedge.CommittedHyperedge` — reachable through the executable
   `execute` path, but this is the legacy integer-store carrier the tree itself calls
