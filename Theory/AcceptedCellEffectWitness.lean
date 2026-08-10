@@ -242,6 +242,29 @@ theorem no_accepted_of_stalePreRoot :
 accepted effect's disclosure decision cannot be anything else. -/
 theorem accepted_is_sealed : accepted.disclosure = .sealed := rfl
 
+/-! ### And the authority gate is inherited
+
+The two request-binding equations above are local to this structure.  This one
+is not: the accepted effect carries an `Authorized` field, so every refutation
+proved about authority in `TypedAuthorizationWitness` propagates here.  That is
+the architecture's claim -- "under one complete request-indexed authority" --
+turned into two theorems rather than a sentence. -/
+
+/-- Close the policy gate and no accepted effect exists, even though every
+evidence mode still verifies and the patch still validates. -/
+theorem no_accepted_of_policyClosed :
+    IsEmpty (AcceptedCellEffect (portal := policyClosedPortal)
+      (authState := authState) family request cell () ()) :=
+  ⟨fun token => authorized_isEmpty_of_policyClosed.false token.authorization⟩
+
+/-- Rotate the policy epoch out from under the request and the same follows:
+the effect cannot be accepted against an authority state its request no longer
+quotes. -/
+theorem no_accepted_of_staleEpoch :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := rotatedState) family request cell () ()) :=
+  ⟨fun token => authorized_isEmpty_of_staleEpoch.false token.authorization⟩
+
 #print axioms disclosure_forced_sealed
 #print axioms acceptedCellEffect_nonempty
 #print axioms acceptedTrue_nonempty
@@ -252,5 +275,7 @@ theorem accepted_is_sealed : accepted.disclosure = .sealed := rfl
 #print axioms no_accepted_of_wrongEffects
 #print axioms no_accepted_of_stalePreRoot
 #print axioms accepted_is_sealed
+#print axioms no_accepted_of_policyClosed
+#print axioms no_accepted_of_staleEpoch
 
 end Minidregg.Theory.AcceptedCellEffectWitness
