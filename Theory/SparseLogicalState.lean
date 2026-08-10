@@ -116,6 +116,52 @@ theorem nonempty_lawfulCodec_sparse {S : Schema.{0, 0, 0, 0}}
   haveI : Nonempty (SparseState S) := ⟨⟨[]⟩⟩
   MaterializerCardinality.nonempty_lawfulCodec_of_countable
 
+/-! ## The fix, demonstrated on a real schema
+
+Existence in the abstract is cheap.  This is `DeclaredTurn.effectSchema` -- the
+first migration step, and the schema `Kernel.DeclaredHyperedge` sits on --
+carried all the way to a codec, so the fix is shown to work on something the
+tree actually uses rather than on a hypothetical countable schema. -/
+
+open Minidregg.Theory.EffectDeclaration in
+/-- A first-order code for the three state-key constructors.  Nothing subtle:
+the point is that `StateKey` is countable, and Lean does not derive that. -/
+def stateKeyCode : StateKey -> Nat × Nat × Nat
+  | .objectField object field => (0, object.value, field.value)
+  | .accountBalance account resource => (1, account.value, resource.value)
+  | .programCode program => (2, program.value, 0)
+
+open Minidregg.Theory.EffectDeclaration in
+theorem stateKeyCode_injective : Function.Injective stateKeyCode := by
+  rintro (⟨⟨o⟩, ⟨f⟩⟩ | ⟨⟨a⟩, ⟨r⟩⟩ | ⟨⟨p⟩⟩) (⟨⟨o'⟩, ⟨f'⟩⟩ | ⟨⟨a'⟩, ⟨r'⟩⟩ | ⟨⟨p'⟩⟩) same <;>
+    simp_all [stateKeyCode]
+
+open Minidregg.Theory.EffectDeclaration in
+instance : Countable StateKey :=
+  Function.Injective.countable stateKeyCode_injective
+
+instance : Countable DeclaredTurn.effectSchema.Field :=
+  inferInstanceAs (Countable EffectDeclaration.StateKey)
+
+open Minidregg.Theory.EffectDeclaration in
+instance : Countable (Sigma DeclaredTurn.effectSchema.FieldType) :=
+  Function.Injective.countable
+    (f := fun entry => (entry.1, show Int from entry.2))
+    (by
+      rintro ⟨key, value⟩ ⟨key', value'⟩ same
+      simp only [Prod.mk.injEq] at same
+      obtain ⟨sameKey, sameValue⟩ := same
+      subst sameKey
+      simp_all)
+
+/-- **A codec exists for the sparse effect state.**  The schema
+`MaterializerCardinality.effectMaterializer_isEmpty` proves unmaterializable as
+a total function is materializable the moment its state is finitely supported.
+That is the fix, on a schema the kernel actually uses. -/
+theorem nonempty_lawfulCodec_sparse_effect :
+    Nonempty (LawfulCodec (SparseState DeclaredTurn.effectSchema.{0, 0})) :=
+  nonempty_lawfulCodec_sparse
+
 /-! ## Migration order, and why each step is separable
 
 Each schema moves independently because nothing reads another schema's cells.
@@ -158,5 +204,9 @@ nonempty infinite `Resource`, it needs this same treatment.
 #guard_msgs (whitespace := lax) in #print axioms countable_sparseState
 /-- info: 'Minidregg.Theory.SparseLogicalState.nonempty_lawfulCodec_sparse' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms nonempty_lawfulCodec_sparse
+/-- info: 'Minidregg.Theory.SparseLogicalState.stateKeyCode_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms stateKeyCode_injective
+/-- info: 'Minidregg.Theory.SparseLogicalState.nonempty_lawfulCodec_sparse_effect' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms nonempty_lawfulCodec_sparse_effect
 
 end Minidregg.Theory.SparseLogicalState
