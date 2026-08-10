@@ -4,20 +4,20 @@
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
 still governs; this block is the live trail.
 
-**Current thrust:** keep hunting for the next vacuity of the kind found tonight — a
-type every theorem quantifies over that nothing inhabits — and close them the same way,
-with built witnesses rather than prose.
+**Current thrust:** the anti-vacuity sweep has run from `Theory/CellState` up through
+`Kernel/MultiCellHyperedge`; every rung the durable and history work stands on now
+bottoms out in built data. What remains is the carriers the sweep has not reached.
 
 **Next 3 moves**
 
-1. Sweep the other quantified-over carriers the same way `VerifiedHistoryHead` was
-   swept: `AcceptedCellEffect`, `MultiCellHyperedge.Commit`, `VerifiedExecution`,
-   `AcceptedOperation`. Anything never constructed gets a witness or a recorded finding.
-2. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
+1. Finish the sweep: `Compiler.DialectClauseDispatch.VerifiedExecution`,
+   `HyperdocumentAgentOperation.AcceptedOperation`, `Kernel.DeclaredHyperedge`. Anything
+   never constructed gets a witness or a recorded finding, same as the others.
+2. Two DIFFERENT schemas in the joint-commit witness — cross-schema heterogeneity is
+   still typed but untested, and that is what `MultiCellHyperedge` is for.
+3. Derive `PcsCrRomReduction` from the raw carrier instead of assuming it: each branch
    of `attribution_split` should name the ledger event it pays, with the retained
    equivocation paying `commitmentBinding` through the collision bridge.
-3. Then breadth: a second consumer slice on the WAL handler, or the authorization
-   issue/attenuate/revoke path over canonical authority cells.
 
 **Evidence grade.** Three isolated committed-source runs, all `command_exit=0`,
 `source_integrity_exit=0`, `dependency_integrity_exit=0`:
@@ -147,6 +147,13 @@ the deployed ones.
   `.olean` was stale. `lake env lean` on an edited file writes no olean, so an importing
   file silently loads the previous version. A stale cache manufactures a RED as readily
   as a green.
+- `c5628d0` + `b46a3d8` — `MultiCellHyperedge.Commit` exhibited, then made actually
+  joint. Two incidences, two distinct cell identities, two distinct accepted effects over
+  distinct pre-cells with distinct effect digests, and an aggregate law that balances by
+  CANCELLATION (`+1` and `-1` over `Int`) rather than by both sides being zero. This is
+  the carrier `DurablePlan` and tonight's `HyperdocumentDurableInstallation` quantify
+  over, so those statements are no longer conditional on an unbuilt commit. Cross-SCHEMA
+  heterogeneity is still typed but untested. `3238` jobs, exit `0`, boundary `0`.
 
 ---
 
