@@ -29,6 +29,7 @@ The witness schemas in `Theory.CellStateWitness` are finite and are unaffected.
 -/
 import Theory.CellState
 import Theory.CredentialAuthorityState
+import Theory.DeclaredTurn
 import Theory.Hyperdocument
 
 namespace Minidregg.Theory.MaterializerCardinality
@@ -172,6 +173,51 @@ theorem hyperdocumentMaterializer_isEmpty :
   materializer_isEmpty_of_natBool_embedding (Root := Digest) documentStateOf
     documentStateOf_injective
 
+/-! ## And the legacy turn schema, which reaches the flat hyperedge
+
+`DeclaredTurn.effectSchema` has `Field := EffectDeclaration.StateKey`, indexed
+by resource identifiers that are digest wrappers over `Nat`, at value type
+`Int`.  Same obstruction -- and this is the schema `Kernel.DeclaredHyperedge`
+uses, so the flat multi-incidence turn carrier is over an uninhabitable cell
+too. -/
+
+open Minidregg.Theory.DeclaredTurn in
+/-- Mark program `index` with `1` or `0`. -/
+def effectStateOf (marked : Nat -> Bool) : LogicalState effectSchema where
+  fields := fun key =>
+    match key with
+    | .programCode program =>
+        show Int from if marked program.value then 1 else 0
+    | _ => show Int from 0
+  resources := fun resource => nomatch resource
+
+open Minidregg.Theory.DeclaredTurn in
+theorem effectStateOf_injective : Function.Injective effectStateOf := by
+  intro left right same
+  funext index
+  have fields := congrArg LogicalState.fields same
+  have point := congrFun fields (.programCode ⟨index⟩)
+  simp only [effectStateOf] at point
+  by_cases hleft : left index = true
+  · by_cases hright : right index = true
+    · rw [hleft, hright]
+    · simp [hleft, hright] at point
+      exact absurd point (show (1 : Int) ≠ 0 by decide)
+  · by_cases hright : right index = true
+    · simp [hleft, hright] at point
+      exact absurd point (show (0 : Int) ≠ 1 by decide)
+    · simp only [Bool.not_eq_true] at hleft hright
+      rw [hleft, hright]
+
+open Minidregg.Theory.DeclaredTurn in
+/-- **The legacy effect cell has no materializer either.**  So
+`Kernel.DeclaredHyperedge`, which the architecture calls the call-forest
+replacement carrier, is also over an uninhabitable cell. -/
+theorem effectMaterializer_isEmpty :
+    IsEmpty (Materializer effectSchema.{0, 0} Digest) :=
+  materializer_isEmpty_of_natBool_embedding (Root := Digest) effectStateOf
+    effectStateOf_injective
+
 /-! ## Countability is also SUFFICIENT
 
 The obstruction above is a counting one, so it is worth knowing that counting
@@ -257,6 +303,10 @@ theorem finite_schema_state_countable {S : Schema.{0, 0, 0, 0}}
 #guard_msgs (whitespace := lax) in #print axioms hyperdocumentMaterializer_isEmpty
 /-- info: 'Minidregg.Theory.MaterializerCardinality.no_authority_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_authority_cell
+/-- info: 'Minidregg.Theory.MaterializerCardinality.effectStateOf_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms effectStateOf_injective
+/-- info: 'Minidregg.Theory.MaterializerCardinality.effectMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms effectMaterializer_isEmpty
 /-- info: 'Minidregg.Theory.MaterializerCardinality.nonempty_lawfulCodec_of_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms nonempty_lawfulCodec_of_countable
 /-- info: 'Minidregg.Theory.MaterializerCardinality.materializer_nonempty_iff_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
