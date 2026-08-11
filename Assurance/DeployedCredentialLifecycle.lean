@@ -84,11 +84,15 @@ theorem bounded_page_agrees_with_initial_selection :
         policyEpochAt initialCell examplePolicy /\
       prePage.policyAddressAt examplePolicy 2 =
         policyAddressAt initialCell examplePolicy 2 := by
-  constructor <;>
-    simp [Page.policyEpochAt, Page.policyAddressAt, Page.toCanonicalState,
-      Page.entries, prePage, oldPolicy, Entry.install, initialCell_logical,
-      initialLogical]
-  all_goals rfl
+  constructor
+  · rw [initial_policy_epoch]
+    simp [Page.policyEpochAt, Page.toCanonicalState,
+      Page.entries, prePage, oldPolicy, Entry.install]
+    rfl
+  · rw [initial_policy_address]
+    simp [Page.policyAddressAt, Page.toCanonicalState,
+      Page.entries, prePage, oldPolicy, Entry.install]
+    rfl
 
 /-! ## A verifier boundary suitable only for inhabitation -/
 
@@ -518,7 +522,7 @@ theorem attenuated_frame
         {AuthorityField.capability .object ⟨100⟩,
           AuthorityField.nullifier 1001})
     decide)]
-  simp [initialCell_logical, initialLogical, issuerEpochAt, prePage,
+  simp [initialCell_logical, initialLogical, prePage,
     Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
     rootCapability]
   rfl
@@ -877,5 +881,215 @@ theorem bounded_page_agrees_with_final_selection :
   exact ⟨post_policy_epoch_exact.trans final_policy_epoch_three.symm,
     post_policy_address_exact.trans final_policy_address_three.symm,
     post_revocation_member⟩
+
+/-! ## Payload-bearing durable use with an exact authority read guard -/
+
+abbrev fullRoot : List UInt8 -> Digest :=
+  Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
+
+def authorityCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨102⟩
+def resultCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨902⟩
+
+def resultBeforeBytes : List UInt8 := [1, 2]
+def resultAfterBytes : List UInt8 := [7, 8, 9]
+
+noncomputable def durableBeforeBytes
+    (cellId : Minidregg.Kernel.DurableDataIntent.CellId) : List UInt8 :=
+  if cellId = authorityCellId then attenuatedCell.bytes
+  else if cellId = resultCellId then resultBeforeBytes
+  else []
+
+noncomputable def durableBeforeModel :
+    Snapshot TransactionId Minidregg.Kernel.DurableDataIntent.CellId
+      StableNullifier ReplayEnvelope where
+  roots := fun cellId => fullRoot (durableBeforeBytes cellId)
+  consumed := fun _ => false
+  available := fun _ => 10
+  history := []
+  journal := []
+
+noncomputable def durableBefore : DataSnapshot fullRoot where
+  model := durableBeforeModel
+  canonicalBytes := durableBeforeBytes
+  coherent := fun _ => rfl
+
+def useWrite : DataWrite where
+  cellId := resultCellId
+  expectedPre := fullRoot resultBeforeBytes
+  exactPost := fullRoot resultAfterBytes
+  canonicalPostBytes := resultAfterBytes
+
+def useNullifier : StableNullifier where
+  codecVersion := 1
+  domain := prePage.authorityDomain
+  nullifierId := ⟨2001⟩
+  canonicalBytes := [116, 111, 107, 101, 110, 45, 117, 115, 101]
+
+def useEvent : StableEvent where
+  codecVersion := 1
+  domain := prePage.authorityDomain
+  eventId := ⟨9200⟩
+  canonicalBytes := [117, 115, 101, 45, 97, 99, 99, 101, 112, 116, 101, 100]
+
+def baseUseIntent : DataIntent fullRoot where
+  transactionId := ⟨2001⟩
+  writes := [useWrite]
+  readGuards := []
+  nullifiers := [useNullifier]
+  exactCharge := fun _ => 1
+  event := useEvent
+  postRootsBound := by
+    intro write member
+    have exact : write = useWrite := by simpa using member
+    subst write
+    rfl
+  guardsReadOnly := by simp
+
+def sharedFullDigest : SharedDigest AuthorityMaterializer fullRoot where
+  exact := rfl
+
+theorem authority_read_only :
+    authorityCellId ∉ baseUseIntent.writes.map DataWrite.cellId := by
+  decide
+
+noncomputable def guardedUseIntent : DataIntent fullRoot :=
+  guardPolicyRegistry attenuatedCell authorityCellId sharedFullDigest
+    baseUseIntent authority_read_only
+
+@[simp] theorem guarded_use_payload_exact :
+    guardedUseIntent.writes = [useWrite] /\
+      guardedUseIntent.nullifiers = [useNullifier] /\
+      guardedUseIntent.event = useEvent := by
+  simp [guardedUseIntent, guardPolicyRegistry, baseUseIntent]
+
+@[simp] theorem guarded_use_observes_exact_authority_root :
+    guardedUseIntent.readGuards =
+      [{ cellId := authorityCellId, expectedRoot := attenuatedCell.root }] := by
+  simp [guardedUseIntent, baseUseIntent,
+    guardPolicyRegistry_readGuards]
+
+@[simp] theorem base_use_ready :
+    baseUseIntent.preflight durableBefore = .ok () := by
+  decide
+
+@[simp] theorem guarded_use_ready :
+    guardedUseIntent.preflight durableBefore = .ok () := by
+  apply guardPolicyRegistry_preflight_ready attenuatedCell authorityCellId
+    sharedFullDigest baseUseIntent authority_read_only durableBefore
+  · rfl
+  · exact base_use_ready
+
+@[simp] theorem guarded_use_installs_payload :
+    Minidregg.Kernel.DurableDataIntent.execute .complete durableBefore
+      guardedUseIntent =
+        .accepted (DataSnapshot.install durableBefore guardedUseIntent) := by
+  apply Minidregg.Kernel.DurableDataIntent.execute_complete_ready
+  · rfl
+  · exact guarded_use_ready
+
+noncomputable abbrev durableAfterUse : DataSnapshot fullRoot :=
+  DataSnapshot.install durableBefore guardedUseIntent
+
+/-- The first installation debits exactly the Lean-derived charge in every
+closed resource lane. -/
+theorem first_use_exact_charge :
+    guardedUseIntent.exactCharge + durableAfterUse.model.available =
+      durableBefore.model.available := by
+  change guardedUseIntent.erase.exactCharge +
+      (Snapshot.install durableBefore.model guardedUseIntent.erase).available =
+        durableBefore.model.available
+  apply Snapshot.install_exact_debit
+  intro lane
+  change 1 ≤ 10
+  exact (by decide : (1 : Nat) ≤ 10)
+
+@[simp] theorem installed_use_bytes :
+    durableAfterUse.canonicalBytes resultCellId = resultAfterBytes := by
+  decide
+
+@[simp] theorem exact_retry_is_replay :
+    Minidregg.Kernel.DurableDataIntent.execute .complete durableAfterUse
+      guardedUseIntent = .replayed guardedUseIntent.erase := by
+  simp [Minidregg.Kernel.DurableDataIntent.execute, durableAfterUse,
+    DataSnapshot.install_model, Snapshot.lookupRecorded,
+    Intent.sameCheck_self]
+
+/-- Journal lookup precedes root/nullifier/charge checks, so an exact retry is
+an identity on the already-debited snapshot: no second charge is possible. -/
+theorem exact_retry_no_double_charge :
+    (Minidregg.Kernel.DurableDataIntent.execute .complete durableAfterUse
+      guardedUseIntent).storeAfter durableAfterUse = durableAfterUse /\
+      forall lane,
+        ((Minidregg.Kernel.DurableDataIntent.execute .complete durableAfterUse
+          guardedUseIntent).storeAfter durableAfterUse).model.available lane =
+            durableAfterUse.model.available lane := by
+  rw [exact_retry_is_replay]
+  exact ⟨rfl, fun _ => rfl⟩
+
+/-- This is the remaining CR premise for the full sparse-cell carrier.  The
+current byte-length root cannot prove it; a production digest must. -/
+structure FullAuthorityPairBinding : Prop where
+  rootsDistinct : finalCell.root ≠ attenuatedCell.root
+
+noncomputable def afterAuthorityUpdateBytes
+    (cellId : Minidregg.Kernel.DurableDataIntent.CellId) : List UInt8 :=
+  if cellId = authorityCellId then finalCell.bytes
+  else durableBeforeBytes cellId
+
+noncomputable def afterAuthorityUpdateModel :
+    Snapshot TransactionId Minidregg.Kernel.DurableDataIntent.CellId
+      StableNullifier ReplayEnvelope :=
+  { durableBeforeModel with
+    roots := fun cellId => fullRoot (afterAuthorityUpdateBytes cellId) }
+
+noncomputable def afterAuthorityUpdate : DataSnapshot fullRoot where
+  model := afterAuthorityUpdateModel
+  canonicalBytes := afterAuthorityUpdateBytes
+  coherent := fun _ => rfl
+
+/-- The old accepted use cannot cross settlement after the authority cell has
+moved.  This is conditional exactly on the full-cell binding premise above. -/
+theorem authority_update_rejects_old_use
+    (binding : FullAuthorityPairBinding) :
+    guardedUseIntent.preflight afterAuthorityUpdate =
+      .error .staleReadGuard := by
+  apply policy_registry_rotation_rejects_old_intent attenuatedCell
+    authorityCellId sharedFullDigest baseUseIntent authority_read_only
+    afterAuthorityUpdate
+  simpa [afterAuthorityUpdate, afterAuthorityUpdateModel,
+    afterAuthorityUpdateBytes, authorityCellId] using binding.rootsDistinct
+
+/-- On the real bounded page, root movement follows from the existing
+pair-scoped cSHAKE binding premise rather than from a global injectivity lie. -/
+theorem bounded_page_update_moves_root
+    (binding : PairBindingPremise
+      (stateOfOption (some prePage)) (stateOfOption (some postPage))) :
+    preCell.root ≠ postCell.root := by
+  intro sameRoot
+  have statesEqual : stateOfOption (some prePage) =
+      stateOfOption (some postPage) :=
+    state_eq_of_root_eq binding sameRoot
+  have pagesEqual : prePage = postPage := by
+    have fieldsEqual := congrArg
+      (fun state : LogicalState
+        CredentialAuthorityPageMaterializer.schema => state.fields ()) statesEqual
+    simpa [stateOfOption] using fieldsEqual
+  have different : prePage ≠ postPage := by decide
+  exact different pagesEqual
+
+/-- No filesystem, database, RPC stack, or physical transport is claimed here.
+Such a claim must inhabit the existing simulation boundary. -/
+abbrev PhysicalDurabilityCeiling
+    (PhysicalState : Type) (PhysicalStep : PhysicalState ->
+      DataIntent fullRoot -> PhysicalState -> Type)
+    (Represents : PhysicalState -> DataSnapshot fullRoot -> Prop) : Prop :=
+  ImplementationRefinement fullRoot PhysicalState PhysicalStep Represents
+
+/-! ## Axiom audit -/
+
+#print axioms subsequent_child_authorization_rejected
+#print axioms first_use_exact_charge
+#print axioms exact_retry_no_double_charge
+#print axioms authority_update_rejects_old_use
 
 end Minidregg.Assurance.DeployedCredentialLifecycle
