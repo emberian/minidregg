@@ -406,12 +406,12 @@ derivation-totality (every second reading a faithful fold into syntax) must keep
 its payloads syntactic — polynomial with countable `Op`.
 
 ATLAS keystone fields (obligation, statement-first):
-* satisfiable: TODO realizer — Cantor + pigeonhole. `ℕ → Bool` is uncountable;
-  if `fun φ => fold alg (guardT φ)` were injective, `Countable δ` would transfer
-  to `ℕ → Bool` along it (`Countable.of_equiv`-style transfer / `Function.Injective`
-  + `Countable δ` ⟹ countability of the domain), contradiction; non-injectivity
-  is exactly `OpaqueConflation`, and `conflation_blocks_decode` (PROVED below)
-  finishes `NoFaithfulSyntacticReading`. Expected TRUE; one short argument.
+* satisfiable: `opaqueConflation_proved` realizes the cardinality face by Cantor's
+  diagonal argument. If the guard-leaf reading were injective, composing it with
+  a countable target's injection into `ℕ` and the characteristic-function injection
+  `Set ℕ → (ℕ → Bool)` would contradict `Function.cantor_injective`.
+  Non-injectivity is exactly `OpaqueConflation`, and `conflation_blocks_decode`
+  finishes `NoFaithfulSyntacticReading`.
 * teeth: rules out every "compile the closure-carrying IR to descriptors" design —
   the exact shape breadstuffs shipped (`RecStmt.guard` closures) and then had to
   prove uncompilable-as-a-fold (`compile_not_a_seq_hom`). Teeth exercised NOW at a
@@ -436,6 +436,42 @@ theorem conflation_blocks_decode :
   calc φ = decode (fold alg (guardT φ)) := (congrFun hdec (guardT φ)).symm
     _ = decode (fold alg (guardT ψ)) := by rw [heq]
     _ = ψ := congrFun hdec (guardT ψ)
+
+/-- **The cardinality face is realized.** A countable target supplies an injection
+into `ℕ`. Were its guard-leaf fold injective, composing those maps with the
+injective characteristic-function encoding `Set ℕ → (ℕ → Bool)` would inject
+`Set ℕ` into `ℕ`, contradicting Cantor's theorem. -/
+theorem opaqueConflation_proved : OpaqueConflation := by
+  classical
+  intro δ _ alg
+  let readGuard : (ℕ → Bool) → δ := fun φ => fold alg (guardT φ)
+  have hnot : ¬ Function.Injective readGuard := by
+    intro hinj
+    obtain ⟨encode, hencode⟩ := Countable.exists_injective_nat δ
+    let characteristic : Set ℕ → (ℕ → Bool) := fun s n => decide (n ∈ s)
+    have hcharacteristic : Function.Injective characteristic := by
+      intro s t hst
+      ext n
+      constructor
+      · intro hs
+        by_contra ht
+        have h := congrFun hst n
+        simp [characteristic, hs, ht] at h
+      · intro ht
+        by_contra hs
+        have h := congrFun hst n
+        simp [characteristic, hs, ht] at h
+    exact Function.cantor_injective (encode ∘ readGuard ∘ characteristic)
+      (hencode.comp (hinj.comp hcharacteristic))
+  obtain ⟨φ, ψ, heq, hne⟩ := Function.not_injective_iff.mp hnot
+  exact ⟨φ, ψ, hne, heq⟩
+
+/-- **[N3-converse], discharged.** Cantor forces conflation for every countable
+compositional target, and that conflation rules out every decoder recovering the
+opaque executor. -/
+theorem N3_opaque_payloads_forbid_second_reading_proved :
+    N3_opaque_payloads_forbid_second_reading :=
+  ⟨opaqueConflation_proved, conflation_blocks_decode opaqueConflation_proved⟩
 
 /-- Premise-inhabitation witness: a countable-target algebra exists (the constant
 descriptor — every term compiles to `0`). -/
