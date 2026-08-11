@@ -508,6 +508,74 @@ def accept
       disclosure := .sealed
       disclosureAllowed := trivial }
 
+/-! ## Exact causal event projection -/
+
+/-- The final causal event determined by one accepted content effect.
+
+This projection belongs beside the accepted semantic effect: its pre-root is
+the exact input cell and its post-root is the sole verifier-minted post.  The
+Kernel event-log layer stores this record, but does not get to reinterpret or
+reconstruct it. -/
+def Accepted.versionEventRecord
+    {MDoc : Hyperdocument.Materializer Digest}
+    {MAuth : CredentialAuthorityState.Materializer}
+    {config : Config}
+    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {authorityPre : CredentialAuthorityState.Cell MAuth}
+    {documentPre : Hyperdocument.Cell MDoc}
+    {portal : Portal} {declaration : Declaration}
+    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    VersionEventRecord :=
+  { historyDomain := declaration.intent.historyDomain
+    document := declaration.intent.document
+    schema := declaration.intent.schema
+    semanticVersion := declaration.intent.semanticVersion
+    operation := declaration.operationId config
+    parents := declaration.intent.parents
+    preStateRoot := documentPre.root
+    postStateRoot := accepted.accepted.prepared.post.root
+    requestId := declaration.requestId config
+    effectId := declaration.effectDigest config
+    author := declaration.intent.author }
+
+/-- The request-neutral causal preimage is derived from that same record. -/
+def Accepted.causalPreimage
+    {MDoc : Hyperdocument.Materializer Digest}
+    {MAuth : CredentialAuthorityState.Materializer}
+    {config : Config}
+    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {authorityPre : CredentialAuthorityState.Cell MAuth}
+    {documentPre : Hyperdocument.Cell MDoc}
+    {portal : Portal} {declaration : Declaration}
+    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    CausalVersionDag.EventPreimage :=
+  accepted.versionEventRecord.toCausalPreimage
+
+@[simp] theorem Accepted.causalPreimage_pre_root
+    {MDoc : Hyperdocument.Materializer Digest}
+    {MAuth : CredentialAuthorityState.Materializer}
+    {config : Config}
+    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {authorityPre : CredentialAuthorityState.Cell MAuth}
+    {documentPre : Hyperdocument.Cell MDoc}
+    {portal : Portal} {declaration : Declaration}
+    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    accepted.causalPreimage.preStateRoot = documentPre.root :=
+  rfl
+
+@[simp] theorem Accepted.causalPreimage_post_root
+    {MDoc : Hyperdocument.Materializer Digest}
+    {MAuth : CredentialAuthorityState.Materializer}
+    {config : Config}
+    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {authorityPre : CredentialAuthorityState.Cell MAuth}
+    {documentPre : Hyperdocument.Cell MDoc}
+    {portal : Portal} {declaration : Declaration}
+    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    accepted.causalPreimage.postStateRoot =
+      accepted.accepted.prepared.post.root :=
+  rfl
+
 /-! ## Exact post containment and receipt projection -/
 
 theorem applyFieldWrites_member_of_nodup

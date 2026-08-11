@@ -118,17 +118,7 @@ def recordOfContent
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
       documentPre contentPortal contentDeclaration) : VersionEventRecord :=
-  { historyDomain := contentDeclaration.intent.historyDomain
-    document := contentDeclaration.intent.document
-    schema := contentDeclaration.intent.schema
-    semanticVersion := contentDeclaration.intent.semanticVersion
-    operation := contentDeclaration.operationId contentConfig
-    parents := contentDeclaration.intent.parents
-    preStateRoot := documentPre.root
-    postStateRoot := content.accepted.prepared.post.root
-    requestId := contentDeclaration.requestId contentConfig
-    effectId := contentDeclaration.effectDigest contentConfig
-    author := contentDeclaration.intent.author }
+  content.versionEventRecord
 
 /-- This equality is the no-caller-authored-root boundary.  A candidate log
 declaration is admissible only when its complete record is the projection of

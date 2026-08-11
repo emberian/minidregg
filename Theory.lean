@@ -42,6 +42,7 @@ import Theory.HyperdocumentOperationIntent  -- acyclic pre-commit OperationId bi
 import Theory.HyperdocumentOperations  -- first-order create/edit/link/transclude/mark/annotate declarations derive exact accepted content patches, requests, and concrete post records
 import Theory.HyperdocumentInterface  -- versioned capability-scoped interface negotiation for content/history reads and mutations; query never grants ambient object authority
 import Theory.CausalVersionDag  -- content-addressed causal events admit exact resolved parents and concurrent siblings; current-tip-only is an explicit optional policy
+import Theory.HyperdocumentCausalFamily -- ordinary accepted content effects instantiate the causal semantic family; includes one real deployed-schema genesis/history witness
 import Theory.CausalVersionAncestry  -- admitted parent edges induce proof-relevant ancestry, acyclicity, and conservative common-base certificates without a fake unique LCA
 import Theory.Bignum  -- canonical fixed-width little-endian limbs + proved Nat/Int codec (wide digest/challenge substrate)
 import Theory.CrossModulus  -- one canonical integer with exact quotient/remainder views in two coprime moduli; CRT/range/canonicality seams for RNS/FHE bridges
