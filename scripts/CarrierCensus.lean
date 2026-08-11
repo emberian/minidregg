@@ -17,6 +17,12 @@ conditional on a type nobody has shown inhabited, which is the exact shape of
 `VerifiedHistoryHead` before `d257fe9` and of all four `CellState.Schema`
 materializers before `MaterializerCardinality` proved them empty.
 
+An unwitnessed carrier can later be proved impossible or deliberately replaced.
+That must not make it disappear from the honest count, but it also must not
+permanently hide the actionable frontier.  The small audited-non-target registry
+below therefore prints both populations: every unwitnessed carrier, and the
+remaining actionable ones after named impossibility/replacement evidence.
+
 **What this does and does not decide.**  It is a *reachability* query, not a
 proof of emptiness.  An unwitnessed carrier may be perfectly inhabitable and
 merely unbuilt; `MaterializerCardinality` had to prove emptiness separately.
@@ -130,7 +136,28 @@ def mustBeWitnessed : List Name :=
 def mustBeUnwitnessed : List Name :=
   [`Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily]
 
+/-- An unwitnessed carrier whose status has already been decided.  `evidence`
+names the load-bearing impossibility theorem when the status is a theorem rather
+than an architectural replacement.  These entries remain in the honest raw
+count and self-test; they are removed only from the second, actionable ranking. -/
+abbrev AuditAnnotation := Name × String × Option Name
+
+def auditedNonTargets : List AuditAnnotation :=
+  [(`Minidregg.Compiler.Tower256AdditiveFriController.MerklePcs,
+    "legacy binding-closed PCS: formally empty for every positive height; use RawMerklePcs",
+    some `Minidregg.Assurance.Tower256MerkleBindingCardinality.merklePcs_empty_of_positive),
+   (`Minidregg.Compiler.Tower256AdditiveFriController.Verifier,
+    "legacy verifier over the positive-height binding-closed PCS; use the raw verifier path",
+    none),
+   (`Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily,
+    "formally impossible; replaced by RawSemanticHistoryCheckpointGame",
+    some `Minidregg.Assurance.Tower256MerkleBindingCardinality.jointGameFamily_impossible),
+   (`Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection,
+    "global finite-word projection is impossible on root-separated infinite streams; use scoped history",
+    some `Minidregg.Assurance.HistoryProjectionCardinalityTooth.no_historyProjection_of_rootSeparatedStream)]
+
 def selfTest (report : Report) (unwitnessed : NameSet) : MetaM Unit := do
+  let env ← getEnv
   let mut failures : Array String := #[]
   for name in mustBeWitnessed do
     unless report.carriers.contains name do
@@ -142,6 +169,17 @@ def selfTest (report : Report) (unwitnessed : NameSet) : MetaM Unit := do
       failures := failures.push s!"{name}: not a carrier at all (renamed?)"
     unless unwitnessed.contains name do
       failures := failures.push s!"{name}: expected UNWITNESSED, census says witnessed"
+  for annotation in auditedNonTargets do
+    unless report.carriers.contains annotation.1 do
+      failures := failures.push
+        s!"{annotation.1}: audited carrier is absent (renamed?)"
+    unless unwitnessed.contains annotation.1 do
+      failures := failures.push
+        s!"{annotation.1}: audited non-target unexpectedly has an outside witness"
+    if let some evidence := annotation.2.2 then
+      unless env.contains evidence do
+        failures := failures.push
+          s!"{annotation.1}: named evidence {evidence} is absent"
   if failures.isEmpty then
     IO.println s!"self-test                   : PASS ({mustBeWitnessed.length} witnessed, {mustBeUnwitnessed.length} unwitnessed)"
   else
@@ -165,15 +203,28 @@ def run : MetaM Unit := do
   let sorted := unwitnessed.qsort fun a b => a.1 > b.1
   let unwitnessedSet : NameSet :=
     unwitnessed.foldl (fun acc entry => acc.insert entry.2.1) ∅
+  let auditedSet : NameSet :=
+    auditedNonTargets.foldl (fun acc entry => acc.insert entry.1) ∅
+  let actionable := sorted.filter fun entry => !auditedSet.contains entry.2.1
   selfTest report unwitnessedSet
   IO.println s!"carriers declared           : {report.carriers.size}"
   IO.println s!"produced outside home       : {report.producedOutside.toList.length}"
   IO.println s!"skipped, nullary ctor       : {trivialSkipped}"
   IO.println s!"UNWITNESSED, load-bearing   : {sorted.size}"
+  IO.println s!"audited non-targets         : {sorted.size - actionable.size}"
+  IO.println s!"ACTIONABLE, unresolved      : {actionable.size}"
   IO.println ""
-  IO.println "rank by how many declarations quantify over the carrier:"
+  IO.println "audited non-targets (still included in the honest count):"
   IO.println ""
-  for (count, carrier, mod) in sorted.toList.take 40 do
+  for annotation in auditedNonTargets do
+    if unwitnessedSet.contains annotation.1 then
+      let evidence := annotation.2.2.map (fun name => s!"; evidence {name}")
+        |>.getD ""
+      IO.println s!"  {annotation.1}: {annotation.2.1}{evidence}"
+  IO.println ""
+  IO.println "actionable rank by how many declarations quantify over the carrier:"
+  IO.println ""
+  for (count, carrier, mod) in actionable.toList.take 40 do
     IO.println s!"  {count}\t{carrier}    [{mod}]"
 
 end Minidregg.CarrierCensus
