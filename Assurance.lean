@@ -18,6 +18,8 @@ import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject 
 import Assurance.SemanticHistoryFamily  -- request-shape-neutral, proof-relevant entry semantics fold singular turns and joint objects through Loom's one AccClaim
 import Assurance.SemanticHistoryFamilyInstances  -- exact singular-turn and complete flat-hyperedge instances; no synthetic primary request
 import Assurance.AcceptedCellEffectHistory  -- accepted canonical cell effects derive their exact bounded core and enter the same request-shape-neutral verified history family without a legacy turn wrapper
+import Assurance.ScopedAcceptedCellEffectHistory  -- finite declared-footprint openings retain typed roots and exact lookup/frame laws without enumerating an infinite deployed schema
+import Assurance.HistoryProjectionCardinalityTooth  -- proves why the old global finite-field projection cannot encode a root-separated infinite materialized-cell stream
 import Assurance.ReactiveLifecycleHistory  -- weak-hole Promise/Notify/React/Finalize/Expire/Break over authenticated history entries; finalization is an accepted cell effect/typed hyperedge leg and physical CAS remains explicit
 import Assurance.GrainForkSettlement  -- causally linked fork heads settle through one schema-polymorphic typed hyperedge while unresolved conflicts and capability liveness stay proof-relevant
 import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
@@ -33,6 +35,7 @@ import Assurance.SemanticHistoryTower256DeployedBcs  -- the literal retained-his
 import Assurance.SemanticHistoryPcsEventRealization  -- intrinsic retained-history MCA/PCS extraction failure is charged to `historyPcs` alone, and is proved minimal: the CR/ROM disjuncts cannot secretly discharge it
 import Assurance.RawHistoryBcsOpenings  -- the retained-history carrier BEFORE binding: submitted roots/columns kept as-is over an executable `OpeningScheme`, root-preimage attribution separated out, and the equivocation branch exhibited inhabited rather than refuted
 import Assurance.RawHistoryCollisionBridge  -- that retained equivocation IS the landed `BindingFailure`, and at the concrete cSHAKE Merkle scheme it extracts an exact framed collision; the power-of-two coordinate embedding is the named residual
+import Assurance.RawSemanticHistoryCheckpointGame  -- constructible nonempty same-coin history/additive checkpoint game retains attribution, proximity, extracted collision, and oracle-transport failures
 import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedule and one tagged PCS/CR/ROM/FRI/OracleLog/ZK failure ledger; the union bound is over an actual common coin space
 import Assurance.ExtensibleProofCompositionGame  -- disjoint finite ledger extensions preserve every old event/price and add Ext6's eight failures on the same coin without tag reuse
 import Assurance.Tower256LogupControllerAdmission  -- exact verified Tower256 LogUp control admitted only with the canonical codec, real Merkle binding, and one common-game PCS/CR/ROM coin
