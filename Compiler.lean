@@ -30,6 +30,8 @@ import Compiler.HyperdocumentEventPageMaterializer  -- bounded versioned causal-
 import Compiler.CredentialAuthorityPageMaterializer  -- bounded policy/revocation pages project exact committed authority roots, epochs, addresses, and membership
 import Compiler.BoundedPageExtensionCatalog  -- one canonical catalog pins all bounded page schemas/codecs/controllers/domains and a cross-page link bundle
 import Compiler.BoundedPageCellRegistry  -- the three exact framed page materializers cross a dependent heterogeneous create/delete registry with no casts
+import Compiler.BoundedPageSchemaUpgrade  -- V2 page codecs/controllers preserve typed projections while changing exact canonical bytes under an authorized migration
+import Compiler.HyperdocumentIndexPageMaterializer  -- bounded backlink/range index rows have a versioned framed codec, cSHAKE root, and exact causal projection
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
 import Compiler.FiniteSparseMaterializerAudit  -- exact seven-schema census: all accepted/non-vacuous, with four inhabitation-only codecs distinguished from three production-pinned page codecs
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
@@ -37,6 +39,7 @@ import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic rec
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
 import Compiler.DeclaredEffectArtifact -- first-order effect artifact projected from the target-indexed Theory.EffectDeclaration, including the concrete v1 account move
+import Compiler.DeclaredActionBytes -- versioned canonical create/write/move batches compile fail-closed into the accepted action language
 import Compiler.DeclaredHyperedgeArtifact -- flat joint turns emit the complete ordered request/effect family and presentation-root pins; no call forest or opaque witness codec is invented
 import Compiler.NativeWorkProfiles -- Lean-owned closed native work/codec catalog and benchmark schedules; generated workers still return only fallible bytes
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners may block with opaque errors or return bounded data, but cannot choose continuation or acceptance
