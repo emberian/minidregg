@@ -109,6 +109,8 @@ def pullbackFailure {Omega LocalCoin : Type}
   event := failure.event ∘ projection.map
   price := failure.price
   bound := by
+    change uniformProb Omega
+      (fun omega => failure.event (projection.map omega)) ≤ failure.price
     rw [projection.probabilityExact failure.event]
     exact failure.bound
 
@@ -410,8 +412,7 @@ theorem controllerStack_falseAccept_le
       bfv.ledger.total =
       (((raw.product ext6).product note).ledger.total + bfv.ledger.total) by
     rw [RegisteredGame.product_total_exact,
-      RegisteredGame.product_total_exact]
-    ring]
+      RegisteredGame.product_total_exact]]
   exact RegisteredGame.product_falseAccept_le
     ((raw.product ext6).product note) bfv
 
