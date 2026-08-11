@@ -38,6 +38,8 @@ set_option autoImplicit false
 
 noncomputable section
 
+local instance : Nonempty Digest := ⟨⟨0⟩⟩
+
 /-! ## First-order shared-MPC language -/
 
 abbrev Party := Fin 3
@@ -211,17 +213,23 @@ structure StoredCompletion where
   effects : List MpcEffect
 deriving DecidableEq, Countable, Nonempty
 
-def schema : CellState.Schema where
+def schema : CellState.Schema.{0, 0, 0, 0} where
   Field := Unit
   FieldType := fun _ => StoredCompletion
   Resource := Empty
   ResourceType := Empty.elim
-  Authority := Empty.elim
-  Evidence := Empty.elim
+  Authority := fun resource => nomatch resource
+  Evidence := fun resource => nomatch resource
 
-instance : DecidableEq schema.Field := inferInstanceAs (DecidableEq Unit)
-instance : DecidableEq schema.Resource := fun resource => resource.elim
-instance : Countable schema.Field := inferInstanceAs (Countable Unit)
+instance : DecidableEq schema.Field := by
+  change DecidableEq Unit
+  infer_instance
+instance : DecidableEq schema.Resource := by
+  change DecidableEq Empty
+  infer_instance
+instance : Countable schema.Field := by
+  change Countable Unit
+  infer_instance
 instance (_field : schema.Field) : Countable (schema.FieldType _field) :=
   inferInstanceAs (Countable StoredCompletion)
 
@@ -428,16 +436,30 @@ def honestResult : MpcResult where
   outputRepresentation := honestOutputArtifact
   privateOutput := honestOutput
 
+theorem honest_accepts :
+    Accepts (declaration.statementOf honestRequest honestResult)
+      honestEvidence := by
+  simp [Accepts, ComputationDeclaration.statementOf,
+    program, relation, pins, honestRequest, honestInput, honestResult,
+    honestOutputArtifact, honestOutput, reconstructed, outputTag,
+    DeclaredQuorumAgreement, honestEvidence, honestView]
+
 noncomputable def honestCompletion : declaration.Completion honestRequest honestResult where
   inputIdentity := {
     nameBound := rfl
     sourceWitness := ()
     targetWitness := ()
-    verified := by simp [NamedRepresentationBridge.verifyIdentity, inputBridge]
+    verified := by
+      change inputBridge.verifyIdentity honestInput () honestInput () honestInput = true
+      simp [NamedRepresentationBridge.verifyIdentity, inputBridge]
   }
   computation := {
     witness := honestEvidence
-    verified := by native_decide
+    verified := by
+      classical
+      change decide (Accepts
+        (declaration.statementOf honestRequest honestResult) honestEvidence) = true
+      exact decide_eq_true honest_accepts
   }
 
 theorem honestPatch_accepted :
@@ -451,10 +473,10 @@ theorem honestPatch_accepted :
     (adapter.patch honestRequest honestResult).expectedPreRoot = pre.root from rfl)]
   rw [dif_pos (show
     (adapter.patch honestRequest honestResult).fieldFootprint =
-      (adapter.patch honestRequest honestResult).namedFields by decide)]
+      (adapter.patch honestRequest honestResult).namedFields by rfl)]
   rw [dif_pos (show
     (adapter.patch honestRequest honestResult).resourceFootprint =
-      (adapter.patch honestRequest honestResult).namedResources by decide)]
+      (adapter.patch honestRequest honestResult).namedResources by rfl)]
   exact ⟨_, rfl⟩
 
 noncomputable def validated :
@@ -517,7 +539,7 @@ theorem accepted_output_commitment_exact :
         honestResult.outputRepresentation.transcriptDigest
         honestResult.privateOutput := by
   have semantic := accepted.cellEffect.modeEvidence.computation.accepts
-  exact semantic.2.2.2.2.2.2.2.2.1
+  exact semantic.2.2.2.2.2.2.2.1
 
 theorem accepted_patch_stores_committed_completion :
     adapter.patch honestRequest honestResult =
@@ -634,7 +656,15 @@ theorem undersized_quorum_rejected :
     evidencePortal.verify
       (declaration.statementOf honestRequest honestResult)
       undersizedEvidence = false := by
-  native_decide
+  classical
+  change decide (Accepts
+    (declaration.statementOf honestRequest honestResult) undersizedEvidence) = false
+  apply decide_eq_false
+  intro accepted
+  have threshold := accepted.2.2.2.2.2.2.2.2.1
+  have pinsExact := accepted.2.2.1
+  rw [pinsExact] at threshold
+  norm_num [pins, undersizedEvidence] at threshold
 
 def disagreeingEvidence : Evidence where
   views := fun party =>
@@ -646,7 +676,17 @@ theorem disagreeing_quorum_rejected :
     evidencePortal.verify
       (declaration.statementOf honestRequest honestResult)
       disagreeingEvidence = false := by
-  native_decide
+  classical
+  change decide (Accepts
+    (declaration.statementOf honestRequest honestResult) disagreeingEvidence) = false
+  apply decide_eq_false
+  intro accepted
+  have agreement := accepted.2.2.2.2.2.2.2.2
+  have member : (⟨0, by decide⟩ : Party) ∈ disagreeingEvidence.quorum := by
+    simp [disagreeingEvidence]
+  have output := (agreement.2 ⟨0, by decide⟩ member).2.2.2
+  change 16 = 15 at output
+  omega
 
 theorem no_accepted_of_args_mismatch
     {request : Request .object}
@@ -690,7 +730,14 @@ theorem wrong_output_commitment_rejected :
     evidencePortal.verify
       (declaration.statementOf honestRequest wrongCommitmentResult)
       honestEvidence = false := by
-  native_decide
+  classical
+  change decide (Accepts
+    (declaration.statementOf honestRequest wrongCommitmentResult) honestEvidence) = false
+  apply decide_eq_false
+  intro accepted
+  have commitment := accepted.2.2.2.2.2.2.2.1
+  change (⟨999999⟩ : Digest) = ⟨6818⟩ at commitment
+  norm_num at commitment
 
 /-! ## Axiom audit -/
 
