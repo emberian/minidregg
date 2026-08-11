@@ -13,4 +13,8 @@ path = "src/lib.rs"
 name = "minidregg-link-store"
 path = "src/main.rs"
 
+[[bin]]
+name = "forward-link-e2e-bench"
+path = "src/bin/forward_link_e2e_bench.rs"
+
 [dependencies]

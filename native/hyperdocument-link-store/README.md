@@ -20,3 +20,12 @@ These tests establish observed conformance on the tested filesystem. They do
 not prove Rust semantics, POSIX contracts, `sync_all` durability, hard-link
 atomicity, stable media, power-loss survival, or safety against an adversary
 mutating the store directory concurrently.
+
+`forward-link-e2e-bench` exercises the same `LocalLinkStore` through a fresh
+child process for each lifecycle stage. It records raw and nearest-rank
+p50/p95/p99 timings for stage, no-overwrite install with its response ignored,
+restart/read, exact retry, reopen/read, and the complete process lifecycle.
+Every sample uses a fresh directory; warmups precede measured samples, but the
+OS filesystem cache is uncontrolled. The benchmark reports no per-stage memory
+number because child-process peak RSS cannot be attributed reliably with this
+dependency-free harness.
