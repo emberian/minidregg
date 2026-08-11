@@ -22,6 +22,7 @@ import Kernel.TypedCellHyperedgeWitness  -- ANTI-VACUITY: a built same-cell `Com
 import Kernel.MultiCellHyperedgeWitness  -- ANTI-VACUITY: a built two-incidence `Commit` — distinct cell ids, distinct accepted legs over distinct pre-cells, aggregate balanced by CANCELLATION; the carrier the durable protocol and the Hyperdocument installation quantify over. Cross-SCHEMA heterogeneity is still untested
 import Kernel.SparseAuthenticatedState  -- typed sparse ROM/RAM/append-only namespaces, fresh allocation, exact trace footprints/roots/bus rows
 import Kernel.HyperdocumentEventLog  -- final causal events occupy a separate append-only sparse cell with an exact canonical CellState adapter
+import Kernel.HyperdocumentIndexSync  -- bounded persistent backlink/range rows advance from exact causal deltas with replay and cursor-staleness semantics
 import Kernel.DeployedMaterializerWitness  -- the append-only event-log schema has an actual materializer/cell and an exact shared sparse/canonical empty root
 import Kernel.HyperdocumentVersionEffects  -- accepted content effects derive final causal records and append them through a separately authorized sparse log effect
 import Kernel.EventLogMaterializerLimit  -- regression-only reconstruction of the deleted total event-log carrier and its counting obstruction
@@ -44,6 +45,9 @@ import Kernel.AuthorizedResourceCharge  -- authority binds the exact ten-lane co
 import Kernel.ReactiveTerminalCell  -- finalize/cancel/expire/break race for one canonical terminal cell and atomic outbox intent
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races
+import Kernel.PrivateEscrowSettlement  -- sealed computation and separately authorized declassification stage exact escrow release, terminal, and outbox effects
+import Kernel.QuotaGcSettlement  -- root-bound reachability, lease expiry, quotas, and guarded atomic compaction make deletion an admitted settlement rather than a host guess
+import Kernel.DeclaredActionExecution  -- accepted create/write/move batches become a typed hyperedge and payload-bearing durable intent with exact resources and charge
 import Kernel.Receipt    -- the receipt word Q: uproj faithfulness + the frame as a receipt fact (OB-3's kernel side)
 import Kernel.Verbs   -- create + gwrite: the remaining conservation-algebra verbs, conservation (honest side-conditions) + frames + the receipt bridge
 import Kernel.PrivateTurn  -- the private-witness turn: the hyperedge at carrier Pub × Priv; publicView blind to the witness ([PRIVATE-TURN-kernel])

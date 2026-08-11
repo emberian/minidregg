@@ -23,6 +23,7 @@ import Assurance.HistoryProjectionCardinalityTooth  -- proves why the old global
 import Assurance.ReactiveLifecycleHistory  -- weak-hole Promise/Notify/React/Finalize/Expire/Break over authenticated history entries; finalization is an accepted cell effect/typed hyperedge leg and physical CAS remains explicit
 import Assurance.GrainForkSettlement  -- causally linked fork heads settle through one schema-polymorphic typed hyperedge while unresolved conflicts and capability liveness stay proof-relevant
 import Assurance.GrainForkScopedSettlement  -- finite declared field focus replaces impossible whole-infinite-schema enumeration while retaining exact roots, frames, and receipt bindings
+import Assurance.GrainHyperdocumentSettlementWitness  -- a concrete current-authority Hyperdocument fork inhabits the scoped focus, receipt, and settlement carriers with stale/conflict teeth
 import Assurance.SemanticHistoryStraightlinePcs  -- WARP-shaped prefix/fold-root schedule plus explicit straightline erasure extraction and KS/CR/ROM error ledger; not yet a full WARP protocol
 import Assurance.SemanticAdditiveFriCheckpoint  -- canonical zero-padding joins the exact semantic history word/root to additive FRI; KS-good extraction recovers the authoritative head
 import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold challenges, post-challenge fold roots commit exact words, and the terminal root is the additive-FRI initial root
@@ -37,6 +38,8 @@ import Assurance.SemanticHistoryPcsEventRealization  -- intrinsic retained-histo
 import Assurance.RawHistoryBcsOpenings  -- the retained-history carrier BEFORE binding: submitted roots/columns kept as-is over an executable `OpeningScheme`, root-preimage attribution separated out, and the equivocation branch exhibited inhabited rather than refuted
 import Assurance.RawHistoryCollisionBridge  -- that retained equivocation IS the landed `BindingFailure`, and at the concrete cSHAKE Merkle scheme it extracts an exact framed collision; the power-of-two coordinate embedding is the named residual
 import Assurance.RawSemanticHistoryCheckpointGame  -- constructible nonempty same-coin history/additive checkpoint game retains attribution, proximity, extracted collision, and oracle-transport failures
+import Assurance.RawHistorySecurityPrices  -- exact collision and native-FS price interfaces expose the coupling needed for honest same-coin bounds and refute marginal-only shortcuts
+import Assurance.Tower256RawHistoryFsExecution  -- binding-free verifier-owned bytes project to literal SR traces and discharge the intrinsic history PCS/MCA execution classifier
 import Assurance.Tower256AdditiveFriCanonicalExecutionGame  -- actual raw receipt execution yields the exact ideal coin or a priced collision/transport event on one ledger
 import Assurance.Tower256RawSemanticHistoryCanonicalGame  -- canonical raw additive execution and retained-history openings share one four-event coin without universal binding
 import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedule and one tagged PCS/CR/ROM/FRI/OracleLog/ZK failure ledger; the union bound is over an actual common coin space
@@ -56,14 +59,24 @@ import Assurance.HyperdocumentLinkPublicationWitness  -- a concrete genesis-to-l
 import Assurance.HyperdocumentLinkReopenWitness  -- the published link occupies an exact post opening and reopens through the canonical content query
 import Assurance.HyperdocumentLinkFramedRecovery  -- the exact published link survives guarded framed-WAL crash/reopen, retry, and stale-authority rejection
 import Assurance.HyperdocumentLinkEndpointController  -- one human/agent byte envelope proves publish, lost-response crash, recovery, retry, and exact canonical reopen
+import Assurance.HyperdocumentLinkLocalFileStore  -- a bounded opaque local-file boundary exercises staged crash, restart, exact retry, and fail-closed corrupt reads
+import Assurance.HyperdocumentLinkClientCutover  -- human and agent submissions share identical semantic bytes and one exact canonical link receipt
+import Assurance.HyperdocumentLinkClientLocalFileCutover  -- the shared client path survives the exercised local-file lost-response/restart lifecycle
+import Assurance.HyperdocumentLinkPageDurableWeld  -- accepted link/event records become exact bounded page deltas, cSHAKE roots, and one authority-guarded durable intent
+import Assurance.HyperdocumentQueryDeployment  -- versioned authorized content/history query bytes reopen the bounded link and exact causal event with rejection teeth
+import Assurance.HyperdocumentTransclusionReferenceDeployment  -- globally injective stored references and a finite declared-domain backlink witness reopen through the deployed query path
+import Assurance.HyperdocumentIndexSyncEndpoint  -- persistent bounded backlink/range indexes sync causal deltas and reopen through an opaque fallible byte endpoint
+import Assurance.BoundedPageSchemaUpgradeCutover  -- authorized V1-to-V2 page migration preserves semantic projections through durable recovery and quorum-finalized payload identity
 import Assurance.HyperdocumentTwoParentHistoryWitness  -- the concrete two-parent conflict survives at an exact verified-history coordinate
 import Assurance.HyperdocumentMergeDurableFinalityWitness  -- the merged conflict survives guarded WAL recovery and an intersecting-quorum finalization witness
 import Assurance.DeployedCredentialLifecycle  -- concrete issue, strict attenuation, use, revocation/rotation, guarded durable debit, and retry inhabit the bounded authority path
+import Assurance.CredentialTokenLocalEndpoint  -- stable token/use/revoke bytes exercise guarded restart and retry while signature and OS boundaries remain explicit
 import Assurance.HyperdocumentDurableInstallation  -- that slice's durable half with the handler premise DISCHARGED by the constructed WAL device: atomicity, marker installation, crash-before, and idempotent retry no longer quantify over a hypothetical correct store
 import Assurance.TransclusionBacklinkHistory  -- typed durable references, exact source/history/opening identity, authenticated forward welds, and coverage-relative complete backlinks
 import Assurance.SemanticHistoryRecursiveAir  -- stateless public history heads bind into the shared-wire recursive verifier AIR while soundness/KS/ZK/SE remain distinct evidence
 import Assurance.AuthenticatedColumnHistoryBridge  -- openings retained by one accepted authenticated-column trace become the identical binding BCS messages and exact semantic WARP link stream
 import Assurance.PrivateComputationReceiptClause  -- ZK/MPC/FHE completions become manifest-bound receipt disclosures only through exact authorization, named same-opening bridges, evidence, and VerifiedRelease
+import Assurance.MpcSealedCellExecution  -- a concrete shared-MPC accepted cell stores only sealed public commitments while release and executor conformance remain separate
 import Assurance.BfvPrivateComputationJoin  -- the encrypted-RNS/FHE evidence lane instantiates the private receipt with one BFV token and all 384 exact integer equations; suite/privacy/knowledge remain unassigned
 import Assurance.BfvNativeBufferAdmission  -- fallible opaque BFV buffers are checked by Lean row descriptors/link constraints before the 384-row token and private receipt can exist
 import Assurance.BfvAcceptedCellEffect  -- checked all-row BFV admission fills typed private completion, then constructs a sealed canonical accepted effect and common history claim; release remains independent
@@ -74,8 +87,12 @@ import Assurance.BfvSuiteMigrationBoundary  -- zero-to-nonzero suite migration c
 import Assurance.NoteSpendCoreAcceptedCellEffect  -- the note-spend AIR enters the release-free computation core as one sealed authorized canonical effect; hiding/PoK/PCS/CR/ROM remain explicit
 import Assurance.NoteSpendProofControllerAdmission  -- canonical proof control admits the sealed note-spend relation only outside separately priced PCS/PoK/CR/ROM failures; hiding is not inferred
 import Assurance.NoteSpendConcreteCellAdapter  -- one concrete coarse authenticated cell realizes the sealed note-spend adapter without inventing a release or deployable suite
+import Assurance.PrivateEscrowSettlementJoin  -- the inhabited shared-MPC path joins sealed computation to escrow while zero-pinned proof suites remain fail-closed
 import Assurance.ReactiveDurableSettlement  -- accepted reactive content, terminal state, and outbox settle in one retry-safe payload intent with explicit liveness ceilings
 import Assurance.HyperdocumentReactiveCarrierWitness  -- concrete deployed create/history/controller values inhabit the reactive carrier and its durable terminal settlement
+import Assurance.HyperdocumentAgentRuntimeScheduler  -- a leased link job reaches authenticated reaction, atomic terminal/outbox settlement, and crash-safe replay with readiness premises
+import Assurance.DreggNetProviderConsumer  -- a market-bound provider job joins exact lease economics, terminal/refund settlement, retry, and quorum safety
+import Assurance.QuotaGcSettlementWitness  -- an expired unprotected bounded page compacts with exact fee, guards, writes, and no-delete teeth for live/finalized roots
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
 import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
