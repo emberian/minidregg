@@ -161,16 +161,31 @@ theorem argsDigest_injective : Function.Injective argsDigest := by
   intro left right same
   apply operationCode_injective
   have values := congrArg Digest.value same
+  have paired :
+      Nat.pair 0 (operationCode left + 1) =
+        Nat.pair 0 (operationCode right + 1) := by
+    simpa [argsDigest, digestBytes, operationCodec] using values
   have lengths : operationCode left + 1 = operationCode right + 1 := by
-    simpa [argsDigest, digestBytes, operationCodec] using
-      (Nat.pair_eq_pair.mp values).2
+    exact (Nat.pair_eq_pair.mp paired).2
   omega
 
 theorem effectDigest_injective : Function.Injective effectDigest := by
   intro left right same
-  apply argsDigest_injective
   have values := congrArg Digest.value same
-  exact Digest.ext (Nat.pair_eq_pair.mp values).1
+  have paired :
+      Nat.pair (argsDigest left).value (resourceDigest left).value =
+        Nat.pair (argsDigest right).value (resourceDigest right).value := by
+    simpa [effectDigest] using values
+  apply argsDigest_injective
+  cases leftDigest : argsDigest left with
+  | mk leftValue =>
+      cases rightDigest : argsDigest right with
+      | mk rightValue =>
+          have sameValue : leftValue = rightValue := by
+            simpa [leftDigest, rightDigest] using
+              (Nat.pair_eq_pair.mp paired).1
+          cases sameValue
+          rfl
 
 /-! ## The derived common authorization request -/
 
@@ -303,7 +318,9 @@ noncomputable def toCellEffect
     CanonicalResourceKernel.logicalBook
       (toCellEffect accepted context authorization).prepared.post.logical =
       operation.apply (CanonicalResourceKernel.logicalBook pre.logical) := by
-  simpa using accepted.post_logicalBook
+  change CanonicalResourceKernel.logicalBook accepted.post.logical =
+    operation.apply (CanonicalResourceKernel.logicalBook pre.logical)
+  exact accepted.post_logicalBook
 
 theorem toCellEffect_conserves
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
@@ -378,8 +395,10 @@ theorem typedResourceLaw_delta_eq_operation
     (asset : CanonicalResourceKernel.AssetId) :
     (typedResourceLaw M portal).delta
       (toTypedLeg accepted context authorization) asset = 0 := by
-  simp [typedResourceLaw, bookDelta, toTypedLeg,
-    toCellEffect_conserves accepted context authorization asset]
+  rw [typedResourceLaw_delta_eq_operation]
+  exact sub_eq_zero.mpr <|
+    operation.apply_conserves (CanonicalResourceKernel.logicalBook pre.logical)
+      accepted.admission.sourcePresent accepted.admission.destinationPresent asset
 
 /-- A fixed-schema `CellFamily` for genuinely distinct resource-book cells. -/
 def resourceCells
@@ -463,7 +482,8 @@ theorem multiCellResourceLaw_delta_eq_zero_of_conserves
       (CanonicalResourceKernel.logicalBook
         (declaration.pre incidence).logical).totalAsset asset) :
     (multiCellResourceLaw declaration).delta incidence accepted asset = 0 := by
-  simp [multiCellResourceLaw, bookDelta, conserves]
+  rw [multiCellResourceLaw_delta]
+  exact sub_eq_zero.mpr conserves
 
 /-! ## Conservation and negative teeth survive the adapter -/
 
