@@ -1,10 +1,46 @@
 # STANDING GOAL — resumed 2026-08-11
 
-**Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.** Solo: no
-subagents, no workflows. The authoritative snapshot below this block is unchanged and
-still governs; this block is the live trail.
+**Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.**  The
+2026-08-11 resumed megaswarm is explicitly authorized.  This top block is the
+authoritative live trail; the long construction ledger below remains valuable
+history but is not present-tense status.
 
-## 2026-08-11 integration resolution
+## 2026-08-11 resumed megaswarm convergence
+
+The first construction batch is integrated.  It adds exact authorized ten-lane
+charges, payload/read-guard settlement, framed/checksummed WAL crash recovery,
+replicated finality safety, reactive terminal exclusivity, provider leases, canonical
+escrow orders, concrete credential use/revocation/rotation, concrete two-parent Hyperdocument conflicts,
+and exact link publication/reopen/recovery witnesses.  Bounded content, event, and
+authority pages have versioned lawful codecs, Lean cSHAKE roots, stable catalog
+identity, and matched hbox/persvati interpreter evidence.
+
+The proof boundary also moved: concrete raw Tower256 deployment and canonical
+receipt execution now feed a same-coin raw history/additive ledger without the
+formally impossible universal-binding carrier.  Ext6 has nonzero deployment
+identity and reflected control.  BFV and note spend distinguish weak reflected
+receipts from semantic admission, which still requires exact nonzero suite binding
+and the named same-coin security laws.  Zero-pinned current requests remain
+deliberately non-deployable.
+
+The latest resumed full umbrella pass was green at 3,303 jobs.  The stricter census
+now sees a much larger integrated environment: 1,210 declared carriers and 510
+outside-home producers.  Its raw 544 "actionable" count is not a task list: a
+top-40 audit classified 24 as already inhabited/data noise, five as honest
+conditional seams, and three or four as legacy.  Only seven or eight were genuine
+construction gaps; the first concrete computation adapter and the non-vacuous
+LogUp extension deployment have since landed.
+
+Current priority is the smallest honest D cutover.  The current-authority typed
+forward link now has one byte request/effect surface for human and agent origins,
+lost-response/restart recovery, idempotent retry, and exact reopen plus causal
+receipt.  That is still S/A: the real filesystem/database refinement, a client that
+uses it, real credential transport, and an end-to-end benchmark are not landed.  In parallel, close the raw history
+Fiat--Shamir execution bridge and concrete CR/ROM/MCA prices without reviving the
+old binding-closed PCS.  Physical/network liveness and cryptographic security stay
+separate from semantic safety.
+
+## Historical: first 2026-08-11 integration resolution
 
 The materializer obstruction is closed by replacing the total dependent function with
 one canonical finite sparse carrier and exhibiting all four deployed schema cells.  The

@@ -1,6 +1,62 @@
 # FORCODEX — minidregg handoff, 2026-08-11
 
-## Codex integration refresh — later on 2026-08-11
+## Resumed megaswarm convergence — latest authoritative status
+
+The earlier refresh immediately below was accurate when written, but its five
+"next stretches" are now mostly landed.  The resumed swarm constructed the
+carriers instead of weakening their statements, integrated the green modules,
+and kept physical and cryptographic ceilings explicit.
+
+What is now materially true:
+
+- Durable semantics retain canonical post bytes and read guards, derive exact
+  ten-lane authorized charges, frame/checksum WAL records, model torn tails and
+  crash repair, and prove intersecting-quorum finality safety and idempotent
+  failover.  Reactive terminal races, provider execution leases, and canonical
+  escrow deposit/fill/cancel/expiry/refund settle through the same payload-bearing
+  intent and exact-charge model.
+- Hyperdocuments have concrete linear link publication/reopen witnesses and a
+  concrete two-parent conflict merge whose content, causal event, history opening,
+  WAL recovery, and quorum-finalized value all agree.  Content, event-history, and
+  authority state also have bounded versioned page formats with exact Lean cSHAKE
+  roots and one pinned extension catalog.
+- The raw Tower256 path is inhabited by concrete PCS levels, statements, an
+  opaque-byte reflected verifier, an actual receipt-derived additive execution
+  game, and a same-coin raw history/additive four-event join.  The old universally
+  binding checkpoint remains a formally impossible regression target, not a
+  deployment goal.
+- BFV and note-spend control receipts can no longer masquerade as semantic proof
+  admission.  Semantic admission requires nonzero exact suite identity plus the
+  named same-coin arithmetic/PCS/CR/ROM/PoK laws; current zero-pinned requests are
+  proved non-deployable.  The first concrete sealed note-spend cell adapter is now
+  inhabited without adding a release channel.
+- Credential issue, strict attenuation, use, revocation and epoch rotation now
+  run through an exact bounded policy page and a guarded durable debit/retry path.
+  Policy/signature soundness and physical storage are still named boundaries.
+- The bounded page harness has exact-source hbox and persvati evidence: 420 raw
+  samples per host, semantic checks passing, identical encoded-byte/checksum
+  columns, and honest Lean-interpreter throughput only.  It is not a native,
+  cryptographic, I/O, or end-to-end consumer benchmark.
+
+The latest resumed umbrella pass built `Minidregg` locally at 3,303 jobs.  After
+the final integration imports, the carrier census reports 1,210 declared carriers,
+510 outside-home producers, 549 raw unwitnessed carriers, five audited
+impossible/obsolete targets, and 544 nominally actionable entries.  A
+manual top-40 audit found only seven or eight genuinely missing constructions;
+most are already-inhabited nested data, explicit conditional security seams, or
+legacy carriers the canonical flat-hyperedge path supersedes.
+
+The most important open line is now narrow and user-facing.  One request/result
+byte surface is used identically by human and agent origins and proves publish,
+lost-response crash, recovery, retry, and exact reopen.  The remaining weld is the
+accepted semantic posts to exact bounded-page deltas/cSHAKE roots plus a real
+transactional filesystem/database implementation and a client that actually uses
+the endpoint.  Until then, link publication/recovery is S/A rather than D.  Real fsync/OS/device
+refinement, authenticated network votes, replication liveness, concrete PCS/CR/ROM
+prices, production proof suites, client cutover, and end-to-end tail benchmarks
+remain open.
+
+## Historical: first Codex integration refresh — later on 2026-08-11
 
 The handoff below was exactly the right warning at `25d2a5a`, but it is now a
 historical diagnosis rather than current status.  The follow-up swarm did not
