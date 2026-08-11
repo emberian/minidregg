@@ -509,7 +509,10 @@ noncomputable def witnessAuthorization :
       (witnessContext.request CanonicalResourceKernel.witnessCell (.mint 0 1 2)) where
   evidence := .signature () rfl rfl
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 /-- A deployed-schema, request-indexed, authorized resource effect is inhabited. -/
