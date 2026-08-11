@@ -51,12 +51,39 @@ open Minidregg.Compiler.Tower256AdditiveFriRawController
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Loom
+open Minidregg.Theory.IndexedProgram
 
 set_option autoImplicit false
 
 noncomputable section
 
 /-! ## Exact deterministic collision endpoints -/
+
+/-- One exact collision in the selected cSHAKE function, retaining the
+customization string and both unequal framed inputs.  Unlike a generic digest
+equality, this is precisely the endpoint produced by the leaf/node Merkle
+extractor. -/
+def ExactCshakeCollision (cshake : Cshake256) : Prop :=
+  exists customization leftInput rightInput,
+    FramedXofCollision cshake customization leftInput rightInput
+
+/-- A leaf-or-node Merkle collision is literally a collision in the backend's
+selected cSHAKE function.  Domain separation remains visible in the witness:
+the customization is respectively `leafCustomization` or
+`nodeCustomization`. -/
+theorem exactCshakeCollision_of_merkleCollision
+    {Representation : Type} {cshake : Cshake256}
+    (domains : MerkleDomains cshake) (codec : LawfulCodec Representation)
+    (collision : MerkleCollision domains codec) :
+    ExactCshakeCollision cshake := by
+  rcases collision with leaf | node
+  · rcases leaf with ⟨left, right, extracted⟩
+    exact ⟨domains.leafCustomization, leafInput codec left,
+      leafInput codec right, extracted⟩
+  · rcases node with ⟨left₁, right₁, left₂, right₂, extracted⟩
+    exact ⟨domains.nodeCustomization,
+      nodeInput cshake left₁ right₁,
+      nodeInput cshake left₂ right₂, extracted⟩
 
 /-- Every path-specific extractor result contains the exact leaf-or-node
 framed cSHAKE collision.  This projection forgets the paths, not the collision
@@ -87,6 +114,16 @@ theorem merkleCollision_of_receiptCollision
   · exact merkleCollision_of_extractedCollision low
   · exact merkleCollision_of_extractedCollision high
   · exact merkleCollision_of_extractedCollision next
+
+/-- Direct additive-receipt endpoint in the selected cSHAKE vocabulary. -/
+theorem exactCshakeCollision_of_receiptCollision
+    {ell m queryCount : Nat} {pcs : RawMerklePcs ell}
+    {statement : Statement pcs m} {receipt : Receipt ell m queryCount}
+    (collision : ReceiptCollision pcs statement receipt) :
+    ExactCshakeCollision pcs.backend.cshake :=
+  exactCshakeCollision_of_merkleCollision pcs.backend.merkle
+    pcs.backend.tower.valueCodec
+    (merkleCollision_of_receiptCollision collision)
 
 /-! ### Retained raw-history specialization -/
 
@@ -139,6 +176,25 @@ theorem merkleCollision_of_extractedHistoryCollision
   rcases collision with
     ⟨_j, _i, _attempt, _root, _index, _left, _right, extracted⟩
   exact merkleCollision_of_extractedCollision extracted
+
+/-- Direct retained-history endpoint in the selected cSHAKE vocabulary. -/
+theorem exactCshakeCollision_of_extractedHistoryCollision
+    {checkpoint : BoundCheckpoint}
+    {domain : BoundReceiptIx n ↪ TowerField}
+    {degree openedCount : Nat}
+    {transcript : CheckpointHistoryTranscript
+      (ell := ell) (m := m) (n := n) (pcs := pcs) (statement := statement)
+      (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := family)
+      (headerCells := headerCells) (C := C) (idealS := idealS)
+      checkpoint domain degree openedCount}
+    (collision :
+      CheckpointHistoryTranscript.ExtractedHistoryCollision
+        (ell := ell) (pcs := pcs) (checkpoint := checkpoint) transcript) :
+    ExactCshakeCollision pcs.backend.cshake :=
+  exactCshakeCollision_of_merkleCollision pcs.backend.merkle
+    pcs.backend.tower.valueCodec
+    (merkleCollision_of_extractedHistoryCollision collision)
 
 /-! ## The exact same-coin birthday adapter -/
 
