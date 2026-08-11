@@ -66,6 +66,8 @@ import Assurance.PrivateComputationReceiptClause  -- ZK/MPC/FHE completions beco
 import Assurance.BfvPrivateComputationJoin  -- the encrypted-RNS/FHE evidence lane instantiates the private receipt with one BFV token and all 384 exact integer equations; suite/privacy/knowledge remain unassigned
 import Assurance.BfvNativeBufferAdmission  -- fallible opaque BFV buffers are checked by Lean row descriptors/link constraints before the 384-row token and private receipt can exist
 import Assurance.BfvAcceptedCellEffect  -- checked all-row BFV admission fills typed private completion, then constructs a sealed canonical accepted effect and common history claim; release remains independent
+import Assurance.BfvConcreteBatchAdmission  -- one prepared committed input constructs all 384 row templates; one fallible dependent buffer family reaches BatchAdmission only after every Lean row/link/no-wrap check
+import Assurance.BfvConcreteBatchCell  -- the concrete checked batch enters the sealed cell/history path while zero suite pins and future nonzero same-coin laws remain explicit
 import Assurance.BfvProofControllerAdmission  -- the BFV384 deployment boundary stated honestly: zero-pinned statements provably cannot bind a suite, so semantic admission is currently impossible rather than faked
 import Assurance.BfvSuiteMigrationBoundary  -- zero-to-nonzero suite migration changes canonical bytes or exposes an exact framed collision; control-only suites cannot fake semantic closure
 import Assurance.NoteSpendCoreAcceptedCellEffect  -- the note-spend AIR enters the release-free computation core as one sealed authorized canonical effect; hiding/PoK/PCS/CR/ROM remain explicit
