@@ -21,6 +21,7 @@ import Theory.CanonicalTransitionWitness  -- ANTI-VACUITY: a `PreparedTurn` whos
 import Theory.ReactiveCellTransition  -- declaration-derived reactive control plus validated typed patches; physical CAS/nullifier insertion is an explicit handler premise
 import Theory.CanonicalTransition  -- one canonical materialized post and proof-relevant typed delta unify ordinary and reactive prepared turns without a parallel store or caller-supplied roots
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
+import Theory.CanonicalResourceKernel  -- typed sparse asset/account nucleus: transfer, issuer-backed mint/burn, fees, and prepaid leases share one patch-derived conservation law
 import Theory.CanonicalReactiveView  -- observer-indexed typed lenses advance directly from canonical deltas; accepted guarded holes retain eager nullifiers without a parallel uniform post
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
