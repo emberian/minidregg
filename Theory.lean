@@ -35,6 +35,7 @@ import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argume
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
 import Theory.CanonicalAuthorityProjection  -- the finite revocation universe is derived from the authority cell's own sparse support, so omitted caller keys cannot erase a live revocation
 import Theory.MaterializerCardinality  -- REGRESSION TOOTH: the deleted total-function carrier was uncountable; the landed sparse carrier is characterized by ordinary countability
+import Theory.DeployedTotalCarrierAudit  -- closes the deleted total-carrier impossibility teeth for authority and Hyperdocument, completing all four migrated deployed schemas
 import Theory.StoreFiniteSupport  -- total semantic stores reachable from zero have an exact sparse realization, while arbitrary infinite-support functions still do not acquire canonical bytes
 import Theory.SparseLogicalState  -- the canonical dependent finite-map carrier, with primitive absence and explicit total `readD` views above it
 import Theory.DeployedMaterializerWitness  -- effect, authority, and Hyperdocument schemas now have concrete materializers and cells; existence codecs are not deployment wire claims

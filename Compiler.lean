@@ -29,7 +29,9 @@ import Compiler.HyperdocumentContentPageMaterializer  -- bounded versioned conte
 import Compiler.HyperdocumentEventPageMaterializer  -- bounded versioned causal-event pages retain exact entries, sparse-log projection, and cSHAKE roots
 import Compiler.CredentialAuthorityPageMaterializer  -- bounded policy/revocation pages project exact committed authority roots, epochs, addresses, and membership
 import Compiler.BoundedPageExtensionCatalog  -- one canonical catalog pins all bounded page schemas/codecs/controllers/domains and a cross-page link bundle
+import Compiler.BoundedPageCellRegistry  -- the three exact framed page materializers cross a dependent heterogeneous create/delete registry with no casts
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
+import Compiler.FiniteSparseMaterializerAudit  -- exact seven-schema census: all accepted/non-vacuous, with four inhabitation-only codecs distinguished from three production-pinned page codecs
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
