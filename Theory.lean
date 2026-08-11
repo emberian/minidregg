@@ -31,6 +31,7 @@ import Theory.TurnTransition  -- ordinary and resumed reactive turns share canon
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
+import Theory.CanonicalAuthorityProjection  -- the finite revocation universe is derived from the authority cell's own sparse support, so omitted caller keys cannot erase a live revocation
 import Theory.MaterializerCardinality  -- REGRESSION TOOTH: the deleted total-function carrier was uncountable; the landed sparse carrier is characterized by ordinary countability
 import Theory.StoreFiniteSupport  -- total semantic stores reachable from zero have an exact sparse realization, while arbitrary infinite-support functions still do not acquire canonical bytes
 import Theory.SparseLogicalState  -- the canonical dependent finite-map carrier, with primitive absence and explicit total `readD` views above it
