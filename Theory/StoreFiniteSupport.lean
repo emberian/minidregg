@@ -77,7 +77,8 @@ theorem finitelySupported_ofZero (mutations : List Mutation) :
 
 /-! ## The bridge to the sparse cell state
 
-A finitely supported store becomes a sparse cell state by listing its carrier.
+A finitely supported store becomes a sparse cell state by writing its carrier
+into the canonical dependent finite map.
 `sparseOfStore_readD` is the theorem that makes the replacement faithful: read
 the result back with the zero default and you have the original store, on every
 key, including the ones outside the carrier.  Without it the migration would be
@@ -88,35 +89,33 @@ open Minidregg.Theory.SparseLogicalState
 instance : DecidableEq DeclaredTurn.effectSchema.Field :=
   inferInstanceAs (DecidableEq StateKey)
 
-/-- Entries for an explicit key list. -/
-def entriesOf (store : Store) (keys : List StateKey) :
-    List (Sigma DeclaredTurn.effectSchema.FieldType) :=
-  keys.map fun key => ⟨key, show Int from store key⟩
+/-- Write the values named by an explicit key list into one canonical sparse
+state.  Repeated keys are extensionally collapsed by `DFinsupp.update`. -/
+def sparseOfKeys (store : Store) : List StateKey →
+    SparseState DeclaredTurn.effectSchema
+  | [] => 0
+  | key :: rest => (sparseOfKeys store rest).write key (store key)
 
 /-- Reading those entries is membership in the key list. -/
-theorem read_entriesOf (store : Store) (keys : List StateKey) (key : StateKey) :
-    (⟨entriesOf store keys⟩ : SparseState DeclaredTurn.effectSchema).read key =
+theorem read_sparseOfKeys (store : Store) (keys : List StateKey) (key : StateKey) :
+    (sparseOfKeys store keys).read key =
       if key ∈ keys then some (show Int from store key) else none := by
   induction keys with
   | nil => rfl
   | cons head rest ih =>
-      show List.findSome?
-          (fun entry => if same : entry.1 = key then some (same ▸ entry.2) else none)
-          (⟨head, show Int from store head⟩ :: entriesOf store rest) = _
-      rw [List.findSome?_cons]
       by_cases same : head = key
-      · subst same
-        rw [dif_pos rfl, if_pos List.mem_cons_self]
+      · subst head
+        rw [sparseOfKeys, SparseState.read_write_self]
+        simp only [List.mem_cons, true_or, if_true]
         rfl
-      · rw [dif_neg same]
-        show (⟨entriesOf store rest⟩ : SparseState DeclaredTurn.effectSchema).read key = _
+      · rw [sparseOfKeys, SparseState.read_write_other _ same]
         rw [ih]
         simp [Ne.symm same]
 
 /-- A finitely supported store as a sparse cell state. -/
 noncomputable def sparseOfStore (store : Store) (supported : FinitelySupported store) :
     SparseState DeclaredTurn.effectSchema :=
-  ⟨entriesOf store supported.choose.toList⟩
+  sparseOfKeys store supported.choose.toList
 
 /-- **The bridge is faithful.**  Reading the sparse state with the zero default
 returns the original store at every key -- inside the carrier by lookup, outside
@@ -125,7 +124,7 @@ theorem sparseOfStore_readD (store : Store) (supported : FinitelySupported store
     (key : StateKey) :
     (sparseOfStore store supported).readD (fun _ => show Int from 0) key =
       store key := by
-  rw [sparseOfStore, SparseState.readD, read_entriesOf]
+  rw [sparseOfStore, SparseState.readD, read_sparseOfKeys]
   by_cases member : key ∈ supported.choose.toList
   · rw [if_pos member]
     rfl
@@ -160,8 +159,8 @@ theorem not_finitelySupported_one : ¬FinitelySupported (fun _ => 1) := by
 #guard_msgs (whitespace := lax) in #print axioms finitelySupported_applyPatch
 /-- info: 'Minidregg.Theory.StoreFiniteSupport.finitelySupported_ofZero' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms finitelySupported_ofZero
-/-- info: 'Minidregg.Theory.StoreFiniteSupport.read_entriesOf' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms read_entriesOf
+/-- info: 'Minidregg.Theory.StoreFiniteSupport.read_sparseOfKeys' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms read_sparseOfKeys
 /-- info: 'Minidregg.Theory.StoreFiniteSupport.sparseOfStore_readD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sparseOfStore_readD
 /-- info: 'Minidregg.Theory.StoreFiniteSupport.not_finitelySupported_one' depends on axioms: [propext, Classical.choice, Quot.sound] -/

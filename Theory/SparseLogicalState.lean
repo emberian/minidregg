@@ -7,8 +7,9 @@ over an infinite field index and a `LawfulCodec` cannot inject an uncountable
 state space into `List UInt8`.
 
 This is the replacement, and it is deliberately the most primitive of the three
-shapes considered: **entries plus an Option-valued read, and no default at
-all**.  The other two candidate designs are then VIEWS on this one rather than
+shapes considered: **a canonical dependent finite map with an Option-valued
+read, and no default at all**.  The other two candidate designs are then VIEWS
+on this one rather than
 rival cores:
 
 * a schema-side default is `readD (S.default ·)`;
@@ -29,6 +30,7 @@ wide reviewable; a twin without one is what the first law forbids.
 -/
 import Theory.CellState
 import Theory.MaterializerCardinality
+import Mathlib.Data.DFinsupp.Encodable
 
 namespace Minidregg.Theory.SparseLogicalState
 
@@ -42,20 +44,31 @@ universe u v w x
 
 /-! ## The carrier -/
 
-/-- A finitely-supported logical state: an association list of typed entries.
-Absence is `none`; there is no default here, by design. -/
-structure SparseState (S : Schema.{u, v, w, x}) where
-  entries : List (Sigma S.FieldType)
+/-- `none` is the distinguished absent value stored as DFinsupp zero.  This is
+representation structure only; it does not choose a default *field value* for
+the total view. -/
+instance optionZero (alpha : Type v) : Zero (Option alpha) := ⟨none⟩
+
+/-- A canonical finitely-supported dependent map.  The stored value at a field
+is optional, so `none` is the primitive absence value and is omitted from the
+finite support.  `DFinsupp` equality is extensional: insertion order and stale
+duplicate writes are not part of logical identity and therefore cannot create
+different canonical roots for the same sparse map. -/
+abbrev SparseState (S : Schema.{u, v, w, x}) :=
+  Π₀ field : S.Field, Option (S.FieldType field)
 
 namespace SparseState
 
-variable {S : Schema.{u, v, w, x}} [DecidableEq S.Field]
+variable {S : Schema.{u, v, w, x}}
 
 /-- **The primitive read.**  Option-valued, because absence is a real answer
 and inventing one is the caller's decision, not the carrier's. -/
 def read (state : SparseState S) (field : S.Field) : Option (S.FieldType field) :=
-  state.entries.findSome? fun entry =>
-    if same : entry.1 = field then some (same ▸ entry.2) else none
+  state field
+
+/-- The empty state reads absent everywhere. -/
+@[simp] theorem read_empty (field : S.Field) :
+    (0 : SparseState S).read field = none := rfl
 
 /-- **The total view.**  Supply a default and reads become total.  Passing the
 schema's own default gives the schema-side design; passing one the state
@@ -64,47 +77,48 @@ def readD (state : SparseState S) (default : (field : S.Field) → S.FieldType f
     (field : S.Field) : S.FieldType field :=
   (state.read field).getD (default field)
 
-/-- The empty state reads absent everywhere. -/
-@[simp] theorem read_empty (field : S.Field) :
-    (⟨[]⟩ : SparseState S).read field = none := rfl
-
-/-- A written entry is read back.  This is the law that makes `read` a lookup
-rather than an arbitrary function. -/
-@[simp] theorem read_cons_self (field : S.Field) (value : S.FieldType field)
-    (rest : List (Sigma S.FieldType)) :
-    (⟨⟨field, value⟩ :: rest⟩ : SparseState S).read field = some value := by
-  simp [read]
-
-/-- Entries for other fields are skipped. -/
-theorem read_cons_other {field other : S.Field}
-    (different : other ≠ field)
-    (value : S.FieldType other) (rest : List (Sigma S.FieldType)) :
-    (⟨⟨other, value⟩ :: rest⟩ : SparseState S).read field =
-      (⟨rest⟩ : SparseState S).read field := by
-  simp [read, different]
-
 /-- With an empty state, the total view is exactly the default -- so "no
 default" and "default everywhere" are the same object seen two ways. -/
 @[simp] theorem readD_empty
     (default : (field : S.Field) → S.FieldType field) (field : S.Field) :
-    (⟨[]⟩ : SparseState S).readD default field = default field := rfl
+    (0 : SparseState S).readD default field = default field := rfl
+
+variable [DecidableEq S.Field]
+
+/-- Write one present field value.  `DFinsupp.update` replaces any prior value,
+so a sequence of writes has one extensional result rather than an
+order-dependent association-list representation. -/
+def write (state : SparseState S) (field : S.Field)
+    (value : S.FieldType field) : SparseState S :=
+  state.update field (some value)
+
+/-- A written entry is read back. -/
+@[simp] theorem read_write_self (state : SparseState S) (field : S.Field)
+    (value : S.FieldType field) :
+    (state.write field value).read field = some value := by
+  simp [read, write]
+
+/-- A write frames every other field. -/
+theorem read_write_other (state : SparseState S) {field other : S.Field}
+    (different : other ≠ field)
+    (value : S.FieldType other) :
+    (state.write other value).read field = state.read field := by
+  change Function.update (⇑state) other (some value) field = state field
+  rw [Function.update_of_ne (Ne.symm different)]
 
 end SparseState
 
 /-! ## Why this fixes the obstruction
 
-The counting argument dies here: an association list over a countable entry
-type is countable, so the state space is countable, so
+The counting argument dies here: a dependent finitely-supported map over
+countable indices and fibers is countable, so
 `materializer_nonempty_iff_countable` supplies a codec. -/
 
-/-- A sparse state space is countable whenever its typed entries are. -/
+/-- A sparse state space is countable whenever its index and every typed fiber
+are countable. -/
 instance countable_sparseState {S : Schema.{0, 0, 0, 0}}
-    [Countable (Sigma S.FieldType)] : Countable (SparseState S) := by
-  apply Function.Injective.countable (f := SparseState.entries)
-  intro left right same
-  cases left
-  cases right
-  simpa using same
+    [Countable S.Field] [∀ field, Countable (S.FieldType field)] :
+    Countable (SparseState S) := by infer_instance
 
 /-- **The obstruction is gone**, for any schema whose typed entries are
 countable: the sparse state space is countable, and
@@ -112,8 +126,9 @@ countable: the sparse state space is countable, and
 Contrast `MaterializerCardinality.authorityMaterializer_isEmpty`, where the
 total-function state space made this impossible. -/
 theorem nonempty_lawfulCodec_sparse {S : Schema.{0, 0, 0, 0}}
-    [Countable (Sigma S.FieldType)] : Nonempty (LawfulCodec (SparseState S)) :=
-  haveI : Nonempty (SparseState S) := ⟨⟨[]⟩⟩
+    [Countable S.Field] [∀ field, Countable (S.FieldType field)] :
+    Nonempty (LawfulCodec (SparseState S)) :=
+  haveI : Nonempty (SparseState S) := ⟨0⟩
   MaterializerCardinality.nonempty_lawfulCodec_of_countable
 
 /-! ## The fix, demonstrated on a real schema
@@ -142,6 +157,10 @@ instance : Countable StateKey :=
 
 instance : Countable DeclaredTurn.effectSchema.Field :=
   inferInstanceAs (Countable EffectDeclaration.StateKey)
+
+instance : ∀ field : DeclaredTurn.effectSchema.Field,
+    Countable (DeclaredTurn.effectSchema.FieldType field) :=
+  fun _ => inferInstanceAs (Countable Int)
 
 open Minidregg.Theory.EffectDeclaration in
 instance : Countable (Sigma DeclaredTurn.effectSchema.FieldType) :=
@@ -192,13 +211,13 @@ nonempty infinite `Resource`, it needs this same treatment.
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_empty' does not depend on any axioms -/
+/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_empty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms SparseState.read_empty
-/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_cons_self' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms SparseState.read_cons_self
-/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_cons_other' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms SparseState.read_cons_other
-/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.readD_empty' does not depend on any axioms -/
+/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_write_self' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SparseState.read_write_self
+/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_write_other' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SparseState.read_write_other
+/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.readD_empty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms SparseState.readD_empty
 /-- info: 'Minidregg.Theory.SparseLogicalState.countable_sparseState' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms countable_sparseState
