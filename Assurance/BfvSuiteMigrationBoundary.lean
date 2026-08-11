@@ -2,29 +2,29 @@
 # Assurance.BfvSuiteMigrationBoundary -- the exact BFV suite cutover boundary
 
 The release-free BFV kernel statement currently owns zero sentinels for its
-proof codec, proof suite, and proof controller.  `BoundSuite` quite correctly
-rejects that statement, but replacing the three zeros is not a transparent
-metadata operation: the pins are part of the canonical statement bytes and of
-the roots-before-challenges statement digest.
+proof codec, proof suite, and proof controller.  `BoundReflectedChecker` quite
+correctly rejects that statement, but replacing the three zeros is not a
+transparent metadata operation: the pins are part of the canonical statement
+bytes and of the roots-before-challenges statement digest.
 
 This module makes the only honest migration explicit.  Given a real
-`SuccinctSuiteInterface`, `rebind` changes exactly the three deployment pins
-and `rebindBound` constructs its `BoundSuite`.  All semantic payload fields are
-preserved.  For a zero-pinned source, however, the target statement and its
-canonical bytes are provably different.  If their cSHAKE statement digests are
-equal, the equality is retained as the exact framed collision that a security
-game must price.  A receipt accepted under both statements likewise extracts
-that collision.
+`ReflectedCheckerInterface`, `rebind` changes exactly the three deployment pins
+and `rebindBound` constructs its `BoundReflectedChecker`.  All semantic payload
+fields are preserved.  For a zero-pinned source, however, the target statement
+and its canonical bytes are provably different.  If their cSHAKE statement
+digests are equal, the equality is retained as the exact framed collision that
+a security game must price.  A receipt accepted under both statements likewise
+extracts that collision.
 
-There is a second, equally important obstruction.  `SuccinctSuiteInterface`
+There is a second, equally important obstruction.  `ReflectedCheckerInterface`
 only asks for a reflected checker; it does not ask for BFV arithmetic, a PCS,
-knowledge, or hiding.  `controlOnlySuite` is an executable countermodel with
+knowledge, or hiding.  `controlOnlyChecker` is an executable countermodel with
 nonzero pins which merely repeats the framing checker.  Its positive receipt
-shows why constructing `Nonempty (BoundSuite statement)` alone would be a
-misleading closure claim.  The load-bearing deployment object remains
-`SuiteLaws` on one common coin, with arithmetic, PCS, CR, ROM, and PoK priced
-separately.  No privacy or hiding claim is introduced here, and opaque native
-code still crosses only the existing bytes/error boundary.
+shows why constructing `Nonempty (BoundReflectedChecker statement)` alone would
+be a misleading closure claim.  The load-bearing deployment object remains
+`SameCoinReductionLaws` on one common coin, with arithmetic, PCS, CR, ROM, and
+PoK priced separately.  No privacy or hiding claim is introduced here, and
+opaque native code still crosses only the existing bytes/error boundary.
 -/
 
 import Assurance.BfvProofControllerAdmission
@@ -62,56 +62,56 @@ structure SameSemanticPayload (left right : Statement) : Prop where
   outputRepresentationId :
     left.outputRepresentationId = right.outputRepresentationId
 
-/-- Rebind a statement to a supplied suite.  This is deliberately not an
+/-- Rebind a statement to a supplied reflected checker.  This is deliberately not an
 in-place cast: the three identities are statement data. -/
-def rebind (source : Statement) (suite : SuccinctSuiteInterface) : Statement :=
+def rebind (source : Statement) (checker : ReflectedCheckerInterface) : Statement :=
   { source with
-    proofCodecId := suite.proofCodecId
-    proofSuiteId := suite.proofSuiteId
-    controllerDigest := suite.controllerDigest }
+    proofCodecId := checker.proofCodecId
+    proofSuiteId := checker.proofSuiteId
+    controllerDigest := checker.controllerDigest }
 
 theorem rebind_sameSemanticPayload (source : Statement)
-    (suite : SuccinctSuiteInterface) :
-    SameSemanticPayload source (rebind source suite) := by
+    (checker : ReflectedCheckerInterface) :
+    SameSemanticPayload source (rebind source checker) := by
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem rebind_pins_exact (source : Statement)
-    (suite : SuccinctSuiteInterface) :
-    (rebind source suite).proofCodecId = suite.proofCodecId ∧
-      (rebind source suite).proofSuiteId = suite.proofSuiteId ∧
-      (rebind source suite).controllerDigest = suite.controllerDigest := by
+    (checker : ReflectedCheckerInterface) :
+    (rebind source checker).proofCodecId = checker.proofCodecId ∧
+      (rebind source checker).proofSuiteId = checker.proofSuiteId ∧
+      (rebind source checker).controllerDigest = checker.controllerDigest := by
   exact ⟨rfl, rfl, rfl⟩
 
 /-- Once an actual suite exists, the type-level binding itself is canonical;
 there is no opportunity for a caller to choose different statement pins. -/
-def rebindBound (source : Statement) (suite : SuccinctSuiteInterface) :
-    BoundSuite (rebind source suite) where
-  suite := suite
+def rebindBound (source : Statement) (checker : ReflectedCheckerInterface) :
+    BoundReflectedChecker (rebind source checker) where
+  checker := checker
   proofCodecBound := rfl
   proofSuiteBound := rfl
   controllerBound := rfl
 
 /-- A zero-pinned source cannot equal its assigned target. -/
 theorem rebind_ne_of_unassignedProofCodec (source : Statement)
-    (suite : SuccinctSuiteInterface)
+    (checker : ReflectedCheckerInterface)
     (sourceUnassigned : source.proofCodecId = unassignedProofCodecId) :
-    source ≠ rebind source suite := by
+    source ≠ rebind source checker := by
   intro equal
   have pinsEqual := congrArg Statement.proofCodecId equal
-  apply suite.proofCodecAssigned
+  apply checker.proofCodecAssigned
   calc
-    suite.proofCodecId = (rebind source suite).proofCodecId := rfl
+    checker.proofCodecId = (rebind source checker).proofCodecId := rfl
     _ = source.proofCodecId := pinsEqual.symm
     _ = unassignedProofCodecId := sourceUnassigned
     _ = ⟨0⟩ := rfl
 
 /-- The canonical statement byte stream changes at the cutover. -/
 theorem rebind_encode_ne_of_unassignedProofCodec (source : Statement)
-    (suite : SuccinctSuiteInterface)
+    (checker : ReflectedCheckerInterface)
     (sourceUnassigned : source.proofCodecId = unassignedProofCodecId) :
-    statementCodec.encode source ≠ statementCodec.encode (rebind source suite) := by
+    statementCodec.encode source ≠ statementCodec.encode (rebind source checker) := by
   intro encodedEqual
-  exact rebind_ne_of_unassignedProofCodec source suite sourceUnassigned
+  exact rebind_ne_of_unassignedProofCodec source checker sourceUnassigned
     (lawfulCodec_encode_injective statementCodec encodedEqual)
 
 /-! ## Digest equality is an explicit cSHAKE collision, not migration glue -/
@@ -131,22 +131,22 @@ theorem statementDigestCollision_of_ne_of_digest_eq
   exact different (lawfulCodec_encode_injective statementCodec encodedEqual)
 
 theorem rebind_statementDigestCollision_of_digest_eq (source : Statement)
-    (suite : SuccinctSuiteInterface)
+    (checker : ReflectedCheckerInterface)
     (sourceUnassigned : source.proofCodecId = unassignedProofCodecId)
     (digestEqual :
-      derivedStatementDigest source = derivedStatementDigest (rebind source suite)) :
-    StatementDigestCollision source (rebind source suite) :=
+      derivedStatementDigest source = derivedStatementDigest (rebind source checker)) :
+    StatementDigestCollision source (rebind source checker) :=
   statementDigestCollision_of_ne_of_digest_eq
-    (rebind_ne_of_unassignedProofCodec source suite sourceUnassigned) digestEqual
+    (rebind_ne_of_unassignedProofCodec source checker sourceUnassigned) digestEqual
 
 theorem rebind_digest_ne_of_collisionFree (source : Statement)
-    (suite : SuccinctSuiteInterface)
+    (checker : ReflectedCheckerInterface)
     (sourceUnassigned : source.proofCodecId = unassignedProofCodecId)
-    (collisionFree : ¬StatementDigestCollision source (rebind source suite)) :
-    derivedStatementDigest source ≠ derivedStatementDigest (rebind source suite) := by
+    (collisionFree : ¬StatementDigestCollision source (rebind source checker)) :
+    derivedStatementDigest source ≠ derivedStatementDigest (rebind source checker) := by
   intro digestEqual
   exact collisionFree
-    (rebind_statementDigestCollision_of_digest_eq source suite sourceUnassigned
+    (rebind_statementDigestCollision_of_digest_eq source checker sourceUnassigned
       digestEqual)
 
 /-- One receipt cannot pass the deterministic controller under both the old
@@ -181,29 +181,29 @@ def controlOnlyControllerDigest : Digest := ⟨983⟩
 
 /-- Countermodel: assigned identities plus an executable reflected checker,
 but no BFV arithmetic, PCS opening, extraction, PoK, or hiding semantics.  This
-exists to prevent `BoundSuite` inhabitation from being mistaken for deployment
+exists to prevent reflected-checker inhabitation from being mistaken for deployment
 closure. -/
-def controlOnlySuite : SuccinctSuiteInterface where
+def controlOnlyChecker : ReflectedCheckerInterface where
   proofCodecId := controlOnlyProofCodecId
   proofSuiteId := controlOnlyProofSuiteId
   controllerDigest := controlOnlyControllerDigest
   proofCodecAssigned := by decide
   proofSuiteAssigned := by decide
   controllerAssigned := by decide
-  SemanticAccepts := ControlAccepts
+  ReflectedAccepts := ControlAccepts
   check := controlCheck
   check_iff := controlCheck_iff
 
 def controlOnlyStatement (source : Statement) : Statement :=
-  rebind source controlOnlySuite
+  rebind source controlOnlyChecker
 
 def controlOnlyBound (source : Statement) :
-    BoundSuite (controlOnlyStatement source) :=
-  rebindBound source controlOnlySuite
+  BoundReflectedChecker (controlOnlyStatement source) :=
+  rebindBound source controlOnlyChecker
 
-theorem controlOnlySuite_accepts_iff_control (statement : Statement)
+theorem controlOnlyChecker_accepts_iff_control (statement : Statement)
     (receipt : Receipt) :
-    (controlOnlyBound statement).suite.SemanticAccepts
+    (controlOnlyBound statement).checker.ReflectedAccepts
         (controlOnlyStatement statement) receipt ↔
       ControlAccepts (controlOnlyStatement statement) receipt := by
   rfl
@@ -235,14 +235,14 @@ theorem controlOnlyReceipt_controlled (statement : Statement)
 
 /-- Positive counterexample: the nonzero bound interface accepts a framed
 receipt for every canonical BFV relation statement, despite checking no row.
-The missing object is therefore the common-game `SuiteLaws`, not a value of
-`BoundSuite`. -/
+The missing object is therefore the common-game `SameCoinReductionLaws`, not a
+value of `BoundReflectedChecker`. -/
 theorem controlOnlyBound_is_not_deployment_closure (source : Statement)
     (relationDescriptorExact : source.relationDescriptor = exactRelationDescriptor)
     (clauseExact : source.clauseId = bfvClauseId)
     (relationExact : source.relationId = bfvRelationId)
     (arithmeticRoot pcsRoot : Digest) :
-    (controlOnlyBound source).suite.SemanticAccepts
+    (controlOnlyBound source).checker.ReflectedAccepts
       (controlOnlyStatement source)
       (controlOnlyReceipt (controlOnlyStatement source) arithmeticRoot pcsRoot) := by
   apply controlOnlyReceipt_controlled

@@ -13,10 +13,11 @@ owns only the narrow deterministic control boundary which already exists:
 
 The accepted BFV path supplies its existing zero proof-codec, proof-suite, and
 controller sentinels.  Nonempty proof frames are syntax, not verification.  The
-typed `SuccinctSuiteInterface` is the exact residual where a future Lean
-verifier must attach semantic meaning; this file constructs no instance and
-claims no arithmetic soundness, PCS, collision resistance, ROM, knowledge,
-privacy, or hiding theorem.
+typed `ReflectedCheckerInterface` is deliberately only the deterministic
+checker boundary; arithmetic/PCS/knowledge meaning is attached by the
+same-coin deployment laws in `Assurance.BfvProofControllerAdmission`.  This
+file constructs no deployment and claims no arithmetic soundness, PCS,
+collision resistance, ROM, knowledge, privacy, or hiding theorem.
 -/
 import Compiler.BfvReceiptClause
 import Compiler.Tower256ConcreteBackend
@@ -294,29 +295,30 @@ theorem run_success_integrity {Error : Type} (statement : Statement)
           (controlCheck_iff statement receipt).mp checked⟩
       next rejected => simp at success
 
-/-- A future succinct verifier must be an actual Lean checker with a reflected
-semantic relation and assigned deployment identity.  No interface value is
-supplied here. -/
-structure SuccinctSuiteInterface where
+/-- A candidate proof checker is an actual Lean Boolean with a reflected
+acceptance relation and assigned deployment identity.  This interface alone
+does not say that acceptance implies BFV arithmetic, PCS soundness, knowledge,
+or hiding. -/
+structure ReflectedCheckerInterface where
   proofCodecId : Digest
   proofSuiteId : Digest
   controllerDigest : Digest
   proofCodecAssigned : proofCodecId ≠ ⟨0⟩
   proofSuiteAssigned : proofSuiteId ≠ ⟨0⟩
   controllerAssigned : controllerDigest ≠ ⟨0⟩
-  SemanticAccepts : Statement → Receipt → Prop
+  ReflectedAccepts : Statement → Receipt → Prop
   check : Statement → Receipt → Bool
   check_iff : ∀ statement receipt,
-    check statement receipt = true ↔ SemanticAccepts statement receipt
+    check statement receipt = true ↔ ReflectedAccepts statement receipt
 
-/-- Semantic admission is available only after an assigned suite is bound to
-all three exact statement pins.  Merely constructing a reflected predicate is
-insufficient. -/
-structure BoundSuite (statement : Statement) where
-  suite : SuccinctSuiteInterface
-  proofCodecBound : statement.proofCodecId = suite.proofCodecId
-  proofSuiteBound : statement.proofSuiteId = suite.proofSuiteId
-  controllerBound : statement.controllerDigest = suite.controllerDigest
+/-- Exact binding of a reflected checker to all three statement pins.  This is
+identity/framing evidence only; semantic admission additionally requires the
+same-coin reduction laws in the assurance layer. -/
+structure BoundReflectedChecker (statement : Statement) where
+  checker : ReflectedCheckerInterface
+  proofCodecBound : statement.proofCodecId = checker.proofCodecId
+  proofSuiteBound : statement.proofSuiteId = checker.proofSuiteId
+  controllerBound : statement.controllerDigest = checker.controllerDigest
 
 /-- Neither opaque proof frame participates in its own challenge. -/
 theorem derivedChallenge_independent_of_proofBytes (statement : Statement)
@@ -345,16 +347,16 @@ theorem canonicalStatement_exact (argsDigest effectsDigest preRoot : Digest)
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 /-- The current canonical BFV statement cannot masquerade as a deployed
-succinct suite: every deployment pin is zero, while every bound suite must
+reflected checker: every deployment pin is zero, while every bound checker must
 carry assigned nonzero identities. -/
-theorem canonicalStatement_no_boundSuite
+theorem canonicalStatement_no_boundReflectedChecker
     (argsDigest effectsDigest preRoot : Digest) (claim : PublicStatement)
     (outputCommitment outputRepresentationId : Digest) :
-    ¬Nonempty (BoundSuite (canonicalStatement argsDigest effectsDigest preRoot
+    ¬Nonempty (BoundReflectedChecker (canonicalStatement argsDigest effectsDigest preRoot
       claim outputCommitment outputRepresentationId unassignedProofCodecId
       unassignedProofSuiteId unassignedControllerDigest)) := by
   rintro ⟨bound⟩
-  exact bound.suite.proofCodecAssigned (by
+  exact bound.checker.proofCodecAssigned (by
     rw [← bound.proofCodecBound]
     rfl)
 
@@ -366,8 +368,8 @@ theorem canonicalStatement_no_boundSuite
 #guard_msgs (whitespace := lax) in #print axioms derivedChallenge_independent_of_proofBytes
 /-- info: 'Minidregg.Compiler.BfvProofController.canonicalStatement_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonicalStatement_exact
-/-- info: 'Minidregg.Compiler.BfvProofController.canonicalStatement_no_boundSuite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_no_boundSuite
+/-- info: 'Minidregg.Compiler.BfvProofController.canonicalStatement_no_boundReflectedChecker' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_no_boundReflectedChecker
 
 end
 

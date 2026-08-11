@@ -2,16 +2,17 @@
 # Assurance.BfvProofControllerAdmission -- honest BFV384 deployment boundary
 
 This module derives the BFV controller statement from the release-free
-`AcceptedCellEffect`, then composes deterministic control-envelope acceptance
-with the deliberately uninstantiated `SuccinctSuiteInterface`.
+`AcceptedCellEffect`, then separates deterministic control-envelope/reflected
+checker acceptance from semantic BFV admission.
 
 The common-game theorem says only this: if a future reflected suite checker
 accepts, then outside separately priced arithmetic, PCS, collision-resistance,
 random-oracle, and knowledge failures it must extract the existing exact
 384-row BFV relation.  There is no hiding event, privacy theorem, release
 value, or disclosure inference.  The current suite/controller/proof-codec pins
-remain zero, so this is a typed deployment residual rather than a fake
-succinct verifier.
+remain zero.  A reflected receipt is therefore explicitly weak; the semantic
+`CoreJoin.AdmittedReceipt` can only be constructed on one good game coin from
+the exact BFV `RelationWitness` reduction laws.
 -/
 import Assurance.BfvPrivateComputationJoin
 import Assurance.ProofCompositionGame
@@ -138,7 +139,7 @@ theorem statementOf_exact
 /-- The accepted BFV core is still deliberately undeployed: its exact
 statement cannot carry a suite whose codec, suite, and controller identities
 are all assigned. -/
-theorem statementOf_no_boundSuite
+theorem statementOf_no_boundReflectedChecker
     {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
     {M : CellState.Materializer S Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
@@ -152,42 +153,43 @@ theorem statementOf_no_boundSuite
     (accepted : ComputationCellEffect.Accepted (portal := portal)
       (authState := authState) dialect.declaration adapter commonRequest pre
       request result) :
-    ¬Nonempty (BoundSuite (statementOf dialect adapter accepted)) := by
+    ¬Nonempty (BoundReflectedChecker (statementOf dialect adapter accepted)) := by
   rintro ⟨bound⟩
   have exact := statementOf_exact dialect adapter accepted
-  exact bound.suite.proofCodecAssigned (by
+  exact bound.checker.proofCodecAssigned (by
     rw [← bound.proofCodecBound]
     exact exact.2.2.2.2.2.2.2.2.2.2.1)
 
-/-! ## Reflected suite admission remains an explicit residual -/
+/-! ## Reflected checker admission remains explicitly weak -/
 
 inductive AdmissionFailure (Error : Type)
   | control (failure : Failure Error)
-  | rejectedSuite
+  | rejectedChecker
 deriving Repr
 
-/-- Successful admission retains both the concrete controller evidence and the
-future suite check's reflected semantic proposition. -/
-structure AdmittedReceipt (statement : Statement) (bound : BoundSuite statement) where
+/-- Successful weak admission retains the concrete controller evidence and the
+candidate checker's reflected proposition.  It carries no reduction laws. -/
+structure ReflectedReceipt (statement : Statement)
+    (bound : BoundReflectedChecker statement) where
   controlled : ControlledReceipt statement
-  suiteAccepted : bound.suite.SemanticAccepts statement controlled.receipt
+  checkerAccepted : bound.checker.ReflectedAccepts statement controlled.receipt
 
 /-- Lean runs the fixed decoder/control checker first and the supplied Lean
 suite checker second.  There is no caller-provided acceptance proposition. -/
-def run {Error : Type} (statement : Statement)
-    (bound : BoundSuite statement) (runner : OpaqueProofRunner Error) :
-    Except (AdmissionFailure Error) (AdmittedReceipt statement bound) :=
+def runReflected {Error : Type} (statement : Statement)
+    (bound : BoundReflectedChecker statement) (runner : OpaqueProofRunner Error) :
+    Except (AdmissionFailure Error) (ReflectedReceipt statement bound) :=
   match Minidregg.Compiler.BfvProofController.run statement runner with
   | .error failure => .error (.control failure)
   | .ok controlled =>
-      if checked : bound.suite.check statement controlled.receipt = true then
+      if checked : bound.checker.check statement controlled.receipt = true then
         .ok ⟨controlled,
-          (bound.suite.check_iff statement controlled.receipt).mp checked⟩
+          (bound.checker.check_iff statement controlled.receipt).mp checked⟩
       else
-        .error .rejectedSuite
+        .error .rejectedChecker
 
 /-- The core-specific runner always sends the exact accepted-effect statement. -/
-def runAccepted
+def runAcceptedReflected
     {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
     {M : CellState.Materializer S Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
@@ -201,23 +203,24 @@ def runAccepted
     (accepted : ComputationCellEffect.Accepted (portal := portal)
       (authState := authState) dialect.declaration adapter commonRequest pre
       request result)
-    {Error : Type} (bound : BoundSuite (statementOf dialect adapter accepted))
+    {Error : Type}
+    (bound : BoundReflectedChecker (statementOf dialect adapter accepted))
     (runner : OpaqueProofRunner Error) :
     Except (AdmissionFailure Error)
-      (AdmittedReceipt (statementOf dialect adapter accepted) bound) :=
-  run (statementOf dialect adapter accepted) bound runner
+      (ReflectedReceipt (statementOf dialect adapter accepted) bound) :=
+  runReflected (statementOf dialect adapter accepted) bound runner
 
-theorem run_success_integrity {Error : Type} (statement : Statement)
-    (bound : BoundSuite statement) (runner : OpaqueProofRunner Error)
-    (reply : AdmittedReceipt statement bound)
-    (success : run statement bound runner = .ok reply) :
+theorem runReflected_success_integrity {Error : Type} (statement : Statement)
+    (bound : BoundReflectedChecker statement) (runner : OpaqueProofRunner Error)
+    (reply : ReflectedReceipt statement bound)
+    (success : runReflected statement bound runner = .ok reply) :
     runner (statementCodec.encode statement) =
         .ok reply.controlled.proofBytes ∧
     receiptCodec.decode reply.controlled.proofBytes =
         some reply.controlled.receipt ∧
     ControlAccepts statement reply.controlled.receipt ∧
-    bound.suite.SemanticAccepts statement reply.controlled.receipt := by
-  unfold run at success
+    bound.checker.ReflectedAccepts statement reply.controlled.receipt := by
+  unfold runReflected at success
   split at success
   next failure failed => simp at success
   next controlled controlledRun =>
@@ -229,7 +232,7 @@ theorem run_success_integrity {Error : Type} (statement : Statement)
         Minidregg.Compiler.BfvProofController.run_success_integrity statement runner
           controlled controlledRun
       exact ⟨integrity.1, integrity.2.1, integrity.2.2,
-        (bound.suite.check_iff statement controlled.receipt).mp checked⟩
+        (bound.checker.check_iff statement controlled.receipt).mp checked⟩
     next rejected => simp at success
 
 end CoreJoin
@@ -343,18 +346,19 @@ theorem bad_le_total (ledger : FailureLedger Omega) :
 
 end FailureLedger
 
-/-! ## The exact unimplemented succinct-suite theorem shape -/
+/-! ## The exact unimplemented same-coin reduction shape -/
 
 /-- A concrete BFV384 suite must prove this extraction law for its reflected
 checker on the same game coin.  This structure does not implement the checker,
 assign deployment pins, or turn the existing arithmetic token into a security
 theorem. -/
-structure SuiteLaws
+structure SameCoinReductionLaws
     {Omega : Type} [Fintype Omega] (ledger : FailureLedger Omega)
-    {statement : Statement} (bound : BoundSuite statement) (Witness : Type) where
+    {statement : Statement} (bound : BoundReflectedChecker statement)
+    (Witness : Type) where
   extract : ∀ omega receipt,
     ControlAccepts statement receipt →
-    bound.suite.SemanticAccepts statement receipt →
+    bound.checker.ReflectedAccepts statement receipt →
     ledger.Good .arithmeticSoundness omega →
     ledger.Good .pcsSoundness omega →
     ledger.Good .collisionResistance omega →
@@ -362,22 +366,181 @@ structure SuiteLaws
     ledger.Good .proofOfKnowledge omega →
     Witness
 
+/-! ## Semantic admission: exact BFV relation on one good coin -/
+
+namespace CoreJoin
+
+/-- A semantic BFV admission is intentionally much stronger than a reflected
+receipt.  Its statement is the exact statement projected from one accepted
+kernel computation; its reduction law extracts that computation's 384-row
+`RelationWitness`; and the receipt names one coin outside the separately
+priced arithmetic, PCS, CR, ROM, and PoK failures.
+
+No hiding field occurs: this release-free lane makes no privacy claim. -/
+structure AdmittedReceipt
+    {Omega : Type} [Fintype Omega]
+    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier)
+    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+    (accepted : ComputationCellEffect.Accepted (portal := portal)
+      (authState := authState) dialect.declaration adapter commonRequest pre
+      request result)
+    (bound : BoundReflectedChecker (statementOf dialect adapter accepted))
+    (ledger : FailureLedger Omega)
+    (laws : SameCoinReductionLaws ledger bound (RelationWitness dialect request result))
+    (omega : Omega) where
+  reflected : ReflectedReceipt (statementOf dialect adapter accepted) bound
+  outsideFailures : ¬ledger.Bad omega
+
+namespace AdmittedReceipt
+
+variable {Omega : Type} [Fintype Omega]
+variable {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+variable {M : CellState.Materializer S Digest}
+variable {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+  Nullifier : Type}
+variable {dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+  ResourceEffect Footprint Nullifier}
+variable {adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration}
+variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+variable {commonRequest : Request kind} {pre : CellState.Materialized M}
+variable {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+variable {accepted : ComputationCellEffect.Accepted (portal := portal)
+  (authState := authState) dialect.declaration adapter commonRequest pre request result}
+variable {bound : BoundReflectedChecker (statementOf dialect adapter accepted)}
+variable {ledger : FailureLedger Omega}
+variable {laws : SameCoinReductionLaws ledger bound
+  (RelationWitness dialect request result)}
+variable {omega : Omega}
+
+/-- Extraction is derived from the exact checker acceptance and the five good
+events carried by this receipt; it is not a caller-authored witness field. -/
+noncomputable def witness
+    (admitted : AdmittedReceipt dialect adapter accepted bound ledger laws omega) :
+    RelationWitness dialect request result :=
+  laws.extract omega admitted.reflected.controlled.receipt
+    admitted.reflected.controlled.controlled admitted.reflected.checkerAccepted
+    (ledger.good_of_not_bad admitted.outsideFailures .arithmeticSoundness)
+    (ledger.good_of_not_bad admitted.outsideFailures .pcsSoundness)
+    (ledger.good_of_not_bad admitted.outsideFailures .collisionResistance)
+    (ledger.good_of_not_bad admitted.outsideFailures .randomOracle)
+    (ledger.good_of_not_bad admitted.outsideFailures .proofOfKnowledge)
+
+theorem every_exact_integer_equation
+    (admitted : AdmittedReceipt dialect adapter accepted bound ledger laws omega)
+    (rowIndex : Fin equationsPerOwner) :
+    (result.outputRepresentation.equations.equation rowIndex).numerator
+        admitted.witness.evidence.token.input.row =
+      ((result.outputRepresentation.equations.equation rowIndex).rns.value : Int) *
+        (admitted.witness.evidence.token.batch.rowCall rowIndex).witness.quotient.value :=
+  admitted.witness.every_exact_integer_equation rowIndex
+
+end AdmittedReceipt
+
+/-- The canonical semantic runner is available only with the exact common-coin
+reduction laws and a proof that this coin is outside all five failure events.
+The weaker bytes/checker path remains `runReflected`. -/
+def run
+    {Omega : Type} [Fintype Omega]
+    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier)
+    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+    (accepted : ComputationCellEffect.Accepted (portal := portal)
+      (authState := authState) dialect.declaration adapter commonRequest pre
+      request result)
+    (bound : BoundReflectedChecker (statementOf dialect adapter accepted))
+    (ledger : FailureLedger Omega)
+    (laws : SameCoinReductionLaws ledger bound
+      (RelationWitness dialect request result))
+    (omega : Omega) (outsideFailures : ¬ledger.Bad omega)
+    {Error : Type} (runner : OpaqueProofRunner Error) :
+    Except (AdmissionFailure Error)
+      (AdmittedReceipt dialect adapter accepted bound ledger laws omega) :=
+  match runReflected (statementOf dialect adapter accepted) bound runner with
+  | .error failure => .error failure
+  | .ok reflected => .ok ⟨reflected, outsideFailures⟩
+
+theorem run_success_integrity
+    {Omega : Type} [Fintype Omega]
+    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
+      Nullifier : Type}
+    (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
+      ResourceEffect Footprint Nullifier)
+    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : dialect.declaration.Request} {result : dialect.declaration.Result}
+    (accepted : ComputationCellEffect.Accepted (portal := portal)
+      (authState := authState) dialect.declaration adapter commonRequest pre
+      request result)
+    (bound : BoundReflectedChecker (statementOf dialect adapter accepted))
+    (ledger : FailureLedger Omega)
+    (laws : SameCoinReductionLaws ledger bound
+      (RelationWitness dialect request result))
+    (omega : Omega) (outsideFailures : ¬ledger.Bad omega)
+    {Error : Type} (runner : OpaqueProofRunner Error)
+    (reply : AdmittedReceipt dialect adapter accepted bound ledger laws omega)
+    (success : run dialect adapter accepted bound ledger laws omega outsideFailures
+      runner = .ok reply) :
+    runner (statementCodec.encode (statementOf dialect adapter accepted)) =
+        .ok reply.reflected.controlled.proofBytes ∧
+      receiptCodec.decode reply.reflected.controlled.proofBytes =
+        some reply.reflected.controlled.receipt ∧
+      ControlAccepts (statementOf dialect adapter accepted)
+        reply.reflected.controlled.receipt ∧
+      bound.checker.ReflectedAccepts (statementOf dialect adapter accepted)
+        reply.reflected.controlled.receipt ∧
+      (∀ rowIndex : Fin equationsPerOwner,
+        (result.outputRepresentation.equations.equation rowIndex).numerator
+            reply.witness.evidence.token.input.row =
+          ((result.outputRepresentation.equations.equation rowIndex).rns.value : Int) *
+            (reply.witness.evidence.token.batch.rowCall rowIndex).witness.quotient.value) := by
+  unfold run at success
+  split at success
+  next failed => simp at success
+  next reflected reflectedRun =>
+    simp only [Except.ok.injEq] at success
+    subst reply
+    have integrity := runReflected_success_integrity
+      (statementOf dialect adapter accepted) bound runner reflected reflectedRun
+    exact ⟨integrity.1, integrity.2.1, integrity.2.2.1, integrity.2.2.2,
+      fun rowIndex => AdmittedReceipt.every_exact_integer_equation _ rowIndex⟩
+
+end CoreJoin
+
 /-! ## One common coin controls execution and all five failure events -/
 
 structure CommonGameFamily
     (Omega : Type) [Fintype Omega] (Error : Type) {statement : Statement}
-    (bound : BoundSuite statement) (Witness : Type) where
+    (bound : BoundReflectedChecker statement) (Witness : Type) where
   ledger : FailureLedger Omega
-  laws : SuiteLaws ledger bound Witness
+  laws : SameCoinReductionLaws ledger bound Witness
   runner : Omega → OpaqueProofRunner Error
-  execution : Omega → Option (CoreJoin.AdmittedReceipt statement bound)
+  execution : Omega → Option (CoreJoin.ReflectedReceipt statement bound)
   executionExact : ∀ omega reply, execution omega = some reply →
-    CoreJoin.run statement bound (runner omega) = .ok reply
+    CoreJoin.runReflected statement bound (runner omega) = .ok reply
 
 namespace CommonGameFamily
 
 variable {Omega : Type} [Fintype Omega] {Error : Type}
-variable {statement : Statement} {bound : BoundSuite statement} {Witness : Type}
+variable {statement : Statement} {bound : BoundReflectedChecker statement}
+variable {Witness : Type}
 
 def FalseAccept (family : CommonGameFamily Omega Error bound Witness)
     (omega : Omega) : Prop :=
@@ -387,11 +550,11 @@ def FalseAccept (family : CommonGameFamily Omega Error bound Witness)
 theorem execution_runner_bytes
     (family : CommonGameFamily Omega Error bound Witness)
     {omega : Omega}
-    {reply : CoreJoin.AdmittedReceipt statement bound}
+    {reply : CoreJoin.ReflectedReceipt statement bound}
     (selected : family.execution omega = some reply) :
     family.runner omega (statementCodec.encode statement) =
         .ok reply.controlled.proofBytes := by
-  exact (CoreJoin.run_success_integrity statement bound (family.runner omega)
+  exact (CoreJoin.runReflected_success_integrity statement bound (family.runner omega)
     reply (family.executionExact omega reply selected)).1
 
 theorem falseAccept_bad
@@ -405,7 +568,7 @@ theorem falseAccept_bad
   have oracle := family.ledger.good_of_not_bad good .randomOracle
   have knowledge := family.ledger.good_of_not_bad good .proofOfKnowledge
   exact falseRelation ⟨family.laws.extract omega reply.controlled.receipt
-    reply.controlled.controlled reply.suiteAccepted arithmetic pcs collision oracle
+    reply.controlled.controlled reply.checkerAccepted arithmetic pcs collision oracle
     knowledge⟩
 
 theorem falseAccept_le
@@ -418,7 +581,7 @@ witness type named by the suite laws. -/
 theorem witness_of_not_bad
     (family : CommonGameFamily Omega Error bound Witness)
     {omega : Omega}
-    {reply : CoreJoin.AdmittedReceipt statement bound}
+    {reply : CoreJoin.ReflectedReceipt statement bound}
     (selected : family.execution omega = some reply)
     (good : ¬family.ledger.Bad omega) :
     Nonempty Witness := by
@@ -429,7 +592,7 @@ theorem witness_of_not_bad
   have knowledge := family.ledger.good_of_not_bad good .proofOfKnowledge
   have _runnerBytes := family.execution_runner_bytes selected
   let witness := family.laws.extract omega reply.controlled.receipt
-    reply.controlled.controlled reply.suiteAccepted arithmetic pcs collision oracle
+    reply.controlled.controlled reply.checkerAccepted arithmetic pcs collision oracle
     knowledge
   exact ⟨witness⟩
 
@@ -452,7 +615,47 @@ variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : dialect.declaration.Request} {result : dialect.declaration.Result}
 variable {accepted : ComputationCellEffect.Accepted (portal := portal)
   (authState := authState) dialect.declaration adapter commonRequest pre request result}
-variable {bound : BoundSuite (CoreJoin.statementOf dialect adapter accepted)}
+variable {bound : BoundReflectedChecker (CoreJoin.statementOf dialect adapter accepted)}
+
+/-- The current accepted request cannot even package a semantic BFV
+deployment: its zero-pinned statement has no bound nonzero checker.  Supplying
+reduction laws out of band cannot repair that; the pins must first enter the
+authorized request and therefore its canonical statement bytes. -/
+theorem no_current_semantic_deployment :
+    ¬∃ bound : BoundReflectedChecker
+        (CoreJoin.statementOf dialect adapter accepted),
+      ∃ ledger : FailureLedger Omega,
+        Nonempty (SameCoinReductionLaws ledger bound
+          (RelationWitness dialect request result)) := by
+  rintro ⟨candidate, -, -⟩
+  exact CoreJoin.statementOf_no_boundReflectedChecker dialect adapter accepted
+    ⟨candidate⟩
+
+/-- The semantic receipt together with evidence that it is the execution
+selected by this common-game coin. -/
+structure AdmittedExecution
+    (family : CommonGameFamily Omega Error bound
+      (RelationWitness dialect request result)) (omega : Omega) where
+  semantic : CoreJoin.AdmittedReceipt dialect adapter accepted bound family.ledger
+    family.laws omega
+  selected : family.execution omega = some semantic.reflected
+
+/-- On a good common-game coin, the weak reflected execution upgrades to the
+semantic receipt.  The result is indexed by the exact accepted core and exact
+`RelationWitness` laws, so a control-only checker cannot inhabit this type. -/
+noncomputable def admitted_of_not_bad
+    (family : CommonGameFamily Omega Error bound
+      (RelationWitness dialect request result))
+    {omega : Omega}
+    {reply : CoreJoin.ReflectedReceipt
+      (CoreJoin.statementOf dialect adapter accepted) bound}
+    (selected : family.execution omega = some reply)
+    (good : ¬family.ledger.Bad omega) :
+    AdmittedExecution family omega where
+  semantic := {
+    reflected := reply
+    outsideFailures := good }
+  selected := selected
 
 /-- A future suite which closes the currently impossible bound-deployment
 premise obtains all 384 exact integer equations.  No privacy, hiding, release,
@@ -461,7 +664,7 @@ theorem every_exact_integer_equation_of_not_bad
     (family : CommonGameFamily Omega Error bound
       (RelationWitness dialect request result))
     {omega : Omega}
-    {reply : CoreJoin.AdmittedReceipt
+    {reply : CoreJoin.ReflectedReceipt
       (CoreJoin.statementOf dialect adapter accepted) bound}
     (selected : family.execution omega = some reply)
     (good : ¬family.ledger.Bad omega) :
@@ -471,15 +674,18 @@ theorem every_exact_integer_equation_of_not_bad
             witness.evidence.token.input.row =
           ((result.outputRepresentation.equations.equation rowIndex).rns.value : Int) *
             (witness.evidence.token.batch.rowCall rowIndex).witness.quotient.value := by
-  obtain ⟨witness⟩ := family.witness_of_not_bad selected good
-  exact ⟨witness, witness.every_exact_integer_equation⟩
+  let execution := admitted_of_not_bad family selected good
+  exact ⟨execution.semantic.witness,
+    execution.semantic.every_exact_integer_equation⟩
 
 end BfvCommonGame
 
 /-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.statementOf_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_exact
-/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.statementOf_no_boundSuite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_no_boundSuite
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.statementOf_no_boundReflectedChecker' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.statementOf_no_boundReflectedChecker
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.runReflected_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CoreJoin.runReflected_success_integrity
 /-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.CoreJoin.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CoreJoin.run_success_integrity
 /-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.RelationWitness.every_exact_integer_equation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -490,6 +696,8 @@ end BfvCommonGame
 #guard_msgs (whitespace := lax) in #print axioms CommonGameFamily.falseAccept_le
 /-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.BfvCommonGame.every_exact_integer_equation_of_not_bad' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms BfvCommonGame.every_exact_integer_equation_of_not_bad
+/-- info: 'Minidregg.Assurance.BfvProofControllerAdmission.BfvCommonGame.no_current_semantic_deployment' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BfvCommonGame.no_current_semantic_deployment
 
 end
 

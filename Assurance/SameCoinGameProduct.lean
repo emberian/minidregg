@@ -334,7 +334,7 @@ open Minidregg.Assurance.BfvProofControllerAdmission
 
 def game {Omega Error : Type} [Fintype Omega]
     {statement : Minidregg.Compiler.BfvProofController.Statement}
-    {bound : Minidregg.Compiler.BfvProofController.BoundSuite statement}
+    {bound : Minidregg.Compiler.BfvProofController.BoundReflectedChecker statement}
     {Witness : Type}
     (family : CommonGameFamily Omega Error bound Witness) :
     RegisteredGame BfvFailureClass Omega where
