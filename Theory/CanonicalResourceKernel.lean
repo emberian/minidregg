@@ -27,7 +27,6 @@ The account book is one typed field in this bounded nucleus.  A production
 layout may shard balances and leases into sparse fields while preserving the
 same operation normalization and conservation law.
 -/
-import Kernel.State
 import Theory.CellState
 import Theory.MaterializerCardinality
 import Theory.TypedAuthorization
@@ -84,18 +83,6 @@ def Book.empty : Book where
 /-- The conserved total for one asset, including its issuer well. -/
 def Book.totalAsset (book : Book) (asset : AssetId) : Int :=
   ∑ account ∈ book.accounts, book.balance account asset
-
-/-- Projection to the old four-field state.  It is used only to inherit the
-already-proved finite-sum algebra; no old executor is invoked. -/
-def Book.asKernelState (book : Book) : Minidregg.Kernel.KernelState where
-  accounts := book.accounts
-  bal := book.balance
-  caps := fun _ => []
-  umap := fun _ => none
-
-@[simp] theorem Book.asKernelState_totalAsset (book : Book) (asset : AssetId) :
-    Minidregg.Kernel.totalAsset book.asKernelState asset = book.totalAsset asset :=
-  rfl
 
 /-! ## One posting algebra, five semantic operations -/
 
@@ -431,21 +418,6 @@ def Book.creditOnly (book : Book) (destination : AccountId)
   balances := book.balances +
     DFinsupp.single (destination, asset) (Int.ofNat amount)
   leaseRecords := book.leaseRecords
-
-@[simp] theorem Book.creditOnly_balance (book : Book) (destination : AccountId)
-    (asset : AssetId) (amount : Nat) (account : AccountId) (otherAsset : AssetId) :
-    (book.creditOnly destination asset amount).balance account otherAsset =
-      Minidregg.Kernel.mintBal book.balance destination asset
-        (Int.ofNat amount) account otherAsset := by
-  simp only [Book.balance, Book.creditOnly, DFinsupp.add_apply,
-    DFinsupp.single_apply, Minidregg.Kernel.mintBal]
-  by_cases sameAsset : otherAsset = asset
-  · subst sameAsset
-    by_cases sameAccount : account = destination
-    · subst sameAccount
-      simp
-    · simp [sameAccount, Ne.symm sameAccount]
-  · simp [sameAsset, Ne.symm sameAsset]
 
 theorem Book.creditOnly_adds
     (book : Book) (destination : AccountId) (asset : AssetId) (amount : Nat)
