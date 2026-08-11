@@ -7,38 +7,42 @@ history but is not present-tense status.
 
 ## 2026-08-11 resumed megaswarm convergence
 
-The first construction batch is integrated.  It adds exact authorized ten-lane
-charges, payload/read-guard settlement, framed/checksummed WAL crash recovery,
-replicated finality safety, reactive terminal exclusivity, provider leases, canonical
-escrow orders, concrete credential use/revocation/rotation, concrete two-parent Hyperdocument conflicts,
-and exact link publication/reopen/recovery witnesses.  Bounded content, event, and
-authority pages have versioned lawful codecs, Lean cSHAKE roots, stable catalog
-identity, and matched hbox/persvati interpreter evidence.
+Both construction waves are integrated through `537b273`.  The first repaired the
+kernel/history foundations; the second deliberately occupied neglected consumer
+surfaces instead of adding more unconstrained interfaces.
 
-The proof boundary also moved: concrete raw Tower256 deployment and canonical
-receipt execution now feed a same-coin raw history/additive ledger without the
-formally impossible universal-binding carrier.  Ext6 has nonzero deployment
-identity and reflected control.  BFV and note spend distinguish weak reflected
-receipts from semantic admission, which still requires exact nonzero suite binding
-and the named same-coin security laws.  Zero-pinned current requests remain
-deliberately non-deployable.
+The forward-link path now has exact bounded content/event pages and cSHAKE roots,
+an authority-guarded durable intent, framed recovery, a shared human/agent request,
+an exercised local-file process-restart path, authorized content/history queries,
+typed transclusion reopening, and a persistent bounded backlink/range index.  V1→V2
+page migration is authorization-gated and recovery/finality-aware.  Credentials have
+a restart-safe issue/attenuate/use/revoke/rotate endpoint.  Reactive agent jobs,
+market-bound provider work, quota-safe GC, private MPC-to-escrow settlement, declared
+create/write/move lowering, and a concrete Grain settlement are now built and public
+through the umbrellas.
 
-The latest resumed full umbrella pass was green at 3,303 jobs.  The stricter census
-now sees a much larger integrated environment: 1,210 declared carriers and 510
-outside-home producers.  Its raw 544 "actionable" count is not a task list: a
-top-40 audit classified 24 as already inhabited/data noise, five as honest
-conditional seams, and three or four as legacy.  Only seven or eight were genuine
-construction gaps; the first concrete computation adapter and the non-vacuous
-LogUp extension deployment have since landed.
+The proof boundary also moved.  Raw retained-history Fiat--Shamir execution is tied
+to literal decoded bytes and SR traces and constructs the intrinsic PCS/MCA event
+without an arbitrary classifier.  Collision pricing is available only through an
+explicit full-query same-coin realization; uniform marginals are formally shown
+insufficient.  BFV has an actual all-384-row checked batch/cell, and Ext6 has a
+positive five-round controlled receipt, while nonzero suite identity and the named
+security laws remain mandatory for semantic proof admission.
 
-Current priority is the smallest honest D cutover.  The current-authority typed
-forward link now has one byte request/effect surface for human and agent origins,
-lost-response/restart recovery, idempotent retry, and exact reopen plus causal
-receipt.  That is still S/A: the real filesystem/database refinement, a client that
-uses it, real credential transport, and an end-to-end benchmark are not landed.  In parallel, close the raw history
-Fiat--Shamir execution bridge and concrete CR/ROM/MCA prices without reviving the
-old binding-closed PCS.  Physical/network liveness and cryptographic security stay
-separate from semantic safety.
+The exact committed snapshot `537b273` passes the isolated local checker at 3,336
+jobs with command/source/dependency integrity all zero.  The full current workspace,
+including the separate live Uwueave lane, is green at 3,383 jobs.  Its census reports 1,365
+declared carriers, 614 outside-home producers, five audited non-targets, and 561 raw
+"actionable" entries.  That last number is an intentionally pessimistic reachability
+signal, not a construction queue: its leaders now include nested produced data,
+explicit reduction premises, and legacy compatibility carriers.
+
+Current priority is no longer carrier breadth.  It is to harden the few slices that
+now look deployment-shaped: actual POSIX/database refinement and power-loss testing;
+authenticated signatures, votes, and key custody; network availability/liveness;
+complete cSHAKE query-trace coupling and concrete PCS/CR/ROM prices; production
+nonzero proof suites; global index/crawler coverage; and end-to-end latency/tail
+benchmarks.  Every one remains separate from the semantic safety already proved.
 
 ## Historical: first 2026-08-11 integration resolution
 
