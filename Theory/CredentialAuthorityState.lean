@@ -35,6 +35,8 @@ inductive AuthorityField where
   | capability (kind : ResourceKind) (id : CapabilityId)
   | issuerEpoch (issuer : IssuerId)
   | policyEpoch (policy : PolicyId)
+  /-- Content address of the exact versioned policy source. -/
+  | policyAddress (policy : PolicyId) (epoch : Epoch)
   | subjectKeyEpoch (subject : SubjectId)
   | revoked (key : RevocationKey)
   | nullifier (id : Nat)
@@ -52,6 +54,7 @@ def AuthorityField.Value : AuthorityField → Type
   | .capability kind _ => StoredCapability kind
   | .issuerEpoch _ => Epoch
   | .policyEpoch _ => Epoch
+  | .policyAddress _ _ => Digest
   | .subjectKeyEpoch _ => Epoch
   | .revoked _ => Bool
   | .nullifier _ => Bool
@@ -86,6 +89,13 @@ def issuerEpochAt {M : Materializer} (pre : Cell M) (issuer : IssuerId) : Epoch 
 
 def policyEpochAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : Epoch :=
   (pre.logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+
+/-- Missing sparse policy records resolve to the distinguished zero address;
+production policy admission still requires membership under `pre.root`, so an
+absent record is not silently authorized. -/
+def policyAddressAt {M : Materializer} (pre : Cell M)
+    (policy : PolicyId) (epoch : Epoch) : Digest :=
+  (pre.logical.fields (.policyAddress policy epoch)).getD ⟨0⟩
 
 def subjectKeyEpochAt {M : Materializer} (pre : Cell M)
     (subject : SubjectId) : Epoch :=
@@ -141,6 +151,8 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
     (pre : Cell M) : AuthState where
   capabilityRoot := pre.root
   revocationRoot := pre.root
+  policyRoot := pre.root
+  policyAddress := policyAddressAt pre
   revoked := domain.revocationKeys.filter fun key => isRevoked pre key
   issuerEpoch := issuerEpochAt pre
   policyEpoch := policyEpochAt pre
@@ -153,6 +165,16 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
 @[simp] theorem authState_revocationRoot {M : Materializer}
     (domain : ProjectionUniverse) (pre : Cell M) :
     (authState domain pre).revocationRoot = pre.root := rfl
+
+@[simp] theorem authState_policyRoot {M : Materializer}
+    (domain : ProjectionUniverse) (pre : Cell M) :
+    (authState domain pre).policyRoot = pre.root := rfl
+
+@[simp] theorem authState_policyAddress {M : Materializer}
+    (domain : ProjectionUniverse) (pre : Cell M)
+    (policy : PolicyId) (epoch : Epoch) :
+    (authState domain pre).policyAddress policy epoch =
+      policyAddressAt pre policy epoch := rfl
 
 @[simp] theorem authState_issuerEpoch {M : Materializer}
     (domain : ProjectionUniverse) (pre : Cell M) (issuer : IssuerId) :

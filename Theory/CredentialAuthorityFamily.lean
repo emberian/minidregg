@@ -349,7 +349,9 @@ theorem AcceptedCredential.policy_selected
     {scheme : RequestDigestScheme} {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (accepted : AcceptedCredential scheme portal state request) :
-    portal.verifyPolicy request accepted.authorization.policyWitness = true :=
+    portal.verifyCommittedPolicy
+      (state.policyAddress request.policyId request.policyEpoch)
+      request accepted.authorization.policyWitness = true :=
   accepted.authorization.policyVerified
 
 theorem AcceptedCredential.holder_covers
@@ -431,7 +433,9 @@ def demoTokenAccepted :
   lineage := demoCapabilityLineage
 
 theorem demoToken_uses_common_policy :
-    demoPortal.verifyPolicy demoRequest
+    demoPortal.verifyCommittedPolicy
+      (demoState.policyAddress demoRequest.policyId demoRequest.policyEpoch)
+      demoRequest
       demoTokenAccepted.authorization.policyWitness = true :=
   demoTokenAccepted.policy_selected
 

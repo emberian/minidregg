@@ -408,7 +408,10 @@ def authorization : Authorized permissivePortal
     (declaration.toRequest config) where
   evidence := .proof () rfl
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 def semantic : HyperdocumentOperations.ValidOperation config

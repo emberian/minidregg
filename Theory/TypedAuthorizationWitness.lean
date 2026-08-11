@@ -40,23 +40,26 @@ def permissivePortal : Portal where
   IssuerWitness := Unit
   NonRevocationWitness := Unit
   PolicyWitness := Unit
+  policyAddress := fun _ => ⟨0⟩
   verifySignature := fun _ _ => true
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
-  verifyPolicy := fun _ _ => true
+  verifyCommittedPolicy := fun _ _ _ _ => true
 
 /-- The same portal with the one common final gate closed.  Every evidence
 mode still verifies. -/
 def policyClosedPortal : Portal :=
-  { permissivePortal with verifyPolicy := fun _ _ => false }
+  { permissivePortal with verifyCommittedPolicy := fun _ _ _ _ => false }
 
 /-- A blank authority state: nothing revoked, every epoch zero. -/
 def authState : AuthState where
   capabilityRoot := ⟨0⟩
   revocationRoot := ⟨0⟩
+  policyRoot := ⟨0⟩
+  policyAddress := fun _ _ => ⟨0⟩
   revoked := ∅
   issuerEpoch := fun _ => 0
   policyEpoch := fun _ => 0
@@ -111,7 +114,10 @@ the tree is indexed by. -/
 def authorized : Authorized permissivePortal authState request where
   evidence := evidence
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 theorem authorized_nonempty :
@@ -121,14 +127,20 @@ theorem authorized_nonempty :
 def authorizedTrue : Authorized permissivePortal authState requestTrue where
   evidence := .proof () rfl
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 /-- The same authority, granted for the second schema's request. -/
 def authorizedB : Authorized permissivePortal authState requestB where
   evidence := .proof () rfl
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 /-! ## The capability path
@@ -194,7 +206,10 @@ def capabilityEvidence : Evidence permissivePortal authState request :=
 def capabilityAuthorized : Authorized permissivePortal authState request where
   evidence := capabilityEvidence
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 /-! ## Teeth -/
@@ -235,7 +250,9 @@ theorem evidence_exists_at_policyClosedPortal :
 theorem authorized_isEmpty_of_policyClosed :
     IsEmpty (Authorized policyClosedPortal authState request) :=
   ⟨fun token => by
-    have rejected : policyClosedPortal.verifyPolicy request token.policyWitness
+    have rejected : policyClosedPortal.verifyCommittedPolicy
+        (authState.policyAddress request.policyId request.policyEpoch)
+        request token.policyWitness
         = false := rfl
     rw [token.policyVerified] at rejected
     exact Bool.noConfusion rejected⟩

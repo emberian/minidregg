@@ -188,6 +188,11 @@ are exact equalities, never lower bounds and never optional. -/
 structure AuthState where
   capabilityRoot : Digest
   revocationRoot : Digest
+  /-- Root of the authenticated policy registry.  `policyAddress` below is the
+  exact logical projection whose membership is checked against this root. -/
+  policyRoot : Digest
+  /-- The committed content address selected by an exact `(id,epoch)` pair. -/
+  policyAddress : PolicyId → Epoch → Digest
   revoked : Finset RevocationKey
   issuerEpoch : IssuerId → Epoch
   policyEpoch : PolicyId → Epoch
@@ -294,6 +299,8 @@ structure Portal where
   IssuerWitness : Type
   NonRevocationWitness : Type
   PolicyWitness : Type
+  /-- Extract the content address named by a first-order policy witness. -/
+  policyAddress : PolicyWitness → Digest
   verifySignature : {kind : ResourceKind} → Request kind → SignatureWitness → Bool
   verifyProof : {kind : ResourceKind} → Request kind → ProofWitness → Bool
   verifyCapabilityCommitment :
@@ -302,7 +309,11 @@ structure Portal where
   verifyMembership : Digest → Digest → MembershipWitness → Bool
   verifyIssuer : IssuerId → Epoch → Digest → IssuerWitness → Bool
   verifyNonRevocation : Digest → RevocationKey → NonRevocationWitness → Bool
-  verifyPolicy : {kind : ResourceKind} → Request kind → PolicyWitness → Bool
+  /-- Verify the policy witness only for the exact committed address supplied
+  by authorization state.  Legacy address-free `verifyPolicy` no longer
+  exists, so a witness cannot choose policy content outside that state. -/
+  verifyCommittedPolicy :
+    Digest → {kind : ResourceKind} → Request kind → PolicyWitness → Bool
 
 /-- Evidence is indexed by the COMPLETE request.  Each constructor's verifier
 therefore checks that exact value, not a separately supplied action/resource
@@ -354,8 +365,19 @@ structure Authorized (portal : Portal) (state : AuthState)
     {kind : ResourceKind} (request : Request kind) : Type where
   evidence : Evidence portal state request
   policyWitness : portal.PolicyWitness
+  policyMembershipWitness : portal.MembershipWitness
   policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId
-  policyVerified : portal.verifyPolicy request policyWitness = true
+  policyAddressExact :
+    portal.policyAddress policyWitness =
+      state.policyAddress request.policyId request.policyEpoch
+  policyMembershipVerified :
+    portal.verifyMembership state.policyRoot
+      (state.policyAddress request.policyId request.policyEpoch)
+      policyMembershipWitness = true
+  policyVerified :
+    portal.verifyCommittedPolicy
+      (state.policyAddress request.policyId request.policyEpoch)
+      request policyWitness = true
 
 /-! ## §5. Negative teeth. -/
 
@@ -450,6 +472,8 @@ def demoCapability : Capability .object where
 def demoState : AuthState where
   capabilityRoot := ⟨30⟩
   revocationRoot := ⟨31⟩
+  policyRoot := ⟨33⟩
+  policyAddress := fun _ _ => ⟨34⟩
   revoked := ∅
   issuerEpoch := fun _ => 3
   policyEpoch := fun _ => 5
@@ -497,13 +521,14 @@ def demoPortal : Portal where
   IssuerWitness := Unit
   NonRevocationWitness := Unit
   PolicyWitness := Unit
+  policyAddress := fun _ => ⟨34⟩
   verifySignature := fun _ _ => true
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
-  verifyPolicy := fun _ _ => true
+  verifyCommittedPolicy := fun _ _ _ _ => true
 
 def demoEvidence : Evidence demoPortal demoState demoRequest :=
   .capability demoCapability ⟨32⟩ () () () () demoCapability_admissible
@@ -520,7 +545,10 @@ with explicit commitment/membership/issuer/non-revocation checks authorizes. -/
 def demo_authorized_positive : Authorized demoPortal demoState demoRequest where
   evidence := demoEvidence
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := rfl
 
 /-- Negative tooth: the same capability cannot authorize a different target. -/

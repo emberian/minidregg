@@ -179,6 +179,8 @@ inductive Check where
   | ancestorNonRevocations
   | channelNonRevocations
   | policyEpoch
+  | policyAddress
+  | policyMembership
   | policy
   deriving DecidableEq, Repr
 
@@ -191,14 +193,15 @@ structure ModePlan where
 which can bypass current-policy selection. -/
 def checksFor : Mode → List Check
   | .signature =>
-      [.subjectKeyEpoch, .signature, .policyEpoch, .policy]
+      [.subjectKeyEpoch, .signature, .policyEpoch, .policyAddress,
+       .policyMembership, .policy]
   | .proof =>
-      [.proof, .policyEpoch, .policy]
+      [.proof, .policyEpoch, .policyAddress, .policyMembership, .policy]
   | .capability =>
       [.capabilitySemantic, .capabilityCommitment,
        .capabilityMembership, .issuer, .selfNonRevocation,
        .ancestorNonRevocations, .channelNonRevocations,
-       .policyEpoch, .policy]
+       .policyEpoch, .policyAddress, .policyMembership, .policy]
 
 /-- Complete emitted declaration.  It is intentionally first-order data. -/
 structure Declaration where
@@ -279,6 +282,7 @@ structure Presentation (portal : Portal) {kind : ResourceKind}
     (request : Request kind) where
   evidence : PresentedEvidence portal request
   policyWitness : portal.PolicyWitness
+  policyMembershipWitness : portal.MembershipWitness
 
 def PresentedEvidence.mode {portal : Portal} {kind : ResourceKind}
     {request : Request kind} : PresentedEvidence portal request → Mode
@@ -512,7 +516,17 @@ def evalCheck {portal : Portal} {state : AuthState}
       | _ => false
   | .policyEpoch =>
       decide (request.policyEpoch = state.policyEpoch request.policyId)
-  | .policy => portal.verifyPolicy request presentation.policyWitness
+  | .policyAddress =>
+      decide (portal.policyAddress presentation.policyWitness =
+        state.policyAddress request.policyId request.policyEpoch)
+  | .policyMembership =>
+      portal.verifyMembership state.policyRoot
+        (state.policyAddress request.policyId request.policyEpoch)
+        presentation.policyMembershipWitness
+  | .policy =>
+      portal.verifyCommittedPolicy
+        (state.policyAddress request.policyId request.policyEpoch)
+        request presentation.policyWitness
 
 /-! ## §5. Total executable verifier and proof layer -/
 
@@ -558,7 +572,7 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
     (presentation : Presentation portal request)
     (satisfied : PlanSatisfied (state := state) presentation) :
     Nonempty (Authorized portal state request) := by
-  rcases presentation with ⟨presented, policyWitness⟩
+  rcases presentation with ⟨presented, policyWitness, policyMembershipWitness⟩
   cases presented with
   | signature signatureWitness =>
       have hkey := satisfied .subjectKeyEpoch
@@ -567,31 +581,49 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
         (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyAddress := satisfied .policyAddress
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyMembership := satisfied .policyMembership
+        (by simp [PresentedEvidence.mode, checksFor])
       have hpolicy := satisfied .policy
         (by simp [PresentedEvidence.mode, checksFor])
       refine ⟨{
         evidence := .signature signatureWitness ?_ ?_
         policyWitness := policyWitness
+        policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyAddressExact := ?_
+        policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
       · simpa [evalCheck] using hkey
       · simpa [evalCheck] using hsignature
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyAddress
+      · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
   | proof proofWitness =>
       have hproof := satisfied .proof
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
         (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyAddress := satisfied .policyAddress
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyMembership := satisfied .policyMembership
+        (by simp [PresentedEvidence.mode, checksFor])
       have hpolicy := satisfied .policy
         (by simp [PresentedEvidence.mode, checksFor])
       refine ⟨{
         evidence := .proof proofWitness ?_
         policyWitness := policyWitness
+        policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyAddressExact := ?_
+        policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
       · simpa [evalCheck] using hproof
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyAddress
+      · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
   | capability capPresentation =>
       have hsemantic := satisfied .capabilitySemantic
@@ -609,6 +641,10 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
       have hchannels := satisfied .channelNonRevocations
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyAddress := satisfied .policyAddress
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyMembership := satisfied .policyMembership
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicy := satisfied .policy
         (by simp [PresentedEvidence.mode, checksFor])
@@ -635,7 +671,10 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
           capPresentation.issuerWitness selfWitness semantic ?_ ?_ ?_ selfVerified
           ?_ ?_
         policyWitness := policyWitness
+        policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyAddressExact := ?_
+        policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
       · simpa [evalCheck] using hcommitment
       · simpa [evalCheck] using hmembership
@@ -647,6 +686,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         rcases channelsVerified channel hmem with ⟨witness, -, verified⟩
         exact ⟨witness, verified⟩
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyAddress
+      · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
 
 theorem verify_accepted_authorized {portal : Portal} {state : AuthState}
@@ -667,7 +708,8 @@ example : (checksFor .capability).getLast? = some .policy := rfl
 
 /-- Mode-specific verification cannot skip the common policy suffix. -/
 theorem checksFor_policy_suffix (mode : Mode) :
-    ∃ headChecks, checksFor mode = headChecks ++ [.policyEpoch, .policy] := by
+    ∃ headChecks, checksFor mode = headChecks ++
+      [.policyEpoch, .policyAddress, .policyMembership, .policy] := by
   cases mode
   · exact ⟨[.subjectKeyEpoch, .signature], rfl⟩
   · exact ⟨[.proof], rfl⟩

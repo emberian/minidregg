@@ -1,8 +1,8 @@
 /-
 # Compiler.CanonicalPolicyAdmission -- committed `Pred` is the policy gate
 
-`TypedAuthorization.Portal.verifyPolicy` is intentionally executable, but the
-bare `Portal` constructor permits a caller to install any Boolean function.
+The former address-free policy verifier permitted a caller to install a
+Boolean function without first selecting committed policy content.
 This module supplies the canonical constructor: the policy verifier is derived
 only from a versioned, content-addressed `Pred` record and acceptance of
 `PredCompile.lower`.  The other verifier portals remain explicit inputs.
@@ -14,11 +14,10 @@ policy step.  Collision resistance, registry authenticity, signature
 soundness, and the concrete field/cast label remain deployment obligations;
 none is synthesized as a proposition by this adapter.
 
-This is a new-only migration face.  It makes arbitrary policy closures absent
-from `CanonicalPolicyConfig.portal`, but cannot make construction of the older
-bare `TypedAuthorization.Portal` unrepresentable.  The eventual minimal core
-cutover is to replace that public `verifyPolicy` field by this committed source
-(and commit the policy root/address in authorization state).
+The core authorization judgment now supplies the exact address selected from
+authenticated authorization state, verifies its membership under the policy
+root, and requires the witness to name that address.  This module owns the
+canonical `PredCompile` implementation of that committed verifier.
 -/
 import Compiler.PredCompile
 import Theory.TypedAuthorization
@@ -67,8 +66,8 @@ structure CompiledPolicyWitness (F : Type) where
 
 /-! ## 2. Canonical portal construction. -/
 
-/-- All inputs to the canonical policy verifier.  `base.verifyPolicy` and its
-old witness type are intentionally ignored by `portal`; only the non-policy
+/-- All inputs to the canonical policy verifier.  The base portal's policy
+verifier and old witness type are intentionally ignored by `portal`; only the non-policy
 verifier families are retained. -/
 structure CanonicalPolicyConfig (F : Type) [Field F] [DecidableEq F] where
   base : Portal
@@ -112,18 +111,23 @@ def CanonicalPolicyConfig.portal {F : Type} [Field F] [DecidableEq F]
   IssuerWitness := config.base.IssuerWitness
   NonRevocationWitness := config.base.NonRevocationWitness
   PolicyWitness := CompiledPolicyWitness F
+  policyAddress := fun witness => witness.address
   verifySignature := config.base.verifySignature
   verifyProof := config.base.verifyProof
   verifyCapabilityCommitment := config.base.verifyCapabilityCommitment
   verifyMembership := config.base.verifyMembership
   verifyIssuer := config.base.verifyIssuer
   verifyNonRevocation := config.base.verifyNonRevocation
-  verifyPolicy := config.verifies
+  verifyCommittedPolicy := fun committedAddress _ request witness =>
+    decide (committedAddress = witness.address) && config.verifies request witness
 
-@[simp] theorem portal_verifyPolicy {F : Type} [Field F] [DecidableEq F]
+@[simp] theorem portal_verifyCommittedPolicy {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) {kind : ResourceKind}
-    (request : Request kind) (witness : CompiledPolicyWitness F) :
-    config.portal.verifyPolicy request witness = config.verifies request witness :=
+    (committedAddress : Digest) (request : Request kind)
+    (witness : CompiledPolicyWitness F) :
+    config.portal.verifyCommittedPolicy committedAddress request witness =
+      (decide (committedAddress = witness.address) &&
+        config.verifies request witness) :=
   rfl
 
 /-! ## 3. Exact executable reading and compiler reflection. -/
@@ -235,30 +239,51 @@ def admit {F : Type} [Field F] [DecidableEq F]
     {kind : ResourceKind} (request : Request kind)
     (evidence : Evidence config.portal state request)
     (witness : CompiledPolicyWitness F)
+    (policyMembershipWitness : config.portal.MembershipWitness)
     (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId) :
     Option (CanonicalAuthorized config state request) :=
-  if accepted : config.verifies request witness = true then
-    some
-      { evidence := evidence
-        policyWitness := witness
-        policyEpochExact := policyEpochExact
-        policyVerified := accepted }
-  else
-    none
+  if addressExact : witness.address =
+      state.policyAddress request.policyId request.policyEpoch then
+    if membershipAccepted : config.portal.verifyMembership state.policyRoot
+        (state.policyAddress request.policyId request.policyEpoch)
+        policyMembershipWitness = true then
+      if accepted : config.verifies request witness = true then
+        some
+          { evidence := evidence
+            policyWitness := witness
+            policyMembershipWitness := policyMembershipWitness
+            policyEpochExact := policyEpochExact
+            policyAddressExact := addressExact
+            policyMembershipVerified := membershipAccepted
+            policyVerified := by
+              simp [CanonicalPolicyConfig.portal, addressExact, accepted] }
+      else none
+    else none
+  else none
 
 theorem admit_isSome_iff {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) (state : AuthState)
     {kind : ResourceKind} (request : Request kind)
     (evidence : Evidence config.portal state request)
     (witness : CompiledPolicyWitness F)
+    (policyMembershipWitness : config.portal.MembershipWitness)
     (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId) :
-    (admit config state request evidence witness policyEpochExact).isSome = true ↔
+    (admit config state request evidence witness policyMembershipWitness
+      policyEpochExact).isSome = true ↔
+      witness.address = state.policyAddress request.policyId request.policyEpoch ∧
+      config.portal.verifyMembership state.policyRoot
+        (state.policyAddress request.policyId request.policyEpoch)
+        policyMembershipWitness = true ∧
       config.verifies request witness = true := by
-  by_cases accepted : config.verifies request witness = true
-  · simp [admit, accepted]
-  · have rejected : config.verifies request witness = false :=
-      Bool.eq_false_iff.mpr accepted
-    simp [admit, accepted]
+  by_cases addressExact :
+      witness.address = state.policyAddress request.policyId request.policyEpoch
+  · by_cases membershipAccepted : config.portal.verifyMembership state.policyRoot
+        (state.policyAddress request.policyId request.policyEpoch)
+        policyMembershipWitness = true
+    · by_cases accepted : config.verifies request witness = true <;>
+        simp [admit, addressExact, membershipAccepted, accepted]
+    · simp [admit, addressExact, membershipAccepted]
+  · simp [admit, addressExact]
 
 /-- A missing `(policyId,version)` record fails closed. -/
 theorem unresolved_rejected {F : Type} [Field F] [DecidableEq F]
@@ -382,6 +407,16 @@ def demoConfig : CanonicalPolicyConfig (ZMod 13) where
   stateDigest := demoStateDigest
   stepDigest := demoStepDigest
 
+/-- Authorization state selects the exact content address resolved by the
+demo registry.  The registry root is illustrative; membership is discharged
+by `demoPortal` and carries no cryptographic claim. -/
+def demoAuthState : AuthState :=
+  { demoState with
+    policyAddress := fun policyId version =>
+      if policyId = demoRequest.policyId ∧ version = demoRequest.policyEpoch then
+        demoCommitted.address
+      else ⟨0⟩ }
+
 def demoWitness : CompiledPolicyWitness (ZMod 13) :=
   canonicalWitness demoCommitted kOld kNew
 
@@ -418,13 +453,13 @@ digest changes and `kPol` itself is false on the mutation. -/
 theorem demo_mutation_rejected :
     demoConfig.verifies demoRequest demoMutatedWitness = false := by decide
 
-def demoEvidence : Evidence demoConfig.portal demoState demoRequest :=
+def demoEvidence : Evidence demoConfig.portal demoAuthState demoRequest :=
   .proof () rfl
 
 /-- The adapter produces an actual request-indexed authorization from the
 compiled gate; this is not merely a standalone Boolean-verifier example. -/
 theorem demo_admission_isSome :
-    (admit demoConfig demoState demoRequest demoEvidence demoWitness rfl).isSome = true := by
+    (admit demoConfig demoAuthState demoRequest demoEvidence demoWitness () rfl).isSome = true := by
   decide
 
 /-- The theorem-level reflection really fires on the deployed keystone. -/

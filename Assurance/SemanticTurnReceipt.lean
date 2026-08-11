@@ -159,7 +159,9 @@ def CommittedTurn.authorizedExact
 verification is the common final field of `Authorized`. -/
 theorem noAuthorized_of_policyReject (request : Request kind)
     (rejects : ∀ witness,
-      portal.verifyPolicy request witness = false) :
+      portal.verifyCommittedPolicy
+        (authState.policyAddress request.policyId request.policyEpoch)
+        request witness = false) :
     ¬ Nonempty (Authorized portal authState request) := by
   rintro ⟨authorized⟩
   have hfalse := rejects authorized.policyWitness
@@ -172,7 +174,9 @@ regardless of which evidence constructor the prover tries. -/
 theorem noCommitted_of_policyReject (request : Request kind)
     (pre : Store Key Value)
     (rejects : ∀ witness,
-      portal.verifyPolicy request witness = false) :
+      portal.verifyCommittedPolicy
+        (authState.policyAddress request.policyId request.policyEpoch)
+        request witness = false) :
     ¬ Nonempty (CommittedTurn portal authState request stateCommitment
       effectSemantics disclosurePolicy pre) := by
   rintro ⟨commit⟩
@@ -261,12 +265,16 @@ def disclosurePolicy : DisclosurePolicy Disclosure where
 policy gate binds the exact target value. -/
 def targetPortal : Portal :=
   { demoPortal with
-    verifyPolicy := fun request _ => decide (request.target.value = demoTarget.value) }
+    verifyCommittedPolicy := fun _ _ request _ =>
+      decide (request.target.value = demoTarget.value) }
 
 def authorization : Authorized targetPortal demoState demoRequest where
   evidence := .proof () rfl
   policyWitness := ()
+  policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
   policyVerified := by decide
 
 def commit : CommittedTurn targetPortal demoState demoRequest stateCommitment
