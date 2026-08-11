@@ -42,6 +42,7 @@ import Assurance.Tower256RawSemanticHistoryCanonicalGame  -- canonical raw addit
 import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedule and one tagged PCS/CR/ROM/FRI/OracleLog/ZK failure ledger; the union bound is over an actual common coin space
 import Assurance.ExtensibleProofCompositionGame  -- disjoint finite ledger extensions preserve every old event/price and add Ext6's eight failures on the same coin without tag reuse
 import Assurance.Tower256LogupControllerAdmission  -- exact verified Tower256 LogUp control admitted only with the canonical codec, real Merkle binding, and one common-game PCS/CR/ROM coin
+import Assurance.Tower256LogupExtensionDeploymentAdmission  -- clause-404 extension control is non-vacuous while PCS/decider/CR/ROM/history/RAM security remains explicit evidence
 import Assurance.Tower256AdditiveFriControllerAdmission  -- byte-checked Tower256 additive-FRI control enters one explicit same-coin failure ledger
 import Assurance.Tower256AdditiveFriRawAdmission  -- the same-coin cover CONSTRUCTED rather than assumed: ideal additive proximity, an accepted receipt carrying a path-specific `ExtractedCollision`, and one transcript-distribution residual
 import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller bytes derive the real Loom challenge/query event and UD price, leaving only exact ROM transport and pre-assumed position binding
@@ -52,6 +53,8 @@ import Assurance.HyperdocumentAgentOperation  -- one composed user/agent link-or
 import Assurance.HyperdocumentGuardedDurable  -- the actual published operation becomes exact content/event payload writes guarded by the current authority root
 import Assurance.HyperdocumentLinkPublicationWitness  -- a concrete genesis-to-link child is accepted and atomically publishes content plus its causal event
 import Assurance.HyperdocumentLinkReopenWitness  -- the published link occupies an exact post opening and reopens through the canonical content query
+import Assurance.HyperdocumentLinkFramedRecovery  -- the exact published link survives guarded framed-WAL crash/reopen, retry, and stale-authority rejection
+import Assurance.HyperdocumentLinkEndpointController  -- one human/agent byte envelope proves publish, lost-response crash, recovery, retry, and exact canonical reopen
 import Assurance.HyperdocumentTwoParentHistoryWitness  -- the concrete two-parent conflict survives at an exact verified-history coordinate
 import Assurance.HyperdocumentMergeDurableFinalityWitness  -- the merged conflict survives guarded WAL recovery and an intersecting-quorum finalization witness
 import Assurance.DeployedCredentialLifecycle  -- concrete issue, strict attenuation, use, revocation/rotation, guarded durable debit, and retry inhabit the bounded authority path
@@ -67,6 +70,7 @@ import Assurance.BfvProofControllerAdmission  -- the BFV384 deployment boundary 
 import Assurance.BfvSuiteMigrationBoundary  -- zero-to-nonzero suite migration changes canonical bytes or exposes an exact framed collision; control-only suites cannot fake semantic closure
 import Assurance.NoteSpendCoreAcceptedCellEffect  -- the note-spend AIR enters the release-free computation core as one sealed authorized canonical effect; hiding/PoK/PCS/CR/ROM remain explicit
 import Assurance.NoteSpendProofControllerAdmission  -- canonical proof control admits the sealed note-spend relation only outside separately priced PCS/PoK/CR/ROM failures; hiding is not inferred
+import Assurance.NoteSpendConcreteCellAdapter  -- one concrete coarse authenticated cell realizes the sealed note-spend adapter without inventing a release or deployable suite
 import Assurance.ReactiveDurableSettlement  -- accepted reactive content, terminal state, and outbox settle in one retry-safe payload intent with explicit liveness ceilings
 import Assurance.HyperdocumentReactiveCarrierWitness  -- concrete deployed create/history/controller values inhabit the reactive carrier and its durable terminal settlement
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle

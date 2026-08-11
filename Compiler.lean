@@ -60,6 +60,7 @@ import Compiler.Tower256ConcreteBackend -- one shared Tower256/cSHAKE/Merkle bac
 import Compiler.Tower256LogupControllerPlan -- four LogUp roots before round challenge, additive checkpoint before query challenge, exact Merkle openings, opaque fallible Tower work, and reflected Lean final semantics
 import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exact plan retains its reflected statement and four-root prefix, yielding indexed evaluation from explicit PCS/CR/ROM judgments
 import Compiler.Tower256LogupClauseDispatch -- extension-local clause-404 dispatch turns exactly two keyed opaque byte replies into the existing Lean-verified execution; base V1 remains empty
+import Compiler.Tower256LogupExtensionDeployment  -- nonzero versioned extension pins and concrete shared-backend inputs inhabit the two-call byte controller while base V1 stays empty
 import Compiler.Tower256AdditiveFriController -- exact cSHAKE-derived additive-FRI control over opaque proof bytes; Lean alone decodes and accepts
 import Compiler.Tower256AdditiveFriRawController -- the same additive checker with NO universal `PositionBinding`: an unequal accepted opening is retained and extracts a path-specific framed cSHAKE collision instead of vanishing
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
