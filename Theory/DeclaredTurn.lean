@@ -35,18 +35,71 @@ def effectSchema : CellState.Schema where
   Authority := fun resource => nomatch resource
   Evidence := fun resource => nomatch resource
 
-def logicalOfStore (store : EffectDeclaration.Store) :
+instance : DecidableEq effectSchema.Field :=
+  inferInstanceAs (DecidableEq EffectDeclaration.StateKey)
+
+instance : DecidableEq effectSchema.Resource :=
+  inferInstanceAs (DecidableEq Empty)
+
+/-- Reify the values at an explicit finite key list into the canonical sparse
+field carrier, framing every other address from `base`. -/
+def fieldsOfStore (base : CellState.FieldStore effectSchema)
+    (store : EffectDeclaration.Store) : List EffectDeclaration.StateKey →
+      CellState.FieldStore effectSchema
+  | [] => base
+  | key :: rest => fieldsOfStore (base.write key (store key)) store rest
+
+/-- A finite store reification reads the supplied semantic store exactly on
+the named keys and otherwise reads the base sparse state. -/
+theorem fieldsOfStore_read (base : CellState.FieldStore effectSchema)
+    (store : EffectDeclaration.Store) (keys : List EffectDeclaration.StateKey)
+    (key : EffectDeclaration.StateKey) :
+    fieldsOfStore base store keys key =
+      if key ∈ keys then some (store key) else base key := by
+  induction keys generalizing base with
+  | nil => rfl
+  | cons head rest ih =>
+      rw [fieldsOfStore, ih]
+      by_cases member : key ∈ rest
+      · simp [member]
+      · by_cases same : key = head
+        · subst head
+          simp [member, CellState.FieldStore.write, CellState.FieldStore.assign]
+          rfl
+        · simp [member, same, CellState.FieldStore.write,
+            CellState.FieldStore.assign]
+          simpa [CellState.FieldStore.read, CellState.FieldStore.write,
+            CellState.FieldStore.assign] using
+            (CellState.FieldStore.read_write_other base (Ne.symm same)
+              (store head))
+
+/-- Materialize one semantic store relative to an exact sparse base and the
+finite key set allowed to differ from it.  The base and footprint are part of
+the construction, so no arbitrary total function crosses the codec boundary. -/
+def logicalOfStore (base : CellState.LogicalState effectSchema)
+    (keys : List EffectDeclaration.StateKey) (store : EffectDeclaration.Store) :
     CellState.LogicalState effectSchema where
-  fields := store
-  resources := fun resource => nomatch resource
+  fields := fieldsOfStore base.fields store keys
+  resources := base.resources
 
 def storeOfLogical (logical : CellState.LogicalState effectSchema) :
     EffectDeclaration.Store :=
-  logical.fields
+  fun key => (logical.fields key).getD (show Int from 0)
 
-@[simp] theorem storeOfLogical_logicalOfStore (store : EffectDeclaration.Store) :
-    storeOfLogical (logicalOfStore store) = store :=
-  rfl
+/-- The sparse reification preserves the complete semantic store when the
+supplied key list covers every difference from the base total view. -/
+theorem storeOfLogical_logicalOfStore
+    (base : CellState.LogicalState effectSchema)
+    (keys : List EffectDeclaration.StateKey) (store : EffectDeclaration.Store)
+    (frame : ∀ key, key ∉ keys → store key = storeOfLogical base key) :
+    storeOfLogical (logicalOfStore base keys store) = store := by
+  funext key
+  simp only [storeOfLogical, logicalOfStore, fieldsOfStore_read]
+  by_cases member : key ∈ keys
+  · rw [if_pos member]
+    rfl
+  · rw [if_neg member]
+    exact frame key member ▸ rfl
 
 /-! ## §2. Request derivation -/
 
@@ -143,7 +196,8 @@ def Commit.post {portal : Portal} {state : AuthState}
     {postStore : EffectDeclaration.Store}
     (_commit : Commit (state := state) declaration postStore) :
     CellState.Materialized materializer :=
-  CellState.materialize materializer (logicalOfStore postStore)
+  CellState.materialize materializer
+    (logicalOfStore declaration.pre.logical declaration.effects.footprint postStore)
 
 def Commit.preRoot {portal : Portal} {state : AuthState}
     {materializer : CellState.Materializer effectSchema Digest}
@@ -243,7 +297,8 @@ def Outcome.materialized {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {declaration : Declaration portal materializer kind} :
     Outcome state declaration → CellState.Materialized materializer
   | .committed postStore =>
-      CellState.materialize materializer (logicalOfStore postStore)
+      CellState.materialize materializer
+        (logicalOfStore declaration.pre.logical declaration.effects.footprint postStore)
   | .rejected _ => declaration.pre
 
 @[simp] theorem Outcome.rejected_materialized {portal : Portal}
@@ -303,8 +358,22 @@ theorem Commit.frame {portal : Portal} {state : AuthState}
     (key : EffectDeclaration.StateKey)
     (outside : key ∉ commit.footprint) :
     commit.post.logical.fields key = declaration.pre.logical.fields key := by
-  change postStore key = declaration.preStore key
-  exact commit.effect.frame key (by simpa [Commit.footprint] using outside)
+  change key ∉ declaration.effects.footprint at outside
+  change fieldsOfStore declaration.pre.logical.fields postStore
+      declaration.effects.footprint key = declaration.pre.logical.fields key
+  rw [fieldsOfStore_read, if_neg outside]
+
+/-- The sparse post cell has exactly the total semantic store accepted by the
+effect evaluator; finite representation does not weaken the transition. -/
+theorem Commit.postStore_exact {portal : Portal} {state : AuthState}
+    {materializer : CellState.Materializer effectSchema Digest}
+    {kind : ResourceKind} {declaration : Declaration portal materializer kind}
+    {postStore : EffectDeclaration.Store}
+    (commit : Commit (state := state) declaration postStore) :
+    storeOfLogical commit.post.logical = postStore := by
+  apply storeOfLogical_logicalOfStore
+  intro key outside
+  exact commit.effect.frame key outside
 
 /-- Commit conserves every complete resource id named by its exact deltas. -/
 theorem Commit.balance {portal : Portal} {state : AuthState}
@@ -335,7 +404,8 @@ theorem Commit.postRoot_derived {portal : Portal} {state : AuthState}
     (commit : Commit (state := state) declaration postStore) :
     commit.postRoot =
       materializer.rootBytes (materializer.codec.encode
-        (logicalOfStore postStore)) :=
+        (logicalOfStore declaration.pre.logical declaration.effects.footprint
+          postStore)) :=
   rfl
 
 end Minidregg.Theory.DeclaredTurn

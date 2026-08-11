@@ -13,15 +13,9 @@ document store is one dependent sparse namespace and is definitionally mapped
 to the canonical `CellState` shape.  A lawful cell codec commits every typed
 value at the byte level; root binding remains a separate cryptographic claim.
 
-**KNOWN VACUOUS (2026-08-10).**  `Materializer Root` below is
-`CellState.Materializer cellSchema Root`, whose codec must inject the ENTIRE
-`LogicalState cellSchema` into `List UInt8`.  `Address` is infinite and the
-value type is `Option (Value _)`, which has at least two inhabitants, so that
-state space is uncountable.
-`Theory.MaterializerCardinality.hyperdocumentMaterializer_isEmpty` proves
-`Materializer Digest` is EMPTY, so every theorem here and downstream that
-quantifies over a document `Cell` is vacuously true.  The namespaces and their
-semantics are not the problem; the total function in `LogicalState` is.
+`CellState.LogicalState` stores document addresses in a canonical finite
+dependent map.  Absence is the primitive field-read result, rather than an
+optional value hidden inside an uncountable total function.
 -/
 import Theory.CausalVersionDag
 import Theory.CredentialAuthorityState
@@ -825,15 +819,11 @@ theorem addresses_disjoint
   intro equal
   exact different (address_namespace_eq_of_eq leftKey rightKey equal)
 
-/-- The semantic sparse store: absence is represented only by `none`. -/
-abbrev SparseStore :=
-  (space : Namespace) -> Key space -> Option (Value space)
-
 /-- The exact canonical cell schema.  There is no untyped extension map or
-parallel resource table; each packed address has its dependent optional value. -/
+parallel resource table; absence belongs to the sparse carrier itself. -/
 def cellSchema : CellState.Schema where
   Field := Address
-  FieldType := fun address => Option (Value address.1)
+  FieldType := fun address => Value address.1
   Resource := Empty
   ResourceType := Empty.elim
   Authority := fun resource => nomatch resource
@@ -847,21 +837,23 @@ instance : DecidableEq cellSchema.Resource := by
   change DecidableEq Empty
   infer_instance
 
+/-- The semantic sparse store is exactly the canonical cell field carrier. -/
+abbrev SparseStore := CellState.FieldStore cellSchema.{0, 0}
+
 /-- Sparse namespace storage becomes canonical cell state without translation
 or a host-authored root. -/
 def SparseStore.toCellState (store : SparseStore) :
     CellState.LogicalState cellSchema where
-  fields := fun address => store address.1 address.2
+  fields := store
   resources := fun resource => nomatch resource
 
 /-- The inverse projection reads the exact dependent field. -/
 def SparseStore.ofCellState (state : CellState.LogicalState cellSchema) :
     SparseStore :=
-  fun space key => state.fields ⟨space, key⟩
+  state.fields
 
 @[simp] theorem SparseStore.ofCellState_toCellState (store : SparseStore) :
     SparseStore.ofCellState store.toCellState = store := by
-  funext space key
   rfl
 
 @[simp] theorem SparseStore.toCellState_ofCellState

@@ -501,9 +501,9 @@ theorem acceptedSparseBusLookup
     rw [rowIndexExact row]
   continuity := ExactBusClaim.twistContinuity bus
 
-/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.TwistContinuity.of_busRelation' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.TwistContinuity.of_busRelation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms TwistContinuity.of_busRelation
-/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.ExactBusClaim.twistContinuity' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.ExactBusClaim.twistContinuity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ExactBusClaim.twistContinuity
 /-- info: 'Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.committedBusTrace_canonicalAddressLinked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms committedBusTrace_canonicalAddressLinked

@@ -1,4 +1,4 @@
-# STANDING GOAL — night session of 2026-08-10
+# STANDING GOAL — resumed 2026-08-11
 
 **Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.** Solo: no
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
@@ -29,17 +29,19 @@ premise — recorded below, because it is the most instructive thing here.
 page cache, replication, clock, or liveness — so "durable" still means "modelled
 durable". The collision bridge is a reduction with no price: no collision probability,
 no ROM realization, no deployed `MerkleDomains`/`ColumnPort` identity. Every witness
-uses BUILT parameters — a minimal schema, a permissive portal, `ZMod 5` — so none of
-them says anything about deployed ones, and a permissive portal is exactly the portal a
-security claim may not use. No consumer has cut over: no editor, index, sync, or client
-reads any path landed tonight. And `PcsCrRomReduction` is still assumed rather than derived.
+uses BUILT parameters — sometimes a minimal schema, permissive portal, or `ZMod 5` — so
+none of those witnesses alone is a deployment security claim. The materializer repair
+below now additionally exhibits the four deployed schemas, but with existence codecs
+and a non-cryptographic root. No consumer has cut over: no editor, index, sync, or client
+reads the complete path. And `PcsCrRomReduction` is still assumed rather than derived.
 
-**Where the session ended (the night ran to mid-afternoon; sixteen isolated runs, all
+**Where the previous session ended (the night ran to mid-afternoon; sixteen isolated runs, all
 three integrity exits `0` on every one).** `QUIESCELOG.md`'s resume items 1–4 are done: clean base,
 integration gate, the raw retained-history carrier, and a durable handler that inhabits
-`ImplementationRefinement`. Item 5 — cut over one user/agent workflow — is **blocked, and
-the block is the finding**: the workflow's cells are uninhabitable, so the cutover cannot
-be done before the `LogicalState` refactor, which is a design decision I left to you.
+`ImplementationRefinement`. Item 5 — cut over one user/agent workflow — was blocked by
+the materializer finding. The `LogicalState` refactor is now landed and the four deployed
+schema carriers are exhibited; consumer cutover is unblocked at the type boundary but
+remains undone as deployment/application work.
 
 **Current thrust:** three sweeps are complete — carrier inhabitation from `Theory/CellState`
 up through `Kernel/MultiCellHyperedge`, the tree-wide axiom ledger, and the codec gate on
@@ -53,12 +55,12 @@ in two (`SemanticHistoryPcsEventRealization`, `SemanticHistoryTower256DeployedBc
 **constructed nowhere**. So the four-event end-to-end price — what the snapshot below
 calls "the sharpened four-event price" — is conditional on a carrier nobody has built.
 
-This is NOT the same status as the materializers, and the difference matters for how
-alarmed to be. The materializers are *provably empty*: no construction can exist.
-`JointGameFamily` is merely *unexhibited* — it is the `VerifiedHistoryHead` situation
-before `d257fe9`, and its fields look inhabitable (`checkpoint` contains a head, which is
-now built; `domain : BoundReceiptIx n ↪ TowerField` needs only a cardinality fit, which
-`TowerField` has room for). Someone should build one; nobody has.
+This was not the same status as the former materializer obstruction. The materializers
+were proved empty and have now been repaired/exhibited. `JointGameFamily` is merely
+*unexhibited* — it is the `VerifiedHistoryHead` situation before `d257fe9`, and its
+fields look inhabitable (`checkpoint` contains a head, which is now built; `domain :
+BoundReceiptIx n ↪ TowerField` needs only a cardinality fit, which `TowerField` has room
+for). It remains a priority audit/build target.
 
 Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryHead`, which
 `HistoryHeadInhabitation` grounds, not over `JointGameFamily`.
@@ -75,8 +77,7 @@ Tonight's `RawHistoryBcsOpenings` is unaffected — it quantifies over `HistoryH
 | `MultiCellHyperedge.Commit` | `Kernel.MultiCellHyperedgeWitness` (`e1f6488`, two legs, two SCHEMAS) |
 | `TypedCellHyperedge.Commit` | `Kernel.TypedCellHyperedgeWitness` (`5d02d05`) |
 
-**Not yet swept — but read the materializer finding above first, because it changes what
-"swept" would even mean for anything sitting on an authority or document cell.**
+**Not yet swept — now against the repaired, inhabited authority/document carriers.**
 
 - `HyperdocumentAgentOperation.AcceptedOperation` — the biggest one left, and the most
   load-bearing: its only theorems are `no_wrong_version` and `no_outside_scope`, two
@@ -232,112 +233,40 @@ individual witness, because it is what finds the next one without a person getti
 
 (I briefly proposed this as a new ATLAS law. It was a restatement of law 2; cut.)
 
-**THE FINDING OF THE NIGHT — read this first (2026-08-10, `70047be` … `ed2cfed`)**
+**THE MATERIALIZER FINDING — CLOSED 2026-08-11**
 
-**No `CellState.Materializer` in this tree has an inhabitant, at any of its schemas.**
-There are exactly four schema definitions in the repository and all four are proved
-empty: `CredentialAuthorityState.schema` (`70047be`), `Hyperdocument.cellSchema`
-(`7311a60`), `HyperdocumentEventLog.cellSchema` (`df10328`), and
-`DeclaredTurn.effectSchema` (`ed2cfed`) — the last of which is what
-`Kernel.DeclaredHyperedge`, the call-forest replacement carrier, is built on.
+The 2026-08-10 audit found a real, system-wide vacuity: the former
+`CellState.LogicalState.fields` was a total dependent function.  At every deployed
+infinite address space it contained an uncountable function subspace, while a
+`LawfulCodec` necessarily injects into countable `List UInt8`.  The authority,
+Hyperdocument, event-log, and declared-effect schemas therefore had no materializer.
 
-The argument is three lines. A materializer carries `LawfulCodec (LogicalState S)`;
-`decode_encode` makes `encode` injective; so a materializer is an injection from the
-schema's entire state space into `List UInt8`, which is countable. The authority schema
-has `AuthorityField.nullifier : Nat → AuthorityField` at value type `Bool`, so its state
-space contains `Nat → Bool`, which is not countable.
+The repair changed the shared carrier rather than adding a parallel sparse twin:
 
-Consequence, stated plainly: **every theorem anywhere in the tree that quantifies over a
-`Materialized` cell at a deployed schema is vacuously true.** Issuance, strict attenuation, revocation, epoch rotation,
-`AuthenticatedPrincipal`, `HyperdocumentOperations.Accepted`, `AcceptedOperation`, the
-atomic two-cell publication, and the flat multi-incidence turn all sit above a premise
-nothing can satisfy. The only cells that exist are the finite ones built tonight in
-`Theory.CellStateWitness` for the express purpose of not being vacuous. They are not false. They are vacuous, which is
-worse, because vacuous theorems read exactly like real ones — and this is the second time
-tonight that shape turned up (the first was `VerifiedHistoryHead`, closed in `d257fe9`).
+- `CellState.FieldStore` is a canonical dependent finite map (`DFinsupp`);
+- primitive reads return `Option`, so absence is represented once;
+- typed field mutations insert/overwrite with `some` and erase with structural `none`;
+- authority readers state zero/false defaults explicitly;
+- Hyperdocument and event-log values are stored directly;
+- `EffectDeclaration.Store` remains a total semantic evaluator, but declared turns
+  reify only the exact finite footprint over their canonical pre-state and prove the
+  outside-frame law; and
+- the deleted total carrier and constant-one semantic store remain negative regression
+  teeth in `MaterializerCardinality` and `StoreFiniteSupport`.
 
-The fix is already the tree's own vocabulary. `CredentialAuthorityState` calls its cell
-"one canonical typed sparse CellState"; `Kernel.SparseAuthenticatedState` calls them
-sparse namespaces. But `LogicalState.fields` is a TOTAL function. Make it finitely
-supported — a finite map read through a default — and the state space is countable
-whenever the index and values are, and the codec is the finite map's codec.
-`finite_schema_state_countable` records the other side: finite schemas are unobstructed,
-which is why `Theory.CellStateWitness` works.
+The closure is exhibited, not inferred. `Theory.DeployedMaterializerWitness` constructs
+lawful codecs, materializers, and empty cells for the declared-effect, authority, and
+Hyperdocument schemas. `Kernel.DeployedMaterializerWitness` constructs both sparse and
+canonical event-log materializers/cells and proves their empty roots exact. The full
+Theory, Kernel, Assurance, Compiler, and Minidregg umbrellas elaborate over the migrated
+carrier.
 
-**Tonight's own witnesses are unaffected**, and it is worth saying why rather than
-leaving a reader to check: every one of them — `CellStateWitness`,
-`AcceptedCellEffectWitness`, `CanonicalTransitionWitness`, both `Kernel` commit witnesses
-— is built at a FINITE schema, whose state space is a `Fintype` and therefore countable.
-`finite_schema_state_countable` is that observation. They still say nothing about the
-deployed schemas, which is the point of the finding.
-
-**The design is decided and the first step has landed.** ember chose the Option-valued
-encoding, with the observation that makes the three-way choice go away: if the core is
-Option-valued, the other two designs are DERIVED, not rival. `Theory.SparseLogicalState`
-is that core — `read` is Option-valued, `readD` takes a default and gives you either the
-schema-side or the state-side convention, and `readD_empty` proves "no default" and
-"default everywhere" are one object seen two ways. `nonempty_lawfulCodec_sparse_effect`
-carries it to an actual codec for `DeclaredTurn.effectSchema`, the schema
-`effectMaterializer_isEmpty` proves empty as a total function.
-
-**Migration step 1 is under way.** Scoping it changed its shape: `EffectDeclaration.Store`
-has 113 references but only 20 cross the materialization boundary, and the other 93 are
-semantics, which needs no codec. So `Theory.StoreFiniteSupport` states the invariant at
-the boundary instead — a store reachable from zero by a patch is finitely supported
-(`finitelySupported_ofZero`), and the constant-one store is not
-(`not_finitelySupported_one`), so the requirement bites. The claim is not "stores are
-finite"; it is "only finitely supported stores can be materialized", which has always
-been true and was never said.
-
-`sparseOfStore` + `sparseOfStore_readD` complete the pieces step 1 needs: the bridge, and
-the theorem that reading it back with the zero default returns the original store at every
-key. Without that theorem the sparse encoding would be a new object with a plausible
-shape; with it, the successor to `logicalOfStore` is faithful by construction. What
-remains for step 1 is mechanical — point `DeclaredTurn`'s materialization at
-`sparseOfStore`, thread `finitelySupported_ofZero` through the callers, switch
-`effectSchema`'s cell.
-
-**Still staged.** `CellState.LogicalState` is untouched; the migration order and the
-reason each schema is separable are in the module. The endpoint is deletion of the
-total-function field.
-
-**The fix has an exact target.** `materializer_nonempty_iff_countable` proves a schema
-admits a materializer for a nonempty root exactly when its logical state space is
-nonempty and countable — so whatever replaces the total function (finite map with a
-default, `Finsupp`, association list) is correct for this purpose **if and only if** it
-lands in a countable type, and then `nonempty_lawfulCodec_of_countable` guarantees a
-codec exists. There is exactly one thing to check, and the refactor cannot fail for a
-subtle reason.
-
-**One scoping fact for the refactor, checked rather than guessed.** The countability
-side is not free: `Countable AuthorityField` does not synthesize today (it wants a
-`deriving instance`), and the sigma of field/value pairs then needs `Countable` for
-`StoredCapability`, `Capability`, and the `Finset`s inside it. That instance plumbing IS
-part of the refactor's work, not a precondition someone else supplies. I did not build
-it, because building half of a refactor before its design decision is made is how the
-twin got written earlier tonight.
-
-Countability gives existence, not quality. A deployed encoding still has to be chosen for
-size, canonicality, and determinism — which is what
-`Compiler.Tower256ConcreteBackend.StreamCodec` is for.
-
-**I did not do the refactor.** It is a shared-interface change across `Theory`, `Kernel`,
-and `Assurance`, and it wants a rested decision about whether the default belongs to the
-schema or the state. Surfacing it as debt rather than extending it, per the tree's rule.
-
-**All three cells on the Hyperdocument publication path are uninhabitable.**
-`Hyperdocument.cellSchema` has it too (`7311a60`), and so does
-`HyperdocumentEventLog.cellSchema` (`df10328`) — so the atomic two-cell publication,
-content and its causal event committed together, is a theorem about an uninhabited
-carrier. `Hyperdocument.cellSchema` has `Address` infinite over `Option DocumentRecord`; the event log has
-`Sparse.Address` over `Option VersionEventRecord`. Same argument each time. BOTH halves
-of what `AcceptedOperation` needed — `AuthenticatedPrincipal` and `ValidOperation` — are
-unsatisfiable as typed.
-
-The pattern: it happens whenever a sparse namespace is typed as a total function over an
-infinite key space. `materializer_isEmpty_of_natBool_embedding` makes each new instance
-an embedding plus an injectivity proof — three lines — so a fourth suspected schema is
-cheap to check and does not need the argument restated.
+Countability gives **existence**, not deployment quality. The witness codecs are chosen
+noncomputably from countability and use a byte-length root to avoid pretending at
+cryptography. Concrete versioned codecs, artifact pins, efficient encodings, and root
+binding remain deployment obligations. The durable lesson survives the incident: every
+load-bearing generic carrier needs a positive inhabited deployment witness, not merely
+negative theorems quantified over it.
 
 **The night's own mistake, recorded because it is the instructive one**
 
@@ -437,11 +366,12 @@ the deployed ones.
   schedule at all. `ClosedInstance` discharges the commit premises by `decide` so the
   refinement is not carried by a handler that never writes. A device MODEL — no fsync,
   torn write, codec, replication, or liveness. `3230` jobs, exit `0`, boundary `0`.
-- `2e5151d` — the durable half no longer quantifies over a handler nobody built. **Read
-  with the materializer finding**: these theorems are generic over the joint `Commit` and
-  are non-vacuous (`MultiCellHyperedgeWitness` inhabits it at finite schemas), but at the
-  actual Hyperdocument instantiation the commit is vacuous, so the module name promises
-  more than the theorems deliver. Caveat added to its header. `no_partial_commit_on_wal`, `marker_installs`,
+- `2e5151d` — the durable half no longer quantifies over a handler nobody built. The
+  theorems are generic over the joint `Commit`; `MultiCellHyperedgeWitness` exhibits that
+  carrier and the sparse-state migration now exhibits the actual Hyperdocument,
+  authority, and event-log cell materializers too. The remaining gap is a concrete
+  versioned-codec/root/physical deployment and consumer, not type inhabitation.
+  `no_partial_commit_on_wal`, `marker_installs`,
   `crash_before_marker`, `retry_after_marker`, plus the constructed `install` step and
   `install_covers_every_incidence`. Not consumer cutover — no editor, index, sync, or
   client reads this path. `3231` jobs, exit `0`, boundary `0`.

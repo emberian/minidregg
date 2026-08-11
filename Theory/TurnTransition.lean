@@ -177,9 +177,10 @@ def Outcome.materialized
       ordinaryMaterializer kind reactiveMaterializer layout} :
     Outcome (U := U) (T := T) (S := S) authState input →
       Cell ordinaryMaterializer reactiveMaterializer
-  | .ordinaryCommitted postStore _ =>
+  | .ordinaryCommitted (declaration := declaration) postStore _ =>
       .ordinary (CellState.materialize ordinaryMaterializer
-        (DeclaredTurn.logicalOfStore postStore))
+        (DeclaredTurn.logicalOfStore declaration.pre.logical
+          declaration.effects.footprint postStore))
   | .ordinaryRejected _ => input.preCell
   | .resumedBlocked => input.preCell
   | .resumedRejected _ => input.preCell
@@ -316,7 +317,7 @@ theorem ordinary_facts
     { touched := footprint
       frame := by
         intro key outside
-        exact commit.frame key (by
+        exact commit.effect.frame key (by
           simpa [footprint, DeclaredTurn.Commit.footprint] using outside) }
   exact ⟨
     { preRoot := declaration.pre.root

@@ -265,7 +265,7 @@ theorem no_accepted_of_staleEpoch :
       (authState := rotatedState) family request cell () ()) :=
   ⟨fun token => authorized_isEmpty_of_staleEpoch.false token.authorization⟩
 
-/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.disclosure_forced_sealed' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.disclosure_forced_sealed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms disclosure_forced_sealed
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.acceptedCellEffect_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms acceptedCellEffect_nonempty
@@ -273,11 +273,11 @@ theorem no_accepted_of_staleEpoch :
 #guard_msgs (whitespace := lax) in #print axioms acceptedTrue_nonempty
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.acceptedB_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms acceptedB_nonempty
-/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.legs_distinct' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.legs_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms legs_distinct
-/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.wrongEffects_not_bound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.wrongEffects_not_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrongEffects_not_bound
-/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.stalePreRoot_not_bound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.stalePreRoot_not_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stalePreRoot_not_bound
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_wrongEffects' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongEffects

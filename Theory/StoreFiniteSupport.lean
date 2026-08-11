@@ -1,25 +1,18 @@
 /-
 # Theory.StoreFiniteSupport -- which stores can be materialized at all
 
-`Theory.MaterializerCardinality` proves `DeclaredTurn.effectSchema` admits no
-materializer, and `Theory.SparseLogicalState` supplies the fix: a finitely
-supported cell state.  Migrating that schema means `DeclaredTurn.logicalOfStore`
-can no longer accept an arbitrary `EffectDeclaration.Store`, because a total
-function `StateKey -> Int` is not finitely supported in general.
+The canonical `CellState` is sparse, while `EffectDeclaration.Store` remains a
+total semantic evaluator.  A total function is not serializable merely because
+it happens to be used by a finite patch.  This module states the stronger
+zero-based invariant under which such a store can be represented exactly by a
+finite map and proves the representation round-trip.
 
-This states the missing invariant rather than changing 113 semantic call sites.
-The store stays a total function where it is doing semantics -- semantics needs
-no codec -- and finite support becomes a requirement exactly at the
-materialization boundary, which is where the obstruction actually is.
-
-The invariant is real and has always held: a turn begins at the zero store and
-each mutation writes one key.  Nobody had said so, which is why nobody noticed
-the boundary could not be crossed.
-
-Nothing here changes an existing definition.  It supplies the two facts the
-migration needs -- the base case and the step -- so that
-`logicalOfStore`'s successor can demand a witness that its callers can actually
-produce.
+The production `DeclaredTurn.logicalOfStore` bridge is slightly more general:
+it starts from a canonical sparse pre-state, reifies the declaration's exact
+finite footprint, and requires/proves that the total semantic store frames the
+pre-state outside that footprint.  The zero-based lemmas here remain useful
+teeth and a complete special case; in particular, they show that arbitrary
+total functions have not silently regained canonical bytes.
 -/
 import Theory.DeclaredTurn
 import Theory.EffectDeclaration

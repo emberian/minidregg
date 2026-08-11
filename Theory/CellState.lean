@@ -13,6 +13,7 @@ resulting frame and no-ghost theorems therefore speak about the same footprint
 that application executes.
 -/
 import Theory.ReactiveController
+import Mathlib.Data.DFinsupp.Encodable
 
 namespace Minidregg.Theory.CellState
 
@@ -41,10 +42,98 @@ structure ResourceCell (S : Schema.{u, v, w, x}) (resource : S.Resource) where
   authority : S.Authority resource value
   evidence : S.Evidence resource value authority
 
-/-- The complete logical state.  There is no untyped extension map in which a
-host can smuggle extra fields. -/
+/-- `none` is the representation-level zero for a sparse dependent field map.
+It means "address absent" and does not choose a semantic default value. -/
+instance optionZero (alpha : Type v) : Zero (Option alpha) := ⟨none⟩
+
+/-- Canonical sparse typed fields.  Equality is extensional and finite support
+is structural, so insertion order and overwritten history are not part of a
+cell's identity. -/
+abbrev FieldStore (S : Schema.{u, v, w, x}) :=
+  Π₀ field : S.Field, Option (S.FieldType field)
+
+namespace FieldStore
+
+/-- The primitive field read.  Absence stays explicit. -/
+def read {S : Schema.{u, v, w, x}} (fields : FieldStore S)
+    (field : S.Field) : Option (S.FieldType field) :=
+  fields field
+
+/-- A total semantic view chooses its default above the sparse carrier. -/
+def readD {S : Schema.{u, v, w, x}} (fields : FieldStore S)
+    (default : (field : S.Field) → S.FieldType field) (field : S.Field) :
+    S.FieldType field :=
+  (fields.read field).getD (default field)
+
+/-- Assign one sparse slot.  `some value` writes a present value and `none`
+erases the address from the canonical finite support. -/
+def assign {S : Schema.{u, v, w, x}} [DecidableEq S.Field]
+    (fields : FieldStore S) (field : S.Field)
+    (value : Option (S.FieldType field)) : FieldStore S :=
+  fields.update field value
+
+/-- Write one present typed value. -/
+def write {S : Schema.{u, v, w, x}} [DecidableEq S.Field]
+    (fields : FieldStore S) (field : S.Field) (value : S.FieldType field) :
+    FieldStore S :=
+  fields.assign field (some value)
+
+/-- Erase one typed address. -/
+def erase {S : Schema.{u, v, w, x}} [DecidableEq S.Field]
+    (fields : FieldStore S) (field : S.Field) : FieldStore S :=
+  fields.assign field none
+
+@[simp] theorem read_zero {S : Schema.{u, v, w, x}} (field : S.Field) :
+    (0 : FieldStore S).read field = none := rfl
+
+@[simp] theorem read_assign_self {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) (field : S.Field)
+    (value : Option (S.FieldType field)) :
+    (fields.assign field value).read field = value := by
+  simp [read, assign]
+
+@[simp] theorem read_write_self {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) (field : S.Field)
+    (value : S.FieldType field) :
+    (fields.write field value).read field = some value := by
+  simp [write]
+
+@[simp] theorem read_erase_self {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) (field : S.Field) :
+    (fields.erase field).read field = none := by
+  simp [erase]
+
+@[simp] theorem write_self {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) (field : S.Field)
+    (value : S.FieldType field) :
+    fields.write field value field = some value := by
+  simpa [read] using read_write_self fields field value
+
+theorem read_assign_other {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) {field other : S.Field}
+    (different : other ≠ field) (value : Option (S.FieldType other)) :
+    (fields.assign other value).read field = fields.read field := by
+  change Function.update (⇑fields) other value field = fields field
+  rw [Function.update_of_ne (Ne.symm different)]
+
+theorem read_write_other {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) {field other : S.Field}
+    (different : other ≠ field) (value : S.FieldType other) :
+    (fields.write other value).read field = fields.read field := by
+  exact read_assign_other fields different (some value)
+
+@[simp] theorem write_other {S : Schema.{u, v, w, x}}
+    [DecidableEq S.Field] (fields : FieldStore S) {field other : S.Field}
+    (different : other ≠ field) (value : S.FieldType other) :
+    fields.write other value field = fields field := by
+  simpa [read] using read_write_other fields different value
+
+end FieldStore
+
+/-- The complete logical state.  Typed fields are a canonical finite map;
+there is no untyped extension map in which a host can smuggle extra fields. -/
 structure LogicalState (S : Schema.{u, v, w, x}) where
-  fields : (field : S.Field) → S.FieldType field
+  fields : FieldStore S
   resources : (resource : S.Resource) → ResourceCell S resource
 
 /-- The only canonical reading.  A root is computed from the exact bytes emitted
@@ -109,10 +198,12 @@ theorem Materialized.root_encoding_coherent
 
 /-! ## Raw and validated typed patches -/
 
-/-- A typed field write. -/
+/-- A typed field mutation.  Sparse deletion is explicit rather than encoded
+as an application-specific tombstone value. -/
 structure FieldWrite (S : Schema.{u, v, w, x}) where
   field : S.Field
-  value : S.FieldType field
+  /-- `some` writes a value; `none` deletes the address. -/
+  value : Option (S.FieldType field)
 
 /-- A typed resource write carries its replacement authority/evidence package. -/
 structure ResourceWrite (S : Schema.{u, v, w, x}) where
@@ -140,14 +231,13 @@ def Patch.namedResources
     (patch : Patch S Root) : Finset S.Resource :=
   (patch.resourceWrites.map ResourceWrite.resource).toFinset
 
-/-- Apply typed field writes in declaration order; later duplicates win. -/
+/-- Apply typed field mutations in declaration order; later duplicates win. -/
 def applyFieldWrites
     {S : Schema.{u, v, w, x}} [DecidableEq S.Field] :
-    List (FieldWrite S) → ((field : S.Field) → S.FieldType field) →
-      ((field : S.Field) → S.FieldType field)
+    List (FieldWrite S) → FieldStore S → FieldStore S
   | [], fields => fields
   | write :: rest, fields =>
-      applyFieldWrites rest (Function.update fields write.field write.value)
+      applyFieldWrites rest (fields.assign write.field write.value)
 
 /-- Apply coherent resource packages in declaration order; later duplicates win. -/
 def applyResourceWrites
@@ -159,11 +249,11 @@ def applyResourceWrites
   | write :: rest, resources =>
       applyResourceWrites rest (Function.update resources write.resource write.cell)
 
-/-- Typed field application cannot affect an unnamed key. -/
+/-- Typed field mutation cannot affect an unnamed key. -/
 theorem applyFieldWrites_frame
     {S : Schema.{u, v, w, x}} [DecidableEq S.Field]
     (writes : List (FieldWrite S))
-    (fields : (field : S.Field) → S.FieldType field)
+    (fields : FieldStore S)
     (field : S.Field)
     (outside : field ∉ (writes.map FieldWrite.field).toFinset) :
     applyFieldWrites writes fields field = fields field := by
@@ -172,7 +262,8 @@ theorem applyFieldWrites_frame
   | cons write rest ih =>
       simp only [List.map_cons, List.toFinset_cons, Finset.mem_insert, not_or] at outside
       rw [applyFieldWrites, ih _ outside.2]
-      simp [Function.update, outside.1]
+      simpa [FieldStore.read] using
+        (FieldStore.read_assign_other fields (Ne.symm outside.1) write.value)
 
 /-- Typed resource application cannot affect an unnamed key. -/
 theorem applyResourceWrites_frame
@@ -327,8 +418,9 @@ theorem ValidatedPatch.resource_changed_only_declared
   by_contra outside
   exact changed (validated.resource_frame resource outside)
 
-/-- Declared footprints contain exactly typed writes: neither undeclared writes
-nor declared-but-absent ghost keys survive validation. -/
+/-- Declared footprints contain exactly typed mutations: neither an undeclared
+mutation nor a footprint entry without mutation syntax survives validation.
+The mutation itself may deliberately erase the address. -/
 theorem ValidatedPatch.no_ghost_keys
     {S : Schema.{u, v, w, x}} {Root : Type y} [DecidableEq S.Field]
     [DecidableEq S.Resource] {M : Materializer S Root} {pre : Materialized M}

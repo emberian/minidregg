@@ -361,13 +361,15 @@ end AcceptedSettlement
 
 /-! ### Canonical history core from the unique typed post -/
 
-/-- A finite, surjective field enumeration and typed encoding into the history
-field.  Resource packages remain bound by the canonical full-cell pre/post roots;
-this projection does not pretend heterogeneous resource evidence is a field. -/
+/-- A finite, surjective field enumeration and typed sparse encoding into the
+history field.  Absence is encoded explicitly rather than replaced by a hidden
+default.  Resource packages remain bound by the canonical full-cell pre/post
+roots; this projection does not pretend heterogeneous resource evidence is a
+field. -/
 structure FieldProjection (n : Nat) (F : Type*) [Field F] where
   keyAt : Fin n -> S.Field
   keyAt_surjective : Function.Surjective keyAt
-  encode : (field : S.Field) -> S.FieldType field -> F
+  encode : (field : S.Field) -> Option (S.FieldType field) -> F
 
 def FieldProjection.project
     {n : Nat} {F : Type*} [Field F]

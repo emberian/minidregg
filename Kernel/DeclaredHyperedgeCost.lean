@@ -167,7 +167,7 @@ def Outcome.materialized
     {available : Charge} : Outcome semantics available ->
       Materialized materializer
   | .committed postStore _ =>
-      materialize materializer (DeclaredTurn.logicalOfStore postStore)
+      materialize materializer (declaration.logicalOfStore postStore)
   | .rejected _ => declaration.pre
   | .overBudget _ _ => declaration.pre
 

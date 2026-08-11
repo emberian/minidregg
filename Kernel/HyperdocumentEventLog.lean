@@ -46,7 +46,7 @@ instance (space : layout.Namespace) : DecidableEq (layout.Key space) := by
 abbrev Store := Minidregg.Kernel.SparseAuthenticatedState.Store layout
 abbrev Address := Minidregg.Kernel.SparseAuthenticatedState.Address layout
 
-def empty : Store := fun _ _ => none
+def empty : Store := 0
 
 def appendOp {scheme : CausalVersionDag.ContentAddressing}
     (event : StoredVersionEvent scheme) :
@@ -106,12 +106,10 @@ theorem AcceptedAppend.pre_fresh
     {event : StoredVersionEvent scheme}
     (accepted : AcceptedAppend materializer pre event) :
     accepted.post.logical .events event.key = some event.record := by
-  simp [Minidregg.Kernel.SparseAuthenticatedState.AcceptedExecution.post,
-    Minidregg.Kernel.SparseAuthenticatedState.materialize,
-    Minidregg.Kernel.SparseAuthenticatedState.Trace.run, appendOp,
-    Minidregg.Kernel.SparseAuthenticatedState.Op.apply,
-    Minidregg.Kernel.SparseAuthenticatedState.Store.set]
-  rfl
+  change ((appendOp event).apply pre.logical) .events event.key = some event.record
+  exact @Minidregg.Kernel.SparseAuthenticatedState.Store.set_eq
+    layout inferInstance (fun _ => inferInstance) pre.logical .events event.key
+      (some event.record)
 
 /-- Allocation has teeth: the exact same event key cannot be appended again to
 the accepted post, independently of any digest-binding assumption. -/
@@ -121,8 +119,10 @@ theorem AcceptedAppend.duplicate_rejected
     {event : StoredVersionEvent scheme}
     (accepted : AcceptedAppend materializer pre event) :
     ¬ (appendOp event).Enabled accepted.post.logical := by
-  rw [appendOp_enabled_iff]
-  simp [accepted.post_contains]
+  intro enabled
+  have fresh := (appendOp_enabled_iff accepted.post.logical event).1 enabled
+  rw [accepted.post_contains] at fresh
+  contradiction
 
 /-- The lookup bus exposes one literal allocation row, not a host-authored
 "append succeeded" flag. -/
@@ -145,7 +145,7 @@ end Sparse
 optional value.  It is not a second event-log state model. -/
 def cellSchema : CellState.Schema where
   Field := Sparse.Address
-  FieldType := fun address => Option (Sparse.layout.Value address.1)
+  FieldType := fun address => Sparse.layout.Value address.1
   Resource := Empty
   ResourceType := Empty.elim
   Authority := fun resource => nomatch resource
@@ -161,16 +161,16 @@ instance : DecidableEq cellSchema.Resource := by
 
 def Sparse.Store.toCellState (store : Sparse.Store) :
     CellState.LogicalState cellSchema where
-  fields := fun address => store address.1 address.2
+  fields := store.entries
   resources := fun resource => nomatch resource
 
 def Sparse.Store.ofCellState (state : CellState.LogicalState cellSchema) :
     Sparse.Store :=
-  fun space key => state.fields ⟨space, key⟩
+  ⟨state.fields⟩
 
 @[simp] theorem Sparse.Store.ofCellState_toCellState (store : Sparse.Store) :
     Sparse.Store.ofCellState store.toCellState = store := by
-  funext space key
+  cases store
   rfl
 
 @[simp] theorem Sparse.Store.toCellState_ofCellState
@@ -230,11 +230,11 @@ claim and no representation-refinement premise. -/
       representation.sparseMaterializer store).root := by
   rfl
 
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.post_contains' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.post_contains
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.duplicate_rejected' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.duplicate_rejected
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store.ofCellState_toCellState' depends on axioms: [Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store.ofCellState_toCellState' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.Store.ofCellState_toCellState
 /-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Representation.roots_exact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Representation.roots_exact

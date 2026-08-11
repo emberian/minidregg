@@ -23,6 +23,7 @@ deployed schema is.
 -/
 import Theory.CellState
 import Theory.IndexedProgram
+import Theory.MaterializerCardinality
 import Theory.TypedAuthorization
 
 namespace Minidregg.Theory.CellStateWitness
@@ -49,33 +50,67 @@ def schema : Schema.{0, 0, 0, 0} where
 instance : DecidableEq schema.Field := inferInstanceAs (DecidableEq Unit)
 instance : DecidableEq schema.Resource := fun resource => resource.elim
 
-/-- A logical state is determined by its one field, since the resource family
-is empty. -/
+/-- Build a present value at the sole field. -/
 def stateOf (value : Bool) : LogicalState schema where
-  fields := fun _ => value
+  fields := (0 : FieldStore schema).write () value
   resources := fun resource => resource.elim
 
-/-- The one field, read at `Bool` rather than at the schema's projection. -/
-def fieldValue (state : LogicalState schema) : Bool := state.fields ()
+/-- Build any of the three possible sparse states: absent, present false, or
+present true. -/
+def stateOfOption : Option Bool → LogicalState schema
+  | none => { fields := 0, resources := fun resource => resource.elim }
+  | some value => stateOf value
+
+def fieldOption (state : LogicalState schema) : Option Bool := state.fields ()
+
+/-- The total semantic view uses false as its explicit absent default. -/
+def fieldValue (state : LogicalState schema) : Bool :=
+  (fieldOption state).getD false
 
 theorem state_ext (state : LogicalState schema) :
-    state = stateOf (fieldValue state) := by
+    state = stateOfOption (fieldOption state) := by
   cases state with
   | mk fields resources =>
-      have hf : fields = fun _ => fields () := funext fun _ => rfl
       have hr : resources = fun resource => resource.elim :=
         funext fun resource => resource.elim
-      rw [hf, hr]
-      rfl
+      cases present : fields () with
+      | none =>
+          have hf : fields = (0 : FieldStore schema) := by
+            apply DFinsupp.ext
+            intro field
+            cases field
+            simpa using present
+          rw [hf, hr]
+          rfl
+      | some value =>
+          have hf : fields = (0 : FieldStore schema).write () value := by
+            apply DFinsupp.ext
+            intro field
+            cases field
+            simpa [present]
+          rw [hf, hr]
+          rfl
 
 /-- A lawful codec: one byte carrying the one field.  `decode_encode` is a
 theorem about built functions, not a carried assumption. -/
 def stateCodec : LawfulCodec (LogicalState schema) where
-  encode := fun state => [if fieldValue state then 1 else 0]
-  decode := fun bytes => some (stateOf (decide (bytes = [1])))
+  encode := fun state =>
+    match fieldOption state with
+    | none => [2]
+    | some false => [0]
+    | some true => [1]
+  decode := fun bytes =>
+    match bytes with
+    | [0] => some (stateOf false)
+    | [1] => some (stateOf true)
+    | [2] => some (stateOfOption none)
+    | _ => none
   decode_encode := fun state => by
     rw [state_ext state]
-    cases hvalue : fieldValue state <;> simp [stateOf, fieldValue, hvalue]
+    cases present : fieldOption state with
+    | none => simp [fieldOption, stateOfOption]
+    | some value =>
+        cases value <;> simp [fieldOption, stateOfOption, stateOf]
 
 /-- The root is the one encoded byte, so a field change moves the root. -/
 def materializer : Materializer schema Digest where
@@ -94,7 +129,7 @@ def honestPatch : Patch schema Digest where
   expectedPreRoot := ⟨0⟩
   fieldFootprint := {()}
   resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := true }]
+  fieldWrites := [{ field := (), value := some true }]
   resourceWrites := []
 
 /-- **Validation accepts, by computation.**  The outcome is the accepted
@@ -128,7 +163,7 @@ def honestPatchTrue : Patch schema Digest where
   expectedPreRoot := ⟨1⟩
   fieldFootprint := {()}
   resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := false }]
+  fieldWrites := [{ field := (), value := some false }]
   resourceWrites := []
 
 theorem honestPatchTrue_accepted :
@@ -142,6 +177,36 @@ theorem honestPatchTrue_accepted :
   rw [dif_pos
     (show honestPatchTrue.resourceFootprint = honestPatchTrue.namedResources by decide)]
   exact ⟨_, rfl⟩
+
+/-! ## Sparse deletion is a real transition -/
+
+/-- Deletion names the address in the authoritative footprint and assigns
+`none`; it is not an application-level tombstone. -/
+def erasePatch : Patch schema Digest where
+  expectedPreRoot := ⟨1⟩
+  fieldFootprint := {()}
+  resourceFootprint := ∅
+  fieldWrites := [{ field := (), value := none }]
+  resourceWrites := []
+
+theorem erasePatch_accepted :
+    ∃ validated : ValidatedPatch materializer cellTrue erasePatch,
+      validate materializer cellTrue erasePatch =
+        ValidationOutcome.accepted validated := by
+  unfold validate
+  rw [dif_pos (show erasePatch.expectedPreRoot = cellTrue.root by decide)]
+  rw [dif_pos (show erasePatch.fieldFootprint = erasePatch.namedFields by decide)]
+  rw [dif_pos
+    (show erasePatch.resourceFootprint = erasePatch.namedResources by decide)]
+  exact ⟨_, rfl⟩
+
+/-- Every validator-minted instance of the erase patch produces structural
+absence at the touched address. -/
+theorem erasePatch_post_absent
+    (validated : ValidatedPatch materializer cellTrue erasePatch) :
+    validated.apply.logical.fields () = none := by
+  simp [ValidatedPatch.apply, erasePatch, applyFieldWrites, FieldStore.assign]
+  rfl
 
 /-! ## A genuinely different schema
 
@@ -161,29 +226,32 @@ def schemaB : Schema.{0, 0, 0, 0} where
 instance : DecidableEq schemaB.Field := inferInstanceAs (DecidableEq Bool)
 instance : DecidableEq schemaB.Resource := fun resource => resource.elim
 
-/-- Its state space is a singleton, since every field carries `Unit`. -/
+/-- The chosen state has both field addresses absent.  Even with `Unit` values,
+the sparse state space also distinguishes presence from absence; this is one
+canonical base state, not a uniqueness claim. -/
 def logicalB : LogicalState schemaB where
-  fields := fun _ => ()
+  fields := 0
   resources := fun resource => resource.elim
 
-theorem logicalB_unique (state : LogicalState schemaB) : state = logicalB := by
-  cases state with
-  | mk fields resources =>
-      have hf : fields = logicalB.fields := funext fun _ => rfl
-      have hr : resources = logicalB.resources :=
-        funext fun resource => resource.elim
-      rw [hf, hr]
+instance : Countable schemaB.Field := inferInstanceAs (Countable Bool)
+instance : ∀ field : schemaB.Field, Countable (schemaB.FieldType field) :=
+  fun _ => inferInstanceAs (Countable Unit)
 
-def stateCodecB : LawfulCodec (LogicalState schemaB) where
-  encode := fun _ => []
-  decode := fun _ => some logicalB
-  decode_encode := fun state => by rw [logicalB_unique state]
+instance : Countable (LogicalState schemaB) :=
+  MaterializerCardinality.sparse_schema_state_countable
+    (S := schemaB) ⟨fun resource => resource.elim⟩
 
-def materializerB : Materializer schemaB Digest where
+instance : Nonempty (LogicalState schemaB) := ⟨logicalB⟩
+
+noncomputable def stateCodecB : LawfulCodec (LogicalState schemaB) :=
+  Classical.choice MaterializerCardinality.nonempty_lawfulCodec_of_countable
+
+noncomputable def materializerB : Materializer schemaB Digest where
   codec := stateCodecB
-  rootBytes := fun bytes => ⟨bytes.length⟩
+  rootBytes := fun _ => ⟨0⟩
 
-def cellB : Materialized materializerB := materialize materializerB logicalB
+noncomputable def cellB : Materialized materializerB :=
+  materialize materializerB logicalB
 
 theorem cellB_root : cellB.root = ⟨0⟩ := rfl
 
@@ -193,7 +261,7 @@ def honestPatchB : Patch schemaB Digest where
   expectedPreRoot := ⟨0⟩
   fieldFootprint := {true}
   resourceFootprint := ∅
-  fieldWrites := [{ field := true, value := () }]
+  fieldWrites := [{ field := true, value := some () }]
   resourceWrites := []
 
 theorem honestPatchB_accepted :
@@ -251,11 +319,11 @@ theorem underDeclaredPatch_rejected :
   rw [dif_neg
     (show ¬underDeclaredPatch.fieldFootprint = underDeclaredPatch.namedFields by decide)]
 
-/-- info: 'Minidregg.Theory.CellStateWitness.state_ext' depends on axioms: [Quot.sound] -/
+/-- info: 'Minidregg.Theory.CellStateWitness.state_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms state_ext
-/-- info: 'Minidregg.Theory.CellStateWitness.cellTrue_root' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CellStateWitness.cellTrue_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cellTrue_root
-/-- info: 'Minidregg.Theory.CellStateWitness.cellB_root' depends on axioms: [Quot.sound] -/
+/-- info: 'Minidregg.Theory.CellStateWitness.cellB_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cellB_root
 /-- info: 'Minidregg.Theory.CellStateWitness.honestPatchB_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms honestPatchB_accepted
@@ -263,7 +331,11 @@ theorem underDeclaredPatch_rejected :
 #guard_msgs (whitespace := lax) in #print axioms schemas_differ
 /-- info: 'Minidregg.Theory.CellStateWitness.honestPatchTrue_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms honestPatchTrue_accepted
-/-- info: 'Minidregg.Theory.CellStateWitness.cell_root' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CellStateWitness.erasePatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms erasePatch_accepted
+/-- info: 'Minidregg.Theory.CellStateWitness.erasePatch_post_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms erasePatch_post_absent
+/-- info: 'Minidregg.Theory.CellStateWitness.cell_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cell_root
 /-- info: 'Minidregg.Theory.CellStateWitness.honestPatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms honestPatch_accepted

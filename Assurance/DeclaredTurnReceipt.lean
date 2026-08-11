@@ -47,7 +47,8 @@ structure BoundedModel
         encodeValue (declaration.preStore (keyAt index)))
   postRootBound : ∀ postStore : Minidregg.Theory.EffectDeclaration.Store,
     (Minidregg.Theory.CellState.materialize materializer
-      (Minidregg.Theory.DeclaredTurn.logicalOfStore postStore)).root =
+      (Minidregg.Theory.DeclaredTurn.logicalOfStore declaration.pre.logical
+        declaration.effects.footprint postStore)).root =
         stateCommitment.root (fun index => encodeValue (postStore (keyAt index)))
 
 def BoundedModel.project

@@ -362,7 +362,8 @@ def accept
     (cellPre representation store).logical.fields
     ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
       declaration.key config⟩ = some declaration.record
-  simp [CellState.applyFieldWrites, Declaration.fieldWrite]
+  simp [CellState.applyFieldWrites, CellState.FieldStore.assign,
+    Declaration.fieldWrite]
   rfl
 
 theorem Accepted.pre_fresh

@@ -213,7 +213,8 @@ def acceptEvent
     ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
       (derivedEventDeclaration merge expectedLogRoot).key eventConfig⟩ =
       some (derivedEventDeclaration merge expectedLogRoot).record
-  simp [CellState.applyFieldWrites, Minidregg.Kernel.HyperdocumentVersionEffects.Declaration.fieldWrite]
+  simp [CellState.applyFieldWrites, CellState.FieldStore.assign,
+    Minidregg.Kernel.HyperdocumentVersionEffects.Declaration.fieldWrite]
   rfl
 
 theorem EventAccepted.pre_fresh

@@ -70,7 +70,7 @@ def IssueDeclaration.patch {kind : ResourceKind}
     [ { field := .capability kind declaration.capability.id
         value := some ⟨declaration.capability, []⟩ },
       { field := .nullifier declaration.operationNullifier
-        value := true } ]
+        value := some true } ]
   resourceWrites := []
 
 @[simp] theorem IssueDeclaration.patch_namedFields {kind : ResourceKind}
@@ -171,7 +171,7 @@ def AttenuateDeclaration.patch {kind : ResourceKind}
     [ { field := .capability kind declaration.child.id
         value := some (descendedCapability declaration.child parent) },
       { field := .nullifier declaration.operationNullifier
-        value := true } ]
+        value := some true } ]
   resourceWrites := []
 
 @[simp] theorem AttenuateDeclaration.patch_namedFields {kind : ResourceKind}
@@ -282,8 +282,8 @@ def RevokeDeclaration.patch
     { .revoked declaration.key, .nullifier declaration.operationNullifier }
   resourceFootprint := ∅
   fieldWrites :=
-    [ { field := .revoked declaration.key, value := true },
-      { field := .nullifier declaration.operationNullifier, value := true } ]
+    [ { field := .revoked declaration.key, value := some true },
+      { field := .nullifier declaration.operationNullifier, value := some true } ]
   resourceWrites := []
 
 @[simp] theorem RevokeDeclaration.patch_namedFields (declaration : RevokeDeclaration) :
@@ -371,9 +371,9 @@ def EpochTarget.readAuth (state : AuthState) : EpochTarget → Epoch
 def EpochTarget.write (target : EpochTarget) (epoch : Epoch) :
     CellState.FieldWrite schema :=
   match target with
-  | EpochTarget.issuer issuerId => ⟨.issuerEpoch issuerId, epoch⟩
-  | EpochTarget.policy policyId => ⟨.policyEpoch policyId, epoch⟩
-  | EpochTarget.subjectKey subjectId => ⟨.subjectKeyEpoch subjectId, epoch⟩
+  | EpochTarget.issuer issuerId => ⟨.issuerEpoch issuerId, some epoch⟩
+  | EpochTarget.policy policyId => ⟨.policyEpoch policyId, some epoch⟩
+  | EpochTarget.subjectKey subjectId => ⟨.subjectKeyEpoch subjectId, some epoch⟩
 
 @[simp] theorem EpochTarget.write_field (target : EpochTarget) (epoch : Epoch) :
     (target.write epoch).field = target.field := by
@@ -394,7 +394,7 @@ def RotateEpochDeclaration.patch
   resourceFootprint := ∅
   fieldWrites :=
     [ declaration.target.write declaration.nextEpoch,
-      { field := .nullifier declaration.operationNullifier, value := true } ]
+      { field := .nullifier declaration.operationNullifier, value := some true } ]
   resourceWrites := []
 
 @[simp] theorem RotateEpochDeclaration.patch_namedFields
@@ -483,7 +483,8 @@ theorem authorization_consults_same_canonical_pre
       some ⟨declaration.capability, []⟩ := by
   simp [AcceptedCellEffect.prepared, CanonicalTransition.PreparedTurn.ofValidatedPatch,
     CanonicalTransition.CellDelta.ofValidatedPatch, CellState.ValidatedPatch.apply,
-    CellState.materialize, CellState.applyFieldWrites, issueFamily,
+    CellState.materialize, CellState.applyFieldWrites, CellState.FieldStore.assign,
+    issueFamily,
     IssueDeclaration.patch]
 
 @[simp] theorem issue_post_nullifier_exact
@@ -499,7 +500,8 @@ theorem authorization_consults_same_canonical_pre
   simp [isNullified, AcceptedCellEffect.prepared,
     CanonicalTransition.PreparedTurn.ofValidatedPatch,
     CanonicalTransition.CellDelta.ofValidatedPatch, CellState.ValidatedPatch.apply,
-    CellState.materialize, CellState.applyFieldWrites, issueFamily,
+    CellState.materialize, CellState.applyFieldWrites, CellState.FieldStore.assign,
+    issueFamily,
     IssueDeclaration.patch]
 
 @[simp] theorem attenuation_post_capability_exact
@@ -518,8 +520,10 @@ theorem authorization_consults_same_canonical_pre
   simp [readCapability, AcceptedCellEffect.prepared,
     CanonicalTransition.PreparedTurn.ofValidatedPatch,
     CanonicalTransition.CellDelta.ofValidatedPatch, CellState.ValidatedPatch.apply,
-    CellState.materialize, CellState.applyFieldWrites, attenuateFamily,
+    CellState.materialize, CellState.applyFieldWrites, CellState.FieldStore.assign,
+    attenuateFamily,
     AttenuateDeclaration.patch]
+  rfl
 
 /-- The written child is not just present: its retained first-order ancestry is
 validated by the exact strict edge and parent lineage read from canonical pre. -/
@@ -554,7 +558,8 @@ theorem attenuation_post_lineage_valid
   simp [isRevoked, AcceptedCellEffect.prepared,
     CanonicalTransition.PreparedTurn.ofValidatedPatch,
     CanonicalTransition.CellDelta.ofValidatedPatch, CellState.ValidatedPatch.apply,
-    CellState.materialize, CellState.applyFieldWrites, revokeFamily,
+    CellState.materialize, CellState.applyFieldWrites, CellState.FieldStore.assign,
+    revokeFamily,
     RevokeDeclaration.patch]
 
 /-- A committed revocation is immediately visible to the next canonical
@@ -588,7 +593,8 @@ theorem revocation_post_is_authorizer_member
     simp [EpochTarget.read, issuerEpochAt, policyEpochAt, subjectKeyEpochAt,
       AcceptedCellEffect.prepared, CanonicalTransition.PreparedTurn.ofValidatedPatch,
       CanonicalTransition.CellDelta.ofValidatedPatch, CellState.ValidatedPatch.apply,
-      CellState.materialize, CellState.applyFieldWrites, rotateEpochFamily,
+      CellState.materialize, CellState.applyFieldWrites, CellState.FieldStore.assign,
+      rotateEpochFamily,
       RotateEpochDeclaration.patch, EpochTarget.write]
 
 /-- Epoch rotation changes the exact epoch read by the next authorization

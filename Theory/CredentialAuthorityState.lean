@@ -12,17 +12,10 @@ Capability lineage is retained as first-order capability data.  Its Lean
 validity predicate checks every adjacent strict-attenuation edge, including
 holder narrowing, rather than trusting parent identifiers.
 
-**KNOWN VACUOUS (2026-08-10).**  `Materializer` below is
-`CellState.Materializer schema Digest`, whose codec must inject the ENTIRE
-`LogicalState schema` into `List UInt8`.  `AuthorityField.nullifier` is indexed
-by `Nat` at value type `Bool`, so that state space contains `Nat -> Bool` and is
-uncountable.  `Theory.MaterializerCardinality.authorityMaterializer_isEmpty`
-proves `Materializer` is EMPTY, so every theorem in this file and downstream
-that quantifies over a `Cell` is vacuously true.  The schema and its semantics
-are not the problem; the total function in `LogicalState` is.  The fix, with an
-exact target proved in that module, is to make `LogicalState` finitely
-supported -- which is what the phrase "canonical sparse authority state" above
-already says this is.
+`CellState.LogicalState` stores a finite dependent map.  Absent epoch and
+membership entries are read through explicit zero/false defaults below;
+capability absence remains the primitive optional lookup result.  Thus the
+word "sparse" here is representation, not merely vocabulary.
 -/
 import Theory.AcceptedCellEffect
 import Theory.CredentialAuthorityFamily
@@ -56,7 +49,7 @@ structure StoredCapability (kind : ResourceKind) where
 /-- Dependent values prevent a capability for one resource kind from being
 written into another kind's slot. -/
 def AuthorityField.Value : AuthorityField → Type
-  | .capability kind _ => Option (StoredCapability kind)
+  | .capability kind _ => StoredCapability kind
   | .issuerEpoch _ => Epoch
   | .policyEpoch _ => Epoch
   | .subjectKeyEpoch _ => Epoch
@@ -89,20 +82,20 @@ def readCapability {M : Materializer} (pre : Cell M)
   pre.logical.fields (.capability kind id)
 
 def issuerEpochAt {M : Materializer} (pre : Cell M) (issuer : IssuerId) : Epoch :=
-  pre.logical.fields (.issuerEpoch issuer)
+  (pre.logical.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
 
 def policyEpochAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : Epoch :=
-  pre.logical.fields (.policyEpoch policy)
+  (pre.logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
 
 def subjectKeyEpochAt {M : Materializer} (pre : Cell M)
     (subject : SubjectId) : Epoch :=
-  pre.logical.fields (.subjectKeyEpoch subject)
+  (pre.logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0)
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
-  pre.logical.fields (.revoked key)
+  (pre.logical.fields (.revoked key)).getD false
 
 def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
-  pre.logical.fields (.nullifier id)
+  (pre.logical.fields (.nullifier id)).getD false
 
 /-! ## Proof-relevant validity of stored lineage -/
 

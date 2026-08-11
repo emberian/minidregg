@@ -1,21 +1,11 @@
 /-
-# Kernel.EventLogMaterializerLimit -- the third schema, same obstruction
+# Kernel.EventLogMaterializerLimit -- regression tooth for total event logs
 
-`Theory.MaterializerCardinality` proves `CredentialAuthorityState.Materializer`
-and `Hyperdocument.Materializer Digest` are empty, because a materializer's
-codec must inject a total function over an infinite field index into
-`List UInt8`.
-
-`HyperdocumentEventLog.cellSchema` is the third cell the Hyperdocument
-publication path needs, and it has the same shape: `Sparse.Address` is
-infinite, its value type is `Option VersionEventRecord`, and
-`VersionEventRecord` is inhabited.  So the joint publication commit demands
-three materializers and none of the three exists.
-
-The proof is three lines, because
-`materializer_isEmpty_of_natBool_embedding` already carries the argument.  That
-is the point of having stated it generically: a suspected schema costs an
-embedding and an injectivity proof, not a rederivation.
+The live Hyperdocument event log now uses a structurally finite
+`SparseAuthenticatedState.Store`, and its `CellState` view uses the same finite
+dependent map.  This module retains the former cardinality failure against
+`MaterializerCardinality.TotalLogicalState`: if either layer regresses to a
+total function, the event-log materializer becomes empty again.
 -/
 import Kernel.HyperdocumentEventLog
 import Theory.MaterializerCardinality
@@ -23,19 +13,17 @@ import Theory.MaterializerCardinality
 namespace Minidregg.Kernel.EventLogMaterializerLimit
 
 open Minidregg.Theory
-open Minidregg.Theory.CellState
 open Minidregg.Theory.MaterializerCardinality
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-/-- A version-event record built from zeros, used only to make `Option`
-two-valued. -/
-def sampleEvent : Hyperdocument.VersionEventRecord where
+/-- A version-event record whose semantic version makes two distinct values. -/
+def sampleEvent (semanticVersion : Nat) : Hyperdocument.VersionEventRecord where
   historyDomain := ⟨0⟩
   document := ⟨⟨0⟩⟩
   schema := { schemaId := ⟨0⟩, version := 0 }
-  semanticVersion := 0
+  semanticVersion := semanticVersion
   operation := ⟨⟨0⟩⟩
   parents := []
   preStateRoot := ⟨0⟩
@@ -44,39 +32,40 @@ def sampleEvent : Hyperdocument.VersionEventRecord where
   effectId := ⟨0⟩
   author := { subject := ⟨0⟩, capabilityKind := .object, capabilityId := ⟨0⟩ }
 
-/-- Mark event `index` present or absent according to `marked index`. -/
-def eventStateOf (marked : Nat -> Bool) :
-    LogicalState HyperdocumentEventLog.cellSchema where
+/-- The deleted total carrier can encode every Boolean stream in event values. -/
+def totalEventStateOf (marked : Nat → Bool) :
+    TotalLogicalState HyperdocumentEventLog.cellSchema where
   fields := fun address =>
-    if marked address.2.digest.value then some sampleEvent else none
+    if marked address.2.digest.value then sampleEvent 1 else sampleEvent 0
   resources := fun resource => resource.elim
 
-theorem eventStateOf_injective : Function.Injective eventStateOf := by
+theorem totalEventStateOf_injective : Function.Injective totalEventStateOf := by
   intro left right same
   funext index
-  have fields := congrArg LogicalState.fields same
+  have fields := congrArg TotalLogicalState.fields same
   have point := congrFun fields ⟨.events, ⟨⟨index⟩⟩⟩
-  simp only [eventStateOf] at point
+  have version := congrArg Hyperdocument.VersionEventRecord.semanticVersion point
+  simp only [totalEventStateOf, sampleEvent] at version
   by_cases hleft : left index = true
   · by_cases hright : right index = true
     · rw [hleft, hright]
-    · simp [hleft, hright] at point
+    · simp [hleft, hright] at version
   · by_cases hright : right index = true
-    · simp [hleft, hright] at point
+    · simp [hleft, hright] at version
     · simp only [Bool.not_eq_true] at hleft hright
       rw [hleft, hright]
 
-/-- **The event-log cell has no materializer either.**  So all three cells the
-Hyperdocument publication commit requires are uninhabitable, and the commit
-itself is vacuous at that instantiation. -/
-theorem eventLogMaterializer_isEmpty :
-    IsEmpty (Materializer HyperdocumentEventLog.cellSchema.{0, 0} Digest) :=
-  materializer_isEmpty_of_natBool_embedding (Root := Digest) eventStateOf
-    eventStateOf_injective
+/-- Restoring a total event-log field function would make materialization
+impossible again.  This theorem is about the regression model, not the live
+sparse cell. -/
+theorem totalEventLogMaterializer_isEmpty :
+    IsEmpty (TotalMaterializer HyperdocumentEventLog.cellSchema.{0, 0} Digest) :=
+  totalMaterializer_isEmpty_of_natBool_embedding totalEventStateOf
+    totalEventStateOf_injective
 
-/-- info: 'Minidregg.Kernel.EventLogMaterializerLimit.eventStateOf_injective' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms eventStateOf_injective
-/-- info: 'Minidregg.Kernel.EventLogMaterializerLimit.eventLogMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms eventLogMaterializer_isEmpty
+/-- info: 'Minidregg.Kernel.EventLogMaterializerLimit.totalEventStateOf_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms totalEventStateOf_injective
+/-- info: 'Minidregg.Kernel.EventLogMaterializerLimit.totalEventLogMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms totalEventLogMaterializer_isEmpty
 
 end Minidregg.Kernel.EventLogMaterializerLimit

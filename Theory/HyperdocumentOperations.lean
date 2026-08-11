@@ -512,7 +512,7 @@ def accept
 
 theorem applyFieldWrites_member_of_nodup
     (writes : List (CellState.FieldWrite cellSchema))
-    (fields : (field : cellSchema.Field) → cellSchema.FieldType field)
+    (fields : CellState.FieldStore cellSchema)
     (nodup : (writes.map CellState.FieldWrite.field).Nodup)
     (write : CellState.FieldWrite cellSchema) (member : write ∈ writes) :
     CellState.applyFieldWrites writes fields write.field = write.value := by
@@ -524,9 +524,10 @@ theorem applyFieldWrites_member_of_nodup
       rw [CellState.applyFieldWrites]
       rcases member with rfl | member
       · rw [CellState.applyFieldWrites_frame]
-        · simp
+        · simpa [CellState.FieldStore.read] using
+            (CellState.FieldStore.read_assign_self fields write.field write.value)
         · simpa using nodup.1
-      · exact induction (Function.update fields head.field head.value)
+      · exact induction (fields.assign head.field head.value)
           nodup.2 member
 
 theorem Accepted.post_contains_fieldWrite

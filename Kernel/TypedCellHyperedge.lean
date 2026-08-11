@@ -481,14 +481,14 @@ structure Certificate
     (typed.legPatch incidence).resourceFootprint = ∅
   legPostLogicalExact : forall incidence,
     (typed.legs incidence).post.logical =
-      Minidregg.Theory.DeclaredTurn.logicalOfStore
+      legacy.logicalOfStore
         (Minidregg.Theory.EffectDeclaration.applyPatch
           (legacy.legs incidence).effects.patch legacy.preStore)
   jointPostLogicalExact : forall
       validated : CellState.ValidatedPatch legacyMaterializer typed.pre
         typed.jointPatch,
     validated.apply.logical =
-      Minidregg.Theory.DeclaredTurn.logicalOfStore
+      legacy.logicalOfStore
         (Minidregg.Theory.EffectDeclaration.applyPatch
           legacy.patch legacy.preStore)
   aggregateExact : typed.aggregateDelta law = legacy.aggregateDelta
@@ -507,7 +507,7 @@ theorem committed_post_matches_legacy
     (certificate : Certificate legacyProjection legacy typed law)
     (commit : Commit law typed) :
     commit.prepared.post.logical =
-      Minidregg.Theory.DeclaredTurn.logicalOfStore
+      legacy.logicalOfStore
         (Minidregg.Theory.EffectDeclaration.applyPatch
           legacy.patch legacy.preStore) :=
   certificate.jointPostLogicalExact commit.validated

@@ -19,6 +19,7 @@ a LogUp/Twist argument, polynomial commitment opening, collision resistance,
 or a Rust implementation theorem.  Those require separate compiler and
 cryptographic evidence over an encoding of these exact rows.
 -/
+import Theory.CellState
 import Theory.IndexedProgram
 import Theory.TypedAuthorization
 
@@ -53,9 +54,33 @@ structure Layout where
 /-- One typed address, existential only in its namespace/key pair. -/
 abbrev Address (L : Layout.{u, v, w}) := Sigma L.Key
 
-/-- A sparse store.  `none` is unallocated and `some value` is allocated. -/
-abbrev Store (L : Layout.{u, v, w}) :=
-  (space : L.Namespace) -> L.Key space -> Option (L.Value space)
+/-- A sparse store.  `none` is unallocated and `some value` is allocated.
+Finite support is structural rather than a predicate on a total function. -/
+structure Store (L : Layout.{u, v, w}) where
+  entries : Π₀ address : Address L, Option (L.Value address.1)
+
+/-- Preserve the natural typed lookup syntax while keeping the representation
+an extensional finite map. -/
+instance {L : Layout.{u, v, w}} : CoeFun (Store L)
+    (fun _ => (space : L.Namespace) → L.Key space → Option (L.Value space)) where
+  coe store space key := store.entries ⟨space, key⟩
+
+instance {L : Layout.{u, v, w}} : Zero (Store L) := ⟨⟨0⟩⟩
+
+@[simp] theorem Store.zero_apply {L : Layout.{u, v, w}}
+    (space : L.Namespace) (key : L.Key space) :
+    (0 : Store L) space key = none := rfl
+
+@[ext] theorem Store.ext {L : Layout.{u, v, w}} {left right : Store L}
+    (equal : ∀ space key, left space key = right space key) : left = right := by
+  cases left with
+  | mk leftEntries =>
+      cases right with
+      | mk rightEntries =>
+          congr 1
+          apply DFinsupp.ext
+          intro ⟨space, key⟩
+          exact equal space key
 
 /-- Typed lookup through a packed address. -/
 def Store.lookup {L : Layout.{u, v, w}} (store : Store L) :
@@ -67,7 +92,7 @@ def Store.set {L : Layout.{u, v, w}}
     [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (store : Store L) (space : L.Namespace) (key : L.Key space)
     (value : Option (L.Value space)) : Store L :=
-  Function.update store space (Function.update (store space) key value)
+  ⟨store.entries.update ⟨space, key⟩ value⟩
 
 @[simp] theorem Store.set_eq {L : Layout.{u, v, w}}
     [DecidableEq L.Namespace] [(space : L.Namespace) -> DecidableEq (L.Key space)]
@@ -85,14 +110,9 @@ theorem Store.set_ne {L : Layout.{u, v, w}}
     (different : (⟨otherNamespace, otherKey⟩ : Address L) ≠ ⟨space, key⟩) :
     (store.set space key value) otherNamespace otherKey =
       store otherNamespace otherKey := by
-  by_cases namespaceEq : otherNamespace = space
-  · subst otherNamespace
-    have keyNe : otherKey ≠ key := by
-      intro keyEq
-      subst otherKey
-      exact different rfl
-    simp [Store.set, keyNe]
-  · simp [Store.set, namespaceEq]
+  change Function.update (⇑store.entries) (⟨space, key⟩ : Address L) value
+      ⟨otherNamespace, otherKey⟩ = store.entries ⟨otherNamespace, otherKey⟩
+  rw [Function.update_of_ne different]
 
 /-- Allocation is exactly absence at an address. -/
 def Fresh {L : Layout.{u, v, w}} (store : Store L)
@@ -644,43 +664,60 @@ instance (space : layout.Namespace) : DecidableEq (layout.Value space) := by
   change DecidableEq Nat
   infer_instance
 
-def empty : Store layout := fun _ _ => none
+def empty : Store layout := 0
 
 def allocateSeven : Op layout :=
   @Op.allocate layout .heap (7 : Nat) (42 : Nat)
 
 example : allocateSeven.Enabled empty := by
-  simp [allocateSeven, Op.Enabled, layout, empty, Fresh]
+  constructor
+  · decide
+  · exact @Store.zero_apply layout .heap (7 : Nat)
 
 example : (allocateSeven.apply empty) .heap (7 : Nat) = some (42 : Nat) := by
-  decide
+  exact @Store.set_eq layout inferInstance (fun _ => inferInstance)
+    empty .heap (7 : Nat) (some (42 : Nat))
 
 /-- Freshness has teeth: the same allocation cannot execute twice. -/
 theorem duplicate_allocation_rejected :
     ¬ (@Op.allocate layout .heap (7 : Nat) (42 : Nat)).Enabled
       ((@Op.allocate layout .heap (7 : Nat) (42 : Nat)).apply empty) := by
-  simp [Op.Enabled, Op.apply, layout, empty, Fresh, Store.set]
+  intro enabled
+  have fresh := enabled.2
+  have present :
+      ((@Op.allocate layout .heap (7 : Nat) (42 : Nat)).apply empty)
+        .heap (7 : Nat) = some (42 : Nat) :=
+    @Store.set_eq layout inferInstance (fun _ => inferInstance)
+      empty .heap (7 : Nat) (some (42 : Nat))
+  change ((@Op.allocate layout .heap (7 : Nat) (42 : Nat)).apply empty)
+      .heap (7 : Nat) = none at fresh
+  rw [present] at fresh
+  contradiction
 
 /-- ROM overwrite is not an enabled semantic operation. -/
+def codeStore : Store layout :=
+  (0 : Store layout).set .code
+    (show layout.Key .code from (0 : Nat))
+    (some (show layout.Value .code from (1 : Nat)))
+
 theorem rom_write_rejected :
     ¬ (@Op.write layout .code (0 : Nat) (1 : Nat) (2 : Nat)).Enabled
-      (show Store layout from fun (space : Namespace) (_ : Nat) =>
-        if space = Namespace.code then some (1 : Nat) else none) := by
-  simp [Op.Enabled, layout]
+      codeStore := by
+  simp [Op.Enabled, layout, codeStore]
 
 end Example
 
-/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Store.set_ne' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Store.set_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Store.set_ne
 /-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.run_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Trace.run_frame
 /-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.mem_writeFootprint_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Trace.mem_writeFootprint_iff
-/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.BusRelation.rows_exact' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Trace.BusRelation.rows_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Trace.BusRelation.rows_exact
 /-- info: 'Minidregg.Kernel.SparseAuthenticatedState.AcceptedExecution.changed_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms AcceptedExecution.changed_only_declared
-/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Example.duplicate_allocation_rejected' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.SparseAuthenticatedState.Example.duplicate_allocation_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Example.duplicate_allocation_rejected
 
 end Minidregg.Kernel.SparseAuthenticatedState

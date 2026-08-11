@@ -1,36 +1,26 @@
 /-
 # Theory.SparseLogicalState -- the finitely-supported cell state
 
-`Theory.MaterializerCardinality` proves that all four schemas in this tree admit
-no `CellState.Materializer`, because `LogicalState.fields` is a TOTAL function
-over an infinite field index and a `LawfulCodec` cannot inject an uncountable
-state space into `List UInt8`.
+`Theory.MaterializerCardinality` proves that the former total-function field
+carrier made four deployed schemas unmaterializable.  `CellState.FieldStore`
+is now the repaired canonical carrier: **a dependent finite map with an
+Option-valued read and no implicit default**.  This module gives that landed
+carrier its sparse-state vocabulary and records the counting theorem which
+shows why the repair is sufficient.
 
-This is the replacement, and it is deliberately the most primitive of the three
-shapes considered: **a canonical dependent finite map with an Option-valued
-read, and no default at all**.  The other two candidate designs are then VIEWS
-on this one rather than
-rival cores:
+The two useful total views are policies above the one carrier, not rival cores:
 
 * a schema-side default is `readD (S.default ·)`;
 * a state-side default is `readD` applied to a default the caller carries.
 
-Both are `readD` below.  Nothing has to choose, which is the point -- the
-encoding is primitive and the totality conventions live above it.  It is also
-what `Hyperdocument.cellSchema` and `HyperdocumentEventLog.cellSchema` already
-do in their own value types (`FieldType := fun a => Option (Value a.1)`), so
-for those two the Option-valued read is the shape the schema already wanted.
-
-**Status: this is a staged migration, and the endpoint is deletion of the
-total-function field.**  `CellState.LogicalState` is unchanged so far; each
-schema moves across separately, and the old shape goes when the last one has.
-The migration order and the reason each step is separable are at the bottom of
-this file.  A twin with a named endpoint is the only way to make a change this
-wide reviewable; a twin without one is what the first law forbids.
+Both are `readD` below.  Canonical bytes encode only the primitive finite map;
+zero epochs, false membership, and semantic store defaults are named at their
+respective readers.  Hyperdocument and event-log values are stored directly,
+with absence represented once by the carrier rather than by a second nested
+`Option`.
 -/
 import Theory.CellState
 import Theory.MaterializerCardinality
-import Mathlib.Data.DFinsupp.Encodable
 
 namespace Minidregg.Theory.SparseLogicalState
 
@@ -44,18 +34,13 @@ universe u v w x
 
 /-! ## The carrier -/
 
-/-- `none` is the distinguished absent value stored as DFinsupp zero.  This is
-representation structure only; it does not choose a default *field value* for
-the total view. -/
-instance optionZero (alpha : Type v) : Zero (Option alpha) := ⟨none⟩
-
 /-- A canonical finitely-supported dependent map.  The stored value at a field
 is optional, so `none` is the primitive absence value and is omitted from the
 finite support.  `DFinsupp` equality is extensional: insertion order and stale
 duplicate writes are not part of logical identity and therefore cannot create
 different canonical roots for the same sparse map. -/
 abbrev SparseState (S : Schema.{u, v, w, x}) :=
-  Π₀ field : S.Field, Option (S.FieldType field)
+  CellState.FieldStore S
 
 namespace SparseState
 
@@ -85,12 +70,21 @@ default" and "default everywhere" are the same object seen two ways. -/
 
 variable [DecidableEq S.Field]
 
+/-- Assign one primitive sparse slot.  `none` is deletion. -/
+def assign (state : SparseState S) (field : S.Field)
+    (value : Option (S.FieldType field)) : SparseState S :=
+  CellState.FieldStore.assign state field value
+
 /-- Write one present field value.  `DFinsupp.update` replaces any prior value,
 so a sequence of writes has one extensional result rather than an
 order-dependent association-list representation. -/
 def write (state : SparseState S) (field : S.Field)
     (value : S.FieldType field) : SparseState S :=
-  state.update field (some value)
+  CellState.FieldStore.write state field value
+
+/-- Remove one address from the structural finite support. -/
+def erase (state : SparseState S) (field : S.Field) : SparseState S :=
+  CellState.FieldStore.erase state field
 
 /-- A written entry is read back. -/
 @[simp] theorem read_write_self (state : SparseState S) (field : S.Field)
@@ -105,6 +99,12 @@ theorem read_write_other (state : SparseState S) {field other : S.Field}
     (state.write other value).read field = state.read field := by
   change Function.update (⇑state) other (some value) field = state field
   rw [Function.update_of_ne (Ne.symm different)]
+
+/-- Erasure reads back as primitive absence. -/
+@[simp] theorem read_erase_self (state : SparseState S) (field : S.Field) :
+    (state.erase field).read field = none := by
+  simpa [read, erase, CellState.FieldStore.read] using
+    (CellState.FieldStore.read_erase_self state field)
 
 end SparseState
 
@@ -123,20 +123,19 @@ instance countable_sparseState {S : Schema.{0, 0, 0, 0}}
 /-- **The obstruction is gone**, for any schema whose typed entries are
 countable: the sparse state space is countable, and
 `MaterializerCardinality.nonempty_lawfulCodec_of_countable` then gives a codec.
-Contrast `MaterializerCardinality.authorityMaterializer_isEmpty`, where the
-total-function state space made this impossible. -/
+Contrast the regression theorem for the deleted total-function carrier, where
+the same construction was impossible. -/
 theorem nonempty_lawfulCodec_sparse {S : Schema.{0, 0, 0, 0}}
     [Countable S.Field] [∀ field, Countable (S.FieldType field)] :
     Nonempty (LawfulCodec (SparseState S)) :=
   haveI : Nonempty (SparseState S) := ⟨0⟩
   MaterializerCardinality.nonempty_lawfulCodec_of_countable
 
-/-! ## The fix, demonstrated on a real schema
+/-! ## The fix on a deployed schema
 
-Existence in the abstract is cheap.  This is `DeclaredTurn.effectSchema` -- the
-first migration step, and the schema `Kernel.DeclaredHyperedge` sits on --
-carried all the way to a codec, so the fix is shown to work on something the
-tree actually uses rather than on a hypothetical countable schema. -/
+`DeclaredTurn.effectSchema` is the state schema used by
+`Kernel.DeclaredHyperedge`.  The instances below carry the repaired state all
+the way to a lawful codec existence theorem. -/
 
 open Minidregg.Theory.EffectDeclaration in
 /-- A first-order code for the three state-key constructors.  Nothing subtle:
@@ -173,40 +172,27 @@ instance : Countable (Sigma DeclaredTurn.effectSchema.FieldType) :=
       subst sameKey
       simp_all)
 
-/-- **A codec exists for the sparse effect state.**  The schema
-`MaterializerCardinality.effectMaterializer_isEmpty` proves unmaterializable as
-a total function is materializable the moment its state is finitely supported.
-That is the fix, on a schema the kernel actually uses. -/
+/-- **A codec exists for the canonical effect state.**  The corresponding
+deleted total-function carrier is unmaterializable; the finite-map state used
+by the kernel is materializable. -/
 theorem nonempty_lawfulCodec_sparse_effect :
     Nonempty (LawfulCodec (SparseState DeclaredTurn.effectSchema.{0, 0})) :=
   nonempty_lawfulCodec_sparse
 
-/-! ## Migration order, and why each step is separable
+/-! ## Representation boundary
 
-Each schema moves independently because nothing reads another schema's cells.
+The four formerly impossible schemas now use this carrier directly:
+`DeclaredTurn.effectSchema`, `CredentialAuthorityState.schema`,
+`Hyperdocument.cellSchema`, and `HyperdocumentEventLog.cellSchema`.  The total
+`EffectDeclaration.Store` remains a semantic evaluator only.  Declared turns
+reify the exact finite footprint over their canonical pre-state and prove a
+frame law for every coordinate outside it; they do not attempt to serialize an
+arbitrary total function.
 
-1. `DeclaredTurn.effectSchema` — the smallest, and the one whose readers are
-   most concentrated. Its `EffectDeclaration.Store` is itself a total function
-   and has to move with it, which is the only place the two changes are
-   coupled.
-2. `CredentialAuthorityState.schema` — mixed value types (`Option
-   StoredCapability`, `Epoch`, `Bool`), so its readers become `readD` with a
-   schema-side default naming zero epochs and unrevoked keys. That default is
-   worth writing out: it is the "empty authority" the model has always assumed
-   and never stated.
-3. `Hyperdocument.cellSchema` and 4. `HyperdocumentEventLog.cellSchema` — both
-   already have `Option`-shaped value types, so their readers want `read`
-   composed with `Option.join`, or equivalently `readD (fun _ => none)`.
-
-The `Countable (Sigma S.FieldType)` instance each step needs does not exist for
-any of them yet — `Countable AuthorityField` alone wants a `deriving instance`,
-and the capability value types want `Countable` through `Finset`. That plumbing
-is part of the step, not a precondition someone else supplies.
-
-`LogicalState.resources` is left alone deliberately: it is also a total
-function, but every schema in the tree has `Resource := Empty`, so it
-contributes a single inhabitant and no obstruction. If a schema ever uses a
-nonempty infinite `Resource`, it needs this same treatment.
+`LogicalState.resources` remains total.  Every migrated schema has
+`Resource := Empty`, so that function has one inhabitant and causes no counting
+obstruction.  A future schema with an infinite nonempty resource index must
+make its resource representation finite or otherwise encodable explicitly.
 -/
 
 /-! ## Axiom pins -/
@@ -217,6 +203,8 @@ nonempty infinite `Resource`, it needs this same treatment.
 #guard_msgs (whitespace := lax) in #print axioms SparseState.read_write_self
 /-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_write_other' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms SparseState.read_write_other
+/-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.read_erase_self' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SparseState.read_erase_self
 /-- info: 'Minidregg.Theory.SparseLogicalState.SparseState.readD_empty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms SparseState.readD_empty
 /-- info: 'Minidregg.Theory.SparseLogicalState.countable_sparseState' depends on axioms: [propext, Classical.choice, Quot.sound] -/

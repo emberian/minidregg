@@ -179,6 +179,13 @@ def Declaration.footprint
     (declaration : Declaration portal materializer Incidence) : List StateKey :=
   (declaration.patch.map Mutation.key).eraseDups
 
+/-- Reify a semantic total store only at the finite joint footprint, framing
+every other address from the exact canonical pre-cell. -/
+def Declaration.logicalOfStore
+    (declaration : Declaration portal materializer Incidence)
+    (store : Store) : LogicalState DeclaredTurn.effectSchema :=
+  DeclaredTurn.logicalOfStore declaration.pre.logical declaration.footprint store
+
 def Declaration.jointDeltas
     (declaration : Declaration portal materializer Incidence) : List BalanceDelta :=
   declaration.composition.order.flatMap fun incidence =>
@@ -498,7 +505,7 @@ def execute
       if declaration.balanceCheck then
         if declaration.guardsCheck then
           let postStore := applyPatch declaration.patch declaration.preStore
-          let post := materialize materializer (DeclaredTurn.logicalOfStore postStore)
+          let post := materialize materializer (declaration.logicalOfStore postStore)
           if post.root = declaration.apex then .committed postStore
           else .rejected .apex
         else .rejected .guard
@@ -510,7 +517,7 @@ def Outcome.materialized
     {declaration : Declaration portal materializer Incidence} :
     Outcome declaration -> Materialized materializer
   | .committed postStore =>
-      materialize materializer (DeclaredTurn.logicalOfStore postStore)
+      materialize materializer (declaration.logicalOfStore postStore)
   | .rejected _ => declaration.pre
 
 @[simp] theorem Outcome.rejected_materialized
@@ -539,8 +546,9 @@ def jointStep (state : Store)
 /-- The shared apex reader is the sole canonical materialization root. -/
 def jointTurnId
     (materializer : Materializer DeclaredTurn.effectSchema Digest)
+    (declaration : Declaration portal materializer Incidence)
     (_incidence : Incidence) (state : Store) : Digest :=
-  (materialize materializer (DeclaredTurn.logicalOfStore state)).root
+  (materialize materializer (declaration.logicalOfStore state)).root
 
 /-- The hyperedge half-edge is the declaration-derived full-width vector. -/
 def jointHalfEdge (incidence : Incidence) (_state : Store)
@@ -550,7 +558,8 @@ def jointHalfEdge (incidence : Incidence) (_state : Store)
 abbrev SemanticHyperedge
     (declaration : Declaration portal materializer Incidence) :=
   Hyperedge Incidence Store (Declaration portal materializer Incidence)
-    Digest (Digest -> Int) jointStep (jointTurnId materializer) jointHalfEdge
+    Digest (Digest -> Int) jointStep
+      (jointTurnId materializer declaration) jointHalfEdge
 
 /-- Semantic certification of one exact committed post.  Every proof field is a
 reflection of a check made by `execute`; authorizations are the existing
@@ -568,7 +577,7 @@ structure CommittedHyperedge
   guards : declaration.GuardsHold
   evaluated : applyPatch declaration.patch declaration.preStore = postStore
   apexExact :
-    (materialize materializer (DeclaredTurn.logicalOfStore postStore)).root =
+    (materialize materializer (declaration.logicalOfStore postStore)).root =
       declaration.apex
 
 def CommittedHyperedge.post
@@ -577,7 +586,7 @@ def CommittedHyperedge.post
     {postStore : Store}
     (_commit : CommittedHyperedge projection declaration postStore) :
     Materialized materializer :=
-  materialize materializer (DeclaredTurn.logicalOfStore postStore)
+  materialize materializer (declaration.logicalOfStore postStore)
 
 def CommittedHyperedge.receipt
     {projection : AuthorizationProjection materializer}
@@ -603,7 +612,20 @@ def CommittedHyperedge.prepared
   delta :=
     { fieldFootprint := commit.receipt.touched
       resourceFootprint := ∅
-      fieldFrame := commit.receipt.frame
+      fieldFrame := by
+        intro field outside
+        change DeclaredTurn.fieldsOfStore declaration.pre.logical.fields
+          postStore declaration.footprint field = declaration.pre.logical.fields field
+        rw [DeclaredTurn.fieldsOfStore_read]
+        have outsideList : field ∉ declaration.footprint := by
+          intro member
+          apply outside
+          change field ∈ declaration.footprint.toFinset
+          exact List.mem_toFinset.mpr member
+        split
+        · rename_i member
+          exact False.elim (outsideList member)
+        · rfl
       resourceFrame := by intro resource; exact nomatch resource }
   nullifier := none
 
@@ -637,7 +659,7 @@ def CommittedHyperedge.toHyperedge
     intro incidence
     change
       (materialize materializer
-        (DeclaredTurn.logicalOfStore
+        (declaration.logicalOfStore
           (applyPatch declaration.patch declaration.preStore))).root =
         declaration.apex
     rw [commit.evaluated]
@@ -722,7 +744,7 @@ theorem execute_rejects_agreeing_nonzero_balance
     (nonzero : declaration.aggregateDelta resource ≠ 0)
     (_agreement :
       (materialize materializer
-        (DeclaredTurn.logicalOfStore
+        (declaration.logicalOfStore
           (applyPatch declaration.patch declaration.preStore))).root =
         declaration.apex) :
     execute projection declaration = .rejected .aggregateBalance := by
