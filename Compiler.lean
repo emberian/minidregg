@@ -25,6 +25,12 @@ import Compiler.GateTraceRelationExt6 -- extends eta aggregation to the entire p
 import Compiler.NextgenLightClientPublicInputs -- exact current binary light-client public schema: consuming decoder round-trip/injectivity, canonical BabyBear cells, exact framed length, and public-prefix uniqueness; handwritten native code remains unverified
 import Compiler.TypedAuthorizationRequestCodec  -- `LawfulCodec (Request .object)` on the landed `StreamCodec` prefix framework: one of the three codecs a Hyperdocument `Config` demands, with teeth that the encoding separates target and effects digest
 import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the wire: identifiers, finite tags, records, atom kinds, embeds, and stable ranges, all on `StreamCodec`; the remaining half of what a `Config` demands
+import Compiler.HyperdocumentContentPageMaterializer  -- bounded versioned content pages retain exact links, routing, canonical sparse projection, and cSHAKE roots
+import Compiler.HyperdocumentEventPageMaterializer  -- bounded versioned causal-event pages retain exact entries, sparse-log projection, and cSHAKE roots
+import Compiler.CredentialAuthorityPageMaterializer  -- bounded policy/revocation pages project exact committed authority roots, epochs, addresses, and membership
+import Compiler.BoundedPageExtensionCatalog  -- one canonical catalog pins all bounded page schemas/codecs/controllers/domains and a cross-page link bundle
+import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
+import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
@@ -56,7 +62,11 @@ import Compiler.Tower256LogupAcceptedRun -- every verified execution of that exa
 import Compiler.Tower256LogupClauseDispatch -- extension-local clause-404 dispatch turns exactly two keyed opaque byte replies into the existing Lean-verified execution; base V1 remains empty
 import Compiler.Tower256AdditiveFriController -- exact cSHAKE-derived additive-FRI control over opaque proof bytes; Lean alone decodes and accepts
 import Compiler.Tower256AdditiveFriRawController -- the same additive checker with NO universal `PositionBinding`: an unequal accepted opening is retained and extracts a path-specific framed cSHAKE collision instead of vanishing
+import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
+import Compiler.Ext6GateProofDeployment  -- nonzero pinned Ext6 deployment carriers and reflected control, with all eight security reductions still explicit
+import Compiler.FramedWalRecoveryController  -- opaque recovery bytes are framed, checked, and replayed only by Lean before a recovered snapshot can exist
+import Compiler.FramedWalRecoveryDeployment  -- recovery work and controller enter an extension deployment without pretending to be native V1 semantics
 import Compiler.ComposableDeploymentManifest -- deployment clauses are projected from actual controller entries; gated/reserved clauses do not enter by declaration alone
 import Compiler.SparseAuthenticatedStateLogupBridge -- exact sparse ROM/RAM/append buses compile to canonical Tower256 lookup indices while retaining Twist-style state continuity and explicit PCS/CR/ROM premises
 import Compiler.SparseEqualityWorkProfile -- Lean-owned dense/sparse equality-functional benchmark schedule, with the common MLE target proved before opaque native timing
