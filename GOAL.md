@@ -4,6 +4,33 @@
 subagents, no workflows. The authoritative snapshot below this block is unchanged and
 still governs; this block is the live trail.
 
+## 2026-08-11 integration resolution
+
+The materializer obstruction is closed by replacing the total dependent function with
+one canonical finite sparse carrier and exhibiting all four deployed schema cells.  The
+causal Hyperdocument family and canonical authority projection are inhabited.  Committed
+policy address/membership is now part of authority state and of every authorization;
+the compiler artifact schema and generated Rust/JSON were versioned with it.
+
+The former `JointGameFamily` priority was resolved by refutation, not construction:
+`Tower256MerkleBindingCardinality` proves that its universal `PositionBinding` premise is
+impossible at positive Merkle height.  `RawSemanticHistoryCheckpointGame` is the new
+target: it retains adversarial openings, extracts a concrete framed-XOF collision, and
+joins history PCS/MCA, additive proximity, collision, and oracle transport on one coin
+without assuming universal binding.
+
+The kernel now also has proof-relevant models for canonical asset/resource effects,
+stable heterogeneous cell creation/deletion, durable canonical payloads and read guards,
+authority-guarded Hyperdocument publication, fee-first admission, scoped history
+projection, and an actual two-leg declared-hyperedge bridge.  These are semantic and
+admission closures.  Physical storage/replication, concrete CR/ROM prices, executable raw
+verifiers, and a real consumer cutover remain open and must not be inferred from them.
+
+Local `lake build Minidregg` is green at 3,264 jobs after the integration imports.  The
+carrier census still reports generic and conditional interfaces, but its former top
+materializer/causal/declared-hyperedge entries are either witnessed, replaced, or
+formally refuted rather than silently assumed.
+
 **What became true tonight, and what is merely an interface**
 
 *Became true.* The six wind-down modules are integrated (`3e28d95`). `Loom`'s BCS

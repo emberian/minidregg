@@ -1,5 +1,59 @@
 # FORCODEX — minidregg handoff, 2026-08-11
 
+## Codex integration refresh — later on 2026-08-11
+
+The handoff below was exactly the right warning at `25d2a5a`, but it is now a
+historical diagnosis rather than current status.  The follow-up swarm did not
+paper over the empty carriers; it changed the representations, built witnesses,
+and retained the impossibility results as regression teeth.
+
+What changed:
+
+- `CellState.LogicalState` now uses one canonical dependent finite map.  The four
+  deployed schema materializers and cells are exhibited (`83d889f`, `e5ccb49`),
+  with the old total-function cardinality obstruction retained as a theorem.
+- The Hyperdocument causal layer is no longer unexplored: a real semantic family,
+  accepted genesis/append path, and canonical authority projection landed in
+  `430d591` and `c15d2a3`.
+- Policy selection is committed by authority state.  `AuthState` binds a policy
+  root/address, authorization retains exact membership/address evidence, the
+  compiler derives the committed `PredCompile` path, and generated artifacts were
+  refreshed (`9faa3cf`, `47d9e4c`, `54e331c`).
+- The old `SemanticHistoryTower256CheckpointGame.JointGameFamily` is **not an
+  inhabitation target**.  `62c0997` proves it impossible at every positive Merkle
+  height: completeness plus universal `PositionBinding` would inject more words
+  into the 256-bit cSHAKE root range than that range can contain.  The honest
+  replacement is the raw path in `384b1bd`, which retains equivocation and gives a
+  same-coin four-event ledger with extracted collision and transport obligations.
+- Kernel semantics grew actual frontiers rather than more callbacks: canonical
+  resource effects (`4119cf4`), durable payload/read-guard intents (`d8d4e53`),
+  authority-guarded Hyperdocument commit (`deebdbb`), fee-first admission
+  (`c3854a6`), heterogeneous cell lifecycle (`604a3ca`), scoped history projection
+  (`b4a4866`), and an executable two-leg declared-hyperedge-to-typed bridge
+  (`8e84438`).
+
+Current verification: local `lake build Minidregg` is green at 3,264 jobs;
+import-boundary, carrier-census self-test, and `git diff --check` are green.  Exact
+committed-source remote replays are recorded in the evidence ledger; production
+cryptography, physical storage refinement, and consumer cutover remain explicit.
+
+The highest-value next stretches are now:
+
+1. instantiate the raw proof/controller path with concrete executable verifier,
+   transcript transport, and priced cSHAKE/PCS/ROM events;
+2. join reactive finalization to durable settlement with a canonical terminal
+   promise cell and race/exclusivity semantics;
+3. exhibit a real two-parent Hyperdocument merge/publication and then cut over one
+   user/agent workflow end to end;
+4. refine durable payload/WAL semantics into a framed physical implementation with
+   torn-write recovery, replication/finality, and liveness stated separately; and
+5. replace existence codecs/roots with versioned deployed codecs and cryptographic
+   binding, without weakening the semantic constructions they currently witness.
+
+Everything below remains useful as the original fault report and as a record of the
+traps that found the bugs.  Read its present-tense status claims as applying to the
+tree named in its opening paragraph.
+
 Written by claude at the end of a long 08-10 session. Not a status report: the
 things here are the ones that will change what you do, in the order they'll
 change it. `GOAL.md` has the full trail; `ATLAS.md` still has the sixteen laws
