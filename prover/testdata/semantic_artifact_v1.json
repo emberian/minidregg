@@ -154,12 +154,12 @@
   "declarationCodecId": 10},
  "canonicalEncoding": "minidregg/encodable/v1",
  "authorization":
- {"schemaVersion": 1,
+ {"schemaVersion": 2,
   "requestFieldTags": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "requestCodecId": 3,
   "modes":
-  [{"modeTag": 1, "checkTags": [1, 2, 11, 12]},
-   {"modeTag": 2, "checkTags": [3, 11, 12]},
-   {"modeTag": 3, "checkTags": [4, 5, 6, 7, 8, 9, 10, 11, 12]}],
+  [{"modeTag": 1, "checkTags": [1, 2, 11, 12, 13, 14]},
+   {"modeTag": 2, "checkTags": [3, 11, 12, 13, 14]},
+   {"modeTag": 3, "checkTags": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]}],
   "declarationId": 601,
   "declarationCodecId": 2}}
