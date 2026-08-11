@@ -144,7 +144,9 @@ def authorizationCheckTag : Minidregg.Theory.AuthorizationDeclaration.Check -> N
   | .ancestorNonRevocations => 9
   | .channelNonRevocations => 10
   | .policyEpoch => 11
-  | .policy => 12
+  | .policyAddress => 12
+  | .policyMembership => 13
+  | .policy => 14
 
 def authorizationModeArtifact
     (plan : Minidregg.Theory.AuthorizationDeclaration.ModePlan) :

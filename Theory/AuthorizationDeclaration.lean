@@ -211,7 +211,7 @@ structure Declaration where
   deriving DecidableEq, Repr
 
 def declaration : Declaration where
-  schemaVersion := 1
+  schemaVersion := 2
   requestFields := requestFieldOrder
   modes :=
     [{ mode := .signature, checks := checksFor .signature },
