@@ -14,7 +14,11 @@ cmp "$fixture" "$generated"
 
 cargo test --quiet --manifest-path "$manifest"
 cargo build --quiet --manifest-path "$manifest" --bin minidregg-link-store
-store_bin="$project_dir/native/hyperdocument-link-store/target/debug/minidregg-link-store"
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+  store_bin="$CARGO_TARGET_DIR/debug/minidregg-link-store"
+else
+  store_bin="$project_dir/native/hyperdocument-link-store/target/debug/minidregg-link-store"
+fi
 
 stage_root="$test_root/stage-crash"
 "$store_bin" stage "$stage_root" "$fixture" >/dev/null

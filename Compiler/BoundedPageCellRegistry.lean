@@ -88,7 +88,7 @@ def directoryRoot (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash directoryRootCustomization bytes).digest
 
 theorem directory_domain_distinct (kind : Kind) :
-    directoryRootCustomization !=
+    directoryRootCustomization ≠
       (BoundedPageExtensionCatalog.controller kind).rootCustomization := by
   cases kind <;> decide
 
@@ -117,6 +117,19 @@ def registry : TypeRegistry Digest where
     registry.materializer .authorityPolicy =
       Minidregg.Compiler.CredentialAuthorityPageMaterializer.materializer :=
   rfl
+
+/-- The dependent registry cannot drift from the catalog's selected lawful
+codec. -/
+theorem registry_codec_catalog_exact (kind : Kind) :
+    HEq (registry.materializer kind).codec
+      (BoundedPageExtensionCatalog.controller kind).codec := by
+  cases kind <;> rfl
+
+/-- Nor can it drift from the catalog's selected page-root computation. -/
+theorem registry_root_catalog_exact (kind : Kind) :
+    (registry.materializer kind).rootBytes =
+      (BoundedPageExtensionCatalog.controller kind).rootBytes := by
+  cases kind <;> rfl
 
 /-! ## One nonempty canonical page cell per row -/
 
