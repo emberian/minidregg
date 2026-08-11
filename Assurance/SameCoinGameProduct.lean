@@ -307,24 +307,29 @@ namespace NoteSpend
 
 open Minidregg.Assurance.NoteSpendProofControllerAdmission
 
-/-- Note-spend relation soundness and hiding remain distinct events in one
-local registry and one component false-accept predicate. -/
+/-- Note-spend relation soundness and hiding remain distinct events.  The
+privacy reduction is an explicit extra argument: a soundness-only family does
+not acquire a hiding claim merely by being registered. -/
 def game {Omega Error : Type} [Fintype Omega]
     {statement : Minidregg.Compiler.NoteSpendProofController.Statement}
-    (family : CommonGameFamily Omega Error statement) :
+    {bound : Minidregg.Compiler.NoteSpendProofController.BoundReflectedSuite statement}
+    (family : CommonGameFamily Omega Error bound)
+    (privacy : SameCoinHidingLaws family.ledger bound) :
     RegisteredGame NoteFailureClass Omega where
   ledger := family.ledger
   falseAccept := fun omega =>
-    family.FalseAccept omega ∨ family.HidingFailure omega
+    family.FalseAccept omega ∨ family.HidingFailure privacy omega
   failureCover := fun omega accepted => by
-    rcases accepted with soundness | privacy
+    rcases accepted with soundness | privacyFailure
     · rcases family.falseAccept_soundnessBad omega soundness with
-        failed | failed | failed | failed
+        failed | failed | failed | failed | failed
+      · exact ⟨.arithmeticSoundness, failed⟩
       · exact ⟨.pcsSoundness, failed⟩
       · exact ⟨.collisionResistance, failed⟩
       · exact ⟨.randomOracle, failed⟩
       · exact ⟨.proofOfKnowledge, failed⟩
-    · exact ⟨.zeroKnowledgeHiding, family.hidingFailure_event omega privacy⟩
+    · exact ⟨.zeroKnowledgeHiding,
+        family.hidingFailure_event privacy omega privacyFailure⟩
 
 end NoteSpend
 

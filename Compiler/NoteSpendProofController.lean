@@ -9,8 +9,10 @@ note-spend descriptor emitted by `Compiler.EmitShare`.
 
 Controller acceptance is deliberately only deterministic control acceptance.
 Opaque argument/PCS byte strings receive their semantic meaning from the
-separate assurance game.  This file does not claim a deployed PCS, collision
-resistance, a random oracle, proof of knowledge, or hiding.
+separate assurance game.  A reflected suite checker remains identity and
+framing evidence until same-coin arithmetic, PCS, collision-resistance,
+random-oracle, and knowledge laws are supplied.  This file constructs no
+deployment and claims no hiding.
 -/
 import Compiler.EmitSerialize
 import Compiler.EmitShare
@@ -59,7 +61,8 @@ structure Statement where
 deriving DecidableEq, Repr
 
 def canonicalStatement (argsDigest effectsDigest preRoot : Digest)
-    (nullifier root outputCommitment : Scalar) : Statement where
+    (nullifier root outputCommitment : Scalar) (proofSuiteId : Digest) :
+    Statement where
   argsDigest := argsDigest
   effectsDigest := effectsDigest
   preRoot := preRoot
@@ -69,7 +72,7 @@ def canonicalStatement (argsDigest effectsDigest preRoot : Digest)
   relationId := relationId
   relationDescriptor := exactRelationDescriptor
   controllerId := controllerId
-  proofSuiteId := unassignedProofSuiteId
+  proofSuiteId := proofSuiteId
 
 def scalarStream : StreamCodec Scalar :=
   StreamCodec.xmap StreamCodec.nat ZMod.val (fun n => (n : Scalar)) (by
@@ -168,25 +171,26 @@ def challengeInput (statement : Statement) (receipt : Receipt) : List UInt8 :=
 def derivedChallenge (statement : Statement) (receipt : Receipt) : Digest :=
   cshake.xofDigest challengeCustomization (challengeInput statement receipt)
 
-/-- Exact deterministic controller acceptance.  The nonempty byte checks are
-framing checks only; cryptographic semantics are not inferred from them. -/
-def Accepts (statement : Statement) (receipt : Receipt) : Prop :=
+/-- Exact deterministic control-envelope acceptance.  The nonempty byte
+checks are framing checks only; cryptographic semantics are not inferred from
+them.  The proof-suite pin is statement data, not something this control
+checker interprets. -/
+def ControlAccepts (statement : Statement) (receipt : Receipt) : Prop :=
   statement.relationId = relationId ∧
   statement.relationDescriptor = exactRelationDescriptor ∧
   statement.controllerId = controllerId ∧
-  statement.proofSuiteId = unassignedProofSuiteId ∧
   receipt.statementDigest = derivedStatementDigest statement ∧
   receipt.challenge = derivedChallenge statement receipt ∧
   receipt.argumentProof ≠ [] ∧
   receipt.pcsProof ≠ []
 
 /-- Lean's Boolean reading of the complete control relation. -/
-def check (statement : Statement) (receipt : Receipt) : Bool := by
+def controlCheck (statement : Statement) (receipt : Receipt) : Bool := by
   classical
-  exact decide (Accepts statement receipt)
+  exact decide (ControlAccepts statement receipt)
 
-theorem check_iff (statement : Statement) (receipt : Receipt) :
-    check statement receipt = true ↔ Accepts statement receipt := by
+theorem controlCheck_iff (statement : Statement) (receipt : Receipt) :
+    controlCheck statement receipt = true ↔ ControlAccepts statement receipt := by
   classical
   exact decide_eq_true_iff
 
@@ -198,40 +202,39 @@ abbrev OpaqueProofRunner (Error : Type) :=
 inductive Failure (Error : Type)
   | native (error : Error)
   | invalidEncoding
-  | rejected
+  | rejectedControlEnvelope
 deriving Repr
 
-/-- Successful control retains exactly the returned bytes and their one Lean
-decoding.  No caller supplies an acceptance proof. -/
-structure AcceptedReceipt (statement : Statement) where
+/-- A controlled receipt retains decoding and framing, not proof semantics. -/
+structure ControlledReceipt (statement : Statement) where
   proofBytes : List UInt8
   receipt : Receipt
   decoded : receiptCodec.decode proofBytes = some receipt
-  accepted : Accepts statement receipt
+  controlled : ControlAccepts statement receipt
 
 /-- The runner receives only the canonical statement encoding selected by
 Lean.  Its output is decoded and checked exactly once. -/
 def run {Error : Type} (statement : Statement)
     (runner : OpaqueProofRunner Error) :
-    Except (Failure Error) (AcceptedReceipt statement) :=
+    Except (Failure Error) (ControlledReceipt statement) :=
   match runner (statementCodec.encode statement) with
   | .error error => .error (.native error)
   | .ok proofBytes =>
       match decoded : receiptCodec.decode proofBytes with
       | none => .error .invalidEncoding
       | some receipt =>
-          if accepted : check statement receipt = true then
+          if accepted : controlCheck statement receipt = true then
             .ok ⟨proofBytes, receipt, decoded,
-              (check_iff statement receipt).mp accepted⟩
+              (controlCheck_iff statement receipt).mp accepted⟩
           else
-            .error .rejected
+            .error .rejectedControlEnvelope
 
 theorem run_success_integrity {Error : Type} (statement : Statement)
-    (runner : OpaqueProofRunner Error) (reply : AcceptedReceipt statement)
+    (runner : OpaqueProofRunner Error) (reply : ControlledReceipt statement)
     (success : run statement runner = .ok reply) :
     runner (statementCodec.encode statement) = .ok reply.proofBytes ∧
     receiptCodec.decode reply.proofBytes = some reply.receipt ∧
-    Accepts statement reply.receipt := by
+    ControlAccepts statement reply.receipt := by
   unfold run at success
   split at success
   next error failed => simp at success
@@ -243,8 +246,27 @@ theorem run_success_integrity {Error : Type} (statement : Statement)
       next checked =>
         simp only [Except.ok.injEq] at success
         subst reply
-        exact ⟨returned, decoded, (check_iff statement receipt).mp checked⟩
+        exact ⟨returned, decoded, (controlCheck_iff statement receipt).mp checked⟩
       next rejected => simp at success
+
+/-- A candidate suite is an actual Lean Boolean with a reflected acceptance
+relation and a nonzero deployment identity.  This interface alone does not
+say that acceptance implies note-spend arithmetic, PCS soundness, knowledge,
+or hiding. -/
+structure ReflectedSuiteInterface where
+  proofSuiteId : Digest
+  proofSuiteAssigned : proofSuiteId ≠ ⟨0⟩
+  ReflectedAccepts : Statement → Receipt → Prop
+  check : Statement → Receipt → Bool
+  check_iff : ∀ statement receipt,
+    check statement receipt = true ↔ ReflectedAccepts statement receipt
+
+/-- Exact binding of a reflected suite to the statement-owned proof-suite
+pin.  This is identity/checker evidence only; semantic admission additionally
+requires same-coin reduction laws in the assurance layer. -/
+structure BoundReflectedSuite (statement : Statement) where
+  suite : ReflectedSuiteInterface
+  proofSuiteBound : statement.proofSuiteId = suite.proofSuiteId
 
 /-- Neither proof byte field can affect the challenge it answers. -/
 theorem derivedChallenge_independent_of_proofBytes (statement : Statement)
@@ -254,23 +276,39 @@ theorem derivedChallenge_independent_of_proofBytes (statement : Statement)
   rw [sameTraceRoot]
 
 theorem canonicalStatement_exact (argsDigest effectsDigest preRoot : Digest)
-    (nullifier root outputCommitment : Scalar) :
+    (nullifier root outputCommitment : Scalar) (proofSuiteId : Digest) :
     let statement := canonicalStatement argsDigest effectsDigest preRoot
-      nullifier root outputCommitment
+      nullifier root outputCommitment proofSuiteId
     statement.relationId = relationId ∧
       statement.relationDescriptor = exactRelationDescriptor ∧
       statement.controllerId = controllerId ∧
-      statement.proofSuiteId = unassignedProofSuiteId := by
+      statement.proofSuiteId = proofSuiteId := by
   exact ⟨rfl, rfl, rfl, rfl⟩
 
-/-- info: 'Minidregg.Compiler.NoteSpendProofController.check_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms check_iff
+/-- The current canonical statement cannot masquerade as a deployed suite:
+its proof-suite pin is zero, while every bound reflected suite must carry an
+assigned nonzero identity. -/
+theorem canonicalStatement_no_boundReflectedSuite
+    (argsDigest effectsDigest preRoot : Digest)
+    (nullifier root outputCommitment : Scalar) :
+    ¬Nonempty (BoundReflectedSuite
+      (canonicalStatement argsDigest effectsDigest preRoot nullifier root
+        outputCommitment unassignedProofSuiteId)) := by
+  rintro ⟨bound⟩
+  exact bound.suite.proofSuiteAssigned (by
+    rw [← bound.proofSuiteBound]
+    rfl)
+
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.controlCheck_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms controlCheck_iff
 /-- info: 'Minidregg.Compiler.NoteSpendProofController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms run_success_integrity
 /-- info: 'Minidregg.Compiler.NoteSpendProofController.derivedChallenge_independent_of_proofBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms derivedChallenge_independent_of_proofBytes
 /-- info: 'Minidregg.Compiler.NoteSpendProofController.canonicalStatement_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonicalStatement_exact
+/-- info: 'Minidregg.Compiler.NoteSpendProofController.canonicalStatement_no_boundReflectedSuite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonicalStatement_no_boundReflectedSuite
 
 end
 
