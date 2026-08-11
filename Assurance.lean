@@ -26,6 +26,8 @@ import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold cha
 import Assurance.SemanticHistoryBcsClaimProjection  -- exact carrier reindex transports semantic AccClaims and folds into the existing unshifted BCS reduction
 import Assurance.SemanticHistoryBcsGame  -- retained history derives the exact unshifted BCS schedule; ideal mathematics and common-coin PCS/CR/ROM evidence stay separate
 import Assurance.SemanticHistoryTower256CheckpointGame  -- one coin/ledger and exact root schedule join retained-history BCS evidence to the concrete Tower256 additive checkpoint
+import Assurance.Tower256MerkleBindingCardinality  -- the old positive-height binding-closed checkpoint carrier is formally impossible, so deployment must retain raw collision events
+import Assurance.SameCoinGameProduct  -- exact nonempty product-coin pullbacks compose raw additive, Ext6, note, and BFV ledgers without pretending they share a deployed ROM
 import Assurance.HistoryHeadInhabitation  -- ANTI-VACUITY: the first constructed `VerifiedHistoryHead`, with a real fold round, at closed built parameters — until this, every retained-history theorem quantified over a type nothing in the tree inhabited
 import Assurance.SemanticHistoryTower256DeployedBcs  -- the literal retained-history Fiat--Shamir failure event has its native MCA bound; concrete same-coin PCS/CR/ROM classification remains explicit
 import Assurance.SemanticHistoryPcsEventRealization  -- intrinsic retained-history MCA/PCS extraction failure is charged to `historyPcs` alone, and is proved minimal: the CR/ROM disjuncts cannot secretly discharge it
