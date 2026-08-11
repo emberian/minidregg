@@ -3,6 +3,9 @@
 **A Lean-first semantic kernel, heterogeneous proof fabric, and authenticated causal medium for
 users and agents.**
 
+**Project site:** [emberian.github.io/minidregg](https://emberian.github.io/minidregg/)
+(source in [`website/`](website/) — deploys via GitHub Pages).
+
 minidregg is building four things as one construction:
 
 1. a **semantic kernel** for typed requests, request-indexed authority, canonical state

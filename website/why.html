@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Why minidregg — diagnosis &amp; thesis</title>
+  <meta name="description" content="Why minidregg exists: the breadstuffs diagnosis, the distilled thesis, and the founding inversion." />
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="index.html">
+        <span class="mark">◆</span> minidregg
+        <span class="tag">research</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html">Home</a>
+        <a href="why.html" aria-current="page">Why</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="maturity.html">Maturity</a>
+        <a href="laws.html">Laws</a>
+        <a class="ext" href="https://github.com/emberian/minidregg">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="shell">
+      <header class="page-hero">
+        <p class="section-label">Origin</p>
+        <h1>Why minidregg exists</h1>
+        <p class="lede">
+          A multi-million-line formal stack already proved the derivation machine.
+          Almost none of it was on the load path. minidregg is the inversion.
+        </p>
+      </header>
+
+      <section>
+        <p class="section-label">The numbers</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Corpus</th>
+                <th>Scale</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>breadstuffs total</td>
+                <td class="mono">~2.89M LOC</td>
+                <td class="dim">1.82M Rust · 913K Lean · ~160K TS/JS</td>
+              </tr>
+              <tr>
+                <td>minidregg budget</td>
+                <td class="mono">≤10% (~290K)</td>
+                <td class="dim">analysis says we need far less</td>
+              </tr>
+              <tr>
+                <td>semantic core (prior)</td>
+                <td class="mono">~25K</td>
+                <td class="dim">the meaning was small; the twins were not</td>
+              </tr>
+              <tr>
+                <td>irreducible kernel (audit)</td>
+                <td class="mono">800–1,200</td>
+                <td class="dim">lines that cannot be deleted by derivation</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Central diagnosis</p>
+        <h2>Sound lowerings. Parallel twins. Empty load path.</h2>
+        <p class="dim narrow">
+          Breadstuffs built and proved every piece of the derivation machine, demonstrated
+          each at n=1, and wired almost none of them into the live path. The distance to
+          “write once, derive executor + proofs + circuits” was never mathematical —
+          every lowering is sound. The mass exists because each generic mechanism landed
+          <em>beside</em> the hand-written corpus it should have replaced.
+        </p>
+        <ul class="clean">
+          <li>
+            <strong>eDSL → VCG → whole-run safety</strong> — complete vertical slice, used
+            once (its own demo). Dozens of apps hand-written beside it.
+          </li>
+          <li>
+            <strong>Parametric app toolkit</strong> — proved once; almost never adopted.
+            Historical twins persist gated and ungated.
+          </li>
+          <li>
+            <strong>Logic→IR compiler</strong> — real and sound; reachability is not authorship.
+          </li>
+          <li>
+            <strong>Kernel minimality theorems</strong> — three verbs over a proved guard
+            lattice. Never executed.
+          </li>
+        </ul>
+        <div class="callout">
+          <p>
+            <strong>The corpus contained its own refactor plan, proved as theorems, and
+            did not execute it.</strong> Additive-extension culture. No delete-the-twin
+            discipline. Too many concurrent lanes in one tree.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Founding inversion</p>
+        <h2>n=1 and n=all coincide by construction.</h2>
+        <p class="dim narrow">
+          Minidregg’s founding move: the derived path is the <em>only</em> path.
+          Nothing lands beside; everything replaces; delete the twin.
+          Before writing any AIR, constraint, circuit, or executor arm by hand — stop.
+          It comes out of the compiler, or the compiler grows the missing vocabulary.
+        </p>
+      </section>
+
+      <section>
+        <p class="section-label">Distilled thesis</p>
+        <h2>A turn is the exercise of an attenuable, proof-carrying token over owned state, leaving a verifiable receipt.</h2>
+        <div class="grid-2" style="margin-top: 1.25rem;">
+          <div class="card">
+            <h3>Four substances</h3>
+            <ul class="clean">
+              <li><strong>Value</strong> — linear (Σδ = 0 exactly)</li>
+              <li><strong>Authority</strong> — generative under non-forgeability</li>
+              <li><strong>Evidence</strong> — monotone</li>
+              <li><strong>State</strong> — guarded-mutable (frame rule)</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Authority = constructive knowledge</h3>
+            <p class="dim">
+              Proof-checking is cheap and trusted. Proof-search is undecidable and untrusted.
+              To hold a capability is to be able to exhibit a witness that verifies.
+            </p>
+          </div>
+          <div class="card">
+            <h3>One Pred algebra, four polarities</h3>
+            <p class="dim">
+              Caveat · program · precondition · intent demand. Two computed dials:
+              coordination price and disclosure ladder.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Spine in five words</h3>
+            <p class="dim">
+              <strong style="color: var(--ink);">Determination is eager; witness is lazy.</strong>
+              Every hole is a lazy witness over an eager shape. Never build a hole that
+              defers its δ or its guard.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Why Loom (not one universal field)</p>
+        <h2>No single arithmetic is honestly native to everything we need.</h2>
+        <p class="dim narrow">
+          Bits, sparse memory, prime-field proofs, residue-ring FHE, MPC shares, privacy,
+          and unbounded causal history do not share one honest native dialect. Forcing them
+          into one universal encoding hides conversions and usually moves the hardest
+          security claims into handwritten glue.
+        </p>
+        <p class="dim narrow">
+          Loom owns the joints: roots-before-challenges control, explicit failure events
+          and error budgets, exact common-opening relations, proof-carrying history
+          attribution, and Lean-owned admission. Native dialects keep the work they do well.
+        </p>
+        <div class="callout ok">
+          <p>
+            This choice is <strong>falsifiable</strong>. If a simpler formalizable stack
+            supplies the same heterogeneous guarantees — or if Loom’s joins do not remove
+            duplication and benchmark competitively — we replace it.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Further reading in-repo</p>
+        <ul class="clean">
+          <li><code>ATLAS.md</code> — founding map, laws, architecture carve</li>
+          <li><code>PROJECT.md</code> — stable construction plan</li>
+          <li><code>docs/PROOF-SYSTEM-SURVEY.md</code> — backend decision</li>
+          <li><code>docs/decisions/D-0004-why-loom.md</code> — Loom decision record</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="inner">
+      <span>minidregg · <a href="index.html">home</a></span>
+      <span><a href="architecture.html">architecture →</a></span>
+    </div>
+  </footer>
+</body>
+</html>

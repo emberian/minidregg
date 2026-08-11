@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture — minidregg</title>
+  <meta name="description" content="How minidregg is carved: Theory, Kernel, Loom, Hyperdocuments, Compiler, and the narrow waist of one semantic event." />
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="index.html">
+        <span class="mark">◆</span> minidregg
+        <span class="tag">research</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html">Home</a>
+        <a href="why.html">Why</a>
+        <a href="architecture.html" aria-current="page">Architecture</a>
+        <a href="maturity.html">Maturity</a>
+        <a href="laws.html">Laws</a>
+        <a class="ext" href="https://github.com/emberian/minidregg">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="shell">
+      <header class="page-hero">
+        <p class="section-label">Construction</p>
+        <h1>Architecture</h1>
+        <p class="lede">
+          One canonical semantic event is the narrow waist. Dialects may differ in
+          representation; they do not get parallel mutable state or parallel authorization.
+        </p>
+      </header>
+
+      <section>
+        <p class="section-label">Target composition</p>
+        <pre class="flow">typed request + current authority + canonical pre-state
+                         |
+                         v
+              Lean-owned effect family
+                         |
+                         v
+        accepted effect + exact validated patch
+                         |
+                         v
+       flat balanced multi-cell semantic hyperedge
+                         |
+             +-----------+-----------+
+             |                       |
+             v                       v
+     durable settlement       causal receipt/history
+             |                       |
+             v                       v
+       physical handler       Loom proof/checkpoint
+                                     |
+                        +------------+------------+
+                        |            |            |
+                     lookup      private/FHE    hypermedia</pre>
+      </section>
+
+      <section>
+        <p class="section-label">The narrow waist</p>
+        <h2>One verified semantic event</h2>
+        <div class="grid-2">
+          <div class="card">
+            <ul class="clean">
+              <li>native statement</li>
+              <li>canonical representation / opening relation</li>
+              <li>one exact typed receipt clause</li>
+              <li>one shared transcript and failure ledger (when security is claimed)</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Hard invariant</h3>
+            <p class="dim">
+              Lean owns state meaning, request meaning, protocol control, and acceptance.
+              Rust has no semantics or refinement theorem in this repository. Native work
+              returns bytes or an opaque error; failure may block availability, never authorize.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Repository carve</p>
+        <h2>Where meaning lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tree</th>
+                <th>Role</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">Theory/</td>
+                <td class="dim">Candidate-independent core: verify/find seam, cameras, verbs, governed dynamics. Import boundary mechanically enforced.</td>
+              </tr>
+              <tr>
+                <td class="mono">Kernel/</td>
+                <td class="dim">State, turns, hyperedges, durable commit models, hyperdocument merge/publication, receipts.</td>
+              </tr>
+              <tr>
+                <td class="mono">Pred/</td>
+                <td class="dim">One predicate algebra, syntactic AST end-to-end — no opaque functions on the policy path.</td>
+              </tr>
+              <tr>
+                <td class="mono">Effects/</td>
+                <td class="dim">Open effect-spec surface from which executor equality, descriptors, and teeth are derived.</td>
+              </tr>
+              <tr>
+                <td class="mono">Compiler/</td>
+                <td class="dim">Arithmetization spine, artifact emission, native work profiles, controllers, codecs.</td>
+              </tr>
+              <tr>
+                <td class="mono">Loom/</td>
+                <td class="dim">Proof fabric: FRI regimes, sumcheck, proximity, light client shapes, ZK games, sponge/ROM.</td>
+              </tr>
+              <tr>
+                <td class="mono">Assurance/</td>
+                <td class="dim">Admission bridges, error budgets, history/family instances, receipt games, deployment joins.</td>
+              </tr>
+              <tr>
+                <td class="mono">prover/</td>
+                <td class="dim">Opaque fallible native compute + generated dispatch glue. Authors nothing semantic.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Pillar detail</p>
+        <div class="stack">
+          <article class="card accent-ember">
+            <div class="num">SEMANTIC KERNEL</div>
+            <h3>Turn = attenuable token over owned state → receipt</h3>
+            <p class="dim">
+              One typed request names subject, target, verb, arguments, effects, policy,
+              nonce, and exact pre-root. A validated patch derives one canonical post-state
+              and exact footprint. Multi-resource actions are flat finite hyperedges with
+              one shared apex and aggregate law — not a hidden call forest.
+            </p>
+            <p class="dim">
+              Rejection has no post-state unless explicitly modeled as a charged committed effect.
+            </p>
+          </article>
+
+          <article class="card accent-teal">
+            <div class="num">LOOM</div>
+            <h3>Heterogeneous dialects, owned joints</h3>
+            <p class="dim">
+              Binary towers, prime-field gates, LogUp/lookup, additive FRI, history BCS,
+              private/sealed computation — each keeps honest native work. Shared control:
+              roots before challenges, common-coin transport obligations, explicit failure
+              classes on one ledger, Lean-owned admission of accepted bytes.
+            </p>
+          </article>
+
+          <article class="card accent-violet">
+            <div class="num">HYPERDOCUMENTS</div>
+            <h3>Causal medium for users and agents</h3>
+            <p class="dim">
+              Typed content, stable ranges, transclusion, backlinks, annotations, offline
+              branches, explicit conflicts, versioned history. Merge preserves every current
+              parent: singleton field sources write; multi-source fields become
+              provenance-bearing conflict records. Ancestry-backed accepted merge retains
+              the selected base; ambiguous bases stay absent.
+            </p>
+            <div class="callout warn" style="margin-top: 0.85rem; margin-bottom: 0;">
+              <p>
+                <strong>Current caveat:</strong> some document cells are still uninhabitable
+                at deployed schemas (infinite total-function logical state). See
+                <a href="maturity.html">maturity</a>.
+              </p>
+            </div>
+          </article>
+
+          <article class="card accent-amber">
+            <div class="num">COMPILER &amp; NATIVE BOUNDARY</div>
+            <h3>Artifacts describe work; Lean alone accepts</h3>
+            <p class="dim">
+              Generated artifacts contain first-order data and dispatch identity, not verdicts.
+              The clause-406 path authenticates arithmetic work with exact byte codecs:
+              Rust returns candidate bytes; Lean decodes and constructs the certificate.
+              Native failure can block availability. It cannot create an accepted receipt.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Privacy &amp; external effects</p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Computation ≠ disclosure</h3>
+            <p class="dim">
+              Private computation is sealed by default. A later release needs new authority
+              and a causal link to an output commitment.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Intent is not completion</h3>
+            <p class="dim">
+              An admission receipt is not proof that external I/O happened.
+              Completion or refusal is a later event.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">Analogy, not lineage</p>
+        <h2>Compound documents, after removing ambient authority</h2>
+        <p class="dim narrow">
+          Older compound-document systems had useful instincts: active documents, links,
+          remote activation, interface negotiation. minidregg studies those ideas after
+          removing ambient pointers, hidden mutation, location authority, and runtime
+          object identity.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Earlier idea</th>
+                <th>minidregg contrast</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>monikers</td>
+                <td class="dim">stable typed content-addressed references</td>
+              </tr>
+              <tr>
+                <td>structured storage</td>
+                <td class="dim">canonical sparse authenticated cells</td>
+              </tr>
+              <tr>
+                <td>embed / link</td>
+                <td class="dim">authenticated transclusion, backlinks, causal history</td>
+              </tr>
+              <tr>
+                <td><code>QueryInterface</code></td>
+                <td class="dim">explicit typed effect family; no runtime object authority</td>
+              </tr>
+              <tr>
+                <td>COM aggregation</td>
+                <td class="dim">one flat typed multi-cell hyperedge</td>
+              </tr>
+              <tr>
+                <td>DTC-style commit</td>
+                <td class="dim">fail-closed multi-root / nullifier / budget / history journal model</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-label">In-repo design docs</p>
+        <ul class="clean">
+          <li><code>docs/HYPEREDGE-DESIGN.md</code> — one turn model</li>
+          <li><code>docs/LOOM-RECOMPOSITION.md</code> — proof system + obligation ledger</li>
+          <li><code>docs/KERNEL-NECESSITY.md</code> — exhibit the kernel, don’t design it</li>
+          <li><code>docs/PROOF-SYSTEM-SURVEY.md</code> — backend survey</li>
+          <li><code>docs/decisions/</code> — numbered decision records</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="inner">
+      <span><a href="why.html">← why</a></span>
+      <span><a href="maturity.html">maturity →</a></span>
+    </div>
+  </footer>
+</body>
+</html>
