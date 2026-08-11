@@ -1,0 +1,16 @@
+[package]
+name = "minidregg-hyperdocument-link-store"
+version = "0.1.0"
+edition = "2021"
+description = "Fallible bounded local byte store for the Lean-owned Hyperdocument link controller."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "minidregg_hyperdocument_link_store"
+path = "src/lib.rs"
+
+[[bin]]
+name = "minidregg-link-store"
+path = "src/main.rs"
+
+[dependencies]
