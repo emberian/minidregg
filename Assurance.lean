@@ -48,6 +48,7 @@ import Assurance.Tower256AdditiveFriRawAdmission  -- the same-coin cover CONSTRU
 import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller bytes derive the real Loom challenge/query event and UD price, leaving only exact ROM transport and pre-assumed position binding
 import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
 import Assurance.Ext6GateProofDeploymentAdmission  -- reflected Ext6 deployment is separated from its exact eight-event semantic security residual
+import Assurance.Ext6GateProofPositiveExecution  -- the exact deployed receipt inhabits ControlledExecution while the eight-event SecurityResidual remains a separate argument
 import Assurance.HyperdocumentHistoryAdmission  -- exact head membership, indexed finality, post-only openings, and accepted LinkRecord containment
 import Assurance.HyperdocumentAgentOperation  -- one composed user/agent link-or-annotation slice: negotiate, promise, notify, react, then the sole accepted effect at Finalize drives publication, invalidation, receipt/history, and the conditional durable plan
 import Assurance.HyperdocumentGuardedDurable  -- the actual published operation becomes exact content/event payload writes guarded by the current authority root

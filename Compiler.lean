@@ -68,6 +68,7 @@ import Compiler.Tower256AdditiveFriRawController -- the same additive checker wi
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
 import Compiler.Ext6GateProofDeployment  -- nonzero pinned Ext6 deployment carriers and reflected control, with all eight security reductions still explicit
+import Compiler.Ext6GateProofPositiveRun  -- one causal five-round receipt for the 23-residual deployment reaches canonical bytes and Lean acceptance; no security residual is fabricated
 import Compiler.FramedWalRecoveryController  -- opaque recovery bytes are framed, checked, and replayed only by Lean before a recovered snapshot can exist
 import Compiler.FramedWalRecoveryDeployment  -- recovery work and controller enter an extension deployment without pretending to be native V1 semantics
 import Compiler.ComposableDeploymentManifest -- deployment clauses are projected from actual controller entries; gated/reserved clauses do not enter by declaration alone
