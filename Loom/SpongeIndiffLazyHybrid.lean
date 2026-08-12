@@ -50,7 +50,7 @@ noncomputable def lazyHybridStep {q : Nat}
     (coins : Fin q → LazyHybridCoins Rate Cap)
     (st : LazyHybridState Rate Cap) (j : Fin q) :
     Except LazyHybridError (LazyHybridState Rate Cap) :=
-  match hquery : D.move st.ans with
+  match D.move st.ans with
   | .constr x xs =>
       let message := x :: xs
       if (coins j).blocks.length = message.length then
@@ -86,6 +86,7 @@ theorem lazyHybridStep_work_exact {q : Nat}
   cases hquery : D.move st.ans with
   | constr x xs =>
       rw [hquery] at h
+      dsimp only at h
       split at h
       · split at h
         · injection h with hnext
@@ -95,6 +96,7 @@ theorem lazyHybridStep_work_exact {q : Nat}
       · contradiction
   | fwd s =>
       rw [hquery] at h
+      dsimp only at h
       cases hcoins : (coins j).blocks with
       | nil => contradiction
       | cons coin rest =>
@@ -106,6 +108,7 @@ theorem lazyHybridStep_work_exact {q : Nat}
           | cons coin' rest => contradiction
   | inv t =>
       rw [hquery] at h
+      dsimp only at h
       cases hcoins : (coins j).blocks with
       | nil => contradiction
       | cons coin rest =>
@@ -127,6 +130,7 @@ theorem lazyHybridStep_ans_length {q : Nat}
   cases hquery : D.move st.ans with
   | constr x xs =>
       rw [hquery] at h
+      dsimp only at h
       split at h
       · split at h
         · injection h with hnext
@@ -136,6 +140,7 @@ theorem lazyHybridStep_ans_length {q : Nat}
       · contradiction
   | fwd s =>
       rw [hquery] at h
+      dsimp only at h
       cases (coins j).blocks with
       | nil => contradiction
       | cons coin rest =>
@@ -144,6 +149,7 @@ theorem lazyHybridStep_ans_length {q : Nat}
           | cons coin' rest => contradiction
   | inv t =>
       rw [hquery] at h
+      dsimp only at h
       cases (coins j).blocks with
       | nil => contradiction
       | cons coin rest =>
