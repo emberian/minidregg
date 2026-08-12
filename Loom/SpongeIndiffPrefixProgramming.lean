@@ -105,13 +105,15 @@ theorem programPrefixes_some_lengths
                         programPrefixes (ro.respond (seen ++ [x]) value.1).2
                           primitive value (seen ++ [x]) xs rateCoins
                           capacityCoins = some result := by
-                      simpa [heq] using h
+                      rw [if_pos heq] at h
+                      exact h
                     obtain ⟨hrate, hcap⟩ :=
                       ih (ro := (ro.respond (seen ++ [x]) value.1).2)
                         (primitive := primitive) (state := value)
                         (seen := seen ++ [x]) htail
                     exact ⟨by simp [hrate], by simp [hcap]⟩
-                  · simp [heq] at h
+                  · rw [if_neg heq] at h
+                    contradiction
               | none =>
                   rw [hlookup] at h
                   let value : Rate × Cap :=
@@ -157,7 +159,7 @@ theorem programConstruction_singleton_fresh
           ((ro.respond [x] rateCoin).1, capacityCoin)).2⟩ := by
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
-    programPrefixes]
+    programPrefixes, List.nil_append]
   rw [hfresh]
   simp only
   rw [Oracle.respond_fresh_fst hfresh]
@@ -176,7 +178,7 @@ theorem programConstruction_singleton_existing_edge_fresh_ro
       some ⟨existing, (ro.respond [x] existing.1).2, primitive⟩ := by
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
-    programPrefixes]
+    programPrefixes, List.nil_append]
   rw [hlookup]
   rw [Oracle.respond_fresh_fst hroFresh]
   simp
@@ -254,10 +256,20 @@ theorem two_prefixes_programmed :
     Oracle.respond_fresh_fst hfirstFresh, hz]
   split
   · rename_i hlookup
-    rw [hsecondFresh'] at hlookup
+    have himpossible : (none : Option (ZMod 2 × Nat)) = some _ :=
+      hsecondFresh'.symm.trans hlookup
+    exact Option.noConfusion himpossible
   · rename_i hlookup
     simp only
-    rw [hroSecondValue, hprimitiveSecondValue]
+    have hvalue :
+        (((((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond
+          [1, 1] 0).1), (2 : Nat)) : ZMod 2 × Nat) = (0, 2) := by
+      rw [hroSecondValue]
+    have hresponse := congrArg
+      (fun value : ZMod 2 × Nat =>
+        (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.respond
+          (0, 1) value) hvalue
+    rw [hresponse, hprimitiveSecondValue]
     rfl
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
