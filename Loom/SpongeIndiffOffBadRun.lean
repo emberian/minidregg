@@ -216,7 +216,12 @@ theorem recursiveCapacityFailure_le {q : Nat}
         RecursiveCapacityFailure D iv (withCapacity parts.1 parts.2))]
     apply uniformProb_congr
     intro coins
-    rw [(splitIdealCoins (Rate := Rate) (Cap := Cap) q).left_inv coins]
+    have hrebuild :=
+      (splitIdealCoins (Rate := Rate) (Cap := Cap) q).left_inv coins
+    change withCapacity
+      ((splitIdealCoins (Rate := Rate) (Cap := Cap) q) coins).1
+      ((splitIdealCoins (Rate := Rate) (Cap := Cap) q) coins).2 = coins at hrebuild
+    rw [hrebuild]
   rw [htransport]
   refine uniformProb_prod_le (by positivity) fun base => ?_
   exact recursiveCapacityFailure_conditional_le D iv base
