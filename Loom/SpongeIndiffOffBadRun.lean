@@ -140,6 +140,7 @@ noncomputable def RecursiveCapacityFailure {q : Nat}
 
 /-- Outside the recursive capacity failure, every round preserves unique
 rooted paths. -/
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 theorem idealStateNat_uniquePaths_of_good {q n : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
     (coins : Fin q → Rate × (Rate × Cap)) (hn : n ≤ q)
@@ -176,6 +177,50 @@ theorem capacityFailure_or_idealRun_uniquePaths {q : Nat}
     exact idealStateNat_uniquePaths_of_good D iv coins (Nat.le_refl q)
       (fun i _ hi => hbad ⟨i, hi⟩)
 
+omit [Fintype Rate] [DecidableEq Rate] in
+/-- Conditional recursive-run price for each fixed rate/block-rate schedule. -/
+theorem recursiveCapacityFailure_conditional_le {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (base : Fin q → Rate × Rate) :
+    uniformProb (Fin q → Cap) (fun capacity =>
+      RecursiveCapacityFailure D iv (withCapacity base capacity))
+      ≤ (q : Real) * (((2 * q + 2 : Nat) : Real) / Fintype.card Cap) := by
+  unfold RecursiveCapacityFailure
+  apply adaptiveFiniteUnionBound
+  · intro i capacity capacity' hprefix
+    apply recursiveCapacityAvoid_prefix
+    intro j hj
+    simp only [withCapacity]
+    rw [hprefix j hj]
+  · intro capacity i
+    exact recursiveCapacityAvoid_card_le D iv (withCapacity base capacity) i
+
+omit [DecidableEq Rate] in
+/-- **Numeric price on the exact ideal coin space.**  The pointwise failure
+event in `capacityFailure_or_idealRun_uniquePaths` costs at most
+`q(2q+2)/|Cap|`. -/
+theorem recursiveCapacityFailure_le {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap) :
+    uniformProb (Fin q → Rate × (Rate × Cap))
+      (RecursiveCapacityFailure D iv)
+      ≤ (q : Real) * (((2 * q + 2 : Nat) : Real) / Fintype.card Cap) := by
+  have htransport :
+      uniformProb (Fin q → Rate × (Rate × Cap))
+          (RecursiveCapacityFailure D iv)
+        = uniformProb ((Fin q → Rate × Rate) × (Fin q → Cap))
+          (fun parts =>
+            RecursiveCapacityFailure D iv (withCapacity parts.1 parts.2)) := by
+    rw [← uniformProb_equiv (splitIdealCoins (Rate := Rate) (Cap := Cap) q)
+      (fun parts =>
+        RecursiveCapacityFailure D iv (withCapacity parts.1 parts.2))]
+    apply uniformProb_congr
+    intro coins
+    congr 1
+    exact (splitIdealCoins (Rate := Rate) (Cap := Cap) q).left_inv coins
+  rw [htransport]
+  refine uniformProb_prod_le (by positivity) fun base => ?_
+  exact recursiveCapacityFailure_conditional_le D iv base
+
 end OffBadRun
 
 /-! The pointwise classifier is the deterministic half.  Its event will be
@@ -186,5 +231,7 @@ probability premise appears in the classifier itself. -/
 #guard_msgs (whitespace := lax) in #print axioms idealStateNat_full_eq_idealRun
 /-- info: 'Minidregg.Loom.capacityFailure_or_idealRun_uniquePaths' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capacityFailure_or_idealRun_uniquePaths
+/-- info: 'Minidregg.Loom.recursiveCapacityFailure_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recursiveCapacityFailure_le
 
 end Minidregg.Loom
