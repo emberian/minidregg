@@ -35,14 +35,17 @@ import Kernel.DurableCommitProtocol  -- fail-closed multi-root/nullifier/budget/
 import Kernel.DurableDataIntent  -- stable payload-bearing writes and read guards refine root settlement without assuming hash injectivity or physical durability
 import Kernel.GuardedDurableCommit  -- Hyperdocument content/event writes carry exact bytes while the canonical authority cell participates as a stale-detecting read guard
 import Kernel.CanonicalPolicyRegistry  -- committed policy records resolve to exact payloads and remain guarded through durable settlement; signatures and physical atomicity stay explicit
+import Kernel.CredentialSignedEnvelopeController  -- versioned key-directory and authority-root checks admit only an exact externally verified credential envelope
 import Kernel.AdmissionPrologue  -- fee and nonce settle before the body, so rejection preserves replay protection and charge without leaking a body post-state
 import Kernel.DurableWalHandler  -- the first inhabitant of that refinement: a staged/committed/compacting write-ahead log whose recovery fold tracks the model exactly; a device MODEL, with no fsync, torn write, codec, replication, or liveness claim
 import Kernel.FramedWalRefinement  -- versioned/checksummed frames, torn tails, crash repair, and sync refine the abstract WAL while real OS/device semantics remain a premise
 import Kernel.ReplicatedSettlementFinality  -- intersecting quorum certificates make finalized logs comparable; availability and network liveness remain separate hypotheses
+import Kernel.AuthenticatedSettlementFinality  -- authority roots, key epochs, policy addresses, and revocation bind quorum votes while EUF remains an explicit bad event
 import Kernel.IrreversibleEffectSettlement  -- external actions settle as commit/refuse/compensate/quarantine with exact receipts; compensation and physical restoration remain distinct
 import Kernel.CanonicalResourceEffect  -- canonical transfer/mint/burn/fee/lease operations derive the sole accepted effect and patch-bound hyperedge resource law
 import Kernel.AuthorizedResourceCharge  -- authority binds the exact ten-lane codec/tariff charge and its payload-bearing durable settlement
 import Kernel.ReactiveTerminalCell  -- finalize/cancel/expire/break race for one canonical terminal cell and atomic outbox intent
+import Kernel.OutboxDelivery  -- stable terminal/outbox identity, receiver replay, and authenticated acknowledgements without invented transport liveness
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races
 import Kernel.PrivateEscrowSettlement  -- sealed computation and separately authorized declassification stage exact escrow release, terminal, and outbox effects

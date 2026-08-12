@@ -11,5 +11,8 @@ import Kernel      -- the 3 verbs (create · gwrite · move) over the camera; hy
 import Pred        -- the ONE predicate algebra, syntactic AST end-to-end
 import Effects     -- open handler registry: one declaration per effect, proof fields for the floor
 import Compiler    -- arithmetization spine: syntactic-leaf IR + fold_unique
+import Compiler.BoundedQuantifiedPolicyAdmission  -- bounded quantified policies reach committed-policy AIR reflection
+import Compiler.DeclaredActionAir  -- canonical action bytes and sparse guard execution are equivalent to one emitted descriptor
+import Compiler.DeclaredEffectPageRegistry  -- bounded declared-effect pages enter the dependent cell registry
 import Loom        -- the proof system
 import Assurance   -- generated ledger machinery: pins, keystone audit, Bound/Forced

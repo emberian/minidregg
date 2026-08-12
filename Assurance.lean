@@ -39,6 +39,7 @@ import Assurance.RawHistoryBcsOpenings  -- the retained-history carrier BEFORE b
 import Assurance.RawHistoryCollisionBridge  -- that retained equivocation IS the landed `BindingFailure`, and at the concrete cSHAKE Merkle scheme it extracts an exact framed collision; the power-of-two coordinate embedding is the named residual
 import Assurance.RawSemanticHistoryCheckpointGame  -- constructible nonempty same-coin history/additive checkpoint game retains attribution, proximity, extracted collision, and oracle-transport failures
 import Assurance.RawHistorySecurityPrices  -- exact collision and native-FS price interfaces expose the coupling needed for honest same-coin bounds and refute marginal-only shortcuts
+import Assurance.Tower256RawHistoryCshakeTrace  -- executed raw history exposes exact cSHAKE traces while fresh-XOF coupling and numeric ROM prices stay explicit
 import Assurance.Tower256RawHistoryFsExecution  -- binding-free verifier-owned bytes project to literal SR traces and discharge the intrinsic history PCS/MCA execution classifier
 import Assurance.Tower256AdditiveFriCanonicalExecutionGame  -- actual raw receipt execution yields the exact ideal coin or a priced collision/transport event on one ledger
 import Assurance.Tower256RawSemanticHistoryCanonicalGame  -- canonical raw additive execution and retained-history openings share one four-event coin without universal binding
@@ -52,6 +53,7 @@ import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller byte
 import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
 import Assurance.Ext6GateProofDeploymentAdmission  -- reflected Ext6 deployment is separated from its exact eight-event semantic security residual
 import Assurance.Ext6GateProofPositiveExecution  -- the exact deployed receipt inhabits ControlledExecution while the eight-event SecurityResidual remains a separate argument
+import Assurance.Ext6GateProofNonzeroSuiteClosure  -- versioned nonzero pins close exact control while all eight same-coin security events remain supplied evidence
 import Assurance.HyperdocumentHistoryAdmission  -- exact head membership, indexed finality, post-only openings, and accepted LinkRecord containment
 import Assurance.HyperdocumentAgentOperation  -- one composed user/agent link-or-annotation slice: negotiate, promise, notify, react, then the sole accepted effect at Finalize drives publication, invalidation, receipt/history, and the conditional durable plan
 import Assurance.HyperdocumentGuardedDurable  -- the actual published operation becomes exact content/event payload writes guarded by the current authority root
@@ -62,15 +64,18 @@ import Assurance.HyperdocumentLinkEndpointController  -- one human/agent byte en
 import Assurance.HyperdocumentLinkLocalFileStore  -- a bounded opaque local-file boundary exercises staged crash, restart, exact retry, and fail-closed corrupt reads
 import Assurance.HyperdocumentLinkClientCutover  -- human and agent submissions share identical semantic bytes and one exact canonical link receipt
 import Assurance.HyperdocumentLinkClientLocalFileCutover  -- the shared client path survives the exercised local-file lost-response/restart lifecycle
+import Assurance.HyperdocumentLinkSqliteTransactionalStore  -- exact link bytes cross an exercised transactional SQLite crash/restart boundary with OS/fsync refinement explicit
 import Assurance.HyperdocumentLinkPageDurableWeld  -- accepted link/event records become exact bounded page deltas, cSHAKE roots, and one authority-guarded durable intent
 import Assurance.HyperdocumentQueryDeployment  -- versioned authorized content/history query bytes reopen the bounded link and exact causal event with rejection teeth
 import Assurance.HyperdocumentTransclusionReferenceDeployment  -- globally injective stored references and a finite declared-domain backlink witness reopen through the deployed query path
 import Assurance.HyperdocumentIndexSyncEndpoint  -- persistent bounded backlink/range indexes sync causal deltas and reopen through an opaque fallible byte endpoint
+import Assurance.HyperdocumentFinalizedDomainCrawler  -- finalized finite manifests drive exact two-sided coverage, cursor recovery, and complete-domain backlink results
 import Assurance.BoundedPageSchemaUpgradeCutover  -- authorized V1-to-V2 page migration preserves semantic projections through durable recovery and quorum-finalized payload identity
 import Assurance.HyperdocumentTwoParentHistoryWitness  -- the concrete two-parent conflict survives at an exact verified-history coordinate
 import Assurance.HyperdocumentMergeDurableFinalityWitness  -- the merged conflict survives guarded WAL recovery and an intersecting-quorum finalization witness
 import Assurance.DeployedCredentialLifecycle  -- concrete issue, strict attenuation, use, revocation/rotation, guarded durable debit, and retry inhabit the bounded authority path
 import Assurance.CredentialTokenLocalEndpoint  -- stable token/use/revoke bytes exercise guarded restart and retry while signature and OS boundaries remain explicit
+import Assurance.CredentialSignedEnvelopeEndpoint  -- versioned credential bytes and canonical key lookup bind an exact externally verified authority transition
 import Assurance.HyperdocumentDurableInstallation  -- that slice's durable half with the handler premise DISCHARGED by the constructed WAL device: atomicity, marker installation, crash-before, and idempotent retry no longer quantify over a hypothetical correct store
 import Assurance.TransclusionBacklinkHistory  -- typed durable references, exact source/history/opening identity, authenticated forward welds, and coverage-relative complete backlinks
 import Assurance.SemanticHistoryRecursiveAir  -- stateless public history heads bind into the shared-wire recursive verifier AIR while soundness/KS/ZK/SE remain distinct evidence
@@ -91,6 +96,8 @@ import Assurance.PrivateEscrowSettlementJoin  -- the inhabited shared-MPC path j
 import Assurance.ReactiveDurableSettlement  -- accepted reactive content, terminal state, and outbox settle in one retry-safe payload intent with explicit liveness ceilings
 import Assurance.HyperdocumentReactiveCarrierWitness  -- concrete deployed create/history/controller values inhabit the reactive carrier and its durable terminal settlement
 import Assurance.HyperdocumentAgentRuntimeScheduler  -- a leased link job reaches authenticated reaction, atomic terminal/outbox settlement, and crash-safe replay with readiness premises
+import Assurance.ReactiveOutboxDelivery  -- the installed reactive outbox becomes one retry-stable delivery message whose ack binds exact bytes and root
+import Assurance.AuthenticatedSettlementFinalityWitness  -- concrete authority snapshots witness current, rotated, revoked, and non-conflicting authenticated quorum paths
 import Assurance.DreggNetProviderConsumer  -- a market-bound provider job joins exact lease economics, terminal/refund settlement, retry, and quorum safety
 import Assurance.QuotaGcSettlementWitness  -- an expired unprotected bounded page compacts with exact fee, guards, writes, and no-delete teeth for live/finalized roots
 import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
