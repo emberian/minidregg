@@ -59,6 +59,7 @@ lemma simFwdRO_sim (iv : Rate × Cap) (ro : Oracle (List Rate) Rate)
   unfold simFwdRO simFwd
   cases completion? os iv s <;> rfl
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- One actual `idealStep` preserves rooted-path uniqueness under precisely
 the branch-specific condition recorded by `IdealFreshAt`. -/
 theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
