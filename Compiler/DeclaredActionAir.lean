@@ -218,10 +218,13 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
         (observations declaration fields).length
     omega
   unfold assignment
-  rw [dif_neg notByte, dif_pos expectedBound]
-  congr 2
-  apply Fin.ext
-  simp
+  split
+  · next hbyte => exact False.elim (notByte hbyte)
+  · split
+    · congr 2
+      apply Fin.ext
+      simp [expectedWire]
+    · next hexpected => exact False.elim (hexpected expectedBound)
 
 @[simp] theorem assignment_observed {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
@@ -246,10 +249,13 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
           (observations declaration fields).length)
     omega
   unfold assignment
-  rw [dif_neg notByte, dif_neg notExpected]
-  congr 2
-  apply Fin.ext
-  simp
+  split
+  · next hbyte => exact False.elim (notByte hbyte)
+  · split
+    · next hexpected => exact False.elim (notExpected hexpected)
+    · congr 2
+      apply Fin.ext
+      simp [observedWire]
 
 /-! ## Lean-authored constraints and emitted descriptor -/
 
@@ -428,7 +434,8 @@ theorem descriptor_accepts_iff_run {kind : ResourceKind}
     intro index
     have pinnedByte := pinned (byteWire
       (guardCount := (observations declaration fields).length) index)
-    simpa only [byteWire, assignment_byte] using pinnedByte
+    rw [assignment_byte context declaration fields index] at pinnedByte
+    simpa only [byteWire] using pinnedByte
 
 /-- Proof-relevant generated witness.  The original variable assignment is
 computable (`assignment`); the existing emit completeness theorem supplies the
