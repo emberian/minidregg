@@ -67,17 +67,30 @@ What lands here, PROVED:
 ## Covered scope, in the same sentence as the claim (the honest label)
 The simulator, its programming correctness, its per-step path-uniqueness
 preservation, and the fixed-set capacity-collision bound are PROVED here.
-Follow-up modules `SpongeIndiffRunInvariant`, `AdaptiveFiniteSampling`,
-`SpongeIndiffCapacityBudget`, `SpongeIndiffAdaptiveSchedule`, and
-`SpongeIndiffOffBadRun` now thread path uniqueness through the actual adaptive
-`idealRun`, prove prefix causality for the evolving `capsOf`, price the exact
-ideal-coin failure event by `q(2q+2)/|Cap|`, and prove failure-or-final
-`UniquePaths`. The distinguisher-advantage inequality itself still requires
-the run-level programmed construction-answer invariant, identical-until-bad
-comparison, and random-permutation/random-function switch (plus sharpening
-the capacity constant to this statement's `2q²/|Cap|`). Single-rate-block
-squeeze; nonempty unpadded messages (`SpQuery.constr` carries `x :: xs`);
-multi-block squeeze and the deployed padding rule are `[SPONGE-padding]`.
+Follow-up modules through `SpongeIndiffOffBadRun` thread path uniqueness
+through the actual adaptive `idealRun`, prove prefix causality for the evolving
+`capsOf`, price its exact ideal-coin failure event by `q(2q+2)/|Cap|`, and
+prove failure-or-final `UniquePaths`.  The newer construction-first lane makes
+the previously missing operational semantics explicit: `SpongeIndiffWorkBudget`
+formally refutes external query count as a primitive-work budget for arbitrary
+multi-block messages; `SpongeIndiffPrefixProgramming` reconciles or programs
+every nonempty prefix; `SpongeIndiffPrefixOutput` proves that a successful
+construction returns exactly the lazy RO value of the full message; and
+`SpongeIndiffWorkStream` consumes one pair from a fixed uniform vector per
+primitive evaluation.  Distinct lazy samples commute extensionally
+(`SpongeIndiffOracleReordering`), while `SpongeIndiffUniformCoupling` proves
+that an actual work-space bijection plus pointwise event equivalence transports
+uniform probability exactly.
+
+Consequently the canonical unrestricted target is now the work-indexed
+`SpongeIndiffWorkGame`, not this file's older `q`-indexed headline.  The latter
+has honest budget meaning only on the explicitly proved
+`SingleBlockConstruction` fragment.  The remaining theorem is sharply named:
+construct the adaptive eager/deferred same-space coupling, prove agreement away
+from its consistency/capacity bad event, price that event on the work space,
+and perform the random-permutation/random-function switch.  The construction
+already squeezes one rate element after a nonempty unpadded message of any
+block length; the deployed padding/domain rule remains `[SPONGE-padding]`.
 
 ## Keystones (ATLAS: satisfiable + teeth + premise inhabitation, BUILT)
 `SpongeExample`: over `ZMod 2 × Fin 2`, the FIRST forward query at the IV
@@ -1068,9 +1081,9 @@ def SpongeIndifferentiable (Rate Cap : Type) [AddCommGroup Rate]
   ∀ (q : ℕ) (D : Distinguisher Rate Cap q),
     |realProb D iv - idealProb D iv| ≤ ε q
 
-/-- **`[SPONGE-indiff-game]` — the named residual, STATED, not proved.** The
-sponge over an ideal permutation is indifferentiable from the RO at the
-capacity bound: advantage `≤ 2q²/|Cap| + q²/|Rate × Cap|`. The first term is
+/-- **`[SPONGE-indiff-game]` — the legacy query-indexed target, STATED, not
+proved.** The sponge over an ideal permutation is indifferentiable from the RO
+at the capacity bound: advantage `≤ 2q²/|Cap| + q²/|Rate × Cap|`. The first term is
 the capacity-collision bad event — PRICED above (`capBad_le`); the second is
 the standard permutation-vs-function switching cost (`q(q−1)/2^{b+1} ≤
 q²/2^b` over the full block). What its proof needs that this file already
@@ -1079,11 +1092,14 @@ has: `walk_programs` (real/ideal agreement at each completing step),
 step), `capBad_le` (the fixed-set price). The follow-up modules named in the
 header close the adaptive `capsOf` causality/cardinality argument and final
 path-uniqueness classifier on the exact `idealRun` coin space, currently at
-the honest but slightly looser `q(2q+2)/|Cap|` price. What remains is folding
-programmed construction-answer agreement through the run,
-identical-until-bad, and the random-permutation/random-function switch, then
-sharpening the capacity constant. NOT an axiom, NOT `True` — a real quantified
-statement awaiting those joins. -/
+the honest but slightly looser `q(2q+2)/|Cap|` price.  Because an arbitrary
+construction query can absorb more than one primitive block, `q` is not a
+valid unrestricted primitive budget; `SpongeIndiffWorkBudget` proves the
+counterexample and states `SpongeIndiffWorkGame` as the canonical replacement.
+This legacy statement has the intended budget reading only for
+`SingleBlockConstruction`.  NOT an axiom, NOT `True` — a real quantified
+statement retained for compatibility while the work-indexed off-bad coupling
+and permutation/function switch remain open. -/
 def SpongeIndiffGame (Rate Cap : Type) [AddCommGroup Rate]
     [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
     (iv : Rate × Cap) : Prop :=
@@ -1260,8 +1276,10 @@ reads: **ideal permutation + proximity**.
 * Keystones — `SpongeExample.*`: the concrete two-query run of the simulator
   (completion computed, programming, walk-back, replay, teeth, invariant,
   inverse coherence) and the priced bad event, exact at `1/2`.
-* Residuals — `[SPONGE-indiff-game]` (run assembly; shares
-  `[CR-ROM-adaptive]`'s schedule machinery), `[SPONGE-padding]`,
+* Residuals — `[SPONGE-indiff-game]` is the legacy single-block/query-count
+  target; the unrestricted residual is the `SpongeIndiffWorkGame` adaptive
+  off-bad work-space coupling plus the permutation/function switch,
+  `[SPONGE-padding]`,
   `[PERM-ideal]` (the new floor) — all prose above, none a `True` stub. -/
 
 #check @walk_programs

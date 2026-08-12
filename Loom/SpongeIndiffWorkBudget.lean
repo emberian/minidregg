@@ -10,8 +10,9 @@ This module adds the missing first-order work accounting.  It proves an exact
 counterexample to treating `q` as primitive work, proves that the old count is
 sound on the explicit single-block construction fragment, and states the
 honest work-indexed indifferentiability target.  It does not prove the game
-hop; the lazy primitive construction runner and its coupling are the next
-semantic layer.
+hop.  The later prefix-programming/work-stream modules now provide the
+construction-first runner and fixed work coin space; the adaptive off-bad
+eager/deferred coupling and permutation/function switch remain.
 -/
 import Loom.SpongeIndiffProgrammedAgreement
 
