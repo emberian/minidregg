@@ -138,9 +138,9 @@ noncomputable def RecursiveCapacityFailure {q : Nat}
     (coins : Fin q → Rate × (Rate × Cap)) : Prop :=
   ∃ i : Fin q, (coins i).2.2 ∈ recursiveCapacityAvoid D iv coins i
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 /-- Outside the recursive capacity failure, every round preserves unique
 rooted paths. -/
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 theorem idealStateNat_uniquePaths_of_good {q n : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
     (coins : Fin q → Rate × (Rate × Cap)) (hn : n ≤ q)
@@ -162,6 +162,7 @@ theorem idealStateNat_uniquePaths_of_good {q n : Nat}
         (idealStateNat D iv coins n (Nat.le_trans (Nat.le_succ n) hn)) j
         hprev (idealFreshAt_of_not_mem_avoid D iv coins _ j havoid)
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 /-- **Priced consistency alternative.**  Every exact ideal coin schedule either
 hits the named adaptive capacity-failure event or the actual final `idealRun`
 simulator log has unique rooted paths. -/
@@ -215,8 +216,7 @@ theorem recursiveCapacityFailure_le {q : Nat}
         RecursiveCapacityFailure D iv (withCapacity parts.1 parts.2))]
     apply uniformProb_congr
     intro coins
-    congr 1
-    exact (splitIdealCoins (Rate := Rate) (Cap := Cap) q).left_inv coins
+    rw [(splitIdealCoins (Rate := Rate) (Cap := Cap) q).left_inv coins]
   rw [htransport]
   refine uniformProb_prod_le (by positivity) fun base => ?_
   exact recursiveCapacityFailure_conditional_le D iv base
