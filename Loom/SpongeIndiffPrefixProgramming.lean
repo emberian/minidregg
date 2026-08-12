@@ -209,6 +209,17 @@ theorem two_prefixes_programmed :
       (q := ([1] : List (ZMod 2)))
       (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
       Oracle.lookup_empty]
+  have hsecondFresh' :
+      (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.lookup
+        (0, ((1 : ZMod 2), (1 : Fin 5)).2) = none := by
+    simpa using hsecondFresh
+  have hroSecondValue :
+      ((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond [1, 1] 0).1 =
+        0 := Oracle.respond_fresh_fst hroSecondFresh 0
+  have hprimitiveSecondValue :
+      ((Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.respond
+        ((0 : ZMod 2), (1 : Fin 5)) (0, 2)).1 = (0, 2) :=
+    Oracle.respond_fresh_fst hsecondFresh (0, 2)
   unfold iv
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
@@ -220,11 +231,10 @@ theorem two_prefixes_programmed :
     Oracle.respond_fresh_fst hfirstFresh, hz]
   split
   · rename_i hlookup
-    rw [hsecondFresh] at hlookup
+    rw [hsecondFresh'] at hlookup
   · rename_i hlookup
     simp only
-    rw [Oracle.respond_fresh_fst hroSecondFresh,
-      Oracle.respond_fresh_fst hlookup]
+    rw [hroSecondValue, hprimitiveSecondValue]
     rfl
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
