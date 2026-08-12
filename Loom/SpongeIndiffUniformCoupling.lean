@@ -72,12 +72,9 @@ parameterized by a corrected work-indexed deferred simulator rather than the
 old one-pair-per-public-round sample space. -/
 def PrefixDeferredCoupling {q work : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
-    (deferredAccept : (Fin work → Rate × Cap) → Prop) : Prop :=
+    (deferredAccept : (Fin work → Rate × Cap) → Prop) : Type :=
   UniformWorkCoupling
-    (fun coins =>
-      match workHybridRun D iv coins with
-      | .ok state => D.out state.core.ans = true
-      | .error _ => False)
+    (workHybridAccept Rate Cap D iv)
     deferredAccept
 
 end UniformCoupling
