@@ -79,12 +79,33 @@ theorem programPrefixes_none_iff_failure
                   let roReply := ro.respond (seen ++ [block]) edgeValue.1
                   by_cases hagree : edgeValue.1 = roReply.1
                   · rw [if_pos hagree]
-                    simpa [roReply, hagree] using
-                      (ih (ro := roReply.2) (primitive := primitive)
-                        (state := edgeValue) (seen := seen ++ [block])
-                        rateCoins capacityCoins)
+                    change
+                      (programPrefixes roReply.2 primitive edgeValue
+                          (seen ++ [block]) message rateCoins capacityCoins =
+                            none ↔
+                        edgeValue.1 ≠ roReply.1 ∨
+                          (edgeValue.1 = roReply.1 ∧
+                            PrefixProgramFailure roReply.2 primitive edgeValue
+                              (seen ++ [block]) message rateCoins capacityCoins))
+                    constructor
+                    · intro hnone
+                      exact Or.inr ⟨hagree,
+                        (ih (ro := roReply.2) (primitive := primitive)
+                          (state := edgeValue) (seen := seen ++ [block])
+                          rateCoins capacityCoins).mp hnone⟩
+                    · rintro (hdisagree | ⟨_, hfailure⟩)
+                      · exact False.elim (hdisagree hagree)
+                      · exact (ih (ro := roReply.2) (primitive := primitive)
+                          (state := edgeValue) (seen := seen ++ [block])
+                          rateCoins capacityCoins).mpr hfailure
                   · rw [if_neg hagree]
-                    simp [hagree]
+                    change
+                      (none = none ↔
+                        edgeValue.1 ≠ roReply.1 ∨
+                          (edgeValue.1 = roReply.1 ∧
+                            PrefixProgramFailure roReply.2 primitive edgeValue
+                              (seen ++ [block]) message rateCoins capacityCoins))
+                    exact ⟨fun _ => Or.inl hagree, fun _ => rfl⟩
               | none =>
                   simp only
                   let roReply := ro.respond (seen ++ [block]) rateCoin
@@ -106,15 +127,33 @@ theorem prefixConflict_iff_respond_disagrees
     (hedge : primitive.lookup (state.1 + block, state.2) = some edgeValue) :
     PrefixConflict ro primitive state seen block ↔
       edgeValue.1 ≠ (ro.respond (seen ++ [block]) edgeValue.1).1 := by
-  rw [← programPrefixes_singleton_none_iff_conflict ro primitive state seen
-    block edgeValue.1 edgeValue.2]
-  simp only [programPrefixes, hedge]
-  let roReply := ro.respond (seen ++ [block]) edgeValue.1
-  by_cases hagree : edgeValue.1 = roReply.1
-  · rw [if_pos hagree]
-    simp [programPrefixes, roReply, hagree]
-  · rw [if_neg hagree]
-    exact iff_of_true rfl hagree
+  unfold PrefixConflict
+  cases hro : ro.lookup (seen ++ [block]) with
+  | none =>
+      have hreply :
+          (ro.respond (seen ++ [block]) edgeValue.1).1 = edgeValue.1 :=
+        Oracle.respond_fresh_fst hro edgeValue.1
+      rw [hreply]
+      constructor
+      · rintro ⟨value, roValue, _, hroValue, _⟩
+        rw [hro] at hroValue
+        contradiction
+      · intro hne
+        exact False.elim (hne rfl)
+  | some roValue =>
+      have hreply :
+          (ro.respond (seen ++ [block]) edgeValue.1).1 = roValue :=
+        Oracle.respond_hit hro
+      rw [hreply]
+      constructor
+      · rintro ⟨value, value', hvalue, hvalue', hne⟩
+        have hv : value = edgeValue :=
+          Option.some.inj (hvalue.symm.trans hedge)
+        have hv' : value' = roValue :=
+          Option.some.inj (hvalue'.symm.trans hro)
+        simpa [hv, hv'] using hne
+      · intro hne
+        exact ⟨edgeValue, roValue, hedge, hro, hne⟩
 
 end PrefixFailure
 
