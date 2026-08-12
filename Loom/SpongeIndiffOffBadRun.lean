@@ -90,7 +90,9 @@ theorem idealStateNat_log_length_le {q n : Nat}
     (coins : Fin q → Rate × (Rate × Cap)) (hn : n ≤ q) :
     (idealStateNat D iv coins n hn).sim.log.length ≤ n := by
   induction n with
-  | zero => simp [idealStateNat]
+  | zero =>
+      change 0 ≤ 0
+      exact Nat.le_refl 0
   | succ n ih =>
       unfold idealStateNat
       have hstep := idealStep_sim_log_length_le D iv coins
@@ -115,7 +117,8 @@ theorem recursiveCapacityAvoid_prefix {q : Nat}
     recursiveCapacityAvoid D iv coins i =
       recursiveCapacityAvoid D iv coins' i := by
   unfold recursiveCapacityAvoid
-  rw [idealStateNat_congr D iv coins coins' i (Nat.le_of_lt i.isLt) hcoins]
+  rw [idealStateNat_congr D iv coins coins'
+    (Nat.le_of_lt i.isLt) hcoins]
 
 omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 /-- Every recursive round avoid set has the same global `2q+2` ceiling. -/
@@ -125,7 +128,7 @@ theorem recursiveCapacityAvoid_card_le {q : Nat}
     (recursiveCapacityAvoid D iv coins i).card ≤ 2 * q + 2 := by
   unfold recursiveCapacityAvoid
   refine (idealCapacityAvoid_card_le D iv _).trans ?_
-  have hlog := idealStateNat_log_length_le D iv coins i
+  have hlog := idealStateNat_log_length_le D iv coins
     (Nat.le_of_lt i.isLt)
   omega
 
@@ -153,7 +156,7 @@ theorem idealStateNat_uniquePaths_of_good {q n : Nat}
       have havoid : (coins j).2.2 ∉
           idealCapacityAvoid D iv
             (idealStateNat D iv coins n (Nat.le_trans (Nat.le_succ n) hn)) := by
-        exact hgood j (by simp)
+        exact hgood j (by change n < n + 1; omega)
       exact idealStep_uniquePaths D iv coins
         (idealStateNat D iv coins n (Nat.le_trans (Nat.le_succ n) hn)) j
         hprev (idealFreshAt_of_not_mem_avoid D iv coins _ j havoid)
@@ -170,7 +173,7 @@ theorem capacityFailure_or_idealRun_uniquePaths {q : Nat}
   · exact Or.inl hbad
   · right
     rw [← idealStateNat_full_eq_idealRun D iv coins]
-    exact idealStateNat_uniquePaths_of_good D iv coins q (Nat.le_refl q)
+    exact idealStateNat_uniquePaths_of_good D iv coins (Nat.le_refl q)
       (fun i _ hi => hbad ⟨i, hi⟩)
 
 end OffBadRun
