@@ -57,6 +57,7 @@ noncomputable def deferredIdealStepWithCoin {q : Nat}
     IdealState Rate Cap :=
   idealStep D iv (fun _ => workCoinAsIdeal coin) state j
 
+omit [DecidableEq Rate] in
 /-- The deferred step is literally the landed ideal step on its selected
 current-round pair. -/
 theorem deferredIdealStepWithCoin_eq_idealStep {q : Nat}
@@ -82,6 +83,7 @@ noncomputable def deferredWorkStep {q : Nat}
           state.remaining.drop need, state.work + need⟩
   else .error .exhausted
 
+omit [DecidableEq Rate] in
 /-- Successful deferred execution charges exactly the current adaptive
 query's primitive work. -/
 theorem deferredWorkStep_work_exact {q : Nat}
@@ -99,6 +101,7 @@ theorem deferredWorkStep_work_exact {q : Nat}
       rfl
   · contradiction
 
+omit [DecidableEq Rate] in
 /-- Successful deferred execution removes exactly the current work segment. -/
 theorem deferredWorkStep_remaining_exact {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -240,7 +243,7 @@ def rotateIndex : Fin 3 → Fin 3
   | 1 => 2
   | 2 => 0
 
-def rotateIndexEquiv : Equiv.Perm (Fin 3) :=
+noncomputable def rotateIndexEquiv : Equiv.Perm (Fin 3) :=
   Equiv.ofBijective rotateIndex (by decide)
 
 theorem deferred_is_permuted_eager :
