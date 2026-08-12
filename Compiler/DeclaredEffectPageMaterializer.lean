@@ -646,12 +646,12 @@ theorem postCanonicalExact :
       rfl
     ·
       have preAbsent : preCell.logical.fields field = none := by
-        change
-          Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical.fields field = none
-        unfold Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical
-        rw [FieldStore.write_other _ (Ne.symm credit)]
-        rw [FieldStore.write_other _ (Ne.symm debit)]
-        rfl
+        simp [preCell,
+          Minidregg.Kernel.DeclaredHyperedgeWitness.preCell,
+          Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical,
+          Minidregg.Theory.DeployedMaterializerWitness.effectCell,
+          Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
+          materialize, debitKey, creditKey, credit, debit]
       have leftAbsent :
           (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
               debitKey (-amount)).write creditKey amount) field = none := by
