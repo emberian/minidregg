@@ -261,7 +261,11 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
       apply congrArg GuardObservation.observed
       apply congrArg (observationAt declaration fields)
       apply Fin.ext
-      simp [observedWire]
+      change (publicBytes context declaration).length +
+          (observations declaration fields).length + index.val -
+            (publicBytes context declaration).length -
+              (observations declaration fields).length = index.val
+      omega
 
 /-! ## Lean-authored constraints and emitted descriptor -/
 
