@@ -188,12 +188,12 @@ def coins : Fin 2 → LazyHybridCoins (ZMod 2) (Fin 4)
   | 0 => ⟨1, [(0, 1), (1, 2)]⟩
   | 1 => ⟨0, [(1, 3)]⟩
 
-def firstState : LazyHybridState (ZMod 2) (Fin 4) :=
+noncomputable def firstState : LazyHybridState (ZMod 2) (Fin 4) :=
   ⟨SpongeLazyConstructionExample.coupledResult.ro,
     SpongeLazyConstructionExample.coupledResult.primitive,
     [.rate 1], 2⟩
 
-def finalState : LazyHybridState (ZMod 2) (Fin 4) :=
+noncomputable def finalState : LazyHybridState (ZMod 2) (Fin 4) :=
   ⟨SpongeLazyConstructionExample.coupledResult.ro,
     SpongeLazyConstructionExample.coupledResult.primitive,
     [.rate 1, .block (0, 1)], 3⟩
@@ -205,7 +205,8 @@ theorem first_step_exact :
       .ok firstState := by
   simp only [lazyHybridStep, constructionThenForward, LazyHybridState.empty,
     List.isEmpty_nil, ↓reduceIte, coins, Fin.isValue, List.length_cons,
-    List.length_nil, Nat.reduceAdd, Nat.reduceEqDiff, ↓reduceIte]
+    List.length_nil, Nat.reduceAdd, ↓reduceIte]
+  rw [show iv = SpongeLazyConstructionExample.iv by rfl]
   rw [SpongeLazyConstructionExample.two_block_coupled_exact]
   rfl
 
@@ -230,8 +231,9 @@ edge `(1,0) ↦ (0,1)`; its fresh supplied coin `(1,3)` is ignored. -/
 theorem construction_first_forward_replays :
     lazyHybridRun constructionThenForward iv coins = .ok finalState ∧
       finalState.ans = [.rate 1, .block (0, 1)] ∧ finalState.work = 3 := by
+  unfold lazyHybridRun
   rw [show List.finRange 2 = [0, 1] by decide]
-  simp only [lazyHybridRun, List.foldl_cons, Except.bind_ok, List.foldl_nil]
+  simp only [List.foldl_cons, Except.bind_ok, List.foldl_nil]
   rw [first_step_exact, second_step_exact]
   simp [finalState]
 
