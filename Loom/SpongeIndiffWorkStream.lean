@@ -188,14 +188,18 @@ theorem first_step_exact :
     List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, List.take,
     List.length_cons, List.length_nil, Nat.reduceAdd, List.map,
     SpQuery.prefixCoins, List.drop]
-  have hstep := SpongePrefixHybridExample.first_step_exact
-  unfold SpongePrefixHybridExample.constructionThenForward
-    PrefixHybridState.empty at hstep
   have hcoin :
       SpongePrefixHybridExample.coins 0 =
         (fun _ => PrefixHybridCoins.construction [1, 0] [1, 2]) 0 := rfl
   have hconstant :=
-    (prefixHybridStep_eq_of_coin_eq _ _ _ _ _ _ hcoin).symm.trans hstep
+    (prefixHybridStep_eq_of_coin_eq
+      (D := SpongePrefixHybridExample.constructionThenForward)
+      (iv := iv) (coins := SpongePrefixHybridExample.coins)
+      (coins' := fun _ => PrefixHybridCoins.construction [1, 0] [1, 2])
+      (st := PrefixHybridState.empty) (j := 0) hcoin).symm.trans
+        SpongePrefixHybridExample.first_step_exact
+  unfold SpongePrefixHybridExample.constructionThenForward
+    PrefixHybridState.empty at hconstant
   rw [hconstant]
   rfl
 
@@ -207,14 +211,18 @@ theorem second_step_exact :
     List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls,
     List.take, List.length_cons, List.length_nil, SpQuery.prefixCoins,
     List.drop]
-  have hstep := SpongePrefixHybridExample.second_step_exact
-  unfold SpongePrefixHybridExample.constructionThenForward
-    SpongePrefixHybridExample.firstState at hstep
   have hcoin :
       SpongePrefixHybridExample.coins 1 =
         (fun _ => PrefixHybridCoins.primitive (0, 3)) 1 := rfl
   have hconstant :=
-    (prefixHybridStep_eq_of_coin_eq _ _ _ _ _ _ hcoin).symm.trans hstep
+    (prefixHybridStep_eq_of_coin_eq
+      (D := SpongePrefixHybridExample.constructionThenForward)
+      (iv := iv) (coins := SpongePrefixHybridExample.coins)
+      (coins' := fun _ => PrefixHybridCoins.primitive (0, 3))
+      (st := SpongePrefixHybridExample.firstState) (j := 1) hcoin).symm.trans
+        SpongePrefixHybridExample.second_step_exact
+  unfold SpongePrefixHybridExample.constructionThenForward
+    SpongePrefixHybridExample.firstState at hconstant
   rw [hconstant]
   rfl
 
