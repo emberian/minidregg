@@ -47,30 +47,6 @@ noncomputable def rsUdSharpError (ι F : Type*) [Fintype ι] [Fintype F]
   (Nat.floor (δ * (Fintype.card ι : ℝ)) + 1 : ℝ) /
     (Fintype.card F : ℝ)
 
-/-- For the uniform affine generator, the probability of a predicate is the
-cardinality of its seed set divided by `|F|`. -/
-private theorem affineGenerator_pr_eq_card [Fintype F]
-    (P : (Fin 2 → F) → Prop)
-    [DecidablePred fun γ : F => P ((affineGenerator F).gen γ)] :
-    (affineGenerator F).pr P =
-      ((Finset.univ.filter fun γ : F => P ((affineGenerator F).gen γ)).card : ℝ) /
-        (Fintype.card F : ℝ) := by
-  unfold ProximityGenerator.pr
-  calc
-    ∑ ω ∈ Finset.univ.filter (fun ω : F => P ((affineGenerator F).gen ω)),
-          (affineGenerator F).weight ω
-        = ∑ _ω ∈ Finset.univ.filter
-            (fun ω : F => P ((affineGenerator F).gen ω)),
-            ((Fintype.card F : ℝ))⁻¹ :=
-          Finset.sum_congr rfl fun _ _ => rfl
-    _ = ((Finset.univ.filter
-            (fun ω : F => P ((affineGenerator F).gen ω))).card : ℝ) *
-          ((Fintype.card F : ℝ))⁻¹ := by
-          rw [Finset.sum_const, nsmul_eq_mul]
-    _ = ((Finset.univ.filter
-            (fun ω : F => P ((affineGenerator F).gen ω))).card : ℝ) /
-          (Fintype.card F : ℝ) := (div_eq_mul_inv _ _).symm
-
 /-- The one-third-UD proximity gap with its exact integer error threshold.
 If more than `floor(delta*n)+1` affine challenges are close, the landed
 counting core sees at least `floor(delta*n)+2` and forces correlated
@@ -90,20 +66,26 @@ theorem rs_proximityGap_UD_sharp [Nonempty ι] [Fintype F]
       (affineGenerator F).pr
           (fun r => close δ (reedSolomonCode dom d) (comb r f)) =
         (A.card : ℝ) / (Fintype.card F : ℝ) := by
-    rw [affineGenerator_pr_eq_card]
+    unfold ProximityGenerator.pr
+    have hcomb : ∀ γ : F,
+        comb ((affineGenerator F).gen γ) f = f 0 + γ • f 1 :=
+      fun γ => funext fun x => by rw [comb_affineGenerator]; rfl
     have hfilter :
         (Finset.univ.filter fun γ : F =>
           close δ (reedSolomonCode dom d)
             (comb ((affineGenerator F).gen γ) f)) = A := by
       rw [hA]
-      apply Finset.filter_congr
-      intro γ _
-      have hcomb : comb ((affineGenerator F).gen γ) f = f 0 + γ • f 1 := by
-        funext x
-        rw [comb_affineGenerator]
-        rfl
-      rw [hcomb]
+      refine Finset.filter_congr fun γ _ => ?_
+      rw [hcomb γ]
     rw [hfilter]
+    calc
+      ∑ ω ∈ A, (affineGenerator F).weight ω
+          = ∑ _ω ∈ A, ((Fintype.card F : ℝ))⁻¹ :=
+            Finset.sum_congr rfl fun _ _ => rfl
+      _ = (A.card : ℝ) * ((Fintype.card F : ℝ))⁻¹ := by
+            rw [Finset.sum_const, nsmul_eq_mul]
+      _ = (A.card : ℝ) / (Fintype.card F : ℝ) :=
+            (div_eq_mul_inv _ _).symm
   by_cases hsmall : (affineGenerator F).pr
       (fun r => close δ (reedSolomonCode dom d) (comb r f))
         ≤ rsUdSharpError ι F δ
@@ -190,7 +172,6 @@ theorem bad_line_pr_eq_one_fifth :
       close (1 / 8 : ℝ) (reedSolomonCode dom₅ 2)
         (comb r ![badWord, negBadWord])) = 1 / 5 := by
   classical
-  rw [affineGenerator_pr_eq_card]
   have hfilter :
       (Finset.univ.filter fun γ : ZMod 5 =>
         close (1 / 8 : ℝ) (reedSolomonCode dom₅ 2)
@@ -206,8 +187,17 @@ theorem bad_line_pr_eq_one_fifth :
       rw [comb_affineGenerator]
       rfl
     rw [hcomb]
+  unfold ProximityGenerator.pr
   rw [hfilter, badSet_eq]
-  norm_num [ZMod.card]
+  calc
+    ∑ ω ∈ ({1} : Finset (ZMod 5)),
+          (affineGenerator (ZMod 5)).weight ω
+        = ∑ _ω ∈ ({1} : Finset (ZMod 5)),
+            ((Fintype.card (ZMod 5) : ℝ))⁻¹ :=
+          Finset.sum_congr rfl fun _ _ => rfl
+    _ = (1 : ℝ) * ((Fintype.card (ZMod 5) : ℝ))⁻¹ := by
+          rw [Finset.sum_const, Finset.card_singleton, nsmul_eq_mul]
+    _ = 1 / 5 := by norm_num [ZMod.card]
 
 /-- The sharp threshold is attained by a tuple with no correlated agreement.
 This is the finite negative tooth showing why `IsProximityGenerator` uses the
@@ -223,9 +213,6 @@ theorem bad_line_attains_sharp_threshold :
   exact ⟨rfl, bad_pair_no_CA⟩
 
 end ProximityGapUDSharpExample
-
-#print axioms affineGenerator_pr_eq_card
-#print axioms correlatedAgreement_of_close_card
 
 #guard_msgs (whitespace := lax) in
 #print axioms rs_proximityGap_UD_sharp
