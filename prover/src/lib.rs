@@ -10,6 +10,11 @@
 #[path = "../generated/semantic_artifact_v1.rs"]
 pub mod semantic_artifact_v1;
 
+// Generated from Uwueave's compile-time-validated Projection V2 export.
+// This contributes static coordination data only: it has no verifier, policy,
+// admission, scheduling-permit, or native-dispatch API.
+include!("../generated/uwueave_preo_projection_v2.rs");
+
 pub mod additive_ntt;
 pub mod babybear;
 pub mod binary_tower;

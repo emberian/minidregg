@@ -44,6 +44,7 @@ import Compiler.DialectClauseDispatch -- a manifest clause is dispatchable only 
 import Compiler.NativeGlueGen -- deterministic data-only Rust DTO/dispatch text generated from the canonical Lean artifact; no native semantics or acceptance
 import Compiler.MinidreggV1Artifact -- concrete v1 declaration bundle and Lean-emitted canonical JSON payload; bridge/clause records are requirements, not implementation claims
 import Compiler.MinidreggV1NativeGlue -- writes the data-only native constants/DTO/buffer-dispatch surface from the concrete Lean artifact
+import Compiler.UwueavePreoProjectionV2 -- content-pinned, validated Preoscript coordination data rendered for the Rust host; never a semantic permit
 import Compiler.Logup256ReceiptClause -- canonical Boolean indices force unit-vector incidence, LogUp pushforward, and exact indexed evaluation; PCS/CR/ROM remain explicit premises
 import Compiler.AdditiveFriReceiptClause -- rate/basis/root schedule plus local additive acceptance, separated from the exact far-word UD probability certificate
 import Compiler.SemanticController -- arbitrary native oracle may return bounded data only; Lean owns authorization, challenge/order, descriptor checks, and the sole Verified token

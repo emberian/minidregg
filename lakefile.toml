@@ -20,6 +20,14 @@ name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4"
 rev = "1c2b90b13009c65b090d95a83c98e248deafb6f1"
 
+# Preoscript's host boundary is consumed as a portable, content-pinned Lean
+# dependency.  In particular, this is deliberately not a sibling path require:
+# fresh and isolated builds see the same checked Projection V2 renderer.
+[[require]]
+name = "uwueave"
+git = "https://github.com/emberian/lean-uwueave.git"
+rev = "48d7fb4b4d54066c69bc24ff3589983347ebe5e8"
+
 # Root library: imports every per-directory root below, so `lake build` (default
 # target `Minidregg`) covers the whole tree.
 [[lean_lib]]
