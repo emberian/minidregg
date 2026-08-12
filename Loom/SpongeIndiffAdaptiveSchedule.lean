@@ -63,7 +63,8 @@ lemma idealStep_eq_of_coin_eq {q : Nat}
   unfold idealStep
   rw [h]
 
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
+    [Nonempty Cap] in
 /-- Two ideal folds agree when their coin schedules agree at every listed
 step, from any common intermediate state. -/
 theorem foldl_idealStep_congr {q : Nat}
@@ -112,6 +113,8 @@ theorem foldl_idealStep_log_length_le {q : Nat}
       have htail := ih (idealStep D iv coins st j)
       omega
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
+    [Nonempty Cap] in
 /-- Every prefix state of a `q`-query run has at most `q` simulator entries. -/
 theorem idealPrefixState_log_length_le {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -187,6 +190,56 @@ theorem adaptiveCapacityFailure_le {q : Nat}
     (fun i r r' h => adaptiveCapacityAvoid_prefix D iv base i r r' h)
     (fun r i => adaptiveCapacityAvoid_card_le D iv base r i)
 
+/-- Lossless separation of the actual ideal-game coin schedule into its fixed
+rate/block-rate schedule and its sampled capacity schedule. -/
+def splitIdealCoins (q : Nat) :
+    (Fin q → Rate × (Rate × Cap)) ≃
+      ((Fin q → Rate × Rate) × (Fin q → Cap)) where
+  toFun coins :=
+    (fun j => ((coins j).1, (coins j).2.1), fun j => (coins j).2.2)
+  invFun parts := withCapacity parts.1 parts.2
+  left_inv coins := by
+    funext j
+    rcases coins j with ⟨rate, ⟨blockRate, capacity⟩⟩
+    rfl
+  right_inv parts := by
+    rcases parts with ⟨base, capacity⟩
+    apply Prod.ext <;> funext j <;> rfl
+
+/-- The adaptive capacity-failure event directly on the actual ideal-game coin
+space. -/
+noncomputable def IdealAdaptiveCapacityFailure {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (coins : Fin q → Rate × (Rate × Cap)) : Prop :=
+  ∃ i : Fin q, (coins i).2.2 ∈
+    adaptiveCapacityAvoid D iv
+      (fun j => ((coins j).1, (coins j).2.1))
+      (fun j => (coins j).2.2) i
+
+/-- **Full ideal-coin transport.**  The conditional adaptive capacity price
+holds on the exact coin space consumed by `idealRun`, not merely after fixing
+the other two coin coordinates by hand. -/
+theorem idealAdaptiveCapacityFailure_le {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap) :
+    uniformProb (Fin q → Rate × (Rate × Cap))
+      (IdealAdaptiveCapacityFailure D iv)
+      ≤ (q : Real) * (((2 * q + 2 : Nat) : Real) / Fintype.card Cap) := by
+  have htransport :
+      uniformProb (Fin q → Rate × (Rate × Cap))
+          (IdealAdaptiveCapacityFailure D iv)
+        = uniformProb ((Fin q → Rate × Rate) × (Fin q → Cap))
+          (fun parts => ∃ i : Fin q,
+            parts.2 i ∈ adaptiveCapacityAvoid D iv parts.1 parts.2 i) := by
+    rw [← uniformProb_equiv (splitIdealCoins (Rate := Rate) (Cap := Cap) q)
+      (fun parts => ∃ i : Fin q,
+        parts.2 i ∈ adaptiveCapacityAvoid D iv parts.1 parts.2 i)]
+    apply uniformProb_congr
+    intro coins
+    rfl
+  rw [htransport]
+  refine uniformProb_prod_le (by positivity) fun base => ?_
+  simpa using adaptiveCapacityFailure_le D iv base
+
 end AdaptiveSchedule
 
 /-! ## A changing two-round simulator schedule -/
@@ -227,5 +280,7 @@ end SpongeAdaptiveScheduleExample
 #guard_msgs (whitespace := lax) in #print axioms adaptiveCapacityAvoid_prefix
 /-- info: 'Minidregg.Loom.adaptiveCapacityFailure_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms adaptiveCapacityFailure_le
+/-- info: 'Minidregg.Loom.idealAdaptiveCapacityFailure_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms idealAdaptiveCapacityFailure_le
 
 end Minidregg.Loom
