@@ -80,14 +80,19 @@ construction returns exactly the lazy RO value of the full message; and
 primitive evaluation.  Distinct lazy samples commute extensionally
 (`SpongeIndiffOracleReordering`), while `SpongeIndiffUniformCoupling` proves
 that an actual work-space bijection plus pointwise event equivalence transports
-uniform probability exactly.
+uniform probability exactly.  `SpongeIndiffDeferredWork` supplies the matching
+work-indexed deferred ideal interpreter: a construction consumes its whole
+primitive-work segment while only its selected public RO coin is used, and a
+concrete two-block construction/reveal run proves that the eager and deferred
+public traces agree after a nontrivial permutation of the three work pairs.
 
 Consequently the canonical unrestricted target is now the work-indexed
 `SpongeIndiffWorkGame`, not this file's older `q`-indexed headline.  The latter
 has honest budget meaning only on the explicitly proved
 `SingleBlockConstruction` fragment.  The remaining theorem is sharply named:
-construct the adaptive eager/deferred same-space coupling, prove agreement away
-from its consistency/capacity bad event, price that event on the work space,
+generalize the exhibited eager/deferred coordinate move to an adaptive
+same-space coupling, prove agreement away from its consistency/capacity bad
+event, price that event on the work space,
 and perform the random-permutation/random-function switch.  The construction
 already squeezes one rate element after a nonempty unpadded message of any
 block length; the deployed padding/domain rule remains `[SPONGE-padding]`.
