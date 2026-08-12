@@ -84,6 +84,7 @@ theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
       have h := uniquePaths_simInv (O := st.sim) (t := t) hUnique hFresh
       simpa [idealStep, hmove] using h
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- The deterministic run induction: every proof-relevant fresh execution
 preserves the unique rooted-path invariant through its final state. -/
 theorem freshIdealExecution_uniquePaths {q : Nat}
