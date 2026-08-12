@@ -117,9 +117,9 @@ theorem programPrefixes_none_iff_failure
                       (state := primitiveReply.1)
                       (seen := seen ++ [block]) rateCoins capacityCoins)
 
+omit [DecidableEq Rate] in
 /-- At an already-present edge, direct inequality with `Oracle.respond` is
 exactly the proof-relevant sampled-table conflict from the singleton kernel. -/
-omit [DecidableEq Rate] in
 theorem prefixConflict_iff_respond_disagrees
     (ro : Oracle (List Rate) Rate)
     (primitive : Oracle (Rate × Cap) (Rate × Cap))
