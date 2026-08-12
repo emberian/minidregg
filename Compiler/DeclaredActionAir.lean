@@ -221,7 +221,9 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
   split
   · next hbyte => exact False.elim (notByte hbyte)
   · split
-    · apply congrArg GuardObservation.expected
+    · apply congrArg (fun code : Nat => (code : BabyBear))
+      apply congrArg optionCode
+      apply congrArg GuardObservation.expected
       apply congrArg (observationAt declaration fields)
       apply Fin.ext
       simp [expectedWire]
@@ -254,7 +256,9 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
   · next hbyte => exact False.elim (notByte hbyte)
   · split
     · next hexpected => exact False.elim (notExpected hexpected)
-    · apply congrArg GuardObservation.observed
+    · apply congrArg (fun code : Nat => (code : BabyBear))
+      apply congrArg optionCode
+      apply congrArg GuardObservation.observed
       apply congrArg (observationAt declaration fields)
       apply Fin.ext
       simp [observedWire]
