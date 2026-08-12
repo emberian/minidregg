@@ -32,8 +32,8 @@ def SpQuery.prefixCoins : SpQuery Rate Cap → List (Rate × Cap) →
   | .inv _, [coin] => some (.primitive coin)
   | _, _ => none
 
-/-- Exact-length work segments always have the right public coin shape. -/
 omit [AddCommGroup Rate] [DecidableEq Rate] in
+/-- Exact-length work segments always have the right public coin shape. -/
 theorem SpQuery.prefixCoins_some_of_length (query : SpQuery Rate Cap)
     (used : List (Rate × Cap))
     (hlength : used.length = query.primitiveCalls) :
@@ -188,7 +188,10 @@ theorem first_step_exact :
     List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, List.take,
     List.length_cons, List.length_nil, Nat.reduceAdd, List.map,
     SpQuery.prefixCoins, List.drop]
-  rw [if_pos trivial]
+  change (match prefixHybridStep constructionThenForward iv
+      (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 with
+    | .ok next => .ok ⟨next, [(0, 3)]⟩
+    | .error error => .error (.hybrid error)) = .ok afterConstruction
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 =
         .ok firstState by
@@ -203,7 +206,10 @@ theorem second_step_exact :
     List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls,
     List.take, List.length_cons, List.length_nil, SpQuery.prefixCoins,
     List.drop]
-  rw [if_pos trivial]
+  change (match prefixHybridStep constructionThenForward iv
+      (fun _ => .primitive (0, 3)) firstState 1 with
+    | .ok next => .ok ⟨next, []⟩
+    | .error error => .error (.hybrid error)) = .ok afterReplay
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .primitive (0, 3)) firstState 1 = .ok finalState by
     simpa [coins] using SpongePrefixHybridExample.second_step_exact]
@@ -220,7 +226,10 @@ theorem fixed_work_stream_replays :
   rw [stream_as_list]
   rw [show List.finRange 2 = [0, 1] by decide]
   simp only [List.foldl_cons, List.foldl_nil, Except.bind]
-  fold initial
+  change (match workHybridStep constructionThenForward iv initial 0 with
+    | .error error => .error error
+    | .ok state => workHybridStep constructionThenForward iv state 1) =
+      .ok afterReplay
   rw [first_step_exact]
   exact second_step_exact
 
