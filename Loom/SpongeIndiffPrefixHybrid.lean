@@ -72,6 +72,16 @@ noncomputable def prefixHybridStep {q : Nat}
       .ok ⟨st.ro, reply.2, st.ans ++ [.block reply.1], st.work + 1⟩
   | _, _ => .error .wrongCoinShape
 
+/-- A public step reads only the coin assigned to its current round. -/
+theorem prefixHybridStep_eq_of_coin_eq {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (coins coins' : Fin q → PrefixHybridCoins Rate Cap)
+    (st : PrefixHybridState Rate Cap) (j : Fin q)
+    (hcoin : coins j = coins' j) :
+    prefixHybridStep D iv coins st j = prefixHybridStep D iv coins' st j := by
+  unfold prefixHybridStep
+  rw [hcoin]
+
 /-- A successful step charges the exact primitive cost of the adaptive query. -/
 theorem prefixHybridStep_work_exact {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
