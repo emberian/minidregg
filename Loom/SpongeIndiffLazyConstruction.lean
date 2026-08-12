@@ -206,7 +206,7 @@ theorem two_block_coupled_accepts :
   simp [coupledConstruction, lazyAbsorb, iv, message, blockCoins,
     Oracle.respond_fresh_fst, Oracle.lookup_respond_ne]
 
-def coupledResult : CoupledConstructionResult (ZMod 2) (Fin 4) :=
+noncomputable def coupledResult : CoupledConstructionResult (ZMod 2) (Fin 4) :=
   ⟨1, (Oracle.empty.respond message 1).2,
     ((Oracle.empty.respond (1, 0) (0, 1)).2.respond (1, 1) (1, 2)).2⟩
 
