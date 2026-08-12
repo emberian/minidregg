@@ -80,7 +80,7 @@ theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
       simpa [idealStep, hmove, simFwdRO_sim] using h
   | inv t =>
       rw [hmove] at hFresh
-      have h := uniquePaths_simInv (O := st.sim) hUnique hFresh
+      have h := uniquePaths_simInv (O := st.sim) (t := t) hUnique hFresh
       simpa [idealStep, hmove] using h
 
 /-- The deterministic run induction: every proof-relevant fresh execution
