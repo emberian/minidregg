@@ -42,7 +42,6 @@ theorem programPrefixes_singleton_none_iff_conflict
   simp only [programPrefixes]
   cases hedge : primitive.lookup (state.1 + block, state.2) with
   | none =>
-      rw [hedge]
       simp only
       constructor
       · intro hnone
@@ -51,7 +50,6 @@ theorem programPrefixes_singleton_none_iff_conflict
         rw [hedge] at hedge'
         contradiction
   | some edgeValue =>
-      rw [hedge]
       simp only
       cases hro : ro.lookup (seen ++ [block]) with
       | none =>
@@ -80,6 +78,7 @@ theorem programPrefixes_singleton_none_iff_conflict
             · intro _
               rfl
 
+omit [DecidableEq Rate] in
 /-- A fresh RO prefix cannot be a consistency conflict, regardless of the
 primitive table. -/
 theorem no_prefixConflict_of_ro_fresh
@@ -92,6 +91,7 @@ theorem no_prefixConflict_of_ro_fresh
   rw [hfresh] at hro
   contradiction
 
+omit [DecidableEq Rate] in
 /-- A fresh primitive edge cannot be a consistency conflict, regardless of
 the RO table. -/
 theorem no_prefixConflict_of_primitive_fresh
