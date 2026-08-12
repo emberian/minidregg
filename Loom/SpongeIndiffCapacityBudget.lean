@@ -40,7 +40,8 @@ theorem idealFreshAt_of_not_mem_avoid {q : Nat}
     (st : IdealState Rate Cap) (j : Fin q)
     (h : (coins j).2.2 ∉ idealCapacityAvoid D iv st) :
     IdealFreshAt D iv coins st j := by
-  unfold idealCapacityAvoid IdealFreshAt at h ⊢
+  unfold idealCapacityAvoid at h
+  unfold IdealFreshAt
   cases hmove : D.move st.ans with
   | constr x xs =>
       rw [hmove] at h ⊢
@@ -60,11 +61,9 @@ lemma Oracle.respond_log_length_le {Q C : Type} (O : Oracle Q C)
     (O.respond query coin).2.log.length ≤ O.log.length + 1 := by
   cases h : O.lookup query with
   | some value =>
-      rw [Oracle.respond_hit h]
-      omega
+      simp [Oracle.respond_hit h]
   | none =>
-      rw [Oracle.respond_fresh_log h]
-      simp
+      simp [Oracle.respond_fresh_log h]
 
 omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- A forward simulator/RO step adds at most one shared-log entry. -/
@@ -84,8 +83,8 @@ lemma simInv_log_length_le (os : Oracle (Rate × Cap) (Rate × Cap))
     (simInv os t coin).2.log.length ≤ os.log.length + 1 := by
   unfold simInv
   cases h : os.lookupInv t with
-  | some entry => omega
-  | none => exact Oracle.respond_log_length_le _ _ _
+  | some entry => simp [h]
+  | none => simpa [h] using Oracle.respond_log_length_le os coin t
 
 /-- Every actual adaptive ideal step extends the simulator log by at most one
 entry, independently of which query branch the distinguisher selects. -/
@@ -94,11 +93,12 @@ theorem idealStep_sim_log_length_le {q : Nat}
     (coins : Fin q → Rate × (Rate × Cap))
     (st : IdealState Rate Cap) (j : Fin q) :
     (idealStep D iv coins st j).sim.log.length ≤ st.sim.log.length + 1 := by
-  unfold idealStep
   cases hmove : D.move st.ans with
-  | constr x xs => omega
-  | fwd s => exact simFwdRO_log_length_le _ _ _ _ _ _
-  | inv t => exact simInv_log_length_le _ _ _
+  | constr x xs => simp [idealStep, hmove]
+  | fwd s => simpa [idealStep, hmove] using
+      simFwdRO_log_length_le iv st.ro st.sim s (coins j).1 (coins j).2
+  | inv t => simpa [idealStep, hmove] using
+      simInv_log_length_le st.sim t (coins j).2
 
 omit [AddCommGroup Rate] [Fintype Rate] [DecidableEq Rate] in
 /-- `capsOf` has one IV coordinate and two coordinates per log entry. -/
@@ -132,10 +132,9 @@ theorem idealCapacityAvoid_card_le {q : Nat}
       calc
         ((capsOf st.sim iv).toFinset ∪ {s.2}).card
             ≤ (capsOf st.sim iv).toFinset.card + ({s.2} : Finset Cap).card :=
-              Finset.card_union_le
+              Finset.card_union_le _ _
         _ ≤ (2 * st.sim.log.length + 1) + 1 := by
-          gcongr
-          exact capsOf_toFinset_card_le st.sim iv
+          exact Nat.add_le_add (capsOf_toFinset_card_le st.sim iv) (by simp)
         _ = 2 * st.sim.log.length + 2 := by omega
   | inv t =>
       exact (capsOf_toFinset_card_le st.sim iv).trans (by omega)

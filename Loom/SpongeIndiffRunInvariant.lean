@@ -100,6 +100,7 @@ theorem freshIdealExecution_uniquePaths {q : Nat}
       exact ih (idealStep D iv coins st j)
         (idealStep_uniquePaths D iv coins st j hUnique hFresh.1) hFresh.2
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- The run-level spine for the actual ideal game.  The only premise left is
 the exact adaptive off-bad schedule; no fixed avoid set or marginal-uniform
 shortcut is assumed. -/
