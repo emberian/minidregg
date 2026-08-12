@@ -93,31 +93,38 @@ theorem programPrefixes_some_lengths
           | nil => simp [programPrefixes] at h
           | cons capacityCoin capacityCoins =>
               simp only [programPrefixes] at h
-              let nextPrefix := seen ++ [x]
-              let roReply := ro.respond nextPrefix rateCoin
-              let key : Rate × Cap := (state.1 + x, state.2)
-              cases hlookup : primitive.lookup key with
+              dsimp only at h
+              cases hlookup : primitive.lookup (state.1 + x, state.2) with
               | some value =>
-                  by_cases heq : value.1 = roReply.1
-                  · have htail : programPrefixes roReply.2 primitive value
-                        nextPrefix xs rateCoins capacityCoins = some result := by
-                      simpa [nextPrefix, roReply, key, hlookup, heq] using h
+                  rw [hlookup] at h
+                  by_cases heq : value.1 = (ro.respond (seen ++ [x]) rateCoin).1
+                  · have htail :
+                        programPrefixes (ro.respond (seen ++ [x]) rateCoin).2
+                          primitive value (seen ++ [x]) xs rateCoins
+                          capacityCoins = some result := by
+                      simpa [heq] using h
                     obtain ⟨hrate, hcap⟩ :=
-                      ih (ro := roReply.2) (primitive := primitive)
-                        (state := value) (seen := nextPrefix) htail
+                      ih (ro := (ro.respond (seen ++ [x]) rateCoin).2)
+                        (primitive := primitive) (state := value)
+                        (seen := seen ++ [x]) htail
                     exact ⟨by simp [hrate], by simp [hcap]⟩
-                  · simp [nextPrefix, roReply, key, hlookup, heq] at h
+                  · simp [heq] at h
               | none =>
-                  let value : Rate × Cap := (roReply.1, capacityCoin)
-                  let primitiveReply := primitive.respond key value
-                  have htail : programPrefixes roReply.2 primitiveReply.2
-                      primitiveReply.1 nextPrefix xs rateCoins capacityCoins =
+                  rw [hlookup] at h
+                  let value : Rate × Cap :=
+                    ((ro.respond (seen ++ [x]) rateCoin).1, capacityCoin)
+                  let primitiveReply :=
+                    primitive.respond (state.1 + x, state.2) value
+                  have htail :
+                      programPrefixes (ro.respond (seen ++ [x]) rateCoin).2
+                        primitiveReply.2 primitiveReply.1 (seen ++ [x]) xs
+                        rateCoins capacityCoins =
                         some result := by
-                    simpa [nextPrefix, roReply, key, hlookup, value,
-                      primitiveReply] using h
+                    simpa [value, primitiveReply] using h
                   obtain ⟨hrate, hcap⟩ :=
-                    ih (ro := roReply.2) (primitive := primitiveReply.2)
-                      (state := primitiveReply.1) (seen := nextPrefix) htail
+                    ih (ro := (ro.respond (seen ++ [x]) rateCoin).2)
+                      (primitive := primitiveReply.2) (state := primitiveReply.1)
+                      (seen := seen ++ [x]) htail
                   exact ⟨by simp [hrate], by simp [hcap]⟩
 
 /-- Successful public construction has exact message/rate/capacity lengths. -/
