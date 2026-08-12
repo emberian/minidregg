@@ -52,7 +52,9 @@ theorem simFwdRO_programs_previously_answered
       walkFrom (simFwdRO iv ro sim s rateCoin blockCoin).2.2 iv m =
         some (h, blockCoin.2) := by
   unfold simFwdRO
-  rw [hcompletion, Oracle.respond_hit hlookup]
+  rw [hcompletion]
+  simp only
+  rw [Oracle.respond_hit hlookup]
   constructor
   · rfl
   constructor
@@ -108,17 +110,20 @@ theorem first_completion :
 made, the path is programmed with the exact earlier RO answer—even though the
 later rate coin is different. -/
 theorem construction_first_later_programmed :
-    let ro := (Oracle.empty.respond [1] (1 : ZMod 2)).2
+    let ro := (Oracle.empty.respond ([1] : List (ZMod 2)) (1 : ZMod 2)).2
     let step := simFwdRO iv ro Oracle.empty (1, 0) 0 (0, 1)
     MessageProgrammed step.2.1 step.2.2 iv [1] := by
   dsimp only
   have hlookup :
-      (Oracle.empty.respond [1] (1 : ZMod 2)).2.lookup [1] = some 1 := by
+      (Oracle.empty.respond ([1] : List (ZMod 2)) (1 : ZMod 2)).2.lookup [1] =
+        some 1 := by
     rw [Oracle.lookup_respond_self,
       Oracle.respond_fresh_fst (Oracle.lookup_empty [1])]
   have h := simFwdRO_programs_previously_answered iv
-    (Oracle.empty.respond [1] (1 : ZMod 2)).2 Oracle.empty
-    hlookup (Oracle.lookup_empty (1, 0)) first_completion 0 (0, 1)
+    (Oracle.empty.respond ([1] : List (ZMod 2)) (1 : ZMod 2)).2 Oracle.empty
+    (s := ((1 : ZMod 2), (0 : Fin 3))) (m := ([1] : List (ZMod 2)))
+    (h := (1 : ZMod 2)) hlookup (Oracle.lookup_empty (1, 0))
+    first_completion 0 (0, 1)
   refine ⟨1, 1, ?_, ?_⟩
   · rw [h.1]
     exact hlookup
