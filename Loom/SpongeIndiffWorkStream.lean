@@ -33,6 +33,7 @@ def SpQuery.prefixCoins : SpQuery Rate Cap → List (Rate × Cap) →
   | _, _ => none
 
 /-- Exact-length work segments always have the right public coin shape. -/
+omit [AddCommGroup Rate] [DecidableEq Rate] in
 theorem SpQuery.prefixCoins_some_of_length (query : SpQuery Rate Cap)
     (used : List (Rate × Cap))
     (hlength : used.length = query.primitiveCalls) :
@@ -76,7 +77,7 @@ noncomputable def workHybridStep {q : Nat}
   let query := D.move st.core.ans
   let need := query.primitiveCalls
   let used := st.remaining.take need
-  if hlength : used.length = need then
+  if used.length = need then
     match query.prefixCoins used with
     | some roundCoins =>
         match prefixHybridStep D iv (fun _ => roundCoins) st.core j with
@@ -155,7 +156,7 @@ prefix capacities with the ideal simulator's later reveal-time samples. -/
 def PrefixHybridIdealAgreement (iv : Rate × Cap) : Prop :=
   ∀ (q work : Nat) (D : Distinguisher Rate Cap q),
     PrimitiveWorkBound D work →
-      workHybridProb Rate Cap D iv = idealProb D iv
+      workHybridProb Rate Cap (work := work) D iv = idealProb D iv
 
 end WorkProbability
 
@@ -186,7 +187,8 @@ theorem first_step_exact :
   simp only [initial, constructionThenForward, PrefixHybridState.empty,
     List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, List.take,
     List.length_cons, List.length_nil, Nat.reduceAdd, List.map,
-    SpQuery.prefixCoins, List.drop, true_and]
+    SpQuery.prefixCoins, List.drop]
+  rw [if_pos trivial]
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 =
         .ok firstState by
@@ -201,6 +203,7 @@ theorem second_step_exact :
     List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls,
     List.take, List.length_cons, List.length_nil, SpQuery.prefixCoins,
     List.drop]
+  rw [if_pos trivial]
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .primitive (0, 3)) firstState 1 = .ok finalState by
     simpa [coins] using SpongePrefixHybridExample.second_step_exact]
@@ -217,6 +220,7 @@ theorem fixed_work_stream_replays :
   rw [stream_as_list]
   rw [show List.finRange 2 = [0, 1] by decide]
   simp only [List.foldl_cons, List.foldl_nil, Except.bind]
+  fold initial
   rw [first_step_exact]
   exact second_step_exact
 

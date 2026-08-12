@@ -165,7 +165,7 @@ theorem first_step_exact :
     prefixHybridStep constructionThenForward iv coins
         PrefixHybridState.empty 0 = .ok firstState := by
   simp only [prefixHybridStep, constructionThenForward, PrefixHybridState.empty,
-    List.isEmpty_nil, ↓reduceIte, coins, Fin.isValue, List.length_cons,
+    List.isEmpty_nil, ↓reduceIte, coins, List.length_cons,
     List.length_nil, Nat.reduceAdd, true_and, ↓reduceIte]
   rw [show iv = SpongePrefixProgrammingExample.iv by rfl]
   rw [SpongePrefixProgrammingExample.two_prefixes_programmed]
@@ -175,7 +175,7 @@ theorem second_step_exact :
     prefixHybridStep constructionThenForward iv coins firstState 1 =
       .ok finalState := by
   simp only [prefixHybridStep, constructionThenForward, firstState,
-    List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, coins, Fin.isValue]
+    List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, coins]
   rw [Oracle.respond_hit SpongePrefixProgrammingExample.first_edge_lookup]
   rfl
 
