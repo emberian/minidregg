@@ -93,7 +93,6 @@ theorem programPrefixes_some_lengths
           | nil => simp [programPrefixes] at h
           | cons capacityCoin capacityCoins =>
               simp only [programPrefixes] at h
-              dsimp only at h
               cases hlookup : primitive.lookup (state.1 + x, state.2) with
               | some value =>
                   rw [hlookup] at h
@@ -193,12 +192,33 @@ second prefix squeezes to `H([1,1]) = 0`. -/
 theorem two_prefixes_programmed :
     programConstruction iv Oracle.empty Oracle.empty [1, 1] [1, 0] [1, 2] =
       some result := by
-  simp [programConstruction, programPrefixes, iv, result,
-    Oracle.respond_fresh_fst, Oracle.lookup_respond_ne]
+  have hz : (1 : ZMod 2) + 1 = 0 := by norm_num
+  have hfirstFresh :
+      (Oracle.empty : Oracle (ZMod 2 × Fin 5) (ZMod 2 × Fin 5)).lookup
+        (1, 0) = none := Oracle.lookup_empty _
+  have hsecondFresh :
+      (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.lookup
+        (0, 1) = none := by
+    rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+      (q := ((1 : ZMod 2), (0 : Fin 5)))
+      (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
+      Oracle.lookup_empty]
+  unfold programConstruction
+  simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
+    programPrefixes]
+  rw [hfirstFresh]
+  simp only
+  rw [Oracle.respond_fresh_fst hfirstFresh, hz, hsecondFresh]
+  simp only
+  rw [Oracle.respond_fresh_fst hsecondFresh]
+  rfl
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
   unfold result
-  rw [Oracle.lookup_respond_ne _ (by decide)]
+  rw [Oracle.lookup_respond_ne
+    (O := (Oracle.empty.respond ([1] : List (ZMod 2)) 1).2)
+    (q := ([1, 1] : List (ZMod 2)))
+    (q' := ([1] : List (ZMod 2))) (by decide) 0]
   rw [Oracle.lookup_respond_self,
     Oracle.respond_fresh_fst (Oracle.lookup_empty [1])]
 
@@ -206,17 +226,46 @@ theorem second_prefix_lookup : result.ro.lookup [1, 1] = some 0 := by
   unfold result
   rw [Oracle.lookup_respond_self]
   rw [Oracle.respond_fresh_fst]
-  rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
+  rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+    (q := ([1] : List (ZMod 2)))
+    (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
+    Oracle.lookup_empty]
+
+theorem first_edge_lookup : result.primitive.lookup (1, 0) = some (1, 1) := by
+  unfold result
+  rw [Oracle.lookup_respond_ne
+    (O := (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2)
+    (q := ((0 : ZMod 2), (1 : Fin 5)))
+    (q' := ((1 : ZMod 2), (0 : Fin 5))) (by decide) (0, 2)]
+  rw [Oracle.lookup_respond_self,
+    Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
+
+theorem second_edge_lookup : result.primitive.lookup (0, 1) = some (0, 2) := by
+  unfold result
+  rw [Oracle.lookup_respond_self]
+  rw [Oracle.respond_fresh_fst]
+  rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+    (q := ((1 : ZMod 2), (0 : Fin 5)))
+    (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
+    Oracle.lookup_empty]
 
 theorem first_prefix_walk :
     walkFrom result.primitive iv [1] = some (1, 1) := by
-  unfold result iv
-  simp [walkFrom, Oracle.lookup_respond_ne]
+  rw [walkFrom_cons]
+  simpa [iv] using first_edge_lookup
 
 theorem full_prefix_walk :
     walkFrom result.primitive iv [1, 1] = some (0, 2) := by
-  unfold result iv
-  simp [walkFrom, Oracle.lookup_respond_ne]
+  rw [walkFrom_cons]
+  have hfirst : result.primitive.lookup
+      (iv.1 + (1 : ZMod 2), iv.2) = some (1, 1) := by
+    simpa [iv] using first_edge_lookup
+  rw [hfirst, walkFrom_cons]
+  have hsecond : result.primitive.lookup
+      (((1 : ZMod 2), (1 : Fin 5)).1 + 1, ((1 : ZMod 2), (1 : Fin 5)).2) =
+        some (0, 2) := by
+    simpa using second_edge_lookup
+  rw [hsecond]
 
 end SpongePrefixProgrammingExample
 
