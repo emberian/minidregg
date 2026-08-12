@@ -67,18 +67,16 @@ theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
     (hUnique : UniquePaths st.sim iv)
     (hFresh : IdealFreshAt D iv coins st j) :
     UniquePaths (idealStep D iv coins st j).sim iv := by
+  unfold IdealFreshAt at hFresh
   cases hmove : D.move st.ans with
   | constr x xs =>
-      simp only [hmove] at hFresh
       simpa [idealStep, hmove] using hUnique
   | fwd s =>
-      simp only [hmove] at hFresh
       rcases hFresh with ⟨hcap, hquery⟩
       have h := uniquePaths_simFwd (O := st.sim) hUnique
         (fun m => (st.ro.respond m (coins j).1).1) hcap hquery
       simpa [idealStep, hmove, simFwdRO_sim] using h
   | inv t =>
-      simp only [hmove] at hFresh
       have h := uniquePaths_simInv (O := st.sim) hUnique hFresh
       simpa [idealStep, hmove] using h
 
@@ -127,14 +125,17 @@ def coins : Fin 1 → ZMod 2 × (ZMod 2 × Fin 3) :=
 
 /-- The adaptive freshness package is inhabited for a real primitive step,
 not merely for the zero-query base case. -/
-example : FreshIdealExecution forwardOne iv coins (List.finRange 1)
+theorem forwardOne_fresh : FreshIdealExecution forwardOne iv coins (List.finRange 1)
     ⟨Oracle.empty, Oracle.empty, []⟩ := by
-  simp [FreshIdealExecution, IdealFreshAt, forwardOne, coins, iv, capsOf]
+  rw [show List.finRange 1 = [0] by decide, FreshIdealExecution]
+  constructor
+  · change (1 : Fin 3) ∉ capsOf Oracle.empty iv ∧ (1 : Fin 3) ≠ 0
+    decide
+  · trivial
 
 /-- Consequently the actual one-step ideal run has unique rooted paths. -/
 theorem forwardOne_uniquePaths : UniquePaths (idealRun forwardOne iv coins).sim iv :=
-  idealRun_uniquePaths_of_fresh forwardOne iv coins (by
-    simp [FreshIdealExecution, IdealFreshAt, forwardOne, coins, iv, capsOf])
+  idealRun_uniquePaths_of_fresh forwardOne iv coins forwardOne_fresh
 
 end SpongeRunInvariantExample
 
