@@ -1,5 +1,90 @@
 # QUIESCELOG — 2026-08-10
 
+## Resume appendix — 2026-08-12 authoritative memory
+
+The original quiescence record below did its job: it kept semantic claims separate
+from deployment claims and named the carriers most likely to disappear from memory.
+The project has since resumed, megaswarmed, quiesced the subagents again, and entered
+one careful integration lane.  Read this appendix first; retain the original body as
+the historical baseline that explains why the current teeth exist.
+
+### Exact state worth preserving
+
+- `cd0c336` integrates the recovered safe modules without touching the separately
+  owned Uwueave/Preoscript Projection-V2 worktree lane.
+- Exact hbox run `E-20260812T013903-51208-hbox-cd0c336de51b-lake` builds
+  `Minidregg` at 3,354/3,354 jobs, command exit 0, source-integrity exit 0.
+- Exact hbox run `E-20260812T014653-64736-hbox-cd0c336de51b-bash` rebuilds the
+  same commit and passes the carrier-census self-test: 1,440 declared, 644 produced
+  outside home, 596 raw load-bearing unwitnessed, five audited non-targets, 591
+  nominal actionable.
+- `e6abd03` converts the 58 recovered bare theorem-footprint prints into exact
+  `#guard_msgs` pins.  The mechanical scan now reports zero bare `#print axioms`.
+- The SQLite forward-link crate passes six exact hbox lifecycle tests, plus fmt and
+  clippy `-D warnings`: rollback before commit, process restart/retry, concurrent
+  conflict/no-overwrite, corrupt/torn fail-closed, oversize fail-closed, and the
+  exact Lean-authored 14-byte fixture.
+- Hbox is the heavy worker.  Persvati's CPU and RAM are free, but its root filesystem
+  is 100% full (roughly 487 MiB free); do not send builds there or delete data without
+  an owner.  Nextop should do only lightweight inspection, editing, and git work.
+
+### What moved beyond the old handoff
+
+The former empty-carrier crisis is no longer the main frontier.  Sparse canonical
+state, concrete bounded pages, real Hyperdocument genesis/link/merge histories,
+resource and declared-action effects, guarded durable payloads, fee-first admission,
+reactive terminal/outbox settlement, credential lifecycles, provider/market flows,
+raw history execution, finite crawling, and several actual consumer witnesses now
+exist and are imported.
+
+The newest recovered surfaces are specifically worth remembering:
+
+- declared create/write/move bytes lower to a four-entry sharded page and a
+  statement-specific AIR which reflects the existing ordered executor;
+- settlement votes bind exact candidate bytes/slots to current authority roots,
+  key and policy epochs, revocation, and a versioned directory, with rotation and
+  stale/revoked/wrong-payload teeth;
+- signed credential envelopes reach request-indexed semantics through an opaque,
+  fallible verifier boundary;
+- terminal outboxes retain stable message identity, exact installed bytes, replay,
+  and authenticated acknowledgement structure;
+- the link path has an exercised SQLite transactional adapter in addition to the
+  earlier logical/framed/local-file models;
+- raw history exposes exact concrete cSHAKE collision endpoints and the minimal
+  missing full-query same-coin ROM realization, while proving a deterministic hash
+  answer cannot masquerade as a fresh uniform slot;
+- bounded policy quantifiers reuse the one `Pred` AST; finalized crawling is exact
+  only inside its declared finite manifest; Ext6's nonzero control identity is real
+  but its eight security events are not wished away; and the one-third-UD error is
+  sharpened to its attained integer threshold.
+
+### Things still most likely to slip through our fingers
+
+1. **A green controller is not P security.**  Ext6, BFV, NoteSpend, raw history,
+   LogUp, and FRI must retain exact same-coin PCS/CR/ROM/PoK/hiding premises.  BFV
+   and NoteSpend remain correctly blocked by authorized zero suite pins.
+2. **A storage model or exercised adapter is not physical refinement.**  SQLite,
+   framed WAL, quorum safety, and local-file restart tests do not prove FFI, fsync,
+   stable media, power-loss, hostile races, consensus, or liveness.
+3. **Uniform marginals are not a joint ROM game.**  The fresh cSHAKE query table and
+   real-vs-ideal sponge coupling must live on the same execution coin before any
+   birthday term is honest.
+4. **Signatures in bytes are not signature soundness or custody.**  EUF-CMA,
+   directory membership soundness, rotation/erasure, authenticated transport, and
+   physical key custody remain deployment obligations.
+5. **Finite coverage is not global completeness.**  The crawler/backlink theorems
+   quantify over an exact declared finalized domain; availability and discovery
+   outside it remain open.
+6. **Do not chase the raw census count.**  Inspect top entries individually.  Many
+   are nested constructed values, configuration indices, conditional security
+   carriers, or legacy surfaces.  Keep the five formal non-targets non-targets.
+7. **Preserve the Uwueave lane.**  Current dirty files are externally owned:
+   `Compiler.lean`, `lake-manifest.json`, `lakefile.toml`, `prover/src/lib.rs`,
+   `Compiler/UwueavePreoProjectionV2.lean`, and its generated/test Rust files.
+
+The next honest stretch should close one of the named physical, cryptographic, or
+same-coin boundaries.  More generic interface breadth is lower value now.
+
 This is not a release note, proof of completion, or conventional handoff. It is the candid memory
 of the long 2026-08-09/10 construction session: what became true, what almost fooled us, what is
 still merely an interface, and what we should do first when attention returns.

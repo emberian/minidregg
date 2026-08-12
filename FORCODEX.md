@@ -1,65 +1,84 @@
 # FORCODEX — minidregg handoff, 2026-08-11
 
-## Resumed megaswarm convergence — latest authoritative status
+## Overnight convergence — latest authoritative status
 
-The second resumed swarm is integrated through `537b273`.  It deliberately
-stretched sideways into consumer and lifecycle surfaces after the first wave had
-closed the core carrier gaps.  The result is no longer only a collection of
-generic semantic interfaces:
+The recovered swarm is integrated through `cd0c336`; the tree-wide theorem-footprint
+gate is restored in `e6abd03`.  The exact committed-source hbox build
+`E-20260812T013903-51208-hbox-cd0c336de51b-lake` completed 3,354/3,354 jobs with
+command and source-integrity exits zero.  The subsequent exact census run
+`E-20260812T014653-64736-hbox-cd0c336de51b-bash` rebuilt the same tree, passed its
+self-test, and reported 1,440 declared carriers, 644 outside-home producers, five
+audited non-targets, and 591 nominal actionable carriers.  That last number remains
+a reachability signal, not a backlog: its leaders include nested values already
+constructed by surrounding witnesses, configuration indices, explicit security
+premises, and legacy carriers.
 
-- The forward-link slice now joins accepted content and causal-event posts to
-  exact bounded page deltas, framed bytes, Lean cSHAKE roots, an authority-guarded
-  durable intent, crash/restart recovery, idempotent retry, one human/agent client
-  command, and an exercised dependency-free local-file store.  Authorized content
-  and history queries, exact stored transclusion references, and a bounded
-  persistent backlink/range index also have concrete byte endpoints.
-- Credential issue, strict attenuation, use, revocation, epoch rotation, guarded
-  debit, local persistence, restart, and retry are one concrete path.  Provider
-  work now joins market fill, prepaid lease, fee-first admission, opaque completion,
-  terminal/outbox settlement, refund, replay, and quorum-safety witnesses.
-- Reactive agent work has a concrete leased link-job scheduler with authenticated
-  notification, dependency invalidation, atomic terminal/outbox writes, and
-  crash-before/crash-after replay.  Quota/GC settlement protects finalized and
-  transitively live roots, requires expiry and scoped authority, charges the exact
-  ten-lane tariff, and compacts atomically with stale/retry teeth.
-- The private lane has an inhabited shared-MPC sealed cell and a separate
-  declassification/escrow-release phase.  NoteSpend and BFV still fail closed at
-  their current zero suite pins; BFV nevertheless now has an actual all-384-row
-  checked batch/cell carrier, and Ext6 has a positive five-round controlled receipt
-  while its eight security events remain separate premises.
-- Raw retained-history Fiat--Shamir execution is now tied to literal verifier-owned
-  bytes, `srTrace`, outputs, roots, messages, columns, and the Def-B.2 intrinsic
-  PCS/MCA event.  Honest price interfaces prove exactly what same-coin realization
-  is required and refuse to synthesize a cSHAKE birthday term from mere uniform
-  marginals.
-- Versioned V1→V2 page migration, bounded index sync, declared create/write/move
-  byte lowering, concrete Grain settlement, private escrow, and DreggNet provider
-  consumption are all umbrella-imported.  Seven registered schemas have an exact
-  audit: the three bounded pages are concrete pinned wire formats; the four older
-  full-cell materializers remain explicitly inhabitation-only.
+Material changes since the previous `537b273` snapshot:
 
-The exact committed snapshot `537b273` passes the isolated local checker at 3,336
-jobs with command, source-integrity, and dependency-integrity exits all zero.  The
-current full workspace, which also includes the separate live Uwueave lane, is
-green at 3,383 jobs.  The live carrier census sees
-1,365 declared carriers and 614 outside-home producers; its raw 561 actionable
-entries are intentionally not a backlog.  The leading ranks include already-built
-nested data (`ReplayEnvelope`, ledgers, client commands), honest conditional
-security premises, and legacy carriers.  Five impossible/obsolete carriers remain
-named regression targets rather than construction goals.
+- The bounded forward-link path now also has a Lean-owned SQLite transaction model
+  and a dependency-free Rust adapter tested across separate processes.  Exact hbox
+  evidence passes six lifecycle tests: rollback before commit, lost-response
+  reopen/retry, concurrent conflicting transaction/no-overwrite, corruption/torn
+  bytes, oversize rejection, and the exact 14-byte Lean fixture.  This exercises a
+  real SQLite rollback-journal path; it does not prove SQLite, FFI, POSIX/fsync,
+  stable media, or power-loss refinement.
+- Authenticated settlement finality binds canonical candidate bytes and derived
+  slots to current authority roots, versioned key directories, key/policy epochs,
+  and revocation state.  A concrete three-signer witness includes rotation,
+  handoff, stale-key, revoked-key, wrong-slot, and wrong-payload teeth.  Credential
+  envelopes now reach the semantic lifecycle through an opaque/fallible signature
+  boundary.  EUF-CMA, key custody, signature implementation, authenticated
+  transport, quorum availability, and liveness remain explicit premises.
+- Reactive terminal outboxes now have a stable message/attempt/receiver/ack state
+  machine joined to the concrete leased Hyperdocument scheduler.  Duplicate
+  delivery is exact replay and acknowledgements bind the installed outbox bytes;
+  scheduler fairness, transport, authenticated ACK delivery, and eventual progress
+  are deliberately outside the safety theorem.
+- Declared create/write/move execution has a concrete four-entry, sixteen-shard V1
+  page representation with exact cSHAKE roots and a registry, plus a statement-
+  specific AIR descriptor.  Its reflection theorem returns to the existing ordered
+  executor and binds declaration bytes, policy id/epoch, pre-root, sparse observed
+  values, guards, and modulus bounds.  It is not a second interpreter or a policy
+  verifier.
+- Bounded `forall`/`exists` policy views compile into the existing first-order
+  `Pred.all`/`Pred.any` AST and reuse committed-policy reflection.  Cross-slot
+  affine predicates, coordination/merge classification, and disclosure-mode proof
+  evidence remain real design gaps.
+- Raw history now exposes the exact executed cSHAKE-collision endpoints and names
+  the smallest honest full-query same-coin realization sufficient for the birthday
+  theorem.  A negative theorem prevents relabeling deterministic cSHAKE output as a
+  fresh uniform slot.  No Merkle/ROM price is claimed until a genuine sponge/ROM
+  coupling records the complete fresh-query table.
+- Ext6 has nonzero versioned suite/controller/codec pins and a positive controlled
+  receipt, but semantic proof admission is still equivalent to supplying the exact
+  eight-event same-coin security carrier.  BFV and NoteSpend remain correctly
+  non-deployable at their currently authorized zero suite pins.
+- The finite finalized-domain crawler now proves returned backlinks iff declared
+  backlinks inside its exact manifest and handles ordered ingest, replay,
+  successor deletion/rebinding, forks, stale cursors, and missing pages.  It does
+  not generalize finite declared coverage into global web/history completeness.
+- Loom's exact one-third-UD proximity error is sharpened to
+  `(floor(delta*n)+1)/|F|` and attained by the landed F5 example.  The original
+  oracle-log obligations are exhibited only at the universal slack price one;
+  their intended low-price forms remain machine-refuted rather than papered over.
 
-The strongest honest deployment-shaped result is the bounded local forward-link
-slice: the same human/agent request survives a lost response and process restart,
-retries without overwriting a conflicting transaction, and reopens the exact link.
-It still does **not** prove POSIX/fsync or power-loss refinement, authenticated
-network finality, production credential signatures, global crawler completeness,
-PCS/CR/ROM security, or competitive end-to-end performance.  Those are the next
-real boundaries; filling more generic records is no longer the highest-value move.
+The trust audit found 58 recovered modules using bare `#print axioms`.  Commit
+`e6abd03` converts all of them to exact `#guard_msgs` pins using the immutable hbox
+output; a mechanical scan now reports zero bare theorem-footprint prints.  There
+are no new `axiom` declarations, `sorry`, or semantic/native-refinement shortcuts.
 
-A separate background Uwueave/Preoscript Projection-V2 integration is present in
-the shared worktree and already passes its four Rust data-contract tests.  It is
-kept out of Codex's commits until its owning background lane converges, so exact
-committed-source evidence cannot accidentally depend on unstaged files.
+The strongest honest deployment-shaped result remains the bounded local
+forward-link slice.  The new signature/finality, SQLite, crawler, AIR, and outbox
+surfaces make its boundary narrower and more explicit, but do not create external
+network finality, a physical durability proof, production key custody, a complete
+ROM coupling, a secure nonzero proof suite, or an end-to-end service SLO.
+
+The shared worktree still contains a separately owned Uwueave/Preoscript
+Projection-V2 lane (`Compiler.lean`, Lake metadata, prover registry/generated/test
+files).  Codex has not staged, reset, or included any of it.  Hbox is the active
+heavy worker.  Persvati is currently CPU/RAM-idle but its root filesystem is 100%
+full (about 487 MiB free), so do not dispatch builds there until its storage is
+cleared by an owner.
 
 ## Historical: first Codex integration refresh — later on 2026-08-11
 

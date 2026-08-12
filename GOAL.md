@@ -1,11 +1,54 @@
 # STANDING GOAL — resumed 2026-08-11
 
 **Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.**  The
-2026-08-11 resumed megaswarm is explicitly authorized.  This top block is the
-authoritative live trail; the long construction ledger below remains valuable
-history but is not present-tense status.
+resumed megaswarm is quiesced; one careful root lane is now converging and auditing
+its output.  This top block is the authoritative live trail.  The long construction
+ledger below remains valuable history but is not present-tense status.
 
-## 2026-08-11 resumed megaswarm convergence
+## 2026-08-12 overnight integration and trust gate
+
+The recovered construction wave is imported through `cd0c336`.  Exact hbox run
+`E-20260812T013903-51208-hbox-cd0c336de51b-lake` built `Minidregg` at
+3,354/3,354 jobs with command and source-integrity exits zero.  Exact run
+`E-20260812T014653-64736-hbox-cd0c336de51b-bash` then rebuilt that commit and ran
+the carrier census: self-test PASS; 1,440 declared; 644 produced outside home; five
+audited non-targets; 591 nominal actionable.  The raw number is deliberately
+pessimistic and is not a queue.
+
+The overnight integration adds four things that materially change the frontier:
+
+1. exact declared-action bytes now lower to one bounded sparse page and one
+   statement-specific AIR whose acceptance reflects the existing ordered executor;
+2. authenticated vote/key/policy/revocation state, signed credential envelopes, and
+   durable outbox acknowledgements now have concrete safety witnesses while crypto,
+   custody, transport, quorum availability, and liveness stay explicit;
+3. the forward-link consumer has an exercised SQLite transaction/restart adapter
+   with six exact lifecycle tests, still without claiming SQLite/FFI/POSIX/fsync or
+   power-loss refinement; and
+4. raw history exposes exact executed cSHAKE collision endpoints and the necessary
+   full-query same-coin ROM seam, including a proof that deterministic output cannot
+   be relabeled as a fresh uniform slot.
+
+Bounded policy quantifiers, finite finalized-domain crawling, a nonzero versioned
+Ext6 control path, and the sharp one-third-UD finite-field error also landed.  None
+is promoted beyond its honest boundary: Ext6 security still requires its eight
+same-coin laws; the crawler is finite-domain; and the original oracle-log claims
+remain refuted at their intended price and inhabited only at the universal bound one.
+
+The full build exposed a trust-gate regression rather than a theorem error: 58
+recovered audits were bare `#print axioms`.  `e6abd03` pins all 58 with exact
+`#guard_msgs`; the mechanical tree scan now finds zero bare theorem-footprint
+prints.  The external Uwueave/Projection-V2 worktree lane remains untouched and
+uncommitted by Codex.  Heavy validation runs only on hbox; persvati is currently
+excluded because its root filesystem is full.
+
+Current highest-value work is therefore: preserve full-build/census/axiom evidence;
+refresh the handoff documents; then close one real remaining boundary—preferably
+full-query cSHAKE/ROM coupling, production key/signature custody, a physical SQLite
+or filesystem refinement, or a genuinely secure nonzero suite—rather than adding
+another generic record.
+
+## Historical: 2026-08-11 resumed megaswarm convergence
 
 Both construction waves are integrated through `537b273`.  The first repaired the
 kernel/history foundations; the second deliberately occupied neglected consumer
