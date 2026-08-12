@@ -183,7 +183,8 @@ theorem canonical_projection_root_join :
   simp [committed, canonicalState, canonicalRegistry, canonicalEnvelope,
     canonicalHeader, canonicalKey, canonicalRegistryCommitment,
     canonicalRegistryBytes, canonicalPrepared, credentialDomain, stateCodecVersion,
-    registryCodecVersion, envelopeCodecVersion]
+    registryCodecVersion, envelopeCodecVersion, ed25519Algorithm,
+    KeyRegistryProjection.findKey]
 
 /-! ## Opaque native verification and persistent success -/
 

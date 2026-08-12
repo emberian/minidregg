@@ -116,18 +116,8 @@ def optionCode (value : Option Int) : Nat := optionIntCode value
 
 theorem optionCode_injective : Function.Injective optionCode := by
   intro left right equal
-  cases left with
-  | none =>
-      cases right with
-      | none => rfl
-      | some right => simp [optionCode, optionIntCode] at equal
-  | some left =>
-      cases right with
-      | none => simp [optionCode, optionIntCode] at equal
-      | some right =>
-          simp only [optionCode, optionIntCode, Nat.add_left_cancel_iff] at equal
-          have decoded := congrArg decodeInt equal
-          simpa using decoded
+  have decoded := congrArg optionIntOfCode equal
+  simpa [optionCode] using decoded
 
 /-- The explicit finite-field range premise.  It is automatic for the landed
 small V1 page witnesses but remains visible for arbitrary full-width `Int`s. -/
@@ -193,8 +183,9 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
       optionCode (observationAt declaration fields
         ⟨index.val - (publicBytes context declaration).length -
           (observations declaration fields).length, by
-            have := index.isLt
-            unfold wireCount at this
+            have indexBound := index.isLt
+            change index.val < (publicBytes context declaration).length +
+              2 * (observations declaration fields).length at indexBound
             omega⟩).observed
 
 @[simp] theorem assignment_byte {kind : ResourceKind}
@@ -203,7 +194,9 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
     (index : Fin (publicBytes context declaration).length) :
     assignment context declaration fields (byteWire index) =
       ((publicBytes context declaration).get index).toNat := by
-  simp [assignment, byteWire]
+  unfold assignment
+  rw [dif_pos index.isLt]
+  rfl
 
 @[simp] theorem assignment_expected {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
@@ -211,7 +204,11 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
     (index : Fin (observations declaration fields).length) :
     assignment context declaration fields (expectedWire index) =
       optionCode (observationAt declaration fields index).expected := by
-  simp [assignment, expectedWire]
+  unfold assignment
+  rw [dif_neg (by omega), dif_pos (by omega)]
+  congr 2
+  apply Fin.ext
+  simp
 
 @[simp] theorem assignment_observed {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
@@ -219,7 +216,11 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
     (index : Fin (observations declaration fields).length) :
     assignment context declaration fields (observedWire index) =
       optionCode (observationAt declaration fields index).observed := by
-  simp [assignment, observedWire, wireCount]
+  unfold assignment
+  rw [dif_neg (by omega), dif_neg (by omega)]
+  congr 2
+  apply Fin.ext
+  simp
 
 /-! ## Lean-authored constraints and emitted descriptor -/
 
@@ -234,12 +235,14 @@ def eqTerm {m : Nat} (left right : Fin m) :
 @[simp] theorem pinTerm_correct {m : Nat} (asg : Fin m -> BabyBear)
     (wire : Fin m) (value : BabyBear) :
     accepts asg (pinTerm wire value) <-> asg wire = value := by
-  simp [accepts, pinTerm]
+  simpa [accepts, pinTerm, sub_eq_add_neg] using
+    (sub_eq_zero : asg wire - value = 0 ↔ asg wire = value)
 
 @[simp] theorem eqTerm_correct {m : Nat} (asg : Fin m -> BabyBear)
     (left right : Fin m) :
     accepts asg (eqTerm left right) <-> asg left = asg right := by
-  simp [accepts, eqTerm]
+  simpa [accepts, eqTerm, sub_eq_add_neg] using
+    (sub_eq_zero : asg left - asg right = 0 ↔ asg left = asg right)
 
 def pinSystem {m : Nat} (canonical : Fin m -> BabyBear) :
     ConstraintSystem BabyBear (Fin m) :=
@@ -253,7 +256,9 @@ theorem pinSystem_correct {m : Nat} (canonical asg : Fin m -> BabyBear) :
     apply (pinTerm_correct asg index (canonical index)).mp
     exact accepted _ (List.mem_map.mpr
       ⟨index, List.mem_finRange index, rfl⟩)
-  · rintro rfl term member
+  · intro asgExact
+    subst asg
+    intro term member
     obtain ⟨index, -, rfl⟩ := List.mem_map.mp member
     exact (pinTerm_correct canonical index (canonical index)).mpr rfl
 
@@ -293,7 +298,8 @@ theorem guardSystem_correct {kind : ResourceKind}
         optionCode (observationAt declaration fields index).expected =
           optionCode (observationAt declaration fields index).observed := by
       have modEqual := (ZMod.natCast_eq_natCast_iff' _ _ babyBearP).mp equalFields
-      simpa [Nat.mod_eq_of_lt range.1, Nat.mod_eq_of_lt range.2] using modEqual
+      rw [Nat.mod_eq_of_lt range.1, Nat.mod_eq_of_lt range.2] at modEqual
+      exact modEqual
     exact optionCode_injective equalCodes
   · intro exact term member
     obtain ⟨index, -, rfl⟩ := List.mem_map.mp member
@@ -388,7 +394,8 @@ theorem descriptor_accepts_iff_run {kind : ResourceKind}
         (system context declaration fields)).mpr accepted
     refine ⟨wireValues, ?_, holds⟩
     intro index
-    simpa using pinned (byteWire index)
+    exact (pinned (byteWire index)).trans
+      (assignment_byte context declaration fields index)
 
 /-- Proof-relevant generated witness.  The original variable assignment is
 computable (`assignment`); the existing emit completeness theorem supplies the
@@ -423,16 +430,15 @@ theorem generated_public_bytes_exact {kind : ResourceKind}
     (List.ofFn fun index : Fin (publicBytes context declaration).length =>
       UInt8.ofNat ((assignment context declaration fields (byteWire index)).val)) =
       publicBytes context declaration := by
-  rw [List.ext_get_iff]
-  constructor
-  · simp
-  · intro index left right
-    simp only [List.get_ofFn, assignment_byte]
-    rw [ZMod.val_natCast]
-    have byteLt : ((publicBytes context declaration).get right).toNat < babyBearP :=
-      lt_of_lt_of_le (UInt8.toNat_lt _) (by norm_num [babyBearP])
-    rw [Nat.mod_eq_of_lt byteLt]
-    exact UInt8.ofNat_toNat _
+  rw [← List.ofFn_get (publicBytes context declaration)]
+  apply congrArg List.ofFn
+  funext index
+  simp only [assignment_byte]
+  rw [ZMod.val_natCast]
+  have byteLt : ((publicBytes context declaration).get index).toNat < babyBearP :=
+    lt_of_lt_of_le (UInt8.toNat_lt _) (by norm_num [babyBearP])
+  rw [Nat.mod_eq_of_lt byteLt]
+  exact UInt8.ofNat_toNat _
 
 /-! ## Axiom audit -/
 
