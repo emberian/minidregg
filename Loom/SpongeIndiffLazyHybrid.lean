@@ -235,7 +235,6 @@ theorem construction_first_forward_replays :
   rw [show List.finRange 2 = [0, 1] by decide]
   simp only [List.foldl_cons, List.foldl_nil, Except.bind]
   rw [first_step_exact]
-  simp only [Except.bind]
   rw [second_step_exact]
   simp [finalState]
 
