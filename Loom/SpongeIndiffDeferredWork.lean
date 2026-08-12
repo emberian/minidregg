@@ -160,16 +160,20 @@ noncomputable def fullMessageRo : Oracle (List (ZMod 2)) (ZMod 2) :=
 noncomputable def afterConstruction : DeferredWorkState (ZMod 2) Nat :=
   ⟨⟨fullMessageRo, Oracle.empty, [.rate 0]⟩, [(1, 1)], 2⟩
 
+theorem deferred_list : List.ofFn deferred =
+    [((0 : ZMod 2), (2 : Nat)), (0, 3), (1, 1)] := by
+  rfl
+
 theorem first_step_exact :
     deferredWorkStep constructionThenForward iv
       (DeferredWorkState.initial deferred) 0 = .ok afterConstruction := by
-  unfold deferredWorkStep DeferredWorkState.initial
-  simp only [constructionThenForward, PrefixHybridState.empty,
-    List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, deferred,
-    eager, SpongeWorkStreamExample.stream, List.ofFn, List.finRange,
-    List.take, List.length_cons, List.length_nil, Nat.reduceAdd,
-    List.drop, deferredIdealStepWithCoin, idealStep, workCoinAsIdeal,
-    fullMessageRo, afterConstruction]
+  unfold DeferredWorkState.initial
+  rw [deferred_list]
+  unfold deferredWorkStep
+  simp only [constructionThenForward, List.isEmpty_nil, ↓reduceIte,
+    SpQuery.primitiveCalls, List.take, List.length_cons, List.length_nil,
+    Nat.reduceAdd, List.drop, deferredIdealStepWithCoin, idealStep,
+    workCoinAsIdeal, fullMessageRo, afterConstruction]
   rw [Oracle.respond_fresh_fst (Oracle.lookup_empty [1, 1])]
 
 /-- The revealed first prefix is still fresh in the deferred primitive table,
@@ -186,8 +190,9 @@ theorem revealed_prefix_answer :
   have hfresh : fullMessageRo.lookup [1] = none := by
     unfold fullMessageRo
     rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
-  unfold simFwdRO simFwd
-  rw [hcompletion, Oracle.respond_fresh_fst hfresh]
+  unfold simFwdRO
+  rw [hcompletion, Oracle.respond_fresh_fst hfresh,
+    Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
 
 end SpongeDeferredWorkExample
 
