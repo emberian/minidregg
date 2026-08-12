@@ -541,6 +541,59 @@ structure SinglePageSuccessor
     after.pages page = before.pages page /\
       after.pageRoots page = before.pageRoots page
 
+theorem follows_not_fork (before after : FinalizedCheckpoint)
+    (follows : before.Follows after) : ¬ before.IsFork after := by
+  intro fork
+  exact fork.2.2 follows.2.2.2
+
+/-- The executable data shape of a one-page successor. -/
+def SinglePageShape
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (changed : Fin pageCount) : Prop :=
+  after.pages = Function.update before.pages changed (after.pages changed) /\
+    after.pageRoots =
+      Function.update before.pageRoots changed (after.pageRoots changed)
+
+instance
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (changed : Fin pageCount) :
+    Decidable (SinglePageShape before after changed) := by
+  unfold SinglePageShape
+  infer_instance
+
+theorem singlePageShape_of_successor
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed) :
+    SinglePageShape before after changed := by
+  constructor <;> funext page
+  · by_cases same : page = changed
+    · subst page
+      simp
+    · simpa [Function.update, same] using (successor.unchanged page same).1
+  · by_cases same : page = changed
+    · subst page
+      simp
+    · simpa [Function.update, same] using (successor.unchanged page same).2
+
+/-- A finite data check, not an availability or cryptographic claim. -/
+def singlePageSuccessorCheck
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (changed : Fin pageCount) : Bool :=
+  decide (SinglePageShape before after changed)
+
+theorem singlePageSuccessorCheck_eq_true
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (changed : Fin pageCount) :
+    singlePageSuccessorCheck before after changed = true <->
+      SinglePageShape before after changed := by
+  simp [singlePageSuccessorCheck]
+
 /-- Install an already authenticated authoritative successor page into a
 complete cache. -/
 def CrawlState.installSuccessor
@@ -664,7 +717,13 @@ def applyFinalizedDelta
     (before after : DeclaredDomain pageCount ExternallyFinal)
     (state : CrawlState pageCount) (delta : DeltaEnvelope pageCount) :
     DeltaResult pageCount :=
-  if state.checkpoint = after.checkpoint then
+  if before.checkpoint.IsFork after.checkpoint then
+    .rejected .reorg
+  else if ¬ before.checkpoint.Follows after.checkpoint then
+    .rejected .nonFinalizedExtension
+  else if singlePageSuccessorCheck before after delta.changed ≠ true then
+    .rejected .nonFinalizedExtension
+  else if state.checkpoint = after.checkpoint then
     match delta.payload with
     | none => .rejected .missingPage
     | some payload =>
@@ -680,10 +739,6 @@ def applyFinalizedDelta
           .rejected .duplicateConflict
   else if state.checkpoint ≠ before.checkpoint then
     .rejected .staleFinality
-  else if before.checkpoint.IsFork after.checkpoint then
-    .rejected .reorg
-  else if ¬ before.checkpoint.Follows after.checkpoint then
-    .rejected .nonFinalizedExtension
   else if delta.before ≠ before.checkpoint \/
       delta.after ≠ after.checkpoint then
     .rejected .staleFinality
@@ -715,32 +770,35 @@ def applyFinalizedDelta
 theorem finalized_fork_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
     (before after : DeclaredDomain pageCount ExternallyFinal)
-    (state : CrawlState pageCount) (atBefore : state.checkpoint = before.checkpoint)
-    (notAfter : state.checkpoint ≠ after.checkpoint)
+    (state : CrawlState pageCount)
     (fork : before.checkpoint.IsFork after.checkpoint)
     (delta : DeltaEnvelope pageCount) :
     applyFinalizedDelta before after state delta = .rejected .reorg := by
-  have beforeNeAfter : before.checkpoint ≠ after.checkpoint := by
-    intro equal
-    apply notAfter
-    rw [atBefore, equal]
-  simp [applyFinalizedDelta, atBefore, beforeNeAfter, fork]
+  simp [applyFinalizedDelta, fork]
 
 theorem nonfinalized_extension_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
     (before after : DeclaredDomain pageCount ExternallyFinal)
-    (state : CrawlState pageCount) (atBefore : state.checkpoint = before.checkpoint)
-    (notAfter : state.checkpoint ≠ after.checkpoint)
+    (state : CrawlState pageCount)
     (notFork : ¬ before.checkpoint.IsFork after.checkpoint)
     (notFollows : ¬ before.checkpoint.Follows after.checkpoint)
     (delta : DeltaEnvelope pageCount) :
     applyFinalizedDelta before after state delta =
       .rejected .nonFinalizedExtension := by
-  have beforeNeAfter : before.checkpoint ≠ after.checkpoint := by
-    intro equal
-    apply notAfter
-    rw [atBefore, equal]
-  simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, notFollows]
+  simp [applyFinalizedDelta, notFork, notFollows]
+
+theorem non_single_page_change_rejected
+    {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
+    (before after : DeclaredDomain pageCount ExternallyFinal)
+    (state : CrawlState pageCount)
+    (notFork : ¬ before.checkpoint.IsFork after.checkpoint)
+    (follows : before.checkpoint.Follows after.checkpoint)
+    (delta : DeltaEnvelope pageCount)
+    (notSingle : ¬ SinglePageShape before after delta.changed) :
+    applyFinalizedDelta before after state delta =
+      .rejected .nonFinalizedExtension := by
+  simp [applyFinalizedDelta, notFork, follows, singlePageSuccessorCheck,
+    notSingle]
 
 theorem finalized_delta_stale_root_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -749,7 +807,9 @@ theorem finalized_delta_stale_root_rejected
     (notAfter : state.checkpoint ≠ after.checkpoint)
     (notFork : ¬ before.checkpoint.IsFork after.checkpoint)
     (follows : before.checkpoint.Follows after.checkpoint)
-    (changed : Fin pageCount) (staleAfterRoot : Digest)
+    (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed)
+    (staleAfterRoot : Digest)
     (stale : staleAfterRoot ≠ after.pageRoots changed)
     (payload : Option (Snapshot 4)) :
     applyFinalizedDelta before after state
@@ -760,20 +820,26 @@ theorem finalized_delta_stale_root_rejected
     intro equal
     apply notAfter
     rw [atBefore, equal]
-  simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows, stale]
+  simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
+    singlePageSuccessorCheck, successor, stale]
 
 theorem conflicting_replayed_delta_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
     (before after : DeclaredDomain pageCount ExternallyFinal)
     (state : CrawlState pageCount) (atAfter : state.checkpoint = after.checkpoint)
-    (changed : Fin pageCount) (conflictingRoot : Digest)
+    (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed)
+    (conflictingRoot : Digest)
     (conflict : conflictingRoot ≠ after.pageRoots changed)
     (payload : Snapshot 4) :
     applyFinalizedDelta before after state
       ⟨before.checkpoint, after.checkpoint, changed,
         before.pageRoots changed, conflictingRoot, some payload⟩ =
       .rejected .duplicateConflict := by
-  simp [applyFinalizedDelta, atAfter, conflict]
+  have notFork := follows_not_fork before.checkpoint after.checkpoint
+    successor.follows
+  simp [applyFinalizedDelta, notFork, successor.follows,
+    singlePageSuccessorCheck, successor, atAfter, conflict]
 
 theorem finalized_delta_missing_page_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -783,7 +849,8 @@ theorem finalized_delta_missing_page_rejected
     (notFork : ¬ before.checkpoint.IsFork after.checkpoint)
     (follows : before.checkpoint.Follows after.checkpoint)
     (complete : state.CompleteFor before)
-    (changed : Fin pageCount) :
+    (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed) :
     applyFinalizedDelta before after state
       ⟨before.checkpoint, after.checkpoint, changed,
         before.pageRoots changed, after.pageRoots changed, none⟩ =
@@ -794,7 +861,7 @@ theorem finalized_delta_missing_page_rejected
     rw [atBefore, equal]
   have cache := complete_cache_exact before state complete
   simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
-    complete.2, cache.1, cache.2]
+    singlePageSuccessorCheck, successor, complete.2, cache.1, cache.2]
 
 theorem finalized_delta_applies
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -804,7 +871,8 @@ theorem finalized_delta_applies
     (notFork : ¬ before.checkpoint.IsFork after.checkpoint)
     (follows : before.checkpoint.Follows after.checkpoint)
     (complete : state.CompleteFor before)
-    (changed : Fin pageCount) :
+    (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed) :
     applyFinalizedDelta before after state
       ⟨before.checkpoint, after.checkpoint, changed,
         before.pageRoots changed, after.pageRoots changed,
@@ -816,20 +884,25 @@ theorem finalized_delta_applies
     rw [atBefore, equal]
   have cache := complete_cache_exact before state complete
   simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
-    complete.2, cache.1, cache.2, after.pageRootExact changed,
+    singlePageSuccessorCheck, successor, complete.2, cache.1, cache.2,
+    after.pageRootExact changed,
     CrawlState.installSuccessor]
 
 theorem finalized_delta_retry_replayed
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
     (before after : DeclaredDomain pageCount ExternallyFinal)
-    (state : CrawlState pageCount) (changed : Fin pageCount) :
+    (state : CrawlState pageCount) (changed : Fin pageCount)
+    (successor : SinglePageSuccessor before after changed) :
     let next := state.installSuccessor after changed
     applyFinalizedDelta before after next
       ⟨before.checkpoint, after.checkpoint, changed,
         before.pageRoots changed, after.pageRoots changed,
         some (after.pages changed)⟩ = .replayed next := by
   dsimp
-  simp [applyFinalizedDelta, CrawlState.installSuccessor,
+  have notFork := follows_not_fork before.checkpoint after.checkpoint
+    successor.follows
+  simp [applyFinalizedDelta, notFork, successor.follows,
+    singlePageSuccessorCheck, successor, CrawlState.installSuccessor,
     after.pageRootExact changed]
 
 /-! ## Closed non-vacuous one-page crawl -/
