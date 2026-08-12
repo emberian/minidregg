@@ -172,13 +172,14 @@ noncomputable def authority :
 
 @[simp] theorem live_old_key_not_revoked :
     isRevoked liveCell oldKeyRevocation = false := by
-  have revocationFieldsDifferent :
-      AuthorityField.revoked oldKeyRevocation ≠
-        AuthorityField.revoked newKeyRevocation := by
-    decide
-  simp [liveCell_logical, liveLogical, isRevoked, subject0, subject1, subject2,
-    governancePolicy, oldKeyRevocation, newKeyRevocation,
-    revocationFieldsDifferent]
+  have readExact :
+      liveLogical.fields (.revoked oldKeyRevocation) = some false := by
+    unfold liveLogical
+    simp [subject0, subject1, subject2, governancePolicy,
+      oldKeyRevocation, newKeyRevocation]
+  change (liveLogical.fields (.revoked oldKeyRevocation)).getD false = false
+  rw [readExact]
+  rfl
 
 @[simp] theorem rotated_subject_epoch (node : Node) :
     subjectKeyEpochAt rotatedCell (signerSubject node) = 3 := by
@@ -208,13 +209,14 @@ noncomputable def authority :
 
 @[simp] theorem rotated_new_key_not_revoked :
     isRevoked rotatedCell newKeyRevocation = false := by
-  have revocationFieldsDifferent :
-      AuthorityField.revoked newKeyRevocation ≠
-        AuthorityField.revoked oldKeyRevocation := by
-    decide
-  simp [rotatedCell_logical, rotatedLogical, liveLogical, isRevoked,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation, revocationFieldsDifferent]
+  have readExact :
+      rotatedLogical.fields (.revoked newKeyRevocation) = some false := by
+    unfold rotatedLogical liveLogical
+    simp [subject0, subject1, subject2, governancePolicy,
+      oldKeyRevocation, newKeyRevocation]
+  change (rotatedLogical.fields (.revoked newKeyRevocation)).getD false = false
+  rw [readExact]
+  rfl
 
 @[simp] theorem final_policy_epoch :
     policyEpochAt finalCell governancePolicy = 6 := by

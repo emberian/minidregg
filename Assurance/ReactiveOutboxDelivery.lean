@@ -18,7 +18,9 @@ namespace Minidregg.Assurance.ReactiveOutboxDelivery
 
 open Minidregg.Assurance.ReactiveDurableSettlement
 open Minidregg.Assurance.ReactiveLifecycleHistory
+open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Assurance.SemanticHistoryFamily
+open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Kernel
@@ -144,9 +146,17 @@ theorem installed_finalize_message_exact
         binding.openCell.outboxCell = (finalizeMessage settlement).outboxRoot := by
   have bytes := (settlement.installed_exact before).2.2
   refine ⟨bytes, ?_⟩
-  rw [← (DataSnapshot.install before settlement.intent).coherent
-    binding.openCell.outboxCell, bytes]
-  exact (finalizeMessage settlement).rootExact
+  calc
+    (DataSnapshot.install before settlement.intent).model.roots
+        binding.openCell.outboxCell =
+        M.rootBytes ((DataSnapshot.install before settlement.intent).canonicalBytes
+          binding.openCell.outboxCell) :=
+      ((DataSnapshot.install before settlement.intent).coherent
+        binding.openCell.outboxCell).symm
+    _ = M.rootBytes (finalizeMessage settlement).outboxBytes :=
+      congrArg M.rootBytes bytes
+    _ = (finalizeMessage settlement).outboxRoot :=
+      (finalizeMessage settlement).rootExact
 
 end ReactiveSettlement
 
@@ -194,38 +204,42 @@ end ProviderLease
 
 namespace AgentRuntime
 
-namespace Scheduler :=
-  Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler
+open Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler
 
-def message : Message Scheduler.Link.materializer.rootBytes :=
-  planMessage Scheduler.settlement.terminalPlan
+def message : Message Link.materializer.rootBytes :=
+  planMessage settlement.terminalPlan
 
 def attempt (number : Nat) : Attempt :=
-  planAttempt Scheduler.settlement.terminalPlan number
+  planAttempt settlement.terminalPlan number
 
 @[simp] theorem attempt_exact (number : Nat) :
     (attempt number).ExactFor message :=
-  planAttempt_exact Scheduler.settlement.terminalPlan number
+  planAttempt_exact settlement.terminalPlan number
 
 /-- The queue item whose outbox is delivered retains the exact accepted
 provider lease and start grant; delivery does not manufacture provider
 authority or execution evidence. -/
 @[simp] theorem job_retains_exact_provider_lease :
-    Scheduler.agentJob.leased.lease = Scheduler.ProviderWitness.lease ∧
-      Scheduler.agentJob.leased.grant = Scheduler.ProviderWitness.grant :=
-  ⟨Scheduler.agentJob.leased.leaseExact,
-    Scheduler.agentJob.leased.grantExact⟩
+    agentJob.leased.lease = ProviderWitness.lease ∧
+      agentJob.leased.grant = ProviderWitness.grant :=
+  ⟨agentJob.leased.leaseExact, agentJob.leased.grantExact⟩
 
-theorem installed_message_exact (before : Scheduler.Store) :
-    (DataSnapshot.install before Scheduler.intent).canonicalBytes
-        Scheduler.openCell.outboxCell = message.outboxBytes ∧
-      (DataSnapshot.install before Scheduler.intent).model.roots
-        Scheduler.openCell.outboxCell = message.outboxRoot := by
-  have bytes := (Scheduler.installed_semantic_terminal_outbox_exact before).2.2
+theorem installed_message_exact (before : Store) :
+    (DataSnapshot.install before intent).canonicalBytes
+        openCell.outboxCell = message.outboxBytes ∧
+      (DataSnapshot.install before intent).model.roots
+        openCell.outboxCell = message.outboxRoot := by
+  have bytes := (installed_semantic_terminal_outbox_exact before).2.2
   refine ⟨bytes, ?_⟩
-  rw [← (DataSnapshot.install before Scheduler.intent).coherent
-    Scheduler.openCell.outboxCell, bytes]
-  exact message.rootExact
+  calc
+    (DataSnapshot.install before intent).model.roots openCell.outboxCell =
+        Link.materializer.rootBytes
+          ((DataSnapshot.install before intent).canonicalBytes
+            openCell.outboxCell) :=
+      ((DataSnapshot.install before intent).coherent openCell.outboxCell).symm
+    _ = Link.materializer.rootBytes message.outboxBytes :=
+      congrArg Link.materializer.rootBytes bytes
+    _ = message.outboxRoot := message.rootExact
 
 def emptyReceiver : ReceiverState where
   delivered := fun _ => none
@@ -250,9 +264,9 @@ theorem accepted_ack_binds_installed_outbox
     (currentAttempt : Nat) (ack : Ack AuthTag)
     (accepted : checkAck verifier message currentAttempt ack = .accepted) :
     verifier.Authenticated ack ∧
-      ack.outboxBytes = Scheduler.settlement.terminalPlan.outboxBytes ∧
-      ack.outboxRoot = Scheduler.settlement.terminalPlan.outboxRoot ∧
-      Scheduler.Link.materializer.rootBytes ack.outboxBytes = ack.outboxRoot :=
+      ack.outboxBytes = settlement.terminalPlan.outboxBytes ∧
+      ack.outboxRoot = settlement.terminalPlan.outboxRoot ∧
+      Link.materializer.rootBytes ack.outboxBytes = ack.outboxRoot :=
   accepted_ack_binds_exact_outbox verifier message currentAttempt ack accepted
 
 theorem stale_ack_rejected
@@ -318,7 +332,7 @@ abbrev AgentRuntimeProgress
     (ScheduledWithin NetworkDeliveredWithin AckReturnedWithin :
       Attempt → Nat → Prop)
     (EventuallyDeliveredWithin EventuallyAcknowledgedWithin :
-      Message Scheduler.Link.materializer.rootBytes → Nat → Prop) : Type :=
+      Message Link.materializer.rootBytes → Nat → Prop) : Type :=
   ProgressRefinement message Enabled ScheduledWithin NetworkDeliveredWithin
     AckReturnedWithin EventuallyDeliveredWithin EventuallyAcknowledgedWithin
 
