@@ -291,7 +291,8 @@ private theorem uniformProb_function_coordinate_eq {q N : Nat}
         (uniformProb_equiv (splitCoord i)
           (fun split : Rest × Fin N => split.2 = value))
     _ = uniformProb (Fin N) (fun candidate => candidate = value) :=
-      uniformProb_snd_marginal _
+      uniformProb_snd_marginal (A := Rest) (B := Fin N)
+        (fun candidate : Fin N => candidate = value)
     _ = 1 / (N : Real) := by
       rw [uniformProb_eq_single, Fintype.card_fin]
 
