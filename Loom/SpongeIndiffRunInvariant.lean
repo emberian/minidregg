@@ -70,13 +70,16 @@ theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
   unfold IdealFreshAt at hFresh
   cases hmove : D.move st.ans with
   | constr x xs =>
+      rw [hmove] at hFresh
       simpa [idealStep, hmove] using hUnique
   | fwd s =>
+      rw [hmove] at hFresh
       rcases hFresh with ⟨hcap, hquery⟩
       have h := uniquePaths_simFwd (O := st.sim) hUnique
         (fun m => (st.ro.respond m (coins j).1).1) hcap hquery
       simpa [idealStep, hmove, simFwdRO_sim] using h
   | inv t =>
+      rw [hmove] at hFresh
       have h := uniquePaths_simInv (O := st.sim) hUnique hFresh
       simpa [idealStep, hmove] using h
 
