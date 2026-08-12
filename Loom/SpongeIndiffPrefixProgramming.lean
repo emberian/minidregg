@@ -224,11 +224,14 @@ theorem two_prefixes_programmed :
       (Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).lookup
         (1, 0) = none := Oracle.lookup_empty _
   have hsecondFresh :
-      (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.lookup
+      ((Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).respond
+        ((1 : ZMod 2), (0 : Nat)) ((1 : ZMod 2), (1 : Nat))).2.lookup
         (0, 1) = none := by
-    rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+    rw [Oracle.lookup_respond_ne
+      (O := (Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)))
       (q := ((1 : ZMod 2), (0 : Nat)))
-      (q' := ((0 : ZMod 2), (1 : Nat))) (by decide) (1, 1),
+      (q' := ((0 : ZMod 2), (1 : Nat))) (by decide)
+      ((1 : ZMod 2), (1 : Nat)),
       Oracle.lookup_empty]
   have hroSecondFresh :
       (Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.lookup [1, 1] = none := by
@@ -245,7 +248,8 @@ theorem two_prefixes_programmed :
       ((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond [1, 1] 0).1 =
         0 := Oracle.respond_fresh_fst hroSecondFresh 0
   have hprimitiveSecondValue :
-      ((Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.respond
+      (((Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).respond
+        ((1 : ZMod 2), (0 : Nat)) ((1 : ZMod 2), (1 : Nat))).2.respond
         ((0 : ZMod 2), (1 : Nat)) (0, 2)).1 = (0, 2) :=
     Oracle.respond_fresh_fst hsecondFresh (0, 2)
   unfold iv
@@ -261,22 +265,23 @@ theorem two_prefixes_programmed :
   · rename_i hlookup
     have himpossible : (none : Option (ZMod 2 × Nat)) = some _ :=
       hsecondFresh'.symm.trans hlookup
-    exact Option.noConfusion himpossible
+    cases himpossible
   · rename_i hlookup
     simp only
     have hvalue :
         (((((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond
           [1, 1] 0).1), (2 : Nat)) : ZMod 2 × Nat) = (0, 2) := by
-      exact Prod.ext hroSecondValue rfl
+      apply Prod.ext
+      · simpa using hroSecondValue
+      · rfl
     have hresponse := congrArg
       (fun value : ZMod 2 × Nat =>
         (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.respond
           (0, 1) value) hvalue
     apply congrArg some
     unfold result
-    apply PrefixProgramState.ext
+    congr 1
     · exact (congrArg Prod.fst hresponse).trans hprimitiveSecondValue
-    · rfl
     · exact congrArg Prod.snd hresponse
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
