@@ -136,24 +136,23 @@ theorem prefixConflict_iff_respond_disagrees
       rw [hreply]
       constructor
       · rintro ⟨value, roValue, _, hroValue, _⟩
-        rw [hro] at hroValue
-        contradiction
+        cases hroValue
       · intro hne
         exact False.elim (hne rfl)
   | some roValue =>
       have hreply :
           (ro.respond (seen ++ [block]) edgeValue.1).1 = roValue :=
-        Oracle.respond_hit hro
+        congrArg Prod.fst (Oracle.respond_hit hro edgeValue.1)
       rw [hreply]
       constructor
       · rintro ⟨value, value', hvalue, hvalue', hne⟩
         have hv : value = edgeValue :=
           Option.some.inj (hvalue.symm.trans hedge)
         have hv' : value' = roValue :=
-          Option.some.inj (hvalue'.symm.trans hro)
+          (Option.some.inj hvalue').symm
         simpa [hv, hv'] using hne
       · intro hne
-        exact ⟨edgeValue, roValue, hedge, hro, hne⟩
+        exact ⟨edgeValue, roValue, hedge, rfl, hne⟩
 
 end PrefixFailure
 
