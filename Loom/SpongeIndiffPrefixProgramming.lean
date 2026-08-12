@@ -234,10 +234,12 @@ theorem two_prefixes_programmed :
       ((1 : ZMod 2), (1 : Nat)),
       Oracle.lookup_empty]
   have hroSecondFresh :
-      (Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.lookup [1, 1] = none := by
-    rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+      ((Oracle.empty : Oracle (List (ZMod 2)) (ZMod 2)).respond
+        ([1] : List (ZMod 2)) (1 : ZMod 2)).2.lookup [1, 1] = none := by
+    rw [Oracle.lookup_respond_ne
+      (O := (Oracle.empty : Oracle (List (ZMod 2)) (ZMod 2)))
       (q := ([1] : List (ZMod 2)))
-      (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
+      (q' := ([1, 1] : List (ZMod 2))) (by decide) (1 : ZMod 2),
       Oracle.lookup_empty]
   have hsecondFresh' :
       ((Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).respond
@@ -245,8 +247,10 @@ theorem two_prefixes_programmed :
         (0, ((1 : ZMod 2), (1 : Nat)).2) = none := by
     simpa using hsecondFresh
   have hroSecondValue :
-      ((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond [1, 1] 0).1 =
-        0 := Oracle.respond_fresh_fst hroSecondFresh 0
+      (((Oracle.empty : Oracle (List (ZMod 2)) (ZMod 2)).respond
+        ([1] : List (ZMod 2)) (1 : ZMod 2)).2.respond [1, 1]
+          (0 : ZMod 2)).1 = 0 :=
+    Oracle.respond_fresh_fst hroSecondFresh (0 : ZMod 2)
   have hprimitiveSecondValue :
       (((Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).respond
         ((1 : ZMod 2), (0 : Nat)) ((1 : ZMod 2), (1 : Nat))).2.respond
