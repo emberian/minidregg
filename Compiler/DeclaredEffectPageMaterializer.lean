@@ -652,8 +652,8 @@ theorem postCanonicalExact :
           Minidregg.Theory.DeployedMaterializerWitness.effectCell,
           Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
           materialize]
-        rw [FieldStore.write_other _ (by simpa [creditKey] using credit)]
-        rw [FieldStore.write_other _ (by simpa [debitKey] using debit)]
+        rw [FieldStore.write_other _ (by simpa [creditKey] using (Ne.symm credit))]
+        rw [FieldStore.write_other _ (by simpa [debitKey] using (Ne.symm debit))]
         rfl
       have leftAbsent :
           (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
