@@ -13,7 +13,9 @@ fn compiler_library(name: &str) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-    path.is_absolute().then_some(path).filter(|path| path.is_file())
+    path.is_absolute()
+        .then_some(path)
+        .filter(|path| path.is_file())
 }
 
 fn main() {
@@ -49,8 +51,8 @@ fn main() {
         )
     });
 
-    let link_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"))
-        .join("sqlite-link");
+    let link_dir =
+        PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR")).join("sqlite-link");
     fs::create_dir_all(&link_dir).expect("create private SQLite link directory");
     let alias = link_dir.join("libsqlite3.so");
     if !Path::new(&alias).is_file() {
