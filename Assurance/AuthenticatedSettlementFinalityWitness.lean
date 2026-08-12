@@ -175,8 +175,9 @@ noncomputable def authority :
   have readExact :
       liveLogical.fields (.revoked oldKeyRevocation) = some false := by
     unfold liveLogical
-    simp [subject0, subject1, subject2, governancePolicy,
-      oldKeyRevocation, newKeyRevocation]
+    rw [FieldStore.write_other (different := by
+      simp [oldKeyRevocation, newKeyRevocation])]
+    rw [FieldStore.write_self]
   change (liveLogical.fields (.revoked oldKeyRevocation)).getD false = false
   rw [readExact]
   rfl
@@ -211,9 +212,14 @@ noncomputable def authority :
     isRevoked rotatedCell newKeyRevocation = false := by
   have readExact :
       rotatedLogical.fields (.revoked newKeyRevocation) = some false := by
-    unfold rotatedLogical liveLogical
-    simp [subject0, subject1, subject2, governancePolicy,
-      oldKeyRevocation, newKeyRevocation]
+    unfold rotatedLogical
+    rw [FieldStore.write_other (different := by
+      simp [oldKeyRevocation, newKeyRevocation])]
+    rw [FieldStore.write_other (different := by simp)]
+    rw [FieldStore.write_other (different := by simp)]
+    rw [FieldStore.write_other (different := by simp)]
+    unfold liveLogical
+    rw [FieldStore.write_self]
   change (rotatedLogical.fields (.revoked newKeyRevocation)).getD false = false
   rw [readExact]
   rfl

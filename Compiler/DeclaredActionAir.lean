@@ -196,7 +196,6 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
       ((publicBytes context declaration).get index).toNat := by
   unfold assignment byteWire
   rw [dif_pos index.isLt]
-  rfl
 
 @[simp] theorem assignment_expected {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
@@ -204,9 +203,22 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
     (index : Fin (observations declaration fields).length) :
     assignment context declaration fields (expectedWire index) =
       optionCode (observationAt declaration fields index).expected := by
+  have notByte : ¬ (expectedWire
+      (publicWidth := (publicBytes context declaration).length) index).val <
+      (publicBytes context declaration).length := by
+    change ¬ ((publicBytes context declaration).length + index.val <
+      (publicBytes context declaration).length)
+    omega
+  have expectedBound : (expectedWire
+      (publicWidth := (publicBytes context declaration).length) index).val <
+      (publicBytes context declaration).length +
+        (observations declaration fields).length := by
+    change (publicBytes context declaration).length + index.val <
+      (publicBytes context declaration).length +
+        (observations declaration fields).length
+    omega
   unfold assignment
-  rw [dif_neg (by simp [expectedWire]),
-    dif_pos (by simp [expectedWire]; omega)]
+  rw [dif_neg notByte, dif_pos expectedBound]
   congr 2
   apply Fin.ext
   simp
@@ -217,9 +229,24 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
     (index : Fin (observations declaration fields).length) :
     assignment context declaration fields (observedWire index) =
       optionCode (observationAt declaration fields index).observed := by
+  have notByte : ¬ (observedWire
+      (publicWidth := (publicBytes context declaration).length) index).val <
+      (publicBytes context declaration).length := by
+    change ¬ ((publicBytes context declaration).length +
+      (observations declaration fields).length + index.val <
+        (publicBytes context declaration).length)
+    omega
+  have notExpected : ¬ (observedWire
+      (publicWidth := (publicBytes context declaration).length) index).val <
+      (publicBytes context declaration).length +
+        (observations declaration fields).length := by
+    change ¬ ((publicBytes context declaration).length +
+      (observations declaration fields).length + index.val <
+        (publicBytes context declaration).length +
+          (observations declaration fields).length)
+    omega
   unfold assignment
-  rw [dif_neg (by simp [observedWire]),
-    dif_neg (by simp [observedWire]; omega)]
+  rw [dif_neg notByte, dif_neg notExpected]
   congr 2
   apply Fin.ext
   simp
@@ -399,9 +426,9 @@ theorem descriptor_accepts_iff_run {kind : ResourceKind}
         (system context declaration fields)).mpr accepted
     refine ⟨wireValues, ?_, holds⟩
     intro index
-    exact (pinned (byteWire
-      (guardCount := (observations declaration fields).length) index)).trans
-      (assignment_byte context declaration fields index)
+    have pinnedByte := pinned (byteWire
+      (guardCount := (observations declaration fields).length) index)
+    simpa only [byteWire, assignment_byte] using pinnedByte
 
 /-- Proof-relevant generated witness.  The original variable assignment is
 computable (`assignment`); the existing emit completeness theorem supplies the
@@ -451,7 +478,7 @@ theorem generated_public_bytes_exact {kind : ResourceKind}
         ((publicBytes context declaration).get index).toNat < babyBearP :=
       lt_of_lt_of_le (UInt8.toNat_lt _) (by norm_num [babyBearP])
     rw [Nat.mod_eq_of_lt byteLt]
-    exact UInt8.ofNat_toNat _
+    exact UInt8.ofNat_toNat
 
 /-! ## Axiom audit -/
 
