@@ -71,7 +71,7 @@ theorem rs_proximityGap_UD_sharp [Nonempty ι] [Fintype F]
         comb ((affineGenerator F).gen γ) f = f 0 + γ • f 1 :=
       fun γ => funext fun x => by rw [comb_affineGenerator]; rfl
     have hfilter :
-        (Finset.univ.filter fun γ : F =>
+        (Finset.univ.filter fun γ : (affineGenerator F).Seed =>
           close δ (reedSolomonCode dom d)
             (comb ((affineGenerator F).gen γ) f)) = A := by
       rw [hA]
@@ -173,7 +173,7 @@ theorem bad_line_pr_eq_one_fifth :
         (comb r ![badWord, negBadWord])) = 1 / 5 := by
   classical
   have hfilter :
-      (Finset.univ.filter fun γ : ZMod 5 =>
+      (Finset.univ.filter fun γ : (affineGenerator (ZMod 5)).Seed =>
         close (1 / 8 : ℝ) (reedSolomonCode dom₅ 2)
           (comb ((affineGenerator (ZMod 5)).gen γ)
             ![badWord, negBadWord])) = badSet := by
