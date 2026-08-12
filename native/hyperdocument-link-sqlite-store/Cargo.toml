@@ -1,0 +1,16 @@
+[package]
+name = "minidregg-hyperdocument-link-sqlite-store"
+version = "0.1.0"
+edition = "2021"
+description = "Fallible SQLite transaction transport for Lean-owned Hyperdocument link bytes."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "minidregg_hyperdocument_link_sqlite_store"
+path = "src/lib.rs"
+
+[[bin]]
+name = "minidregg-link-sqlite-store"
+path = "src/main.rs"
+
+[dependencies]
