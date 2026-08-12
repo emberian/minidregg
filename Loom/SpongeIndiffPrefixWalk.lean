@@ -39,7 +39,6 @@ theorem programPrefixes_preserves_lookup
       intro rateCoins capacityCoins result key value hrun hlookup
       cases rateCoins <;> cases capacityCoins <;>
         simp [programPrefixes] at hrun
-      injection hrun with hresult
       subst result
       exact hlookup
   | cons x xs ih =>
@@ -101,7 +100,6 @@ theorem programPrefixes_final_walk
       intro rateCoins capacityCoins result hrun
       cases rateCoins <;> cases capacityCoins <;>
         simp [programPrefixes] at hrun
-      injection hrun with hresult
       subst result
       rfl
   | cons x xs ih =>
@@ -131,7 +129,9 @@ theorem programPrefixes_final_walk
                       (ro := (ro.respond (seen ++ [x]) edgeValue.1).2)
                       (primitive := primitive) (state := edgeValue)
                       (seen := seen ++ [x]) hrun
-                    rw [walkFrom_cons, hfirst, htail]
+                    rw [walkFrom_cons, hfirst]
+                    simp only
+                    exact htail
                   · rw [if_neg hagree] at hrun
                     contradiction
               | none =>
@@ -160,7 +160,9 @@ theorem programPrefixes_final_walk
                     (primitive := primitiveReply.2)
                     (state := primitiveReply.1) (seen := seen ++ [x])
                     htailRun
-                  rw [walkFrom_cons, hfirst, htail]
+                  rw [walkFrom_cons, hfirst]
+                  simp only
+                  exact htail
 
 /-- Public construction starts at the IV, so a successful construction's
 final primitive table realizes the entire public message exactly. -/
