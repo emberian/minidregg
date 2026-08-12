@@ -221,7 +221,8 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
   split
   · next hbyte => exact False.elim (notByte hbyte)
   · split
-    · congr 2
+    · apply congrArg GuardObservation.expected
+      apply congrArg (observationAt declaration fields)
       apply Fin.ext
       simp [expectedWire]
     · next hexpected => exact False.elim (hexpected expectedBound)
@@ -253,7 +254,8 @@ def assignment {kind : ResourceKind} {target : ResourceId kind}
   · next hbyte => exact False.elim (notByte hbyte)
   · split
     · next hexpected => exact False.elim (notExpected hexpected)
-    · congr 2
+    · apply congrArg GuardObservation.observed
+      apply congrArg (observationAt declaration fields)
       apply Fin.ext
       simp [observedWire]
 
@@ -434,8 +436,9 @@ theorem descriptor_accepts_iff_run {kind : ResourceKind}
     intro index
     have pinnedByte := pinned (byteWire
       (guardCount := (observations declaration fields).length) index)
-    rw [assignment_byte context declaration fields index] at pinnedByte
-    simpa only [byteWire] using pinnedByte
+    unfold assignment byteWire at pinnedByte
+    rw [dif_pos index.isLt] at pinnedByte
+    exact pinnedByte
 
 /-- Proof-relevant generated witness.  The original variable assignment is
 computable (`assignment`); the existing emit completeness theorem supplies the
