@@ -43,9 +43,15 @@ theorem idealFreshAt_of_not_mem_avoid {q : Nat}
   unfold idealCapacityAvoid at h
   unfold IdealFreshAt
   cases hmove : D.move st.ans with
-  | constr x xs => simpa using h
-  | fwd s => simpa using h
-  | inv t => simpa using h
+  | constr x xs =>
+      rw [hmove] at h
+      trivial
+  | fwd s =>
+      rw [hmove] at h
+      simpa [Finset.mem_union] using h
+  | inv t =>
+      rw [hmove] at h
+      simpa using h
 
 omit [AddCommGroup Rate] [Fintype Rate] [Fintype Cap] [DecidableEq Rate]
     [DecidableEq Cap] in
@@ -104,7 +110,7 @@ lemma capsOf_length (os : Oracle (Rate × Cap) (Rate × Cap))
   simp [capsOf]
   omega
 
-omit [AddCommGroup Rate] [Fintype Rate] [DecidableEq Rate] in
+omit [AddCommGroup Rate] [Fintype Rate] [Fintype Cap] [DecidableEq Rate] in
 /-- Deduplication can only shrink the capacity footprint. -/
 lemma capsOf_toFinset_card_le (os : Oracle (Rate × Cap) (Rate × Cap))
     (iv : Rate × Cap) :
