@@ -175,6 +175,7 @@ theorem first_step_exact :
     Nat.reduceAdd, List.drop, deferredIdealStepWithCoin, idealStep,
     workCoinAsIdeal, fullMessageRo, afterConstruction]
   rw [Oracle.respond_fresh_fst (Oracle.lookup_empty [1, 1])]
+  rfl
 
 /-- The revealed first prefix is still fresh in the deferred primitive table,
 and is programmed with the eager coordinate-0 pair after reindexing. -/
@@ -191,7 +192,9 @@ theorem revealed_prefix_answer :
     unfold fullMessageRo
     rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
   unfold simFwdRO
-  rw [hcompletion, Oracle.respond_fresh_fst hfresh,
+  rw [hcompletion]
+  simp only
+  rw [Oracle.respond_fresh_fst hfresh,
     Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
 
 end SpongeDeferredWorkExample
