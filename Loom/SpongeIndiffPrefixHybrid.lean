@@ -141,22 +141,22 @@ end PrefixHybrid
 
 namespace SpongePrefixHybridExample
 
-def iv : ZMod 2 × Fin 5 := SpongePrefixProgrammingExample.iv
+def iv : ZMod 2 × Nat := SpongePrefixProgrammingExample.iv
 
-def constructionThenForward : Distinguisher (ZMod 2) (Fin 5) 2 where
+def constructionThenForward : Distinguisher (ZMod 2) Nat 2 where
   move answers :=
     if answers.isEmpty then .constr 1 [1] else .fwd (1, 0)
   out answers := answers.length = 2
 
-def coins : Fin 2 → PrefixHybridCoins (ZMod 2) (Fin 5)
+def coins : Fin 2 → PrefixHybridCoins (ZMod 2) Nat
   | 0 => .construction [1, 0] [1, 2]
   | 1 => .primitive (0, 3)
 
-noncomputable def firstState : PrefixHybridState (ZMod 2) (Fin 5) :=
+noncomputable def firstState : PrefixHybridState (ZMod 2) Nat :=
   ⟨SpongePrefixProgrammingExample.result.ro,
     SpongePrefixProgrammingExample.result.primitive, [.rate 0], 2⟩
 
-noncomputable def finalState : PrefixHybridState (ZMod 2) (Fin 5) :=
+noncomputable def finalState : PrefixHybridState (ZMod 2) Nat :=
   ⟨SpongePrefixProgrammingExample.result.ro,
     SpongePrefixProgrammingExample.result.primitive,
     [.rate 0, .block (1, 1)], 3⟩

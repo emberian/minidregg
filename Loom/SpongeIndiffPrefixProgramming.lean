@@ -180,9 +180,9 @@ end PrefixProgramming
 
 namespace SpongePrefixProgrammingExample
 
-def iv : ZMod 2 × Fin 5 := (0, 0)
+def iv : ZMod 2 × Nat := (0, 0)
 
-noncomputable def result : PrefixProgramState (ZMod 2) (Fin 5) :=
+noncomputable def result : PrefixProgramState (ZMod 2) Nat :=
   ⟨(0, 2),
     ((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond [1, 1] 0).2,
     ((Oracle.empty.respond (1, 0) (1, 1)).2.respond (0, 1) (0, 2)).2⟩
@@ -194,14 +194,14 @@ theorem two_prefixes_programmed :
       some result := by
   have hz : (1 : ZMod 2) + 1 = 0 := by decide
   have hfirstFresh :
-      (Oracle.empty : Oracle (ZMod 2 × Fin 5) (ZMod 2 × Fin 5)).lookup
+      (Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).lookup
         (1, 0) = none := Oracle.lookup_empty _
   have hsecondFresh :
-      (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.lookup
+      (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.lookup
         (0, 1) = none := by
     rw [Oracle.lookup_respond_ne (O := Oracle.empty)
-      (q := ((1 : ZMod 2), (0 : Fin 5)))
-      (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
+      (q := ((1 : ZMod 2), (0 : Nat)))
+      (q' := ((0 : ZMod 2), (1 : Nat))) (by decide) (1, 1),
       Oracle.lookup_empty]
   have hroSecondFresh :
       (Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.lookup [1, 1] = none := by
@@ -210,15 +210,15 @@ theorem two_prefixes_programmed :
       (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
       Oracle.lookup_empty]
   have hsecondFresh' :
-      (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.lookup
-        (0, ((1 : ZMod 2), (1 : Fin 5)).2) = none := by
+      (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.lookup
+        (0, ((1 : ZMod 2), (1 : Nat)).2) = none := by
     simpa using hsecondFresh
   have hroSecondValue :
       ((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond [1, 1] 0).1 =
         0 := Oracle.respond_fresh_fst hroSecondFresh 0
   have hprimitiveSecondValue :
-      ((Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2.respond
-        ((0 : ZMod 2), (1 : Fin 5)) (0, 2)).1 = (0, 2) :=
+      ((Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.respond
+        ((0 : ZMod 2), (1 : Nat)) (0, 2)).1 = (0, 2) :=
     Oracle.respond_fresh_fst hsecondFresh (0, 2)
   unfold iv
   unfold programConstruction
@@ -258,9 +258,9 @@ theorem second_prefix_lookup : result.ro.lookup [1, 1] = some 0 := by
 theorem first_edge_lookup : result.primitive.lookup (1, 0) = some (1, 1) := by
   unfold result
   rw [Oracle.lookup_respond_ne
-    (O := (Oracle.empty.respond ((1 : ZMod 2), (0 : Fin 5)) (1, 1)).2)
-    (q := ((0 : ZMod 2), (1 : Fin 5)))
-    (q' := ((1 : ZMod 2), (0 : Fin 5))) (by decide) (0, 2)]
+    (O := (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2)
+    (q := ((0 : ZMod 2), (1 : Nat)))
+    (q' := ((1 : ZMod 2), (0 : Nat))) (by decide) (0, 2)]
   rw [Oracle.lookup_respond_self,
     Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
 
@@ -269,8 +269,8 @@ theorem second_edge_lookup : result.primitive.lookup (0, 1) = some (0, 2) := by
   rw [Oracle.lookup_respond_self]
   rw [Oracle.respond_fresh_fst]
   rw [Oracle.lookup_respond_ne (O := Oracle.empty)
-    (q := ((1 : ZMod 2), (0 : Fin 5)))
-    (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
+    (q := ((1 : ZMod 2), (0 : Nat)))
+    (q' := ((0 : ZMod 2), (1 : Nat))) (by decide) (1, 1),
     Oracle.lookup_empty]
 
 theorem first_prefix_walk :
@@ -291,7 +291,7 @@ theorem full_prefix_walk :
   simp only
   rw [walkFrom_cons]
   have hsecond : result.primitive.lookup
-      (((1 : ZMod 2), (1 : Fin 5)).1 + 1, ((1 : ZMod 2), (1 : Fin 5)).2) =
+      (((1 : ZMod 2), (1 : Nat)).1 + 1, ((1 : ZMod 2), (1 : Nat)).2) =
         some (0, 2) := by
     simpa using second_edge_lookup
   rw [hsecond]
