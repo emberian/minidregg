@@ -218,6 +218,7 @@ noncomputable def IdealAdaptiveCapacityFailure {q : Nat}
       (fun j => ((coins j).1, (coins j).2.1))
       (fun j => (coins j).2.2) i
 
+omit [DecidableEq Rate] in
 /-- **Full ideal-coin transport.**  The conditional adaptive capacity price
 holds on the exact coin space consumed by `idealRun`, not merely after fixing
 the other two coin coordinates by hand. -/
