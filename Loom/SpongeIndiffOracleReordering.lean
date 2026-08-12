@@ -113,6 +113,55 @@ theorem respond_distinct_commute (oracle : Oracle Q C) {first second : Q}
     · rw [if_neg hfirst]
       rw [lookup_respond, if_neg hfirst, lookup_respond, if_neg hsecond]
 
+/-- Apply a finite schedule of explicit lazy-response coins. -/
+noncomputable def respondAll (oracle : Oracle Q C) :
+    List (Q × C) → Oracle Q C
+  | [] => oracle
+  | entry :: entries => respondAll (oracle.respond entry.1 entry.2).2 entries
+
+/-- Running the same response schedule preserves lookup equivalence of the
+starting handlers. -/
+theorem LookupEquivalent.respondAll {left right : Oracle Q C}
+    (h : LookupEquivalent left right) (entries : List (Q × C)) :
+    LookupEquivalent (respondAll left entries) (respondAll right entries) := by
+  induction entries generalizing left right with
+  | nil => exact h
+  | cons entry entries ih =>
+      exact ih (h.respond entry.1 entry.2)
+
+/-- One adjacent swap of distinct sampled queries preserves the denoted
+partial function, including after any common suffix schedule. -/
+theorem respondAll_swap_distinct (oracle : Oracle Q C)
+    (first second : Q × C) (rest : List (Q × C))
+    (hne : first.1 ≠ second.1) :
+    LookupEquivalent
+      (respondAll oracle (first :: second :: rest))
+      (respondAll oracle (second :: first :: rest)) := by
+  apply LookupEquivalent.respondAll
+  exact respond_distinct_commute oracle hne first.2 second.2
+
+/-- Any permutation of a schedule with pairwise-distinct query keys preserves
+the final lookup semantics.  This is the deterministic core of moving eager
+construction-prefix samples to later reveal points. -/
+theorem respondAll_perm_of_nodup (oracle : Oracle Q C)
+    {left right : List (Q × C)} (hperm : left.Perm right)
+    (hnodup : (left.map Prod.fst).Nodup) :
+    LookupEquivalent (respondAll oracle left) (respondAll oracle right) := by
+  induction hperm generalizing oracle with
+  | nil => exact LookupEquivalent.refl oracle
+  | @cons entry left right hperm ih =>
+      simp only [List.map_cons, List.nodup_cons] at hnodup
+      exact ih (oracle := (oracle.respond entry.1 entry.2).2) hnodup.2
+  | @swap first second entries =>
+      simp only [List.map_cons, List.nodup_cons, List.mem_cons] at hnodup
+      exact respondAll_swap_distinct oracle first second entries
+        (fun heq => hnodup.1 (Or.inl heq.symm))
+  | @trans left middle right hlm hmr ihlm ihmr =>
+      have hmiddle : (middle.map Prod.fst).Nodup := by
+        exact (hlm.map Prod.fst).nodup_iff.mp hnodup
+      exact (ihlm (oracle := oracle) hnodup).trans
+        (ihmr (oracle := oracle) hmiddle)
+
 end Reordering
 
 end Oracle
@@ -141,6 +190,20 @@ theorem exact_values :
     rw [Oracle.respond_fresh_fst]
     rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
 
+def scheduleA : List (Nat × Bool) := [(7, true), (9, false), (11, true)]
+def scheduleB : List (Nat × Bool) := [(11, true), (7, true), (9, false)]
+
+theorem schedule_perm : scheduleA.Perm scheduleB := by decide
+
+theorem schedule_keys_nodup : (scheduleA.map Prod.fst).Nodup := by decide
+
+theorem reordered_schedule_agrees :
+    Oracle.LookupEquivalent
+      (Oracle.respondAll Oracle.empty scheduleA)
+      (Oracle.respondAll Oracle.empty scheduleB) :=
+  Oracle.respondAll_perm_of_nodup Oracle.empty schedule_perm
+    schedule_keys_nodup
+
 end SpongeOracleReorderingExample
 
 /-- info: 'Minidregg.Loom.Oracle.respond_distinct_commute' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -148,5 +211,8 @@ end SpongeOracleReorderingExample
 /-- info: 'Minidregg.Loom.SpongeOracleReorderingExample.lookups_agree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms SpongeOracleReorderingExample.lookups_agree
+/-- info: 'Minidregg.Loom.Oracle.respondAll_perm_of_nodup' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Oracle.respondAll_perm_of_nodup
 
 end Minidregg.Loom
