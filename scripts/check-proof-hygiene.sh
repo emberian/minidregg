@@ -5,7 +5,13 @@
 # that footprint into a regression gate.
 set -euo pipefail
 
-repo_root=$(git rev-parse --show-toplevel)
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+if repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null); then
+  in_git_worktree=true
+else
+  repo_root=$(cd "$script_dir/.." && pwd -P)
+  in_git_worktree=false
+fi
 cd "$repo_root"
 
 scan_file() {
@@ -54,13 +60,18 @@ fi
 status=0
 file_count=0
 print_count=0
+if $in_git_worktree; then
+  file_stream=(git ls-files -z -- '*.lean')
+else
+  file_stream=(find . -path './.lake' -prune -o -type f -name '*.lean' -print0)
+fi
 while IFS= read -r -d '' file; do
   file_count=$((file_count + 1))
   count=$(awk '/^[[:space:]]*#print[[:space:]]+axioms([[:space:]]|$)/ { n++ }
     END { print n + 0 }' "$file")
   print_count=$((print_count + count))
   scan_file "$file" || status=1
-done < <(git ls-files -z -- '*.lean')
+done < <("${file_stream[@]}")
 
 if [[ "$status" -ne 0 ]]; then
   echo 'proof-hygiene: FAILED' >&2
@@ -69,4 +80,3 @@ fi
 
 printf 'proof-hygiene: PASS (%d tracked Lean files, %d guarded axiom footprints)\n' \
   "$file_count" "$print_count"
-
