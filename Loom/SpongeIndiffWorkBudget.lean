@@ -51,8 +51,8 @@ distinguisher sees exactly the first `j` answers.  Quantifying over all answer
 traces below gives an input-independent worst-case primitive budget. -/
 def Distinguisher.primitiveWorkOn {q : Nat}
     (D : Distinguisher Rate Cap q) (answers : Fin q → SpAnswer Rate Cap) : Nat :=
-  (List.finRange q).sum fun j =>
-    (D.move ((List.ofFn answers).take j)).primitiveCalls
+  ((List.finRange q).map fun j =>
+    (D.move ((List.ofFn answers).take j)).primitiveCalls).sum
 
 /-- `work` bounds every adaptive answer trace's total primitive evaluations.
 This is the budget which belongs in capacity and permutation/function terms. -/
@@ -83,14 +83,8 @@ theorem primitiveWorkOn_eq_queries_of_singleBlock {q : Nat}
     (answers : Fin q → SpAnswer Rate Cap) :
     D.primitiveWorkOn answers = q := by
   unfold Distinguisher.primitiveWorkOn
-  calc
-    (List.finRange q).sum (fun j =>
-        (D.move ((List.ofFn answers).take j)).primitiveCalls)
-        = (List.finRange q).sum (fun _ => 1) := by
-          apply List.sum_congr
-          intro j hj
-          exact primitiveCalls_eq_one_of_singleBlock hsingle _
-    _ = q := by simp
+  simp_rw [primitiveCalls_eq_one_of_singleBlock hsingle]
+  simp
 
 theorem primitiveWorkBound_queries_of_singleBlock {q : Nat}
     {D : Distinguisher Rate Cap q} (hsingle : SingleBlockConstruction D) :
@@ -116,8 +110,7 @@ def oneAnswer : Fin 1 → SpAnswer (ZMod 2) (Fin 3) :=
 one. -/
 theorem longConstruction_work (n : Nat) :
     (longConstruction n).primitiveWorkOn oneAnswer = n + 1 := by
-  simp [Distinguisher.primitiveWorkOn, longConstruction, oneAnswer,
-    SpQuery.primitiveCalls]
+  simp [Distinguisher.primitiveWorkOn, longConstruction, SpQuery.primitiveCalls]
 
 /-- **Counterexample to the old budget interpretation.**  For every positive
 `n`, a one-query distinguisher need not have primitive work at most one. -/
