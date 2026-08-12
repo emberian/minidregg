@@ -614,14 +614,22 @@ structure DeploymentCeiling where
 
 /-! ## Narrow assurance audit -/
 
-#print axioms transition_exact
-#print axioms wrong_root_rejected
-#print axioms expired_rejected
-#print axioms consumed_replay_rejected
-#print axioms terminal_trigger_is_verified_history_root
-#print axioms exact_retry_replays
-#print axioms different_terminal_after_finalize_conflicts
-#print axioms terminal_race_has_no_partial_commit
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.transition_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transition_exact
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.wrong_root_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wrong_root_rejected
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.expired_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms expired_rejected
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.consumed_replay_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms consumed_replay_rejected
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.terminal_trigger_is_verified_history_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms terminal_trigger_is_verified_history_root
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.exact_retry_replays' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms exact_retry_replays
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.different_terminal_after_finalize_conflicts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms different_terminal_after_finalize_conflicts
+/-- info: 'Minidregg.Assurance.HyperdocumentReactiveCarrierWitness.terminal_race_has_no_partial_commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms terminal_race_has_no_partial_commit
 
 end
 

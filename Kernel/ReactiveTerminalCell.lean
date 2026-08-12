@@ -554,12 +554,19 @@ end Witness
 
 /-! Kernel-facing theorem audit. -/
 
-#print axioms Plan.terminal_and_outbox_atomic
-#print axioms Plan.retry_after_install
-#print axioms competing_decision_conflicts
-#print axioms distinct_terminals_mutually_exclusive
-#print axioms physical_step_terminal_atomic
-#print axioms Witness.finalize_commits
-#print axioms Witness.cancel_loses_finalize_race
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.terminal_and_outbox_atomic' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Plan.terminal_and_outbox_atomic
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.retry_after_install' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Plan.retry_after_install
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.competing_decision_conflicts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms competing_decision_conflicts
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.distinct_terminals_mutually_exclusive' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms distinct_terminals_mutually_exclusive
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.physical_step_terminal_atomic' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms physical_step_terminal_atomic
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.finalize_commits' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.finalize_commits
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.cancel_loses_finalize_race' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.cancel_loses_finalize_race
 
 end Minidregg.Kernel.ReactiveTerminalCell

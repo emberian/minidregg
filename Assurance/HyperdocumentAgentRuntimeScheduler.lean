@@ -517,12 +517,18 @@ structure RuntimeCompletion
 
 /-! ## Axiom audit -/
 
-#print axioms finalized_is_exact_link
-#print axioms selected_link_view_is_invalidated
-#print axioms ready_run_accepts
-#print axioms crash_after_then_retry_replays
-#print axioms invalidated_dependency_preflight_rejects
-#print axioms local_store_human_and_agent_same_semantics
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.finalized_is_exact_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalized_is_exact_link
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.selected_link_view_is_invalidated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms selected_link_view_is_invalidated
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.ready_run_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ready_run_accepts
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.crash_after_then_retry_replays' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms crash_after_then_retry_replays
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.invalidated_dependency_preflight_rejects' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms invalidated_dependency_preflight_rejects
+/-- info: 'Minidregg.Assurance.HyperdocumentAgentRuntimeScheduler.local_store_human_and_agent_same_semantics' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms local_store_human_and_agent_same_semantics
 
 end
 

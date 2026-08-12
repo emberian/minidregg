@@ -1087,9 +1087,13 @@ abbrev PhysicalDurabilityCeiling
 
 /-! ## Axiom audit -/
 
-#print axioms subsequent_child_authorization_rejected
-#print axioms first_use_exact_charge
-#print axioms exact_retry_no_double_charge
-#print axioms authority_update_rejects_old_use
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.subsequent_child_authorization_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms subsequent_child_authorization_rejected
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.first_use_exact_charge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms first_use_exact_charge
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.exact_retry_no_double_charge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms exact_retry_no_double_charge
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.authority_update_rejects_old_use' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authority_update_rejects_old_use
 
 end Minidregg.Assurance.DeployedCredentialLifecycle

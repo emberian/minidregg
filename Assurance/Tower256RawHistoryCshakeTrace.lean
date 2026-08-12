@@ -343,10 +343,14 @@ theorem FreshTraceRealization.no_constant_slot
 
 /-! ## Axiom audit -/
 
-#print axioms executedCollision_has_endpoint
-#print axioms FreshTraceRealization.toCollisionRomRealization
-#print axioms no_constant_uniform_256_slot
-#print axioms FreshTraceRealization.no_constant_slot
+/-- info: 'Minidregg.Assurance.Tower256RawHistoryCshakeTrace.executedCollision_has_endpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms executedCollision_has_endpoint
+/-- info: 'Minidregg.Assurance.Tower256RawHistoryCshakeTrace.FreshTraceRealization.toCollisionRomRealization' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FreshTraceRealization.toCollisionRomRealization
+/-- info: 'Minidregg.Assurance.Tower256RawHistoryCshakeTrace.no_constant_uniform_256_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_constant_uniform_256_slot
+/-- info: 'Minidregg.Assurance.Tower256RawHistoryCshakeTrace.FreshTraceRealization.no_constant_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FreshTraceRealization.no_constant_slot
 
 end
 

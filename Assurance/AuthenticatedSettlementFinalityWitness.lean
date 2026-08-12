@@ -491,14 +491,22 @@ structure PhysicalAuthenticatedFinalityRefinement
 
 /-! ## Axiom audit -/
 
-#print axioms currentSigner
-#print axioms voteAccepted
-#print axioms no_other_authenticated_candidate_at_slot
-#print axioms wrong_slot_vote_rejected
-#print axioms rotatedCurrentSigner
-#print axioms rotated_key_handoff_extends_exact_log
-#print axioms stale_key_after_rotation_rejected
-#print axioms revoked_signer_vote_rejected
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.currentSigner' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms currentSigner
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.voteAccepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms voteAccepted
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.no_other_authenticated_candidate_at_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_other_authenticated_candidate_at_slot
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.wrong_slot_vote_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms wrong_slot_vote_rejected
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.rotatedCurrentSigner' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rotatedCurrentSigner
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.rotated_key_handoff_extends_exact_log' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rotated_key_handoff_extends_exact_log
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.stale_key_after_rotation_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stale_key_after_rotation_rejected
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.revoked_signer_vote_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revoked_signer_vote_rejected
 
 end
 end Minidregg.Assurance.AuthenticatedSettlementFinalityWitness

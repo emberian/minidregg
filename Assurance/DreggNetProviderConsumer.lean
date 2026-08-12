@@ -940,9 +940,13 @@ structure DeploymentRefinement
 
 /-! ## Axiom audit for the new load-bearing joints -/
 
-#print axioms different_manifest_changes_provider_key
-#print axioms FeeFirstJob.authorized_exact_split
-#print axioms Witness.completion_retry_is_exact_replay
-#print axioms Witness.no_other_finalized_payload_at_terminal_slot
+/-- info: 'Minidregg.Assurance.DreggNetProviderConsumer.different_manifest_changes_provider_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms different_manifest_changes_provider_key
+/-- info: 'Minidregg.Assurance.DreggNetProviderConsumer.FeeFirstJob.authorized_exact_split' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FeeFirstJob.authorized_exact_split
+/-- info: 'Minidregg.Assurance.DreggNetProviderConsumer.Witness.completion_retry_is_exact_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.completion_retry_is_exact_replay
+/-- info: 'Minidregg.Assurance.DreggNetProviderConsumer.Witness.no_other_finalized_payload_at_terminal_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.no_other_finalized_payload_at_terminal_slot
 
 end Minidregg.Assurance.DreggNetProviderConsumer

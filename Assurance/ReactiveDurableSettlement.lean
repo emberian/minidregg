@@ -444,13 +444,20 @@ end Lifecycle
 
 /-! Assurance-facing theorem audit. -/
 
-#print axioms FinalizeSettlement.trigger_is_authenticated_observation
-#print axioms FinalizeSettlement.semantic_terminal_outbox_atomic
-#print axioms FinalizeSettlement.retry_after_install
-#print axioms FinalizeSettlement.alternative_after_finalize_conflicts
-#print axioms FinalizeSettlement.installed_exact
-#print axioms FinalizeSettlement.FeeFirstBinding.admitted_body_has_zero_fee
-#print axioms FinalizeSettlement.physical_step_atomic
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.trigger_is_authenticated_observation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.trigger_is_authenticated_observation
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.semantic_terminal_outbox_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.semantic_terminal_outbox_atomic
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.retry_after_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.retry_after_install
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.alternative_after_finalize_conflicts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.alternative_after_finalize_conflicts
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.installed_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.installed_exact
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.FeeFirstBinding.admitted_body_has_zero_fee' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.FeeFirstBinding.admitted_body_has_zero_fee
+/-- info: 'Minidregg.Assurance.ReactiveDurableSettlement.FinalizeSettlement.physical_step_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms FinalizeSettlement.physical_step_atomic
 
 end
 

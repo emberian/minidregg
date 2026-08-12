@@ -601,10 +601,15 @@ structure DeploymentRefinement
 
 /-! ## Axiom audit -/
 
-#print axioms stale_key_epoch_rejected
-#print axioms revoked_signer_rejected
-#print axioms accepted_candidate_unique_across_authorities_at_slot
-#print axioms accepted_candidate_unique_at_slot
-#print axioms no_conflicting_authenticated_finalization
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.stale_key_epoch_rejected' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stale_key_epoch_rejected
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.revoked_signer_rejected' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revoked_signer_rejected
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.accepted_candidate_unique_across_authorities_at_slot' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_candidate_unique_across_authorities_at_slot
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.accepted_candidate_unique_at_slot' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_candidate_unique_at_slot
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.no_conflicting_authenticated_finalization' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_conflicting_authenticated_finalization
 
 end Minidregg.Kernel.AuthenticatedSettlementFinality

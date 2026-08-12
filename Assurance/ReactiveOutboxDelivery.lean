@@ -338,9 +338,12 @@ abbrev AgentRuntimeProgress
 
 /-! ## Axiom audit -/
 
-#print axioms installed_message_exact
-#print axioms duplicate_delivery_replays
-#print axioms accepted_ack_binds_installed_outbox
+/-- info: 'Minidregg.Assurance.ReactiveOutboxDelivery.AgentRuntime.installed_message_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms installed_message_exact
+/-- info: 'Minidregg.Assurance.ReactiveOutboxDelivery.AgentRuntime.duplicate_delivery_replays' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms duplicate_delivery_replays
+/-- info: 'Minidregg.Assurance.ReactiveOutboxDelivery.AgentRuntime.accepted_ack_binds_installed_outbox' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_ack_binds_installed_outbox
 
 end AgentRuntime
 

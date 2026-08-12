@@ -372,7 +372,9 @@ structure ProgressRefinement
 
 /-! ## Axiom audit -/
 
-#print axioms duplicate_retry_replays
-#print axioms accepted_ack_binds_exact_outbox
+/-- info: 'Minidregg.Kernel.OutboxDelivery.duplicate_retry_replays' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms duplicate_retry_replays
+/-- info: 'Minidregg.Kernel.OutboxDelivery.accepted_ack_binds_exact_outbox' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms accepted_ack_binds_exact_outbox
 
 end Minidregg.Kernel.OutboxDelivery
