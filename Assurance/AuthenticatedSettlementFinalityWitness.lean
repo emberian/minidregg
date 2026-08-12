@@ -172,8 +172,13 @@ noncomputable def authority :
 
 @[simp] theorem live_old_key_not_revoked :
     isRevoked liveCell oldKeyRevocation = false := by
+  have revocationFieldsDifferent :
+      AuthorityField.revoked oldKeyRevocation ≠
+        AuthorityField.revoked newKeyRevocation := by
+    decide
   simp [liveCell_logical, liveLogical, isRevoked, subject0, subject1, subject2,
-    governancePolicy, oldKeyRevocation, newKeyRevocation]
+    governancePolicy, oldKeyRevocation, newKeyRevocation,
+    revocationFieldsDifferent]
 
 @[simp] theorem rotated_subject_epoch (node : Node) :
     subjectKeyEpochAt rotatedCell (signerSubject node) = 3 := by
@@ -203,9 +208,13 @@ noncomputable def authority :
 
 @[simp] theorem rotated_new_key_not_revoked :
     isRevoked rotatedCell newKeyRevocation = false := by
+  have revocationFieldsDifferent :
+      AuthorityField.revoked newKeyRevocation ≠
+        AuthorityField.revoked oldKeyRevocation := by
+    decide
   simp [rotatedCell_logical, rotatedLogical, liveLogical, isRevoked,
     subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+    newKeyRevocation, revocationFieldsDifferent]
 
 @[simp] theorem final_policy_epoch :
     policyEpochAt finalCell governancePolicy = 6 := by

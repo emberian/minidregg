@@ -16,8 +16,10 @@ import Kernel.ReactiveTerminalCell
 namespace Minidregg.Kernel.OutboxDelivery
 
 open Minidregg.Kernel.DurableCommitProtocol
+open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.ReactiveTerminalCell
 open Minidregg.Theory
+open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
@@ -351,7 +353,7 @@ structure ProgressRefinement
     (ScheduledWithin NetworkDeliveredWithin AckReturnedWithin :
       Attempt → Nat → Prop)
     (EventuallyDeliveredWithin EventuallyAcknowledgedWithin :
-      Message rootBytes → Nat → Prop) : Prop where
+      Message rootBytes → Nat → Prop) where
   schedulerCeiling : Nat
   networkCeiling : Nat
   acknowledgementCeiling : Nat

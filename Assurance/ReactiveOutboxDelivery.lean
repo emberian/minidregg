@@ -318,7 +318,7 @@ abbrev AgentRuntimeProgress
     (ScheduledWithin NetworkDeliveredWithin AckReturnedWithin :
       Attempt → Nat → Prop)
     (EventuallyDeliveredWithin EventuallyAcknowledgedWithin :
-      Message Scheduler.Link.materializer.rootBytes → Nat → Prop) : Prop :=
+      Message Scheduler.Link.materializer.rootBytes → Nat → Prop) : Type :=
   ProgressRefinement message Enabled ScheduledWithin NetworkDeliveredWithin
     AckReturnedWithin EventuallyDeliveredWithin EventuallyAcknowledgedWithin
 
