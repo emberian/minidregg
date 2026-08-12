@@ -98,26 +98,28 @@ theorem lazyHybridStep_work_exact {q : Nat}
       rw [hquery] at h
       dsimp only at h
       cases hcoins : (coins j).blocks with
-      | nil => contradiction
+      | nil => rw [hcoins] at h; contradiction
       | cons coin rest =>
           cases rest with
           | nil =>
+              rw [hcoins] at h
               injection h with hnext
               subst next
               rfl
-          | cons coin' rest => contradiction
+          | cons coin' rest => rw [hcoins] at h; contradiction
   | inv t =>
       rw [hquery] at h
       dsimp only at h
       cases hcoins : (coins j).blocks with
-      | nil => contradiction
+      | nil => rw [hcoins] at h; contradiction
       | cons coin rest =>
           cases rest with
           | nil =>
+              rw [hcoins] at h
               injection h with hnext
               subst next
               rfl
-          | cons coin' rest => contradiction
+          | cons coin' rest => rw [hcoins] at h; contradiction
 
 /-- Every successful step appends exactly one public answer. -/
 theorem lazyHybridStep_ans_length {q : Nat}
@@ -141,21 +143,21 @@ theorem lazyHybridStep_ans_length {q : Nat}
   | fwd s =>
       rw [hquery] at h
       dsimp only at h
-      cases (coins j).blocks with
-      | nil => contradiction
+      cases hcoins : (coins j).blocks with
+      | nil => rw [hcoins] at h; contradiction
       | cons coin rest =>
           cases rest with
-          | nil => injection h with hnext; subst next; simp
-          | cons coin' rest => contradiction
+          | nil => rw [hcoins] at h; injection h with hnext; subst next; simp
+          | cons coin' rest => rw [hcoins] at h; contradiction
   | inv t =>
       rw [hquery] at h
       dsimp only at h
-      cases (coins j).blocks with
-      | nil => contradiction
+      cases hcoins : (coins j).blocks with
+      | nil => rw [hcoins] at h; contradiction
       | cons coin rest =>
           cases rest with
-          | nil => injection h with hnext; subst next; simp
-          | cons coin' rest => contradiction
+          | nil => rw [hcoins] at h; injection h with hnext; subst next; simp
+          | cons coin' rest => rw [hcoins] at h; contradiction
 
 /-- Fold the adaptive hybrid over the same external round indices as the
 landed real and ideal games. -/
@@ -186,26 +188,52 @@ def coins : Fin 2 → LazyHybridCoins (ZMod 2) (Fin 4)
   | 0 => ⟨1, [(0, 1), (1, 2)]⟩
   | 1 => ⟨0, [(1, 3)]⟩
 
+def firstState : LazyHybridState (ZMod 2) (Fin 4) :=
+  ⟨SpongeLazyConstructionExample.coupledResult.ro,
+    SpongeLazyConstructionExample.coupledResult.primitive,
+    [.rate 1], 2⟩
+
+def finalState : LazyHybridState (ZMod 2) (Fin 4) :=
+  ⟨SpongeLazyConstructionExample.coupledResult.ro,
+    SpongeLazyConstructionExample.coupledResult.primitive,
+    [.rate 1, .block (0, 1)], 3⟩
+
 /-- The first construction succeeds, returns the RO answer `1`, and records
 two primitive calls. -/
 theorem first_step_exact :
     lazyHybridStep constructionThenForward iv coins LazyHybridState.empty 0 =
-      .ok ⟨
-        (Oracle.empty.respond ([1, 1] : List (ZMod 2)) 1).2,
-        ((Oracle.empty.respond (1, 0) (0, 1)).2.respond (1, 1) (1, 2)).2,
-        [.rate 1], 2⟩ := by
-  simp [lazyHybridStep, constructionThenForward, coins, coupledConstruction,
-    lazyAbsorb, iv, Oracle.respond_fresh_fst, Oracle.lookup_respond_ne]
+      .ok firstState := by
+  simp only [lazyHybridStep, constructionThenForward, LazyHybridState.empty,
+    List.isEmpty_nil, ↓reduceIte, coins, Fin.isValue, List.length_cons,
+    List.length_nil, Nat.reduceAdd, Nat.reduceEqDiff, ↓reduceIte]
+  rw [SpongeLazyConstructionExample.two_block_coupled_exact]
+  rfl
+
+theorem first_edge_lookup :
+    SpongeLazyConstructionExample.coupledResult.primitive.lookup (1, 0) =
+      some (0, 1) := by
+  unfold SpongeLazyConstructionExample.coupledResult
+  rw [Oracle.lookup_respond_ne _ (by decide)]
+  rw [Oracle.lookup_respond_self,
+    Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
+
+theorem second_step_exact :
+    lazyHybridStep constructionThenForward iv coins firstState 1 =
+      .ok finalState := by
+  simp only [lazyHybridStep, constructionThenForward, firstState,
+    List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, coins, Fin.isValue]
+  rw [Oracle.respond_hit first_edge_lookup]
+  rfl
 
 /-- The subsequent public forward query replays the first hidden construction
 edge `(1,0) ↦ (0,1)`; its fresh supplied coin `(1,3)` is ignored. -/
 theorem construction_first_forward_replays :
-    ∃ final,
-      lazyHybridRun constructionThenForward iv coins = .ok final ∧
-      final.ans = [.rate 1, .block (0, 1)] ∧ final.work = 3 := by
-  simp [lazyHybridRun, lazyHybridStep, constructionThenForward, coins,
-    coupledConstruction, lazyAbsorb, iv, Oracle.respond_fresh_fst,
-    Oracle.lookup_respond_ne, Oracle.respond_hit]
+    lazyHybridRun constructionThenForward iv coins = .ok finalState ∧
+      finalState.ans = [.rate 1, .block (0, 1)] ∧ finalState.work = 3 := by
+  rw [show List.finRange 2 = [0, 1] by decide]
+  simp only [lazyHybridRun, List.foldl_cons, Except.bind_ok, List.foldl_nil]
+  rw [first_step_exact, second_step_exact]
+  simp [finalState]
 
 end SpongeLazyHybridExample
 

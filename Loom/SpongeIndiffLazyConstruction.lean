@@ -206,6 +206,22 @@ theorem two_block_coupled_accepts :
   simp [coupledConstruction, lazyAbsorb, iv, message, blockCoins,
     Oracle.respond_fresh_fst, Oracle.lookup_respond_ne]
 
+def coupledResult : CoupledConstructionResult (ZMod 2) (Fin 4) :=
+  ⟨1, (Oracle.empty.respond message 1).2,
+    ((Oracle.empty.respond (1, 0) (0, 1)).2.respond (1, 1) (1, 2)).2⟩
+
+/-- Exact state returned by the concrete accepted construction. -/
+theorem two_block_coupled_exact :
+    coupledConstruction iv Oracle.empty Oracle.empty message 1 blockCoins =
+      some coupledResult := by
+  unfold coupledConstruction
+  rw [show message.isEmpty = false by decide]
+  simp only [Bool.false_eq_true, ↓reduceIte]
+  rw [two_block_lazy_absorb]
+  simp only
+  rw [Oracle.respond_fresh_fst (Oracle.lookup_empty message)]
+  simp [coupledResult]
+
 /-- Changing only the RO rate coin makes the same primitive execution reject,
 so the agreement check is load-bearing. -/
 theorem two_block_wrong_ro_rejected :
