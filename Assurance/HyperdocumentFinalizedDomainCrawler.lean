@@ -820,8 +820,9 @@ theorem finalized_delta_stale_root_rejected
     intro equal
     apply notAfter
     rw [atBefore, equal]
+  have shape := singlePageShape_of_successor before after changed successor
   simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
-    singlePageSuccessorCheck, successor, stale]
+    singlePageSuccessorCheck, shape, stale]
 
 theorem conflicting_replayed_delta_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -838,8 +839,9 @@ theorem conflicting_replayed_delta_rejected
       .rejected .duplicateConflict := by
   have notFork := follows_not_fork before.checkpoint after.checkpoint
     successor.follows
+  have shape := singlePageShape_of_successor before after changed successor
   simp [applyFinalizedDelta, notFork, successor.follows,
-    singlePageSuccessorCheck, successor, atAfter, conflict]
+    singlePageSuccessorCheck, shape, atAfter, conflict]
 
 theorem finalized_delta_missing_page_rejected
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -860,8 +862,9 @@ theorem finalized_delta_missing_page_rejected
     apply notAfter
     rw [atBefore, equal]
   have cache := complete_cache_exact before state complete
+  have shape := singlePageShape_of_successor before after changed successor
   simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
-    singlePageSuccessorCheck, successor, complete.2, cache.1, cache.2]
+    singlePageSuccessorCheck, shape, complete.2, cache.1, cache.2]
 
 theorem finalized_delta_applies
     {pageCount : Nat} {ExternallyFinal : FinalizedCheckpoint -> Prop}
@@ -883,8 +886,9 @@ theorem finalized_delta_applies
     apply notAfter
     rw [atBefore, equal]
   have cache := complete_cache_exact before state complete
+  have shape := singlePageShape_of_successor before after changed successor
   simp [applyFinalizedDelta, atBefore, beforeNeAfter, notFork, follows,
-    singlePageSuccessorCheck, successor, complete.2, cache.1, cache.2,
+    singlePageSuccessorCheck, shape, complete.2, cache.1, cache.2,
     after.pageRootExact changed,
     CrawlState.installSuccessor]
 
@@ -901,8 +905,9 @@ theorem finalized_delta_retry_replayed
   dsimp
   have notFork := follows_not_fork before.checkpoint after.checkpoint
     successor.follows
+  have shape := singlePageShape_of_successor before after changed successor
   simp [applyFinalizedDelta, notFork, successor.follows,
-    singlePageSuccessorCheck, successor, CrawlState.installSuccessor,
+    singlePageSuccessorCheck, shape, CrawlState.installSuccessor,
     after.pageRootExact changed]
 
 /-! ## Closed non-vacuous one-page crawl -/
