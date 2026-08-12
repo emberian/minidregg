@@ -217,7 +217,9 @@ theorem two_prefixes_programmed :
   rw [hfirstFresh]
   simp only
   rw [Oracle.respond_fresh_fst (Oracle.lookup_empty [1]),
-    Oracle.respond_fresh_fst hfirstFresh, hz, hsecondFresh]
+    Oracle.respond_fresh_fst hfirstFresh, hz]
+  simp only [Prod.snd]
+  rw [hsecondFresh]
   simp only
   rw [Oracle.respond_fresh_fst hroSecondFresh,
     Oracle.respond_fresh_fst hsecondFresh]
