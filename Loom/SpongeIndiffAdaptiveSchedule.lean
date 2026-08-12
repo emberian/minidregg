@@ -146,7 +146,7 @@ noncomputable def adaptiveCapacityAvoid {q : Nat}
   idealCapacityAvoid D iv
     (idealPrefixState D iv (withCapacity base capacity) i)
 
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] in
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 /-- Prefix causality: changing the current or any later capacity coin cannot
 change the current round's avoid set. -/
 theorem adaptiveCapacityAvoid_prefix {q : Nat}
@@ -177,6 +177,7 @@ theorem adaptiveCapacityAvoid_card_le {q : Nat}
     (withCapacity base capacity) i
   omega
 
+omit [Fintype Rate] [DecidableEq Rate] in
 /-- **The first whole-run adaptive capacity price.**  For every fixed schedule
 of rate coins and block-rate coins, the probability that some capacity coin
 hits the simulator avoid set chosen from its earlier prefix is at most
@@ -202,8 +203,7 @@ def splitIdealCoins (q : Nat) :
   invFun parts := withCapacity parts.1 parts.2
   left_inv coins := by
     funext j
-    rcases coins j with ⟨rate, ⟨blockRate, capacity⟩⟩
-    simp [withCapacity]
+    exact Prod.ext rfl (Prod.ext rfl rfl)
   right_inv parts := by
     rcases parts with ⟨base, capacity⟩
     apply Prod.ext <;> funext j <;> rfl
