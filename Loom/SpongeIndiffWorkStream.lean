@@ -154,7 +154,7 @@ noncomputable def workHybridAccept {q work : Nat}
 hybrid on a fixed `work`-pair uniform sample space. -/
 noncomputable def workHybridProb {q work : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap) : Real :=
-  uniformProb (Fin work → Rate × Cap) (workHybridAccept D iv)
+  uniformProb (Fin work → Rate × Cap) (workHybridAccept Rate Cap D iv)
 
 /-- The honest interface still required to identify the prefix-programmed
 work game with the ideal game.  The hybrid may reject on a consistency bad
@@ -166,7 +166,7 @@ structure PrefixHybridIdealOffBadWitness {q work : Nat}
   bad : (Fin work → Rate × Cap) → Prop
   deferredAccept : (Fin work → Rate × Cap) → Prop
   agree_off_bad : ∀ coins, ¬ bad coins →
-    (workHybridAccept D iv coins ↔ deferredAccept coins)
+    (workHybridAccept Rate Cap D iv coins ↔ deferredAccept coins)
   deferred_probability_exact :
     uniformProb (Fin work → Rate × Cap) deferredAccept = idealProb D iv
 
@@ -176,7 +176,7 @@ this declaration itself asserts neither existence nor a numerical bound. -/
 def PrefixHybridIdealOffBadTarget (iv : Rate × Cap) : Prop :=
   ∀ (q work : Nat) (D : Distinguisher Rate Cap q),
     PrimitiveWorkBound D work →
-      Nonempty (PrefixHybridIdealOffBadWitness D iv)
+      Nonempty (PrefixHybridIdealOffBadWitness Rate Cap D iv)
 
 end WorkProbability
 
