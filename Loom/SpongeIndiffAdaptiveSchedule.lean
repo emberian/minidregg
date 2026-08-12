@@ -30,7 +30,7 @@ namespace Minidregg.Loom
 section AdaptiveSchedule
 
 variable {Rate Cap : Type} [AddCommGroup Rate] [Fintype Rate] [Fintype Cap]
-  [DecidableEq Rate] [DecidableEq Cap]
+  [DecidableEq Rate] [DecidableEq Cap] [Nonempty Cap]
 
 /-- Replace only the capacity coordinate of a fixed ideal-game coin schedule. -/
 def withCapacity {q : Nat} (base : Fin q → Rate × Rate)
@@ -54,6 +54,35 @@ noncomputable def idealPrefixState {q : Nat}
     ⟨Oracle.empty, Oracle.empty, []⟩
 
 omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+lemma idealStep_eq_of_coin_eq {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (coins coins' : Fin q → Rate × (Rate × Cap))
+    (st : IdealState Rate Cap) (j : Fin q) (h : coins j = coins' j) :
+    idealStep D iv coins st j = idealStep D iv coins' st j := by
+  unfold idealStep
+  rw [h]
+
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+/-- Two ideal folds agree when their coin schedules agree at every listed
+step, from any common intermediate state. -/
+theorem foldl_idealStep_congr {q : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (coins coins' : Fin q → Rate × (Rate × Cap))
+    (steps : List (Fin q)) (st : IdealState Rate Cap)
+    (hlisted : ∀ j ∈ steps, coins j = coins' j) :
+    steps.foldl (idealStep D iv coins) st =
+      steps.foldl (idealStep D iv coins') st := by
+  induction steps generalizing st with
+  | nil => rfl
+  | cons j js ih =>
+      simp only [List.foldl_cons]
+      rw [idealStep_eq_of_coin_eq D iv coins coins' st j
+        (hlisted j (by simp))]
+      apply ih (st := idealStep D iv coins' st j)
+      intro k hk
+      exact hlisted k (by simp [hk])
+
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- A prefix state depends only on the coins of the listed earlier steps. -/
 theorem idealPrefixState_congr {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -61,21 +90,9 @@ theorem idealPrefixState_congr {q : Nat}
     (hcoins : ∀ j : Fin q, (j : Nat) < n → coins j = coins' j) :
     idealPrefixState D iv coins n = idealPrefixState D iv coins' n := by
   unfold idealPrefixState
-  generalize hs : idealPrefixSteps q n = steps
-  have hlisted : ∀ j ∈ steps, coins j = coins' j := by
-    intro j hj
-    apply hcoins j
-    rw [← mem_idealPrefixSteps (n := n) j, hs]
-    exact hj
-  clear hs hcoins
-  induction steps with
-  | nil => rfl
-  | cons j js ih =>
-      simp only [List.foldl_cons]
-      rw [hlisted j (by simp)]
-      apply ih
-      intro k hk
-      exact hlisted k (by simp [hk])
+  apply foldl_idealStep_congr
+  intro j hj
+  exact hcoins j (mem_idealPrefixSteps j |>.mp hj)
 
 omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- Folding `n` ideal steps grows the shared simulator log by at most `n`. -/
@@ -105,7 +122,11 @@ theorem idealPrefixState_log_length_le {q : Nat}
       (idealPrefixSteps q n).length ≤ (List.finRange q).length := by
         exact List.length_filter_le _ _
       _ = q := List.length_finRange
-  simpa [idealPrefixState] using hfold.trans hfilter
+  have hfold' :
+      (idealPrefixState D iv coins n).sim.log.length ≤
+        (idealPrefixSteps q n).length := by
+    simpa [idealPrefixState] using hfold
+  exact hfold'.trans hfilter
 
 /-- The evolving avoid set presented as a function of the capacity vector. -/
 noncomputable def adaptiveCapacityAvoid {q : Nat}
@@ -115,6 +136,7 @@ noncomputable def adaptiveCapacityAvoid {q : Nat}
   idealCapacityAvoid D iv
     (idealPrefixState D iv (withCapacity base capacity) i)
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] in
 /-- Prefix causality: changing the current or any later capacity coin cannot
 change the current round's avoid set. -/
 theorem adaptiveCapacityAvoid_prefix {q : Nat}
