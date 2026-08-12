@@ -66,13 +66,16 @@ What lands here, PROVED:
 
 ## Covered scope, in the same sentence as the claim (the honest label)
 The simulator, its programming correctness, its per-step path-uniqueness
-preservation, and the capacity-collision bound are PROVED — for every log,
-every step, non-adaptive avoid-set (`CapBad` takes a FIXED `S`, mirroring
-`Loom/CollisionResistanceROM.lean`'s non-adaptive covered scope). The
-distinguisher-advantage inequality itself — folding the per-step lemmas along
-`idealRun`, tying `CapBad`'s avoid set to the adaptively-grown `capsOf`, and
-the identical-until-bad comparison of the two runs — is `[SPONGE-indiff-game]`,
-stated as a real quantified `Prop` below and NOT proved. Single-rate-block
+preservation, and the fixed-set capacity-collision bound are PROVED here.
+Follow-up modules `SpongeIndiffRunInvariant`, `AdaptiveFiniteSampling`,
+`SpongeIndiffCapacityBudget`, `SpongeIndiffAdaptiveSchedule`, and
+`SpongeIndiffOffBadRun` now thread path uniqueness through the actual adaptive
+`idealRun`, prove prefix causality for the evolving `capsOf`, price the exact
+ideal-coin failure event by `q(2q+2)/|Cap|`, and prove failure-or-final
+`UniquePaths`. The distinguisher-advantage inequality itself still requires
+the run-level programmed construction-answer invariant, identical-until-bad
+comparison, and random-permutation/random-function switch (plus sharpening
+the capacity constant to this statement's `2q²/|Cap|`). Single-rate-block
 squeeze; nonempty unpadded messages (`SpQuery.constr` carries `x :: xs`);
 multi-block squeeze and the deployed padding rule are `[SPONGE-padding]`.
 
@@ -1073,12 +1076,14 @@ the standard permutation-vs-function switching cost (`q(q−1)/2^{b+1} ≤
 q²/2^b` over the full block). What its proof needs that this file already
 has: `walk_programs` (real/ideal agreement at each completing step),
 `uniquePaths_simFwd`/`uniquePaths_simInv` (the bookkeeping invariant per
-step), `capBad_le` (the price). What it needs that this file does NOT have:
-the run-level induction folding those per-step lemmas along `idealRun` with
-`CapBad`'s fixed avoid set covering the adaptively-grown `capsOf` (the same
-adaptive-schedule machinery `Loom/CollisionResistanceROM.lean` names
-`[CR-ROM-adaptive]`), and the identical-until-bad comparison of the two runs.
-NOT an axiom, NOT `True` — a real quantified statement awaiting its proof. -/
+step), `capBad_le` (the fixed-set price). The follow-up modules named in the
+header close the adaptive `capsOf` causality/cardinality argument and final
+path-uniqueness classifier on the exact `idealRun` coin space, currently at
+the honest but slightly looser `q(2q+2)/|Cap|` price. What remains is folding
+programmed construction-answer agreement through the run,
+identical-until-bad, and the random-permutation/random-function switch, then
+sharpening the capacity constant. NOT an axiom, NOT `True` — a real quantified
+statement awaiting those joins. -/
 def SpongeIndiffGame (Rate Cap : Type) [AddCommGroup Rate]
     [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
     (iv : Rate × Cap) : Prop :=
@@ -1209,19 +1214,15 @@ worlds and the advantage statement — STATED precisely, with the `q = 0` slice
 proved.
 
 **`[SPONGE-indiff-game]`** — the genuinely-remaining mass, named as the real
-`Prop` `SpongeIndiffGame`: the run-level assembly. Concretely owed: (i) the
-run induction — fold `uniquePaths_simFwd`/`uniquePaths_simInv` and
-`walk_programs` along `idealRun`, maintaining "every completed path's walk
-agrees with the RO handler" as a run invariant (each per-step lemma is proved
-above; the induction must thread `capsOf`'s growth); (ii) the schedule bridge
-— `CapBad` takes a FIXED avoid set, but `capsOf` grows adaptively: the same
-per-step conditioning machinery `Loom/CollisionResistanceROM.lean` already
-names `[CR-ROM-adaptive]` (one shared debt, not a new one); (iii)
-identical-until-bad — off `CapBad`, coupling the ideal run to the real run
-(through the random-function hybrid; the RP/RF switch is the `q²/|Blk|` term
-in the stated bound). Nothing in (i)–(iii) is conjectural mathematics — it is
-standard game-hopping (Bertoni–Daemen–Peeters–Van Assche 2008) awaiting
-formalization mass.
+`Prop` `SpongeIndiffGame`. The follow-up run modules now close the evolving
+capacity schedule, its exact ideal-coin probability transport, and final
+path uniqueness (failure price `q(2q+2)/|Cap|`). Concretely owed: (i) fold
+`walk_programs` into a run invariant saying every completed construction path
+agrees with the RO handler; (ii) identical-until-bad, coupling that ideal run
+to a random-function transcript; (iii) the random-permutation/random-function
+switch (`q²/|Blk|`); and (iv) sharpen the landed adaptive capacity price to the
+headline `2q²/|Cap|`. This is standard game-hopping
+(Bertoni–Daemen–Peeters–Van Assche 2008) awaiting formalization mass.
 
 **`[SPONGE-padding]`** — single-rate-block squeeze, nonempty unpadded
 messages; the deployed injective padding rule and multi-block squeeze are
