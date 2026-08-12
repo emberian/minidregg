@@ -78,8 +78,8 @@ theorem LookupEquivalent.respond {left right : Oracle Q C}
   classical
   by_cases heq : other = query
   · rw [lookup_respond, lookup_respond, if_pos heq, if_pos heq]
-    congr 2
-    exact respond_fst_eq_of_lookup_eq left right query coin (h query)
+    exact congrArg some
+      (respond_fst_eq_of_lookup_eq left right query coin (h query))
   · rw [lookup_respond, lookup_respond, if_neg heq, if_neg heq]
     exact h other
 
@@ -103,18 +103,18 @@ theorem respond_distinct_commute (oracle : Oracle Q C) {first second : Q}
   classical
   by_cases hsecond : other = second
   · subst other
-    rw [lookup_respond, lookup_respond, if_pos rfl, if_neg hne,
-      lookup_respond, if_pos rfl]
-    congr 2
-    exact respond_distinct_fst oracle (Ne.symm hne) firstCoin secondCoin
+    rw [lookup_respond_self,
+      lookup_respond_ne _ (Ne.symm hne), lookup_respond_self]
+    exact congrArg some
+      (respond_distinct_fst oracle (Ne.symm hne) firstCoin secondCoin)
   · by_cases hfirst : other = first
     · subst other
-      rw [lookup_respond, lookup_respond, if_neg hne, if_pos rfl,
-        lookup_respond, if_pos rfl]
-      congr 2
-      exact respond_distinct_fst oracle hne secondCoin firstCoin |>.symm
-    · rw [lookup_respond, lookup_respond, if_neg hsecond, if_neg hfirst,
-        lookup_respond, if_neg hfirst, lookup_respond, if_neg hsecond]
+      rw [lookup_respond_ne _ hne, lookup_respond_self,
+        lookup_respond_self]
+      exact congrArg some
+        (respond_distinct_fst oracle hne secondCoin firstCoin).symm
+    · rw [lookup_respond_ne _ hsecond, lookup_respond_ne _ hfirst,
+        lookup_respond_ne _ hfirst, lookup_respond_ne _ hsecond]
 
 /-- Apply a finite schedule of explicit lazy-response coins. -/
 noncomputable def respondAll (oracle : Oracle Q C) :
