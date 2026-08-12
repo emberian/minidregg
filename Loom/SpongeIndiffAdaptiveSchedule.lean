@@ -53,7 +53,8 @@ noncomputable def idealPrefixState {q : Nat}
   (idealPrefixSteps q n).foldl (idealStep D iv coins)
     ⟨Oracle.empty, Oracle.empty, []⟩
 
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
+    [Nonempty Cap] in
 lemma idealStep_eq_of_coin_eq {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
     (coins coins' : Fin q → Rate × (Rate × Cap))
@@ -94,7 +95,8 @@ theorem idealPrefixState_congr {q : Nat}
   intro j hj
   exact hcoins j (mem_idealPrefixSteps j |>.mp hj)
 
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
+    [Nonempty Cap] in
 /-- Folding `n` ideal steps grows the shared simulator log by at most `n`. -/
 theorem foldl_idealStep_log_length_le {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -125,7 +127,11 @@ theorem idealPrefixState_log_length_le {q : Nat}
   have hfold' :
       (idealPrefixState D iv coins n).sim.log.length ≤
         (idealPrefixSteps q n).length := by
-    simpa [idealPrefixState] using hfold
+    change
+      ((idealPrefixSteps q n).foldl (idealStep D iv coins)
+        ⟨Oracle.empty, Oracle.empty, []⟩).sim.log.length ≤
+          (idealPrefixSteps q n).length
+    simpa only [Oracle.empty, List.length_nil, Nat.zero_add] using hfold
   exact hfold'.trans hfilter
 
 /-- The evolving avoid set presented as a function of the capacity vector. -/
