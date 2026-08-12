@@ -84,7 +84,8 @@ theorem foldl_idealStep_congr {q : Nat}
       intro k hk
       exact hlisted k (by simp [hk])
 
-omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
+    [Nonempty Cap] in
 /-- A prefix state depends only on the coins of the listed earlier steps. -/
 theorem idealPrefixState_congr {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -163,6 +164,7 @@ theorem adaptiveCapacityAvoid_prefix {q : Nat}
   simp only [withCapacity]
   rw [hprefix j hj]
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [Nonempty Cap] in
 /-- Uniform global cardinality ceiling for every adaptive round. -/
 theorem adaptiveCapacityAvoid_card_le {q : Nat}
     (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
@@ -201,7 +203,7 @@ def splitIdealCoins (q : Nat) :
   left_inv coins := by
     funext j
     rcases coins j with ⟨rate, ⟨blockRate, capacity⟩⟩
-    rfl
+    simp [withCapacity]
   right_inv parts := by
     rcases parts with ⟨base, capacity⟩
     apply Prod.ext <;> funext j <;> rfl
