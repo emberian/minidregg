@@ -32,6 +32,7 @@ def idealCapacityAvoid {q : Nat} (D : Distinguisher Rate Cap q)
   | .fwd s => (capsOf st.sim iv).toFinset ∪ {s.2}
   | .inv _ => (capsOf st.sim iv).toFinset
 
+omit [AddCommGroup Rate] [Fintype Rate] [Fintype Cap] [DecidableEq Rate] in
 /-- Avoid-set nonmembership is exactly sufficient for the branch-specific
 `IdealFreshAt` premise used by the run invariant. -/
 theorem idealFreshAt_of_not_mem_avoid {q : Nat}
