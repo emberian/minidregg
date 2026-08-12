@@ -20,7 +20,7 @@ namespace Minidregg.Loom
 
 section LazyConstruction
 
-variable {Rate Cap : Type} [AddCommGroup Rate] [DecidableEq Rate]
+variable {Rate Cap : Type} [AddCommGroup Rate]
 
 /-- Execute a sponge absorption against a lazy primitive table.  The list of
 candidate primitive answers must have exactly the message length; handler hits
@@ -107,6 +107,8 @@ theorem lazyAbsorb_singleton_fresh
       (coin, (primitive.respond (state.1 + x, state.2) coin).2) :=
     Prod.ext (Oracle.respond_fresh_fst hfresh coin) rfl
   rw [hreply]
+
+variable [DecidableEq Rate]
 
 /-- Successful coupled construction state.  Both handlers are returned so the
 next adaptive query observes their exact updated tables. -/
