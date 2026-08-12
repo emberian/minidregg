@@ -176,7 +176,7 @@ this declaration itself asserts neither existence nor a numerical bound. -/
 def PrefixHybridIdealOffBadTarget (iv : Rate × Cap) : Prop :=
   ∀ (q work : Nat) (D : Distinguisher Rate Cap q),
     PrimitiveWorkBound D work →
-      Nonempty (PrefixHybridIdealOffBadWitness Rate Cap D iv)
+      Nonempty (PrefixHybridIdealOffBadWitness Rate Cap (work := work) D iv)
 
 end WorkProbability
 
