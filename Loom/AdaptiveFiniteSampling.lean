@@ -19,12 +19,11 @@ import Loom.Sumcheck
 
 namespace Minidregg.Loom
 
-open Classical
-
 section FiniteAlphabet
 
 variable {C : Type} [Fintype C] [DecidableEq C] [Nonempty C]
 
+omit [DecidableEq C] in
 /-- A coordinate of a uniform finite-alphabet vector hits a prefix-measurable
 bad set of size at most `d` with probability at most `d / |C|`. -/
 theorem uniformProb_coord_mem_prefix_finite {v d : Nat} (i : Fin v)
