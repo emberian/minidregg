@@ -197,6 +197,57 @@ theorem revealed_prefix_answer :
   rw [Oracle.respond_fresh_fst hfresh,
     Oracle.respond_fresh_fst (Oracle.lookup_empty (1, 0))]
 
+noncomputable def revealReply :
+    (ZMod 2 × Nat) × Oracle (List (ZMod 2)) (ZMod 2) ×
+      Oracle (ZMod 2 × Nat) (ZMod 2 × Nat) :=
+  simFwdRO iv fullMessageRo Oracle.empty (1, 0) 1 (1, 1)
+
+noncomputable def afterReveal : DeferredWorkState (ZMod 2) Nat :=
+  ⟨⟨revealReply.2.1, revealReply.2.2,
+      [.rate 0, .block revealReply.1]⟩, [], 3⟩
+
+theorem second_step_exact :
+    deferredWorkStep constructionThenForward iv afterConstruction 1 =
+      .ok afterReveal := by
+  unfold deferredWorkStep
+  simp only [constructionThenForward, afterConstruction, List.isEmpty_cons,
+    Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls, List.take,
+    List.length_cons, List.length_nil, List.drop, deferredIdealStepWithCoin,
+    idealStep, workCoinAsIdeal, revealReply, afterReveal]
+  rfl
+
+/-- The deferred run consumes the same three work units and produces the same
+public answer trace as the eager run, while sampling the hidden prefix only at
+its later reveal. -/
+theorem deferred_work_stream_replays :
+    deferredWorkRun constructionThenForward iv deferred = .ok afterReveal := by
+  unfold deferredWorkRun
+  rw [show List.finRange 2 = [0, 1] by decide]
+  simp only [List.foldl_cons, List.foldl_nil, Except.bind]
+  rw [first_step_exact]
+  exact second_step_exact
+
+theorem deferred_public_trace :
+    afterReveal.core.ans =
+      [.rate 0, .block ((1 : ZMod 2), (1 : Nat))] := by
+  unfold afterReveal revealReply
+  rw [revealed_prefix_answer]
+
+/-- The concrete eager/deferred move is an actual permutation of the fixed
+work coordinates, not a matching-marginals assertion. -/
+def rotateIndex : Fin 3 → Fin 3
+  | 0 => 1
+  | 1 => 2
+  | 2 => 0
+
+def rotateIndexEquiv : Equiv.Perm (Fin 3) :=
+  Equiv.ofBijective rotateIndex (by decide)
+
+theorem deferred_is_permuted_eager :
+    permuteWorkCoins rotateIndexEquiv eager = deferred := by
+  funext index
+  fin_cases index <;> rfl
+
 end SpongeDeferredWorkExample
 
 /-- info: 'Minidregg.Loom.deferredWorkStep_work_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -204,5 +255,8 @@ end SpongeDeferredWorkExample
 /-- info: 'Minidregg.Loom.SpongeDeferredWorkExample.revealed_prefix_answer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms SpongeDeferredWorkExample.revealed_prefix_answer
+/-- info: 'Minidregg.Loom.SpongeDeferredWorkExample.deferred_work_stream_replays' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms SpongeDeferredWorkExample.deferred_work_stream_replays
 
 end Minidregg.Loom
