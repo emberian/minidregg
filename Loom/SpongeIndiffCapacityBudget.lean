@@ -48,7 +48,9 @@ theorem idealFreshAt_of_not_mem_avoid {q : Nat}
       trivial
   | fwd s =>
       rw [hmove] at h
-      simpa [Finset.mem_union] using h
+      have hs : (coins j).2.2 ≠ s.2 := by simpa using h.1
+      have hc : (coins j).2.2 ∉ capsOf st.sim iv := by simpa using h.2
+      exact ⟨hc, hs⟩
   | inv t =>
       rw [hmove] at h
       simpa using h
@@ -120,7 +122,7 @@ lemma capsOf_toFinset_card_le (os : Oracle (Rate × Cap) (Rate × Cap))
       List.toFinset_card_le _
     _ = 2 * os.log.length + 1 := capsOf_length os iv
 
-omit [AddCommGroup Rate] [Fintype Rate] [DecidableEq Rate] in
+omit [AddCommGroup Rate] [Fintype Rate] [Fintype Cap] [DecidableEq Rate] in
 /-- The branch-specific avoid set has size at most `2n + 2` when the current
 simulator log has `n` entries. -/
 theorem idealCapacityAvoid_card_le {q : Nat}
