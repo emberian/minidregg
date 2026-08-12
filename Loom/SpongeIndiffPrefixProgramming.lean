@@ -99,6 +99,7 @@ theorem programPrefixes_some_lengths
               cases hlookup : primitive.lookup (state.1 + x, state.2) with
               | some value =>
                   rw [hlookup] at h
+                  simp only at h
                   by_cases heq :
                       value.1 = (ro.respond (seen ++ [x]) value.1).1
                   · have htail :
@@ -163,7 +164,6 @@ theorem programConstruction_singleton_fresh
   rw [hfresh]
   simp only
   rw [Oracle.respond_fresh_fst hfresh]
-  rfl
 
 /-- Primitive-first reconciliation: if the edge exists and the prefix RO is
 fresh, the RO is programmed to the existing edge's rate.  The supplied rate
@@ -180,8 +180,8 @@ theorem programConstruction_singleton_existing_edge_fresh_ro
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
     programPrefixes, List.nil_append]
   rw [hlookup]
-  rw [Oracle.respond_fresh_fst hroFresh]
-  simp
+  simp only
+  rw [if_pos (Oracle.respond_fresh_fst hroFresh existing.1).symm]
 
 /-- A pre-existing edge conflicts with an already-answered prefix RO exactly
 when their rates differ.  This consistency test is load-bearing. -/
@@ -195,8 +195,10 @@ theorem programConstruction_singleton_existing_edge_wrong_ro
     programConstruction iv ro primitive [x] [rateCoin] [capacityCoin] = none := by
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
-    programPrefixes]
-  rw [hlookup, Oracle.respond_hit hro]
+    programPrefixes, List.nil_append]
+  rw [hlookup]
+  simp only
+  rw [Oracle.respond_hit hro]
   simp [hne]
 
 end PrefixProgramming
@@ -235,7 +237,8 @@ theorem two_prefixes_programmed :
       (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
       Oracle.lookup_empty]
   have hsecondFresh' :
-      (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.lookup
+      ((Oracle.empty : Oracle (ZMod 2 × Nat) (ZMod 2 × Nat)).respond
+        ((1 : ZMod 2), (0 : Nat)) ((1 : ZMod 2), (1 : Nat))).2.lookup
         (0, ((1 : ZMod 2), (1 : Nat)).2) = none := by
     simpa using hsecondFresh
   have hroSecondValue :
@@ -264,13 +267,17 @@ theorem two_prefixes_programmed :
     have hvalue :
         (((((Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.respond
           [1, 1] 0).1), (2 : Nat)) : ZMod 2 × Nat) = (0, 2) := by
-      rw [hroSecondValue]
+      exact Prod.ext hroSecondValue rfl
     have hresponse := congrArg
       (fun value : ZMod 2 × Nat =>
         (Oracle.empty.respond ((1 : ZMod 2), (0 : Nat)) (1, 1)).2.respond
           (0, 1) value) hvalue
-    rw [hresponse, hprimitiveSecondValue]
-    rfl
+    apply congrArg some
+    unfold result
+    apply PrefixProgramState.ext
+    · exact (congrArg Prod.fst hresponse).trans hprimitiveSecondValue
+    · rfl
+    · exact congrArg Prod.snd hresponse
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
   unfold result
