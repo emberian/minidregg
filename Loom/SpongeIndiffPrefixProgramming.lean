@@ -47,7 +47,7 @@ noncomputable def programPrefixes
       let nextPrefix := seen ++ [x]
       let roReply := ro.respond nextPrefix rateCoin
       let key : Rate × Cap := (state.1 + x, state.2)
-      match hlookup : primitive.lookup key with
+      match primitive.lookup key with
       | some value =>
           if value.1 = roReply.1 then
             programPrefixes roReply.2 primitive value nextPrefix xs
@@ -192,7 +192,7 @@ second prefix squeezes to `H([1,1]) = 0`. -/
 theorem two_prefixes_programmed :
     programConstruction iv Oracle.empty Oracle.empty [1, 1] [1, 0] [1, 2] =
       some result := by
-  have hz : (1 : ZMod 2) + 1 = 0 := by norm_num
+  have hz : (1 : ZMod 2) + 1 = 0 := by decide
   have hfirstFresh :
       (Oracle.empty : Oracle (ZMod 2 × Fin 5) (ZMod 2 × Fin 5)).lookup
         (1, 0) = none := Oracle.lookup_empty _
@@ -203,9 +203,10 @@ theorem two_prefixes_programmed :
       (q := ((1 : ZMod 2), (0 : Fin 5)))
       (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
       Oracle.lookup_empty]
+  unfold iv
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
-    programPrefixes]
+    programPrefixes, List.nil_append, List.singleton_append]
   rw [hfirstFresh]
   simp only
   rw [Oracle.respond_fresh_fst hfirstFresh, hz, hsecondFresh]
@@ -252,7 +253,9 @@ theorem second_edge_lookup : result.primitive.lookup (0, 1) = some (0, 2) := by
 theorem first_prefix_walk :
     walkFrom result.primitive iv [1] = some (1, 1) := by
   rw [walkFrom_cons]
-  simpa [iv] using first_edge_lookup
+  rw [show result.primitive.lookup
+    (iv.1 + (1 : ZMod 2), iv.2) = some (1, 1) by
+      simpa [iv] using first_edge_lookup]
 
 theorem full_prefix_walk :
     walkFrom result.primitive iv [1, 1] = some (0, 2) := by
@@ -260,7 +263,9 @@ theorem full_prefix_walk :
   have hfirst : result.primitive.lookup
       (iv.1 + (1 : ZMod 2), iv.2) = some (1, 1) := by
     simpa [iv] using first_edge_lookup
-  rw [hfirst, walkFrom_cons]
+  rw [hfirst]
+  simp only
+  rw [walkFrom_cons]
   have hsecond : result.primitive.lookup
       (((1 : ZMod 2), (1 : Fin 5)).1 + 1, ((1 : ZMod 2), (1 : Fin 5)).2) =
         some (0, 2) := by
