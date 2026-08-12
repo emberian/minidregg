@@ -55,7 +55,6 @@ private theorem affineGenerator_pr_eq_card [Fintype F]
     (affineGenerator F).pr P =
       ((Finset.univ.filter fun γ : F => P ((affineGenerator F).gen γ)).card : ℝ) /
         (Fintype.card F : ℝ) := by
-  classical
   unfold ProximityGenerator.pr
   calc
     ∑ ω ∈ Finset.univ.filter (fun ω : F => P ((affineGenerator F).gen ω)),
@@ -92,15 +91,19 @@ theorem rs_proximityGap_UD_sharp [Nonempty ι] [Fintype F]
           (fun r => close δ (reedSolomonCode dom d) (comb r f)) =
         (A.card : ℝ) / (Fintype.card F : ℝ) := by
     rw [affineGenerator_pr_eq_card]
-    congr 2
-    rw [hA]
-    apply Finset.filter_congr
-    intro γ _
-    have hcomb : comb ((affineGenerator F).gen γ) f = f 0 + γ • f 1 := by
-      funext x
-      rw [comb_affineGenerator]
-      rfl
-    rw [hcomb]
+    have hfilter :
+        (Finset.univ.filter fun γ : F =>
+          close δ (reedSolomonCode dom d)
+            (comb ((affineGenerator F).gen γ) f)) = A := by
+      rw [hA]
+      apply Finset.filter_congr
+      intro γ _
+      have hcomb : comb ((affineGenerator F).gen γ) f = f 0 + γ • f 1 := by
+        funext x
+        rw [comb_affineGenerator]
+        rfl
+      rw [hcomb]
+    rw [hfilter]
   by_cases hsmall : (affineGenerator F).pr
       (fun r => close δ (reedSolomonCode dom d) (comb r f))
         ≤ rsUdSharpError ι F δ
