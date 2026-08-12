@@ -31,21 +31,21 @@ noncomputable def PrefixProgramFailure
   | _ :: _, _, [] => True
   | block :: message, rateCoin :: rateCoins,
       capacityCoin :: capacityCoins =>
-      let prefix := seen ++ [block]
+      let nextPrefix := seen ++ [block]
       let key : Rate × Cap := (state.1 + block, state.2)
       match primitive.lookup key with
       | some edgeValue =>
-          let roReply := ro.respond prefix edgeValue.1
+          let roReply := ro.respond nextPrefix edgeValue.1
           edgeValue.1 ≠ roReply.1 ∨
             (edgeValue.1 = roReply.1 ∧
-              PrefixProgramFailure roReply.2 primitive edgeValue prefix
+              PrefixProgramFailure roReply.2 primitive edgeValue nextPrefix
                 message rateCoins capacityCoins)
       | none =>
-          let roReply := ro.respond prefix rateCoin
+          let roReply := ro.respond nextPrefix rateCoin
           let programmed : Rate × Cap := (roReply.1, capacityCoin)
           let primitiveReply := primitive.respond key programmed
           PrefixProgramFailure roReply.2 primitiveReply.2 primitiveReply.1
-            prefix message rateCoins capacityCoins
+            nextPrefix message rateCoins capacityCoins
 
 /-- Every recursive failure classifier branch is exact: no interpreter
 failure lacks a reason, and no classified reason can accompany success. -/
@@ -106,24 +106,15 @@ theorem prefixConflict_iff_respond_disagrees
     (hedge : primitive.lookup (state.1 + block, state.2) = some edgeValue) :
     PrefixConflict ro primitive state seen block ↔
       edgeValue.1 ≠ (ro.respond (seen ++ [block]) edgeValue.1).1 := by
-  unfold PrefixConflict
-  cases hro : ro.lookup (seen ++ [block]) with
-  | none =>
-      rw [Oracle.respond_fresh_fst hro]
-      constructor
-      · rintro ⟨value, roValue, hvalue, hroValue, hne⟩
-        rw [hro] at hroValue
-        contradiction
-      · exact fun h => h rfl
-  | some roValue =>
-      rw [Oracle.respond_hit hro]
-      constructor
-      · rintro ⟨value, value', hvalue, hvalue', hne⟩
-        have hv : value = edgeValue := Option.some.inj (hvalue.symm.trans hedge)
-        have hv' : value' = roValue := Option.some.inj (hvalue'.symm.trans hro)
-        simpa [hv, hv'] using hne
-      · intro hne
-        exact ⟨edgeValue, roValue, hedge, hro, hne⟩
+  rw [← programPrefixes_singleton_none_iff_conflict ro primitive state seen
+    block edgeValue.1 edgeValue.2]
+  simp only [programPrefixes, hedge]
+  let roReply := ro.respond (seen ++ [block]) edgeValue.1
+  by_cases hagree : edgeValue.1 = roReply.1
+  · rw [if_pos hagree]
+    simp [programPrefixes, roReply, hagree]
+  · rw [if_neg hagree]
+    exact iff_of_true rfl hagree
 
 end PrefixFailure
 
