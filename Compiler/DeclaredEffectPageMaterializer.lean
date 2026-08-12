@@ -647,14 +647,8 @@ theorem postCanonicalExact :
     ·
       have preAbsent : preCell.logical.fields field = none := by
         change
-          (FieldStore.write
-              (FieldStore.write
-                Minidregg.Theory.DeployedMaterializerWitness.effectCell.logical.fields
-                debitKey
-                (show DeclaredTurn.effectSchema.FieldType debitKey from (0 : Int)))
-              creditKey
-              (show DeclaredTurn.effectSchema.FieldType creditKey from (0 : Int))
-              field) = none
+          Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical.fields field = none
+        unfold Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical
         rw [FieldStore.write_other _ (Ne.symm credit)]
         rw [FieldStore.write_other _ (Ne.symm debit)]
         rfl
