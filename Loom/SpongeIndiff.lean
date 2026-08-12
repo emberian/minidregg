@@ -99,6 +99,11 @@ random-permutation/random-function switch.  The atomic consistency event is
 already exact: `SpongeIndiffPrefixConflict` proves a one-prefix construction
 rejects iff the primitive edge and lazy RO had previously sampled unequal rate
 values at that rooted prefix; either fresh side is conflict-free.
+`SpongeIndiffPrefixFailure` lifts that atom through arbitrary message length:
+every recursive `programPrefixes = none` is equivalent to malformed coin
+lists, a direct sampled disagreement, or the exact failure of the updated
+tail state.  Thus construction rejection is no longer an opaque error event;
+the remaining work is to transport and price this exact adaptive event.
 The construction already squeezes one rate element after a nonempty unpadded
 message of any block length; the deployed padding/domain rule remains
 `[SPONGE-padding]`.

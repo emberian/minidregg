@@ -92,6 +92,7 @@ import Loom.SpongeIndiffPrefixProgramming -- corrected construction-first semant
 import Loom.SpongeIndiffPrefixOutput -- load-bearing output theorem: every successful nonempty construction returns exactly the lazy RO value recorded for its full message
 import Loom.SpongeIndiffPrefixWalk -- every successful prefix program preserves prior edges and its final primitive table walks the complete multi-block message to the returned state; combined realization also pins that state's rate to the full-message RO answer
 import Loom.SpongeIndiffPrefixConflict -- exact single-prefix bad-event classifier: rejection iff the already-sampled primitive edge rate and RO prefix rate disagree; fresh RO or primitive entries are formally conflict-free
+import Loom.SpongeIndiffPrefixFailure -- exact recursive rejection classifier: every multi-prefix none is malformed coin shape, a current sampled inconsistency, or a precisely attributed later-prefix failure
 import Loom.SpongeIndiffPrefixHybrid -- adaptive shared RO/primitive state over construction and primitive queries, with exact per-step work and current-coin framing
 import Loom.SpongeIndiffWorkStream -- one fixed uniform coin pair per primitive work unit; exhaustion fails closed and the remaining ideal bridge is an explicit off-bad witness, not unconditional equality
 import Loom.SpongeIndiffOracleReordering -- distinct lazy responses commute extensionally and arbitrary Nodup response schedules are invariant under permutation of sample order
