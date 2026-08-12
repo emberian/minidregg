@@ -37,14 +37,14 @@ exactly the remaining message length. -/
 noncomputable def programPrefixes
     (ro : Oracle (List Rate) Rate)
     (primitive : Oracle (Rate × Cap) (Rate × Cap))
-    (state : Rate × Cap) (prefix : List Rate) :
+    (state : Rate × Cap) (seen : List Rate) :
     List Rate → List Rate → List Cap → Option (PrefixProgramState Rate Cap)
   | [], [], [] => some ⟨state, ro, primitive⟩
   | [], _, _ => none
   | _ :: _, [], _ => none
   | _ :: _, _, [] => none
   | x :: xs, rateCoin :: rateCoins, capacityCoin :: capacityCoins =>
-      let nextPrefix := prefix ++ [x]
+      let nextPrefix := seen ++ [x]
       let roReply := ro.respond nextPrefix rateCoin
       let key : Rate × Cap := (state.1 + x, state.2)
       match hlookup : primitive.lookup key with
@@ -73,14 +73,14 @@ capacity coin per remaining message block. -/
 theorem programPrefixes_some_lengths
     (ro : Oracle (List Rate) Rate)
     (primitive : Oracle (Rate × Cap) (Rate × Cap))
-    (state : Rate × Cap) (prefix : List Rate) :
+    (state : Rate × Cap) (seen : List Rate) :
     ∀ {message rateCoins : List Rate} {capacityCoins : List Cap} {result},
-      programPrefixes ro primitive state prefix message rateCoins capacityCoins =
+      programPrefixes ro primitive state seen message rateCoins capacityCoins =
         some result →
       message.length = rateCoins.length ∧
         message.length = capacityCoins.length := by
   intro message
-  induction message generalizing ro primitive state prefix with
+  induction message generalizing ro primitive state seen with
   | nil =>
       intro rateCoins capacityCoins result h
       cases rateCoins <;> cases capacityCoins <;> simp [programPrefixes] at h ⊢
@@ -93,7 +93,7 @@ theorem programPrefixes_some_lengths
           | nil => simp [programPrefixes] at h
           | cons capacityCoin capacityCoins =>
               simp only [programPrefixes] at h
-              let nextPrefix := prefix ++ [x]
+              let nextPrefix := seen ++ [x]
               let roReply := ro.respond nextPrefix rateCoin
               let key : Rate × Cap := (state.1 + x, state.2)
               cases hlookup : primitive.lookup key with
@@ -104,7 +104,7 @@ theorem programPrefixes_some_lengths
                       simpa [nextPrefix, roReply, key, hlookup, heq] using h
                     obtain ⟨hrate, hcap⟩ :=
                       ih (ro := roReply.2) (primitive := primitive)
-                        (state := value) (prefix := nextPrefix) htail
+                        (state := value) (seen := nextPrefix) htail
                     exact ⟨by simp [hrate], by simp [hcap]⟩
                   · simp [nextPrefix, roReply, key, hlookup, heq] at h
               | none =>
@@ -117,7 +117,7 @@ theorem programPrefixes_some_lengths
                       primitiveReply] using h
                   obtain ⟨hrate, hcap⟩ :=
                     ih (ro := roReply.2) (primitive := primitiveReply.2)
-                      (state := primitiveReply.1) (prefix := nextPrefix) htail
+                      (state := primitiveReply.1) (seen := nextPrefix) htail
                   exact ⟨by simp [hrate], by simp [hcap]⟩
 
 /-- Successful public construction has exact message/rate/capacity lengths. -/
