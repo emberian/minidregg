@@ -48,6 +48,7 @@ noncomputable def FreshIdealExecution {q : Nat}
       IdealFreshAt D iv coins st j ∧
         FreshIdealExecution D iv coins js (idealStep D iv coins st j)
 
+omit [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap] in
 /-- The simulator component threaded by `simFwdRO` is exactly the component
 threaded by the already-proved `simFwd` preservation theorem. -/
 lemma simFwdRO_sim (iv : Rate × Cap) (ro : Oracle (List Rate) Rate)
@@ -68,13 +69,16 @@ theorem idealStep_uniquePaths {q : Nat} (D : Distinguisher Rate Cap q)
     UniquePaths (idealStep D iv coins st j).sim iv := by
   cases hmove : D.move st.ans with
   | constr x xs =>
+      simp only [hmove] at hFresh
       simpa [idealStep, hmove] using hUnique
   | fwd s =>
+      simp only [hmove] at hFresh
       rcases hFresh with ⟨hcap, hquery⟩
       have h := uniquePaths_simFwd (O := st.sim) hUnique
         (fun m => (st.ro.respond m (coins j).1).1) hcap hquery
       simpa [idealStep, hmove, simFwdRO_sim] using h
   | inv t =>
+      simp only [hmove] at hFresh
       have h := uniquePaths_simInv (O := st.sim) hUnique hFresh
       simpa [idealStep, hmove] using h
 
@@ -125,11 +129,12 @@ def coins : Fin 1 → ZMod 2 × (ZMod 2 × Fin 3) :=
 not merely for the zero-query base case. -/
 example : FreshIdealExecution forwardOne iv coins (List.finRange 1)
     ⟨Oracle.empty, Oracle.empty, []⟩ := by
-  decide
+  simp [FreshIdealExecution, IdealFreshAt, forwardOne, coins, iv, capsOf]
 
 /-- Consequently the actual one-step ideal run has unique rooted paths. -/
 theorem forwardOne_uniquePaths : UniquePaths (idealRun forwardOne iv coins).sim iv :=
-  idealRun_uniquePaths_of_fresh forwardOne iv coins (by decide)
+  idealRun_uniquePaths_of_fresh forwardOne iv coins (by
+    simp [FreshIdealExecution, IdealFreshAt, forwardOne, coins, iv, capsOf])
 
 end SpongeRunInvariantExample
 
