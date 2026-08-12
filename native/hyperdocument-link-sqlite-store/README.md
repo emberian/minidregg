@@ -13,3 +13,8 @@ publication, malformed or torn database rejection, and the record-size bound.
 These observations do not prove SQLite, its C ABI, Rust FFI, host locks,
 filesystem ordering, `fsync`, stable media, power-loss behavior, or hostile
 directory mutation. Those refinements remain explicit on the Lean side.
+
+On minimal Linux workers that provide `libsqlite3.so.0` without the usual
+development symlink, `build.rs` creates a private linker alias in `OUT_DIR`.
+It does not bundle or modify SQLite, and the resulting binary still records
+the system runtime library's versioned SONAME.
