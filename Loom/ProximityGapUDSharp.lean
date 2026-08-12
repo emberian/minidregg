@@ -178,8 +178,8 @@ theorem bad_line_pr_eq_one_fifth :
           (comb ((affineGenerator (ZMod 5)).gen γ)
             ![badWord, negBadWord])) = badSet := by
     ext γ
-    rw [Finset.mem_filter, mem_badSet]
-    simp only [Finset.mem_univ, true_and]
+    simp only [Finset.mem_filter, Finset.mem_univ, true_and]
+    rw [mem_badSet]
     have hcomb :
         comb ((affineGenerator (ZMod 5)).gen γ) ![badWord, negBadWord] =
           badWord + γ • negBadWord := by
@@ -195,8 +195,9 @@ theorem bad_line_pr_eq_one_fifth :
         = ∑ _ω ∈ ({1} : Finset (ZMod 5)),
             ((Fintype.card (ZMod 5) : ℝ))⁻¹ :=
           Finset.sum_congr rfl fun _ _ => rfl
-    _ = (1 : ℝ) * ((Fintype.card (ZMod 5) : ℝ))⁻¹ := by
+    _ = ((Fintype.card (ZMod 5) : ℝ))⁻¹ := by
           rw [Finset.sum_const, Finset.card_singleton, nsmul_eq_mul]
+          norm_num
     _ = 1 / 5 := by norm_num [ZMod.card]
 
 /-- The sharp threshold is attained by a tuple with no correlated agreement.
@@ -214,12 +215,15 @@ theorem bad_line_attains_sharp_threshold :
 
 end ProximityGapUDSharpExample
 
+/-- info: 'Minidregg.Loom.rs_proximityGap_UD_sharp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms rs_proximityGap_UD_sharp
 
+/-- info: 'Minidregg.Loom.reedSolomonCode_isProximityGenerator_UD_sharp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms reedSolomonCode_isProximityGenerator_UD_sharp
 
+/-- info: 'Minidregg.Loom.ProximityGapUDSharpExample.bad_line_attains_sharp_threshold' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ProximityGapUDSharpExample.bad_line_attains_sharp_threshold
 
