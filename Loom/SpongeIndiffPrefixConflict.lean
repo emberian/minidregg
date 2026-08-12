@@ -45,19 +45,15 @@ theorem programPrefixes_singleton_none_iff_conflict
       simp only
       constructor
       · intro hnone
-        simp [programPrefixes] at hnone
+        simp at hnone
       · rintro ⟨edgeValue, roValue, hedge', -⟩
-        rw [hedge] at hedge'
-        contradiction
+        cases hedge'
   | some edgeValue =>
       simp only
       cases hro : ro.lookup (seen ++ [block]) with
       | none =>
           rw [Oracle.respond_fresh_fst hro]
-          simp only [if_pos rfl, programPrefixes, reduceCtorEq]
-          rintro ⟨value, roValue, -, hro', -⟩
-          rw [hro] at hro'
-          contradiction
+          simp
       | some roValue =>
           rw [Oracle.respond_hit hro]
           by_cases hagree : edgeValue.1 = roValue
@@ -65,16 +61,16 @@ theorem programPrefixes_singleton_none_iff_conflict
             simp only [programPrefixes, reduceCtorEq, false_iff]
             rintro ⟨value, value', hedge', hro', hne⟩
             have hvalue : value = edgeValue := by
-              exact Option.some.inj (hedge'.symm.trans hedge)
+              exact Option.some.inj hedge'.symm
             have hvalue' : value' = roValue := by
-              exact Option.some.inj (hro'.symm.trans hro)
+              exact Option.some.inj hro'.symm
             subst value
             subst value'
             exact hne hagree
           · rw [if_neg hagree]
             constructor
             · intro _
-              exact ⟨edgeValue, roValue, hedge, hro, hagree⟩
+              exact ⟨edgeValue, roValue, rfl, rfl, hagree⟩
             · intro _
               rfl
 
