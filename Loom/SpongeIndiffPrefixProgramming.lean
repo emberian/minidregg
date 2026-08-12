@@ -203,15 +203,24 @@ theorem two_prefixes_programmed :
       (q := ((1 : ZMod 2), (0 : Fin 5)))
       (q' := ((0 : ZMod 2), (1 : Fin 5))) (by decide) (1, 1),
       Oracle.lookup_empty]
+  have hroSecondFresh :
+      (Oracle.empty.respond ([1] : List (ZMod 2)) 1).2.lookup [1, 1] = none := by
+    rw [Oracle.lookup_respond_ne (O := Oracle.empty)
+      (q := ([1] : List (ZMod 2)))
+      (q' := ([1, 1] : List (ZMod 2))) (by decide) 1,
+      Oracle.lookup_empty]
   unfold iv
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
     programPrefixes, List.nil_append, List.singleton_append]
+  simp only [zero_add]
   rw [hfirstFresh]
   simp only
-  rw [Oracle.respond_fresh_fst hfirstFresh, hz, hsecondFresh]
+  rw [Oracle.respond_fresh_fst (Oracle.lookup_empty [1]),
+    Oracle.respond_fresh_fst hfirstFresh, hz, hsecondFresh]
   simp only
-  rw [Oracle.respond_fresh_fst hsecondFresh]
+  rw [Oracle.respond_fresh_fst hroSecondFresh,
+    Oracle.respond_fresh_fst hsecondFresh]
   rfl
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
@@ -256,6 +265,7 @@ theorem first_prefix_walk :
   rw [show result.primitive.lookup
     (iv.1 + (1 : ZMod 2), iv.2) = some (1, 1) by
       simpa [iv] using first_edge_lookup]
+  rfl
 
 theorem full_prefix_walk :
     walkFrom result.primitive iv [1, 1] = some (0, 2) := by
@@ -271,6 +281,7 @@ theorem full_prefix_walk :
         some (0, 2) := by
     simpa using second_edge_lookup
   rw [hsecond]
+  rfl
 
 end SpongePrefixProgrammingExample
 
