@@ -66,6 +66,7 @@ theorem uniformProb_coord_mem_prefix_finite {v d : Nat} (i : Fin v)
       gcongr
       exact_mod_cast hcard _
 
+omit [DecidableEq C] in
 /-- Fully adaptive finite-alphabet union bound.  Each round's bad set may be
 chosen from the earlier sampled prefix. -/
 theorem adaptiveFiniteUnionBound {v d : Nat}
