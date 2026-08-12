@@ -179,7 +179,6 @@ theorem bad_line_pr_eq_one_fifth :
             ![badWord, negBadWord])) = badSet := by
     ext γ
     simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-    rw [mem_badSet]
     have hcomb :
         comb ((affineGenerator (ZMod 5)).gen γ) ![badWord, negBadWord] =
           badWord + γ • negBadWord := by
@@ -187,6 +186,7 @@ theorem bad_line_pr_eq_one_fifth :
       rw [comb_affineGenerator]
       rfl
     rw [hcomb]
+    exact mem_badSet.symm
   unfold ProximityGenerator.pr
   rw [hfilter, badSet_eq]
   calc
