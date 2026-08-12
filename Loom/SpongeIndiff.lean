@@ -94,10 +94,14 @@ has honest budget meaning only on the explicitly proved
 `SingleBlockConstruction` fragment.  The remaining theorem is sharply named:
 generalize the exhibited eager/deferred coordinate move to an adaptive
 same-space coupling, prove agreement away from its consistency/capacity bad
-event, price that event on the work space,
-and perform the random-permutation/random-function switch.  The construction
-already squeezes one rate element after a nonempty unpadded message of any
-block length; the deployed padding/domain rule remains `[SPONGE-padding]`.
+event, price that event on the work space, and perform the
+random-permutation/random-function switch.  The atomic consistency event is
+already exact: `SpongeIndiffPrefixConflict` proves a one-prefix construction
+rejects iff the primitive edge and lazy RO had previously sampled unequal rate
+values at that rooted prefix; either fresh side is conflict-free.
+The construction already squeezes one rate element after a nonempty unpadded
+message of any block length; the deployed padding/domain rule remains
+`[SPONGE-padding]`.
 
 ## Keystones (ATLAS: satisfiable + teeth + premise inhabitation, BUILT)
 `SpongeExample`: over `ZMod 2 × Fin 2`, the FIRST forward query at the IV

@@ -58,7 +58,7 @@ theorem programPrefixes_singleton_none_iff_conflict
           rw [Oracle.respond_hit hro]
           by_cases hagree : edgeValue.1 = roValue
           · rw [if_pos hagree]
-            simp only [programPrefixes, reduceCtorEq, false_iff]
+            simp only [reduceCtorEq, false_iff]
             rintro ⟨value, value', hedge', hro', hne⟩
             have hvalue : value = edgeValue := by
               exact Option.some.inj hedge'.symm
