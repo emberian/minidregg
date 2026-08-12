@@ -59,7 +59,7 @@ theorem programPrefixes_final_lookup
                                 subst result
                                 have hself := Oracle.lookup_respond_self ro
                                   (seen ++ [x]) value.1
-                                simpa only [hagree] using hself
+                                exact hself.trans (congrArg some hagree.symm)
                             | cons capacityCoin' capacityCoins =>
                                 simp [programPrefixes] at hrun
                         | cons rateCoin' rateCoins =>
