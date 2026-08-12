@@ -48,9 +48,11 @@ theorem idealFreshAt_of_not_mem_avoid {q : Nat}
       trivial
   | fwd s =>
       rw [hmove] at h
-      have hs : (coins j).2.2 ≠ s.2 := by simpa using h.1
-      have hc : (coins j).2.2 ∉ capsOf st.sim iv := by simpa using h.2
-      exact ⟨hc, hs⟩
+      constructor
+      · intro hc
+        exact h (Finset.mem_union_left _ (by simpa using hc))
+      · intro hs
+        exact h (Finset.mem_union_right _ (by simpa using hs))
   | inv t =>
       rw [hmove] at h
       simpa using h
