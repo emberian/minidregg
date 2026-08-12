@@ -188,10 +188,10 @@ theorem first_step_exact :
     List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, List.take,
     List.length_cons, List.length_nil, Nat.reduceAdd, List.map,
     SpQuery.prefixCoins, List.drop]
-  rw [show prefixHybridStep constructionThenForward iv
-      (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 =
-        .ok firstState by
-    simpa [coins] using SpongePrefixHybridExample.first_step_exact]
+  have hstep := SpongePrefixHybridExample.first_step_exact
+  unfold SpongePrefixHybridExample.constructionThenForward
+    PrefixHybridState.empty SpongePrefixHybridExample.coins at hstep
+  rw [hstep]
   rfl
 
 theorem second_step_exact :
@@ -202,9 +202,10 @@ theorem second_step_exact :
     List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls,
     List.take, List.length_cons, List.length_nil, SpQuery.prefixCoins,
     List.drop]
-  rw [show prefixHybridStep constructionThenForward iv
-      (fun _ => .primitive (0, 3)) firstState 1 = .ok finalState by
-    simpa [coins] using SpongePrefixHybridExample.second_step_exact]
+  have hstep := SpongePrefixHybridExample.second_step_exact
+  unfold SpongePrefixHybridExample.constructionThenForward
+    SpongePrefixHybridExample.firstState SpongePrefixHybridExample.coins at hstep
+  rw [hstep]
   rfl
 
 theorem stream_as_list : List.ofFn stream = [(1, 1), (0, 2), (0, 3)] := by
