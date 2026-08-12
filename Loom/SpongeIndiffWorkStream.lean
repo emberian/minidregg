@@ -190,8 +190,9 @@ theorem first_step_exact :
     SpQuery.prefixCoins, List.drop]
   change (match prefixHybridStep constructionThenForward iv
       (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 with
-    | .ok next => .ok ⟨next, [(0, 3)]⟩
-    | .error error => .error (.hybrid error)) = .ok afterConstruction
+    | Except.ok next => Except.ok ⟨next, [(0, 3)]⟩
+    | Except.error error => Except.error (.hybrid error)) =
+      Except.ok afterConstruction
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 =
         .ok firstState by
@@ -208,8 +209,9 @@ theorem second_step_exact :
     List.drop]
   change (match prefixHybridStep constructionThenForward iv
       (fun _ => .primitive (0, 3)) firstState 1 with
-    | .ok next => .ok ⟨next, []⟩
-    | .error error => .error (.hybrid error)) = .ok afterReplay
+    | Except.ok next => Except.ok ⟨next, []⟩
+    | Except.error error => Except.error (.hybrid error)) =
+      Except.ok afterReplay
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .primitive (0, 3)) firstState 1 = .ok finalState by
     simpa [coins] using SpongePrefixHybridExample.second_step_exact]
@@ -227,9 +229,9 @@ theorem fixed_work_stream_replays :
   rw [show List.finRange 2 = [0, 1] by decide]
   simp only [List.foldl_cons, List.foldl_nil, Except.bind]
   change (match workHybridStep constructionThenForward iv initial 0 with
-    | .error error => .error error
-    | .ok state => workHybridStep constructionThenForward iv state 1) =
-      .ok afterReplay
+    | Except.error error => Except.error error
+    | Except.ok state => workHybridStep constructionThenForward iv state 1) =
+      Except.ok afterReplay
   rw [first_step_exact]
   exact second_step_exact
 
