@@ -146,7 +146,7 @@ def SpongeIndiffWorkGame (iv : Rate × Cap) : Prop :=
 
 end CorrectedTarget
 
-/-- info: 'Minidregg.Loom.primitiveWorkOn_eq_queries_of_singleBlock' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Loom.primitiveWorkOn_eq_queries_of_singleBlock' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms primitiveWorkOn_eq_queries_of_singleBlock
 /-- info: 'Minidregg.Loom.SpongeWorkBudgetExample.external_query_count_does_not_bound_primitive_work' depends on axioms: [propext, Classical.choice, Quot.sound] -/
