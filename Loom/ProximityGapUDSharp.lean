@@ -50,7 +50,8 @@ noncomputable def rsUdSharpError (ι F : Type*) [Fintype ι] [Fintype F]
 /-- For the uniform affine generator, the probability of a predicate is the
 cardinality of its seed set divided by `|F|`. -/
 private theorem affineGenerator_pr_eq_card [Fintype F]
-    (P : (Fin 2 → F) → Prop) :
+    (P : (Fin 2 → F) → Prop)
+    [DecidablePred fun γ : F => P ((affineGenerator F).gen γ)] :
     (affineGenerator F).pr P =
       ((Finset.univ.filter fun γ : F => P ((affineGenerator F).gen γ)).card : ℝ) /
         (Fintype.card F : ℝ) := by
@@ -109,12 +110,17 @@ theorem rs_proximityGap_UD_sharp [Nonempty ι] [Fintype F]
     exact_mod_cast Fintype.card_pos
   have hcardR :
       (Nat.floor (δ * (Fintype.card ι : ℝ)) + 1 : ℝ) < (A.card : ℝ) := by
-    rw [hpr, rsUdSharpError, div_lt_div_iff_of_pos_right hF] at hsmall
-    exact not_le.mp hsmall
+    have hnot : ¬(A.card : ℝ) / (Fintype.card F : ℝ) ≤
+        (Nat.floor (δ * (Fintype.card ι : ℝ)) + 1 : ℝ) /
+          (Fintype.card F : ℝ) := by
+      simpa [hpr, rsUdSharpError] using hsmall
+    exact (div_lt_div_iff_of_pos_right hF).mp (not_le.mp hnot)
   have hcard : Nat.floor (δ * (Fintype.card ι : ℝ)) + 2 ≤ A.card := by
     exact_mod_cast hcardR
   exact correlatedAgreement_of_close_card dom hδ0 hδ3
-    (fun γ hγ => (Finset.mem_filter.mp (hA ▸ hγ)).2) hcard
+    (fun γ hγ => by
+      rw [hA] at hγ
+      exact (Finset.mem_filter.mp hγ).2) hcard
 
 /-- The affine generator is a proximity generator for every finite-rate RS
 code throughout the proved one-third-UD interval, now with the exact
@@ -190,10 +196,13 @@ theorem bad_line_pr_eq_one_fifth :
     ext γ
     rw [Finset.mem_filter, mem_badSet]
     simp only [Finset.mem_univ, true_and]
-    congr 1
-    funext x
-    rw [comb_affineGenerator]
-    rfl
+    have hcomb :
+        comb ((affineGenerator (ZMod 5)).gen γ) ![badWord, negBadWord] =
+          badWord + γ • negBadWord := by
+      funext x
+      rw [comb_affineGenerator]
+      rfl
+    rw [hcomb]
   rw [hfilter, badSet_eq]
   norm_num [ZMod.card]
 
