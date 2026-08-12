@@ -20,7 +20,7 @@ namespace Minidregg.Loom
 
 section LazyConstruction
 
-variable {Rate Cap : Type} [AddCommGroup Rate]
+variable {Rate Cap : Type} [AddCommGroup Rate] [DecidableEq Rate]
 
 /-- Execute a sponge absorption against a lazy primitive table.  The list of
 candidate primitive answers must have exactly the message length; handler hits
@@ -93,7 +93,6 @@ theorem lazyAbsorb_singleton_replay
     (hlookup : primitive.lookup (state.1 + x, state.2) = some value) :
     lazyAbsorb primitive state [x] [coin] = some (value, primitive) := by
   rw [lazyAbsorb_singleton, Oracle.respond_hit hlookup]
-  rfl
 
 /-- On a fresh primitive input, a one-block construction records exactly its
 candidate coin. -/
@@ -103,8 +102,11 @@ theorem lazyAbsorb_singleton_fresh
     (hfresh : primitive.lookup (state.1 + x, state.2) = none) :
     lazyAbsorb primitive state [x] [coin] =
       some (coin, (primitive.respond (state.1 + x, state.2) coin).2) := by
-  rw [lazyAbsorb_singleton, Oracle.respond_fresh_fst hfresh]
-  rfl
+  rw [lazyAbsorb_singleton]
+  have hreply : primitive.respond (state.1 + x, state.2) coin =
+      (coin, (primitive.respond (state.1 + x, state.2) coin).2) :=
+    Prod.ext (Oracle.respond_fresh_fst hfresh coin) rfl
+  rw [hreply]
 
 /-- Successful coupled construction state.  Both handlers are returned so the
 next adaptive query observes their exact updated tables. -/
@@ -140,13 +142,11 @@ theorem coupledConstruction_some_length_eq
     (h : coupledConstruction iv ro primitive message rateCoin blockCoins =
       some result) :
     message.length = blockCoins.length := by
-  unfold coupledConstruction at h
-  split at h
-  · contradiction
-  · split at h
-    · rename_i finalState primitive' hlazy
-      exact lazyAbsorb_some_length_eq primitive iv hlazy
-    · contradiction
+  by_cases hempty : message.isEmpty = true
+  · simp [coupledConstruction, hempty] at h
+  · cases hlazy : lazyAbsorb primitive iv message blockCoins with
+    | none => simp [coupledConstruction, hempty, hlazy] at h
+    | some pair => exact lazyAbsorb_some_length_eq primitive iv hlazy
 
 /-- A successful coupled step records the full message at exactly the returned
 answer in its RO state. -/
@@ -158,17 +158,22 @@ theorem coupledConstruction_lookup
     (h : coupledConstruction iv ro primitive message rateCoin blockCoins =
       some result) :
     result.ro.lookup message = some result.answer := by
-  unfold coupledConstruction at h
-  split at h
-  · contradiction
-  · split at h
-    · rename_i finalState primitive' hlazy
-      split at h
-      · injection h with hresult
-        subst result
-        exact Oracle.lookup_respond_self ro message rateCoin
-      · contradiction
-    · contradiction
+  by_cases hempty : message.isEmpty = true
+  · simp [coupledConstruction, hempty] at h
+  · cases hlazy : lazyAbsorb primitive iv message blockCoins with
+    | none => simp [coupledConstruction, hempty, hlazy] at h
+    | some pair =>
+        obtain ⟨finalState, primitive'⟩ := pair
+        by_cases heq : finalState.1 = (ro.respond message rateCoin).1
+        · have hresult :
+              (CoupledConstructionResult.mk
+                (ro.respond message rateCoin).1
+                (ro.respond message rateCoin).2 primitive') = result := by
+            exact Option.some.inj (by
+              simpa [coupledConstruction, hempty, hlazy, heq] using h)
+          rw [← hresult]
+          exact Oracle.lookup_respond_self ro message rateCoin
+        · simp [coupledConstruction, hempty, hlazy, heq] at h
 
 end LazyConstruction
 
