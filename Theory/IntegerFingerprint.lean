@@ -71,6 +71,11 @@ already exceeds BabyBear's characteristic once the committed polynomial has six 
 i.e. 64 hypercube entries.  Goldilocks clears the same floor with enormous room.  This is
 the arithmetic behind the report's verdict that Limber's "small fields" means 64-bit, not
 31-bit, and it is stated here so it can go red if anyone re-derives the parameters.
+
+`stated_soundness_term_never_negligible` records a second, separate observation: Table 3's
+concrete `s` values come from the Appendix A script, not from the inequality Theorem 5.5
+states, and at the table's best-overhead row the stated term is `≥ 1` for every `s`.  See
+the section comment there for the full accounting.
 -/
 import Mathlib.RingTheory.UniqueFactorizationDomain.Basic
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
@@ -368,6 +373,46 @@ theorem goldilocks_clears_limber_min :
     limberMinCharacteristic (64 * 128 * 25) < (2 ^ 64 - 2 ^ 32 + 1 : ℕ) := by
   norm_num [limberMinCharacteristic]
 
+/-- Soundness Bound 2 (`s·m²/(k·|F|) ≤ negl`) additionally forces the *extension* field to
+have order at least `2^λ` (Remark 5.9).  BabyBear's quartic extension does not reach
+λ = 128: `(2^31 − 2^27 + 1)^4 < 2^124`.  A second, softer obstruction, recorded so the
+first one is not mistaken for the only one. -/
+theorem babybear_quartic_extension_below_lambda :
+    (2 ^ 31 - 2 ^ 27 + 1 : ℕ) ^ 4 < 2 ^ 124 := by norm_num
+
+/-! ## Where Theorem 5.5's stated bound and Table 3's parameters part company
+
+Limber states `IntEval`'s soundness error as `ϵ = (32λm/P)^s + s·m²/(k·|F|)` (Theorem 5.5),
+having derived the per-prime factor `32λm/P` in §3.5.3 from `|S| ≤ 8λm/log P` and
+`|Primes(P/2,P)| ≥ P/(4 log P)` (Corollary A.1), with the design rule `P ≫ 32λm`.
+
+Table 3's concrete `s` values are **not** computed from that inequality.  They come from the
+Appendix A script, which counts the bad-prime set per instance — roughly `λm/log P` rather
+than `8λm/log P` — and uses `P/(2 ln P)` for the prime count where Corollary A.1 proves only
+`P/(4 log P)`.  The two analyses disagree by about 4.5 bits per sampled prime.
+
+The clearest symptom is Table 3's best-commitment-overhead row (λ = 128, m = 25,
+log P = 16, s = 34, overhead 0.033): there `32λm = 102400` already **exceeds** `P = 65536`,
+so the term Theorem 5.5 proves is at least `1` for every `s`, while the table reports that
+row as reaching `2^-λ`.  This is loose rounding in the theorem's statement rather than an
+attack — the script's `|S|` bound is the one §3.5.3's argument actually supports — but the
+proved inequality is the pessimistic member of the pair, and it is the one recorded here. -/
+
+/-- At Table 3's `log P = 16` row, `32λm` exceeds `P`. -/
+theorem table3_low_prime_row_exceeds_P : 65536 < 32 * 128 * 25 := by norm_num
+
+/-- The general consequence: once `P ≤ 32λm`, no number of sampled primes drives the term
+Theorem 5.5 states below one.  Instantiating at `lam = 128`, `m = 25`, `P = 65536` covers
+the Table 3 row above. -/
+theorem stated_soundness_term_never_negligible
+    (lam m P s : ℕ) (hP : 0 < P) (hle : P ≤ 32 * lam * m) :
+    1 ≤ ((32 * lam * m : ℚ) / (P : ℚ)) ^ s := by
+  have hPQ : (0 : ℚ) < (P : ℚ) := by exact_mod_cast hP
+  have h1 : (1 : ℚ) ≤ (32 * lam * m : ℚ) / (P : ℚ) := by
+    rw [le_div_iff₀ hPQ, one_mul]
+    exact_mod_cast hle
+  exact one_le_pow₀ h1
+
 /-! ## Axiom pins -/
 
 /-- info: 'Minidregg.Theory.IntegerFingerprint.Row.holdsInt_iff_residual_eq_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -420,5 +465,12 @@ theorem goldilocks_clears_limber_min :
 #guard_msgs (whitespace := lax) in #print axioms babybear_excluded_from_six_variables
 /-- info: 'Minidregg.Theory.IntegerFingerprint.goldilocks_clears_limber_min' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms goldilocks_clears_limber_min
+
+/-- info: 'Minidregg.Theory.IntegerFingerprint.babybear_quartic_extension_below_lambda' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms babybear_quartic_extension_below_lambda
+/-- info: 'Minidregg.Theory.IntegerFingerprint.table3_low_prime_row_exceeds_P' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms table3_low_prime_row_exceeds_P
+/-- info: 'Minidregg.Theory.IntegerFingerprint.stated_soundness_term_never_negligible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stated_soundness_term_never_negligible
 
 end Minidregg.Theory.IntegerFingerprint
