@@ -76,8 +76,10 @@ formally refutes external query count as a primitive-work budget for arbitrary
 multi-block messages; `SpongeIndiffPrefixProgramming` reconciles or programs
 every nonempty prefix; `SpongeIndiffPrefixOutput` proves that a successful
 construction returns exactly the lazy RO value of the full message; and
-`SpongeIndiffWorkStream` consumes one pair from a fixed uniform vector per
-primitive evaluation.  Distinct lazy samples commute extensionally
+`SpongeIndiffPrefixWalk` proves that its returned primitive table actually
+walks the complete message to that same state.  `SpongeIndiffWorkStream`
+consumes one pair from a fixed uniform vector per primitive evaluation.
+Distinct lazy samples commute extensionally
 (`SpongeIndiffOracleReordering`), while `SpongeIndiffUniformCoupling` proves
 that an actual work-space bijection plus pointwise event equivalence transports
 uniform probability exactly.  `SpongeIndiffDeferredWork` supplies the matching

@@ -178,6 +178,22 @@ theorem programConstruction_final_walk
   · contradiction
   · exact programPrefixes_final_walk ro primitive iv [] hrun
 
+/-- One theorem packages the complete construction semantics: the final table
+walks the entire nonempty message to the returned state, and the state's rate
+is exactly the full-message lazy RO response. -/
+theorem programConstruction_realizes_ro
+    (iv : Rate × Cap) (ro : Oracle (List Rate) Rate)
+    (primitive : Oracle (Rate × Cap) (Rate × Cap))
+    (message rateCoins : List Rate) (capacityCoins : List Cap) {result}
+    (hrun : programConstruction iv ro primitive message rateCoins
+      capacityCoins = some result) :
+    walkFrom result.primitive iv message = some result.state ∧
+      result.ro.lookup message = some result.state.1 :=
+  ⟨programConstruction_final_walk iv ro primitive message rateCoins
+      capacityCoins hrun,
+    programConstruction_final_lookup iv ro primitive message rateCoins
+      capacityCoins hrun⟩
+
 end PrefixWalk
 
 /-- info: 'Minidregg.Loom.programPrefixes_final_walk' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -185,5 +201,8 @@ end PrefixWalk
 /-- info: 'Minidregg.Loom.programConstruction_final_walk' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms programConstruction_final_walk
+/-- info: 'Minidregg.Loom.programConstruction_realizes_ro' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms programConstruction_realizes_ro
 
 end Minidregg.Loom

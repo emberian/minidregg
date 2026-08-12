@@ -90,6 +90,7 @@ import Loom.SpongeIndiffLazyConstruction -- diagnostic lazy construction interpr
 import Loom.SpongeIndiffLazyHybrid -- diagnostic eager/lazy hybrid with concrete order-sensitive teeth; superseded for the corrected path by prefix programming below
 import Loom.SpongeIndiffPrefixProgramming -- corrected construction-first semantics: every nonempty prefix is reconciled with an existing primitive edge or programmed from the lazy RO, with exact length and replay teeth
 import Loom.SpongeIndiffPrefixOutput -- load-bearing output theorem: every successful nonempty construction returns exactly the lazy RO value recorded for its full message
+import Loom.SpongeIndiffPrefixWalk -- every successful prefix program preserves prior edges and its final primitive table walks the complete multi-block message to the returned state; combined realization also pins that state's rate to the full-message RO answer
 import Loom.SpongeIndiffPrefixHybrid -- adaptive shared RO/primitive state over construction and primitive queries, with exact per-step work and current-coin framing
 import Loom.SpongeIndiffWorkStream -- one fixed uniform coin pair per primitive work unit; exhaustion fails closed and the remaining ideal bridge is an explicit off-bad witness, not unconditional equality
 import Loom.SpongeIndiffOracleReordering -- distinct lazy responses commute extensionally and arbitrary Nodup response schedules are invariant under permutation of sample order
