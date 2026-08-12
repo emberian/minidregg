@@ -7,11 +7,13 @@ the primitive edge after every prefix must squeeze to that prefix's RO answer.
 Programming only the final edge is insufficient.
 
 This module gives the operational semantics needed by an honest hybrid.  It
-walks the message from the IV, lazily samples one RO answer for each nonempty
-prefix, and programs the corresponding fresh primitive edge to
-`(RO(prefix), freshCapacity)`.  A pre-existing edge must already have that
-rate or the execution fails closed.  Successful execution therefore consumes
-exactly one rate coin and one capacity coin per message block.
+walks the message from the IV and reconciles every nonempty prefix in both
+directions.  If the primitive edge is fresh, it lazily samples the prefix RO
+and programs the edge to `(RO(prefix), freshCapacity)`.  If the primitive edge
+already exists, a fresh prefix RO is programmed to the edge's rate; an already
+answered prefix must agree or execution fails closed.  Successful execution
+therefore is supplied exactly one rate coin and one capacity coin per message
+block, though a rate coin is intentionally unused on an existing edge.
 
 The runner is deterministic from its explicit coins and tables.  It does not
 yet assign a probability distribution to variable-length coin streams or
@@ -45,15 +47,16 @@ noncomputable def programPrefixes
   | _ :: _, _, [] => none
   | x :: xs, rateCoin :: rateCoins, capacityCoin :: capacityCoins =>
       let nextPrefix := seen ++ [x]
-      let roReply := ro.respond nextPrefix rateCoin
       let key : Rate × Cap := (state.1 + x, state.2)
       match primitive.lookup key with
       | some value =>
+          let roReply := ro.respond nextPrefix value.1
           if value.1 = roReply.1 then
             programPrefixes roReply.2 primitive value nextPrefix xs
               rateCoins capacityCoins
           else none
       | none =>
+          let roReply := ro.respond nextPrefix rateCoin
           let value : Rate × Cap := (roReply.1, capacityCoin)
           let primitiveReply := primitive.respond key value
           programPrefixes roReply.2 primitiveReply.2 primitiveReply.1
@@ -96,14 +99,15 @@ theorem programPrefixes_some_lengths
               cases hlookup : primitive.lookup (state.1 + x, state.2) with
               | some value =>
                   rw [hlookup] at h
-                  by_cases heq : value.1 = (ro.respond (seen ++ [x]) rateCoin).1
+                  by_cases heq :
+                      value.1 = (ro.respond (seen ++ [x]) value.1).1
                   · have htail :
-                        programPrefixes (ro.respond (seen ++ [x]) rateCoin).2
+                        programPrefixes (ro.respond (seen ++ [x]) value.1).2
                           primitive value (seen ++ [x]) xs rateCoins
                           capacityCoins = some result := by
                       simpa [heq] using h
                     obtain ⟨hrate, hcap⟩ :=
-                      ih (ro := (ro.respond (seen ++ [x]) rateCoin).2)
+                      ih (ro := (ro.respond (seen ++ [x]) value.1).2)
                         (primitive := primitive) (state := value)
                         (seen := seen ++ [x]) htail
                     exact ⟨by simp [hrate], by simp [hcap]⟩
@@ -159,19 +163,38 @@ theorem programConstruction_singleton_fresh
   rw [Oracle.respond_fresh_fst hfresh]
   rfl
 
-/-- A pre-existing final edge with the wrong rate is rejected even when its
-capacity is otherwise usable.  The consistency test is load-bearing. -/
-theorem programConstruction_singleton_wrong_rate
+/-- Primitive-first reconciliation: if the edge exists and the prefix RO is
+fresh, the RO is programmed to the existing edge's rate.  The supplied rate
+and capacity coins are deliberately unused. -/
+theorem programConstruction_singleton_existing_edge_fresh_ro
     (iv : Rate × Cap) (ro : Oracle (List Rate) Rate)
     (primitive : Oracle (Rate × Cap) (Rate × Cap))
     (x rateCoin : Rate) (capacityCoin : Cap) (existing : Rate × Cap)
     (hlookup : primitive.lookup (iv.1 + x, iv.2) = some existing)
-    (hne : existing.1 ≠ (ro.respond [x] rateCoin).1) :
-    programConstruction iv ro primitive [x] [rateCoin] [capacityCoin] = none := by
+    (hroFresh : ro.lookup [x] = none) :
+    programConstruction iv ro primitive [x] [rateCoin] [capacityCoin] =
+      some ⟨existing, (ro.respond [x] existing.1).2, primitive⟩ := by
   unfold programConstruction
   simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
     programPrefixes]
   rw [hlookup]
+  rw [Oracle.respond_fresh_fst hroFresh]
+  simp
+
+/-- A pre-existing edge conflicts with an already-answered prefix RO exactly
+when their rates differ.  This consistency test is load-bearing. -/
+theorem programConstruction_singleton_existing_edge_wrong_ro
+    (iv : Rate × Cap) (ro : Oracle (List Rate) Rate)
+    (primitive : Oracle (Rate × Cap) (Rate × Cap))
+    (x rateCoin : Rate) (capacityCoin : Cap) (existing : Rate × Cap)
+    (hlookup : primitive.lookup (iv.1 + x, iv.2) = some existing)
+    (answer : Rate) (hro : ro.lookup [x] = some answer)
+    (hne : existing.1 ≠ answer) :
+    programConstruction iv ro primitive [x] [rateCoin] [capacityCoin] = none := by
+  unfold programConstruction
+  simp only [List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte,
+    programPrefixes]
+  rw [hlookup, Oracle.respond_hit hro]
   simp [hne]
 
 end PrefixProgramming
