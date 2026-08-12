@@ -650,8 +650,11 @@ theorem postCanonicalExact :
           (FieldStore.write
               (FieldStore.write
                 Minidregg.Theory.DeployedMaterializerWitness.effectCell.logical.fields
-                debitKey 0)
-              creditKey 0 field) = none
+                debitKey
+                (show DeclaredTurn.effectSchema.FieldType debitKey from (0 : Int)))
+              creditKey
+              (show DeclaredTurn.effectSchema.FieldType creditKey from (0 : Int))
+              field) = none
         rw [FieldStore.write_other _ (Ne.symm credit)]
         rw [FieldStore.write_other _ (Ne.symm debit)]
         rfl
