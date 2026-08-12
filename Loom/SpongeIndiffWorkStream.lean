@@ -140,23 +140,43 @@ section WorkProbability
 variable (Rate Cap : Type) [AddCommGroup Rate]
   [Fintype Rate] [Fintype Cap] [DecidableEq Rate] [DecidableEq Cap]
 
-/-- Acceptance probability of the corrected prefix-programmed random-function
-hybrid on a fixed `work`-pair uniform sample space.  Exhaustion or a semantic
-mismatch rejects. -/
-noncomputable def workHybridProb {q work : Nat}
-    (D : Distinguisher Rate Cap q) (iv : Rate × Cap) : Real :=
-  uniformProb (Fin work → Rate × Cap) fun coins =>
+/-- Acceptance predicate of the corrected prefix-programmed random-function
+hybrid on one fixed primitive-work vector.  Exhaustion or a semantic mismatch
+rejects. -/
+noncomputable def workHybridAccept {q work : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap)
+    (coins : Fin work → Rate × Cap) : Prop :=
     match workHybridRun D iv coins with
     | .ok state => D.out state.core.ans = true
     | .error _ => False
 
-/-- Work-indexed hybrid-to-ideal agreement is deliberately a named theorem
-target rather than an asserted field.  Its proof must couple construction-time
-prefix capacities with the ideal simulator's later reveal-time samples. -/
-def PrefixHybridIdealAgreement (iv : Rate × Cap) : Prop :=
+/-- Acceptance probability of the corrected prefix-programmed random-function
+hybrid on a fixed `work`-pair uniform sample space. -/
+noncomputable def workHybridProb {q work : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap) : Real :=
+  uniformProb (Fin work → Rate × Cap) (workHybridAccept D iv)
+
+/-- The honest interface still required to identify the prefix-programmed
+work game with the ideal game.  The hybrid may reject on a consistency bad
+event, so unconditional equality is not a sound target.  A witness must expose
+that event, prove pointwise agreement away from it, and separately realize the
+deferred ideal acceptance predicate on the same finite work space. -/
+structure PrefixHybridIdealOffBadWitness {q work : Nat}
+    (D : Distinguisher Rate Cap q) (iv : Rate × Cap) where
+  bad : (Fin work → Rate × Cap) → Prop
+  deferredAccept : (Fin work → Rate × Cap) → Prop
+  agree_off_bad : ∀ coins, ¬ bad coins →
+    (workHybridAccept D iv coins ↔ deferredAccept coins)
+  deferred_probability_exact :
+    uniformProb (Fin work → Rate × Cap) deferredAccept = idealProb D iv
+
+/-- Work-indexed hybrid-to-ideal agreement is deliberately an off-bad witness
+target.  A later coupling must construct the witness and price its `bad` event;
+this declaration itself asserts neither existence nor a numerical bound. -/
+def PrefixHybridIdealOffBadTarget (iv : Rate × Cap) : Prop :=
   ∀ (q work : Nat) (D : Distinguisher Rate Cap q),
     PrimitiveWorkBound D work →
-      workHybridProb Rate Cap (work := work) D iv = idealProb D iv
+      Nonempty (PrefixHybridIdealOffBadWitness D iv)
 
 end WorkProbability
 

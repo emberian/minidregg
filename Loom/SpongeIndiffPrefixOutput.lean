@@ -59,7 +59,7 @@ theorem programPrefixes_final_lookup
                                 subst result
                                 have hself := Oracle.lookup_respond_self ro
                                   (seen ++ [x]) value.1
-                                simpa [hagree] using hself
+                                simpa only [hagree] using hself
                             | cons capacityCoin' capacityCoins =>
                                 simp [programPrefixes] at hrun
                         | cons rateCoin' rateCoins =>
@@ -68,8 +68,7 @@ theorem programPrefixes_final_lookup
                         have htail := ih
                           (ro := (ro.respond (seen ++ [x]) value.1).2)
                           (primitive := primitive) (state := value)
-                          (seen := seen ++ [x]) (message := y :: ys)
-                          (by simp) hrun
+                          (seen := seen ++ [x]) (by simp) hrun
                         simpa [List.append_assoc] using htail
                   · rw [if_neg hagree] at hrun
                     contradiction
@@ -109,7 +108,7 @@ theorem programPrefixes_final_lookup
                       have hrecursive := ih
                         (ro := roReply.2) (primitive := primitiveReply.2)
                         (state := primitiveReply.1) (seen := seen ++ [x])
-                        (message := y :: ys) (by simp) htail
+                        (by simp) htail
                       simpa [List.append_assoc] using hrecursive
 
 /-- Public construction is a nonempty wrapper, so its returned rate is exactly
