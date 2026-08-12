@@ -231,12 +231,15 @@ edge `(1,0) ↦ (0,1)`; its fresh supplied coin `(1,3)` is ignored. -/
 theorem construction_first_forward_replays :
     lazyHybridRun constructionThenForward iv coins = .ok finalState ∧
       finalState.ans = [.rate 1, .block (0, 1)] ∧ finalState.work = 3 := by
-  unfold lazyHybridRun
-  rw [show List.finRange 2 = [0, 1] by decide]
-  simp only [List.foldl_cons, List.foldl_nil, Except.bind]
-  rw [first_step_exact]
-  rw [second_step_exact]
-  simp [finalState]
+  constructor
+  · unfold lazyHybridRun
+    rw [show List.finRange 2 = [0, 1] by decide]
+    simp only [List.foldl_cons, List.foldl_nil, Except.bind]
+    rw [first_step_exact]
+    change lazyHybridStep constructionThenForward iv coins firstState 1 =
+      .ok finalState
+    exact second_step_exact
+  · exact ⟨rfl, rfl⟩
 
 end SpongeLazyHybridExample
 
