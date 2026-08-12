@@ -26,6 +26,8 @@ section Reordering
 
 variable {Q C : Type}
 
+open Classical
+
 /-- Two finite lazy handlers denote the same partial response function.  Their
 log order and proof fields may differ. -/
 def LookupEquivalent (left right : Oracle Q C) : Prop :=
@@ -184,6 +186,7 @@ theorem leftFirst_log : leftFirst.log = [(7, true), (9, false)] := by
     rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
   simp only [leftFirst]
   rw [Oracle.respond_fresh_log h9, Oracle.respond_fresh_log h7]
+  rfl
 
 theorem rightFirst_log : rightFirst.log = [(9, false), (7, true)] := by
   have h9 : (Oracle.empty : Oracle Nat Bool).lookup 9 = none :=
@@ -192,6 +195,7 @@ theorem rightFirst_log : rightFirst.log = [(9, false), (7, true)] := by
     rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
   simp only [rightFirst]
   rw [Oracle.respond_fresh_log h7, Oracle.respond_fresh_log h9]
+  rfl
 
 theorem logs_differ : leftFirst.log ≠ rightFirst.log := by
   rw [leftFirst_log, rightFirst_log]
@@ -202,10 +206,13 @@ theorem lookups_agree : Oracle.LookupEquivalent leftFirst rightFirst := by
 
 theorem exact_values :
     leftFirst.lookup 7 = some true ∧ leftFirst.lookup 9 = some false := by
-  rw [Oracle.lookup]
-  change ((leftFirst.log.find? _).map Prod.snd = some true) ∧ _
-  rw [leftFirst_log]
-  decide
+  unfold leftFirst
+  constructor
+  · rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_respond_self,
+      Oracle.respond_fresh_fst (Oracle.lookup_empty 7)]
+  · rw [Oracle.lookup_respond_self]
+    rw [Oracle.respond_fresh_fst]
+    rw [Oracle.lookup_respond_ne _ (by decide), Oracle.lookup_empty]
 
 def scheduleA : List (Nat × Bool) := [(7, true), (9, false), (11, true)]
 def scheduleB : List (Nat × Bool) := [(11, true), (7, true), (9, false)]
