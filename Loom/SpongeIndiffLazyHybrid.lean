@@ -207,7 +207,7 @@ theorem first_step_exact :
     List.isEmpty_nil, ↓reduceIte, coins, Fin.isValue, List.length_cons,
     List.length_nil, Nat.reduceAdd, ↓reduceIte]
   rw [show iv = SpongeLazyConstructionExample.iv by rfl]
-  rw [SpongeLazyConstructionExample.two_block_coupled_exact]
+  rw [SpongeLazyConstructionExample.two_block_coupled_exact_literals]
   rfl
 
 theorem first_edge_lookup :
@@ -233,7 +233,7 @@ theorem construction_first_forward_replays :
       finalState.ans = [.rate 1, .block (0, 1)] ∧ finalState.work = 3 := by
   unfold lazyHybridRun
   rw [show List.finRange 2 = [0, 1] by decide]
-  simp only [List.foldl_cons, Except.bind_ok, List.foldl_nil]
+  simp only [List.foldl_cons, List.foldl_nil, Except.bind]
   rw [first_step_exact, second_step_exact]
   simp [finalState]
 

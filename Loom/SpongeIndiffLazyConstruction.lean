@@ -222,6 +222,11 @@ theorem two_block_coupled_exact :
   rw [Oracle.respond_fresh_fst (Oracle.lookup_empty message)]
   simp [coupledResult]
 
+theorem two_block_coupled_exact_literals :
+    coupledConstruction iv Oracle.empty Oracle.empty
+      ([1, 1] : List (ZMod 2)) 1 [(0, 1), (1, 2)] = some coupledResult := by
+  simpa [message, blockCoins] using two_block_coupled_exact
+
 /-- Changing only the RO rate coin makes the same primitive execution reject,
 so the agreement check is load-bearing. -/
 theorem two_block_wrong_ro_rejected :
