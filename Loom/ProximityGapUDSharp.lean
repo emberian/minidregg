@@ -212,6 +212,9 @@ theorem bad_line_attains_sharp_threshold :
 
 end ProximityGapUDSharpExample
 
+#print axioms affineGenerator_pr_eq_card
+#print axioms correlatedAgreement_of_close_card
+
 #guard_msgs (whitespace := lax) in
 #print axioms rs_proximityGap_UD_sharp
 
