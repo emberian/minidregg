@@ -218,10 +218,14 @@ theorem two_prefixes_programmed :
   simp only
   rw [Oracle.respond_fresh_fst (Oracle.lookup_empty [1]),
     Oracle.respond_fresh_fst hfirstFresh, hz]
-  simp only [hsecondFresh]
-  rw [Oracle.respond_fresh_fst hroSecondFresh,
-    Oracle.respond_fresh_fst hsecondFresh]
-  rfl
+  split
+  · rename_i hlookup
+    rw [hsecondFresh] at hlookup
+  · rename_i hlookup
+    simp only
+    rw [Oracle.respond_fresh_fst hroSecondFresh,
+      Oracle.respond_fresh_fst hlookup]
+    rfl
 
 theorem first_prefix_lookup : result.ro.lookup [1] = some 1 := by
   unfold result
