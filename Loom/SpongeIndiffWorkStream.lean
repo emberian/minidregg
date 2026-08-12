@@ -188,11 +188,6 @@ theorem first_step_exact :
     List.isEmpty_nil, ↓reduceIte, SpQuery.primitiveCalls, List.take,
     List.length_cons, List.length_nil, Nat.reduceAdd, List.map,
     SpQuery.prefixCoins, List.drop]
-  change (match prefixHybridStep constructionThenForward iv
-      (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 with
-    | Except.ok next => Except.ok ⟨next, [(0, 3)]⟩
-    | Except.error error => Except.error (.hybrid error)) =
-      Except.ok afterConstruction
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .construction [1, 0] [1, 2]) PrefixHybridState.empty 0 =
         .ok firstState by
@@ -207,11 +202,6 @@ theorem second_step_exact :
     List.isEmpty_cons, Bool.false_eq_true, ↓reduceIte, SpQuery.primitiveCalls,
     List.take, List.length_cons, List.length_nil, SpQuery.prefixCoins,
     List.drop]
-  change (match prefixHybridStep constructionThenForward iv
-      (fun _ => .primitive (0, 3)) firstState 1 with
-    | Except.ok next => Except.ok ⟨next, []⟩
-    | Except.error error => Except.error (.hybrid error)) =
-      Except.ok afterReplay
   rw [show prefixHybridStep constructionThenForward iv
       (fun _ => .primitive (0, 3)) firstState 1 = .ok finalState by
     simpa [coins] using SpongePrefixHybridExample.second_step_exact]
@@ -228,11 +218,11 @@ theorem fixed_work_stream_replays :
   rw [stream_as_list]
   rw [show List.finRange 2 = [0, 1] by decide]
   simp only [List.foldl_cons, List.foldl_nil, Except.bind]
-  change (match workHybridStep constructionThenForward iv initial 0 with
-    | Except.error error => Except.error error
-    | Except.ok state => workHybridStep constructionThenForward iv state 1) =
-      Except.ok afterReplay
-  rw [first_step_exact]
+  rw [show workHybridStep constructionThenForward iv
+      { core := PrefixHybridState.empty,
+        remaining := [(1, 1), (0, 2), (0, 3)] } 0 =
+        .ok afterConstruction by
+    simpa only [initial] using first_step_exact]
   exact second_step_exact
 
 end SpongeWorkStreamExample
