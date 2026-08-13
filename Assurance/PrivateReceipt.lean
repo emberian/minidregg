@@ -2,7 +2,7 @@
 # `Assurance/PrivateReceipt.lean` — can a turn carry a PRIVATE input? (the checkpoint)
 
 The honest answer to "do we actually have hiding / private inputs" was: we have the algebraic
-HIDING CORE (`Loom/ZKHiding.lean` — masked-opening hiding for Reed–Solomon), but no wired
+HIDING CORE (`Selvage/ZKHiding.lean` — masked-opening hiding for Reed–Solomon), but no wired
 "a turn carries a hidden witness" feature and no end-to-end ZK argument. This file takes the
 FIRST real step, statement-first: it makes "private input to a turn" a concrete object with a
 kill-checkpoint, and answers — at the opening layer — YES, the architecture admits it.
@@ -25,23 +25,23 @@ load-bearing, not vacuous: `witness_hidden_needs_mask` shows that at `γ = 0` (n
 private witness IS leaked (the opened support collapses to the witness's own symbols), and the
 `t ≤ d` bound is load-bearing upstream (`not_maskedOpeningHiding_of_gt`). What this does NOT yet
 give — stated plainly — is `[OB-4-hiding-rbr]` (the full zero-knowledge argument where hiding and
-SOUNDNESS coexist in one straightline RBR game, against a real prover): that is Loom's open
+SOUNDNESS coexist in one straightline RBR game, against a real prover): that is Selvage's open
 contribution slot, confirmed absent from the literature, and most of OB-4's mass. So: the
 private-input story is *possible* (this checkpoint), not *finished* (that residual).
 -/
 import Assurance.ReceiptClaim
-import Loom.ZKHiding
+import Selvage.ZKHiding
 
 namespace Minidregg.Assurance
 
-open Minidregg.Kernel Minidregg.Loom
+open Minidregg.Kernel Minidregg.Selvage
 
 variable {F : Type} [Field F]
 
 /-- **The private-input hiding of a receipt codeword.** When a turn's receipt is committed as a
 Reed–Solomon codeword and masked by a uniform mask codeword, the `t ≤ d` spot-check openings the
 verifier reads are perfectly simulatable — the private witness in the codeword does not leak
-through the openings. This is the masked-opening hiding of `Loom/ZKHiding.lean` at the receipt's
+through the openings. This is the masked-opening hiding of `Selvage/ZKHiding.lean` at the receipt's
 own code; it is the substrate on which "a turn carries a private input" rests. -/
 theorem privateReceipt_hiding {ι : Type} [Fintype ι] {t d : ℕ}
     (dom : ι ↪ F) (ht : t ≤ d) {q : Fin t → ι}
@@ -79,7 +79,7 @@ theorem witness_hidden_needs_mask {ι : Type} [Fintype ι] {t d : ℕ}
 
 /-! ### Keystone witnesses — the checkpoint FIRES concretely (ZMod 5, the rate-1/2 code).
 
-Reusing `Loom/ZKHiding.lean`'s built RS example (`dom₅ : Fin 4 ↪ ZMod 5`, degree bound 2, the
+Reusing `Selvage/ZKHiding.lean`'s built RS example (`dom₅ : Fin 4 ↪ ZMod 5`, degree bound 2, the
 two-symbol query `qPair = ![0,2]`). Two turns whose private witnesses are two DISTINCT lines
 (`3 + 0·X` vs a different codeword) are indistinguishable under masking; at `γ = 0` they are not.
 -/
@@ -109,7 +109,7 @@ proves the OPENING layer hides the private witness (perfect, at `t ≤ d`, `γ �
 private-input guarantee needs three more things, none built here and none stubbed:
   1. the mask confined to the mask-claim's solution space (constrained-mask surjectivity), so
      masking does not disturb the low-degree test — reduced by `maskedOpeningHiding_of_surj` to
-     ONE statement, realizer named in `Loom/ZKHiding.lean`;
+     ONE statement, realizer named in `Selvage/ZKHiding.lean`;
   2. hiding and SOUNDNESS coexisting in one straightline RBR game (the extractor peels the mask
      via `unmask` while the simulator hides it) — the genuinely open research half;
   3. the wire-up to a `KernelState`'s designated PRIVATE fields (which coordinates of `flatten`

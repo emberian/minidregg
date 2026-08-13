@@ -9,7 +9,7 @@ base field, while multiplicative FRI uses the degree-four quotient.  A single
 
 This file makes the separation explicit.  It also adds the exact-word gate
 batching term `(constraints - 1) / |F_batch|`, which is the root-counting bound
-proved by `Loom.card_batch_satisfying_le`.  Three exact parameter points give
+proved by `Selvage.card_batch_satisfying_le`.  Three exact parameter points give
 the useful engineering answer:
 
 * base-field gate batching + sumcheck has only 16 priced bits;

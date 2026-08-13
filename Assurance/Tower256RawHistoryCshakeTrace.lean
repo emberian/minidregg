@@ -53,7 +53,7 @@ open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Compiler.Tower256AdditiveFriRawController
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false

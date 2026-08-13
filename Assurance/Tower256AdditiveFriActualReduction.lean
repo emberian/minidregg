@@ -3,13 +3,13 @@
 
 This module removes the arbitrary pointwise `failureCover` from the concrete
 Tower256 additive-FRI admission.  Its coin space is literally the ideal
-challenge/query sample measured by `Loom.additiveFriAdaptive_coherent_sampled_sound_UD`.
+challenge/query sample measured by `Selvage.additiveFriAdaptive_coherent_sampled_sound_UD`.
 The `additiveProximity` ledger entry is replaced, by construction, with that
 exact acceptance event and its proved UD price.
 
 An accepted native reply contributes only bytes.  Lean decoding and checking
 produce an `AcceptedReceipt`; the existing controller theorem then produces
-the exact ideal additive-FRI sample accepted by Loom.  The only pointwise
+the exact ideal additive-FRI sample accepted by Selvage.  The only pointwise
 transport premise says that, outside the common `oracleTransport` event, this
 Lean-derived cSHAKE sample is the game coin.  Consequently false acceptance is
 covered by `additiveProximity` or `oracleTransport`, hence by the requested
@@ -34,7 +34,7 @@ open Minidregg.Assurance.Tower256AdditiveFriControllerAdmission
 open Minidregg.Compiler.AdditiveFriReceiptClause
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -268,7 +268,7 @@ theorem schedule_queries_eq_accepted
   (congrArg Prod.snd
     (family.transportExact coin reply selected transportGood)).symm
 
-/-- The real cover.  The additive branch is the exact Loom acceptance event,
+/-- The real cover.  The additive branch is the exact Selvage acceptance event,
 not an application-supplied proposition.  Commitment binding is already a
 global premise of `pcs`; therefore this stronger cover needs only proximity or
 oracle transport and embeds directly into the requested three-event envelope. -/

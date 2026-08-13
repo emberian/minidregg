@@ -3,7 +3,7 @@
 
 **Substrate, said out loud:** this is the Lean-authored quadratic face of the arithmetization
 soundness link. `Assurance/AirSumcheck` retired the LINEAR face (add gates + root pin) through
-Loom's proven sumcheck and routed mul-gate violations out loud as the `[AIR-sumcheck-quadratic]`
+Selvage's proven sumcheck and routed mul-gate violations out loud as the `[AIR-sumcheck-quadratic]`
 residual — witnessed REAL by `exMulCheat`, which satisfies the whole linear system while
 cheating the mul gate. This file builds the missing channel: the degree-2 (R1CS-shaped) claim
 `Σ_b (Â·B̂ − Ĉ)(b)` over MLEs, its honest QUADRATIC round-polynomial engine, and the retirement
@@ -19,7 +19,7 @@ Three TABLES read the gates' wires: `gateTableA/B/C` carry gate `k`'s `a`-read, 
 claimed output `auxv out` at corner `enc k` (zero elsewhere) — each read IS a wire-word pairing
 (`gateTables_pairing`, via the linear face's `wireVec_read`). The DEFECT word
 `D(j) = A(j)·B(j) − C(j)` vanishes at `enc k` iff gate `k` holds (`defectWord_read`). Each gate
-is then ONE `Loom.LinearConstraint` on `D` — indicator weight at its corner, target `0`
+is then ONE `Selvage.LinearConstraint` on `D` — indicator weight at its corner, target `0`
 (`mulConstraint`, faithful by `mulConstraint_iff`) — so the WHOLE landed constraint machinery
 applies to the mul system verbatim: per-constraint claims, γ-batching (`batch_survives_prob_le`
 CITED for the γ round), the lot. The sumcheck that retires a violated claim walks the summand
@@ -40,7 +40,7 @@ packages the family in the adaptive protocol shape: prefix-measurable
 along the truth chain (`quadHonest_boolean_sum`, via the landed `roundSum_zero`/`roundSum_succ`
 — pure sum-splitting, no re-derivation), final check FACTORED as
 `Â(r)·B̂(r) − Ĉ(r)` (`scChain_quadHonest_final`) — exactly the factored terminal comparison
-`Loom/MultilinearExtension` names as the quadratic face's missing piece. `quadHonest_complete`:
+`Selvage/MultilinearExtension` names as the quadratic face's missing piece. `quadHonest_complete`:
 the honest run is accepted on every challenge.
 
 **What is proved (no sorry):**
@@ -101,17 +101,17 @@ functions, not yet vocabulary. (iii) `enc`/`eW` hypercube paddings (`t ≤ 2^m`)
 per deployment, as hypotheses here (the `hyperIdx` precedent).
 -/
 import Assurance.AirSumcheck
-import Loom.MultilinearExtension
+import Selvage.MultilinearExtension
 
 namespace Minidregg.Assurance
 
-open Minidregg.Compiler Minidregg.Loom Polynomial
+open Minidregg.Compiler Minidregg.Selvage Polynomial
 
 variable {F : Type} [Field F] [Fintype F] [DecidableEq F]
 
 /-! ## §1. The quadratic round engine — degree-2 claims `Σ_b (Â·B̂ − Ĉ)(b)`, honest side BUILT.
 
-`Loom/MultilinearExtension` built the degree-1 engine (`roundPoly`/`mleHonest`) for a single
+`Selvage/MultilinearExtension` built the degree-1 engine (`roundPoly`/`mleHonest`) for a single
 MLE's hypercube sum. The mul-gate face needs the PRODUCT of two MLEs minus a third: still
 prefix-measurable, still boolean-sum consistent (those are pure sum-splitting, cited), but
 degree 2 per round variable — the round polynomial gains the cross term `ΔÂ·ΔB̂`. -/
@@ -376,7 +376,7 @@ end QuadEngine
 
 /-! ## §2. The mul-gate system — product-form constraints over the gate-index hypercube.
 
-Each mul gate `a·b = out` becomes ONE `Loom.LinearConstraint` on the DEFECT word
+Each mul gate `a·b = out` becomes ONE `Selvage.LinearConstraint` on the DEFECT word
 `D(j) = A(j)·B(j) − C(j)`: indicator weight at the gate's corner, target `0`. The tables read
 the gates' wires (hence, by `wireVec_read`, the WIRE WORD); the defect vanishes at a corner
 iff that gate holds. The whole landed constraint machinery (γ-batching included) then applies
@@ -464,7 +464,7 @@ theorem defectWord_read {m : ℕ} (gs : List (Gate F Idx))
       - gateTableC gs enc asg auxv (enc k) = _
   rw [gateTableA_read, gateTableB_read, gateTableC_read]
 
-/-- Gate `k`'s claim as a `Loom.LinearConstraint` on the defect word: indicator weight at the
+/-- Gate `k`'s claim as a `Selvage.LinearConstraint` on the defect word: indicator weight at the
 gate's corner, target `0` — "the defect vanishes THERE". -/
 def mulConstraint {m : ℕ} (gs : List (Gate F Idx)) (enc : Fin gs.length ↪ (Fin m → Bool))
     (k : Fin gs.length) : LinearConstraint (Fin m → Bool) F where

@@ -200,7 +200,7 @@ variable
     {request : Request kind} {pre : Store Key F}
 
 /-- Forget only the typed wrapper after it has been checked.  The resulting
-claim is the exact fixed-shape language consumed by Loom's accumulator. -/
+claim is the exact fixed-shape language consumed by Selvage's accumulator. -/
 def coreClaim
     (commit : CommittedTurn portal authState request stateCommitment
       effectSemantics disclosurePolicy pre) :

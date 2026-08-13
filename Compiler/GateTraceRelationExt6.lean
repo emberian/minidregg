@@ -19,7 +19,7 @@ import Compiler.GateFactoredExt6
 namespace Minidregg.Compiler
 
 open scoped BigOperators
-open Minidregg.Loom Polynomial
+open Minidregg.Selvage Polynomial
 
 namespace GateTraceRelationExt6
 

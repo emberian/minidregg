@@ -26,7 +26,7 @@ import Assurance.ErrorBudget120
 
 namespace Minidregg.Assurance
 
-open Minidregg.Loom
+open Minidregg.Selvage
 
 /-! ## The nonce predicate and its exact ideal-response density -/
 

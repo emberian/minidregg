@@ -24,7 +24,7 @@ the `[N3-converse]` law's requirement.
 Honestly scoped (residuals, none stubbed): `[AIR-flatten]` — flattening a nested expression to a
 degree-≤2 constraint SYSTEM with aux wires (R1CS/Plonkish gates) and proving the flattening
 preserves semantics; `[AIR-sumcheck]` — retiring the emitted polynomial constraint through
-`Loom/SumcheckReduction`; `[AIR-poseidon]`/`[AIR-membership]` — the hash + Merkle gadgets that
+`Selvage/SumcheckReduction`; `[AIR-poseidon]`/`[AIR-membership]` — the hash + Merkle gadgets that
 make a note-spend, grown on this rung. This file proves the RUNG (a DSL whose constraint reading
 is a drift-free fold + a first gadget), not the note-spend.
 -/
@@ -170,7 +170,7 @@ flattened system is satisfiable iff the expression evaluates to its target. This
 arithmetization (this file asserts one polynomial `= 0`; deployment needs bounded-degree gates).
 Derived the same way — the flattening is a fold into a gate list, its soundness a fold-hom.
 
-`[AIR-sumcheck]` — the emitted polynomial/gate constraint is RETIRED by `Loom/SumcheckReduction`
+`[AIR-sumcheck]` — the emitted polynomial/gate constraint is RETIRED by `Selvage/SumcheckReduction`
 (a constraint IS a sumcheck claim). Wires this DSL to the proven proof system.
 
 `[AIR-poseidon]` / `[AIR-membership]` — the Poseidon2 hash gate and the Merkle-membership circuit

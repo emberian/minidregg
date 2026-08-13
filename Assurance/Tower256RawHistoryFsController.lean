@@ -24,8 +24,8 @@ identity seam on which those separately priced predicates operate.
 -/
 
 import Assurance.RawSemanticHistoryCheckpointGame
-import Loom.AccRbrBcsRaw
-import Loom.FiatShamir
+import Selvage.AccRbrBcsRaw
+import Selvage.FiatShamir
 
 namespace Minidregg.Assurance.Tower256RawHistoryFsController
 
@@ -43,7 +43,7 @@ open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriRawController
 open Minidregg.Compiler.Tower256CshakeMerkleController (encodeLength envelope)
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 

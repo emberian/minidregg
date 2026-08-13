@@ -41,7 +41,7 @@ open Minidregg.Assurance.SemanticReceiptRelation
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.ReactiveReceipt
 open Minidregg.Theory.TypedAuthorization (Digest)
 

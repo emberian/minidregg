@@ -33,7 +33,7 @@ open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.TransclusionBacklinkHistory
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.CanonicalReactiveView
 open Minidregg.Theory.Hyperdocument

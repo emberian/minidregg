@@ -36,7 +36,7 @@ open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriRawController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false

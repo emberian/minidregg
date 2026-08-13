@@ -6,7 +6,7 @@ contains pre-state, post-state, and a touched mask. Two quadratic residuals per
 key enforce mask Booleanity and the anti-ghost frame law. Their zero set is
 proved equivalent to the existence of a `Theory.ReactiveReceipt.ReceiptDelta`.
 
-A valid word is then transported into Loom's actual `AccClaim`: one shared
+A valid word is then transported into Selvage's actual `AccClaim`: one shared
 evaluation channel binds every coordinate, and `semanticReceiptClaims_fold`
 is literally `foldClaims_satisfies`. The folded accumulator word need not be
 another literal receipt—exactly as in WARP, it is the linear combination used
@@ -18,11 +18,11 @@ exists in which such a refinement theorem could be stated. Lean emission of
 the codec/API and `[PCH-OUTER-ACCUMULATOR]` remain separate boundaries.
 -/
 import Theory.ReactiveReceipt
-import Loom.Accumulator
+import Selvage.Accumulator
 
 namespace Minidregg.Assurance.SemanticReceiptRelation
 
-open Minidregg.Theory.ReactiveReceipt Minidregg.Loom
+open Minidregg.Theory.ReactiveReceipt Minidregg.Selvage
 
 variable {Key F : Type*} [Fintype Key] [DecidableEq Key] [Field F] [DecidableEq F]
 
@@ -178,7 +178,7 @@ theorem semanticReceiptRelation_iff_delta (word : ReceiptIx Key → F) :
   · rintro ⟨pre, post, delta, rfl⟩
     exact ⟨ReceiptWitness.ofDelta delta, ReceiptWitness.ofDelta_satisfies delta, rfl⟩
 
-/-! ## The actual Loom accumulated claim -/
+/-! ## The actual Selvage accumulated claim -/
 
 /-- A receipt admitted to the accumulator carries its semantic validity proof. -/
 structure SemanticReceiptClaim (Key F : Type*) [Fintype Key]
@@ -241,7 +241,7 @@ theorem SemanticReceiptClaim.acc_self {Root : Type*}
   (claim.acc_satisfies_iff root _).mpr ⟨hmem, rfl⟩
 
 /-- **The common-relation accumulation join.** Two valid semantic receipts with
-words in one linear code fold through Loom's real WARP-shaped claim. -/
+words in one linear code fold through Selvage's real WARP-shaped claim. -/
 theorem semanticReceiptClaims_fold {Root : Type*}
     {C : Submodule F (ReceiptIx Key → F)}
     (foldRoot : Root → F → Root → Root)

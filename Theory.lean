@@ -58,5 +58,5 @@ import Theory.BinaryTowerFanPaarCodec  -- concrete recursive Fan--Paar coordinat
 import Theory.BinaryTowerFanPaar  -- [BTOWER-fanpaar] the Fan–Paar generator recursion + fast tower multiplication
 import Theory.BinaryTowerTrace  -- [BTOWER-fanpaar-basis] CLOSED (Wiedemann trace induction) — FanPaarRecursion holds
 import Theory.AdditiveNTT  -- [BTOWER-additive-fri] additive domains + subspace-vanishing (GF(2)-linear) + novelpolynomial basis + the additive FRI fold
-import Theory.AdditiveNTTTransform  -- [ANTT-transform] CLOSED: the additive NTT is a linear bijection; Loom/AdditiveProximity now realizes a macroscopic one-round [ANTT-proximity] band, while an executable butterfly/tower backend remains separate runtime work
+import Theory.AdditiveNTTTransform  -- [ANTT-transform] CLOSED: the additive NTT is a linear bijection; Selvage/AdditiveProximity now realizes a macroscopic one-round [ANTT-proximity] band, while an executable butterfly/tower backend remains separate runtime work
 import Theory.IntegerFingerprint  -- the Zaratan/Limber integer relation `a*b = c + u*m` and its random-prime fingerprint: counting core proved, prime-counting denominator left as a named hypothesis

@@ -21,7 +21,7 @@ open Minidregg.Compiler.AuthenticatedColumnLogupBridge
 open Minidregg.Compiler.Logup256ReceiptClause
 open Minidregg.Compiler.Tower256LogupAcceptedRun
 open Minidregg.Compiler.Tower256LogupExtensionDeployment
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

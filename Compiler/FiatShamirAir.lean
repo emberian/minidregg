@@ -38,14 +38,14 @@ door — Fiat–Shamir IN-CIRCUIT:
   non-interactive verifier. A satisfying assignment IS a transcript whose challenges were
   derived, not chosen.
 
-## The Loom correspondence (prose, boundary-honest)
+## The Selvage correspondence (prose, boundary-honest)
 
-`Compiler` may not import `Loom` (`Theory`-boundary law), so the correspondence is stated
-at matching shape: `FsBound` is the in-circuit form of Loom's Fiat–Shamir challenge
+`Compiler` may not import `Selvage` (`Theory`-boundary law), so the correspondence is stated
+at matching shape: `FsBound` is the in-circuit form of Selvage's Fiat–Shamir challenge
 derivation — the challenge at round `k` is a deterministic hash of the transcript prefix,
 the object `[LC-fs-adaptive]`'s grinding bound quantifies over (the adversary retries the
 HASH, it cannot pick the challenge). `[RECURSE-fs-bridge]` — the machine-checked
-identification (`FsBound` ⟺ Loom's FS transcript relation, through the sponge
+identification (`FsBound` ⟺ Selvage's FS transcript relation, through the sponge
 representation), statable only Assurance-side — is the named residual, exactly like
 `[RECURSE-sumcheck-bridge]`/`[RECURSE-fri-bridge]`.
 
@@ -71,7 +71,7 @@ representation), statable only Assurance-side — is the named residual, exactly
 
 `boundVerifier` is a `ConstraintSystem`, so the verified emit path applies verbatim —
 `emit_accepts_iff_fin` is consumed on the composed demo in §6. **"The FS-bound verifier
-accepted" is itself an emitted, Loom-provable statement**: a Loom proof of THAT statement
+accepted" is itself an emitted, Selvage-provable statement**: a Selvage proof of THAT statement
 is a proof that a non-interactive proof verified — the recursive apex, now with no free
 challenge wires. With `[RECURSE-merkle-bind]` closed the emitted system is the whole
 self-contained light-client verifier.
@@ -113,7 +113,7 @@ def transcriptVals (asg : Idx → F) (transcript : Fin n → Fin w → Idx) : �
 
 /-- **The Fiat–Shamir binding, statement-first.** Every challenge equals the chain hash of
 its transcript prefix — the challenges are DERIVED, not chosen. This is the in-circuit form
-of Loom's FS challenge derivation; the machine-checked identification is
+of Selvage's FS challenge derivation; the machine-checked identification is
 `[RECURSE-fs-bridge]`. -/
 def FsBound [NeZero w] (spec : PermSpec F w) (blk : ℕ → Fin w → F)
     (chalv : Fin n → F) : Prop :=
@@ -468,8 +468,8 @@ example (asg : Fin 17 → ZMod 13) (h : systemAccepts asg boundDemo) :
 Because `boundVerifier` is a `ConstraintSystem`, the verified emit path applies with zero
 new work: the emitted `ConstraintDescriptor`'s satisfiability IS the bound verifier's
 acceptance. So **"the FS-bound verifier accepted this transcript" is itself an emitted,
-Loom-provable statement** — and unlike the §4 pair of the landed files, its challenge
-wires are NOT free: a satisfying witness must carry the derived challenges. A Loom proof
+Selvage-provable statement** — and unlike the §4 pair of the landed files, its challenge
+wires are NOT free: a satisfying witness must carry the derived challenges. A Selvage proof
 of the emitted statement is a proof that a NON-INTERACTIVE proof verified — the recursive
 apex with Fiat–Shamir inside the circuit. Remaining: `[RECURSE-merkle-bind]` (openings and
 absorbed roots via AirMembership), then the emitted system is the whole self-contained
@@ -492,7 +492,7 @@ end FiatShamirExample
 value, and the absorbed commitment roots bound to AirMembership's `membershipGadget` (the
 same `++` + wire-sharing; vocabulary landed), and `twoX` to the query index's domain
 point. `[RECURSE-fs-sponge]` — deployed sponge mode (rate/capacity, padding, domain
-separation) atop `[AIR-poseidon-params]`. `[RECURSE-fs-bridge]` — the Loom identification
+separation) atop `[AIR-poseidon-params]`. `[RECURSE-fs-bridge]` — the Selvage identification
 of `FsBound` with the FS transcript relation (`[LC-fs-adaptive]`'s object),
 Assurance-side, like `[RECURSE-sumcheck-bridge]`/`[RECURSE-fri-bridge]`. `[FS-oracle]` —
 FS soundness of the instantiated permutation is a cryptographic FLOOR (`[COMMIT-CR]`'s

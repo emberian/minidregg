@@ -251,7 +251,7 @@ theorem boundReceiptCoord_surjective {n : Nat} (ix : BoundReceiptIx n) :
 
 noncomputable def BoundSemanticReceiptClaim.acc {n : Nat} {Root : Type*}
     (claim : BoundSemanticReceiptClaim n F) (root : Root) :
-    Minidregg.Loom.AccClaim Root F (BoundReceiptIx n)
+    Minidregg.Selvage.AccClaim Root F (BoundReceiptIx n)
       (Fintype.card (BoundReceiptIx n)) :=
   ⟨root, fun k =>
     (boundEvalAt (boundReceiptCoord k), claim.witness.encode (boundReceiptCoord k))⟩
@@ -267,21 +267,21 @@ theorem BoundSemanticReceiptClaim.acc_satisfies_iff
     {C : Submodule F (BoundReceiptIx n → F)}
     (claim : BoundSemanticReceiptClaim n F) (root : Root)
     (word : BoundReceiptIx n → F) :
-    Minidregg.Loom.AccClaim.Satisfies C (claim.acc root) word ↔
+    Minidregg.Selvage.AccClaim.Satisfies C (claim.acc root) word ↔
       word ∈ C ∧ word = claim.witness.encode := by
-  unfold Minidregg.Loom.AccClaim.Satisfies
+  unfold Minidregg.Selvage.AccClaim.Satisfies
   refine and_congr_right fun _ => ?_
   constructor
   · intro h
     funext ix
     obtain ⟨k, rfl⟩ := boundReceiptCoord_surjective ix
-    simpa [BoundSemanticReceiptClaim.acc, Minidregg.Loom.AccClaim.weights,
-      Minidregg.Loom.AccClaim.targets, boundEvalAt] using h k
+    simpa [BoundSemanticReceiptClaim.acc, Minidregg.Selvage.AccClaim.weights,
+      Minidregg.Selvage.AccClaim.targets, boundEvalAt] using h k
   · rintro rfl k
-    simp [BoundSemanticReceiptClaim.acc, Minidregg.Loom.AccClaim.weights,
-      Minidregg.Loom.AccClaim.targets, boundEvalAt]
+    simp [BoundSemanticReceiptClaim.acc, Minidregg.Selvage.AccClaim.weights,
+      Minidregg.Selvage.AccClaim.targets, boundEvalAt]
 
-/-- Bound words fold through the real Loom claim while retaining the typed
+/-- Bound words fold through the real Selvage claim while retaining the typed
 header binding as ordinary authenticated coordinates. -/
 theorem boundSemanticReceiptClaims_fold
     {n : Nat} {Root : Type*}
@@ -291,11 +291,11 @@ theorem boundSemanticReceiptClaims_fold
     (leftRoot rightRoot : Root) (gamma : F)
     (hleft : left.witness.encode ∈ C)
     (hright : right.witness.encode ∈ C) :
-    Minidregg.Loom.AccClaim.Satisfies C
-      (Minidregg.Loom.foldClaims foldRoot (left.acc leftRoot)
+    Minidregg.Selvage.AccClaim.Satisfies C
+      (Minidregg.Selvage.foldClaims foldRoot (left.acc leftRoot)
         (right.acc rightRoot) gamma)
       (left.witness.encode + gamma • right.witness.encode) := by
-  apply Minidregg.Loom.foldClaims_satisfies foldRoot gamma
+  apply Minidregg.Selvage.foldClaims_satisfies foldRoot gamma
     (left.acc_weights_shared right leftRoot rightRoot)
   · exact (left.acc_satisfies_iff leftRoot _).mpr ⟨hleft, rfl⟩
   · exact (right.acc_satisfies_iff rightRoot _).mpr ⟨hright, rfl⟩

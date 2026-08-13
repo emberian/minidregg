@@ -37,7 +37,7 @@ open Minidregg.Assurance.TransclusionBacklinkHistory
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Kernel
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.ReactiveReceipt

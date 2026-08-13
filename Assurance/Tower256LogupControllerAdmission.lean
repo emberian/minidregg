@@ -40,7 +40,7 @@ open Minidregg.Compiler.Logup256ReceiptClause
 open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Compiler.Tower256LogupAcceptedRun
 open Minidregg.Compiler.Tower256LogupControllerPlan
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

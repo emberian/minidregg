@@ -25,7 +25,7 @@ open Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect
 open Minidregg.Assurance.ProofCompositionGame
 open Minidregg.Compiler
 open Minidregg.Compiler.NoteSpendProofController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 

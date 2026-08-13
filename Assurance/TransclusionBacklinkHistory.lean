@@ -29,7 +29,7 @@ open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.CanonicalTransition
 open Minidregg.Theory.TypedAuthorization

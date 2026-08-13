@@ -10,7 +10,7 @@ For every claimed opening the checker compares against the honest opening of
 the transcript word.  If the values differ, the landed deterministic Merkle
 reduction extracts an exact `FramedXofCollision` (leaf or node) from the two
 accepted paths.  If no such collision is extracted, all queried values equal
-the literal committed words and the accepted receipt enters Loom's ideal
+the literal committed words and the accepted receipt enters Selvage's ideal
 additive-FRI predicate.  No collision probability, ROM theorem, native
 semantics, or universal binding assumption is introduced here.
 -/
@@ -27,7 +27,7 @@ open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

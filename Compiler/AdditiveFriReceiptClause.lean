@@ -3,8 +3,8 @@
 
 This module packages the proved characteristic-two additive-FRI stack as one
 Lean-owned receipt clause. It does not restate a verifier: acceptance is
-exactly `Loom.AdditiveFriAdaptiveCoherentAccepts`, and the error bound is
-exactly `Loom.additiveFriAdaptive_coherent_sampled_sound_UD`.
+exactly `Selvage.AdditiveFriAdaptiveCoherentAccepts`, and the error bound is
+exactly `Selvage.additiveFriAdaptive_coherent_sampled_sound_UD`.
 
 The clause binds the manifest declaration, reversed/high-coordinate-first LCH
 basis order, affine domain, exact power-of-two domain sizes, degree/rate
@@ -17,12 +17,12 @@ postulated here or silently folded into the ideal interactive UD theorem.
 -/
 
 import Compiler.SemanticManifest
-import Loom.AdditiveFriQuery
+import Selvage.AdditiveFriQuery
 
 namespace Minidregg.Compiler.AdditiveFriReceiptClause
 
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

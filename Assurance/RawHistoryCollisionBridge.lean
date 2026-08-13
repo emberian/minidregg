@@ -43,7 +43,7 @@ open Minidregg.Assurance.RawHistoryBcsOpenings
 open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -55,7 +55,7 @@ variable {port : ColumnPort Semantic Representation (Fin m)}
 
 /-! ## An executable scheme is an opening scheme, minus the binding -/
 
-/-- Forget everything except what the verifier runs.  The result is a Loom
+/-- Forget everything except what the verifier runs.  The result is a Selvage
 `OpeningScheme`: `commit`, `openAt`, `verifyOpen`, completeness -- and no
 binding field, because the executable Merkle checker does not have one. -/
 def openingOf (scheme : CommitmentScheme port) :
@@ -85,7 +85,7 @@ theorem positionBinding_iff (scheme : CommitmentScheme port) :
 
 /-! ## A retained equivocation is a binding failure -/
 
-/-- **The bridge.**  `Loom.ColumnEquivocation` over the forgetful opening
+/-- **The bridge.**  `Selvage.ColumnEquivocation` over the forgetful opening
 scheme is literally `BindingFailure` over the executable scheme -- both
 openings accepted at the same root and coordinate, values unequal. -/
 theorem bindingFailure_of_columnEquivocation (scheme : CommitmentScheme port)

@@ -15,11 +15,11 @@ does not relate either Rust implementation to Lean.  The benchmark profile is
 also Lean data and is emitted verbatim for the native timing harness; Rust does
 not select the tested dimensions, densities, or repetition counts.
 -/
-import Loom.MultilinearExtension
+import Selvage.MultilinearExtension
 
 namespace Minidregg.Compiler.SparseEqualityWorkProfile
 
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

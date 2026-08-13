@@ -30,7 +30,7 @@ open Minidregg.Assurance.Ext6GateProofControllerAdmission
 open Minidregg.Compiler
 open Minidregg.Compiler.Ext6GateProofController
 open Minidregg.Compiler.GateFactoredExt6
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

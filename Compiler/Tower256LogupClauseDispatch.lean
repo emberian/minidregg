@@ -34,7 +34,7 @@ open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256LogupAcceptedRun
 open Minidregg.Compiler.Tower256LogupControllerPlan
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 

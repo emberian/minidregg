@@ -30,7 +30,7 @@ open Minidregg.Compiler.Ext6GateProofDeployment
 open Minidregg.Compiler.Ext6GateProofPositiveRun
 open Minidregg.Compiler.Ext6GateProofVersionedDeployment
 open Minidregg.Compiler.GateMleExt6
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 set_option maxRecDepth 10000

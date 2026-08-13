@@ -24,7 +24,7 @@ open Minidregg.Compiler.Ext6GateProofController
 open Minidregg.Compiler.Ext6GateProofDeployment
 open Minidregg.Compiler.Ext6GateProofPositiveRun
 open Minidregg.Compiler.GateMleExt6
-open Minidregg.Loom
+open Minidregg.Selvage
 
 namespace Positive
 

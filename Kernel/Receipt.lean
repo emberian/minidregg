@@ -3,13 +3,13 @@
 
 `docs/OB3-RECEIPT-ENCODING.md` §1: a committed turn leaves one receipt Q — the committed
 whole post-state under one commitment scheme, anchored at the hyperedge's apex. The
-ENCODING side (Q's word as the accumulator's committed codeword, the CRS claim) is Loom's
-(`Loom/ReceiptClaim.lean`, future); THIS file is the kernel side: the projection of a
+ENCODING side (Q's word as the accumulator's committed codeword, the CRS claim) is Selvage's
+(`Selvage/ReceiptClaim.lean`, future); THIS file is the kernel side: the projection of a
 `KernelState` to the observation word, and the two theorems OB-3's constraints ride on:
 
   * **faithfulness** — the word determines the observed state exactly (two states agree
     on the window iff their words are equal). This is what makes "the receipt binds the
-    post-state" a fact about the WORD, so Loom's evaluation constraint `û(α)=μ` binds Q.
+    post-state" a fact about the WORD, so Selvage's evaluation constraint `û(α)=μ` binds Q.
   * **the frame** — a `move` changes the word ONLY at its touched coordinates; untouched
     coordinates are untouched in the word. OB-3 constraint (2): frame-preservation is the
     SAME evaluation constraint over the untouched coordinates — no separate frame circuit.
@@ -47,7 +47,7 @@ theorem obsKey_injective : Function.Injective obsKey := by
 
 /-- The receipt word: the state's observations over the window. Balance coordinates read
 `bal`; key coordinates read the presence-bit pair. (The flattening of `ℤ × ℤ` into two
-field coordinates is Loom's encoding concern; the kernel word keeps the pair.) -/
+field coordinates is Selvage's encoding concern; the kernel word keeps the pair.) -/
 def uproj (w : Window) (k : KernelState) :
     (w.cells → ℤ) × (w.keys → ℤ × ℤ) :=
   (fun c => k.bal c.1.1 c.1.2, fun u => obsKey (k.umap u.1))

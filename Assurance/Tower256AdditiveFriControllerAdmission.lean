@@ -29,7 +29,7 @@ open Minidregg.Assurance.ProofCompositionGame
 open Minidregg.Compiler.AdditiveFriReceiptClause
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false

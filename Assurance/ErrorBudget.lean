@@ -7,21 +7,21 @@ the joint failure event by it, one deployed instantiation with the bit-security
 COMPUTED. The four component failure events, each priced by its landed theorem
 (CITED, never re-derived):
 
-* **Grinding/FS light client** — `Loom.lightClientGrinding_sound`
-  (`Loom/LightClientGrinding.lean`): a `t`-query grinding adversary forges the
+* **Grinding/FS light client** — `Selvage.lightClientGrinding_sound`
+  (`Selvage/LightClientGrinding.lean`): a `t`-query grinding adversary forges the
   FS light client with probability `≤ (t + k)·[k·(err⋆(δ) + 1/|F|)]`, `k` the
   chain-length bound. The per-fold factor `err⋆(δ) + 1/|F|` IS the landed RBR
-  round error `accRbrError` (`Loom/AccSoundRbr.lean`) — `budget_accRbrError`
+  round error `accRbrError` (`Selvage/AccSoundRbr.lean`) — `budget_accRbrError`
   below records the identification as `rfl`.
-* **Sumcheck** — `Loom.sumcheck_soundness` (`Loom/Sumcheck.lean`): each link's
+* **Sumcheck** — `Selvage.sumcheck_soundness` (`Selvage/Sumcheck.lean`): each link's
   `v`-round degree-`d` sumcheck accepts a false claim with probability
   `≤ v·d/|F|`; union over the `k` links: `k·(v·d/|F|)`.
-* **CR in the ROM** — `Loom.commitCR_of_RO_pow`
-  (`Loom/CollisionResistanceROM.lean`): a `q`-query commitment-break adversary
+* **CR in the ROM** — `Selvage.commitCR_of_RO_pow`
+  (`Selvage/CollisionResistanceROM.lean`): a `q`-query commitment-break adversary
   against an `h`-bit hash range wins with probability `≤ q·(q−1)/2^(h+1)`
   (the birthday bound).
-* **Proximity gap** — `Loom.hasMutualCorrelatedAgreement_UD`
-  (`Loom/ProximityGapUD.lean`): one affine-generator draw (the decider's fold
+* **Proximity gap** — `Selvage.hasMutualCorrelatedAgreement_UD`
+  (`Selvage/ProximityGapUD.lean`): one affine-generator draw (the decider's fold
   challenge) lands in the mutual-CA failure set with probability `≤ n/|F|`,
   `n` the code length — the PROVED unique-decoding error, which is also the
   `err⋆(δ)` substituted into the grinding term.
@@ -55,15 +55,15 @@ non-adaptive query schedules; the claimed pair is adaptive). The floor
 contributes NO summand because its content is an idealization, not an event
 with a proven probability — stated separately, never silently added to zero.
 -/
-import Loom.LightClientGrinding
-import Loom.Sumcheck
-import Loom.CollisionResistanceROM
-import Loom.AccSoundRbr
-import Loom.ProximityGapUD
+import Selvage.LightClientGrinding
+import Selvage.Sumcheck
+import Selvage.CollisionResistanceROM
+import Selvage.AccSoundRbr
+import Selvage.ProximityGapUD
 
 namespace Minidregg.Assurance
 
-open Minidregg.Loom
+open Minidregg.Selvage
 
 /-! ## §1 The deployment knobs and the composed error -/
 
@@ -100,7 +100,7 @@ structure SoundnessParams where
   secparam : ℕ
 
 /-- The PROVED unique-decoding mutual-CA error `err⋆ = n/|F|`
-(`hasMutualCorrelatedAgreement_UD`, `Loom/ProximityGapUD.lean`) — the one
+(`hasMutualCorrelatedAgreement_UD`, `Selvage/ProximityGapUD.lean`) — the one
 error function every proximity citation below instantiates. -/
 noncomputable def errStarUD (P : SoundnessParams) : ℝ :=
   (P.codeLen : ℝ) / (P.fieldCard : ℝ)
@@ -141,7 +141,7 @@ noncomputable def soundnessError (P : SoundnessParams) : ℝ :=
   grindingTerm P + sumcheckTerm P + crTerm P + proximityTerm P
 
 /-- The grinding term's per-fold factor IS the landed RBR round error
-`accRbrError` (`Loom/AccSoundRbr.lean`) at the UD-proved `err⋆` — the
+`accRbrError` (`Selvage/AccSoundRbr.lean`) at the UD-proved `err⋆` — the
 identification is definitional, recorded so the budget's vocabulary and the
 RBR tower's provably coincide. -/
 theorem budget_accRbrError (F ι : Type) [Fintype F] [Fintype ι] (δ : ℝ) :
@@ -153,7 +153,7 @@ theorem budget_accRbrError (F ι : Type) [Fintype F] [Fintype ι] (δ : ℝ) :
 
 The four component events live on four coin blocks; the joint space is their
 product. An event reading ONE block keeps exactly its marginal probability —
-the same counting fact `Loom/LightClientGrinding.lean` proves (privately) for
+the same counting fact `Selvage/LightClientGrinding.lean` proves (privately) for
 its shared-oracle transfer, rebuilt here for a four-fold product. Private, per
 the module-private discipline. -/
 
@@ -487,9 +487,9 @@ theorem deployedBudget_delta_admissible :
 
 section BudgetExample
 
-open Minidregg.Loom.RSExample Minidregg.Loom.AccExample Minidregg.Loom.LCExample
-  Minidregg.Loom.LCSoundExample Minidregg.Loom.LCGrindExample
-  Minidregg.Loom.BirthdayExample
+open Minidregg.Selvage.RSExample Minidregg.Selvage.AccExample Minidregg.Selvage.LCExample
+  Minidregg.Selvage.LCSoundExample Minidregg.Selvage.LCGrindExample
+  Minidregg.Selvage.BirthdayExample
 
 /-- The F₅ keystone knobs: `|F| = 5`, `n = 4`, RS degree `2` (rate `1/2`),
 `δ = 1/16`, the landed 4-query grind over the phantom pair (`t = 4`, `k = 2`),
@@ -513,7 +513,7 @@ the zero pair — all against the RS code `reedSolomonCode dom₅ 2` with the
 PROVED UD mutual CA. (Numerically `soundnessError budgetF₅ = 133/10 > 1`,
 vacuous as a probability bound — the deliberately tiny field prices the
 deployment regime `|F| ≫ t·k·n`, exactly as
-`Loom/LightClientGrinding.lean`'s headline notes; the deployed keystone above
+`Selvage/LightClientGrinding.lean`'s headline notes; the deployed keystone above
 carries the real number. What fires here is the PREMISES.) -/
 theorem budget_fired :
     uniformProb ((Fin grindQs.length → ZMod 5) ×
@@ -600,7 +600,7 @@ one hash, and the decider's fold challenge is FS-derived. The shared-oracle
 rendering — all four events as reads of ONE lazy-sampling handler, with
 domain separation making the four query families pairwise disjoint, whence
 the product marginals above are EXACT by the same injection-marginal argument
-as `uniformProb_comp_injective` (`Loom/LightClientGrinding.lean`) — is what
+as `uniformProb_comp_injective` (`Selvage/LightClientGrinding.lean`) — is what
 `[BUDGET-compose]` names; it rides `[FS-ROM]` for the handler itself. The SUM
 and the union-bound structure are unaffected: the union bound never needed
 independence (the grinding file's audit note), only the marginal prices,
@@ -608,7 +608,7 @@ which each landed theorem supplies at its own coins. Also under this name:
 the four adversary objects are quantified separately here; identifying them
 as ONE prover's single execution (its grind, its sumcheck messages, its
 commitment queries, one transcript feeding all four events) is the same
-one-run coupling `Assurance/LoomV0.lean`'s residual block names for the
+one-run coupling `Assurance/SelvageV0.lean`'s residual block names for the
 capstone — inherited, not new.
 
 **The floor, inherited unchanged** (no summand — an idealization is not an
@@ -624,7 +624,7 @@ adaptive), and UNIQUE DECODING (`err⋆ = n/|F|` proved only for
 smaller of the two `1/|F|`-scale terms — but would widen the admissible δ).
 
 **Sharpening named, with its price computed**: `[LC-grinding-native]`
-(`Loom/LightClientGrinding.lean`) would replace the grinding term's
+(`Selvage/LightClientGrinding.lean`) would replace the grinding term's
 per-try·per-chain `(t+k)·k·(err⋆+1/|F|)` by per-query·per-fold
 `(t+k)·(err⋆+1/|F|)` — at the deployed knobs exactly `log₂ k = 8` more bits
 (55 → 63). The engine is landed (`accFsSound_native`); the transport is owed

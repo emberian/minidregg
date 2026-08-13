@@ -10,7 +10,7 @@ premises: mutual correlated agreement, PCS opening soundness, commitment
 binding/collision resistance, and oracle transport.
 
 No second accumulator relation is introduced.  The chain below contains the
-existing Loom `AccClaim`s of the post-genesis semantic entries, and its
+existing Selvage `AccClaim`s of the post-genesis semantic entries, and its
 aggregate is proved equal to the head's authoritative accumulator.  Native
 code has no role in this construction.
 -/
@@ -29,7 +29,7 @@ open Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -77,7 +77,7 @@ theorem listGet_append_last {α : Type} (left : List α) (value : α) :
 
 /-! ## The unique unshifted carrier derived from `HistoryFoldTrace` -/
 
-/-- A semantic entry viewed as the existing Loom history-link object.  Its
+/-- A semantic entry viewed as the existing Selvage history-link object.  Its
 claim is literally the entry claim at the entry's binding root. -/
 def entryLink (entry : HistoryEntry) :
     Link Digest F (BoundReceiptIx n) (ReceiptChannels n) where
@@ -187,7 +187,7 @@ theorem traceLinkWords_eq_ofFn
       simp
 
 /-- Every retained trace reconstructs the authoritative accumulator exactly
-by running Loom's existing aggregate over the reconstructed genesis and
+by running Selvage's existing aggregate over the reconstructed genesis and
 post-genesis chain. -/
 theorem traceAggregate_eq_accumulator
     {rounds : Nat} {entries : List HistoryEntry}
@@ -397,11 +397,11 @@ theorem traceSource_aligned
 
 /-! ## Head-derived reduction and opened BCS transcript -/
 
-/-- The unique Loom genesis claim retained by this head. -/
+/-- The unique Selvage genesis claim retained by this head. -/
 def historyGenesisClaim (head : HistoryHead) :=
   traceGenesisClaim head.foldTrace
 
-/-- The unique post-genesis Loom chain retained by this head. -/
+/-- The unique post-genesis Selvage chain retained by this head. -/
 def historyChain (head : HistoryHead) :=
   traceLinkChain head.foldTrace
 
@@ -571,7 +571,7 @@ theorem bcsRounds_exact
           (openings.messages j, head.foldChallenges j)) =
       List.ofFn fun j : Fin head.foldRounds =>
         (reindexWord (head.foldLinkWord j), head.foldChallenges j) := by
-  rw [Minidregg.Loom.bcsRounds_ofFn]
+  rw [Minidregg.Selvage.bcsRounds_ofFn]
   apply congrArg List.ofFn
   funext j
   rw [bcsWord_eq_historyLink head openings j]
@@ -874,9 +874,9 @@ theorem historyBcsBad_implies_commonBad
 #guard_msgs (whitespace := lax) in #print axioms HistoryBcsOpenings.bcsRounds_exact
 /-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.historyBcsReduction_source' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms historyBcsReduction_source
-/-- info: 'Minidregg.Loom.accRbrKnowledgeSoundBcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.accRbrKnowledgeSoundBcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accRbrKnowledgeSoundBcs
-/-- info: 'Minidregg.Loom.accFsSound_bcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Selvage.accFsSound_bcs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accFsSound_bcs
 /-- info: 'Minidregg.Assurance.SemanticHistoryBcsGame.historyBcsBad_le_price' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms historyBcsBad_le_price

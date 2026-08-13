@@ -32,7 +32,7 @@ is postulated here.  The only positive collision price is the existing
 
 import Assurance.SameCoinGameProduct
 import Assurance.Tower256RawSemanticHistoryCanonicalGame
-import Loom.CollisionResistanceROM
+import Selvage.CollisionResistanceROM
 
 namespace Minidregg.Assurance.RawHistorySecurityPrices
 
@@ -50,7 +50,7 @@ open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256AdditiveFriRawController
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 
 set_option autoImplicit false

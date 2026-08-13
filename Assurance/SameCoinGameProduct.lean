@@ -33,7 +33,7 @@ namespace Minidregg.Assurance.SameCoinGameProduct
 open scoped BigOperators
 open Minidregg.Assurance.ProofCompositionGame
 open Minidregg.Assurance.ExtensibleProofCompositionGame
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

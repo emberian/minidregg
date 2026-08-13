@@ -17,7 +17,7 @@ additive-FRI clause and the concrete Tower256/cSHAKE/Merkle backend.
 * successful execution implies exactly `AdditiveFriAdaptiveCoherentAccepts`.
 
 Merkle position binding is retained as the exact property needed to construct
-Loom's `BindingCommitment`.  `Tower256CshakeMerkleBinding` reduces that
+Selvage's `BindingCommitment`.  `Tower256CshakeMerkleBinding` reduces that
 property to concrete framed cSHAKE collisions; the probabilistic collision,
 ROM, and proximity reductions remain outside this deterministic verifier.
 There is no Rust proposition or Rust field semantics in this module.
@@ -33,7 +33,7 @@ open Minidregg.Compiler.AdditiveFriReceiptClause
 open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 
@@ -109,7 +109,7 @@ variable {ell : Nat} (pcs : MerklePcs ell)
 def finiteCommitment (n : Nat) :
     BindingCommitment Digest Tower256 (PowerTwoFriLevels ell n) (List UInt8) :=
   (bindingMerkleCommitmentScheme pcs.backend.merkle (pcs.level n).port
-    (pcs.positionBinding n)).toLoom
+    (pcs.positionBinding n)).toSelvage
 
 /-- Reindex the concrete tree from its little-endian integer address to the
 literal additive bit-vector coordinate used by `AdditiveFriTower`.  The root,

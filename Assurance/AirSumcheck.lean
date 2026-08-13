@@ -2,7 +2,7 @@
 # `Assurance/AirSumcheck.lean` — [AIR-sumcheck]: the DERIVED gate system retired by the PROVEN sumcheck
 
 **Substrate, said out loud:** this is the Lean-authored soundness link. The gate system comes
-out of `Compiler/AirFlatten`'s fold (`flatten`), the sumcheck bound out of `Loom/Sumcheck`'s
+out of `Compiler/AirFlatten`'s fold (`flatten`), the sumcheck bound out of `Selvage/Sumcheck`'s
 proved round-by-round soundness; this file only ENCODES the former as the latter's claim
 object and composes the landed theorems. No constraint is hand-authored here, and no
 soundness is re-derived.
@@ -13,13 +13,13 @@ soundness is re-derived.
 `wireWord asg auxv : (Idx ⊕ Fin N) → F` (original variables ⊕ the `N` allocated aux wires):
 
 * an ADD gate `a + b = out` is the LINEAR equation `⟨vec(a) + vec(b) − vec(out), w⟩ = −(consts)`
-  — a `Loom.LinearConstraint`, i.e. (by `constraint_as_sumcheck`, definitional) a sumcheck
+  — a `Selvage.LinearConstraint`, i.e. (by `constraint_as_sumcheck`, definitional) a sumcheck
   sum-claim. `addGateLin_iff` proves the encoding faithful: satisfaction of the constraint IS
   `Gate.holds`, given the scoping `flatten_scoped` provides for every emitted gate.
 * the ROOT PIN `root = 0` is likewise linear (`rootZero`, `rootZero_iff`).
 * a MUL gate `a · b = out` is DEGREE-2 in the wire word — NOT a linear functional, hence not a
   `LinearConstraint`. Its sumcheck retirement needs the multilinear-extension encoding
-  (R1CS-style: `Σ_b eq(z,b)·(Â(b)·B̂(b) − Ĉ(b)) = 0`), the same MLE vocabulary Loom already
+  (R1CS-style: `Σ_b eq(z,b)·(Â(b)·B̂(b) − Ĉ(b)) = 0`), the same MLE vocabulary Selvage already
   names as `[SC-reshape]`. That is the honest residual `[AIR-sumcheck-quadratic]` below.
 
 **What is proved (no sorry):**
@@ -36,7 +36,7 @@ soundness is re-derived.
   with the encoding iffs — this is where "the arithmetization's constraint is false" becomes
   "some sumcheck claim is false".
 * `airSumcheck_sound` — **the keystone**: rejected assignment + mul gates undisturbed ⟹ some
-  encoded constraint is violated AND Loom's sumcheck on that claim accepts with probability
+  encoded constraint is violated AND Selvage's sumcheck on that claim accepts with probability
   `≤ v·d/|F|` — `sumcheck_retires_constraint` (hence `sumcheck_soundness`) CITED, not re-proved.
   `airSumcheck_sound_adaptive` is the same statement in the prefix-dependent protocol shape a
   real multi-round MLE prover inhabits (`adaptive_sumcheck_retires_constraint`, cited).
@@ -58,17 +58,17 @@ gate — the quadratic residual is REAL, not decorative.
 placeholder Prop).** The MUL-gate channel: encoding `a·b = out` as a sum-claim needs the
 multilinear extension of the wire word and the standard R1CS-to-sumcheck reshaping
 (`Σ_b eq(z,b)·(Â(b)·B̂(b) − Ĉ(b)) = 0`, degree ≤ 3 per round variable) — exactly the MLE
-realizer Loom names `[SC-reshape]`. Until it lands, mul-gate violations are routed out
+realizer Selvage names `[SC-reshape]`. Until it lands, mul-gate violations are routed out
 loud (the left disjunct of `air_violation_dichotomy`), never silently absorbed: the PROVED
 scope is "linear subsystem (add gates + root pin) retired with the proven bound", and
 `exMulCheat` witnesses that this scope is strictly smaller than full gate soundness.
 -/
 import Compiler.AirFlatten
-import Loom.SumcheckReduction
+import Selvage.SumcheckReduction
 
 namespace Minidregg.Assurance
 
-open Minidregg.Compiler Minidregg.Loom Polynomial
+open Minidregg.Compiler Minidregg.Selvage Polynomial
 
 variable {F : Type} [Field F] [Fintype F] [DecidableEq F]
 variable {Idx : Type} [Fintype Idx] [DecidableEq Idx]
@@ -141,7 +141,7 @@ theorem wireVec_read {N : ℕ} (asg : Idx → F) (auxv : ℕ → F) {w : WireRef
 /-! ## §2. The gate constraints — ADD gates and the root pin are LINEAR claims.
 
 An add gate `a + b = out` over the wire word `w` is `⟨vec(a)+vec(b)−vec(out), w⟩ = −(κa+κb)`
-(κ the constant parts): one `Loom.LinearConstraint`, hence — by the landed, definitional
+(κ the constant parts): one `Selvage.LinearConstraint`, hence — by the landed, definitional
 `constraint_as_sumcheck` — one sumcheck sum-claim. The root pin `root = 0` is
 `⟨vec(root), w⟩ = −κ`. MUL gates are degree-2 in `w`: NOT in this vocabulary; they are the
 `[AIR-sumcheck-quadratic]` residual, routed explicitly by `air_violation_dichotomy`. -/
@@ -217,7 +217,7 @@ theorem mem_addGates {gs : List (Gate F Idx)} {g : Gate F Idx} :
   simp [addGates]
 
 /-- **The linear face of the gate system**: the root pin + the add gates' constraints — each
-entry a `Loom.LinearConstraint`, i.e. (by `constraint_as_sumcheck`) a sumcheck sum-claim. -/
+entry a `Selvage.LinearConstraint`, i.e. (by `constraint_as_sumcheck`) a sumcheck sum-claim. -/
 def linearSystem (N : ℕ) (root : WireRef F Idx) (gs : List (Gate F Idx)) :
     List (LinearConstraint (WireIdx Idx N) F) :=
   rootZero N root :: (addGates gs).map (addGateLin N)
@@ -253,7 +253,7 @@ REJECTS the assignment (`¬ accepts asg t` — equivalently, by `accepts_iff_sem
 executor relation fails), then EVERY aux valuation either violates a MUL gate (the
 `[AIR-sumcheck-quadratic]` residual channel, named, never silently absorbed) or violates some
 LINEAR constraint of the encoded system — a false sumcheck sum-claim, which §4 retires with
-Loom's proven bound. Composition of `flatten_constraint_iff` with the §2 encoding iffs. -/
+Selvage's proven bound. Composition of `flatten_constraint_iff` with the §2 encoding iffs. -/
 theorem air_violation_dichotomy (asg : Idx → F) (t : Term (AirSig F Idx))
     (hrej : ¬ accepts asg t) (auxv : ℕ → F) :
     (∃ g ∈ (flatten t 0).gates, g.op = GateOp.mul ∧ ¬ g.holds asg auxv)
@@ -277,19 +277,19 @@ theorem air_violation_dichotomy (asg : Idx → F) (t : Term (AirSig F Idx))
         (List.mem_map_of_mem (mem_addGates.mpr ⟨hg, hop⟩)))
   · exact (rootZero_iff hout asg auxv).mp (hlin _ (List.mem_cons_self ..))
 
-/-! ## §4. The retirement — Loom's PROVEN sumcheck catches the violation.
+/-! ## §4. The retirement — Selvage's PROVEN sumcheck catches the violation.
 
-Everything below CITES `Loom/SumcheckReduction` (`sumcheck_retires_constraint`,
+Everything below CITES `Selvage/SumcheckReduction` (`sumcheck_retires_constraint`,
 `batch_survives_prob_le`, `sumcheck_retires_batch`, `satisfies_not_acceptsFalse`,
-`list_as_single_sumcheck`) — which in turn cites `Loom/Sumcheck`'s proved
+`list_as_single_sumcheck`) — which in turn cites `Selvage/Sumcheck`'s proved
 `sumcheck_soundness`. No probability, no root counting, no union bound is re-derived here;
-the bound `v·d/|F|` is Loom's, quoted verbatim, and covers the LINEAR face of the gate
+the bound `v·d/|F|` is Selvage's, quoted verbatim, and covers the LINEAR face of the gate
 system (add gates + root pin) — mul gates are `[AIR-sumcheck-quadratic]`. -/
 
 /-- **`airSumcheck_sound` — [AIR-sumcheck], the linear face, closed.** A wire assignment the
 circuit REJECTS, whose aux valuation leaves every MUL gate intact (otherwise the violation
 lives in the named `[AIR-sumcheck-quadratic]` channel), violates SOME constraint of the
-encoded linear system — and Loom's sumcheck run on that constraint's sum-claim (claimed total
+encoded linear system — and Selvage's sumcheck run on that constraint's sum-claim (claimed total
 `c.target`, truth chain anchored at the actual pairing) accepts with probability at most
 `v·d/|F|`, for every prover and every degree-`≤ d` honest chain. The bound is
 `sumcheck_retires_constraint` = `sumcheck_soundness`, cited; the AIR content is the
@@ -318,7 +318,7 @@ theorem airSumcheck_sound {v d : ℕ} (asg : Idx → F) (t : Term (AirSig F Idx)
 /-- **The adaptive form** — the protocol shape a real multi-round honest prover (the MLE
 round polynomials of `[SC-reshape]`) inhabits: round polynomials drawn from the challenge
 prefix. Same dichotomy, same violated claim; the bound is
-`adaptive_sumcheck_retires_constraint` (Loom's packaging of its own `sumcheck_reduction` +
+`adaptive_sumcheck_retires_constraint` (Selvage's packaging of its own `sumcheck_reduction` +
 discharged `adaptiveUnionBound_holds`), cited. -/
 theorem airSumcheck_sound_adaptive {v d : ℕ} (asg : Idx → F) (t : Term (AirSig F Idx))
     (hrej : ¬ accepts asg t) (auxv : ℕ → F)
@@ -466,7 +466,7 @@ theorem exForced_mul_intact :
     | tail _ hg'' => exact nomatch hg''
 
 /-- **The keystone FIRES on real data**: rejected assignment + mul gates intact ⟹ some
-encoded sum-claim is violated and Loom's proven bound applies to it — every premise of
+encoded sum-claim is violated and Selvage's proven bound applies to it — every premise of
 `airSumcheck_sound` discharged concretely. -/
 example := airSumcheck_sound (v := 1) (d := 1) exAsg exFlat exFlat_rejects
   exForced exForced_mul_intact

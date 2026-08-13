@@ -30,7 +30,7 @@ open Minidregg.Assurance.ProofCompositionGame
 open Minidregg.Assurance.Tower256AdditiveFriRawAdmission
 open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256AdditiveFriRawController
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 set_option maxHeartbeats 1000000

@@ -3,7 +3,7 @@
 
 **Substrate, said out loud: this file is a verified-side reference computation for the
 seam.** The UNVERIFIED Rust prover (`prover/src/sumcheck.rs`) re-computes
-`Loom/MultilinearExtension.lean`'s `mle` (WHIR Def 4.5's `f̂`) and `roundSum` (the round
+`Selvage/MultilinearExtension.lean`'s `mle` (WHIR Def 4.5's `f̂`) and `roundSum` (the round
 polynomial `gᵢ`); Rust has no formal semantics, so the seam is a CONFORMANCE VECTOR:
 this file instantiates the REAL `mle`/`roundSum` at a fixed `m = 3` table over BabyBear
 (`[PROVER-field]`), KERNEL-DECIDES the reference values, and writes table + challenges +
@@ -29,16 +29,16 @@ refinement. The soundness content stays entirely on the Lean side
   the Rust side EXERCISES the same identities numerically on the vector.
 
 The Lean side is the only author of `prover/testdata/sumcheck_conformance.json`;
-Rust only reads. `Loom/` cannot host this file — the import boundary
+Rust only reads. `Selvage/` cannot host this file — the import boundary
 (`scripts/check-import-boundary.sh`) rightly keeps `Lean.Data.Json` out of the proof
 layer — so it lives here beside `EmitSerialize`, the seam's serialization home.
 -/
 import Compiler.EmitSerialize
-import Loom.MultilinearExtension
+import Selvage.MultilinearExtension
 
 namespace Minidregg.Compiler
 
-open Minidregg.Loom
+open Minidregg.Selvage
 open Lean (Json ToJson toJson)
 
 /-! ## §1. The fixed instance: table, challenges, probe point -/
@@ -138,7 +138,7 @@ def scRoundJson (i : Fin 3) : Json :=
 
 /-- The whole conformance file: field, dimension, table (LSB-first), challenges,
 claim, per-round messages, and the two MLE probe values — all computed from the
-REAL Loom `mle`/`roundSum` (the values the decided examples above pin). -/
+REAL Selvage `mle`/`roundSum` (the values the decided examples above pin). -/
 def sumcheckConformanceJson : Json :=
   Json.mkObj
     [ ("p", toJson babyBearP),

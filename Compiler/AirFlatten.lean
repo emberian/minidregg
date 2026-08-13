@@ -46,7 +46,7 @@ to one wire read — gates cannot nest), not a numeric degree function; the refi
 are inductions over the SAME signature the fold consumes (`flatten_forces`, `flatten_scoped`,
 `flatten_sound`, `flatten_covers` — one induction each), with the gate system itself produced
 ONLY by the fold. Residuals that remain live upstream, unchanged: `[AIR-sumcheck]` (retire the
-gate constraints through `Loom/SumcheckReduction`), `[AIR-poseidon]`/`[AIR-membership]` (the
+gate constraints through `Selvage/SumcheckReduction`), `[AIR-poseidon]`/`[AIR-membership]` (the
 note-spend gadgets, grown on this rung).
 -/
 import Compiler.Air

@@ -33,24 +33,24 @@ That hypothesis is the deployment label, AirRange's `2^k ≤ p` pattern: over ch
 no `half` satisfies it and the divided fold does not exist — pick the field so it does
 (BabyBear does).
 
-## The Loom correspondence (prose, boundary-honest)
+## The Selvage correspondence (prose, boundary-honest)
 
-`Compiler` may not import `Loom` (`Theory`-boundary law), so the correspondence is stated
+`Compiler` may not import `Selvage` (`Theory`-boundary law), so the correspondence is stated
 here at matching shape and the cross-boundary lemma is the named residual
 `[RECURSE-fri-bridge]`:
 
-* `Loom/Proximity.fold D f α = foldEven + α·foldOdd` where
+* `Selvage/Proximity.fold D f α = foldEven + α·foldOdd` where
   `foldEven f k = (f(x) + f(−x))/2` and `foldOdd f k = (f(x) − f(−x))/(2x)` at
   `x = D.sec k` — the object `fold_preserves_code` is proved about.
 * `friFoldVal half β lo hi tw` below IS that formula with the two divisions rendered as
   the constant `half` and the witnessed wire `tw`: `friFoldVal_eq_div_twoX` proves
   `2·half = 1 → tw·(2x) = 1 → friFoldVal half β lo hi tw = (lo+hi)/2 + β·(lo−hi)/(2x)` —
-  the in-boundary bridge, exactly `Loom.fold` at `f(x) = lo`, `f(−x) = hi`.
-* Check (2) is therefore `next_k = Loom.fold D f_k β_k (sq x)`'s shape per round, and
+  the in-boundary bridge, exactly `Selvage.fold` at `f(x) = lo`, `f(−x) = hi`.
+* Check (2) is therefore `next_k = Selvage.fold D f_k β_k (sq x)`'s shape per round, and
   check (3) is the final low-degree comparison (`Proximity`'s last-round constant check).
 
 `[RECURSE-fri-bridge]` — the machine-checked identification
-(`systemAccepts asg (friQueryVerifierGadget …) ↔` the `Loom.fold` equations at the real
+(`systemAccepts asg (friQueryVerifierGadget …) ↔` the `Selvage.fold` equations at the real
 domain points), statable only in a layer importing both (Assurance). Everything on THIS
 side of the boundary is proved; the residual is the cross-boundary restatement, not a gap
 in the gadget's meaning.
@@ -84,7 +84,7 @@ is now `sumcheckVerifierGadget … ++ friQueryVerifierGadget … ++ membershipGa
 sumcheck + FRI pair as `recursiveVerifierPair_correct` in §4. What remains under
 `[RECURSE-verifier]`: the actual wire-sharing composition (challenges to FS hashes,
 `lo`/`hi`/`next` to Merkle openings, `twoX` to the index's domain point) and
-`[RECURSE-fri-bridge]`/`[RECURSE-sumcheck-bridge]` (the Loom identifications,
+`[RECURSE-fri-bridge]`/`[RECURSE-sumcheck-bridge]` (the Selvage identifications,
 Assurance-side).
 
 ## Statement-first (ATLAS fields)
@@ -109,7 +109,7 @@ variable {F : Type u} [Field F] {Idx : Type u} {rounds n : ℕ}
 /-! ## §1. The semantic spec, statement-first — the FRI query's checks as a `Prop`. -/
 
 /-- **The deployed fold formula, twiddle form**: `(lo + hi)·half + β·(lo − hi)·tw`. With
-`2·half = 1` and `tw·(2x) = 1` this IS `Loom/Proximity.fold`'s
+`2·half = 1` and `tw·(2x) = 1` this IS `Selvage/Proximity.fold`'s
 `(f(x)+f(−x))/2 + β·(f(x)−f(−x))/(2x)` at `f(x) = lo`, `f(−x) = hi`
 (`friFoldVal_eq_div_twoX` below). -/
 def friFoldVal (half β lo hi tw : F) : F := (lo + hi) * half + β * (lo - hi) * tw
@@ -122,7 +122,7 @@ def lastVal (finalv : F) (nextv : Fin rounds → F) : F :=
 /-- **The FRI query verifier's acceptance, statement-first.** Every twiddle wire is the
 genuine inverse of its `2x` mate, every round's opened values fold to the next round's
 opened value by the deployed formula, and the last fold equals the claimed final
-constant. This is the fold-consistency conjunction `Loom`'s query check imposes on one
+constant. This is the fold-consistency conjunction `Selvage`'s query check imposes on one
 query path; the machine-checked identification is `[RECURSE-fri-bridge]`. -/
 def FriQueryAccepts (half finalv : F)
     (lov hiv nextv betav twv twoXv : Fin rounds → F) : Prop :=
@@ -133,7 +133,7 @@ def FriQueryAccepts (half finalv : F)
 /-- **The divided-form bridge (in-boundary).** When the half constant and the twiddle wire
 really are the inverses their constraints claim (`2·half = 1`, `tw·t2x = 1`), the
 arithmetized fold IS the divided fold `(lo+hi)/2 + β·(lo−hi)/t2x` — at `t2x = 2x` this is
-verbatim `Loom.Proximity.fold`'s formula. The `Loom` restatement is
+verbatim `Selvage.Proximity.fold`'s formula. The `Selvage` restatement is
 `[RECURSE-fri-bridge]`. -/
 theorem friFoldVal_eq_div_twoX {half tw t2x : F} (hhalf : (2 : F) * half = 1)
     (htw : tw * t2x = 1) (β lo hi : F) :
@@ -271,10 +271,10 @@ theorem friQueryVerifier_semHolds_correct (asg : Idx → F) (half : F) (finalW :
         (fun k => asg (twoX k)) := by
   rw [← systemAccepts_iff_systemSemHolds, friQueryVerifier_correct]
 
-/-- **The DIVIDED reading — the gadget accepts iff Loom's fold equations hold.** Under the
+/-- **The DIVIDED reading — the gadget accepts iff Selvage's fold equations hold.** Under the
 deployment label `2·half = 1`, acceptance is: the twiddles invert, and every round
 satisfies `next_k = (lo_k + hi_k)/2 + β_k·(lo_k − hi_k)/twoX_k` — with `twoX_k` carrying
-`2x`, verbatim `Loom.Proximity.fold`'s formula — plus the final check. The first conjunct
+`2x`, verbatim `Selvage.Proximity.fold`'s formula — plus the final check. The first conjunct
 FEEDS the second (the division form only means division because the inverse constraint
 holds): the arithmetized division is load-bearing, not decorative. -/
 theorem friQueryVerifier_correct_div (asg : Idx → F) {half : F}
@@ -298,7 +298,7 @@ parts with zero new constraint work. The pair below (sumcheck-verify + FRI-query
 proof-system spine; AirMembership's `membershipGadget` appends the same way to bind each
 opened wire (`lo k`/`hi k`/`next k`) to a Merkle root, and AirHash's `permGadget` to bind
 `beta k`/`chal i` to Fiat–Shamir transcript hashes. The remaining `[RECURSE-verifier]`
-mass is exactly that wire-sharing (plus the `[RECURSE-*-bridge]` Loom identifications,
+mass is exactly that wire-sharing (plus the `[RECURSE-*-bridge]` Selvage identifications,
 Assurance-side); the constraint vocabulary is now complete. -/
 
 /-- **Sumcheck-verify + FRI-query as ONE system** — the two proof-system components of the
@@ -462,7 +462,7 @@ example : ¬ systemAccepts ![7, 8, 10, 7, 6, 10, 4] gadget13 := by decide
 `ConstraintSystem`, the verified emit path applies with zero new work — the emitted
 `ConstraintDescriptor`'s satisfiability IS the query verifier's acceptance
 (`emit_accepts_iff_fin`, instantiated below). So **"the FRI query folded consistently" is
-itself a Loom-arithmetizable statement**: prove THAT statement with Loom and a proof
+itself a Selvage-arithmetizable statement**: prove THAT statement with Selvage and a proof
 verifies a proof. Together with `sumcheckVerifierGadget` (§4's append) and
 AirMembership's `membershipGadget`, every check of the light client now exists as an
 emittable constraint — the apex assembly is wire-sharing, `[RECURSE-verifier]`'s

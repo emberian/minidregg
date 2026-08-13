@@ -30,7 +30,7 @@ namespace Minidregg.Compiler.Tower256CshakeMerkleBinding
 open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

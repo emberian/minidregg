@@ -25,7 +25,7 @@ namespace Minidregg.Compiler.AuthenticatedColumnLogupBridge
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.Logup256ReceiptClause
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

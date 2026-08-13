@@ -28,7 +28,7 @@ open Minidregg.Compiler.GateFactoredExt6
 open Minidregg.Compiler.GateMleExt6
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256CshakeMerkleController
-open Minidregg.Loom Polynomial
+open Minidregg.Selvage Polynomial
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

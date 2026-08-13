@@ -7,7 +7,7 @@ AIR, NO constraint system, NO gated Verb/admission, NO executor arm is authored 
 constraint side that would make a private turn SOUNDLY CONSTRAIN is the Lean-authored
 `[PRIVATE-TURN-air]` lane (named in `Assurance/PrivateTurn.lean`), and the CRYPTOGRAPHIC hiding
 — a verifier's masked-opening view cannot distinguish witnesses — is Assurance-level
-(`Assurance/PrivateTurn.lean`, riding Loom; the Kernel boundary forbids importing either here).
+(`Assurance/PrivateTurn.lean`, riding Selvage; the Kernel boundary forbids importing either here).
 
 What the KERNEL owns is the model fact both of those sit on: a participant's state splits into
 a PUBLIC half and a PRIVATE witness (`Pub × Priv`); a private-witness turn is the ONE hyperedge
@@ -232,7 +232,7 @@ theorem witness_hidden :
 
 /-- The whole witness FAMILY collapses to one view: for EVERY pair of note values the
 transfer's public view is the same — the observable quotients out the witness entirely
-(`Loom`'s `witness_free` shape, at the model level). -/
+(`Selvage`'s `witness_free` shape, at the model level). -/
 theorem transfer_view_witness_free (v w : ℤ) :
     (transfer v).publicView = (transfer w).publicView :=
   privateTurn_public_indistinguishable (transfer v) (transfer w)
@@ -266,7 +266,7 @@ What this file does NOT claim, named:
 
   `[PRIVATE-TURN-crypto]` — hiding here is EQUALITY of public views: perfect, model-level,
      no adversary, no distribution, no computational content. The cryptographic statement
-     (masked openings, simulator) is `Assurance/PrivateTurn.lean` + Loom; this file only
+     (masked openings, simulator) is `Assurance/PrivateTurn.lean` + Selvage; this file only
      supplies the kernel object it is ABOUT.
 
   `[PRIVATE-TURN-exec]` — the admission side (a gated verb accepting a private turn given

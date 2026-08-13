@@ -17,13 +17,13 @@ has the wrong degree, and requires an unrelated GF(2)-to-Ext6 bridge.  This clau
 the distinct declared GF(2^256) carrier profile and has no bridge requirement.
 -/
 import Compiler.MinidreggV1Artifact
-import Loom.LogupIndexLink
+import Selvage.LogupIndexLink
 
 namespace Minidregg.Compiler.Logup256ReceiptClause
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

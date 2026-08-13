@@ -29,28 +29,28 @@ the AIR asserts exactly the verifier's checks:
    interpolation `(1 − rₖ)·gₖ(0) + rₖ·gₖ(1)` — exact for degree ≤ 1;
 3. **final**: `finalW = g_{n−1}(r_{n−1})` — the last fold value equals the oracle wire.
 
-## The Loom correspondence (prose, boundary-honest)
+## The Selvage correspondence (prose, boundary-honest)
 
-`Compiler` may not import `Loom` (`Theory`-boundary law), so the correspondence is stated
+`Compiler` may not import `Selvage` (`Theory`-boundary law), so the correspondence is stated
 here at matching shape, theorem-for-theorem, and the cross-boundary lemma is the named
 residual `[RECURSE-sumcheck-bridge]`:
 
-* `chainVal` below IS `Loom.scChain` in values form: `scChain base poly chal 0 = base` and
+* `chainVal` below IS `Selvage.scChain` in values form: `scChain base poly chal 0 = base` and
   `scChain … (i+1) = (poly i).eval (chal i)`; for a degree-≤1 round polynomial the
-  evaluation is the interpolation of its values at 0 and 1 (`Loom.roundSum_affine` /
+  evaluation is the interpolation of its values at 0 and 1 (`Selvage.roundSum_affine` /
   `roundPoly_eval` are exactly this shape; `interp_eq_of_affine` below is the in-boundary
   bridge at that resolution).
-* Check (1) is `Loom.roundSum_zero`'s shape (`g₀(0)+g₀(1) =` the claimed total), check (2)
-  is `Loom.roundSum_succ` (`g_{k+1}(0)+g_{k+1}(1) = gₖ(rₖ)`), check (3) is
-  `Loom.roundSum_last` / `scChain_mleHonest_final` (the last fold IS the full evaluation
+* Check (1) is `Selvage.roundSum_zero`'s shape (`g₀(0)+g₀(1) =` the claimed total), check (2)
+  is `Selvage.roundSum_succ` (`g_{k+1}(0)+g_{k+1}(1) = gₖ(rₖ)`), check (3) is
+  `Selvage.roundSum_last` / `scChain_mleHonest_final` (the last fold IS the full evaluation
   `f̂(r)`, compared against the oracle).
-* `SumcheckVerifierAccepts` below is `Loom.SumcheckAccepts`' check-conjunction on the same
+* `SumcheckVerifierAccepts` below is `Selvage.SumcheckAccepts`' check-conjunction on the same
   transcript (the round checks against the claim chain + the final comparison), minus
   nothing: the arithmetized verifier accepts iff the Lean sumcheck verifier would accept
   the same values-form transcript.
 
 `[RECURSE-sumcheck-bridge]` — the machine-checked form of that last bullet
-(`systemAccepts asg (sumcheckVerifierGadget …) ↔ Loom.SumcheckAccepts …` through the
+(`systemAccepts asg (sumcheckVerifierGadget …) ↔ Selvage.SumcheckAccepts …` through the
 values/`Polynomial` representation change), statable only in a layer importing both
 (Assurance). Everything on THIS side of the boundary is proved; the residual is the
 cross-boundary restatement, not a gap in the gadget's meaning.
@@ -60,7 +60,7 @@ cross-boundary restatement, not a gap in the gadget's meaning.
 The gadget is a `ConstraintSystem`, so the WHOLE emit path applies to it verbatim:
 `flattenSystem`/`emit` produce a first-order `ConstraintDescriptor` whose satisfiability is
 `systemAccepts` (`emit_accepts_iff`, instantiated on this gadget in §6). Therefore **"the
-sumcheck verifier accepted this transcript" is itself a Loom-arithmetized statement** — a
+sumcheck verifier accepted this transcript" is itself a Selvage-arithmetized statement** — a
 proof OF that statement is a proof that a proof verified: the recursion apex. The full
 recursive verifier `[RECURSE-verifier]` is the composition, all on this rung: THIS gadget
 (its first component) + challenge wires BOUND to Fiat–Shamir transcript hashes (AirHash's
@@ -95,7 +95,7 @@ variable {F : Type u} [Field F] {Idx : Type u} {n : ℕ}
 (`interp_eq_of_affine`), and the degree bound is enforced by the values REPRESENTATION. -/
 def interp (r a b : F) : F := (1 - r) * a + r * b
 
-/-- **The claim chain, values form** — Loom's `scChain` with the round-polynomial
+/-- **The claim chain, values form** — Selvage's `scChain` with the round-polynomial
 evaluation rendered as the interpolation: `claim` at 0, `gₖ(rₖ) = interp rₖ gₖ(0) gₖ(1)`
 at `k+1` (junk `claim` past the horizon, never queried in range — `chalOf`'s pattern). -/
 def chainVal (claim : F) (g0v g1v chalv : Fin n → F) : ℕ → F
@@ -107,14 +107,14 @@ def chainVal (claim : F) (g0v g1v chalv : Fin n → F) : ℕ → F
 `gᵢ(0) + gᵢ(1) = chainᵢ` holds (round 0 against the claim — `roundSum_zero`'s shape;
 round `k+1` against the previous fold `gₖ(rₖ)` — `roundSum_succ`'s shape) AND the final
 oracle value equals the last fold (`roundSum_last`'s shape). This is
-`Loom.SumcheckAccepts` on the values-form transcript; the machine-checked identification
+`Selvage.SumcheckAccepts` on the values-form transcript; the machine-checked identification
 is `[RECURSE-sumcheck-bridge]`. -/
 def SumcheckVerifierAccepts (claim final : F) (g0v g1v chalv : Fin n → F) : Prop :=
   (∀ i : Fin n, g0v i + g1v i = chainVal claim g0v g1v chalv i.val)
     ∧ final = chainVal claim g0v g1v chalv n
 
 /-- **The degree-1 bridge (in-boundary form).** For any round function `g` that is affine
-in Loom's `AffineInCoord`/`roundSum_affine` shape (`g t = (1−t)·g 0 + t·g 1`), the
+in Selvage's `AffineInCoord`/`roundSum_affine` shape (`g t = (1−t)·g 0 + t·g 1`), the
 gadget's fold value `interp r (g 0) (g 1)` IS `g r` — the arithmetized chain computes the
 real `gₖ(rₖ)` exactly on degree-≤1 round polynomials. The `Polynomial F` restatement is
 `[RECURSE-sumcheck-bridge]`. -/
@@ -238,7 +238,7 @@ theorem sumcheckVerifier_semHolds_correct (asg : Idx → F) (claimW finalW : Idx
 the REAL fold via §1 of `AirRange`'s `Decidable` instances.
 
 The honest transcript is the REAL MLE sumcheck run for `f = AND` on two bits
-(`f̂ = x₀·x₁`, `Loom/MultilinearExtension`'s worked example): claim `H = Σ_b AND(b) = 1`;
+(`f̂ = x₀·x₁`, `Selvage/MultilinearExtension`'s worked example): claim `H = Σ_b AND(b) = 1`;
 `g₀(t) = Σ_b f̂(t, b) = t` so `(g₀(0), g₀(1)) = (0, 1)`; challenge `r₀ = 3`;
 `g₁(t) = f̂(3, t) = 3t` so `(g₁(0), g₁(1)) = (0, 3)`; challenge `r₁ = 5`; final oracle
 value `f̂(3, 5) = 15 = 1` in `ZMod 7`. Wire layout on `Fin 8`: claim at 0, final at 1,
@@ -316,7 +316,7 @@ example : ¬ systemAccepts ![2, 1, 0, 0, 1, 7, 7, 2] gadget13 := by decide
 `ConstraintSystem`, the verified emit path applies to it with zero new work — the emitted
 `ConstraintDescriptor`'s satisfiability IS the verifier's acceptance
 (`emit_accepts_iff_fin`, instantiated below). So **"the sumcheck verifier accepted this
-transcript" is itself a Loom-arithmetizable statement**: prove THAT statement with Loom
+transcript" is itself a Selvage-arithmetizable statement**: prove THAT statement with Selvage
 and a proof verifies a proof. What remains under `[RECURSE-verifier]`: binding the
 challenge wires to Fiat–Shamir hashes (AirHash `permGadget`), the `finalW` wire to a
 Merkle-opened oracle value (AirMembership), and the FRI-query gadget — composed by list
@@ -326,7 +326,7 @@ append into one emitted system, on this same rung. -/
 the arithmetized sumcheck verifier accepts — `emit_accepts_iff_fin` consumed on THIS
 gadget, no new proof. The recursion apex, concretely: the right-hand side is (by
 `sumcheckVerifier_correct`) the verifier's checks, and the left-hand side is a first-order
-emitted statement a Loom proof can target. -/
+emitted statement a Selvage proof can target. -/
 example (asg : Fin 8 → ZMod 7) :
     (∃ wv : ℕ → ZMod 7, (∀ i : Fin 8, wv i.val = asg i) ∧
         descriptorHolds (emit Fin.val 8 8 gadget7) wv)

@@ -27,7 +27,7 @@ open Minidregg.Compiler.BfvCompressedEquation
 open Minidregg.Compiler.BfvInputValidity
 open Minidregg.Compiler.BfvProofController
 open Minidregg.Compiler.BfvReceiptClause
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 

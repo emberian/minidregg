@@ -44,17 +44,17 @@ This file closes that door:
 `fullVerifier` is a `ConstraintSystem`, so the verified emit path applies verbatim:
 `emit_accepts_iff_fin` is consumed on the composed demo in §6. **"The full light-client
 verifier accepted" — challenges derived by Fiat–Shamir, openings members of the committed
-roots, sumcheck and FRI checks passed — is ONE emitted, Loom-provable statement.** A Loom
+roots, sumcheck and FRI checks passed — is ONE emitted, Selvage-provable statement.** A Selvage
 proof of that statement is a proof that a self-contained non-interactive proof verified:
 a proof verifies a proof, with no free wire standing in for trust on the proof-carrying
 path. What "verified" means here is priced exactly: the constraints force the conjunction
 of `fullVerifier_correct`'s four clauses; the cryptographic floors and the remaining
 composition mass are named below, none smuggled.
 
-## The Loom correspondence (prose, boundary-honest)
+## The Selvage correspondence (prose, boundary-honest)
 
-`Compiler` may not import `Loom` (`Theory`-boundary law). `OpeningsBound` is the
-in-circuit form of Loom's Merkle opening verification — the object the light client's
+`Compiler` may not import `Selvage` (`Theory`-boundary law). `OpeningsBound` is the
+in-circuit form of Selvage's Merkle opening verification — the object the light client's
 query checks read oracle values through; `memberAtDepth` is its set reading. The
 machine-checked identification (Assurance-side, like the landed bridge residuals) is part
 of `[RECURSE-full-resid]` below.
@@ -74,7 +74,7 @@ statement, each piece named:
    index-to-point power chain and per-round squaring) — new vocabulary, not landed.
 4. **Query multiplicity**: ONE query path is arithmetized; deployment runs many queries —
    more instances of the same gadgets by `++`, instantiation not theory.
-5. **The Loom bridges**: `[RECURSE-fs-bridge]`/`[RECURSE-sumcheck-bridge]`/
+5. **The Selvage bridges**: `[RECURSE-fs-bridge]`/`[RECURSE-sumcheck-bridge]`/
    `[RECURSE-fri-bridge]` plus the Merkle identification above, Assurance-side.
 
 FLOORS (assumptions, never theorems here): `[COMMIT-CR]` — the binding forces
@@ -108,7 +108,7 @@ variable {F : Type u} [Field F] {Idx : Type u} {w s n rounds : ℕ}
 /-- **The opening binding, statement-first.** Per round: the direction values are boolean
 and the committed root is EXACTLY the Merkle path fold of the opened value — the opened
 value sits at a position of the tree the root commits to. This is the in-circuit form of
-Loom's Merkle opening verification; the machine-checked identification is part of
+Selvage's Merkle opening verification; the machine-checked identification is part of
 `[RECURSE-full-resid]`. -/
 def OpeningsBound (spec : PermSpec F 2) (rootv openedv : Fin rounds → F)
     (pathv : Fin rounds → List (F × F)) : Prop :=
@@ -527,7 +527,7 @@ Because `fullVerifier` is a `ConstraintSystem`, the verified emit path applies w
 new work: the emitted `ConstraintDescriptor`'s satisfiability IS the full verifier's
 acceptance. **"The full light-client verifier accepted this transcript" — challenges
 FS-derived, openings Merkle-members, sumcheck and FRI passed — is ONE emitted,
-Loom-provable statement.** A Loom proof of the emitted statement is a self-contained
+Selvage-provable statement.** A Selvage proof of the emitted statement is a self-contained
 recursive proof: a proof that a proof verified, with no free wire on the proof-carrying
 path (`fullVerifier_binds`). Remaining mass: `[RECURSE-full-resid]` (header), the floors
 named, none load-bearing in any theorem here. -/
@@ -549,7 +549,7 @@ end MerkleBindExample
 transcript (wire-sharing, landed mechanism, not yet required by hypothesis); (2) the
 sumcheck oracle wire's own opening binding (same vocabulary, not instantiated); (3)
 `twoX`/query-index domain-point arithmetization (new vocabulary); (4) query multiplicity
-(instantiation by `++`); (5) the Assurance-side Loom identifications
+(instantiation by `++`); (5) the Assurance-side Selvage identifications
 (`[RECURSE-fs-bridge]`/`[RECURSE-sumcheck-bridge]`/`[RECURSE-fri-bridge]` + the Merkle
 one). FLOORS: `[COMMIT-CR]` (§5 exhibits its concreteness — the accepted forgery set IS
 the toy hash's collision fiber), `[FS-oracle]`, `[RECURSE-fs-sponge]`,

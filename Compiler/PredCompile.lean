@@ -16,7 +16,7 @@ over `Pred`/`PredList`, not a per-gadget argument. Rust appears nowhere.
 
 ## Placement (the boundary question, resolved by reading, not vibes)
 
-`scripts/check-import-boundary.sh` mechanically constrains ONLY `Theory/` and `Loom/`;
+`scripts/check-import-boundary.sh` mechanically constrains ONLY `Theory/` and `Selvage/`;
 `Compiler/` is not constrained by the script. `Pred/Core` imports core Lean only (it cannot
 and does not import `Compiler`), so `Compiler → Pred.Core` introduces no cycle and keeps the
 direction right: ATLAS §7 carves `Compiler/` as the arithmetization spine that CONSUMES

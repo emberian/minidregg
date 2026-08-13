@@ -4,7 +4,7 @@
 This module prices the raw additive controller on one common coin space.  It
 constructs, rather than assumes, the false-accept cover:
 
-* `additiveProximity` is exactly Loom's ideal challenge/query acceptance event
+* `additiveProximity` is exactly Selvage's ideal challenge/query acceptance event
   and is priced by `additiveFriAdaptive_coherent_sampled_sound_UD`;
 * `commitmentBinding` is exactly an accepted controller receipt carrying a
   path-specific `ExtractedCollision` from the concrete Merkle checker; and
@@ -25,7 +25,7 @@ open Minidregg.Assurance.ProofCompositionGame
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256AdditiveFriRawController
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false

@@ -2,14 +2,14 @@
 # `Assurance/ReceiptClaim.lean` — OB-3: the receipt Q as a native accumulated claim
 
 THE KILL-CHECKPOINT (`docs/OB3-RECEIPT-ENCODING.md`). This bridge lives in `Assurance/`
-by necessity: the import boundary forbids `Loom` importing `Kernel` (and vice versa), and
+by necessity: the import boundary forbids `Selvage` importing `Kernel` (and vice versa), and
 OB-3 is exactly where a kernel object (the receipt word, `Kernel/Receipt.lean`) meets a
-proof-system object (the code, `Loom/ReedSolomon.lean`). `Assurance/` is unrestricted —
+proof-system object (the code, `Selvage/ReedSolomon.lean`). `Assurance/` is unrestricted —
 the apex layer — so it is the only lawful home.
 
 **Checkpoint verdict (v0): PASS at the binding level.** The receipt word flattens to a
 field vector; that vector determines the observed post-state (`flatten_faithful`), so
-Loom's evaluation constraint `û(α)=μ` binds Q — the receipt IS the accumulator's committed
+Selvage's evaluation constraint `û(α)=μ` binds Q — the receipt IS the accumulator's committed
 word, no verifier-simulator. The anti-ghost tooth (`flatten_tamper_changes`) fires
 concretely: a tampered post-state produces a different word. No candidate failure site
 (OB-3 §2 — authority non-amp, nullifier non-membership, keyed-map sparsity) bit at this
@@ -20,15 +20,15 @@ field (not char-zero — that would be the ℤ-for-BabyBear trap), with the cast
 carried as an explicit range-restricted hypothesis `castInj` (OB-3 §2's named range
 obligation — never assumed silently; a global `Int.cast` injectivity would be FALSE at a
 finite field, i.e. vacuous, so it is range-restricted). The FOLD half (d) is now ALSO
-closed at the CLOSURE level: a `ReceiptClaim` is a native Loom accumulated claim
+closed at the CLOSURE level: a `ReceiptClaim` is a native Selvage accumulated claim
 (`ReceiptClaim.acc`, provably the `AccClaim.ofConstraints` transport of its evaluation
-constraints), and two receipt claims over one window fold via Loom's `foldClaims` to ONE
+constraints), and two receipt claims over one window fold via Selvage's `foldClaims` to ONE
 accumulated claim satisfied by the folded word (`receiptClaim_folds`, inheriting the
 closure theorem `foldClaims_satisfies`) — the δ-proximity soundness of that fold stays
 the SHARED `[ACC-sound]`/`[CRS-batch-sound]` residual, cited, not re-opened. The
 PROXIMITY half (c at rate < 1) — `[OB3-c-prox]` — is now CLOSED at the
 EXACT-MEMBERSHIP level (Proximity section below): the rate<1 acceptance
-`ReceiptClaim.proxAccepts` checks membership by Loom's FRI/WHIR descent, and
+`ReceiptClaim.proxAccepts` checks membership by Selvage's FRI/WHIR descent, and
 `receiptClaim_proximity` bounds a δ-far receipt word's acceptance by `m·b·|F|^{m−1}`
 (riding `proximity_sound`, REUSED). Below the quantization radius the fold-distance
 premise is discharged UNCONDITIONALLY (`receiptClaim_proximity_subQuant`, zero residual
@@ -39,13 +39,13 @@ rides the ONE standing RS proximity-gap hypothesis `hPG`
 same hypothesis the whole rate<1 tree carries; cited, never assumed, NOT claimed).
 -/
 import Kernel.Receipt
-import Loom.ReedSolomon
-import Loom.Accumulator
-import Loom.Proximity
+import Selvage.ReedSolomon
+import Selvage.Accumulator
+import Selvage.Proximity
 
 namespace Minidregg.Assurance
 
-open Minidregg.Kernel Minidregg.Loom
+open Minidregg.Kernel Minidregg.Selvage
 
 /-- The flattened index of a window's word: one coordinate per observed balance cell, two
 per observed key (presence bit at `0`, value at `1`) — the OB-3 §1 vector layout. -/
@@ -77,7 +77,7 @@ def obsRange (w : Window) (k : KernelState) : Finset ℤ :=
 /-- **Flatten faithfulness — the binding half of Q (OB-3 obligation a/b/c-word).** Given
 the range-restricted cast injectivity, the field vector determines the receipt word, hence
 (via `uproj_faithful`) the observed post-state. This is what makes "the receipt binds the
-whole post-state" a fact about the WORD — so Loom's `û(α)=μ` constraint binds Q. -/
+whole post-state" a fact about the WORD — so Selvage's `û(α)=μ` constraint binds Q. -/
 theorem flatten_faithful (w : Window) (k k' : KernelState)
     (castInj : ∀ z z' : ℤ, z ∈ obsRange w k → z' ∈ obsRange w k' →
       ((z : F) = (z' : F)) → z = z')
@@ -161,10 +161,10 @@ structure ReceiptClaim (w : Window) (F : Type) [Field F] [DecidableEq F] where
 
 /-! ## [OB3-d-fold], the closure half — the receipt claim as a native accumulated claim
 
-The kernel's receipt Q becomes a Loom `AccClaim`: the binding "word = flatten(post)" is
+The kernel's receipt Q becomes a Selvage `AccClaim`: the binding "word = flatten(post)" is
 exactly a channel of per-coordinate EVALUATION constraints (`evalConstraint ix (word ix)`
 — WHIR Def 4.5's in-domain `Z·eq` weight, one per flat coordinate), transported into
-channel functionals by `dotWtL`. Two receipt claims over one window then fold by Loom's
+channel functionals by `dotWtL`. Two receipt claims over one window then fold by Selvage's
 γ-fold: `receiptClaim_folds` inherits the closure theorem `foldClaims_satisfies` (REUSED,
 not re-derived), so the folded object is ONE well-formed accumulated claim satisfied by
 the folded word — the receipt chain is one accumulated object, and the seam
@@ -209,13 +209,13 @@ private theorem dotWt_evalConstraint {ι : Type} [Fintype ι] [DecidableEq ι]
   satisfies_evalConstraint_iff.mpr rfl
 
 /-- The receipt's binding channel in the sibling's list presentation
-(`Loom/ConstrainedCode.lean`): one evaluation constraint per flat coordinate, target the
+(`Selvage/ConstrainedCode.lean`): one evaluation constraint per flat coordinate, target the
 claimed word there. -/
 noncomputable def ReceiptClaim.constraintList (rc : ReceiptClaim w F) :
     List (LinearConstraint (FlatIx w) F) :=
   (ixList w).map fun ix => evalConstraint ix (rc.word ix)
 
-/-- **The OB-3 bridge.** The receipt claim as a native Loom accumulated claim:
+/-- **The OB-3 bridge.** The receipt claim as a native Selvage accumulated claim:
 commitment `rt` (opaque — binding is the commitment layer's obligation, per the
 accumulator's root discipline), channel = the per-coordinate evaluation constraints of
 the binding, arity the window's spine. Its satisfaction is EXACTLY "the word is
@@ -235,7 +235,7 @@ theorem ReceiptClaim.acc_weights_shared (rc₁ rc₂ : ReceiptClaim w F) (rt₁ 
   fun _ => rfl
 
 /-- Satisfaction of the bridged claim, characterized: the witness word IS the post-state's
-flattening (and lies in the code) — OB-3 §1's Q, now read through Loom's claim relation. -/
+flattening (and lies in the code) — OB-3 §1's Q, now read through Selvage's claim relation. -/
 theorem ReceiptClaim.acc_satisfies_iff {C : Submodule F (FlatIx w → F)}
     (rc : ReceiptClaim w F) (rt : Root) {f : FlatIx w → F} :
     AccClaim.Satisfies C (rc.acc rt) f ↔ f ∈ C ∧ f = flatten (F := F) w rc.post := by
@@ -299,7 +299,7 @@ theorem ReceiptClaim.acc_satisfies_iff_ofConstraints {dom : FlatIx w ↪ F} {d :
 /-- **[OB3-d-fold], the closure.** Two receipt claims over ONE window, bridged to native
 accumulated claims, fold at any challenge γ to ONE accumulated claim (`foldClaims` — a
 well-formed `AccClaim` by construction) SATISFIED by the folded word
-`flatten post₁ + γ • flatten post₂`: Loom's closure theorem `foldClaims_satisfies`
+`flatten post₁ + γ • flatten post₂`: Selvage's closure theorem `foldClaims_satisfies`
 inherited verbatim (`hshare` is `acc_weights_shared`, i.e. `rfl`). The receipt chain is
 thereby one accumulated object. δ-proximity soundness of the fold (the `(t−1)ℓ/|F|`
 bound) is the shared `[ACC-sound]`/`[CRS-batch-sound]` residual — cited, not re-opened. -/
@@ -417,8 +417,8 @@ end Fold
 At full rate the code is ⊤ and the membership conjunct of `AccClaim.Satisfies` is
 FREE — the fold section above says so honestly, and its proximity content is zero.
 This section is the refinement where that conjunct grows teeth: at rate < 1
-(`deg 0 < |FlatIx w|`) membership is checked by Loom's FRI/WHIR descent
-(`proximityTest`, Loom/Proximity.lean) instead of read off exactly, and the OB-3
+(`deg 0 < |FlatIx w|`) membership is checked by Selvage's FRI/WHIR descent
+(`proximityTest`, Selvage/Proximity.lean) instead of read off exactly, and the OB-3
 checkpoint keeps its bite — a receipt word δ-FAR from the code passes the descent
 on at most `m·b·|F|^{m−1}` of the `|F|^m` challenge tuples
 (`receiptClaim_proximity`, riding `proximity_sound` — REUSED, not re-derived).
@@ -427,15 +427,15 @@ resolution, so a wrong-word ghost is rejected outright at EVERY challenge
 (`proxAccepts_ne_reject`); its δ-relaxed evaluation form is the SHARED
 `[ACC-sound]` residual, cited, not re-opened.
 
-Two regimes, exactly as Loom delivers `[PROX-fold-distance]`:
+Two regimes, exactly as Selvage delivers `[PROX-fold-distance]`:
 * sub-quantization `δ < 1/|level|`: `receiptClaim_proximity_subQuant` — the
   fold-distance premise discharged UNCONDITIONALLY by
   `foldDistancePreserving_of_lt_inv_card` (`b = 1`): zero residual hypotheses,
   and the keystones below compute it end-to-end.
 * macroscopic `δ ∈ (0, 1−B)`: `receiptClaim_proximity_ofProximityGenerator` —
   rides the ONE standing RS proximity-gap hypothesis `hPG` (WHIR Thm 4.8 /
-  BCIKS 2020/654), the SAME hypothesis Loom/ReedSolomon.lean's Corollary 4.11
-  and Loom/Proximity.lean carry; a hypothesis, never an axiom, NOT claimed. -/
+  BCIKS 2020/654), the SAME hypothesis Selvage/ReedSolomon.lean's Corollary 4.11
+  and Selvage/Proximity.lean carry; a hypothesis, never an axiom, NOT claimed. -/
 
 /-- The tower levels of a receipt descent: level 0 IS the window's flat spine
 (definitionally — no transport, no coherence), the descent tail is arbitrary. -/
@@ -479,7 +479,7 @@ theorem ReceiptClaim.channels_iff_binds (rc : ReceiptClaim w F) (rt : Root)
 
 /-- **The rate<1 acceptance of a submitted receipt word**: `AccClaim.Satisfies`
 with its membership conjunct replaced by the LDT descent — the word must pass
-Loom's `proximityTest` over the challenge tuple `r` (membership, now checked
+Selvage's `proximityTest` over the challenge tuple `r` (membership, now checked
 probabilistically) and meet the claim's channels exactly (the binding). At full
 rate the first conjunct is vacuous (`reedSolomonCode_card_eq_top`); at rate < 1
 it is the real membership check. -/
@@ -522,7 +522,7 @@ theorem ReceiptClaim.proxAccepts_ne_reject (rc : ReceiptClaim w F) (rt : Root)
 variable [Fintype F]
 
 /-- The accepting challenge tuples of a submitted word (classically measurable —
-mirrors Loom's `acceptSet`). -/
+mirrors Selvage's `acceptSet`). -/
 noncomputable def ReceiptClaim.proxAcceptSet (rc : ReceiptClaim w F) (rt : Root)
     (T : FoldingTower F (rcLevels w tail) m) (deg : ℕ → ℕ)
     (f : FlatIx w → F) : Finset (Fin m → F) :=
@@ -556,9 +556,9 @@ theorem ReceiptClaim.proxAcceptSet_subset_acceptSet [∀ n, Fintype (tail n)]
 /-- **`[OB3-c-prox]`, counting form — the proximity tooth of the OB-3
 checkpoint.** At rate < 1, a submitted receipt word δ-far from the code
 prox-accepts on at most `m·b·|F|^{m−1}` of the `|F|^m` challenge tuples: the
-acceptance event embeds in the bare LDT's and Loom's `proximity_sound` (REUSED,
+acceptance event embeds in the bare LDT's and Selvage's `proximity_sound` (REUSED,
 not re-derived) counts that. The per-round fold-distance premise `hfold` is the
-same `[PROX-fold-distance]` interface Loom delivers in two regimes — discharged
+same `[PROX-fold-distance]` interface Selvage delivers in two regimes — discharged
 unconditionally below quantization (`…_subQuant`) and from the standing `hPG`
 at macroscopic δ (`…_ofProximityGenerator`). -/
 theorem receiptClaim_proximity [∀ n, Fintype (tail n)]
@@ -620,7 +620,7 @@ theorem receiptClaim_proximity_subQuant
 /-- **`[OB3-c-prox]` at macroscopic δ — on the ONE standing proximity-gap
 hypothesis.** With PG(2) a proximity generator for each folded level's code —
 WHIR Theorem 4.8 / BCIKS 2020/654, the SAME standing `hPG` carried by
-Loom/ReedSolomon.lean's Corollary 4.11 and Loom/Proximity.lean's macroscopic
+Selvage/ReedSolomon.lean's Corollary 4.11 and Selvage/Proximity.lean's macroscopic
 realizer; a HYPOTHESIS here, never an axiom, NOT claimed proved — a receipt
 word δ-far from the rate<1 code prox-accepts on at most `m·b·|F|^{m−1}` tuples
 for any `b ≥ err(δ)·|F|`. -/
@@ -650,7 +650,7 @@ end Proximity
 inhabitation — BUILT and computing)
 
 A TWO-nullifier window: four flat coordinates, embedded at the negation-closed
-`{1,2,3,4} ⊂ F₅` — the same domain as Loom's `ProximityExample`, whose folded
+`{1,2,3,4} ⊂ F₅` — the same domain as Selvage's `ProximityExample`, whose folded
 level `{1,4}` (`dom1`) and degree schedule `2 → 1` are REUSED. Degree bound 2
 over 4 points: rate 1/2 — the first site in this file where code membership is
 NOT free.
@@ -691,7 +691,7 @@ private def dom₄ : FlatIx w₄ ↪ ZMod 5 :=
    by decide⟩
 
 /-- Folding structure on the spine: negation swaps the key (same bit), squaring
-projects onto the bit — the folded level is Loom `ProximityExample`'s `{1,4}`
+projects onto the bit — the folded level is Selvage `ProximityExample`'s `{1,4}`
 (`dom1`), reused. Every law is checked by `decide`. -/
 private def data₄ : FoldingData (ZMod 5) dom₄ ProximityExample.dom1 where
   neg := fun ix => match ix with
@@ -749,7 +749,7 @@ private def zIx₂ : FlatIx w₄ := Sum.inr (⟨UKey.nullifier 8, by decide⟩, 
 
 /-- The spent word is OFF the rate-1/2 code: a degree-<2 polynomial matching it
 would vanish at two of the four points (hence be zero, by root counting —
-Loom's `card_agreeSet_lt_of_ne`, reused) yet read 1 at the spiked presence
+Selvage's `card_agreeSet_lt_of_ne`, reused) yet read 1 at the spiked presence
 bit. The presence bit pushes the word off the code. -/
 theorem spentWord_notMem :
     flatten (F := ZMod 5) w₄ k₀spent ∉ reedSolomonCode dom₄ 2 := by
@@ -884,12 +884,12 @@ A `def : Prop := … True` would be the vacuous-obligation sin (see memory
 
   [OB3-c-prox]  CLOSED at the EXACT-MEMBERSHIP level (this file, Proximity section) —
      NOT still fully open. The rate<1 accept predicate exists
-     (`ReceiptClaim.proxAccepts`: Loom's `proximityTest` for membership + the claim's
+     (`ReceiptClaim.proxAccepts`: Selvage's `proximityTest` for membership + the claim's
      exact channels for binding), and a receipt word δ-far from the rate<1 code
      prox-accepts on at most `m·b·|F|^{m−1}` challenge tuples
      (`receiptClaim_proximity`, probability form `receiptClaim_proximity_prob`) —
-     riding Loom's `proximity_sound`, REUSED, not re-derived. Regime split, exactly
-     as Loom delivers `[PROX-fold-distance]`:
+     riding Selvage's `proximity_sound`, REUSED, not re-derived. Regime split, exactly
+     as Selvage delivers `[PROX-fold-distance]`:
        • sub-quantization δ < 1/|level|: UNCONDITIONAL
          (`receiptClaim_proximity_subQuant`, `b = 1` via
          `foldDistancePreserving_of_lt_inv_card`) — zero residual hypotheses, and
@@ -899,30 +899,30 @@ A `def : Prop := … True` would be the vacuous-obligation sin (see memory
          bound attained with equality.
        • macroscopic δ ∈ (0, 1−B): rides the ONE standing RS proximity-gap
          hypothesis `hPG` (`receiptClaim_proximity_ofProximityGenerator` — WHIR
-         Thm 4.8 / BCIKS 2020/654), the SAME hypothesis Loom/ReedSolomon.lean's
-         Corollary 4.11 and Loom/Proximity.lean carry. Cited, not re-opened, NOT
+         Thm 4.8 / BCIKS 2020/654), the SAME hypothesis Selvage/ReedSolomon.lean's
+         Corollary 4.11 and Selvage/Proximity.lean carry. Cited, not re-opened, NOT
          claimed proved; its UD-regime instantiation stays the ladder's next rung
          (docs/LOOM-RECOMPOSITION.md §5).
      What is NOT covered here, stated plainly: the channel half stays EXACT at claim
      resolution (a wrong word is rejected outright, `proxAccepts_ne_reject`); its
      δ-relaxed evaluation form — random-point channel checks — is the SHARED
      `[ACC-sound]` residual below, and the oracle/Merkle query phase is
-     `[DEC-open]`-adjacent (Loom/Proximity.lean's honest scope limits apply
+     `[DEC-open]`-adjacent (Selvage/Proximity.lean's honest scope limits apply
      verbatim).
 
   [OB3-d-fold]  CLOSED at the closure level (this file, γ-fold section): the receipt
      claim IS a native accumulated claim (`ReceiptClaim.acc`, the same object as the
      `AccClaim.ofConstraints` transport — `acc_satisfies_iff_ofConstraints`), and two
-     receipt claims over one window fold via Loom's `foldClaims` to ONE accumulated
+     receipt claims over one window fold via Selvage's `foldClaims` to ONE accumulated
      claim satisfied by the folded word (`receiptClaim_folds`, inheriting
      `foldClaims_satisfies` — the closure theorem REUSED, not re-derived), with
      computing keystones `receipt_fold_satisfiable` / `receipt_fold_teeth`. The receipt
      chain is one accumulated object. What remains is NOT re-opened here: δ-proximity
      soundness of the fold — that a δ-close-satisfiable folded claim certifies
      δ-close-satisfiable constituents except with probability `(t−1)ℓ/|F|` — is the
-     SHARED `[ACC-sound]` residual of `Loom/Accumulator.lean` (whose exact-word kernel
+     SHARED `[ACC-sound]` residual of `Selvage/Accumulator.lean` (whose exact-word kernel
      is already the theorem `card_batch_satisfying_le`, `[CRS-batch-sound]` in
-     `Loom/ConstrainedCode.lean`).
+     `Selvage/ConstrainedCode.lean`).
 -/
 
 end Minidregg.Assurance

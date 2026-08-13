@@ -7,7 +7,7 @@ object (the code + claim) here — nowhere else.
 -/
 import Assurance.Placeholder  -- carve marker: pins, keystone audit, carrier registry, Bound/Forced
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
-import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Loom AccClaim fold
+import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation
 import Assurance.DeclaredTurnReceipt  -- DeclaredTurn.execute derives the exact commit/reject receipt core and history claim; callers cannot supply post/touched/auth semantics
 import Assurance.DeclaredHyperedgeReceipt  -- flat jointly authorized turns derive one canonical commit/reject history core without choosing a synthetic primary leg
@@ -15,7 +15,7 @@ import Assurance.DeclaredHyperedgeHistoryBinding  -- context plus the complete o
 import Assurance.BinaryTowerHeaderCodec  -- the fixed 32-byte joint header packs injectively into sixteen GF(2^256) cells through GF(2^16), avoiding characteristic-two Nat-cast collapse
 import Assurance.SemanticReceiptRuntimeCodec  -- exact fixed key-major word/residual layout ↔ formal receipt relation; no native semantics is asserted
 import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject receipts fold only from a verified predecessor head; WARP/PCS recommitment stays explicit proof data
-import Assurance.SemanticHistoryFamily  -- request-shape-neutral, proof-relevant entry semantics fold singular turns and joint objects through Loom's one AccClaim
+import Assurance.SemanticHistoryFamily  -- request-shape-neutral, proof-relevant entry semantics fold singular turns and joint objects through Selvage's one AccClaim
 import Assurance.SemanticHistoryFamilyInstances  -- exact singular-turn and complete flat-hyperedge instances; no synthetic primary request
 import Assurance.AcceptedCellEffectHistory  -- accepted canonical cell effects derive their exact bounded core and enter the same request-shape-neutral verified history family without a legacy turn wrapper
 import Assurance.ScopedAcceptedCellEffectHistory  -- finite declared-footprint openings retain typed roots and exact lookup/frame laws without enumerating an infinite deployed schema
@@ -49,7 +49,7 @@ import Assurance.Tower256LogupControllerAdmission  -- exact verified Tower256 Lo
 import Assurance.Tower256LogupExtensionDeploymentAdmission  -- clause-404 extension control is non-vacuous while PCS/decider/CR/ROM/history/RAM security remains explicit evidence
 import Assurance.Tower256AdditiveFriControllerAdmission  -- byte-checked Tower256 additive-FRI control enters one explicit same-coin failure ledger
 import Assurance.Tower256AdditiveFriRawAdmission  -- the same-coin cover CONSTRUCTED rather than assumed: ideal additive proximity, an accepted receipt carrying a path-specific `ExtractedCollision`, and one transcript-distribution residual
-import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller bytes derive the real Loom challenge/query event and UD price, leaving only exact ROM transport and pre-assumed position binding
+import Assurance.Tower256AdditiveFriActualReduction  -- accepted controller bytes derive the real Selvage challenge/query event and UD price, leaving only exact ROM transport and pre-assumed position binding
 import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
 import Assurance.Ext6GateProofDeploymentAdmission  -- reflected Ext6 deployment is separated from its exact eight-event semantic security residual
 import Assurance.Ext6GateProofPositiveExecution  -- the exact deployed receipt inhabits ControlledExecution while the eight-event SecurityResidual remains a separate argument
@@ -100,11 +100,11 @@ import Assurance.ReactiveOutboxDelivery  -- the installed reactive outbox become
 import Assurance.AuthenticatedSettlementFinalityWitness  -- concrete authority snapshots witness current, rotated, revoked, and non-conflicting authenticated quorum paths
 import Assurance.DreggNetProviderConsumer  -- a market-bound provider job joins exact lease economics, terminal/refund settlement, retry, and quorum safety
 import Assurance.QuotaGcSettlementWitness  -- an expired unprotected bounded page compacts with exact fee, guards, writes, and no-delete teeth for live/finalized roots
-import Assurance.LoomV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
-import Assurance.LoomV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
+import Assurance.SelvageV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
+import Assurance.SelvageV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
 import Assurance.PrivateTurn  -- the private-witness TURN model (Lean-authored): public claim binds, private witness hides; [PRIVATE-TURN-air] the Lean constraint system (not the Rust AIR)
-import Assurance.AirSumcheck  -- [AIR-sumcheck]: the flattened gate system's linear face retired by Loom's proven sumcheck; [AIR-sumcheck-quadratic] the mul-gate MLE encoding
+import Assurance.AirSumcheck  -- [AIR-sumcheck]: the flattened gate system's linear face retired by Selvage's proven sumcheck; [AIR-sumcheck-quadratic] the mul-gate MLE encoding
 import Assurance.AirSumcheckQuadratic  -- [AIR-sumcheck-quadratic] CLOSED: the mul-gate face retired at d = 2 (quadHonest), full gate-system soundness; [AIR-quadratic-selectors] the oracle-side table linearization
 import Assurance.ErrorBudget  -- the product-coordinate SOUNDNESS ERROR BUDGET: soundnessError (grinding + sumcheck + CR + proximity, union bound) composed via soundnessError_bound; deployedBudget = 55 bits at BabyBear⁴ (in (2^{-56}, 2^{-55}], grinding-dominated); [BUDGET-compose] is the required shared-oracle rendering before this is an end-to-end deployment number
 import Assurance.ErrorBudget120  -- the 120-bit path, priced exactly: BabyBear^6 challenge field + 20 PoW bits gives a resource-budget error in (2^-138, 2^-137]; both levers load-bearing; [BUDGET-PoW-compose] is the honest nonce-protocol bridge

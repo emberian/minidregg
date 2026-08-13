@@ -368,7 +368,7 @@ every weight above `2⁰` vanishes and the gadget only pins `x ∈ {0, 1}` — s
 integer reading of `x < 2^k` to prove; the cast statement `rangeGadget_bounds` is the sharp
 one).
 `[AIR-range-lift]` is thereby CLOSED, not residual. Residuals unchanged upstream:
-`[AIR-sumcheck]` (retire the emitted constraints through `Loom/SumcheckReduction`),
+`[AIR-sumcheck]` (retire the emitted constraints through `Selvage/SumcheckReduction`),
 `[AIR-poseidon]`/`[AIR-membership]` (the note-spend gadgets, grown on this rung — range now
 available for their amount wires). -/
 

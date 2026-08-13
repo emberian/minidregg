@@ -37,7 +37,7 @@ open Minidregg.Assurance.BfvProofControllerAdmission
 open Minidregg.Compiler.BfvProofController
 open Minidregg.Compiler.BfvReceiptClause
 open Minidregg.Compiler.Tower256CshakeMerkleBinding
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

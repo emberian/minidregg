@@ -11,7 +11,7 @@ committed semantic certificate all come from `DeclaredHyperedge.execute`.
 For a commit, the proof-relevant `CommittedHyperedge` is retained, including
 every exact request-indexed authorization, aggregate balance, guards, shared
 apex, and canonical patch result.  The projected word is the existing
-`BoundSemanticReceiptClaim` consumed by Loom history.
+`BoundSemanticReceiptClaim` consumed by Selvage history.
 
 The next history-admission layer must bind the complete incidence/request list
 and its presentation/effect roots in a joint header.  This file intentionally

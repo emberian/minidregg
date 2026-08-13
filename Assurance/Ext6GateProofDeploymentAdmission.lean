@@ -23,7 +23,7 @@ open Minidregg.Compiler
 open Minidregg.Compiler.Ext6GateProofController
 open Minidregg.Compiler.GateFactoredExt6
 open Minidregg.Compiler.GateMleExt6
-open Minidregg.Loom
+open Minidregg.Selvage
 
 namespace Deployment
 

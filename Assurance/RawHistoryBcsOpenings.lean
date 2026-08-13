@@ -50,7 +50,7 @@ open Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -157,7 +157,7 @@ structure RootPreimage
 /-! ### Branch 2 -- the retained equivocation -/
 
 /-- A submitted column that disagrees with the honest word at a named round.
-Its content is `Loom.ColumnEquivocation`: two accepted openings of one root at
+Its content is `Selvage.ColumnEquivocation`: two accepted openings of one root at
 one coordinate with different values -- the exact `BindingFailure` shape the
 landed Merkle reduction consumes.  This is the object the binding carrier
 cannot hold. -/
@@ -238,7 +238,7 @@ theorem bcsRounds_exact_of_noEquivocation
           (transcript.messages j, head.foldChallenges j)) =
       List.ofFn fun j : Fin head.foldRounds =>
         (reindexWord (head.foldLinkWord j), head.foldChallenges j) := by
-  rw [Minidregg.Loom.bcsRounds_ofFn]
+  rw [Minidregg.Selvage.bcsRounds_ofFn]
   apply congrArg List.ofFn
   funext j
   rcases transcript.columnsExact_or_equivocation attribution j with pinned | equivocation

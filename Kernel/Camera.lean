@@ -25,7 +25,7 @@ footprint half's algebra.
 Discipline added in the port (ATLAS §6 law 2 — a keystone that can't exhibit
 both poles doesn't compile): every keystone carries, BESIDE it, a concrete
 camera where its `Fpu` genuinely fires AND a hostile update genuinely refused —
-named satisfiability witnesses, anonymous `example` teeth (the Loom
+named satisfiability witnesses, anonymous `example` teeth (the Selvage
 convention). Axiom pins are `#guard_msgs in #print axioms` (self-verifying;
 minidregg has no `#assert_axioms` yet — that tool is Assurance-lane territory).
 

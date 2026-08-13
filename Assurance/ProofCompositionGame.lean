@@ -23,14 +23,14 @@ additive FRI, and query sampling as phases of one transcript.
 
 import Compiler.AuthenticatedColumnLogupBridge
 import Compiler.AdditiveFriReceiptClause
-import Loom.OracleLogLinkedTwoPhaseSoundness
+import Selvage.OracleLogLinkedTwoPhaseSoundness
 
 namespace Minidregg.Assurance.ProofCompositionGame
 
 open Minidregg.Compiler.AuthenticatedColumnLogupBridge
 open Minidregg.Compiler.Logup256ReceiptClause
 open Minidregg.Compiler.AdditiveFriReceiptClause
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false

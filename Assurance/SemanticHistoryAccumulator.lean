@@ -12,23 +12,23 @@ introducing a second receipt or accumulator relation:
   rejected semantic outcome;
 * `SemanticReceiptRuntimeCodec.BoundReceiptWitness.encode` is the one word
   admitted for either outcome;
-* `Loom.AccClaim` and `foldClaims_satisfies` perform every history fold.
+* `Selvage.AccClaim` and `foldClaims_satisfies` perform every history fold.
 
 `VerifiedHistoryHead` has a private constructor.  The exported `append`
 operation consumes an `AppendLink` indexed by an existing verified head, so it
 has no argument in which a caller can substitute a raw predecessor digest.
 
-The cryptographic boundary is explicit.  `BindingCommitment` is Loom's
+The cryptographic boundary is explicit.  `BindingCommitment` is Selvage's
 position-binding PCS interface; `FoldRecommitment` is the WARP recommitment
 equation for one fold.  The deployed short-root Merkle/BCS realization and the
-sampled-opening/proximity lift remain exactly Loom's named `[COMMIT-CR]`,
+sampled-opening/proximity lift remain exactly Selvage's named `[COMMIT-CR]`,
 `[ACC-extract-bind]`, and `[DEC-proximity]` seams.  No axiom is declared here.
 -/
 
 import Compiler.DialectClauseDispatch
 import Compiler.SemanticManifest
 import Assurance.SemanticReceiptRuntimeCodec
-import Loom.Commitment
+import Selvage.Commitment
 
 namespace Minidregg.Assurance.SemanticHistoryAccumulator
 
@@ -40,7 +40,7 @@ open Minidregg.Assurance.SemanticTurnReceipt
 open Minidregg.Theory.AuthorizationDeclaration
 open Minidregg.Theory.ReactiveReceipt
 open Minidregg.Theory.TypedAuthorization
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 
@@ -211,7 +211,7 @@ def receiptAdmissionOutcome (errorId : Error → Digest)
 
 /-- One entry admitted simultaneously by the semantic receipt relation and the
 manifest admission relation.  `codeword` is the honest-code/PCS boundary
-needed by Loom; no cryptographic fact is inferred from the semantic proof. -/
+needed by Selvage; no cryptographic fact is inferred from the semantic proof. -/
 structure VerifiedEntry
     (manifest : Manifest)
     (registry : ControllerRegistry.{uClauseInput, uClauseQuery,
@@ -285,7 +285,7 @@ theorem resolvedClauseAt_registered (entry : ThisEntry)
         some (entry.resolvedClauseAt index).clause :=
   (entry.resolvedClauseAt index).clauseFound
 
-/-- The exact Loom/runtime-codec word for this entry. -/
+/-- The exact Selvage/runtime-codec word for this entry. -/
 def word (entry : ThisEntry) :
     BoundReceiptIx n → F :=
   entry.Claim.witness.encode
@@ -389,7 +389,7 @@ local notation "LinkedEntries" => HistoryChain
   manifest registry clauseEvidence errorId headerCells C S
 
 /-- A verified head contains the complete proof-relevant entry list, its latest
-entry, the single folded Loom claim/word, exact satisfaction, and commitment
+entry, the single folded Selvage claim/word, exact satisfaction, and commitment
 binding.  The private constructor makes `start` and `append` the only public
 ways to obtain one. -/
 structure VerifiedHistoryHead where
@@ -475,7 +475,7 @@ structure FoldRecommitment
     foldRoot head.accumulator.rt gamma (entry.receiptRoot S) =
       S.commit (head.foldedWord + gamma • entry.word)
 
-/-- Append one verified semantic receipt and fold it into the single Loom
+/-- Append one verified semantic receipt and fold it into the single Selvage
 claim.  The caller supplies only the new verified entry, a link indexed by the
 existing head, the Lean-controller challenge, and the explicit recommitment
 proof. -/
@@ -540,26 +540,26 @@ def append
 
 /-! ## Arbitrary-depth decision and the explicit opening seam -/
 
-/-- Every constructible history head, at arbitrary depth, passes Loom's exact
-one-time decider on its folded word.  This is directly the existing Loom
+/-- Every constructible history head, at arbitrary depth, passes Selvage's exact
+one-time decider on its folded word.  This is directly the existing Selvage
 completeness theorem applied to the satisfaction proof preserved by `append`. -/
 theorem decider_complete_at_head
     (head : HistoryHead) :
     decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_complete head.satisfies
+  Minidregg.Selvage.decider_complete head.satisfies
 
-/-- The honest full-opening side of the PCS seam.  Loom's existing commitment
+/-- The honest full-opening side of the PCS seam.  Selvage's existing commitment
 theorem simultaneously supplies openings and the final decider result. -/
 theorem opening_decider_complete
     (head : HistoryHead) :
     (∀ index, S.verifyOpen head.accumulator.rt index (head.foldedWord index)
       (S.openAt head.foldedWord index)) ∧
       decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_open_complete S head.rootBound head.satisfies
+  Minidregg.Selvage.decider_open_complete S head.rootBound head.satisfies
 
 /-- Binding/extraction tooth at arbitrary history depth: any fully opened word
-which passes the final Loom decider is exactly the head's committed folded
-word.  The deployed sampled-opening lift remains Loom's explicit
+which passes the final Selvage decider is exactly the head's committed folded
+word.  The deployed sampled-opening lift remains Selvage's explicit
 `[ACC-extract-bind]`/`[DEC-proximity]` obligation. -/
 theorem opened_decider_extracts_head
     (head : HistoryHead)
@@ -569,7 +569,7 @@ theorem opened_decider_extracts_head
     (hdecider : decider C head.accumulator opened) :
     opened = head.foldedWord ∧
       decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_open_sound S head.rootBound hopen hdecider
+  Minidregg.Selvage.decider_open_sound S head.rootBound hopen hdecider
 
 end VerifiedHistoryHead
 

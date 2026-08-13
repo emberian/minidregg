@@ -15,7 +15,7 @@ This module factors history admission at the right boundary:
   indexed by the exact public context and exact accumulated receipt claim;
 * `VerifiedEntry` combines that semantic evidence with manifest closure,
   exact ordered clause evidence, and honest-code membership;
-* `VerifiedHistoryHead` folds only these verified entries through Loom's one
+* `VerifiedHistoryHead` folds only these verified entries through Selvage's one
   existing `AccClaim` relation and retains the exact proof-relevant append
   derivation (including every challenge and recommitment equation).
 
@@ -40,7 +40,7 @@ open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticHistoryAccumulator
 open Minidregg.Theory.TypedAuthorization
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 
@@ -238,7 +238,7 @@ def toSumRight
       (headerCells := headerCells) (C := C) :=
   entry.mapFamily (fun evidence => .inr evidence)
 
-/-- The exact runtime/Loom word. -/
+/-- The exact runtime/Selvage word. -/
 def word (entry : VerifiedEntry (manifest := manifest) (registry := registry)
     (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells) (C := C)) : BoundReceiptIx n → F :=
@@ -339,10 +339,10 @@ local notation "LinkedEntries" => HistoryChain
   (headerCells := headerCells) (C := C) S
 
 /-- Proof-relevant history-fold derivation.  The indices are the exact entry
-list, Loom claim, and folded word reached by the derivation.  `append` stores
+list, Selvage claim, and folded word reached by the derivation.  `append` stores
 the semantic entry and controller challenge only after the entry's receipt
 root is already determined, together with the exact post-challenge
-recommitment equation.  This is evidence about Loom's existing `foldClaims`;
+recommitment equation.  This is evidence about Selvage's existing `foldClaims`;
 it does not introduce a second accumulator relation. -/
 inductive HistoryFoldTrace
     (foldRoot : Digest → F → Digest → Digest) :
@@ -394,7 +394,7 @@ theorem rounds_succ_entries_length
 end HistoryFoldTrace
 
 /-- Private-constructor history head over an arbitrary exact semantic family.
-The arithmetic accumulator is still Loom's sole `AccClaim`.  The fold
+The arithmetic accumulator is still Selvage's sole `AccClaim`.  The fold
 operator and indexed derivation are retained so later proof consumers cannot
 substitute a parallel challenge/entry schedule. -/
 structure VerifiedHistoryHead where
@@ -533,13 +533,13 @@ def append
 
 theorem decider_complete_at_head (head : HistoryHead) :
     decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_complete head.satisfies
+  Minidregg.Selvage.decider_complete head.satisfies
 
 theorem opening_decider_complete (head : HistoryHead) :
     (∀ index, S.verifyOpen head.accumulator.rt index (head.foldedWord index)
       (S.openAt head.foldedWord index)) ∧
       decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_open_complete S head.rootBound head.satisfies
+  Minidregg.Selvage.decider_open_complete S head.rootBound head.satisfies
 
 theorem opened_decider_extracts_head
     (head : HistoryHead)
@@ -549,7 +549,7 @@ theorem opened_decider_extracts_head
     (hdecider : decider C head.accumulator opened) :
     opened = head.foldedWord ∧
       decider C head.accumulator head.foldedWord :=
-  Minidregg.Loom.decider_open_sound S head.rootBound hopen hdecider
+  Minidregg.Selvage.decider_open_sound S head.rootBound hopen hdecider
 
 end VerifiedHistoryHead
 

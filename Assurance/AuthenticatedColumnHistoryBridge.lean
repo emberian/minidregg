@@ -3,7 +3,7 @@
 
 This module closes one duplicated PCS boundary.  `AuthenticatedColumnPlan`
 owns executable roots and opening checks inside one accepted transcript, while
-`SemanticHistoryWARPAdditiveJoin` consumes BCS messages under a Loom
+`SemanticHistoryWARPAdditiveJoin` consumes BCS messages under a Selvage
 `BindingCommitment`.  The binding adapter is now literal, so an opening that
 occurred in the accepted controller attestation becomes the same BCS column
 opening: no root, coordinate, value, or proof bytes are reinterpreted.
@@ -22,7 +22,7 @@ namespace Minidregg.Assurance.AuthenticatedColumnHistoryBridge
 
 open Minidregg.Assurance.SemanticHistoryWARPAdditiveJoin
 open Minidregg.Compiler.AuthenticatedColumnPlan
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -38,7 +38,7 @@ variable {rounds openedCount degree : Nat}
 variable {port : ColumnPort F F ι}
 variable {scheme : BindingCommitmentScheme port}
 variable {schedule : DualRootSchedule
-  (C := C) (S := scheme.toLoom) (foldRoot := foldRoot) (rounds := rounds)}
+  (C := C) (S := scheme.toSelvage) (foldRoot := foldRoot) (rounds := rounds)}
 variable {domain : ι ↪ F}
 variable {queries : Fin openedCount -> Fin (FiniteCoordinateCount ι)}
 
@@ -99,16 +99,16 @@ theorem message_root_exact
   exact links.representedExact round index
 
 /-- Every BCS column opening is exactly the opening already accepted by the
-authenticated-column controller, viewed through the literal Loom adapter. -/
+authenticated-column controller, viewed through the literal Selvage adapter. -/
 theorem message_columns_open
     (links : AuthenticatedLinkColumns
       (port := port) (scheme := scheme) (schedule := schedule)
       (queries := queries) attestation)
     (round : Fin rounds) :
-    ColsOpen (reindexCommitment (S := scheme.toLoom)) queries
+    ColsOpen (reindexCommitment (S := scheme.toSelvage)) queries
       (links.message round) := by
   intro query
-  have verified := (links.openings round query).verifiesInLoom
+  have verified := (links.openings round query).verifiesInSelvage
   rw [links.openingIndexExact round query] at verified
   exact verified
 
@@ -120,7 +120,7 @@ def toBcsLinkOpenings
       (queries := queries) attestation)
     (degreeLeOpened : degree ≤ openedCount)
     (queriesDistinct : Function.Injective (reindexDomain domain ∘ queries)) :
-    BcsLinkOpenings scheme.toLoom schedule domain degree openedCount where
+    BcsLinkOpenings scheme.toSelvage schedule domain degree openedCount where
   degreeLeOpened := degreeLeOpened
   queries := queries
   queriesDistinct := queriesDistinct

@@ -35,7 +35,7 @@ open Minidregg.Compiler.GateTraceRelationExt6
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec)
-open Minidregg.Loom Polynomial
+open Minidregg.Selvage Polynomial
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

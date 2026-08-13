@@ -16,12 +16,12 @@ No commitment or FRI claim is postulated or re-proved here.
 
 import Assurance.AirSumcheckQuadratic
 import Compiler.Ext6Conformance
-import Loom.ExtensionChallengeBridge
+import Selvage.ExtensionChallengeBridge
 
 namespace Minidregg.Compiler
 
 open scoped BigOperators
-open Minidregg.Assurance Minidregg.Loom Polynomial
+open Minidregg.Assurance Minidregg.Selvage Polynomial
 
 namespace GateMleExt6
 

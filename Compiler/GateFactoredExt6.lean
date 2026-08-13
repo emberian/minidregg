@@ -22,7 +22,7 @@ import Mathlib.LinearAlgebra.Finsupp.LinearCombination
 namespace Minidregg.Compiler
 
 open scoped BigOperators
-open Minidregg.Assurance Minidregg.Loom Polynomial
+open Minidregg.Assurance Minidregg.Selvage Polynomial
 
 namespace GateFactoredExt6
 

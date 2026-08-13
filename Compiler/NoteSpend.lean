@@ -64,9 +64,9 @@ compression.
 This file is the SOUND half of the private turn: `noteSpendSystem` is the relation a
 satisfying assignment MUST inhabit — accepting means value-bounded, nullifier-derived,
 note-committed. It says NOTHING about hiding. The HIDING half — that the verifier learns the
-nullifier and root but nothing about the note — is the ZK layer: `loom_zk_argument`
-(`Loom/ZK`, the OB-4 disclosure layer), cited here BY NAME because `Compiler` does not import
-`Loom`; the ZK argument proves knowledge of a satisfying assignment of THIS system without
+nullifier and root but nothing about the note — is the ZK layer: `selvage_zk_argument`
+(`Selvage/ZK`, the OB-4 disclosure layer), cited here BY NAME because `Compiler` does not import
+`Selvage`; the ZK argument proves knowledge of a satisfying assignment of THIS system without
 revealing it. Neither layer re-derives the other. `[COMMIT-CR]` is the floor beneath both:
 that a dishonest prover cannot forge a commitment opening or a membership path is collision
 resistance of the instantiated hash — a cryptographic assumption about
@@ -176,7 +176,7 @@ IS a valid shielded spend of the note it carries: the value wire holds (the cast
 integer `< 2^k`, the exposed nullifier is the note's hash, and the note's commitment is a
 member of the tree at the exposed root. This is the SOUND half of the private turn — what a
 satisfying witness is FORCED to be. The HIDING half (the verifier learns nothing beyond
-`(nullifier, root)`) is the ZK layer, `loom_zk_argument` (`Loom/ZK`), which proves knowledge
+`(nullifier, root)`) is the ZK layer, `selvage_zk_argument` (`Selvage/ZK`), which proves knowledge
 of a satisfying assignment of THIS system — cited, not re-derived. That forging a
 commitment or a path needs a hash collision is `[COMMIT-CR]`, the named cryptographic floor
 about `[AIR-poseidon-params]` — an assumption, never a theorem here. -/
@@ -294,7 +294,7 @@ theorem noteSpend_complete [NeZero w] (nfSpec cmSpec : PermSpec F w) (trSpec : P
 /-- **`noteSpend_meaning` — the spend relation, closed both ways.** An assignment exposing
 `(nullifier, root)` on the public wires satisfies the composed system IFF some note makes
 `ValidSpend` true — the constraint system IS the shielded-spend relation, no more and no
-less. This is the statement the ZK layer (`loom_zk_argument`) proves knowledge of; the
+less. This is the statement the ZK layer (`selvage_zk_argument`) proves knowledge of; the
 existential over `note` is exactly what stays hidden there. -/
 theorem noteSpend_meaning [NeZero w] (nfSpec cmSpec : PermSpec F w) (trSpec : PermSpec F 2)
     (vIdx : Fin w) (k depth : ℕ) (nf root : F) :
@@ -528,10 +528,10 @@ level**: the composed constraint system a private turn must satisfy exists, is L
 end-to-end, and provably MEANS the shielded-spend relation (`noteSpend_correct` /
 `noteSpend_meaning`, both directions, every width/bit-count/depth). What remains around it:
 
-* HIDING is `loom_zk_argument` (`Loom/ZK`, the OB-4 disclosure layer): the verifier learns
+* HIDING is `selvage_zk_argument` (`Selvage/ZK`, the OB-4 disclosure layer): the verifier learns
   `(nullifier, root)` and NOT the note — that layer proves knowledge of a satisfying
   assignment of THIS system without revealing it. Cited by name (`Compiler` does not import
-  `Loom`); neither layer re-derives the other. Nothing in this file claims hiding.
+  `Selvage`); neither layer re-derives the other. Nothing in this file claims hiding.
 * `[COMMIT-CR]` — that a dishonest prover cannot open a commitment two ways or exhibit a
   path for a non-member is collision resistance of the instantiated hash: a cryptographic
   ASSUMPTION about `[AIR-poseidon-params]`, exhibited honestly above (the demo parameters
@@ -543,7 +543,7 @@ end-to-end, and provably MEANS the shielded-spend relation (`noteSpend_correct` 
   constraint — this system binds each spend to exactly one nullifier
   (`noteSpend_correct`'s hash conjunct); the ledger's reveal-set does the rest.
 * `[AIR-flatten]` (bounded-degree gate form, closed upstream, applied downstream) and
-  `[AIR-sumcheck]` (retiring the emitted constraints through `Loom/SumcheckReduction`)
+  `[AIR-sumcheck]` (retiring the emitted constraints through `Selvage/SumcheckReduction`)
   unchanged upstream. -/
 
 end Minidregg.Compiler

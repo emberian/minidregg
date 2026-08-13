@@ -39,7 +39,7 @@ open Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.HyperdocumentInterface

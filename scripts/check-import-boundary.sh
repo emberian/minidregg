@@ -4,8 +4,8 @@
 #
 #   Theory/ (and the Theory.lean root) may import ONLY Mathlib and Theory itself
 #           — the metatheory must never know the candidate (no Kernel/Pred/
-#           Effects/Compiler/Loom/Assurance imports).
-#   Loom/   (and the Loom.lean root) may import ONLY Mathlib, Theory, and Loom.
+#           Effects/Compiler/Selvage/Assurance imports).
+#   Selvage/   (and the Selvage.lean root) may import ONLY Mathlib, Theory, and Selvage.
 #
 # Exits 1 listing every offending import line; prints OK lines when clean.
 set -u
@@ -37,7 +37,7 @@ check_boundary() {
 check_boundary "Theory" 'Mathlib|Minidregg\.Theory|Theory' \
   Theory.lean $(find Theory -name '*.lean' 2>/dev/null | sort)
 
-check_boundary "Loom" 'Mathlib|Minidregg\.Theory|Minidregg\.Loom|Theory|Loom' \
-  Loom.lean $(find Loom -name '*.lean' 2>/dev/null | sort)
+check_boundary "Selvage" 'Mathlib|Minidregg\.Theory|Minidregg\.Selvage|Theory|Selvage' \
+  Selvage.lean $(find Selvage -name '*.lean' 2>/dev/null | sort)
 
 exit "${status}"

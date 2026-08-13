@@ -32,7 +32,7 @@ open Minidregg.Compiler.AuthenticatedColumnLogupBridge
 open Minidregg.Compiler.Logup256ReceiptClause
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
-open Minidregg.Loom
+open Minidregg.Selvage
 
 set_option autoImplicit false
 

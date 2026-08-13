@@ -17,9 +17,9 @@ Lean-authored, not yet built — and this file is honest that it does not exist 
     conservation, the revealed nullifier), checked by the decider without the witness;
   * a PRIVATE witness — the receipt WORD (`flatten` of the post-state, note values and all),
     committed and revealed to the verifier only through masked `t`-symbol openings.
-The two-part guarantee: the public claim BINDS (the decider checks it — `Loom/Decider.lean`),
+The two-part guarantee: the public claim BINDS (the decider checks it — `Selvage/Decider.lean`),
 and the private witness HIDES (two turns with the same public claim but different witnesses are
-indistinguishable — `Loom/ZKHiding.lean`'s `witness_free`, via `PrivateReceipt`).
+indistinguishable — `Selvage/ZKHiding.lean`'s `witness_free`, via `PrivateReceipt`).
 
 **Verdict (v0): the private-witness turn is a real object, and its hiding half is proved.**
 `privateTurn_witness_hidden`: two private turns sharing a public claim, carrying DIFFERENT
@@ -27,14 +27,14 @@ private witnesses, produce IDENTICAL masked openings — the verifier cannot tel
 the turn held. What is NOT built, stated plainly: `[PRIVATE-TURN-air]` (the Lean-authored
 note-opening / nullifier-derivation / membership constraint system — the real content, and it
 must NOT be the ported Rust AIR), and `[ZK-RBR-game]` (soundness coexisting with hiding — the
-open research half, `Loom/ZkArgument.lean`). So: the private-witness turn EXISTS and HIDES; it
+open research half, `Selvage/ZkArgument.lean`). So: the private-witness turn EXISTS and HIDES; it
 does not yet SOUNDLY CONSTRAIN. That gap is Lean-authored work, named, not faked.
 -/
 import Assurance.PrivateReceipt
 
 namespace Minidregg.Assurance
 
-open Minidregg.Kernel Minidregg.Loom
+open Minidregg.Kernel Minidregg.Selvage
 
 variable {F : Type} [Field F]
 
@@ -109,8 +109,8 @@ committed). breadstuffs `faithful_note_spend_exact_v3` is the design shape; the 
 authored in LEAN (a future `air`/gadget compiled from the DSL), never the ported Rust AIR. This
 is the real content and it does not exist yet.
 
-`[ZK-RBR-game]` — soundness coexisting with hiding in one straightline argument (`Loom/
-ZkArgument.lean`). Until it lands, the public claim's binding rides `Loom/Decider.lean` at the
+`[ZK-RBR-game]` — soundness coexisting with hiding in one straightline argument (`Selvage/
+ZkArgument.lean`). Until it lands, the public claim's binding rides `Selvage/Decider.lean` at the
 word level and the hiding rides this file; they are not yet fused against a forging prover.
 
 `[PRIVATE-TURN-kernel]` — the wire-up to a `Kernel/Turn` variant carrying a private witness (the

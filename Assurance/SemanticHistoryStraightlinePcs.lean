@@ -5,7 +5,7 @@ This module joins `SemanticHistoryFamily` to an external, straightline-
 extractable linear-code PCS without claiming a complete WARP protocol.
 
 The semantic side remains authoritative: a `VerifiedHistoryHead` contains the
-proof-relevant admitted entries, their causal chain, the folded Loom claim,
+proof-relevant admitted entries, their causal chain, the folded Selvage claim,
 and its exact satisfying word. The PCS side is a separate interface whose
 types force the SAME carrier `F` and coordinate type `BoundReceiptIx n` and
 whose fields state, rather than assume silently:
@@ -31,8 +31,8 @@ or the constrained-mask lagged-root schedule.
 -/
 
 import Assurance.SemanticHistoryFamily
-import Loom.Erasure
-import Loom.Rbr
+import Selvage.Erasure
+import Selvage.Rbr
 
 namespace Minidregg.Assurance.SemanticHistoryStraightlinePcs
 
@@ -41,7 +41,7 @@ open Minidregg.Assurance.SemanticHistoryFamily
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -362,7 +362,7 @@ theorem extract_eq_semantic_head
   · exact pcs.acceptedOpeningsVerify coin accepted ksGood
 
 /-- The extracted object is not only root-attributed: it is a genuine witness
-of the semantic head's accumulated Loom claim. -/
+of the semantic head's accumulated Selvage claim. -/
 theorem extract_satisfies_semantic_head
     (head : HistoryHead)
     {schedule : FoldRootSchedule C S head.foldRoot head.foldRounds}

@@ -49,7 +49,7 @@ accepted token.
   Lean-owned transcript/controller. The historical Rust descriptor reader and
   BabyBear⁴/FRI/WGPU path were deleted; no current native module consumes this descriptor.
 * `[EMIT-sound]` — the deployed claim "the prover ACCEPTED, therefore `descriptorHolds`"
-  inherits the FRI/STARK floor (`Loom`'s undischarged soundness residuals plus the backend's
+  inherits the FRI/STARK floor (`Selvage`'s undischarged soundness residuals plus the backend's
   honest implementation of the IOP). This file proves the descriptor MEANS the Lean AIR; it
   does NOT claim the unverified prover's acceptance implies the descriptor's satisfaction.
   "It proves on a box" stays exactly that until the floor is discharged.

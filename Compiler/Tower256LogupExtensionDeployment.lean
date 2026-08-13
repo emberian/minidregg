@@ -25,7 +25,7 @@ open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Compiler.Tower256LogupAcceptedRun
 open Minidregg.Compiler.Tower256LogupClauseDispatch
 open Minidregg.Compiler.Tower256LogupControllerPlan
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 

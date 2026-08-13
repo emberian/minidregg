@@ -58,7 +58,7 @@ effect).
 
 Effects is candidate-side: imports Mathlib + `Compiler.Signature` (the initiality
 engine) + `Kernel.State` (the first effect's semantics). `scripts/check-import-boundary.sh`
-constrains `Theory`/`Loom` only — it stays green.
+constrains `Theory`/`Selvage` only — it stays green.
 
 Residual: `[EFFECT-registry]` (§8) — the full declaration vocabulary, the open registry,
 the weld to the emit path, per-declaration frame/reject teeth, the witness generator.

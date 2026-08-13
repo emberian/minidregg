@@ -14,14 +14,14 @@ precede challenges structurally rather than by a timestamp comparison.
 
 import Compiler.NativeKernelPlan
 import Compiler.SemanticManifest
-import Loom.Commitment
+import Selvage.Commitment
 import Theory.IndexedProgram
 
 namespace Minidregg.Compiler.AuthenticatedColumnPlan
 
 open Minidregg.Compiler.NativeKernelPlan (WorkKind)
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Loom
+open Minidregg.Selvage
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 
@@ -102,16 +102,16 @@ def CommitmentScheme.PositionBinding
     left = right
 
 /-- The authenticated-column commitment carrying the same position-binding
-property consumed by Loom accumulation and extraction. -/
+property consumed by Selvage accumulation and extraction. -/
 structure BindingCommitmentScheme
     {Semantic Representation Domain : Type}
     (port : ColumnPort Semantic Representation Domain)
     extends CommitmentScheme port where
   binding : toCommitmentScheme.PositionBinding
 
-/-- Literal adapter from the controller's executable scheme to Loom's opening
+/-- Literal adapter from the controller's executable scheme to Selvage's opening
 relation. No root, index, value, or proof codec is changed. -/
-def CommitmentScheme.toLoomOpeningScheme
+def CommitmentScheme.toSelvageOpeningScheme
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     (scheme : CommitmentScheme port) :
@@ -122,40 +122,40 @@ def CommitmentScheme.toLoomOpeningScheme
     scheme.verifyOpening root index value proof = true
   verifyOpen_commit := scheme.verifyOpening_commit
 
-/-- A binding authenticated-column scheme is exactly a Loom binding
+/-- A binding authenticated-column scheme is exactly a Selvage binding
 commitment. This closes the formerly duplicated commitment interface between
 controller transcripts and proof-carrying history. -/
-def BindingCommitmentScheme.toLoom
+def BindingCommitmentScheme.toSelvage
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     (scheme : BindingCommitmentScheme port) :
     BindingCommitment Digest Representation Domain (List UInt8) where
-  toOpeningScheme := scheme.toCommitmentScheme.toLoomOpeningScheme
+  toOpeningScheme := scheme.toCommitmentScheme.toSelvageOpeningScheme
   binding := scheme.binding
 
-@[simp] theorem BindingCommitmentScheme.toLoom_commit
+@[simp] theorem BindingCommitmentScheme.toSelvage_commit
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     (scheme : BindingCommitmentScheme port)
     (column : Domain -> Representation) :
-    scheme.toLoom.commit column = scheme.commit column :=
+    scheme.toSelvage.commit column = scheme.commit column :=
   rfl
 
-@[simp] theorem BindingCommitmentScheme.toLoom_openAt
+@[simp] theorem BindingCommitmentScheme.toSelvage_openAt
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     (scheme : BindingCommitmentScheme port)
     (column : Domain -> Representation) (index : Domain) :
-    scheme.toLoom.openAt column index = scheme.openAt column index :=
+    scheme.toSelvage.openAt column index = scheme.openAt column index :=
   rfl
 
-theorem BindingCommitmentScheme.toLoom_verifyOpen_iff
+theorem BindingCommitmentScheme.toSelvage_verifyOpen_iff
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     (scheme : BindingCommitmentScheme port)
     (root : Digest) (index : Domain) (value : Representation)
     (proof : List UInt8) :
-    scheme.toLoom.verifyOpen root index value proof <->
+    scheme.toSelvage.verifyOpen root index value proof <->
       scheme.verifyOpening root index value proof = true :=
   Iff.rfl
 
@@ -239,15 +239,15 @@ def BoundColumn.honestOpening
   representationExact := rfl
   verified := scheme.verifyOpening_commit column.represented index
 
-/-- A controller-accepted opening is the identical Loom opening relation for
+/-- A controller-accepted opening is the identical Selvage opening relation for
 the adapted scheme. -/
-theorem ColumnOpening.verifiesInLoom
+theorem ColumnOpening.verifiesInSelvage
     {Semantic Representation Domain : Type}
     {port : ColumnPort Semantic Representation Domain}
     {scheme : CommitmentScheme port}
     {column : BoundColumn port scheme}
     (opening : ColumnOpening column) :
-    scheme.toLoomOpeningScheme.verifyOpen column.root opening.index
+    scheme.toSelvageOpeningScheme.verifyOpen column.root opening.index
       opening.representationValue opening.proofBytes :=
   opening.verified
 
@@ -961,7 +961,7 @@ def towerCommitment : CommitmentScheme towerPort where
     simp
 
 /-- The tiny executable example also carries a proved position-binding law,
-so the controller-to-Loom adapter is inhabited rather than premise-only. -/
+so the controller-to-Selvage adapter is inhabited rather than premise-only. -/
 def towerBindingCommitment : BindingCommitmentScheme towerPort where
   toCommitmentScheme := towerCommitment
   binding := by
@@ -980,9 +980,9 @@ def towerBindingCommitment : BindingCommitmentScheme towerPort where
       omega
     exact Fin.ext hvalue
 
-theorem towerBinding_toLoom_commit_exact
+theorem towerBinding_toSelvage_commit_exact
     (column : SingletonDomain -> Tower256Value) :
-    towerBindingCommitment.toLoom.commit column =
+    towerBindingCommitment.toSelvage.commit column =
       towerCommitment.commit column :=
   rfl
 
@@ -1070,8 +1070,8 @@ end Tower256Example
 #guard_msgs (whitespace := lax) in #print axioms challenge_before_root_unrepresentable
 /-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.native_error_cannot_accept_query' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms native_error_cannot_accept_query
-/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.towerBinding_toLoom_commit_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Tower256Example.towerBinding_toLoom_commit_exact
+/-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.towerBinding_toSelvage_commit_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Tower256Example.towerBinding_toSelvage_commit_exact
 /-- info: 'Minidregg.Compiler.AuthenticatedColumnPlan.Tower256Example.concrete_schedule_is_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Tower256Example.concrete_schedule_is_nonvacuous
 
