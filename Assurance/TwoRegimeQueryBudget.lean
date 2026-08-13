@@ -37,9 +37,19 @@ withdrawn regime.** `ir2_the_conjectured_130_is_the_withdrawn_regime` below stat
 that identification as a theorem rather than as prose.
 
 **And the ledger has no UDR column at all.** `johnsonBits` (JBR) and
-`capacityBits` (CBR) are its only two; the one regime that is unconditionally
-proven has never been computed for a shipped dregg config. `ir2_three_regimes`
-computes it: **34 bits.**
+`capacityBits` (CBR) are its only two, so the regime that is unconditionally
+proven is absent from the object every shipped config is judged against.
+`ir2_three_regimes` computes it for the deployed knobs: **34 bits.**
+
+⚠ Narrowly and honestly: a unique-decoding query bound *does* exist elsewhere in
+the tree — `Dregg2.Circuit.FriVerifierQuery.epsilon_query_deployed_query_term_lt`
+proves `(9/16)^38 < 2^(−31)`, which is exactly this column at `δ = 7/16` (the UDR
+radius at `logBlowup = 3`) and `q = 38`. It is **one-sided**, it **omits the
+grinding bits entirely**, and it is stated only for the `lb = 3, q = 38` shape,
+never for the deployed IR-v2 `lb = 6, q = 19`. `prodV1_udr_agrees_with_metatheory`
+below checks our formula against it: `31 + 16 = 47`, which is what
+`prodV1_three_regimes` reports. Two independently written definitions, same
+number — the existing bound is this file's UDR column minus its `powBits`.
 
 ## What the type does
 
@@ -337,9 +347,10 @@ the shipped artifact differs between the three. A number quoted without its regi
 is not imprecise; it is a choice of one of these three, made silently.
 
 `73` is `Dregg2.Circuit.FriLedger.johnsonBits`; `130` is its `capacityBits`. **The
-`34` has never been computed anywhere in the dregg tree** — the ledger has no UDR
-column, so the only unconditionally proven reading of the deployed query phase did
-not exist before this theorem. -/
+`34` is not in the ledger**, which has no UDR column at all — so the only
+unconditionally proven reading of the *deployed* query phase did not exist before
+this theorem. (The tree's one existing UDR query bound covers a different shape;
+see the header, and `prodV1_udr_agrees_with_metatheory` for the cross-check.) -/
 theorem ir2_three_regimes :
     (queryErr .UDR ir2).Bits 34
       ∧ (queryErr .JBR ir2).Bits 73
@@ -408,6 +419,23 @@ theorem prodV1_three_regimes :
            by norm_num [queryErr, survivalSq, FriQueryCfg.rate, prodV1]⟩,
           ⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, prodV1],
            by norm_num [queryErr, survivalSq, FriQueryCfg.rate, prodV1]⟩⟩
+
+/-- **Cross-check against an independently written in-tree bound.**
+`Dregg2.Circuit.FriVerifierQuery.epsilon_query_deployed_query_term_lt` proves
+`(9/16)^38 < 2^(−31)` — the same column at the same knobs (`δ = 7/16` is the UDR
+radius at `logBlowup = 3`; `q = 38`), written from a different definition, with the
+`powBits` left out. Our `survivalSq .UDR` at `ρ = 1/8` is `(9/16)²` — it is the
+square of `1 − θ`, and `9/16` is exactly that `1 − θ` — so the two definitions
+meet, and `prodV1_three_regimes` reports `47 = 31 + 16`: the difference is
+precisely the 16 grinding bits the older bound does not carry.
+
+Stated here two-sided, which the older bound is not: `(9/16)^38` is also strictly
+above `2^(−32)`, so `31` is tight and not a loose `<`. -/
+theorem prodV1_udr_agrees_with_metatheory :
+    survivalSq .UDR prodV1.rate = (9 / 16) ^ 2
+      ∧ (9 / 16 : ℚ) ^ 38 < 1 / 2 ^ 31
+      ∧ 1 / 2 ^ 32 < (9 / 16 : ℚ) ^ 38 := by
+  refine ⟨by norm_num [survivalSq, FriQueryCfg.rate, prodV1], by norm_num, by norm_num⟩
 
 /-- ⚑ **THE CALIBRATION CELL — zkDTVM's published proven-128, reproduced.**
 
@@ -617,5 +645,7 @@ rational arithmetic that `norm_num` closes in the kernel. -/
 #guard_msgs (whitespace := lax) in #print axioms unpinned_query_count_collapses_the_column
 /-- info: 'Minidregg.Assurance.the_two_walls_move_on_different_levers' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms the_two_walls_move_on_different_levers
+/-- info: 'Minidregg.Assurance.prodV1_udr_agrees_with_metatheory' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms prodV1_udr_agrees_with_metatheory
 
 end Minidregg.Assurance
