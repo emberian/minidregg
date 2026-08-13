@@ -7,7 +7,7 @@ The proof-native semantic computer.
 **Read `ATLAS.md` before doing anything.** It carries the diagnosis, the sixteen
 design laws (each bought with a documented breadstuffs wound), and the
 architecture carve. The active design docs: `docs/PROOF-SYSTEM-SURVEY.md` (the
-backend decision), `docs/LOOM-RECOMPOSITION.md` (the proof system + obligation
+backend decision), `docs/SELVAGE-RECOMPOSITION.md` (the proof system + obligation
 ledger), `docs/HYPEREDGE-DESIGN.md` (one turn model), `docs/KERNEL-NECESSITY.md`
 (exhibit the kernel, don't design it).
 

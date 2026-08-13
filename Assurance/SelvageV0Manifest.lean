@@ -23,7 +23,7 @@ table.
 Grouped by layer, in the order `GOAL.md`'s done-log narrates the tower:
 Front → Code → Accumulator → Depth/transcript → Light client → Deployed →
 Bridge/capstone (§§1–7, the first revision), then the layers that COMPLETED
-v0 (`docs/LOOM-COMPLETE.md`): ZK argument of knowledge (§8) →
+v0 (`docs/SELVAGE-COMPLETE.md`): ZK argument of knowledge (§8) →
 Arithmetization compiler (§9) → Note-spend gadgets (§10) → Kernel (§11) →
 Deployment hardening (§12). Each entry's docstring names the theorem's own
 residual (if any is still open at THAT theorem's resolution) — a residual
@@ -1291,7 +1291,7 @@ theorem manifest_privateTurn_witness_hidden {F : Type} [Field F]
 
 Every tag below is a NAMED obligation with a realizer or an explicit open
 half — never a `def : Prop := True`. Status as of this manifest (matches
-`docs/LOOM-COMPLETE.md`): **the v0 soundness formalization is COMPLETE** —
+`docs/SELVAGE-COMPLETE.md`): **the v0 soundness formalization is COMPLETE** —
 what remains is exactly the three-assumption cryptographic FLOOR (named,
 inhabited, the same floor every hash-based SNARK carries) and the BEYOND-v0
 research (named, not proved, never on the label).

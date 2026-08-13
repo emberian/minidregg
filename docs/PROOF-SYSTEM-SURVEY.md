@@ -13,7 +13,7 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
   soundness is the exact proof shape mechanization likes (round induction +
   Schwartz–Zippel = the round-by-round invariant).
 - **Multilinear PCS, staged:** *(staging revised after the construction-level
-  reads — see LOOM-RECOMPOSITION §5/§6)* **WHIR-shaped constrained-claims at
+  reads — see SELVAGE-RECOMPOSITION §5/§6)* **WHIR-shaped constrained-claims at
   unique-decoding parameters first** — unconditional end-to-end (CA ⇒ mutual CA
   is free in UD) *with* RBR knowledge soundness, so the straightline law holds
   from v0 — widening to the Johnson bound (unconditional for RS since 2025/2051
@@ -39,7 +39,7 @@ formalization repos cloned and sorry-counted. Eprint numbers throughout.*
   Where RBR knowledge soundness holds, FS-of-RBR already gives straightline
   extraction from one transcript; R–T stays on the shelf for hypothetical
   constant-round non-RBR components, where its Merkle-instantiated variant
-  uniquely offers polynomial-loss QROM soundness. See LOOM-RECOMPOSITION §2.)*
+  uniquely offers polynomial-loss QROM soundness. See SELVAGE-RECOMPOSITION §2.)*
 - **No curves anywhere. No DLOG, no pairings, no trusted setup, no AGM, no curve
   cycle, no 255-bit fields.** PQ-plausible throughout.
 
@@ -208,7 +208,7 @@ the plan, several join the watchlist.
   sumcheck round counts (t ≈ λ·N transcript trees, or c^s·N ≥ 2¹⁵⁰ prover).
   Withdrawn from §0; shelved for hypothetical constant-round non-RBR
   components, where Merkle-instantiated transform 2 uniquely gives
-  polynomial-loss QROM soundness. See LOOM-RECOMPOSITION §2.)*
+  polynomial-loss QROM soundness. See SELVAGE-RECOMPOSITION §2.)*
 - **2026/289** (Zheng–Gao–Liu, ZK-PCD from accumulation) — masking vectors +
   ZK-sumcheck; separates the compliance predicate from accumulation verification
   so no zkNARK is needed. This is the **disclosure dial at the aggregation
@@ -218,7 +218,7 @@ the plan, several join the watchlist.
   masking machinery is Pedersen-homomorphic with rewinding extraction
   (4m-transcript trees, expected-PPT) — disqualified for our stack. ZK for
   hash-based straightline accumulation remains open: contribution slot OB-4,
-  LOOM-RECOMPOSITION §4.)*
+  SELVAGE-RECOMPOSITION §4.)*
 - **2026/538** (Paslis–Ràfols–Zacharakis, holography accumulation) — *stateless*
   recursive proving: accumulates the witness-independent *holographic* (public
   structure-polynomial) checks by commitment-free sumcheck batching to a fresh
@@ -226,7 +226,7 @@ the plan, several join the watchlist.
   full read — adopted for the structure side, complementary to the WARP-shape
   witness accumulator; the homomorphic decider (§5.3 there) is the one
   hash-incompatible piece and is carved out — the final decide pays merged
-  structure evaluations directly. See LOOM-RECOMPOSITION §3, OB-7.)*
+  structure evaluations directly. See SELVAGE-RECOMPOSITION §3, OB-7.)*
 
 **Watchlist:**
 - **Zinc/Zinc+** (2025/316, 2026/855, Nethermind et al.) — transparent hash-based

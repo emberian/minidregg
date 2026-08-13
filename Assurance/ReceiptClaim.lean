@@ -902,7 +902,7 @@ A `def : Prop := … True` would be the vacuous-obligation sin (see memory
          Thm 4.8 / BCIKS 2020/654), the SAME hypothesis Selvage/ReedSolomon.lean's
          Corollary 4.11 and Selvage/Proximity.lean carry. Cited, not re-opened, NOT
          claimed proved; its UD-regime instantiation stays the ladder's next rung
-         (docs/LOOM-RECOMPOSITION.md §5).
+         (docs/SELVAGE-RECOMPOSITION.md §5).
      What is NOT covered here, stated plainly: the channel half stays EXACT at claim
      resolution (a wrong word is rejected outright, `proxAccepts_ne_reject`); its
      δ-relaxed evaluation form — random-point channel checks — is the SHARED

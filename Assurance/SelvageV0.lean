@@ -1,7 +1,7 @@
 /-
 # `Assurance/SelvageV0.lean` — the v0 CAPSTONE: the whole Selvage tower, one theorem.
 
-The end-to-end composition (docs/LOOM-RECOMPOSITION.md, docs/HYPEREDGE-DESIGN.md):
+The end-to-end composition (docs/SELVAGE-RECOMPOSITION.md, docs/HYPEREDGE-DESIGN.md):
 a committed chain of KERNEL RECEIPTS, verified by the light client at ONE
 Fiat–Shamir schedule, attests the whole history — soundly, knowledge-soundly,
 bound to the commitment, and decided. Every clause of that sentence is a
