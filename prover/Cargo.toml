@@ -2,7 +2,12 @@
 name = "minidregg-prover"
 version = "0.1.0"
 edition = "2021"
-description = "Unverified native arithmetic, transform, hash, and buffer kernels for Lean-owned minidregg control."
+description = "Unverified native arithmetic, transform, hash, and buffer kernels for Lean-owned minidregg control, plus the Selvage sumcheck engine bound to the Lean-authored conformance vector."
 
 [dependencies]
 sha3 = "0.10"
+
+[dev-dependencies]
+# Test-only: reading the Lean-authored conformance vectors in testdata/.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
