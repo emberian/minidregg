@@ -1,8 +1,8 @@
-# Loom: what is complete, at which boundary
+# Selvage: what is complete, at which boundary
 
 Status: 2026-08-09.
 
-Loom is substantial machine-checked mathematics plus several real Lean-owned controllers. It is
+Selvage is substantial machine-checked mathematics plus several real Lean-owned controllers. It is
 not one deployed succinct ZK proof system. This document replaces earlier uses of “complete” that
 collapsed ideal theorems, verifier gadgets, native experiments, and deployment into one label.
 
@@ -16,7 +16,7 @@ collapsed ideal theorems, verifier gadgets, native experiments, and deployment i
 | **D** | authenticated deployment and consumer cutover |
 | **B** | reproducible matched-workload benchmark |
 
-Current Loom is strongest at **S**, has concrete **A** seams, has conditional **P** shapes, and has
+Current Selvage is strongest at **S**, has concrete **A** seams, has conditional **P** shapes, and has
 not yet reached an end-to-end **P/D/B** proof-system claim.
 
 ## Machine-checked formal core — S
@@ -34,7 +34,7 @@ This does not instantiate a concrete PCS, ROM, commitment, or succinct verifier.
 
 ### Sumcheck and derived arithmetization
 
-- `Loom/Sumcheck` and multilinear-extension modules prove the algebraic layer;
+- `Selvage/Sumcheck` and multilinear-extension modules prove the algebraic layer;
 - `Compiler/Air` proves the circuit fold and executor readings agree;
 - `AirFlatten` derives degree-≤2 gates with forced auxiliary wires;
 - assurance modules retire linear and quadratic gate faces at their theorem interfaces; and
@@ -165,7 +165,7 @@ opening, CR/binding, ROM transport, and hiding/sub-UD remain.
 
 ## Semantic and deployment joins
 
-Loom's proof claims meet the semantic kernel only through typed clauses:
+Selvage's proof claims meet the semantic kernel only through typed clauses:
 
 - exact requests and family-selected argument bytes are bound to accepted effects;
 - canonical patches produce one pre/post state and exact footprint;
@@ -238,7 +238,7 @@ is superseded.
    extensible ledger.
 5. Close a concrete BFV proof controller and separately authorized disclosure path.
 6. Deploy one durable handler and migrate real user/agent consumers.
-7. Benchmark admitted end-to-end workloads against alternatives and apply Loom's kill criteria.
+7. Benchmark admitted end-to-end workloads against alternatives and apply Selvage's kill criteria.
 
 The defensible one-breath claim is:
 

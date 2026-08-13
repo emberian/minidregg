@@ -64,7 +64,7 @@ typed request + current authority + canonical pre-state
      durable settlement       causal receipt/history
              |                       |
              v                       v
-       physical handler       Loom proof/checkpoint
+       physical handler       Selvage proof/checkpoint
                                      |
                         +------------+------------+
                         |            |            |
@@ -321,9 +321,9 @@ Gated or reserved clauses cannot project into deployment.
   deployment; and
 - BFV 901: reserved, with unclosed carrier and zero proof codec/suite/controller pins.
 
-## History and Loom
+## History and Selvage
 
-Loom provides multiplicative and additive proximity results, claim folding, arbitrary-depth
+Selvage provides multiplicative and additive proximity results, claim folding, arbitrary-depth
 extraction, sumcheck, Fiat–Shamir/RBR game structures, constrained masking, and explicit security
 budgets. Published or external algebraic inputs remain named interfaces rather than being described
 as locally proved.
@@ -371,7 +371,7 @@ physical completion. Compatibility modules are migration views, not proof of cut
 5. Instantiate durable storage refinement for one consumer, including WAL recovery and tariffs.
 6. Complete Hyperdocument operation grammar, authenticated transclusion/backlink maintenance, and
    one real offline merge UI.
-7. Run matched **B** workloads against candidate external stacks and apply Loom's kill criteria.
+7. Run matched **B** workloads against candidate external stacks and apply Selvage's kill criteria.
 
 ## Performance and evidence discipline
 

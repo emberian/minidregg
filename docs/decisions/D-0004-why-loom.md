@@ -1,16 +1,16 @@
-# D-0004 — Loom as heterogeneous proof-assurance fabric
+# D-0004 — Selvage as heterogeneous proof-assurance fabric
 
 - Status: accepted, falsifiable
 - Date: 2026-08-09
 
 ## Decision
 
-Keep Loom as the proof-theoretic composition and assurance layer for the proof-native semantic
-computer. Loom is not a universal execution field, VM, PCS, or requirement to invent every proof
+Keep Selvage as the proof-theoretic composition and assurance layer for the proof-native semantic
+computer. Selvage is not a universal execution field, VM, PCS, or requirement to invent every proof
 component locally. Specialized Boolean/GF(2), ordinary-field, residue-ring FHE, MPC, lookup/RAM,
 zero-knowledge, and history constructions remain native dialects.
 
-Loom owns the typed joints between them: roots-before-challenges transcript causality, exact
+Selvage owns the typed joints between them: roots-before-challenges transcript causality, exact
 security/error regimes, checked common-opening representation relations, native-failure
 non-authority, clause evidence, and proof-carrying history attribution. The first deterministic
 Tower256/additive controller and the extension-local indexed-lookup controller have landed at **A**;
@@ -44,7 +44,7 @@ provide dialect components; they do not define the semantic machine or their com
 - Unique/Johnson/post-Johnson, PCS, commitment-CR, ROM, sampling, ZK, and extraction errors remain
   separate until a common game composes them.
 - A manifest/controller/pin is not implementation or cryptographic evidence.
-- Loom is not yet a deployed succinct or zero-knowledge proof system. The additive controller,
+- Selvage is not yet a deployed succinct or zero-knowledge proof system. The additive controller,
   retained-history BCS game, and Ext6 controller close deterministic structure, not their concrete
   PCS/CR/ROM/proximity/hiding reductions or consumer deployment.
 
@@ -81,7 +81,7 @@ does not promote the others.
 
 ## Kill or replace criteria
 
-Revisit or remove Loom if:
+Revisit or remove Selvage if:
 
 1. one formalizable transparent/PQ construction supplies the required heterogeneous commitments,
    straight-line unbounded accumulation, malicious-composable ZK, and ring/MPC adapters with less

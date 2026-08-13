@@ -120,14 +120,14 @@ The old kernel is not replaced for a document consumer until:
 6. workload evidence shows sparse incremental update/proof costs rather than whole-history replay,
    reseal, and serialization per edit.
 
-## Why this belongs in Loom
+## Why this belongs in Selvage
 
 A hypermedia edit simultaneously touches content, causal history, authority, links, views, indexes,
 and sometimes private computation. A quote crosses object identity, history, finality, disclosure,
 and representation. A merge joins causal content while consulting present authority. These joints
 cannot safely be recreated by convention in each renderer, editor, agent tool, and storage service.
 
-Loom is the assurance fabric that makes the specialized execution and proof dialects refer to the
+Selvage is the assurance fabric that makes the specialized execution and proof dialects refer to the
 same semantic event. It is not a universal field or universal AIR.
 
 ## Compound-document design analogy, not lineage

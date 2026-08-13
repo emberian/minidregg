@@ -1,4 +1,4 @@
-# Loom vs Plonky3 — the defensibility brief
+# Selvage vs Plonky3 — the defensibility brief
 
 > Historical decision brief. Its architectural comparison remains useful, but several detailed
 > residuals in §6 have since closed. `README.md`, `GOAL.md`, and `docs/LOOM-COMPLETE.md` are the
@@ -6,7 +6,7 @@
 
 *For the conversation that starts with a raised eyebrow. Written to be handed to a skeptical
 peer, so it quotes the pessimistic numbers and names what we give up. If this doc can't
-survive that reader, the decision can't either. Status 2026-08-07: Loom's v0 SOUNDNESS TOWER
+survive that reader, the decision can't either. Status 2026-08-07: Selvage's v0 SOUNDNESS TOWER
 is proved (machine-checked, hand-audited) — the whole-history-aggregation promise is a Lean
 term — and a deliberately non-succinct Rust reference path now runs. Competitive performance
 remains unmeasured; read §6 (honest state)
@@ -29,7 +29,7 @@ Plonky3 is a production STARK toolkit: FRI-based, small-field (BabyBear/KoalaBea
 recursive proving, real deployments (SP1, Valida, others), an active ecosystem, and years
 of engineering hardening. Its verifier is battle-exercised; its performance is state of the
 art; its arithmetization tooling (AIRs) is mature. **For proving a fixed computation fast,
-today, with support, it is the right tool and Loom is not a competitor to it on those axes.**
+today, with support, it is the right tool and Selvage is not a competitor to it on those axes.**
 
 What it does NOT give — and these are structural, not maturity gaps:
 - Its soundness is a *paper argument + an unaudited-or-internally-audited config*, not a
@@ -63,9 +63,9 @@ committed — re-executing nothing. That sentence is paper2's opening line, and 
    executor (or a zkVM running it) — the thing that drifts, and in the zkVM case a 10³–10⁶×
    overhead to prove a CPU that proves our rules.
 
-Loom exists to make (1) a *theorem* and (2) *unnecessary*.
+Selvage exists to make (1) a *theorem* and (2) *unnecessary*.
 
-## 3. What Loom gives that is structural, not just "ours"
+## 3. What Selvage gives that is structural, not just "ours"
 
 - **Unbounded-depth aggregation as a proven theorem.** Straightline extraction (WARP/Arc
   shape: erasure correction, no rewinding) composes depth *additively* by union bound. The
@@ -74,7 +74,7 @@ Loom exists to make (1) a *theorem* and (2) *unnecessary*.
   sharpest differentiator.
 - **Soundness is a Lean term, not an audit.** Nobody has a fully mechanized soundness proof
   of a complete succinct argument (ArkLib, the serious attempt, is ~293 sorries and aims to
-  verify *others'* systems). Loom's own end-to-end soundness is the deliverable, under a
+  verify *others'* systems). Selvage's own end-to-end soundness is the deliverable, under a
   discipline that refuses vacuity — which already *refuted* our first depth-composition
   statement (machine-checked false at an empty-index corner) and *found a typo in the
   EUROCRYPT WHIR paper* while building a witness.
@@ -91,16 +91,16 @@ Loom exists to make (1) a *theorem* and (2) *unnecessary*.
 
 ## 4. What we give up (the pessimistic column — read this twice)
 
-- **Maturity.** Plonky3 is years-hardened and deployed; Loom is weeks old and unproven in
+- **Maturity.** Plonky3 is years-hardened and deployed; Selvage is weeks old and unproven in
   production. This is the biggest real cost and no amount of theory buys it back quickly.
 - **Competitive performance is UNMEASURED.** A full-trace reference prover/verifier now runs, but
   it is intentionally non-succinct and does not instantiate the additive GF(2) path or the
-  accumulator protocol. The honest-parameter stance also carries real rate costs. Loom could be
+  accumulator protocol. The honest-parameter stance also carries real rate costs. Selvage could be
   slower than Plonky3 in practice; only workload-matched, proved-parameter benchmarks can answer.
-- **Audit surface & ecosystem.** Plonky3 has external eyes, tooling, hiring pool. Loom has us.
+- **Audit surface & ecosystem.** Plonky3 has external eyes, tooling, hiring pool. Selvage has us.
   The mechanized proof is a *different kind* of assurance, not a replacement for adversarial
   external review of the implementation and the deployed field arithmetic.
-- **Engineering cost.** A production Loom (prover + verifier + the mechanized tower) is a
+- **Engineering cost.** A production Selvage (prover + verifier + the mechanized tower) is a
   multi-quarter effort even at our demonstrated velocity, with genuine research risk in the
   open slots (OB-4 ZK, OB-2a, small-field linearity).
 - **The math is borrowed; the composition is the bet.** The cryptography (WARP, Arc, sumcheck,
@@ -110,14 +110,14 @@ Loom exists to make (1) a *theorem* and (2) *unnecessary*.
 ## 5. Resource estimate (order-of-magnitude, honest)
 
 - **The mechanized soundness tower** (the differentiator): calibration point — a full FRI RBR
-  soundness mechanization was one person / ~6 weeks / 4K lines (simple-rbr-fri). Loom's tower
+  soundness mechanization was one person / ~6 weeks / 4K lines (simple-rbr-fri). Selvage's tower
   (WHIR-at-UD + accumulator + whole-stack straightline apex + FS/BCS) is bigger; at our
   swarm velocity, *weeks-to-a-couple-months* of focused lanes for a v0 tower, longer for the
   Johnson-regime MCA and the ZK slot. The tree today is a spine of ~10 audited keystones.
 - **A working prover/verifier** (the engineering): unestimated — this is the larger, riskier
   half, and the one where Plonky3's years are hardest to replace. A credible plan stages it:
   mechanized soundness + a reference (possibly slow) prover first, performance work second.
-- **The off-ramp is cheap:** the descriptor/claim interface is ours regardless, so a Loom that
+- **The off-ramp is cheap:** the descriptor/claim interface is ours regardless, so a Selvage that
   stalls can fall back to emitting to a Plonky3-style backend without re-architecting the
   kernel. We are not betting the kernel on the proof system.
 
@@ -143,7 +143,7 @@ statement kept compiling beside the true one:
 
 So the central promise — *one aggregate proves the whole history, sound at deployed depth* —
 is now a chain of Lean terms, not a heuristic, and it is **composed into a single capstone
-theorem** (`Assurance/LoomV0.loomV0_holds`): a committed chain of kernel receipts, verified at
+theorem** (`Assurance/SelvageV0.loomV0_holds`): a committed chain of kernel receipts, verified at
 one Fiat-Shamir schedule, carries all four guarantees at once — soundness, knowledge-soundness,
 commitment-binding, and decision — the proof term being exactly the four citations, no new
 math. That one theorem is the thing to hand a skeptic; its honest-scope caveat (the soundness
@@ -162,19 +162,19 @@ performance therefore remains UNMEASURED** (§4). This is a proved
 soundness tower with a deployment layer in progress, not a system you can prove a block with
 tomorrow — but it is no longer an "early spine," and the promise it was built to make is kept.
 
-## 7. The decision criterion (when Loom, when Plonky3)
+## 7. The decision criterion (when Selvage, when Plonky3)
 
 - **Stay on Plonky3** if: you need to prove a fixed computation fast, now, with support; you
   do not need whole-history aggregation with proven-depth soundness; the simulation tax is
   acceptable; mechanized soundness is not a requirement.
-- **Pursue Loom** if: the product *is* unbounded-depth aggregation and "the light client
+- **Pursue Selvage** if: the product *is* unbounded-depth aggregation and "the light client
   learns the whole history" must be true rather than heuristic; a machine-checked soundness
   floor is a differentiator worth a research bet; receipt-native (no VM) statements matter;
   PQ-transparency at proven parameters is required; and you can fund a multi-quarter effort
   with a Plonky3 off-ramp.
 
 **The defensible pitch to a peer, in one breath:** *"We're not replacing Plonky3 because we
-think we can out-engineer it on speed. We're building Loom because our product's core promise
+think we can out-engineer it on speed. We're building Selvage because our product's core promise
 — one aggregate proves the whole history — is a theorem in no existing system at deployed
 depth, and because a capability computer's soundness should be a proof you can read, not an
 audit you have to trust. It's an early research spine with a real off-ramp, and here's exactly

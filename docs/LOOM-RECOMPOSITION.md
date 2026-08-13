@@ -7,14 +7,14 @@ appendices included. One deep-read lane (Basefold/WHIR/DeepBrake claim formats)
 still out; §6 notes where it lands. v2 changes are marked ⟲.*
 
 **Stance.** Every step below is (a) a cited theorem, (b) our obligation **[OB-n]**,
-or (c) a design choice. The ledger is the deliverable. Working name **Loom**
+or (c) a design choice. The ledger is the deliverable. Working name **Selvage**
 (weaves the blocklace's strands into one fabric); ember may rename.
 
 ## 1. The link layer — ⟲ OB-1 resolved: the composition dissolves
 
 v1 asked whether a WARP/Arc accumulator can ingest Basefold-style claims at
 successively halved lengths. Construction-level answer: **neither scheme folds
-mixed lengths — and Loom never needs it.** WARP's accumulated object
+mixed lengths — and Selvage never needs it.** WARP's accumulated object
 `acc.𝕩 = (rt, α, μ, β, η)` — one Merkle root, one multilinear evaluation
 constraint `û(α) = μ`, one bundled circuit constraint `P̂(β, C⁻¹(u)) = η` — **is
 already a constrained-codeword claim at full length** (WARP Def 5.6/5.7,
@@ -33,19 +33,19 @@ Link-layer facts now pinned (from the reads):
   Unconditional today: every linear code at δ(C)/3 (unique regime); RS at the
   Johnson radius via 2025/2051 + 2025/2110. ⟲ **The Nov 2025 results upgrade
   WARP-over-RS at Johnson from conjectured to unconditional — an observation no
-  paper states; Loom's parameter section should state and use it.** [OB-6′]
+  paper states; Selvage's parameter section should state and use it.** [OB-6′]
 - In-domain queries re-read as boolean multilinear claims make batching
   linear-time; imported claims at non-boolean points cost O(n) each — keep them
   O(1) per step (design rule for the receipt encoding).
 - Arc's per-instance *degree* heterogeneity (geometric degree correction in
   Combine) means rates fold natively at one domain — the accommodation we keep
   in pocket for heterogeneous receipt sizes.
-- Accumulator inputs in Loom are always chain-internal, so Arc's first OOD
+- Accumulator inputs in Selvage are always chain-internal, so Arc's first OOD
   binding round is skippable (Arc Rem. 7.15) — cheaper links, and the design
   should never accept externally-supplied accumulators without re-binding.
 - **The strict/relaxed (promise) relation split is the formal interface for
   "what a chain link certifies"** (honest decider checks exact codeword
-  membership; δ-slack lives only in extraction). Loom's Lean statements fix
+  membership; δ-slack lives only in extraction). Selvage's Lean statements fix
   this interface on day one. [OB-3 restated below]
 
 ## 2. The transcript layer — ⟲ corrected: RBR + BCS, no R–T in front
@@ -58,7 +58,7 @@ c^s·N ≥ 2¹⁵⁰ prover work (transform 1, whose round cap is Θ(log λ/log 
 single digits). R–T exists to rescue protocols whose only handle is special
 soundness; **where round-by-round knowledge soundness holds, Fiat–Shamir of RBR
 in the ROM already yields straightline extraction from a single transcript**
-(the CY24/BMNW25 route; what WARP and holography both use). Loom's law:
+(the CY24/BMNW25 route; what WARP and holography both use). Selvage's law:
 
 > **Every component enters the stack with an RBR knowledge-soundness proof;
 > the transcript layer is one BCS/FS compilation of the whole protocol; R–T is
@@ -84,7 +84,7 @@ FS. It is *complementary* to the WARP-shape witness accumulator, and it makes
 the prover **stateless on the structure side** while removing per-step
 structure-polynomial costs.
 
-Loom adopts the split: **witness claims → WARP-shape accumulation; structure
+Selvage adopts the split: **witness claims → WARP-shape accumulation; structure
 claims → GBF-style commitment-free sumcheck batching.** Hash-based carve-out,
 accepted: no homomorphic decider — the final decide pays the merged structure
 evaluations directly (or one closing argument; the final compression step
@@ -102,7 +102,7 @@ From the reads: **neither WARP nor Arc has any ZK** (salt-zero Merkle, t
 codeword symbols leaked per step, no sketch); 2026/289's concrete zk machinery
 is Pedersen-homomorphic with rewinding extraction (4m-transcript trees,
 expected-PPT) — disqualified twice over for our stack. **ZK for hash-based
-straightline accumulation does not exist. That is Loom's open problem to
+straightline accumulation does not exist. That is Selvage's open problem to
 solve.** What ports from 2026/289:
 - the **architecture** (their Thm 1, fully generic): split compliance from
   accumulation-verification; zk confines to a small compliance proof plus zk of
@@ -141,7 +141,7 @@ openings per input oracle is the whole verifier story.
 
 **The accumulated object is a multi-constrained CRS claim over one fixed code,
 frozen at the outermost level — descent is the decider's job.** WHIR's own
-machinery proves the closure Loom needs: CRS-claim × CRS-claim → CRS-claim
+machinery proves the closure Selvage needs: CRS-claim × CRS-claim → CRS-claim
 under γ-folding (same-word constraints: Constr. 5.5, RBR error (t−1)ℓ/|F|;
 cross-word: Constr. 7.4 via mutual CA, err★ + (s−1)ℓ/|F|), with the proximity
 test — all queries, all Merkle paths — deferred entirely to the decider, which
@@ -175,13 +175,13 @@ Design rules banked from the reads:
 | id | obligation | status / risk | first move |
 |---|---|---|---|
 | OB-1 | fold ∘ accumulate mixed-length compatibility | ⟲ **RESOLVED — dissolved.** Accumulator replaces the PCS at links; folding PCS only at final compression | write the link-layer relation in Lean against WARP Constr. 10.4's shape |
-| OB-2 | whole-stack straightline KS apex | ⟲ **depth-composition (Thm B.4) TOWER PROVED** (`Loom/Depth.lean`): backwards extractor (Constr. B.5), Claim B.6 chain-descent, the fresh-slot bound, and a from-scratch `uniformProb` union-bound toolkit — all no-sorry. Two findings: (a) the as-first-stated `OB2_depth_composition` is **machine-checked FALSE** (`OB2_depth_composition_false` — the `Z=∅` sign corner: a vacuous empty-`Z` hypothesis admits `εrbr:=-1`; specialization-7's "arbitrary uniform bound" opened it); (b) the repair `OB2_depth_composition_nonneg` (one added `0 ≤ εrbr` guard, free for nonempty `Z`) is proved modulo **one named seam [OB-2a]**. The whole-stack apex (3 arrows: sumcheck → link accumulation → final compression) still sits above this depth lemma. | close [OB-2a]; then compose the 3 arrows onto the repaired depth lemma |
+| OB-2 | whole-stack straightline KS apex | ⟲ **depth-composition (Thm B.4) TOWER PROVED** (`Selvage/Depth.lean`): backwards extractor (Constr. B.5), Claim B.6 chain-descent, the fresh-slot bound, and a from-scratch `uniformProb` union-bound toolkit — all no-sorry. Two findings: (a) the as-first-stated `OB2_depth_composition` is **machine-checked FALSE** (`OB2_depth_composition_false` — the `Z=∅` sign corner: a vacuous empty-`Z` hypothesis admits `εrbr:=-1`; specialization-7's "arbitrary uniform bound" opened it); (b) the repair `OB2_depth_composition_nonneg` (one added `0 ≤ εrbr` guard, free for nonempty `Z`) is proved modulo **one named seam [OB-2a]**. The whole-stack apex (3 arrows: sumcheck → link accumulation → final compression) still sits above this depth lemma. | close [OB-2a]; then compose the 3 arrows onto the repaired depth lemma |
 | OB-2a | the `t` game-move slots of the union bound: `Pr[HitBad j] ≤ εrbr δ` | ⟲ **named seam under OB-2**, precisely diagnosed (not hand-waved): bounding an arbitrary game move's slot needs a lazy-`rnd` resolver over *every* salted `(stmt, prefix)` pair — the eager-total-function `rnd` gives it free, the lazy rendering (specialization 5) does not; fixing all coins but `c_j` does not hold `srOut` fixed. Trace-prefix scaffolding banked (`srTrace_take_agree`: move `j` depends on `c_{<j}` alone). | build the general lazy-rnd resolver; its uniformity closes the game-slot bound |
 | OB-3 | seam/receipt claims native to the accumulator | ⟲ refined: route seam claims to the GBF (public) side where possible [OB-3′]; strict/relaxed promise interface fixed day-one | prototype Q/seam encoding against `(rt,α,μ,β,η)` + GBF claim shapes |
 | OB-4 | ZK accumulation, hash-based, straightline | ⟲ **confirmed open in the literature — contribution slot.** Architecture ported (2026/289 Thm 1); opening-leakage hiding is the new mathematics | after OB-2 statements; design masked-opening experiment |
 | OB-5 | stateless accumulator variant | ⟲ subsumed: holography split adopted for the structure side (§3); witness side stays WARP-stateful (acceptable: one node, not distributed provers) | — |
 | OB-6 | unique-decoding mutual-CA realizer (v0 floor) | low; unconditional for every linear code at δ(C)/3 | early — it inhabits the carrier |
-| OB-6′ | ⟲ Johnson-regime WARP-over-RS upgrade (2025/2051+2110 applied to WARP's conjectured-MCA remark) | medium — `JohnsonMcaBridge` now pins 2110's exact reduced-rate constants and Loom interface; the GS/BCIKS/Hensel algebraic core remains to formalize | `Loom/JohnsonMcaBridge.lean` |
+| OB-6′ | ⟲ Johnson-regime WARP-over-RS upgrade (2025/2051+2110 applied to WARP's conjectured-MCA remark) | medium — `JohnsonMcaBridge` now pins 2110's exact reduced-rate constants and Selvage interface; the GS/BCIKS/Hensel algebraic core remains to formalize | `Selvage/JohnsonMcaBridge.lean` |
 | OB-7 | ⟲ GBF structure-claim batching integrated with derived descriptors | medium-low | after the IR fold-algebra lands |
 | OB-8 | ⟲ small-field accumulation without the O(λ) linearity loss (WARP App. D's open problem) | open research — second contribution slot | after v0 ships at extension-field sampling |
 
@@ -192,7 +192,7 @@ before proof work starts.
 ## 8. Next actions
 
 1. Third lane lands → finalize §5/§6, close the claim-format question.
-2. Scaffold the Lean project: `Theory/` (import-boundary-enforced) + `Loom/`
+2. Scaffold the Lean project: `Theory/` (import-boundary-enforced) + `Selvage/`
    skeletons; state OB-2 and OB-6 statement-first.
 3. Field + sponge decisions (survey §7) bind at OB-6's instantiation.
 4. The two contribution slots (OB-4 ZK, OB-8 small-field linearity) get

@@ -130,7 +130,7 @@ Rust has no operational semantics here. Rust is generated manifest/dispatch data
 fallible candidate computation. Rust may return bytes or an error. It never returns the semantic
 acceptance bit and is never called a refinement of Lean.
 
-Loom is the proof-assurance fabric around that narrow waist. Binary Tower256 work, sparse memory,
+Selvage is the proof-assurance fabric around that narrow waist. Binary Tower256 work, sparse memory,
 prime-field proofs, FHE rings, MPC shares, private relations, and causal history keep native
 dialects. They meet through canonical representations/openings, roots-before-challenges control,
 typed receipt clauses, and one explicit failure ledger. The proof is the bridge; a fake cast or
@@ -415,7 +415,7 @@ order unless new evidence changes the dependency graph:
 6. **Close one real proof suite end-to-end.** Prefer the suite that serves the chosen consumer;
    supply exact IDs/codecs, PCS/CR/ROM/proximity/knowledge prices, and an authenticated artifact.
 7. **Benchmark the admitted workflow.** Measure user-visible latency, proof size, memory, storage,
-   network, and tails on both CPUs. Use Loom's kill criteria if the construction loses.
+   network, and tails on both CPUs. Use Selvage's kill criteria if the construction loses.
 8. **Then broaden consumers.** Authorization, Grains/history, private market/FHE, and DreggNet/cloud
    should all compile into the same accepted-effect/durable-history spine rather than acquire new
    kernels.
@@ -454,7 +454,7 @@ order unless new evidence changes the dependency graph:
   are independent?
 - Which abstractions genuinely replace Breadstuffs/dregg2 functionality, and which merely describe
   a formal subset while runtime behavior remains elsewhere?
-- What would falsify Loom as the right architecture? We should keep the answer executable and
+- What would falsify Selvage as the right architecture? We should keep the answer executable and
   benchmarkable rather than rhetorical.
 
 ## Final strategic note
@@ -472,7 +472,7 @@ back to the exact object which should own it:
 - native work identity into authenticated generated artifacts; and
 - deployment claims into explicit S/A/P/D/B gates.
 
-The most important next milestone is therefore not “more Loom.” It is one user-visible workflow
+The most important next milestone is therefore not “more Selvage.” It is one user-visible workflow
 which passes through all of those owners without a parallel runtime meaning. When that exists with
 physical refinement, concrete proof security, and matched performance evidence, minidregg will
 begin to subsume a real kernel rather than merely deserve to.

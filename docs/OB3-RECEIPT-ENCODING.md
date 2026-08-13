@@ -1,7 +1,7 @@
 # OB-3 — the receipt Q as a native accumulated claim (the kill-checkpoint)
 
 *Design, 2026-08-07, under the standing goal. This is the mutual-elaboration crux:
-Loom's accumulator shape (from the WARP/WHIR construction reads, LOOM §6) meets the
+Selvage's accumulator shape (from the WARP/WHIR construction reads, LOOM §6) meets the
 kernel's receipt Q (HYPEREDGE-DESIGN §4). OB-3 passes iff a turn's receipt claim is
 NATIVE to the accumulator — carried in its constraint channel, not proven by a
 verifier-simulator circuit. This document states the encoding precisely enough that a
@@ -28,7 +28,7 @@ OB-3 succeeds iff Q **is** such a CRS claim — the light-client object is the Q
 1. **Q's committed word.** The post-state projection `uproj` (breadstuffs' UniversalBridge
    design, ported into `Kernel/State.lean`'s keyed map) is a vector over the base field:
    one coordinate per (cell field | keyed-map entry). Encode it under the fixed linear
-   code C (RS at v0, `Loom/ReedSolomon.lean`): `f := C(uproj(post))`. **The Merkle root of
+   code C (RS at v0, `Selvage/ReedSolomon.lean`): `f := C(uproj(post))`. **The Merkle root of
    `f` IS Q's commitment `rt`** — Q does not get a *separate* commitment scheme; the
    accumulator's word commitment is Q.
 2. **Q's binding = a multilinear-evaluation constraint.** "The receipt binds the whole
@@ -52,7 +52,7 @@ OB-3 succeeds iff Q **is** such a CRS claim — the light-client object is the Q
 
 ## 2. The checkpoint criterion — what PASS and FAIL look like
 
-**PASS** (v0 milestone): a prototype `Loom/ReceiptClaim.lean` that, given a landed turn's
+**PASS** (v0 milestone): a prototype `Selvage/ReceiptClaim.lean` that, given a landed turn's
 post-state (`Kernel/Turn.lean` + `Kernel/State.lean`), produces a CRS/`(rt,α,μ,β,η)`-shape
 claim and PROVES: (a) the claim's word is `C(uproj post)`; (b) an honest turn's Q satisfies
 the claim; (c) the TEETH — a tampered post-state (a mutated untouched cell, a non-conserving
@@ -80,17 +80,17 @@ the committed word. Candidate failure sites to probe first:
 - `Kernel/State.lean` → `uproj`, the post-state vector to encode.
 - `Kernel/Turn.lean` → the hyperedge whose commit produces Q; the frame theorem that
   becomes constraint (2).
-- `Loom/ReedSolomon.lean` → the code C the word lives in (landed).
-- `Loom/Sumcheck.lean` → the reduction that retires the Z-linear part of the accumulated
+- `Selvage/ReedSolomon.lean` → the code C the word lives in (landed).
+- `Selvage/Sumcheck.lean` → the reduction that retires the Z-linear part of the accumulated
   constraints at the decider (the front).
-- `Loom/Depth.lean` (OB-2/OB-2a) → the straightline soundness the folded chain inherits.
+- `Selvage/Depth.lean` (OB-2/OB-2a) → the straightline soundness the folded chain inherits.
 
 OB-3's prototype is the confluence: it cannot be written until State + Turn land, but its
 TARGET is fixed now, so those lanes build toward a known encoding rather than a guess.
 
 ## 4. Next action (when State + Turn land)
 
-Author `Loom/ReceiptClaim.lean` statement-first: the CRS-claim-of-a-turn as a `def`, with
+Author `Selvage/ReceiptClaim.lean` statement-first: the CRS-claim-of-a-turn as a `def`, with
 the four PASS obligations (a)-(d) as keystone-fielded statements (satisfiable + teeth built,
 per the audit lesson), then fan out the proofs. If (c) or the seam (4) will not close
 linearly, STOP and surface it as the OB-3 finding — that is the checkpoint doing its job.

@@ -136,11 +136,11 @@ which upgrades "nothing ex nihilo" to "the authority object is canonically
 determined." **Risk:** low-medium; the right ambient category (ordered
 commutative monoids with joins?) needs choosing once.
 
-### N6 — Aggregation is a colimit (Loom's receipt-nativity, justified)
+### N6 — Aggregation is a colimit (Selvage's receipt-nativity, justified)
 
 **Claim.** The receipt chain is a diagram; the whole-history object is its
 **colimit**; the light-client theorem is the *uniqueness of the mediating
-morphism* out of it; and Loom's accumulator is an incremental colimit
+morphism* out of it; and Selvage's accumulator is an incremental colimit
 computation carrying proofs. R8's federation-merge is a colimit of partial
 views one level up (LaceMerge's join-semilattice is its poset shadow —
 already proved). **Held:** LaceMerge laws; the Q-chain seam-pinning.
@@ -179,7 +179,7 @@ Once K is exhibited, expressivity is *read off*, not legislated:
    — everything hyperdreggmedia wants is a comonadic structure over νB, and
    deos's "affordance = cap-gated effect-template" should fall out as: an
    affordance is a λ-compatible pairing of one Σ-generator with one B-observation.
-4. **Loom consumes N3+N6 directly**: descriptors are folds (N3); the aggregate
+4. **Selvage consumes N3+N6 directly**: descriptors are folds (N3); the aggregate
    is the colimit (N6); receipt-nativity is canonicality.
 
 ## 3. Method and sequencing
@@ -203,7 +203,7 @@ Once K is exhibited, expressivity is *read off*, not legislated:
 
 ## 4. Relation to the other lanes
 
-Loom (proof system) does not block on this lane and vice versa: Loom consumes
+Selvage (proof system) does not block on this lane and vice versa: Selvage consumes
 descriptors whatever their provenance; this lane determines what the
 descriptors *are* descriptors of. The first shared artifact is Σ-as-polynomial-
 functor (N3), which the Compiler lane needs anyway for syntactic leaves — so
