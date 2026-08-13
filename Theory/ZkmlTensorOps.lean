@@ -140,6 +140,33 @@ def idxEquiv : ∀ s : List ℕ, Idx s ≃ Fin (size s)
         Fin.val_injective (Nat.lt_one_iff.mp i.isLt).symm }
   | n :: s => (Equiv.prodCongr (Equiv.refl (Fin n)) (idxEquiv s)).trans finProdFinEquiv
 
+/-- Row-major **enumeration** of a shape's multi-indices. An emitter needs one
+constraint per output element, so it needs this list. -/
+def idxList : (s : List ℕ) → List (Idx s)
+  | [] => [PUnit.unit]
+  | n :: s => (List.finRange n).flatMap fun i => (idxList s).map fun j => (i, j)
+
+/-- **The enumeration is total.** This is what makes "one constraint per element of
+`idxList`" mean "every element constrained": an emitter that silently dropped an
+index would be constraining a proper subset, and no theorem downstream would
+notice. -/
+theorem mem_idxList : ∀ {s : List ℕ} (i : Idx s), i ∈ idxList s := by
+  intro s
+  induction s with
+  | nil => intro i; cases i; exact List.mem_singleton_self _
+  | cons n s ih =>
+      rintro ⟨i, j⟩
+      simp only [idxList, List.mem_flatMap, List.mem_map]
+      exact ⟨i, List.mem_finRange i, j, ih j, rfl⟩
+
+/-- ...and it has exactly the element count the shape declares. -/
+theorem length_idxList : ∀ s : List ℕ, (idxList s).length = size s := by
+  intro s
+  induction s with
+  | nil => rfl
+  | cons n s ih =>
+      simp [idxList, List.length_flatMap, ih]
+
 /-- A tensor **value** in carrier `α`: a total function from the type's
 multi-index. Totality is the point — a shape error is not representable, so the
 denotation below is total and needs no `Option`. -/
@@ -710,6 +737,38 @@ theorem census_macs_eq_macAlg (tOut : TyT) {Γ : Ctx} (p : Trace tOut Γ) :
 /-- Census of a trace. -/
 def census {tOut : TyT} {Γ : Ctx} (p : Trace tOut Γ) : Census :=
   fold (censusAlg tOut) p
+
+/-- A third reading of the same signature: how many ops fall **outside** the
+arithmetic fragment, i.e. how many gadgets a trace costs. -/
+def gadgetAlg (tOut : TyT) :
+    Algebra tensorSig (fun Γ => Var Γ tOut) (fun _ => ℕ) where
+  pure := fun _ => 0
+  call := fun op k => k () + (if op.arithmetic then 0 else 1)
+
+/-- The gadget count of a trace. -/
+def gadgetCount {tOut : TyT} {Γ : Ctx} (p : Trace tOut Γ) : ℕ :=
+  fold (gadgetAlg tOut) p
+
+/-- **The count is a certificate, not a statistic.** A trace costs zero gadgets
+exactly when it lies in the arithmetic fragment — so `gadgetCount p = 0`, which is
+computable, discharges `arith_transport`'s hypothesis, which is not. -/
+theorem gadgetCount_eq_zero_iff {tOut : TyT} :
+    ∀ {Γ : Ctx} (p : Trace tOut Γ), gadgetCount p = 0 ↔ p.arithmetic := by
+  intro Γ p
+  induction p with
+  | pure w => exact ⟨fun _ => trivial, fun _ => rfl⟩
+  | call op k ih =>
+      show fold (gadgetAlg tOut) (k ()) + (if op.arithmetic then 0 else 1) = 0 ↔ _
+      rw [Nat.add_eq_zero_iff]
+      constructor
+      · rintro ⟨hk, ho⟩
+        refine ⟨?_, fun r => ?_⟩
+        · by_cases h : op.arithmetic = true
+          · exact h
+          · simp [h] at ho
+        · cases r; exact (ih ()).mp hk
+      · rintro ⟨ho, hk⟩
+        exact ⟨(ih ()).mpr (hk ()), by simp [ho]⟩
 
 /-- A **deliberately wrong** cost reading: it charges a matmul `m·n`, forgetting
 the contraction. This is the mistake that would price an MNIST circuit 784× cheap,
