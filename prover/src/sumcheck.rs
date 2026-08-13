@@ -37,6 +37,40 @@
 //! (O(2^m) MLE evals per point); the standard table-folding optimization arrives
 //! only when a rung needs it, and will be conformance-checked against this mirror
 //! (`mle_kernels::fold_mle_table` is the folding kernel already in the crate).
+//!
+//! ## The degree-3 rung (`cubic` items below)
+//!
+//! `Assurance/AirSumcheckCubic.lean` builds the degree-3 realizer
+//! `cubicForm E A B C D = Ê·(Â·B̂ + Ĉ·D̂)` — one shape covering BOTH a GKR
+//! fraction-tree layer (`eq·(p_L·q_R + p_R·q_L)`) and a zkML matmul claim
+//! (`eq·(Â·B̂ − Ĉ)`), each named there as a theorem. This file re-computes that
+//! engine, at TWO speeds that are checked against each other:
+//!
+//! * `cubic_round_sum_literal` — the LITERAL mirror of the Lean `roundSum
+//!   (cubicForm …)`, O(4^m), the thing the conformance vector binds;
+//! * `fold_table` + `cubic_round_evals` — the folded prover, O(2^m) TOTAL, which
+//!   is what lifts the rung off its `m ≈ 12` ceiling.
+//!
+//! `folded_prover_agrees_with_literal_mirror` pins the fast path to the mirror,
+//! so the Lean binding survives the optimization instead of being replaced by it.
+//!
+//! **`h(1)` is on the wire.** A degree-3 round message is FOUR evaluations
+//! `[h(0), h(1), h(2), h(3)]`. The p3-sumcheck engine sends `[h(0), h(∞)]` and
+//! lets the verifier DERIVE `h(1) = claim − h(0)`, which makes its round check
+//! `h(0) + h(1) = claim` true by construction — the check is not skipped, it is
+//! made a tautology. Here `h(1)` is prover-supplied and the round check can fail;
+//! `no_message_passes_both_checks` exhibits the resulting fork: against a false
+//! claim, the honest `h(1)` fails the ROUND check and the derived `h(1)` fails the
+//! TERMINAL check, and there is no third option. Cost of not compressing: one
+//! field element per round.
+//!
+//! **Interpolation needs `p > 3`.** `eval_lagrange` divides by the node
+//! differences of `{0,1,2,3}`, whose denominators are `±6, ±2`; it returns `None`
+//! when the modulus makes them non-invertible and the verifier REJECTS on `None`
+//! rather than folding a wrong value. This is why the Lean side keeps the round
+//! polynomial in COEFFICIENT form (no division, no characteristic hypothesis):
+//! the char-2 binary-tower instantiation cannot use these nodes at all and will
+//! need coefficient-form messages, which is an open fork, not an oversight.
 
 /// A canonical residue mod the caller's prime `p` (`0 ≤ v < p`). The engine is
 /// prime-generic so the Lean `MLEExample` keystones over F₅ bind here too;
@@ -220,6 +254,286 @@ pub fn verify_sumcheck(proof: &SumcheckProof, f_oracle: impl Fn(&[Fp]) -> Fp, p:
     // The terminal oracle check: the folded claim equals f̂ at the challenge
     // point (`scChain_mleHonest_final`'s target).
     running == f_oracle(&proof.challenges)
+}
+
+// ===========================================================================
+// The degree-3 rung. Mirrors `Assurance/AirSumcheckCubic.lean`.
+// ===========================================================================
+
+/// `a^e mod p` by square-and-multiply — the engine had only add/sub/mul.
+pub fn pow_mod(a: Fp, e: u64, p: u64) -> Fp {
+    let mut base = a % p;
+    let mut exp = e;
+    let mut acc = 1 % p;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            acc = mul_mod(acc, base, p);
+        }
+        base = mul_mod(base, base, p);
+        exp >>= 1;
+    }
+    acc
+}
+
+/// The modular inverse `a⁻¹ mod p` for PRIME `p`, by Fermat (`a^{p−2}`).
+/// `None` for `a ≡ 0`, so a caller cannot silently consume a wrong value —
+/// every caller here turns `None` into a REJECT.
+///
+/// Correctness rests on `p` being prime; `prove_*`/`verify_*` are documented
+/// prime-only and the conformance vector instantiates `p = babybear::P`.
+pub fn inv_mod(a: Fp, p: u64) -> Option<Fp> {
+    if a % p == 0 {
+        None
+    } else {
+        Some(pow_mod(a, p - 2, p))
+    }
+}
+
+/// The Lagrange denominators for the node set `{0, …, d}`:
+/// `Dⱼ = ∏_{k ≠ j} (j − k) = (−1)^{d−j}·j!·(d−j)!`. Precomputed as constants
+/// (index by `d`, then by `j`) — degrees 1 through 3, which is every degree this
+/// engine sends.
+const LAGRANGE_DENOMS: [&[i64]; 4] = [&[1], &[-1, 1], &[2, -1, 2], &[-6, 2, -2, 6]];
+
+/// Reduce a (possibly negative) integer denominator into `[0, p)`.
+fn denom_mod(d: i64, p: u64) -> Fp {
+    let m = d.unsigned_abs() % p;
+    if d < 0 { sub_mod(0, m, p) } else { m }
+}
+
+/// Evaluate the degree-`d` interpolant of `evals` (given at the nodes
+/// `0, 1, …, d`) at `t`, in the Lagrange basis with the denominators above.
+///
+/// `None` — and therefore a verifier REJECT — when the modulus cannot support
+/// the node set: `p ≤ d` makes the nodes collide, and `p ∈ {2,3}` makes a
+/// denominator non-invertible. Never returns a value it could not justify.
+pub fn eval_lagrange(evals: &[Fp], t: Fp, p: u64) -> Option<Fp> {
+    let d = evals.len().checked_sub(1)?;
+    if d >= LAGRANGE_DENOMS.len() || (p as u128) <= d as u128 {
+        return None;
+    }
+    let denoms = LAGRANGE_DENOMS[d];
+    let t = t % p;
+    let mut acc = 0;
+    for (j, &y) in evals.iter().enumerate() {
+        // ∏_{k ≠ j} (t − k)
+        let mut num = 1 % p;
+        for k in 0..=d {
+            if k != j {
+                num = mul_mod(num, sub_mod(t, (k as u64) % p, p), p);
+            }
+        }
+        let inv = inv_mod(denom_mod(denoms[j], p), p)?;
+        acc = add_mod(acc, mul_mod(mul_mod(y % p, num, p), inv, p), p);
+    }
+    Some(acc)
+}
+
+/// Bind the LSB coordinate of a value table at `r`: the pair `(f[2k], f[2k+1])`
+/// becomes `f[2k] + r·(f[2k+1] − f[2k])`. The p-generic twin of
+/// `mle_kernels::fold_mle_table`, whose `NativeMleScalar` trait carries no
+/// runtime modulus and so cannot serve this engine (see the module docs).
+pub fn fold_table(f: &[Fp], r: Fp, p: u64) -> Vec<Fp> {
+    assert!(f.len() >= 2 && f.len().is_power_of_two(), "foldable table");
+    f.chunks_exact(2)
+        .map(|pair| {
+            add_mod(
+                pair[0] % p,
+                mul_mod(r % p, sub_mod(pair[1], pair[0], p), p),
+                p,
+            )
+        })
+        .collect()
+}
+
+/// The five tables of a cubic claim `Σ_b E(b)·(A(b)·B(b) + C(b)·D(b))`, in the
+/// order the Lean `cubicForm E A B C D` takes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CubicTables {
+    pub e: Vec<Fp>,
+    pub a: Vec<Fp>,
+    pub b: Vec<Fp>,
+    pub c: Vec<Fp>,
+    pub d: Vec<Fp>,
+}
+
+impl CubicTables {
+    /// All five tables must be `2^m` long for one common `m`.
+    pub fn dim(&self) -> usize {
+        let m = cube_dim(&self.e);
+        for t in [&self.a, &self.b, &self.c, &self.d] {
+            assert_eq!(cube_dim(t), m, "all five tables share one dimension");
+        }
+        m
+    }
+
+    /// The claimed total `Σ_b E(b)·(A(b)·B(b) + C(b)·D(b))`.
+    pub fn claim(&self, p: u64) -> Fp {
+        let n = self.e.len();
+        (0..n).fold(0, |acc, k| {
+            let inner = add_mod(
+                mul_mod(self.a[k] % p, self.b[k] % p, p),
+                mul_mod(self.c[k] % p, self.d[k] % p, p),
+                p,
+            );
+            add_mod(acc, mul_mod(self.e[k] % p, inner, p), p)
+        })
+    }
+
+    /// The FACTORED terminal openings `[Ê(x), Â(x), B̂(x), Ĉ(x), D̂(x)]` — five
+    /// values the verifier combines itself, mirroring `scChain_cubicHonest_final`.
+    pub fn openings(&self, point: &[Fp], p: u64) -> [Fp; 5] {
+        [
+            mle_eval(&self.e, point, p),
+            mle_eval(&self.a, point, p),
+            mle_eval(&self.b, point, p),
+            mle_eval(&self.c, point, p),
+            mle_eval(&self.d, point, p),
+        ]
+    }
+
+    fn fold(&self, r: Fp, p: u64) -> CubicTables {
+        CubicTables {
+            e: fold_table(&self.e, r, p),
+            a: fold_table(&self.a, r, p),
+            b: fold_table(&self.b, r, p),
+            c: fold_table(&self.c, r, p),
+            d: fold_table(&self.d, r, p),
+        }
+    }
+}
+
+/// Combine five openings into the cubic value — the verifier's own arithmetic,
+/// `Ê·(Â·B̂ + Ĉ·D̂)`.
+pub fn cubic_combine(o: &[Fp; 5], p: u64) -> Fp {
+    let inner = add_mod(mul_mod(o[1], o[2], p), mul_mod(o[3], o[4], p), p);
+    mul_mod(o[0], inner, p)
+}
+
+/// The LITERAL mirror of the Lean `roundSum (cubicForm E A B C D) r i t` — the
+/// summand evaluated through `mle_eval` at every suffix corner. O(4^m); this is
+/// the shape the conformance vector binds and the oracle the folded prover is
+/// checked against.
+pub fn cubic_round_sum_literal(tabs: &CubicTables, r: &[Fp], i: usize, t: Fp, p: u64) -> Fp {
+    let m = tabs.dim();
+    assert_eq!(r.len(), m, "challenge vector length {} != {m}", r.len());
+    assert!(i < m, "round index {i} out of range (m = {m})");
+    let suffix = m - i - 1;
+    let mut point: Vec<Fp> = Vec::with_capacity(m);
+    let mut acc = 0;
+    for b in 0..1usize << suffix {
+        point.clear();
+        point.extend_from_slice(&r[..i]);
+        point.push(t % p);
+        for j in 0..suffix {
+            point.push(((b >> j) & 1) as u64);
+        }
+        acc = add_mod(acc, cubic_combine(&tabs.openings(&point, p), p), p);
+    }
+    acc
+}
+
+/// Round `i`'s message from ALREADY-FOLDED tables: the four evaluations
+/// `[h(0), h(1), h(2), h(3)]`. Each remaining pair contributes its line values
+/// at the four nodes; O(len) per round, so O(2^m) over the whole protocol.
+///
+/// `h(1)` is computed here and SENT — it is never derived by the verifier.
+pub fn cubic_round_evals(tabs: &CubicTables, p: u64) -> [Fp; 4] {
+    let half = tabs.e.len() / 2;
+    let mut out = [0u64; 4];
+    for k in 0..half {
+        let line = |tab: &[Fp], t: u64| -> Fp {
+            let lo = tab[2 * k] % p;
+            let hi = tab[2 * k + 1] % p;
+            add_mod(lo, mul_mod(t % p, sub_mod(hi, lo, p), p), p)
+        };
+        for (idx, out_slot) in out.iter_mut().enumerate() {
+            let t = idx as u64;
+            let inner = add_mod(
+                mul_mod(line(&tabs.a, t), line(&tabs.b, t), p),
+                mul_mod(line(&tabs.c, t), line(&tabs.d, t), p),
+                p,
+            );
+            *out_slot = add_mod(*out_slot, mul_mod(line(&tabs.e, t), inner, p), p);
+        }
+    }
+    out
+}
+
+/// A degree-3 sumcheck transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CubicSumcheckProof {
+    /// The claimed total (honest prover: `CubicTables::claim`).
+    pub claim: Fp,
+    /// Per round, `[hᵢ(0), hᵢ(1), hᵢ(2), hᵢ(3)]` — FOUR evals, `h(1)` included.
+    pub rounds: Vec<[Fp; 4]>,
+    /// The challenges folded in after each round. Fiat-Shamir is `[PROVER-fs]`.
+    pub challenges: Vec<Fp>,
+}
+
+/// The honest degree-3 prover, folded: five tables shrink by half each round, so
+/// the whole run is O(2^m) rather than the literal mirror's O(4^m).
+pub fn prove_cubic_sumcheck(tabs: &CubicTables, challenges: &[Fp], p: u64) -> CubicSumcheckProof {
+    let m = tabs.dim();
+    assert_eq!(challenges.len(), m, "need one challenge per round (m = {m})");
+    assert!(
+        challenges.iter().all(|&r| r < p),
+        "challenges must be canonical mod p"
+    );
+    let claim = tabs.claim(p);
+    let mut state = tabs.clone();
+    let mut rounds = Vec::with_capacity(m);
+    for &r in challenges.iter() {
+        rounds.push(cubic_round_evals(&state, p));
+        state = state.fold(r, p);
+    }
+    CubicSumcheckProof {
+        claim,
+        rounds,
+        challenges: challenges.to_vec(),
+    }
+}
+
+/// The degree-3 verifier, fail-closed, mirroring Selvage's `SumcheckAccepts`
+/// conjunct for conjunct at `d = 3`.
+///
+/// Every round check reads the PROVER'S `h(1)`; nothing is reconstructed from
+/// the running claim, so `h(0) + h(1) = running` is a real constraint. The
+/// terminal check takes the five openings and combines them itself
+/// (`scChain_cubicHonest_final`'s factored target). Any shape violation,
+/// non-canonical value, or non-invertible interpolation REJECTS.
+///
+/// Runs; does not verify in the formal sense — there is no semantics of Rust.
+pub fn verify_cubic_sumcheck(
+    proof: &CubicSumcheckProof,
+    openings: impl Fn(&[Fp]) -> [Fp; 5],
+    p: u64,
+) -> bool {
+    if proof.rounds.len() != proof.challenges.len() {
+        return false;
+    }
+    if proof.claim >= p || proof.challenges.iter().any(|&r| r >= p) {
+        return false;
+    }
+    let mut running = proof.claim;
+    for (h, &r) in proof.rounds.iter().zip(proof.challenges.iter()) {
+        if h.iter().any(|&v| v >= p) {
+            return false;
+        }
+        // The boolean check against the prover-supplied h(1) — NOT a tautology.
+        if add_mod(h[0], h[1], p) != running {
+            return false;
+        }
+        match eval_lagrange(h, r, p) {
+            Some(v) => running = v,
+            None => return false,
+        }
+    }
+    let o = openings(&proof.challenges);
+    if o.iter().any(|&v| v >= p) {
+        return false;
+    }
+    running == cubic_combine(&o, p)
 }
 
 #[cfg(test)]
@@ -429,5 +743,384 @@ mod tests {
             assert_eq!(sub_mod(a, b, P), bsub(a, b));
             assert_eq!(mul_mod(a, b, P), bmul(a, b));
         }
+    }
+
+    // ---------------- the degree-3 rung ----------------
+
+    /// A deterministic m-variable instance over F₉₇, asymmetric in every table.
+    fn cubic_instance(m: usize) -> CubicTables {
+        let n = 1usize << m;
+        let gen = |seed: u64| -> Vec<Fp> {
+            let mut s = seed;
+            (0..n)
+                .map(|_| {
+                    s = s
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (s >> 33) % P97
+                })
+                .collect()
+        };
+        CubicTables {
+            e: gen(1),
+            a: gen(2),
+            b: gen(3),
+            c: gen(4),
+            d: gen(5),
+        }
+    }
+
+    #[test]
+    fn inv_mod_is_a_two_sided_inverse() {
+        for a in 1..P97 {
+            let inv = inv_mod(a, P97).expect("nonzero is invertible");
+            assert_eq!(mul_mod(a, inv, P97), 1, "a = {a}");
+        }
+        assert_eq!(inv_mod(0, P97), None);
+        // BabyBear too, since the conformance vector rides on it.
+        for a in [1, 2, 3, 6, 42, P - 1] {
+            let inv = inv_mod(a, P).expect("nonzero is invertible");
+            assert_eq!(mul_mod(a, inv, P), 1, "a = {a}");
+        }
+    }
+
+    #[test]
+    fn eval_lagrange_reproduces_its_own_nodes() {
+        // The interpolant through 4 points agrees with them at 0,1,2,3.
+        let evals = [11, 5, 90, 33];
+        for (t, &y) in evals.iter().enumerate() {
+            assert_eq!(eval_lagrange(&evals, t as u64, P97), Some(y), "node {t}");
+        }
+    }
+
+    #[test]
+    fn eval_lagrange_matches_a_known_cubic() {
+        // h(X) = 2X³ + 3X² + 5X + 7 over F₉₇, sampled at 0..3 and re-evaluated.
+        let h = |x: u64| -> u64 {
+            let x = x % P97;
+            let x2 = mul_mod(x, x, P97);
+            let x3 = mul_mod(x2, x, P97);
+            add_mod(
+                add_mod(mul_mod(2, x3, P97), mul_mod(3, x2, P97), P97),
+                add_mod(mul_mod(5, x, P97), 7, P97),
+                P97,
+            )
+        };
+        let evals = [h(0), h(1), h(2), h(3)];
+        for t in [4, 17, 50, 96] {
+            assert_eq!(eval_lagrange(&evals, t, P97), Some(h(t)), "t = {t}");
+        }
+    }
+
+    #[test]
+    fn eval_lagrange_refuses_moduli_it_cannot_serve() {
+        // The {0,1,2,3} node set needs p > 3 and 6 invertible. A refusal must be
+        // a refusal, not a wrong value silently folded (`None`, never `Some`).
+        assert_eq!(eval_lagrange(&[1, 1, 1, 1], 0, 2), None);
+        assert_eq!(eval_lagrange(&[1, 1, 1, 1], 0, 3), None);
+        // Degree 5 has no precomputed denominators — refuse rather than guess.
+        assert_eq!(eval_lagrange(&[1, 2, 3, 4, 5, 6], 0, P97), None);
+    }
+
+    #[test]
+    fn fold_table_agrees_with_the_mle_kernel_recurrence() {
+        // The p-generic fold is the same recurrence as the crate's typed
+        // `mle_kernels::fold_mle_table`: lo + r·(hi − lo) on LSB-adjacent pairs.
+        let f: Vec<Fp> = vec![3, 1, 4, 1, 5, 9, 2, 6];
+        let r = 42;
+        let got = fold_table(&f, r, P97);
+        let want: Vec<Fp> = (0..4)
+            .map(|k| {
+                add_mod(f[2 * k], mul_mod(r, sub_mod(f[2 * k + 1], f[2 * k], P97), P97), P97)
+            })
+            .collect();
+        assert_eq!(got, want);
+        // Folding every coordinate is an MLE evaluation.
+        let point = [42, 17, 63];
+        let mut layer = f.clone();
+        for &r in point.iter() {
+            layer = fold_table(&layer, r, P97);
+        }
+        assert_eq!(layer, vec![mle_eval(&f, &point, P97)]);
+    }
+
+    #[test]
+    fn folded_prover_agrees_with_literal_mirror() {
+        // THE BINDING THAT SURVIVES THE OPTIMIZATION: the O(2^m) folded prover
+        // and the O(4^m) literal mirror of the Lean `roundSum (cubicForm …)`
+        // produce the same four evals in every round. Without this the speedup
+        // would have replaced the Lean-mirroring path instead of accelerating it.
+        for m in 1..=5usize {
+            let tabs = cubic_instance(m);
+            let chal: Vec<Fp> = (0..m).map(|i| (7 * i as u64 + 13) % P97).collect();
+            let mut state = tabs.clone();
+            for i in 0..m {
+                let folded = cubic_round_evals(&state, P97);
+                for (t, &got) in folded.iter().enumerate() {
+                    assert_eq!(
+                        got,
+                        cubic_round_sum_literal(&tabs, &chal, i, t as u64, P97),
+                        "m {m} round {i} t {t}"
+                    );
+                }
+                state = state.fold(chal[i], P97);
+            }
+        }
+    }
+
+    #[test]
+    fn cubic_round_sum_is_cubic_in_t() {
+        // The Lean `cubicRoundPoly_eval`, exercised: the four evals interpolate
+        // the round partial sum at points OFF the node set {0,1,2,3}.
+        let m = 4;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63, 5];
+        let mut state = tabs.clone();
+        for i in 0..m {
+            let h = cubic_round_evals(&state, P97);
+            for t in [4, 11, 60, 96] {
+                assert_eq!(
+                    eval_lagrange(&h, t, P97),
+                    Some(cubic_round_sum_literal(&tabs, &chal, i, t, P97)),
+                    "round {i} t {t}"
+                );
+            }
+            state = state.fold(chal[i], P97);
+        }
+    }
+
+    #[test]
+    fn cubic_chain_identities_hold_on_the_honest_transcript() {
+        let m = 4;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63, 5];
+        let proof = prove_cubic_sumcheck(&tabs, &chal, P97);
+        // roundSum_zero + cubicForm_cube_sum: h₀(0) + h₀(1) = the claim.
+        assert_eq!(
+            add_mod(proof.rounds[0][0], proof.rounds[0][1], P97),
+            proof.claim
+        );
+        // roundSum_succ: h_{k+1}(0) + h_{k+1}(1) = h_k(r_k).
+        for k in 0..m - 1 {
+            assert_eq!(
+                add_mod(proof.rounds[k + 1][0], proof.rounds[k + 1][1], P97),
+                eval_lagrange(&proof.rounds[k], chal[k], P97).unwrap(),
+                "chain link {k}"
+            );
+        }
+        // scChain_cubicHonest_final: the terminal value is the FACTORED combine.
+        assert_eq!(
+            eval_lagrange(&proof.rounds[m - 1], chal[m - 1], P97).unwrap(),
+            cubic_combine(&tabs.openings(&chal, P97), P97)
+        );
+    }
+
+    #[test]
+    fn cubic_prove_verify_round_trip() {
+        for m in 1..=6usize {
+            let tabs = cubic_instance(m);
+            let chal: Vec<Fp> = (0..m).map(|i| (11 * i as u64 + 3) % P97).collect();
+            let proof = prove_cubic_sumcheck(&tabs, &chal, P97);
+            assert!(
+                verify_cubic_sumcheck(&proof, |pt| tabs.openings(pt, P97), P97),
+                "m = {m}"
+            );
+        }
+    }
+
+    #[test]
+    fn cubic_tampered_round_message_fails() {
+        let m = 3;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63];
+        for i in 0..m {
+            for j in 0..4 {
+                let mut proof = prove_cubic_sumcheck(&tabs, &chal, P97);
+                let before = proof.rounds[i][j];
+                proof.rounds[i][j] = (before + 1) % P97;
+                // The mutation must actually be a mutation.
+                assert_ne!(proof.rounds[i][j], before, "round {i} eval {j} unmutated");
+                assert!(
+                    !verify_cubic_sumcheck(&proof, |pt| tabs.openings(pt, P97), P97),
+                    "tampered h_{i}({j}) must fail"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cubic_false_claim_and_wrong_oracle_fail() {
+        let m = 3;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63];
+        let good = prove_cubic_sumcheck(&tabs, &chal, P97);
+
+        let mut bad = good.clone();
+        bad.claim = (bad.claim + 1) % P97;
+        assert!(!verify_cubic_sumcheck(&bad, |pt| tabs.openings(pt, P97), P97));
+
+        // The terminal check has teeth: a different D table is a different claim.
+        let mut other = tabs.clone();
+        other.d[0] = (other.d[0] + 1) % P97;
+        assert_ne!(other.d, tabs.d, "the oracle swap must be a real swap");
+        assert!(!verify_cubic_sumcheck(
+            &good,
+            |pt| other.openings(pt, P97),
+            P97
+        ));
+    }
+
+    #[test]
+    fn no_message_passes_both_checks() {
+        // THE p3 PITFALL, REFUSED. Against a FALSE claim a prover has exactly two
+        // options for h₀(1), and this engine rejects both:
+        //   * the honest h₀(1) fails the ROUND check (h(0)+h(1) is the TRUE sum);
+        //   * the derived h₀(1) = claim − h(0) passes the round check by
+        //     construction — which is what p3 hands the verifier for free — and
+        //     then fails the TERMINAL check.
+        // A verifier that DERIVES h(1) has only the second branch and has made
+        // its round check a tautology.
+        let m = 3;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63];
+        let honest = prove_cubic_sumcheck(&tabs, &chal, P97);
+        let false_claim = (honest.claim + 1) % P97;
+
+        // Branch 1: honest messages, false claim.
+        let mut p1 = honest.clone();
+        p1.claim = false_claim;
+        assert_ne!(
+            add_mod(p1.rounds[0][0], p1.rounds[0][1], P97),
+            p1.claim,
+            "the honest round-0 check must genuinely disagree with the false claim"
+        );
+        assert!(!verify_cubic_sumcheck(&p1, |pt| tabs.openings(pt, P97), P97));
+
+        // Branch 2: the p3-style DERIVED h(1), which makes the round check pass.
+        let mut p2 = honest.clone();
+        p2.claim = false_claim;
+        let derived = sub_mod(false_claim, p2.rounds[0][0], P97);
+        assert_ne!(
+            derived, honest.rounds[0][1],
+            "the derived h(1) must differ from the honest one, or this test is a no-op"
+        );
+        p2.rounds[0][1] = derived;
+        assert_eq!(
+            add_mod(p2.rounds[0][0], p2.rounds[0][1], P97),
+            p2.claim,
+            "the derived message DOES pass the round check — that is the pitfall"
+        );
+        assert!(
+            !verify_cubic_sumcheck(&p2, |pt| tabs.openings(pt, P97), P97),
+            "the terminal check must catch what the round check cannot"
+        );
+    }
+
+    #[test]
+    fn cubic_malformed_shapes_rejected() {
+        let m = 3;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = vec![17, 42, 63];
+        let good = prove_cubic_sumcheck(&tabs, &chal, P97);
+
+        let mut proof = good.clone();
+        proof.rounds.pop();
+        assert!(!verify_cubic_sumcheck(
+            &proof,
+            |pt| tabs.openings(pt, P97),
+            P97
+        ));
+
+        let mut proof = good.clone();
+        proof.rounds[0][0] += P97; // non-canonical
+        assert!(!verify_cubic_sumcheck(
+            &proof,
+            |pt| tabs.openings(pt, P97),
+            P97
+        ));
+
+        let mut proof = good;
+        proof.challenges[1] += P97;
+        assert!(!verify_cubic_sumcheck(
+            &proof,
+            |pt| tabs.openings(pt, P97),
+            P97
+        ));
+    }
+
+    #[test]
+    fn folding_lifts_the_dimension_ceiling() {
+        // The literal mirror is O(4^m); the folded prover is O(2^m). At m = 16
+        // the mirror would be ~4·10⁹ MLE evaluations — this runs instantly, which
+        // is the whole point of wiring the fold.
+        let m = 16;
+        let tabs = cubic_instance(m);
+        let chal: Vec<Fp> = (0..m).map(|i| (13 * i as u64 + 7) % P97).collect();
+        let proof = prove_cubic_sumcheck(&tabs, &chal, P97);
+        assert_eq!(proof.rounds.len(), m);
+        assert!(verify_cubic_sumcheck(&proof, |pt| tabs.openings(pt, P97), P97));
+    }
+
+    #[test]
+    fn cubic_matmul_and_fraction_layer_instantiations() {
+        // The two consumers the Lean names as theorems, exercised numerically.
+        let m = 3;
+        let n = 1usize << m;
+        let base = cubic_instance(m);
+
+        // zkML matmul: eq·(Â·B̂ − Ĉ) is cubicForm with D ≡ 1 and C negated
+        // (`cubicForm_matmul`).
+        let matmul = CubicTables {
+            e: base.e.clone(),
+            a: base.a.clone(),
+            b: base.b.clone(),
+            c: base.c.iter().map(|&v| sub_mod(0, v, P97)).collect(),
+            d: vec![1; n],
+        };
+        let point = [17, 42, 63];
+        let o = matmul.openings(&point, P97);
+        let direct = mul_mod(
+            mle_eval(&base.e, &point, P97),
+            sub_mod(
+                mul_mod(
+                    mle_eval(&base.a, &point, P97),
+                    mle_eval(&base.b, &point, P97),
+                    P97,
+                ),
+                mle_eval(&base.c, &point, P97),
+                P97,
+            ),
+            P97,
+        );
+        assert_eq!(cubic_combine(&o, P97), direct, "cubicForm_matmul");
+
+        // GKR fraction-tree layer: the head table is the eq weights b ↦ χ_b(z)
+        // (`cubicForm_fraction_layer`; `Selvage.eqMle_eq_mle` says its MLE is
+        // eq(z, ·)).
+        let z = [5, 11, 90];
+        let eq_table: Vec<Fp> = (0..n).map(|b| chi_eval(b, &z, P97)).collect();
+        let frac = CubicTables {
+            e: eq_table,
+            a: base.a.clone(),
+            b: base.b.clone(),
+            c: base.c.clone(),
+            d: base.d.clone(),
+        };
+        // eqMle_fold: the eq-weighted hypercube sum is the MLE at z. Here the
+        // claim of the fraction layer is the numerator word evaluated at z.
+        let word: Vec<Fp> = (0..n)
+            .map(|k| {
+                add_mod(
+                    mul_mod(base.a[k], base.b[k], P97),
+                    mul_mod(base.c[k], base.d[k], P97),
+                    P97,
+                )
+            })
+            .collect();
+        assert_eq!(frac.claim(P97), mle_eval(&word, &z, P97), "eqMle_fold");
+
+        let chal: Vec<Fp> = vec![3, 71, 22];
+        let proof = prove_cubic_sumcheck(&frac, &chal, P97);
+        assert!(verify_cubic_sumcheck(&proof, |pt| frac.openings(pt, P97), P97));
     }
 }
