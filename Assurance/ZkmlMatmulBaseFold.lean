@@ -99,8 +99,8 @@ noncomputable def matmulBaseFoldIorAlgebraicBudget
   ((μ + κ : ℕ) : ℝ) * (3 / Fintype.card F) +
   ((κ + ν : ℕ) : ℝ) * (3 / Fintype.card F)
 
-/-- The three opening dimensions sum to twice the total bit width. -/
 omit [Field F] [DecidableEq F] in
+/-- The three opening dimensions sum to twice the total bit width. -/
 theorem matmulBaseFoldIorAlgebraicBudget_eq :
     matmulBaseFoldIorAlgebraicBudget F μ κ ν =
       (2 * ((μ + κ + ν : ℕ) : ℝ)) * (3 / Fintype.card F) := by
