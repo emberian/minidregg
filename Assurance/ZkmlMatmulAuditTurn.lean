@@ -338,9 +338,9 @@ theorem forged_output_refused :
 
 /-- info: 'Minidregg.Assurance.ZkmlMatmulAuditTurn.receipt_core_relation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms receipt_core_relation
-/-- info: 'Minidregg.Assurance.ZkmlMatmulAuditTurn.durable_install' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ZkmlMatmulAuditTurn.durable_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms durable_install
-/-- info: 'Minidregg.Assurance.ZkmlMatmulAuditTurn.audit_tamper_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ZkmlMatmulAuditTurn.audit_tamper_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms audit_tamper_rejected
 
 end
