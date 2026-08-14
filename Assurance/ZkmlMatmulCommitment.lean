@@ -23,13 +23,14 @@ open Minidregg.Selvage
 
 section Flatten
 
-variable {F : Type*} [CommRing F] {μ ν : ℕ}
+variable {F : Type} [CommRing F] {μ ν : ℕ}
 
 /-- Flatten a curried two-block table along `Fin.appendEquiv`, row block first. -/
 def flatten₂ (f : (Fin μ → Bool) → (Fin ν → Bool) → F) :
     (Fin (μ + ν) → Bool) → F :=
   fun b => f (rowHalf μ ν b) (colHalf μ ν b)
 
+omit [CommRing F] in
 @[simp] theorem flatten₂_append (f : (Fin μ → Bool) → (Fin ν → Bool) → F)
     (a : Fin μ → Bool) (b : Fin ν → Bool) :
     flatten₂ f (Fin.append a b) = f a b := by
@@ -70,7 +71,7 @@ structure MatmulMleClaims (RootA RootB RootC F : Type*) (μ κ ν : ℕ) where
 
 section Honest
 
-variable {F RootA RootB RootC OpA OpB OpC ιA ιB ιC : Type*}
+variable {F : Type} {RootA RootB RootC OpA OpB OpC ιA ιB ιC : Type*}
 variable [Field F] {μ κ ν : ℕ}
 
 /-- Construct the three exact claims for a contraction transcript. The output claim
@@ -123,7 +124,7 @@ end Honest
 
 section Binding
 
-variable {F RootA RootB RootC OpA OpB OpC ιA ιB ιC : Type*}
+variable {F : Type} {RootA RootB RootC OpA OpB OpC ιA ιB ιC : Type*}
 variable [Field F] [DecidableEq F]
 variable [Fintype ιA] [Fintype ιB] [Fintype ιC]
 variable {μ κ ν : ℕ}
@@ -177,10 +178,7 @@ open MatmulExample
 /-- Four distinct F7 points, enough for a two-variable BaseFold word. -/
 def dom₇₄ : Fin 4 ↪ ZMod 7 where
   toFun i := i.val
-  inj' := by
-    intro a b h
-    apply Fin.ext
-    exact_mod_cast h
+  inj' := by decide
 
 /-- All three honest contraction claims are inhabited over identity commitments. -/
 theorem honest_three_claims_hold :
