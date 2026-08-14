@@ -21,7 +21,7 @@ namespace Minidregg.Assurance
 open Minidregg.Selvage
 open Polynomial
 
-variable {F RootA RootB RootC : Type*}
+variable {F : Type} {RootA RootB RootC : Type*}
 variable [Field F] [Fintype F] [DecidableEq F]
 variable {μ κ ν : ℕ}
 
@@ -100,6 +100,7 @@ noncomputable def matmulBaseFoldIorAlgebraicBudget
   ((κ + ν : ℕ) : ℝ) * (3 / Fintype.card F)
 
 /-- The three opening dimensions sum to twice the total bit width. -/
+omit [Field F] [DecidableEq F] in
 theorem matmulBaseFoldIorAlgebraicBudget_eq :
     matmulBaseFoldIorAlgebraicBudget F μ κ ν =
       (2 * ((μ + κ + ν : ℕ) : ℝ)) * (3 / Fintype.card F) := by
