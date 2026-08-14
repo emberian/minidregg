@@ -112,6 +112,7 @@ specific nonzero field element, so `spartanTerminal_eq_honest` is not an equatio
 constants.
 -/
 import Assurance.ZkmlMatmulCommitment
+import Assurance.ZkmlLowRankUpdate
 
 namespace Minidregg.Assurance
 
@@ -132,9 +133,11 @@ variable {s t : ℕ}
 /-- One R1CS coefficient matrix, as a table on (constraint cube) × (variable cube). -/
 abbrev R1CSMatrix (F : Type) (s t : ℕ) := (Fin s → Bool) → (Fin t → Bool) → F
 
-/-- Matrix times witness: `(Az)(a) = Σ_y A a y · z y`. -/
-def matVec (A : R1CSMatrix F s t) (z : (Fin t → Bool) → F) : (Fin s → Bool) → F :=
-  fun a => ∑ y, A a y * z y
+/-! `matVec` — `(Az)(a) = Σ_y A a y · z y` — is NOT defined here. It is
+`Assurance/ZkmlLowRankUpdate.lean`'s, imported: the low-rank file needed the same object for
+`matVec_matmulTable` ("the cheap evaluation order is legal") and defining a second one would have
+been a twin that agrees today. This file's first draft did define one; the umbrella build caught
+it as a name clash, which is the cheapest possible way to be told. -/
 
 /-- The witness presented as a one-column matrix — the `ν = 0` right factor. -/
 def asColumn (z : (Fin t → Bool) → F) : (Fin t → Bool) → (Fin 0 → Bool) → F := fun y _ => z y
