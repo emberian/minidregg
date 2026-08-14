@@ -111,6 +111,19 @@ stage:
   decoder is deterministic but not claimed uniform; the adaptive work-space
   ROM coupling, padding/byte codec, and deployed-permutation hop remain open.
 
+- `Selvage/BaseFoldBcsSpongeGame.lean` now places that exact ordered receipt
+  schedule inside the `Distinguisher` type quantified by the work-indexed
+  sponge game.  For every Boolean verdict and every hypothetical answer trace,
+  its primitive work is proved equal to `transcriptPrimitiveWork`; the named
+  BaseFold ROM target therefore specializes directly to `romError` at that
+  exact ledger.  This is a receipt-indexed game adapter, not an online-prover
+  model: producing each next round from returned challenges and the adaptive
+  whole-work-space eager/deferred coupling are still open.  Exact
+  committed-source persvati run
+  `E-20260814T083721-54109-persvati-3702141b42c8-lake` built the adapter and
+  conditional ROM specialization in 2,238 jobs with command and
+  source-integrity exits zero.
+
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
 output, three root-bound MLE claims, an accepted contraction sumcheck, and its

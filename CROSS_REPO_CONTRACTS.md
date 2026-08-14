@@ -165,6 +165,15 @@ schedule.  This does not yet prove modulo query decoding uniform, the adaptive
 work-space sponge/RO coupling, padding or byte-codec refinement, or the deployed
 Poseidon2 permutation idealization.
 
+`Selvage/BaseFoldBcsSpongeGame.lean` makes the next boundary explicit rather
+than leaving the construction outside the security game.  The exact ordered
+challenge/query list is now a `Distinguisher` for any answer verdict, its
+worst-case `PrimitiveWorkBound` is exactly the absorbed-block receipt ledger,
+and the still-conditional `romConstructionTarget` specializes to the concrete
+BaseFold `romError` at that ledger.  The adapter is intentionally indexed by a
+fixed candidate receipt; it does not claim the missing online-prover semantics
+or adaptive eager/deferred coin-space reindexing.
+
 Evidence does not authorize a request.  minidregg admits it only under the
 request-indexed disclosure/audit policy of the same `CommittedTurn` whose
 authority, effects, pre-state, post-state, and delta it already owns.
