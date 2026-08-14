@@ -785,6 +785,126 @@ a reader of `ir2_three_regimes` does not read `34 / 73 / 130` as covering both
 grinds; it covers one, and the other is off. -/
 theorem ir2_powBits_is_the_query_knob_only : ir2.powBits = 16 := rfl
 
+/-! ## §7b ⚑ THE BLOWUP DROP, RE-DERIVED — what `lb = 6 → 2` costs in queries
+
+`zkml-research/notes/blowup-drop.md`. Until 2026-08-14 `log_blowup = 2` was believed
+unreachable for any descriptor carrying the degree-7 Poseidon2 chip. That refusal was
+a row-order bug in `p3-fri`'s quotient-extrapolation path, not a soundness bound
+(`breadstuffs/circuit/tests/fri_extrapolation_row_order.rs` settles it by
+construction). With it fixed, the blowup is a free knob again — so the question is
+what the drop costs on THIS column.
+
+**Lower blowup needs more queries. It does not need more than the ladder already
+had, and it does not lose a bit anywhere.** Recomputed here from scratch, two-sided,
+at all three regimes rather than assumed from the `q·lb` product:
+
+| config | UDR | JBR | CBR |
+|---|---:|---:|---:|
+| deployed `(6, 19, pow 16)` | 34 | 73 | 130 |
+| **`(2, 57, pow 16)`** | **54** | **73** | **130** |
+
+`q = 57` is exactly the parity point the measurement ladder already used — but the
+ladder set it from the two *linear* columns (`q·lb` at CBR, `q·lb/2` at JBR), where
+`19·6 = 57·2`. UDR is not linear in `q·lb`, and on UDR the drop is **+20 bits**:
+`((1+ρ)/2)²` degrades much more slowly than `ρ` as `ρ` grows, so at a fixed product
+the low-blowup/high-query end is strictly the sounder one. **UDR is the only
+unconditionally proven regime in this file** (`udr_reportable`, `cbr_not_reportable`),
+which makes that the column the drop actually improves.
+
+⚠ And a query is nearly free on the prover. Measured in
+`zkml-research/notes/phase-profile.md`: the whole `query/open` phase is **0.068 ms of
+an 82.84 ms prove (0.08%)**, and it is flat in blowup across `lb = 3…8`
+(0.049–0.073 ms). Tripling `q` to hold the column costs about **0.14 ms**. What the
+drop pays for the queries is *wire bytes and verifier time*, priced in
+`breadstuffs/circuit/tests/fri_blowup_global_knob_survey.rs` §1b — never prover time.
+
+The `lb ≤ 3` rungs are also the only ones with room at the two-adicity ceiling
+(`max rows = 2^(TWO_ADICITY − lb)`), and they raise the commit-phase `ε_C ∝ ρ^{−3/2}`
+column too. Every soundness column this repo models moves the same way. -/
+
+/-- The candidate: the deployed IR-v2 knobs with the blowup dropped four rungs and
+the query count set by the ladder. The grind is UNCHANGED at 16 — the drop is a
+blowup/query trade, not a grind trade. -/
+def lb2Drop : FriQueryCfg := { logBlowup := 2, numQueries := 57, powBits := 16 }
+
+/-- ⚑ **`(2, 57, pow 16)` at all three regimes: 54 / 73 / 130.** Two-sided, so each
+is a measurement and not a bound that could be loosened. Compare `ir2_three_regimes`:
+`34 / 73 / 130`. -/
+theorem lb2_drop_three_regimes :
+    (queryErr .UDR lb2Drop).Bits 54
+      ∧ (queryErr .JBR lb2Drop).Bits 73
+      ∧ (queryErr .CBR lb2Drop).Bits 130 := by
+  refine ⟨⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop],
+          by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop]⟩,
+         ⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop],
+          by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop]⟩,
+         ⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop],
+          by norm_num [queryErr, survivalSq, FriQueryCfg.rate, lb2Drop]⟩⟩
+
+/-- ⚑ **THE DROP LOSES NOTHING, AT EVERY REGIME.** Stated over ALL of `Regime` rather
+than at a chosen one, because "at parity" claims in this repo have been made at
+whichever column flattered them. There is no regime at which `(2, 57)` is worse than
+the deployed point. -/
+theorem lb2_drop_is_at_or_above_the_deployed_column (r : Regime) :
+    (queryErr r lb2Drop).errSq ≤ (queryErr r ir2).errSq := by
+  cases r <;> norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2, lb2Drop]
+
+/-- **And 56 queries is not enough.** The pair that makes the count above a
+*derivation* rather than a choice: at JBR (and at CBR, which moves with it) one fewer
+query drops below the deployed column. So `57` is minimal, not padded — a padded rung
+would let a cost comparison charge the extra soundness to the blowup. -/
+theorem lb2_drop_query_count_is_minimal :
+    (queryErr .JBR ir2).errSq
+        < (queryErr .JBR { logBlowup := 2, numQueries := 56, powBits := 16 }).errSq
+      ∧ (queryErr .CBR ir2).errSq
+        < (queryErr .CBR { logBlowup := 2, numQueries := 56, powBits := 16 }).errSq := by
+  constructor <;> norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
+/-- ⚑ **On the only unconditionally proven regime the drop is a STRICT improvement**
+— `34 → 54` bits, twenty of them, for zero grind and 38 extra queries costing ~0.14 ms
+of prover. The two `≤`s of `lb2_drop_is_at_or_above_the_deployed_column` are equalities
+at JBR and CBR; this is the one that is not. -/
+theorem lb2_drop_strictly_improves_the_proven_regime :
+    (queryErr .UDR lb2Drop).errSq < (queryErr .UDR ir2).errSq := by
+  norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2, lb2Drop]
+
+/-! ### The grind-free measurement pair
+
+A wall-clock comparison at `pow = 16` is dominated by grind, which is
+blowup-independent (12.8 ms mean, `zkml-research/notes/grind-phase.md`) and carries
+run-to-run variance that swamps the difference being measured. The honest fix is to
+measure at `pow = 0` — but then BOTH ends need their query counts recomputed, or the
+comparison silently moves the soundness as well as the blowup. These two are the
+`pow = 0` points that hold every regime at or above the deployed column. -/
+
+/-- The `pow = 0` control at the DEPLOYED blowup: 36 queries, not 19. -/
+def lb6Pow0 : FriQueryCfg := { logBlowup := 6, numQueries := 36, powBits := 0 }
+
+/-- The `pow = 0` point at the dropped blowup: 73 queries, not 57. The `q` ratio is
+`2.03×` here against `3.00×` at `pow = 16`, because switching the grind off costs the
+low-blowup end fewer queries — a grind bit is worth 17 queries at UDR at `lb = 6`
+(`sixteen_grind_bits_cost_seventeen_queries_at_UDR`) and fewer as `ρ` grows. -/
+def lb2Pow0 : FriQueryCfg := { logBlowup := 2, numQueries := 73, powBits := 0 }
+
+/-- ⚑ **Both ends of the grind-free measurement are at or above the deployed column,
+at every regime.** Without this the `pow = 0` speedup number would be a comparison of
+two different systems. -/
+theorem the_grind_free_pair_is_at_or_above_the_deployed_column (r : Regime) :
+    (queryErr r lb6Pow0).errSq ≤ (queryErr r ir2).errSq
+      ∧ (queryErr r lb2Pow0).errSq ≤ (queryErr r ir2).errSq := by
+  cases r <;>
+    exact ⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2, lb6Pow0],
+           by norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2, lb2Pow0]⟩
+
+/-- **And both are tight** — one query fewer at either end drops below the deployed
+column, at the regime that binds it (UDR for the `lb = 6` end, JBR for `lb = 2`). -/
+theorem the_grind_free_pair_is_tight :
+    (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 35, powBits := 0 }).errSq
+      ∧ (queryErr .JBR ir2).errSq
+        < (queryErr .JBR { logBlowup := 2, numQueries := 72, powBits := 0 }).errSq := by
+  constructor <;> norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
 /-! ## §8 Axiom footprint
 
 Kernel-checked throughout: the three standard axioms and nothing else. In
@@ -817,5 +937,14 @@ rational arithmetic that `norm_num` closes in the kernel. -/
 #guard_msgs (whitespace := lax) in #print axioms the_two_walls_move_on_different_levers
 /-- info: 'Minidregg.Assurance.prodV1_udr_agrees_with_metatheory' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms prodV1_udr_agrees_with_metatheory
+/-- info: 'Minidregg.Assurance.lb2_drop_three_regimes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lb2_drop_three_regimes
+/-- info: 'Minidregg.Assurance.lb2_drop_is_at_or_above_the_deployed_column' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lb2_drop_is_at_or_above_the_deployed_column
+/-- info: 'Minidregg.Assurance.lb2_drop_query_count_is_minimal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lb2_drop_query_count_is_minimal
+/-- info: 'Minidregg.Assurance.the_grind_free_pair_is_at_or_above_the_deployed_column' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms the_grind_free_pair_is_at_or_above_the_deployed_column
 
 end Minidregg.Assurance
