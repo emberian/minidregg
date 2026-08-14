@@ -536,6 +536,176 @@ pub fn verify_cubic_sumcheck(
     running == cubic_combine(&o, p)
 }
 
+// ─── The zkML matmul CONTRACTION, driven over the cubic engine ──────────────
+//
+// `Assurance/ZkmlMatmulSumcheck.lean` is the Lean side and the only authority on
+// what these objects mean:
+//
+//   `mle₂_contraction`   Ĉ(x,y) = Σ_p Â(x,p)·B̂(p,y)  at EVERY (x,y)
+//   `cubicForm_contraction`  the instance: head E ≡ 1, pair (g,h), C ≡ 0, D ≡ 1
+//   `matmul_sumcheck_soundness`  ≤ (μ+ν)/|F| + κ·3/|F|
+//
+// Two things this code is NOT:
+//
+// * It is **not** the Hadamard face. `cubicForm_hadamard` (renamed — it was called
+//   `cubicForm_matmul`) is `eq·(Â·B̂ − Ĉ)`, a POINTWISE product; a contraction sums
+//   an inner index that appears in neither output coordinate.
+// * It is **not** a complete argument. `[MATMUL-pcs]`: the verifier must OPEN
+//   `Â(x,·)` and `B̂(·,y)` at the terminal point, and there is no multilinear PCS
+//   here — `verify_matmul` takes the two openings from a closure, which in the
+//   tests is honest evaluation. Everything the openings would cost is unpriced.
+
+/// A matmul claim on cubes: `A` is `2^mu × 2^kappa`, `B` is `2^kappa × 2^nu`, both
+/// row-major with LSB-first cube indices (index bit `i` = cube coordinate `i`, the
+/// convention `bitsToIdx` pins on the Lean side).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatmulClaim {
+    pub mu: usize,
+    pub kappa: usize,
+    pub nu: usize,
+    /// `a[row][inner]`
+    pub a: Vec<Vec<Fp>>,
+    /// `b[inner][col]`
+    pub b: Vec<Vec<Fp>>,
+}
+
+impl MatmulClaim {
+    fn check_shape(&self) {
+        assert_eq!(self.a.len(), 1 << self.mu, "A has 2^mu rows");
+        assert!(
+            self.a.iter().all(|r| r.len() == 1 << self.kappa),
+            "every A row has 2^kappa entries"
+        );
+        assert_eq!(self.b.len(), 1 << self.kappa, "B has 2^kappa rows");
+        assert!(
+            self.b.iter().all(|r| r.len() == 1 << self.nu),
+            "every B row has 2^nu entries"
+        );
+    }
+
+    /// The TRUE output table `C = A·B` — the Lean `matmulTable`. This is the
+    /// `m·k·n` work the prover must do anyway to know its own answer; the argument
+    /// below is what replaces proving it gate by gate.
+    pub fn output(&self, p: u64) -> Vec<Vec<Fp>> {
+        self.check_shape();
+        (0..1 << self.mu)
+            .map(|i| {
+                (0..1 << self.nu)
+                    .map(|j| {
+                        (0..1 << self.kappa).fold(0, |acc, q| {
+                            add_mod(acc, mul_mod(self.a[i][q] % p, self.b[q][j] % p, p), p)
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// `Â(x, ·)` on the inner cube — the Lean `rowPartial`.
+    pub fn row_partial(&self, x: &[Fp], p: u64) -> Vec<Fp> {
+        self.check_shape();
+        assert_eq!(x.len(), self.mu, "outer row point has mu coordinates");
+        (0..1 << self.kappa)
+            .map(|q| {
+                (0..1 << self.mu).fold(0, |acc, i| {
+                    add_mod(acc, mul_mod(self.a[i][q] % p, chi_eval(i, x, p), p), p)
+                })
+            })
+            .collect()
+    }
+
+    /// `B̂(·, y)` on the inner cube — the Lean `colPartial`.
+    pub fn col_partial(&self, y: &[Fp], p: u64) -> Vec<Fp> {
+        self.check_shape();
+        assert_eq!(y.len(), self.nu, "outer column point has nu coordinates");
+        (0..1 << self.kappa)
+            .map(|q| {
+                (0..1 << self.nu).fold(0, |acc, j| {
+                    add_mod(acc, mul_mod(self.b[q][j] % p, chi_eval(j, y, p), p), p)
+                })
+            })
+            .collect()
+    }
+
+    /// The five cubic tables at the bound outer point: `E ≡ 1`, the product pair,
+    /// `C ≡ 0`, `D ≡ 1`. The head is CONSTANT — there is no `eq` factor, because the
+    /// outer indices were bound before the sumcheck started.
+    pub fn tables(&self, x: &[Fp], y: &[Fp], p: u64) -> CubicTables {
+        let n = 1usize << self.kappa;
+        CubicTables {
+            e: vec![1 % p; n],
+            a: self.row_partial(x, p),
+            b: self.col_partial(y, p),
+            c: vec![0; n],
+            d: vec![1 % p; n],
+        }
+    }
+}
+
+/// The two-block multilinear extension of a `2^mu × 2^nu` table — the Lean `mle₂`.
+/// This is how the VERIFIER computes its target from the claimed output table; it
+/// never takes the prover's word for the total.
+pub fn mle2_eval(table: &[Vec<Fp>], x: &[Fp], y: &[Fp], p: u64) -> Fp {
+    let rows = table.len();
+    assert!(rows == 1 << x.len(), "table rows must be 2^|x|");
+    let mut acc = 0;
+    for (i, row) in table.iter().enumerate() {
+        assert!(row.len() == 1 << y.len(), "table cols must be 2^|y|");
+        let cx = chi_eval(i, x, p);
+        for (j, &v) in row.iter().enumerate() {
+            acc = add_mod(acc, mul_mod(mul_mod(v % p, cx, p), chi_eval(j, y, p), p), p);
+        }
+    }
+    acc
+}
+
+/// The honest contraction prover: fold the two operands at the outer point, then
+/// run the folded cubic prover on the inner cube. Work is
+/// `O(2^(mu+kappa) + 2^(kappa+nu))` for the folding and `O(2^kappa)` for the rounds
+/// — the `m·k·n` contraction itself is NOT re-done here.
+pub fn prove_matmul(
+    claim: &MatmulClaim,
+    x: &[Fp],
+    y: &[Fp],
+    challenges: &[Fp],
+    p: u64,
+) -> CubicSumcheckProof {
+    prove_cubic_sumcheck(&claim.tables(x, y, p), challenges, p)
+}
+
+/// The contraction verifier, fail-closed.
+///
+/// 1. The target is recomputed from the CLAIMED output table (`mle2_eval`), never
+///    read from the proof: a prover that sends a total the claimed table does not
+///    have is rejected before any round is examined.
+/// 2. The rounds are the landed degree-3 verifier, `h(1)` read from the wire.
+/// 3. The terminal check combines FIVE openings, of which three are the constants
+///    `1, 0, 1` the verifier supplies itself. Only two are oracle openings, and
+///    `open_gh` stands for the missing PCS (`[MATMUL-pcs]`).
+///
+/// Runs; does not verify in the formal sense — there is no semantics of Rust.
+pub fn verify_matmul(
+    claimed_output: &[Vec<Fp>],
+    x: &[Fp],
+    y: &[Fp],
+    proof: &CubicSumcheckProof,
+    open_gh: impl Fn(&[Fp]) -> (Fp, Fp),
+    p: u64,
+) -> bool {
+    let target = mle2_eval(claimed_output, x, y, p);
+    if proof.claim != target {
+        return false;
+    }
+    verify_cubic_sumcheck(
+        proof,
+        |r| {
+            let (g, h) = open_gh(r);
+            [1 % p, g, h, 0, 1 % p]
+        },
+        p,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,5 +1293,203 @@ mod tests {
         let chal: Vec<Fp> = vec![3, 71, 22];
         let proof = prove_cubic_sumcheck(&frac, &chal, P97);
         assert!(verify_cubic_sumcheck(&proof, |pt| frac.openings(pt, P97), P97));
+    }
+
+    // ── The zkML matmul contraction ────────────────────────────────────────
+
+    /// A deterministic pseudo-random matmul instance over BabyBear.
+    fn matmul_instance(mu: usize, kappa: usize, nu: usize, seed: u64) -> MatmulClaim {
+        let mut s = seed;
+        let mut next = move || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (s >> 33) % P
+        };
+        let a: Vec<Vec<Fp>> = (0..1 << mu)
+            .map(|_| (0..1 << kappa).map(|_| next()).collect())
+            .collect();
+        let b: Vec<Vec<Fp>> = (0..1 << kappa)
+            .map(|_| (0..1 << nu).map(|_| next()).collect())
+            .collect();
+        MatmulClaim {
+            mu,
+            kappa,
+            nu,
+            a,
+            b,
+        }
+    }
+
+    /// `Assurance/ZkmlMatmulSumcheck.lean`'s `mle₂_contraction`, checked numerically
+    /// OFF the cube: the extension of the true output at a random `(x,y)` equals the
+    /// inner product of the two folded tables. The Lean statement is the theorem;
+    /// this is the seam agreeing with it.
+    #[test]
+    fn matmul_contraction_identity_off_cube() {
+        let claim = matmul_instance(2, 3, 2, 7);
+        let x = [123456789, 987654321];
+        let y = [555555555, 42];
+        let out = claim.output(P);
+        let g = claim.row_partial(&x, P);
+        let h = claim.col_partial(&y, P);
+        let inner = (0..g.len()).fold(0, |acc, q| add_mod(acc, mul_mod(g[q], h[q], P), P));
+        assert_eq!(mle2_eval(&out, &x, &y, P), inner, "mle₂_contraction");
+        // ...and the cube corners still read the table (mle₂_agrees).
+        assert_eq!(mle2_eval(&out, &[0, 0], &[1, 0], P), out[0][1]);
+    }
+
+    /// The contraction is NOT the Hadamard product — `matmul_is_not_hadamard`, in
+    /// Rust, so a reader of this module cannot re-make the naming mistake.
+    #[test]
+    fn matmul_is_not_hadamard() {
+        let claim = matmul_instance(1, 1, 1, 11);
+        let out = claim.output(P);
+        let hadamard = mul_mod(claim.a[0][0], claim.b[0][0], P);
+        assert_ne!(out[0][0], hadamard);
+    }
+
+    #[test]
+    fn matmul_honest_proof_verifies() {
+        let claim = matmul_instance(2, 4, 3, 99);
+        let x = [11, 22];
+        let y = [33, 44, 55];
+        let out = claim.output(P);
+        let tabs = claim.tables(&x, &y, P);
+        let chal: Vec<Fp> = vec![101, 202, 303, 404];
+        let proof = prove_matmul(&claim, &x, &y, &chal, P);
+        assert_eq!(proof.claim, mle2_eval(&out, &x, &y, P), "claim IS Ĉ(x,y)");
+        assert!(verify_matmul(
+            &out,
+            &x,
+            &y,
+            &proof,
+            |r| (mle_eval(&tabs.a, r, P), mle_eval(&tabs.b, r, P)),
+            P
+        ));
+    }
+
+    /// A FORGED output table is rejected, and the mutation is asserted to be real
+    /// first so this cannot decay into a test of the honest table. Two adversaries:
+    /// the lazy one keeps the honest total (rejected on the target check), the
+    /// serious one sends the total its forged table actually has (rejected at round
+    /// 0's boolean check, because the honest round messages do not sum to it).
+    #[test]
+    fn matmul_forged_output_rejected() {
+        let claim = matmul_instance(2, 4, 2, 5);
+        let x = [7, 9];
+        let y = [13, 17];
+        let out = claim.output(P);
+        let mut forged = out.clone();
+        forged[1][0] = add_mod(forged[1][0], 1, P);
+        assert_ne!(forged[1][0], out[1][0], "the mutation must be real");
+        let tabs = claim.tables(&x, &y, P);
+        let chal: Vec<Fp> = vec![21, 22, 23, 24];
+        let open = |r: &[Fp]| (mle_eval(&tabs.a, r, P), mle_eval(&tabs.b, r, P));
+
+        let honest = prove_matmul(&claim, &x, &y, &chal, P);
+        assert!(
+            !verify_matmul(&forged, &x, &y, &honest, open, P),
+            "lazy forgery: the target no longer matches the claim"
+        );
+
+        let mut matched = honest.clone();
+        matched.claim = mle2_eval(&forged, &x, &y, P);
+        assert_ne!(matched.claim, honest.claim, "the forged target must differ");
+        assert!(
+            !verify_matmul(&forged, &x, &y, &matched, open, P),
+            "matched forgery: round 0's boolean check fails"
+        );
+    }
+
+    /// ⚑ The contraction instance rides a degree-3 wire with a degree-2 message:
+    /// the third finite difference is ZERO in every round (the head is constant and
+    /// the second pair is dead) while the second is not. Both halves are theorems in
+    /// `Assurance/ZkmlMatmulConformance.lean` (`matmulRounds_are_not_cubic`,
+    /// `matmulRounds_are_quadratic`); this is the same fact on the engine.
+    #[test]
+    fn matmul_message_is_quadratic_on_a_cubic_wire() {
+        let claim = matmul_instance(1, 3, 1, 31);
+        let x = [111];
+        let y = [222];
+        let mut state = claim.tables(&x, &y, P);
+        let chal: Vec<Fp> = vec![5, 6, 7];
+        for &r in chal.iter() {
+            let h = cubic_round_evals(&state, P);
+            let third = sub_mod(
+                add_mod(h[3], mul_mod(3, h[1], P), P),
+                add_mod(mul_mod(3, h[2], P), h[0], P),
+                P,
+            );
+            assert_eq!(third, 0, "no cubic term at the contraction instance");
+            let second = sub_mod(add_mod(h[2], h[0], P), mul_mod(2, h[1], P), P);
+            assert_ne!(second, 0, "but the message is genuinely quadratic");
+            state = state.fold(r, P);
+        }
+    }
+
+    /// **The measured comparison against the gate route.** MNIST layer 1 is
+    /// `[2,784]·[784,100]`, padded to `[2,1024]·[1024,128]`
+    /// (`Theory/ZkmlMatmulSum.lean`'s `padded_contraction` is why that is the same
+    /// claim). The AIR route emits one gate per DSL node — `m·n·(2k+2)` — which is
+    /// 314 000 gates unpadded and 524 800 padded, at a measured ≈52 bytes/gate of
+    /// descriptor JSON. This route sends `κ` round messages of four field elements.
+    ///
+    /// What this does NOT measure, and must not be quoted as if it did:
+    /// `[MATMUL-pcs]`, the two multilinear openings, which do not exist yet.
+    #[test]
+    fn matmul_at_mnist_layer_one_size() {
+        let claim = matmul_instance(1, 10, 7, 2026);
+        let x = [111111111];
+        let y = [222222222, 3, 5, 7, 11, 13, 17];
+        let chal: Vec<Fp> = (0..10).map(|i| 1000003 + i as u64).collect();
+
+        let t0 = std::time::Instant::now();
+        let out = claim.output(P);
+        let t_out = t0.elapsed();
+
+        // Split the prover, because "prove" hides two very different costs: binding
+        // the outer indices (a partial evaluation over the whole operand) and the
+        // sumcheck rounds themselves.
+        let t1 = std::time::Instant::now();
+        let tabs = claim.tables(&x, &y, P);
+        let t_bind = t1.elapsed();
+        let t1b = std::time::Instant::now();
+        let proof = prove_cubic_sumcheck(&tabs, &chal, P);
+        let t_rounds = t1b.elapsed();
+        let t_prove = t_bind + t_rounds;
+        let t2 = std::time::Instant::now();
+        let ok = verify_matmul(
+            &out,
+            &x,
+            &y,
+            &proof,
+            |r| (mle_eval(&tabs.a, r, P), mle_eval(&tabs.b, r, P)),
+            P,
+        );
+        let t_verify = t2.elapsed();
+        assert!(ok);
+
+        // Transcript: the claim, κ messages of 4 nodes, κ challenges.
+        let felts = 1 + 4 * proof.rounds.len() + proof.challenges.len();
+        assert_eq!(felts, 51);
+        let bytes = felts * 8;
+        let air_gates_unpadded = 2 * 100 * (2 * 784 + 2);
+        let air_gates_padded = 2 * 128 * (2 * 1024 + 2);
+        assert_eq!(air_gates_unpadded, 314_000);
+        assert_eq!(air_gates_padded, 524_800);
+        println!(
+            "matmul [2,1024]x[1024,128]: output {:?}, bind-outer {:?}, rounds {:?}, \
+             prove {:?}, verify {:?}; \
+             transcript {felts} field elements = {bytes} bytes + 2 UNPRICED openings; \
+             AIR route {air_gates_unpadded} gates unpadded / {air_gates_padded} padded \
+             (~{} MB of descriptor at 52 B/gate)",
+            t_out,
+            t_bind,
+            t_rounds,
+            t_prove,
+            t_verify,
+            air_gates_padded * 52 / 1_000_000
+        );
     }
 }
