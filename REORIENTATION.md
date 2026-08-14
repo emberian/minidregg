@@ -130,11 +130,13 @@ stage:
   arbitrary block lists, preserves the causal prefix and challenge/query
   domain laws, and instantiates literal padded construction queries.  Its
   exact receipt cost is `transcriptPrimitiveWork + m + queryCount`: one added
-  permutation call per public draw.  This closes block-level padding only;
-  canonical byte packing/decoding and transport of the padded profile through
-  the accepted strict ROM ledger remain explicit.  Exact committed-source
-  persvati run `E-20260814T100743-52177-persvati-1ed0cf08ddf2-lake` built the
-  target in 2,240 jobs with command and source-integrity exits zero.
+  permutation call per public draw.  The padded schedule is now itself a
+  work-bounded `Distinguisher`; `strictPaddedAcceptedRawRomLedger` carries it
+  through the accepted joint-query/raw-IOR/ROM ledger with the larger exact
+  work argument and the same explicit `q / p` rejection term.  Canonical byte
+  packing/decoding remains separate.  Exact committed-source persvati run
+  `E-20260814T101425-61974-persvati-d3a92414d682-lake` built the composed
+  target in 2,243 jobs with command and source-integrity exits zero.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it
@@ -222,9 +224,9 @@ The remaining boundary is therefore narrower and more concrete:
    submitted-opening reflection, primitive-work ledger, and strict unbiased
    query sampler are now landed; the complete accepted query family is jointly
    uniform, and the explicit `q / p` rejection loss is carried through the
-   raw-IOR/ROM ledger.  Derive the run-specific adaptive eager/deferred
-   work-space coupling, carry the distinct injectively padded rate-block
-   profile through the accepted ledger, pin its canonical byte codec, and
+   raw-IOR/ROM ledger, including the distinct injectively padded rate-block
+   profile and its exact work delta.  Derive the run-specific adaptive
+   eager/deferred work-space coupling, pin the canonical byte codec, and
    perform the deployed-Poseidon idealization with its hash/grinding terms
    visible.  The current policy has no retry; any future retry rule must be
    introduced and priced explicitly;
