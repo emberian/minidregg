@@ -209,10 +209,13 @@ ledger.  A full deferred run on exactly that vector cannot exhaust: it returns
 one answer per draw, consumes the entire vector, and leaves no suffix.  The
 segment heads and eager full-message coordinates induce explicit swaps; those
 swaps compose into an actual equivalence of the entire work-vector space and
-preserve its uniform counting measure exactly.  The remaining sponge/RO
-crossing is composed eager/deferred state agreement away from the prefix
-conflict event, followed by the random-permutation/function and deployed-
-Poseidon idealization hops.
+preserve its uniform counting measure exactly.  This is the baseline routing
+when each public full message is fresh at its final prefix; a structural
+prefix-freeness theorem for the padded public-message family (or an explicit
+shared-prefix router) still has to connect that program to every receipt.  The
+remaining sponge/RO crossing then requires composed eager/deferred state
+agreement away from the prefix-conflict event, followed by the random-
+permutation/function and deployed-Poseidon idealization hops.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query

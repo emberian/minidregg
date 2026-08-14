@@ -168,10 +168,12 @@ stage:
   equivalence of the full fixed work space.  Exact committed-source persvati
   run `E-20260814T105825-87814-persvati-cbdc82087c31-lake` built the target in
   2,250 jobs with command and source-integrity exits zero.  Fixed-receipt
-  schedule synthesis, deferred exhaustion, and construction of the coin
-  reindexing program are therefore closed; composed off-bad eager/deferred
-  state agreement and the permutation/function/deployed-Poseidon switch
-  remain open.
+  schedule synthesis and deferred exhaustion are therefore closed, and the
+  fresh-full-message segment reindexing is concrete.  What remains is to prove
+  the padded public-message family cannot redirect a full lookup through a
+  shared earlier proper prefix (or route that case explicitly), then establish
+  composed off-bad eager/deferred state agreement and the
+  permutation/function/deployed-Poseidon switch.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it
