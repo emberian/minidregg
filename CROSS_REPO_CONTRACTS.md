@@ -153,6 +153,18 @@ refinement, collision-game pricing, the work-indexed sponge game, and the
 deployed-permutation idealization.  The Tower256/cSHAKE additive-FRI controller
 remains a proof pattern, not the zkML suite.
 
+`Selvage/BaseFoldBcsFiatShamir.lean` now fixes the local BaseFold construction
+alphabet before any native codec is admitted.  It frames the profile and
+statement, every prefix-adaptive root, three-coefficient sumcheck message,
+challenge, terminal root, query label/seed, opened Ext4 values, and all three
+binary-Merkle paths.  Challenge and query namespaces are distinct; each draw
+is a literal Poseidon2 sponge construction query; causality excludes future
+frames; primitive work equals absorbed block count; and accepted submitted
+paths reflect into `BaseFoldRawCommittedIorAccepts` on the same coherent query
+schedule.  This does not yet prove modulo query decoding uniform, the adaptive
+work-space sponge/RO coupling, padding or byte-codec refinement, or the deployed
+Poseidon2 permutation idealization.
+
 Evidence does not authorize a request.  minidregg admits it only under the
 request-indexed disclosure/audit policy of the same `CommittedTurn` whose
 authority, effects, pre-state, post-state, and delta it already owns.

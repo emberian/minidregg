@@ -95,6 +95,22 @@ stage:
   `E-20260814T072652-62290-hbox-ddf61fcb1a57-bash` checked the generated
   payload view; command and source-integrity exits were zero in both runs.
 
+- `Selvage/BaseFoldBcsFiatShamir.lean` now supplies the missing local
+  construction alphabet.  A statement-first transcript frames every level
+  root, three-coefficient sumcheck message, prior challenge, terminal root,
+  query label/seed, opened value, and complete binary-Merkle path.  Challenge
+  and query draws use distinct in-band domains and are literal multi-block
+  `SpQuery.constr` calls to the source-derived Poseidon2 sponge.  Causality is
+  a theorem, Ext4 output decoding round-trips the proved power basis, and total
+  primitive work is the exact sum of absorbed blocks rather than the number of
+  public draws.  The construction verifier binds its roots and actual submitted
+  paths, then reflects into the existing raw committed-IOR event on the same
+  coherent schedule.  Exact committed-source persvati run
+  `E-20260814T081149-38055-persvati-aa48aaacb40a-lake` built the target in
+  2,237 jobs with command and source-integrity exits zero.  The modulo query
+  decoder is deterministic but not claimed uniform; the adaptive work-space
+  ROM coupling, padding/byte codec, and deployed-permutation hop remain open.
+
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
 output, three root-bound MLE claims, an accepted contraction sumcheck, and its
@@ -132,10 +148,11 @@ The remaining boundary is therefore narrower and more concrete:
    collision reduction are now instantiated.  Pin the deployed root/path/Ext4
    byte codecs to these semantics and price the resulting Poseidon leaf/node
    collision games and byte/work costs;
-2. **BCS/Fiat--Shamir:** encode the exact BaseFold oracle-message alphabet
-   (level roots, sumcheck polynomials, openings, query seeds, and domain
-   separators), then transport the interactive event through the ROM game with
-   its hash/grinding terms still visible;
+2. **BCS/Fiat--Shamir:** the exact construction alphabet, causal draw schedule,
+   submitted-opening reflection, and primitive-work ledger are now landed.
+   Prove the adaptive eager/deferred work-space coupling, replace the modulo
+   query decoder with a uniform construction, pin padding/bytes, and perform
+   the deployed-Poseidon idealization with its hash/grinding terms visible;
 3. **succinct matmul composition:** the toy serialized statement and
    proof-bearing exact checker are now runnable.  Replace its F7 recomputation
    payload with a checker that binds the C/A/B openings, contraction
