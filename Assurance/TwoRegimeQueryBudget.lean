@@ -622,7 +622,170 @@ theorem the_two_walls_move_on_different_levers :
           ⟨by norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2],
            by norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]⟩⟩
 
-/-! ## §7 Axiom footprint
+/-! ## §7 ⚑ THE GRIND LEVER, PRICED IN QUERIES — what `powBits` buys and what it displaces
+
+`ir2_three_regimes` reads the deployed column as `34 / 73 / 130` and stops there.
+It does not say **where those bits come from**, and the split turns out to matter
+a great deal outside this file: measured 2026-08-13
+(`zkml-research/notes/phase-profile.md` §4), grinding the deployed
+`query_proof_of_work_bits = 16` costs **47,917 Poseidon2 permutations, ~25% of a
+whole IR-v2 prove**, while a query costs the prover essentially nothing
+(`MerkleTreeMmcs::open_batch` copies stored digests and hashes nothing — 0.05–0.07
+ms for all nineteen). So the question "is 16 bits of grind a good trade" is a real
+one, and it is answered by the **exchange rate between the two levers**, which is
+exactly what this column knows and the cost measurement does not.
+
+Two facts, and they have different shapes:
+
+* **`powBits` is additive and REGIME-FREE.** `k` more grind bits is `k` more column
+  bits at UDR, at JBR and at CBR alike (`powBits_add_divides`,
+  `grind_moves_every_regime_identically`). It is the dual of
+  `logup_carries_no_regime` §6: the grind is the one lever in this file that does
+  not care which analysis you are standing on.
+* **`numQueries` is multiplicative and REGIME-BOUND.** One more query multiplies
+  the error by `survivalSq r ρ`, and that factor is `(65/128)²` at UDR against
+  `1/64` at JBR — a fact, not a rounding (`the_query_lever_is_regime_dependent`).
+
+So a grind bit has a *price in queries* and the price depends on the regime. -/
+
+/-- **`k` more grind bits divides the error by exactly `4^k`** (i.e. `2^k` on the
+error itself), at every regime and every configuration. No cell, no instance: this
+is the general fact the deployed numbers are instances of. -/
+theorem powBits_add_divides (r : Regime) (c : FriQueryCfg) (k : ℕ) :
+    (queryErr r { c with powBits := c.powBits + k }).errSq
+      = (queryErr r c).errSq / 4 ^ k := by
+  unfold queryErr
+  simp only
+  rw [pow_add, ← div_div]
+  rfl
+
+/-- **The two-sided bit count shifts by exactly `k`.** If a configuration's column
+is *exactly* `n` bits, the same configuration with `k` more grind bits is *exactly*
+`n + k`. Two-sided in, two-sided out — so this cannot be the vacuously-loose `≤`
+that `bits_unique` exists to rule out. -/
+theorem powBits_add_shifts_bits {r : Regime} {c : FriQueryCfg} {n k : ℕ}
+    (h : (queryErr r c).Bits n) :
+    (queryErr r { c with powBits := c.powBits + k }).Bits (n + k) := by
+  obtain ⟨hle, hlt⟩ := h
+  have h4 : (0 : ℚ) < 4 ^ k := by positivity
+  refine ⟨?_, ?_⟩
+  · rw [powBits_add_divides, pow_add, ← div_div]
+    gcongr
+  · rw [powBits_add_divides]
+    have hn : n + k + 1 = (n + 1) + k := by omega
+    rw [hn, pow_add, ← div_div]
+    gcongr
+
+/-- **The grind moves every regime identically.** Cross-multiplied so no division
+by a possibly-zero quantity appears: the factor `k` grind bits contributes is the
+same at `r` and at `r'`, whatever they are. This is the property `numQueries` does
+NOT have, and the next theorem exhibits the failure rather than asserting it. -/
+theorem grind_moves_every_regime_identically (r r' : Regime) (c : FriQueryCfg) (k : ℕ) :
+    (queryErr r { c with powBits := c.powBits + k }).errSq * (queryErr r' c).errSq
+      = (queryErr r' { c with powBits := c.powBits + k }).errSq * (queryErr r c).errSq := by
+  rw [powBits_add_divides, powBits_add_divides]
+  ring
+
+/-- ⚑ **And the query lever is NOT regime-free — exhibited, not assumed.** One extra
+query multiplies the (squared) error by `survivalSq r ρ`: `(65/128)² = 4225/16384`
+at UDR against `1/64` at JBR. A "one query ≈ `logBlowup` bits" rule of thumb is a
+JBR/CBR statement wearing no regime tag; at UDR at `lb = 6` a query is worth
+**0.978 bits**, not 6.
+
+This is the `prove-the-floor-false` half of the pair above: `powBits`'s regime
+freedom is only content because the other lever demonstrably lacks it. -/
+theorem the_query_lever_is_regime_dependent :
+    survivalSq .UDR (ir2.rate) ≠ survivalSq .JBR (ir2.rate) := by
+  norm_num [survivalSq, FriQueryCfg.rate, ir2]
+
+/-! ### The exchange rate, two-sided, at the deployed rate
+
+How many queries would it take to buy back the deployed 16 grind bits, if the
+grind were switched off entirely? The answer is a *pair* of statements — `n` queries
+suffice and `n − 1` do not — because a one-sided "17 queries suffice" is also true
+of 170. -/
+
+/-- ⚑ **AT UDR, THE DEPLOYED 16 GRIND BITS COST EXACTLY 17 QUERIES.** `q = 19 → 36`
+at `pow = 0` is at least as sound as the deployed `(19, 16)`; `q = 35` is not. So
+the grind buys 16 bits for the price of 17 queries — and the measurement says those
+17 queries would cost the prover ~0.06 ms of `open_batch` copying against the
+grind's 8–41 ms of Poseidon2. **On the prover the grind is the expensive way to buy
+the bits by two orders of magnitude**; what it saves is verifier time and proof
+bytes, which is where the trade actually lives. -/
+theorem sixteen_grind_bits_cost_seventeen_queries_at_UDR :
+    (queryErr .UDR { logBlowup := 6, numQueries := 36, powBits := 0 }).errSq
+        ≤ (queryErr .UDR ir2).errSq
+      ∧ (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 35, powBits := 0 }).errSq := by
+  constructor
+  · norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+  · norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
+/-- **At JBR the same 16 bits cost 6 queries**, and at CBR 3 — the same artifact,
+three prices, because the price of a query is the regime and the price of a grind
+bit is not. A cost argument that quotes "the grind replaces N queries" without its
+regime has quoted one of `17 / 6 / 3`. -/
+theorem sixteen_grind_bits_cost_six_queries_at_JBR :
+    (queryErr .JBR { logBlowup := 6, numQueries := 25, powBits := 0 }).errSq
+        ≤ (queryErr .JBR ir2).errSq
+      ∧ (queryErr .JBR ir2).errSq
+        < (queryErr .JBR { logBlowup := 6, numQueries := 24, powBits := 0 }).errSq := by
+  constructor
+  · norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+  · norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
+/-! ### The measurement's parity ladder, as theorems
+
+`zkml-research`'s §G4 sweeps `pow ∈ {0, 8, 12, 16, 20}` against the query count
+that holds the UDR column at or above the deployed value, and then compares total
+prover cost. That sweep is only a fair comparison if every rung really is at least
+as sound as the deployed point — which is a claim about rationals, so it is stated
+here rather than computed in a float in a Rust test. -/
+
+/-- The four non-deployed rungs of the measurement ladder at `lb = 6`. -/
+def udrLadder : List FriQueryCfg :=
+  [ { logBlowup := 6, numQueries := 36, powBits := 0 },
+    { logBlowup := 6, numQueries := 28, powBits := 8 },
+    { logBlowup := 6, numQueries := 24, powBits := 12 },
+    { logBlowup := 6, numQueries := 15, powBits := 20 } ]
+
+/-- ⚑ **Every rung of the cost ladder is at least as sound as the deployed point,
+at UDR.** This is what makes §G4 a comparison of *cost at fixed soundness* rather
+than a comparison of two different systems. (It is stated at UDR, the only
+unconditionally proven regime; the JBR and CBR columns of the same rungs are wider
+still, since fewer grind bits are traded for more queries and a query is worth more
+at those regimes.) -/
+theorem the_cost_ladder_is_at_or_above_the_deployed_column :
+    ∀ c ∈ udrLadder, (queryErr .UDR c).errSq ≤ (queryErr .UDR ir2).errSq := by
+  intro c hc
+  fin_cases hc <;> norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
+/-- **And each rung is TIGHT: one query fewer drops below the deployed column.** So
+the ladder is not padded — no rung is buying extra soundness that a cost comparison
+would then charge to the grind. -/
+theorem the_cost_ladder_is_tight :
+    (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 35, powBits := 0 }).errSq
+      ∧ (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 27, powBits := 8 }).errSq
+      ∧ (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 23, powBits := 12 }).errSq
+      ∧ (queryErr .UDR ir2).errSq
+        < (queryErr .UDR { logBlowup := 6, numQueries := 14, powBits := 20 }).errSq := by
+  refine ⟨?_, ?_, ?_, ?_⟩ <;>
+    norm_num [queryErr, survivalSq, FriQueryCfg.rate, ir2]
+
+/-- ⚑ **The commit-phase grind is `0` at every shipped dregg config** — `IR2_FRI_
+COMMIT_POW_BITS`, `PROD_FRI_COMMIT_POW_BITS`, `ZK_FRI_COMMIT_POW_BITS`,
+`OUTER_FRI_COMMIT_POW_BITS`, `MINA_FRI_COMMIT_POW_BITS`,
+`RECURSION_FRI_COMMIT_POW_BITS`, `IR2_INNER_COMMIT_POW_BITS` — and this column
+cannot see it: `FriQueryCfg` has a single `powBits`, which is the *query* knob.
+`Dregg2.Circuit.FriCommitPow` is where the commit knob is modeled. Recorded here so
+a reader of `ir2_three_regimes` does not read `34 / 73 / 130` as covering both
+grinds; it covers one, and the other is off. -/
+theorem ir2_powBits_is_the_query_knob_only : ir2.powBits = 16 := rfl
+
+/-! ## §8 Axiom footprint
 
 Kernel-checked throughout: the three standard axioms and nothing else. In
 particular **no `Lean.ofReduceBool`** — no cell in this file goes through the
@@ -637,6 +800,13 @@ rational arithmetic that `norm_num` closes in the kernel. -/
 #guard_msgs (whitespace := lax) in #print axioms queryErrReal_sq
 /-- info: 'Minidregg.Assurance.ir2_three_regimes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ir2_three_regimes
+/-- info: 'Minidregg.Assurance.powBits_add_shifts_bits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms powBits_add_shifts_bits
+/-- info: 'Minidregg.Assurance.sixteen_grind_bits_cost_seventeen_queries_at_UDR' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sixteen_grind_bits_cost_seventeen_queries_at_UDR
+/-- info: 'Minidregg.Assurance.the_cost_ladder_is_at_or_above_the_deployed_column' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms the_cost_ladder_is_at_or_above_the_deployed_column
 /-- info: 'Minidregg.Assurance.ir2_the_conjectured_130_is_the_withdrawn_regime' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ir2_the_conjectured_130_is_the_withdrawn_regime
 /-- info: 'Minidregg.Assurance.zkdtvm_core_is_128' depends on axioms: [propext, Classical.choice, Quot.sound] -/
