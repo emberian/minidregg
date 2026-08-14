@@ -165,14 +165,16 @@ stage:
   answers.  Each segment's head and full-message coordinate are now also
   machine-checked, their swap is an unconditional whole-vector involution,
   and the per-round swaps compose into an exact uniform-measure-preserving
-  equivalence of the full fixed work space.  Exact committed-source persvati
-  run `E-20260814T105825-87814-persvati-cbdc82087c31-lake` built the target in
+  equivalence of the full fixed work space.  The complete padded public-message
+  family is also proved prefix-free when
+  `queryCount ≤ BabyBearExt4.modulus`: distinct causal challenges diverge at
+  the earlier terminal marker, challenge/query domains diverge immediately,
+  and bounded query labels are injective.  Exact committed-source persvati run
+  `E-20260814T112202-90012-persvati-9acb7cbe883f-lake` built the target in
   2,250 jobs with command and source-integrity exits zero.  Fixed-receipt
-  schedule synthesis and deferred exhaustion are therefore closed, and the
-  fresh-full-message segment reindexing is concrete.  What remains is to prove
-  the padded public-message family cannot redirect a full lookup through a
-  shared earlier proper prefix (or route that case explicitly), then establish
-  composed off-bad eager/deferred state agreement and the
+  schedule synthesis, deferred exhaustion, full-message routing, and uniform
+  reindexing are therefore closed.  What remains is composed off-bad
+  eager/deferred state agreement and the
   permutation/function/deployed-Poseidon switch.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
@@ -262,8 +264,9 @@ The remaining boundary is therefore narrower and more concrete:
    query sampler are now landed; the complete accepted query family is jointly
    uniform, and the explicit `q / p` rejection loss is carried through the
    raw-IOR/ROM ledger, including the distinct injectively padded rate-block
-   profile and its exact work delta.  Derive the run-specific adaptive
-   eager/deferred work-space coupling, extend the lawful field/rate bytes to
+   profile and its exact work delta.  Complete the run-specific off-bad
+   eager/deferred state coupling over the landed bounded prefix-free schedule,
+   extend the lawful field/rate bytes to
    the whole receipt and Merkle paths, and perform the deployed-Poseidon
    idealization with its hash/grinding terms visible.  The current policy has
    no retry; any future retry rule must be introduced and priced explicitly;

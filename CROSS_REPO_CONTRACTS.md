@@ -209,13 +209,18 @@ ledger.  A full deferred run on exactly that vector cannot exhaust: it returns
 one answer per draw, consumes the entire vector, and leaves no suffix.  The
 segment heads and eager full-message coordinates induce explicit swaps; those
 swaps compose into an actual equivalence of the entire work-vector space and
-preserve its uniform counting measure exactly.  This is the baseline routing
-when each public full message is fresh at its final prefix; a structural
-prefix-freeness theorem for the padded public-message family (or an explicit
-shared-prefix router) still has to connect that program to every receipt.  The
-remaining sponge/RO crossing then requires composed eager/deferred state
-agreement away from the prefix-conflict event, followed by the random-
-permutation/function and deployed-Poseidon idealization hops.
+preserve its uniform counting measure exactly.  When
+`queryCount ≤ BabyBearExt4.modulus`, the entire padded public-message family is
+proved prefix-free: distinct causal challenges diverge at padding versus the
+next challenge-result frame, challenge/query domains differ in their first
+block, and bounded query labels are injective.  This closes the structural
+full-message routing premise for every such fixed receipt.  The remaining
+sponge/RO crossing requires composed eager/deferred state agreement away from
+the already named simulator bad events, followed by the random-
+permutation/function and deployed-Poseidon idealization hops.  Exact
+committed-source run
+`E-20260814T112202-90012-persvati-9acb7cbe883f-lake` built the complete target
+in 2,250 jobs with command and source-integrity exits zero.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
@@ -248,8 +253,9 @@ observed prefix may guard swaps wholly inside the unseen suffix, and any finite
 program of those guarded swaps is one bijection of the complete fixed work
 space.  Supplying pointwise eager/deferred agreement under that program yields
 the exact uniform-probability coupling.  What remains is run-specific rather
-than measure-theoretic: synthesize the guarded program from actual sponge
-construction/reveal steps and prove their off-bad public-state agreement.  The
+than measure-theoretic: connect the landed BaseFold segment program and
+prefix-free public schedule to the actual sponge construction/reveal steps,
+then prove their off-bad public-state agreement.  The
 focused seam is green as
 `E-20260814T085015-69502-persvati-cdb76138c078-lake` (3,070 jobs), and the same
 source commit passed the complete 8,928-job `lake build Minidregg` on hbox as
