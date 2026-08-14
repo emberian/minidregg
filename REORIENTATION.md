@@ -9,7 +9,7 @@ ledger at the commit being claimed.
 Snapshot inspected while writing this note (and refreshed through the strict
 BaseFold query-sampling convergence):
 
-- `minidregg` `15e846c31269` on `main`, with an independently owned Uwueave
+- `minidregg` proof snapshot `9a4ab1c91bab` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
 - `zkml-research` `bc075dbed6d1` on `dev`, with `vendor/` untracked; its decisive
   blowup-2 verdict is at `97c0b08af1fa`;
@@ -138,6 +138,21 @@ stage:
   `E-20260814T092057-4803-persvati-15e846c31269-lake` built the final sampler
   in 2,238 jobs with command and source-integrity exits zero.
 
+- `Selvage/BaseFoldBcsQuerySamplingJoint.lean` lifts that single-coordinate
+  result to the whole accepted digest family.  One exact equivalence retains
+  all seven unused lanes per digest, the factorization slack, and every query
+  coordinate; after marginalizing only the nuisance coordinates, the complete
+  query vector is jointly uniform even with the algebraic challenge vector
+  kept as independent context.  That law now transports the accepted strict
+  schedule directly into the raw committed-IOR theorem.  Finally,
+  `Selvage/BaseFoldBcsStrictRomLedger.lean` composes the raw algebraic/query/
+  equivocation terms with the exact receipt work-indexed sponge advantage and
+  `q / 2013265921` rejection term.  The result remains conditional on the open
+  ideal-permutation sponge target and does not idealize deployed Poseidon2.
+  Exact committed-source persvati run
+  `E-20260814T095239-27653-persvati-9a4ab1c91bab-lake` built the combined seam
+  in 2,241 jobs with command and source-integrity exits zero.
+
 - `Selvage/SpongeIndiffAdaptiveCoupling.lean` had existed outside the rooted
   build and contained latent failures.  It is now rooted and green.  A
   `WorkPrefixMeasurable` guard provably survives any swap wholly after its
@@ -193,11 +208,12 @@ The remaining boundary is therefore narrower and more concrete:
    collision games and byte/work costs;
 2. **BCS/Fiat--Shamir:** the exact construction alphabet, causal draw schedule,
    submitted-opening reflection, primitive-work ledger, and strict unbiased
-   query sampler are now landed.  Derive the run-specific adaptive
-   eager/deferred work-space coupling, carry the explicit `q / p` seed-
-   rejection term (and any retry policy) through the full ROM ledger, pin
-   padding/bytes, and perform the deployed-Poseidon idealization with its
-   hash/grinding terms visible;
+   query sampler are now landed; the complete accepted query family is jointly
+   uniform, and the explicit `q / p` rejection loss is carried through the
+   raw-IOR/ROM ledger.  Derive the run-specific adaptive eager/deferred
+   work-space coupling, pin padding/bytes, and perform the deployed-Poseidon
+   idealization with its hash/grinding terms visible.  The current policy has
+   no retry; any future retry rule must be introduced and priced explicitly;
 3. **succinct matmul composition:** the toy serialized statement and
    proof-bearing exact checker are now runnable.  Replace its F7 recomputation
    payload with a checker that binds the C/A/B openings, contraction

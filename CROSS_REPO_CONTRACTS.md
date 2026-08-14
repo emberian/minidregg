@@ -182,12 +182,23 @@ uses the exact factorization of `p - 1` to identify every accepted seed with a
 slack coordinate and one query coordinate.  Equal fibres give exact uniform
 marginals; rejection across `q` independent uniform seed digests costs at most
 `q / 2013265921`.  Strict acceptance fails closed on rejection and reflects to
-the raw committed-IOR event on that exact schedule.  A full ROM composition
-must still carry this rejection term, state whether retries exist, and price
-any retry rule rather than silently conditioning it away.  Exact
-committed-source run `E-20260814T092057-4803-persvati-15e846c31269-lake`
-built the final sampler in 2,238 jobs with command and source-integrity exits
-zero.
+the raw committed-IOR event on that exact schedule.
+
+`Selvage/BaseFoldBcsQuerySamplingJoint.lean` proves the missing whole-batch
+statement: accepted digest families are bijective to all unused digest lanes,
+all slack coordinates, and one complete query-coordinate vector.  Exact
+marginalization makes that vector jointly uniform while retaining the
+algebraic challenge vector as context, so the accepted strict schedule feeds
+the raw committed-IOR soundness theorem without a coordinatewise-independence
+shortcut.  `Selvage/BaseFoldBcsStrictRomLedger.lean` then exposes one additive
+ledger containing the raw algebraic term, coherent query miss, retained Merkle
+equivocation, exact receipt work-indexed sponge advantage, and
+`q / 2013265921` rejection loss.  This is still conditional on the explicitly
+open ideal-permutation sponge target; it does not assert deployed Poseidon2
+security.  No retry exists in the current semantics, and any future retry rule
+must be separately introduced and priced.  Exact committed-source run
+`E-20260814T095239-27653-persvati-9a4ab1c91bab-lake` built the combined seam in
+2,241 jobs with command and source-integrity exits zero.
 
 The generic reindexing half is now narrower and machine checked in rooted
 `Selvage/SpongeIndiffAdaptiveCoupling.lean`: a decision depending only on an
