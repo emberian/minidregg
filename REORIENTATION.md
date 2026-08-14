@@ -71,7 +71,11 @@ stage:
   `Selvage/ZkmlSuiteRegistry.lean`.  Unknown suite, changed source, changed
   payload, and changed checker identities are refusal theorems.  This closes
   first-order suite identity, not native-verifier refinement or cryptographic
-  soundness.
+  soundness.  Exact committed-source persvati runs at minidregg commit
+  `521b2eedbd24b6cfceb6a7d35cfb218b03567ed4` built the registry in 460 jobs
+  (`E-20260814T070002-31460-persvati-521b2eedbd24-lake`) and checked the payload
+  and envelope (`E-20260814T070029-31799-persvati-521b2eedbd24-bash`), with
+  runner, command, and source-integrity exits zero in both runs.
 
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
