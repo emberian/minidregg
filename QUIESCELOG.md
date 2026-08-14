@@ -1,5 +1,90 @@
 # QUIESCELOG — 2026-08-10
 
+## Pause appendix — 2026-08-14 current restart point
+
+This is a local Codex pause for usage refresh, not a request that Claude, Grok,
+Uwueave/Preoscript, zkML research, or any other independently owned lane stop.
+No new substantial Codex lane should be opened during this pause.  Work already
+in flight elsewhere may continue and should be reconciled on resume.
+
+### Exact committed state
+
+- Codex stopped at `00b7480` (`specialize terminal freshness to BaseFold runs`).
+  Before this appendix commit, local `main` was exactly 222 commits ahead of
+  `origin/main` and zero behind after `git fetch origin main`.
+- The last complete umbrella replay remains
+  `E-20260814T085014-69503-hbox-cdb76138c078-lake`: 8,928 jobs, command exit 0,
+  source-integrity exit 0.  Descendant work has focused committed-source runs,
+  not a newer umbrella claim.
+- The latest focused BaseFold schedule run is
+  `E-20260814T132019-3848-persvati-00b7480af813-lake`: 2,251 jobs, command exit 0,
+  source-integrity exit 0.
+- The generic structural replay theorem is covered by
+  `E-20260814T131810-3415-persvati-dc403a6f1f18-lake`: 1,972 jobs, command exit 0,
+  source-integrity exit 0.
+- Nextop remained an editor/git client.  The substantive Lean replays above ran
+  on hbox or persvati.
+
+### What is now true at the sponge/BaseFold seam
+
+- Prefix-free public routing deterministically keeps every not-yet-issued full
+  public message absent from the ideal random-oracle table after each successful
+  eager BaseFold prefix.
+- The initial `PrimitivePathFresh` good event was caught as too strong for the
+  intended execution: sponge calls legitimately replay primitive edges belonging
+  to common proper prefixes.  Do not use that stronger witness as the final priced
+  event merely because its coupling theorem remains available.
+- `ConstructionReturnsLastRate` is the exact replay-compatible semantic boundary:
+  lawful proper-prefix edges may replay consistently, while a new terminal edge
+  supplies the segment's designated final rate.
+- `TerminalPrimitiveFreshTo` is the structural sufficient condition: every proper
+  edge is either a consistent replay or fresh, the terminal primitive edge is
+  absent, and the supplied terminal rate is the designated one.
+- `PaddedEagerTerminalFreshRun` lifts that condition over the exact padded BaseFold
+  work schedule.  Under prefix-free routing,
+  `paddedEagerDeferredRun_terminalFresh_agreement` gives equal complete eager and
+  deferred transcripts.  This is semantic coupling under a named condition, not
+  yet a probability bound and not a deployed Poseidon2 theorem.
+
+### Resume exactly here
+
+The next proof was deliberately *not* started when quiescence was requested.
+First isolate the exact work-coin capacity event rather than broadening the kernel:
+
+1. Split `Fin work -> Rate × Cap` into its rate and capacity coordinate families.
+2. Define the work-capacity bad event as `CapBad {iv.2}` over the exact capacity
+   coordinates and transport `capBad_le` through uniform product probability.
+3. Prove, rather than assume, the deterministic bridge from absence of that event
+   to `PaddedEagerTerminalFreshRun`.  This likely needs an invariant connecting
+   `Oracle.capsOf`, consumed work coordinates, rooted paths, and the previously
+   materialized public-prefix tree.
+4. Only then charge the terminal-fresh failure in the existing exact BaseFold
+   work ledger and close the eager/deferred real/ideal coupling.
+5. After that, the honest remaining cryptographic crossings are the RP/RF switch
+   and the deployed Poseidon2-permutation boundary.  The rich Preoscript/native
+   response connection and production fixture replacement remain later vertical-
+   slice work; neither was silently completed.
+
+Do not skip step 3 by equating pairwise capacity distinctness with rooted-path
+uniqueness in prose.  Existing `UniquePaths` lemmas look like the right machinery,
+but the reachable-table/consumed-coordinate invariant is still owed.
+
+### Shared-tree ownership at pause
+
+The only uncommitted files observed before writing this appendix belong to the
+independently owned Uwueave/Preoscript Projection-V2 lane and were not staged,
+reset, edited, or included by Codex:
+
+- `Compiler.lean`
+- `prover/src/lib.rs`
+- `Compiler/UwueavePreoProjectionV2.lean`
+- `prover/generated/uwueave_preo_projection_v2.rs`
+- `prover/tests/uwueave_preo_projection_v2.rs`
+
+Re-audit these paths on resume because that lane may legitimately have advanced.
+The active cross-repository goal is paused by user intent, not achieved; do not
+mark it complete merely to make the dashboard tidy.
+
 ## Resume appendix — 2026-08-12 authoritative memory
 
 The original quiescence record below did its job: it kept semantic claims separate
