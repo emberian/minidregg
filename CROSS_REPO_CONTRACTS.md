@@ -188,15 +188,17 @@ one call per public draw, `m + queryCount` per receipt.  Its work-indexed game
 adapter and `strictPaddedAcceptedRawRomLedger` now preserve that larger ledger
 through the same joint accepted-query and `q / p` terms.  This is not yet a
 whole receipt codec: `BaseFoldBcsByteCodec` now supplies strict canonical
-field/rate bytes, while Ext4 values, roots, paths, receipt framing, and native
-refinement remain to be composed.
+field/rate bytes and a lawful complete padded-message codec, while Ext4 values,
+roots, paths, receipt framing, and native refinement remain to be composed.
 
 `Selvage/BaseFoldBcsByteCodec.lean` fixes one BabyBear value as four
 little-endian bytes and refuses any decoded word at or above the modulus.  The
 actual construction rate is eight lanes, not twelve: the lawful lane-major
 rate codec therefore consumes exactly 32 bytes, rejects trailing bytes, and
 round-trips injectively.  Encoding the `.pad1` message costs exactly
-`32 * (semantic blocks + 1)` bytes.  This is the canonical Lean wire meaning;
+`32 * (semantic blocks + 1)` bytes.  Its lawful whole-message decoder accepts
+only complete rate blocks and the reserved terminal block, refusing leftovers
+and missing or different terminals.  This is the canonical Lean wire meaning;
 no handwritten native routine is treated as refined by implication.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path

@@ -134,7 +134,8 @@ stage:
   work-bounded `Distinguisher`; `strictPaddedAcceptedRawRomLedger` carries it
   through the accepted joint-query/raw-IOR/ROM ledger with the larger exact
   work argument and the same explicit `q / p` rejection term.  Canonical byte
-  packing/decoding remains separate.  Exact committed-source persvati run
+  packing/decoding is supplied by the adjacent byte-codec seam.  Exact
+  committed-source persvati run
   `E-20260814T101425-61974-persvati-d3a92414d682-lake` built the composed
   target in 2,243 jobs with command and source-integrity exits zero.
 
@@ -143,11 +144,14 @@ stage:
   decoding refuses the modulus and every larger 32-bit word instead of
   reducing it.  The Poseidon2 construction rate is correctly eight lanes, so
   its lane-major codec is exactly 32 bytes, round-trips as a `LawfulCodec`,
-  rejects trailing bytes, and is injective.  A padded block message therefore
-  occupies exactly `32 * (blocks + 1)` bytes.  The first draft's mistaken
+  rejects trailing bytes, and is injective.  The whole padded block stream also
+  round-trips through a `LawfulCodec`: decoding consumes only complete 32-byte
+  blocks, refuses any leftover suffix, and requires the reserved terminal
+  block.  A padded block message occupies exactly `32 * (blocks + 1)` bytes.
+  The first draft's mistaken
   12-lane/48-byte assumption was caught by the type before landing as a wire
   identity.  Exact committed-source persvati run
-  `E-20260814T102507-72128-persvati-85aa6b1accbe-lake` built the target in
+  `E-20260814T103404-80410-persvati-c007bcf1dee1-lake` built the target in
   3,020 jobs with command and source-integrity exits zero.  Whole receipt,
   Ext4, root/path, and native-code refinement remain separate crossings.
 
