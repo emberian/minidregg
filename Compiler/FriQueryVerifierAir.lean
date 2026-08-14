@@ -142,6 +142,40 @@ theorem friFoldVal_eq_div_twoX {half tw t2x : F} (hhalf : (2 : F) * half = 1)
   rw [div_eq_mul_inv, div_eq_mul_inv, inv_eq_of_mul_eq_one_right hhalf,
     inv_eq_of_mul_eq_one_left htw]
 
+/-! ### ⚑ The deployment label is a CHARACTERISTIC-TWO WALL, and it is named here
+
+The module header says `2 · half = 1` "is the deployment label … over characteristic 2 no
+`half` satisfies it and the divided fold does not exist".  That is correct, and the two
+theorems below make it MACHINE-CHECKED rather than prose.  It matters because
+`friFoldVal_eq_div_twoX` and `friQueryVerifier_correct_div` are stated over an
+unconstrained `[Field F]`: nothing in their types stops a reader from instantiating them
+at `Tower256` and reading a VACUOUS statement as a deployment result.
+
+⚑ Note what is and is not walled.  `friQueryVerifier_correct` — the keystone iff — holds
+for EVERY `half` and is untouched by this; the gadget itself arithmetizes fine over a
+binary field.  Only the DIVIDED reading dies, because that is the multiplicative
+even/odd fold.  The characteristic-two protocol folds along an additive coset instead
+(`Selvage.AdditiveFriTower.additiveTowerFold`), which never halves; arithmetizing THAT
+fold is the honest binary-field task, not relaxing `2 · half = 1`. -/
+
+/-- **No half constant exists at characteristic two.**  `2 = 0`, so `2 * half = 0 ≠ 1`. -/
+theorem no_half_of_charTwo [CharP F 2] (half : F) : (2 : F) * half ≠ 1 := by
+  rw [CharTwo.two_eq_zero, zero_mul]
+  exact zero_ne_one
+
+/-- **The vacuity, named.**  At characteristic two the `2 * half = 1` premise of
+`friFoldVal_eq_div_twoX` / `friQueryVerifier_correct_div` proves anything at all.  Cite
+this if either theorem is ever quoted at a binary field: it is not a weak result there,
+it is no result. -/
+theorem dividedFold_vacuous_of_charTwo [CharP F 2] {half : F}
+    (hhalf : (2 : F) * half = 1) (P : Prop) : P :=
+  absurd hhalf (no_half_of_charTwo half)
+
+/-- info: 'Minidregg.Compiler.no_half_of_charTwo' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_half_of_charTwo
+/-- info: 'Minidregg.Compiler.dividedFold_vacuous_of_charTwo' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms dividedFold_vacuous_of_charTwo
+
 /-! ## §2. The checks as DSL terms — every constraint out of the compiler surface. -/
 
 /-- The fold formula as a DSL term: `(lo + hi)·half + (β·(lo + (−1)·hi))·tw`. -/

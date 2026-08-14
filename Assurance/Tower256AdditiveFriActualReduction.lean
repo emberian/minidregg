@@ -1,5 +1,32 @@
 /-
-# Assurance.Tower256AdditiveFriActualReduction -- the actual additive-FRI cover
+# Assurance.Tower256AdditiveFriActualReduction -- ⚑ RETRACTED, VACUOUS
+
+⚑ **RETRACTED 2026-08-14.  Every declaration below is quantified over
+`pcs : MerklePcs ell`, and `Tower256MerkleCardinalityCore.merklePcs_empty_of_positive`
+proves that carrier EMPTY for every `0 < ell`.**  The retraction is
+machine-checked at the bottom of this file
+(`reduction_vacuous_of_positive_height`, `actualReductionFamily_impossible`).
+
+Read the original note below with that in mind.  It claims to *remove* an
+arbitrary pointwise `failureCover` and replace it with the real Selvage UD
+price — but on an empty carrier that removal cost nothing and bought nothing.
+`falseAccept_three_event_cover`, `falseAccept_bad` and `falseAccept_le` are all
+true of no PCS at any height that folds.  The concluding paragraph is worth
+reading twice: it says the absent Merkle-collision-to-`PositionBinding`
+reduction "is stated honestly by retaining that exact projection", and that a
+raw non-binding PCS interface would be needed to conditionalize it.  That is
+right, and it is the whole story: **demanding unconditional position binding
+from a 256-bit root is not a strong premise, it is an impossible one.**
+
+**The honest replacement**, over `RawMerklePcs`, which retains extracted
+collision events with an explicit CR price:
+`Assurance.Tower256AdditiveFriRawAdmission` and
+`Assurance.Tower256AdditiveFriCanonicalExecutionGame`.  New work goes there.
+
+---
+
+Original module note (describes what the declarations WOULD have meant on an
+inhabited carrier):
 
 This module removes the arbitrary pointwise `failureCover` from the concrete
 Tower256 additive-FRI admission.  Its coin space is literally the ideal
@@ -328,6 +355,37 @@ theorem falseAccept_impossible_of_all_good
   family.securityGame.falseAccept_impossible_of_all_good good
 
 end ActualReductionFamily
+
+/-! ## ⚑ The retraction, machine-checked
+
+Everything above is quantified over `pcs : MerklePcs ell`.  At any height that
+folds the carrier is empty, so every preceding declaration is vacuously true
+and asserts nothing. -/
+
+/-- **Retraction.**  The `pcs` this module quantifies over, plus a height that
+folds, yields `False`. -/
+theorem reduction_vacuous_of_positive_height
+    (thePcs : MerklePcs ell) (positive : 0 < ell) : False :=
+  Tower256MerkleCardinalityCore.merklePcs_empty_of_positive positive ⟨thePcs⟩
+
+/-- **Retraction, at the load-bearing carrier.**  `ActualReductionFamily` is
+introduced above as the family with "no false-accept cover field", the one
+whose additive branch is the exact proved Selvage acceptance event.  At
+positive height the family cannot exist, so the exactness it advertises is
+exactness about nothing. -/
+theorem actualReductionFamily_impossible
+    {radius : Nat -> Real} {tau : Real}
+    {certificate : FarWordSoundnessCertificate clause radius tau}
+    {Error : Type} {request : List UInt8}
+    (positive : 0 < ell)
+    (_family : ActualReductionFamily (queryCount := queryCount)
+      (verifier := verifier) certificate Error request) : False :=
+  reduction_vacuous_of_positive_height pcs positive
+
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.reduction_vacuous_of_positive_height' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reduction_vacuous_of_positive_height
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.actualReductionFamily_impossible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms actualReductionFamily_impossible
 
 /-- info: 'Minidregg.Assurance.Tower256AdditiveFriActualReduction.additiveProximityFailure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms additiveProximityFailure

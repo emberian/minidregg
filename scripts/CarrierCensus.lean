@@ -145,7 +145,7 @@ abbrev AuditAnnotation := Name × String × Option Name
 def auditedNonTargets : List AuditAnnotation :=
   [(`Minidregg.Compiler.Tower256AdditiveFriController.MerklePcs,
     "legacy binding-closed PCS: formally empty for every positive height; use RawMerklePcs",
-    some `Minidregg.Assurance.Tower256MerkleBindingCardinality.merklePcs_empty_of_positive),
+    some `Minidregg.Assurance.Tower256MerkleCardinalityCore.merklePcs_empty_of_positive),
    (`Minidregg.Compiler.Tower256AdditiveFriController.Verifier,
     "legacy verifier over the positive-height binding-closed PCS; use the raw verifier path",
     none),

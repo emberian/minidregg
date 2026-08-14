@@ -1,5 +1,38 @@
 /-
-# Assurance.Tower256AdditiveFriControllerAdmission -- common-game FRI admission
+# Assurance.Tower256AdditiveFriControllerAdmission -- ⚑ RETRACTED, VACUOUS
+
+⚑ **RETRACTED 2026-08-14.  Every declaration below is quantified over
+`pcs : MerklePcs ell`, and `Tower256MerkleCardinalityCore.merklePcs_empty_of_positive`
+proves that carrier EMPTY for every `0 < ell`.**  So each theorem here holds
+vacuously at every height that folds; none of them says anything.  The
+retraction is machine-checked at the bottom of this file
+(`admission_vacuous_of_positive_height`, `commonGameFamily_impossible`), not
+asserted in prose.
+
+Why the carrier is empty: `MerklePcs` demands *unconditional* position binding
+from a concrete cSHAKE256 Merkle commitment.  Binding plus completeness makes
+the whole-word commitment injective, but the root is 256 bits while a
+positive-height Tower256 column has more than `2 ^ 256` words.  Pigeonhole.
+
+⚑ Height zero is not a rescue: it performs no folds, and the carrier census
+reports `MerklePcs` with no witness at any height.  There is no `ell` at which
+this module is known to say something.
+
+**The honest replacement is the raw (non-binding-closed) path**, which retains
+extracted collision events with an explicit CR price instead of postulating an
+injective finite hash:
+`Assurance.Tower256AdditiveFriRawAdmission` and
+`Assurance.Tower256AdditiveFriCanonicalExecutionGame`, both over
+`RawMerklePcs`.  New work goes there.
+
+This file is retained only because `Assurance.SemanticHistoryTower256CheckpointGame`
+and `Assurance.Tower256AdditiveFriActualReduction` still build on it, and both
+are retracted for the same reason; deleting the three together is the follow-up.
+
+---
+
+Original module note (describes what the declarations WOULD have meant on an
+inhabited carrier):
 
 The concrete Tower256 additive-FRI controller returns an exact ideal clause
 acceptance theorem, but computational soundness still has to live in the same
@@ -21,6 +54,7 @@ existing common-game union bound applies without an independence assumption.
 -/
 
 import Assurance.ProofCompositionGame
+import Assurance.Tower256MerkleCardinalityCore
 import Compiler.Tower256AdditiveFriController
 
 namespace Minidregg.Assurance.Tower256AdditiveFriControllerAdmission
@@ -227,6 +261,38 @@ theorem falseAccept_impossible_of_all_good
   family.securityGame.falseAccept_impossible_of_all_good good
 
 end CommonGameFamily
+
+/-! ## ⚑ The retraction, machine-checked
+
+Everything above is quantified over `pcs : MerklePcs ell`.  The two theorems
+below are the retraction: at any height that folds, the carrier is empty, so
+each preceding declaration is vacuously true and asserts nothing.  They are
+stated here, in the file they retract, rather than in a downstream note — the
+cardinality argument was moved into `Assurance.Tower256MerkleCardinalityCore`
+precisely so this import is possible without a cycle. -/
+
+/-- **Retraction.**  Hand me the `pcs` this module quantifies over together
+with a height that folds, and I hand you `False`.  Every theorem in this file
+is therefore vacuous at every positive height. -/
+theorem admission_vacuous_of_positive_height
+    (thePcs : MerklePcs ell) (positive : 0 < ell) : False :=
+  Tower256MerkleCardinalityCore.merklePcs_empty_of_positive positive ⟨thePcs⟩
+
+/-- **Retraction, at the load-bearing carrier.**  The `failureCover` field of
+`CommonGameFamily` is advertised above as "the one hard field", the exact
+remaining PCS/ROM reduction.  At positive height nobody has to supply it: the
+whole family is impossible, so its obligation was never a real one. -/
+theorem commonGameFamily_impossible
+    {Omega : Type} [Fintype Omega] {Error : Type} {request : List UInt8}
+    (positive : 0 < ell)
+    (_family : CommonGameFamily (pcs := pcs) (clause := clause)
+      (verifier := verifier) Omega Error request) : False :=
+  admission_vacuous_of_positive_height pcs positive
+
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.admission_vacuous_of_positive_height' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms admission_vacuous_of_positive_height
+/-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.commonGameFamily_impossible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms commonGameFamily_impossible
 
 /-- info: 'Minidregg.Assurance.Tower256AdditiveFriControllerAdmission.CommonCoinAdmission.acceptedSample' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CommonCoinAdmission.acceptedSample
