@@ -174,6 +174,15 @@ BaseFold `romError` at that ledger.  The adapter is intentionally indexed by a
 fixed candidate receipt; it does not claim the missing online-prover semantics
 or adaptive eager/deferred coin-space reindexing.
 
+The generic reindexing half is now narrower and machine checked in rooted
+`Selvage/SpongeIndiffAdaptiveCoupling.lean`: a decision depending only on an
+observed prefix may guard swaps wholly inside the unseen suffix, and any finite
+program of those guarded swaps is one bijection of the complete fixed work
+space.  Supplying pointwise eager/deferred agreement under that program yields
+the exact uniform-probability coupling.  What remains is run-specific rather
+than measure-theoretic: synthesize the guarded program from actual sponge
+construction/reveal steps and prove their off-bad public-state agreement.
+
 Evidence does not authorize a request.  minidregg admits it only under the
 request-indexed disclosure/audit policy of the same `CommittedTurn` whose
 authority, effects, pre-state, post-state, and delta it already owns.

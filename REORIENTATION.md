@@ -124,6 +124,19 @@ stage:
   conditional ROM specialization in 2,238 jobs with command and
   source-integrity exits zero.
 
+- `Selvage/SpongeIndiffAdaptiveCoupling.lean` had existed outside the rooted
+  build and contained latent failures.  It is now rooted and green.  A
+  `WorkPrefixMeasurable` guard provably survives any swap wholly after its
+  observation boundary; finite sequences of such guarded swaps compose into
+  one equivalence of the complete fixed work-vector space; and pointwise
+  eager/deferred agreement under that program produces the exact
+  `UniformWorkCoupling` and probability equality.  This closes generic global
+  reindex composition, not the run-specific schedule: deriving the guarded
+  moves from the actual adaptive sponge transcript and proving off-bad
+  eager/deferred agreement remain open.  Exact committed-source persvati run
+  `E-20260814T084746-68524-persvati-d84438914a25-lake` built the rooted module
+  in 1,975 jobs with command and source-integrity exits zero.
+
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
 output, three root-bound MLE claims, an accepted contraction sumcheck, and its
