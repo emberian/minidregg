@@ -23,14 +23,14 @@ open Minidregg.Selvage
 
 section Flatten
 
-variable {F : Type} [CommRing F] {μ ν : ℕ}
+variable {F : Type} [Field F] {μ ν : ℕ}
 
 /-- Flatten a curried two-block table along `Fin.appendEquiv`, row block first. -/
 def flatten₂ (f : (Fin μ → Bool) → (Fin ν → Bool) → F) :
     (Fin (μ + ν) → Bool) → F :=
   fun b => f (rowHalf μ ν b) (colHalf μ ν b)
 
-omit [CommRing F] in
+omit [Field F] in
 @[simp] theorem flatten₂_append (f : (Fin μ → Bool) → (Fin ν → Bool) → F)
     (a : Fin μ → Bool) (b : Fin ν → Bool) :
     flatten₂ f (Fin.append a b) = f a b := by
@@ -54,7 +54,8 @@ theorem mle_flatten₂ (f : (Fin μ → Bool) → (Fin ν → Bool) → F)
     _ = ∑ a, ∑ b, f a b * chiEval a x * chiEval b y := by
           rw [Fintype.sum_prod_type]
           exact Finset.sum_congr rfl fun a _ => Finset.sum_congr rfl fun b _ => by
-            rw [flatten₂_append, chiEval_split, rowHalf_append, colHalf_append]
+            rw [flatten₂_append, chiEval_split]
+            simp only [rowHalf_append, colHalf_append]
             ring
     _ = mle₂ f x y := rfl
 
@@ -114,9 +115,9 @@ theorem honestMatmulMleClaims_hold
   · refine ⟨flatten₂ C, rfl, ?_⟩
     exact mle_flatten₂ C x y
   · refine ⟨flatten₂ A, rfl, ?_⟩
-    rw [mle_flatten₂, mle₂_row]
+    exact (mle_flatten₂ A x r).trans (mle₂_row A x r)
   · refine ⟨flatten₂ B, rfl, ?_⟩
-    rw [mle_flatten₂, mle₂_col]
+    exact (mle_flatten₂ B r y).trans (mle₂_col B r y)
 
 end Honest
 
@@ -162,10 +163,12 @@ theorem matmul_opening_values_bound
     SB domB hcardB (flatten₂ B) claims.right hrootB).mp hB
   have hvC := (MleEvalClaim.holds_iff_of_committed
     SC domC hcardC (flatten₂ C) claims.output hrootC).mp hC
-  rw [hptA, mle_flatten₂, mle₂_row] at hvA
-  rw [hptB, mle_flatten₂, mle₂_col] at hvB
-  rw [hptC, mle_flatten₂] at hvC
-  exact ⟨hvC.symm, hvA.symm, hvB.symm⟩
+  rw [hptA] at hvA
+  rw [hptB] at hvB
+  rw [hptC] at hvC
+  exact ⟨hvC.symm.trans (mle_flatten₂ C x y),
+    hvA.symm.trans ((mle_flatten₂ A x r).trans (mle₂_row A x r)),
+    hvB.symm.trans ((mle_flatten₂ B r y).trans (mle₂_col B r y))⟩
 
 end Binding
 
