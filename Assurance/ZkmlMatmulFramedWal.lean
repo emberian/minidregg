@@ -58,13 +58,14 @@ def payloadV1 : List UInt8 :=
     payloadV1.drop 13 = auditEventBytes := by
   decide
 
-/-- A deliberately closed payload codec.  Encoding any other logical intent
-produces an unadmitted payload; decoding accepts only this exact record. -/
+/-- A deliberately closed payload codec.  Its encoder emits the one admitted
+payload and its decoder maps only that payload to the one admitted intent.
+Consequently only this record is given a round-trip theorem below; this is not
+a claim of injective or general serialization. -/
 noncomputable def frameCodec : FrameCodec WalIntent where
   magic := 221
   version := 1
-  encodePayload := fun intent =>
-    if intent = durableIntent.erase then payloadV1 else []
+  encodePayload := fun _ => payloadV1
   decodePayload := fun payload =>
     if payload = payloadV1 then some durableIntent.erase else none
   checksum := fun bytes => bytes.foldl (fun acc byte => acc + byte) 0
