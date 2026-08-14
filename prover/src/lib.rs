@@ -20,6 +20,7 @@ pub mod field6;
 pub mod hash_kernels;
 pub mod mle_kernels;
 pub mod native_dispatch;
+pub mod rank1;
 pub mod semantic_artifact_arithmetic;
 pub mod sumcheck;
 pub mod tower256_kernels;
