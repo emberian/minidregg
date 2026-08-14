@@ -6,16 +6,16 @@ For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
 current-truth file.  For exact proof/build evidence, use each repository's own
 ledger at the commit being claimed.
 
-Snapshot inspected while writing this note (and refreshed through the checked
-Dregg2 suite-export convergence):
+Snapshot inspected while writing this note (and refreshed through the strict
+BaseFold query-sampling convergence):
 
-- `minidregg` `a7fe546c8834` on `main`, with an independently owned Uwueave
+- `minidregg` `15e846c31269` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
-- `zkml-research` `453ff3fb35a4` on `dev`, with active verdict/grinding notes and
-  `vendor/` untracked; and
-- `leanuweave` `6770e01d8f7d` on `dev`, with active durable-artifact,
+- `zkml-research` `bc075dbed6d1` on `dev`, with `vendor/` untracked; its decisive
+  blowup-2 verdict is at `97c0b08af1fa`;
+- `leanuweave` `0eb9fc15def2` on `dev`, with active durable-artifact,
   runtime-auth-V4, debt-gate, and Rust persistence work; and
-- `breadstuffs` `e496fb48d6aa` on `main`, with independently active field-op,
+- `breadstuffs` `010201bb0d45` on `main`, with independently active field-op,
   PoW, FHE, and measurement work in its shared worktree.
 
 The snapshot is an ownership marker, not a claim that later commits are stale.
@@ -107,9 +107,9 @@ stage:
   paths, then reflects into the existing raw committed-IOR event on the same
   coherent schedule.  Exact committed-source persvati run
   `E-20260814T081149-38055-persvati-aa48aaacb40a-lake` built the target in
-  2,237 jobs with command and source-integrity exits zero.  The modulo query
-  decoder is deterministic but not claimed uniform; the adaptive work-space
-  ROM coupling, padding/byte codec, and deployed-permutation hop remain open.
+  2,237 jobs with command and source-integrity exits zero.  Its original modulo
+  decoder remains a deterministic construction primitive, not a uniformity
+  claim; the strict verifier path below supplies the exact uniform sampler.
 
 - `Selvage/BaseFoldBcsSpongeGame.lean` now places that exact ordered receipt
   schedule inside the `Distinguisher` type quantified by the work-indexed
@@ -124,6 +124,20 @@ stage:
   conditional ROM specialization in 2,238 jobs with command and
   source-integrity exits zero.
 
+- `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
+  unbiased query construction.  For every level with at most 28 index bits it
+  proves `BabyBear.modulus - 1` factors as an exact slack coordinate times the
+  query domain, rejects the lone zero field element, and decodes the remaining
+  field elements through an explicit product equivalence.  Every coordinate
+  therefore has the same fibre cardinality.  The strict schedule fails closed
+  on any rejected seed, reflects acceptance into the existing raw
+  committed-IOR event, and exposes the exact rejection price
+  `q / 2013265921` for `q` independent uniform seed digests.  It deliberately
+  assumes no retry policy: the remaining full-ROM ledger must carry this term
+  and any future retry rule explicitly.  Exact committed-source persvati run
+  `E-20260814T092057-4803-persvati-15e846c31269-lake` built the final sampler
+  in 2,238 jobs with command and source-integrity exits zero.
+
 - `Selvage/SpongeIndiffAdaptiveCoupling.lean` had existed outside the rooted
   build and contained latent failures.  It is now rooted and green.  A
   `WorkPrefixMeasurable` guard provably survives any swap wholly after its
@@ -134,8 +148,11 @@ stage:
   reindex composition, not the run-specific schedule: deriving the guarded
   moves from the actual adaptive sponge transcript and proving off-bad
   eager/deferred agreement remain open.  Exact committed-source persvati run
-  `E-20260814T084746-68524-persvati-d84438914a25-lake` built the rooted module
-  in 1,975 jobs with command and source-integrity exits zero.
+  `E-20260814T085015-69502-persvati-cdb76138c078-lake` built the focused seam
+  in 3,070 jobs, and the exact same source commit passed the complete
+  `lake build Minidregg` on hbox in 8,928 jobs as
+  `E-20260814T085014-69503-hbox-cdb76138c078-lake`; command and
+  source-integrity exits were zero in both runs.
 
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
@@ -175,10 +192,12 @@ The remaining boundary is therefore narrower and more concrete:
    byte codecs to these semantics and price the resulting Poseidon leaf/node
    collision games and byte/work costs;
 2. **BCS/Fiat--Shamir:** the exact construction alphabet, causal draw schedule,
-   submitted-opening reflection, and primitive-work ledger are now landed.
-   Prove the adaptive eager/deferred work-space coupling, replace the modulo
-   query decoder with a uniform construction, pin padding/bytes, and perform
-   the deployed-Poseidon idealization with its hash/grinding terms visible;
+   submitted-opening reflection, primitive-work ledger, and strict unbiased
+   query sampler are now landed.  Derive the run-specific adaptive
+   eager/deferred work-space coupling, carry the explicit `q / p` seed-
+   rejection term (and any retry policy) through the full ROM ledger, pin
+   padding/bytes, and perform the deployed-Poseidon idealization with its
+   hash/grinding terms visible;
 3. **succinct matmul composition:** the toy serialized statement and
    proof-bearing exact checker are now runnable.  Replace its F7 recomputation
    payload with a checker that binds the C/A/B openings, contraction
@@ -260,9 +279,13 @@ semantic statements, but they are not one cryptographic suite:
 - **IR-v2 today** is BabyBear, Ext4 challenges, Poseidon2 width 16, and the
   existing Plonky3 FRI.  Its deployed `(log_blowup, queries, grind) =
   (6,19,16)` query column is only 34 UDR bits.  The research tree has now
-  priced `(2,57,16)` as prover-cheaper but verifier/wire-heavier; it is not
-  landed, and the recursion verifier must first pin `num_queries` instead of
-  reading the security parameter from the child proof.
+  repaired the upstream FRI bit-reversal bug and made all twelve descriptors
+  self-verify at `(2,57,16)`.  The configuration flip was deliberately not
+  landed: measurements divide prover work by roughly 15.19 but cost 2.28 times
+  more verifier work, 2.4 times more wire, a 16-times larger row
+  ceiling, and 20 additional UDR bits.  The production pin remains
+  `(6,19,16)`, and the recursion verifier must first pin `num_queries` instead
+  of reading the security parameter from the child proof.
 - **Selvage's multilinear candidate** is BaseFold over Reed--Solomon in the
   unconditional `(1−ρ)/3` band.  Its deployment target must use the selected
   zkML field/extension and Poseidon2 commitment encoding (or explicitly choose

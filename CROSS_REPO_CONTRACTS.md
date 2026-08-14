@@ -161,9 +161,10 @@ binary-Merkle paths.  Challenge and query namespaces are distinct; each draw
 is a literal Poseidon2 sponge construction query; causality excludes future
 frames; primitive work equals absorbed block count; and accepted submitted
 paths reflect into `BaseFoldRawCommittedIorAccepts` on the same coherent query
-schedule.  This does not yet prove modulo query decoding uniform, the adaptive
-work-space sponge/RO coupling, padding or byte-codec refinement, or the deployed
-Poseidon2 permutation idealization.
+schedule.  Its original modulo decoder remains deterministic but is not a
+uniformity claim; the strict path below supplies unbiased sampling.  The
+adaptive work-space sponge/RO coupling, padding or byte-codec refinement, and
+deployed Poseidon2 permutation idealization remain open.
 
 `Selvage/BaseFoldBcsSpongeGame.lean` makes the next boundary explicit rather
 than leaving the construction outside the security game.  The exact ordered
@@ -174,6 +175,20 @@ BaseFold `romError` at that ledger.  The adapter is intentionally indexed by a
 fixed candidate receipt; it does not claim the missing online-prover semantics
 or adaptive eager/deferred coin-space reindexing.
 
+`Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
+without pretending the original modulo decoder was unbiased.  For query
+domains of at most 28 bits it rejects the single zero BabyBear element and
+uses the exact factorization of `p - 1` to identify every accepted seed with a
+slack coordinate and one query coordinate.  Equal fibres give exact uniform
+marginals; rejection across `q` independent uniform seed digests costs at most
+`q / 2013265921`.  Strict acceptance fails closed on rejection and reflects to
+the raw committed-IOR event on that exact schedule.  A full ROM composition
+must still carry this rejection term, state whether retries exist, and price
+any retry rule rather than silently conditioning it away.  Exact
+committed-source run `E-20260814T092057-4803-persvati-15e846c31269-lake`
+built the final sampler in 2,238 jobs with command and source-integrity exits
+zero.
+
 The generic reindexing half is now narrower and machine checked in rooted
 `Selvage/SpongeIndiffAdaptiveCoupling.lean`: a decision depending only on an
 observed prefix may guard swaps wholly inside the unseen suffix, and any finite
@@ -181,7 +196,12 @@ program of those guarded swaps is one bijection of the complete fixed work
 space.  Supplying pointwise eager/deferred agreement under that program yields
 the exact uniform-probability coupling.  What remains is run-specific rather
 than measure-theoretic: synthesize the guarded program from actual sponge
-construction/reveal steps and prove their off-bad public-state agreement.
+construction/reveal steps and prove their off-bad public-state agreement.  The
+focused seam is green as
+`E-20260814T085015-69502-persvati-cdb76138c078-lake` (3,070 jobs), and the same
+source commit passed the complete 8,928-job `lake build Minidregg` on hbox as
+`E-20260814T085014-69503-hbox-cdb76138c078-lake`; command and source-integrity
+exits were zero in both runs.
 
 Evidence does not authorize a request.  minidregg admits it only under the
 request-indexed disclosure/audit policy of the same `CommittedTurn` whose
@@ -226,8 +246,12 @@ Current pins:
 - production-shaped IR-v2: BabyBear, Ext4, Poseidon2-w16, FRI,
   `(log_blowup, queries, grind) = (6,19,16)`;
 - its query column is 34 UDR / 73 JBR / 130 withdrawn-CBR bits;
-- `(2,57,16)` is priced but not landed and requires a recursion-verifier
-  `num_queries` pin first; and
+- after repairing the upstream FRI bit-reversal bug, all twelve descriptors
+  self-verify at `(2,57,16)`, but the configuration flip was deliberately not
+  landed: it divides measured prover work by about 15.19 but costs 2.28 times
+  verifier work, 2.4 times more wire, a 16-times larger row ceiling, and 20
+  additional UDR bits; it also requires a recursion-verifier `num_queries` pin
+  first; and
 - the selected multilinear research route is BaseFold/RS in the unconditional
   `(1−ρ)/3` regime, eventually instantiated over the intended zkML
   extension-field/Poseidon2 suite.
