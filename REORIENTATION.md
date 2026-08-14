@@ -193,7 +193,15 @@ content/version-pinned first-order export and checked meaning theorem now exist,
 and minidregg consumes their exact identity without hand-copying constants.
 The next proof boundary is to instantiate the concrete Poseidon2 BaseFold
 commitment/opening semantics from that source-owned data; the export itself is
-not that instantiation.
+not that instantiation.  The field half of that boundary is now concrete:
+`Selvage/BabyBearExt4.lean` proves `X^4-11` irreducible over BabyBear by checked
+Euler witnesses and a quadratic-tower norm argument, constructs the quotient
+field, proves its finrank is four and its generator satisfies `u^4=11`, and
+exposes its canonical four-coordinate power basis.  Exact committed-source run
+`E-20260814T070954-42349-persvati-815063f47f38-lake` built it on persvati in
+1,944 jobs with command and source-integrity exits zero.  The remaining half is
+the source-data-driven Poseidon2 leaf/node semantics and retained-collision
+reduction over that carrier.
 
 The exact audit turn is deliberately below this fork: it can eventually carry
 either suite's accepted evidence, but today it carries exact-recompute Lean
