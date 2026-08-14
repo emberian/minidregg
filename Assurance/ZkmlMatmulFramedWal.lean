@@ -249,13 +249,13 @@ theorem stale_cannot_sync :
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.recovered_after_sync_exact' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.recovered_after_sync_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms recovered_after_sync_exact
-/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.refinement' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.refinement' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms refinement
 /-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.recovered_retains_checked_output' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms recovered_retains_checked_output
-/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.stale_cannot_sync' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Assurance.ZkmlMatmulFramedWal.stale_cannot_sync' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stale_cannot_sync
 
 end
