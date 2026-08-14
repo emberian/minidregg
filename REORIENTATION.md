@@ -1,4 +1,4 @@
-# Reorientation — 2026-08-13
+# Reorientation — 2026-08-14
 
 This is a thin cross-repository orientation note, not another evidence ledger.
 For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
@@ -7,12 +7,50 @@ ledger at the commit being claimed.
 
 Snapshot inspected while writing this note:
 
-- `minidregg` `9b1d512` on `main`, with independently owned zkML-matmul and
-  Uwueave projection work in the shared worktree;
-- `zkml-research` `a42c9b9` on `dev`, with `vendor/` untracked; and
-- `lean-uwueave` `49203f1` on `dev`, with active trust/debt/runtime work.
+- `minidregg` `1f25749` on `main`, with independently owned two-regime query,
+  Uwueave projection, and native projection work in the shared worktree;
+- `zkml-research` `9be47ff` on `dev`, with `vendor/` and research notes
+  untracked; and
+- `lean-uwueave` `f9396b1` on `dev`, with active finite-history,
+  finite-product, audit, and benchmark work.
 
 The snapshot is an ownership marker, not a claim that later commits are stale.
+
+## Current convergence truth
+
+The first linear-layer proof seam is no longer at the architectural-sketch
+stage:
+
+- the matrix statement is contraction, not Hadamard product, with the corrected
+  `(μ+ν)/|F| + κ·3/|F|` soundness account and a native conformance prover;
+- the C/A/B multilinear evaluation claims are each tied to their own vector
+  commitment root; the transcript account now honestly says three unpriced MLE
+  proofs rather than two nonexistent openings;
+- the reusable quadratic sumcheck and BaseFold equality braid are proved;
+- sumcheck now has a native WARP `Reduction`, `KStateFn`, and
+  `RbrKnowledgeSoundness` instance with exact per-round price `d/|F|`;
+- BaseFold instantiates that object at degree two, with an inhabited F5 state
+  and exact `2/5` round price; and
+- the full-word BaseFold IOR verifier now checks the degree bounds, Boolean
+  recurrences, RS descent, and braided terminal on one challenge vector.  It has
+  perfect completeness and exact-codeword wrong-value soundness
+  `m·2/|F|`.
+
+The last item is deliberately an IOR result, not a deployment claim.  Two
+fronts remain and must not be merged by prose:
+
+1. **relaxed proximity knowledge state:** product-compose the scalar state with
+   the RS/fold witness state, including the actual `FoldDistancePreserving` or
+   correlated-agreement price when a previously dead codeword state revives;
+2. **committed sampled transcript:** bind statement-first intermediate roots,
+   exact fibre openings, and multi-round sampled query consistency, then carry
+   the query-miss, commitment, and ROM terms into BCS/Fiat--Shamir.
+
+`HalfThresholdFriTranscript` already owns the exact opened-fibre and
+all-position binding lemmas; do not recreate them.  The new
+`Assurance/TwoRegimeQueryBudget.lean` worktree lane is independently owned and
+appears aimed at the query-price front; reconcile after its owner commits or
+hands it over.
 
 ## One system, four responsibilities
 
@@ -91,16 +129,16 @@ PQ-128 FHE, physical stable media, or production key custody.
 
 ## Immediate convergence order
 
-1. Let the active matmul lane finish its correction from Hadamard product to
-   contraction and preserve its explicit padding, PCS, Fiat--Shamir, and
-   registry residuals.
+1. Preserve the now-landed contraction statement/native conformance seam and
+   its explicit padding, PCS, Fiat--Shamir, and registry residuals.
 2. Replace the accidental Projection-V2 bridge decision with an explicit
    interface choice. Use V3 for rich checked plan/result/certificate data;
    use the V4 sidecar only where context-bound runtime-auth facts are actually
    required. In both cases the imported value remains neutral data.
-3. Finish one runnable hash-based multilinear opening seam. Reuse Selvage's
-   existing `OpeningScheme`, RBR-to-Fiat--Shamir, BCS, and accumulation cone;
-   do not invent a second PCS abstraction merely to look multilinear.
+3. Advance the landed exact-codeword BaseFold IOR through the two named fronts
+   above. Reuse the existing `OpeningScheme`, committed FRI transcript,
+   RBR-to-Fiat--Shamir, BCS, and accumulation cone; do not invent a second PCS
+   abstraction merely to look multilinear.
 4. Instantiate the audit checker's named transport obligations for the chosen
    contraction statement, then price the real binding and beacon terms.
 5. Join that evidence to one canonical computation receipt and the existing
