@@ -138,6 +138,19 @@ stage:
   `E-20260814T101425-61974-persvati-d3a92414d682-lake` built the composed
   target in 2,243 jobs with command and source-integrity exits zero.
 
+- `Selvage/BaseFoldBcsByteCodec.lean` pins the canonical bytes immediately
+  below that profile.  BabyBear values use exactly four little-endian bytes;
+  decoding refuses the modulus and every larger 32-bit word instead of
+  reducing it.  The Poseidon2 construction rate is correctly eight lanes, so
+  its lane-major codec is exactly 32 bytes, round-trips as a `LawfulCodec`,
+  rejects trailing bytes, and is injective.  A padded block message therefore
+  occupies exactly `32 * (blocks + 1)` bytes.  The first draft's mistaken
+  12-lane/48-byte assumption was caught by the type before landing as a wire
+  identity.  Exact committed-source persvati run
+  `E-20260814T102507-72128-persvati-85aa6b1accbe-lake` built the target in
+  3,020 jobs with command and source-integrity exits zero.  Whole receipt,
+  Ext4, root/path, and native-code refinement remain separate crossings.
+
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it
   proves `BabyBear.modulus - 1` factors as an exact slack coordinate times the
@@ -226,10 +239,10 @@ The remaining boundary is therefore narrower and more concrete:
    uniform, and the explicit `q / p` rejection loss is carried through the
    raw-IOR/ROM ledger, including the distinct injectively padded rate-block
    profile and its exact work delta.  Derive the run-specific adaptive
-   eager/deferred work-space coupling, pin the canonical byte codec, and
-   perform the deployed-Poseidon idealization with its hash/grinding terms
-   visible.  The current policy has no retry; any future retry rule must be
-   introduced and priced explicitly;
+   eager/deferred work-space coupling, extend the lawful field/rate bytes to
+   the whole receipt and Merkle paths, and perform the deployed-Poseidon
+   idealization with its hash/grinding terms visible.  The current policy has
+   no retry; any future retry rule must be introduced and priced explicitly;
 3. **succinct matmul composition:** the toy serialized statement and
    proof-bearing exact checker are now runnable.  Replace its F7 recomputation
    payload with a checker that binds the C/A/B openings, contraction

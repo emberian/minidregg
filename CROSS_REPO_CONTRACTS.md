@@ -165,11 +165,11 @@ schedule.  Its original modulo decoder remains deterministic but is not a
 uniformity claim; the strict path below supplies unbiased sampling.  This
 original profile is intentionally still unpadded.  The separate
 `BaseFoldBcsPadding` profile proves injective rate-block padding and its exact
-`m + queryCount` work delta without claiming a byte codec.  That padded
+`m + queryCount` work delta.  That padded
 schedule is now a work-bounded distinguisher and reaches the combined strict
 accepted-query/raw-IOR/ROM ledger at its exact larger work argument.  The
-adaptive work-space sponge/RO coupling, canonical byte refinement, and
-deployed Poseidon2 permutation idealization remain open.
+adaptive work-space sponge/RO coupling, whole-receipt/Merkle serialization,
+and deployed Poseidon2 permutation idealization remain open.
 
 `Selvage/BaseFoldBcsSpongeGame.lean` makes the next boundary explicit rather
 than leaving the construction outside the security game.  The exact ordered
@@ -187,7 +187,17 @@ and domain-separated draw laws survive; and its exact primitive-work delta is
 one call per public draw, `m + queryCount` per receipt.  Its work-indexed game
 adapter and `strictPaddedAcceptedRawRomLedger` now preserve that larger ledger
 through the same joint accepted-query and `q / p` terms.  This is not yet a
-wire codec: bytes-to-field packing and bounded decoding remain open.
+whole receipt codec: `BaseFoldBcsByteCodec` now supplies strict canonical
+field/rate bytes, while Ext4 values, roots, paths, receipt framing, and native
+refinement remain to be composed.
+
+`Selvage/BaseFoldBcsByteCodec.lean` fixes one BabyBear value as four
+little-endian bytes and refuses any decoded word at or above the modulus.  The
+actual construction rate is eight lanes, not twelve: the lawful lane-major
+rate codec therefore consumes exactly 32 bytes, rejects trailing bytes, and
+round-trips injectively.  Encoding the `.pad1` message costs exactly
+`32 * (semantic blocks + 1)` bytes.  This is the canonical Lean wire meaning;
+no handwritten native routine is treated as refined by implication.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
