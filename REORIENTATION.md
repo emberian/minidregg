@@ -13,7 +13,9 @@ authorized audit-turn convergence):
 - `zkml-research` `283692e` on `dev`, with active verdict/grinding notes and
   `vendor/` untracked; and
 - `leanuweave` `a80a29b` on `dev`, with active durable-artifact,
-  runtime-auth-V4, debt-gate, and Rust persistence work.
+  runtime-auth-V4, debt-gate, and Rust persistence work; and
+- `breadstuffs` `dcd6db17c064` on `main`, with independently active field-op,
+  PoW, FHE, and measurement work in its shared worktree.
 
 The snapshot is an ownership marker, not a claim that later commits are stale.
 
@@ -96,7 +98,7 @@ UDR/JBR/withdrawn-CBR models respectively, so only the withdrawn model reaches
 128 bits.  This is configuration evidence and a refusal tooth, not permission
 to promote the withdrawn assumption into a cryptographic claim.
 
-## One system, four responsibilities
+## One system, five responsibilities
 
 The project is a **receipts-native compute fabric**: every accepted turn is a
 typed, authorized semantic state transition whose evidence is carried now or
@@ -118,6 +120,11 @@ The repositories/layers have different authority:
 4. **zkml-research owns protocol selection by evidence.** It measures candidate
    designs, records refutations, and decides which statements are worth moving
    into the checked stack. It is not a second semantic kernel or proof tree.
+5. **breadstuffs / Dregg2 owns the current implementation rail.** It contains
+   the deployed IR-v2 compiler/prover, Lean-authored Poseidon2/AIR artifacts,
+   and operational measurement instruments. It may emit a versioned statement,
+   candidate result, proof, or verifier artifact. It does not authorize a
+   minidregg request or assign semantic meaning to acceptance.
 
 The narrow interfaces should therefore be:
 
@@ -131,7 +138,10 @@ minidregg exact request + authority + state transition
 typed computation statement + canonical commitments/openings
           |
           v
-Selvage proof or commit-and-audit evidence
+breadstuffs candidate/proof bytes + versioned suite artifacts
+          |
+          v
+Selvage proof or commit-and-audit check/evidence
           |
           v
 minidregg receipt + durable causal history
@@ -158,6 +168,13 @@ semantic statements, but they are not one cryptographic suite:
   and register another suite).  The existing Tower256/cSHAKE additive-FRI raw
   controller is a valuable implementation and reduction pattern, not a
   drop-in zkML PCS instance.
+
+The Poseidon2 constants, matrices, round schedule, narrow/wide AIR artifacts,
+and current Plonky3 transcript semantics live in breadstuffs/Dregg2.  Selvage
+must consume a content/version-pinned first-order suite export with a checked
+meaning theorem; it must not hand-copy hex constants or infer a cryptographic
+suite from a benchmark fixture.  Producing that export is the prerequisite to
+the concrete Poseidon2 BaseFold instantiation.
 
 The exact audit turn is deliberately below this fork: it can eventually carry
 either suite's accepted evidence, but today it carries exact-recompute Lean
