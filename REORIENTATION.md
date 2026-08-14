@@ -6,16 +6,16 @@ For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
 current-truth file.  For exact proof/build evidence, use each repository's own
 ledger at the commit being claimed.
 
-Snapshot inspected while writing this note (and refreshed after the first
-authorized audit-turn convergence):
+Snapshot inspected while writing this note (and refreshed through the checked
+Dregg2 suite-export convergence):
 
-- `minidregg` `907e880` on `main`, with an independently owned Uwueave
+- `minidregg` `085a7978ee60` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
-- `zkml-research` `283692e` on `dev`, with active verdict/grinding notes and
+- `zkml-research` `453ff3fb35a4` on `dev`, with active verdict/grinding notes and
   `vendor/` untracked; and
-- `leanuweave` `a80a29b` on `dev`, with active durable-artifact,
+- `leanuweave` `6770e01d8f7d` on `dev`, with active durable-artifact,
   runtime-auth-V4, debt-gate, and Rust persistence work; and
-- `breadstuffs` `dcd6db17c064` on `main`, with independently active field-op,
+- `breadstuffs` `e496fb48d6aa` on `main`, with independently active field-op,
   PoW, FHE, and measurement work in its shared worktree.
 
 The snapshot is an ownership marker, not a claim that later commits are stale.
@@ -58,7 +58,20 @@ stage:
   `m·3/|F| + (1−τ)^q + Pr[accepted equivocation]`; and
 - the retained raw equivocation exposes an exact level and two distinct flat
   hash preimages with the same root.  This is a real witness-level reduction,
-  but not yet the deployed Merkle/sponge/ROM reduction.
+  but not yet the deployed Merkle/sponge/ROM reduction; and
+- the production IR-v2 suite now has a checked source-owned first-order export
+  at breadstuffs commit `e496fb48d6aaf374d4c0302c95c0fcc69bb8051d`.
+  `Dregg2/Circuit/ZkmlSuiteArtifact.lean` derives the Poseidon2 round constants
+  and both linear maps from the source definitions, pins the exact Plonky3
+  revision and wire codec, and emits the 6,654-byte payload whose SHA-256 is
+  `b131ed2ad3e9628dbcdbf2bf6c8cf845a6f31f87eea3c91ba8aa00d019c494f0`.
+  minidregg retains that payload and its source-blob envelope under
+  `artifacts/zkml-suites`, checks them in the repository trust gate, and admits
+  only the exact source/payload/protocol/checker tuple through
+  `Selvage/ZkmlSuiteRegistry.lean`.  Unknown suite, changed source, changed
+  payload, and changed checker identities are refusal theorems.  This closes
+  first-order suite identity, not native-verifier refinement or cryptographic
+  soundness.
 
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
@@ -171,11 +184,12 @@ semantic statements, but they are not one cryptographic suite:
   drop-in zkML PCS instance.
 
 The Poseidon2 constants, matrices, round schedule, narrow/wide AIR artifacts,
-and current Plonky3 transcript semantics live in breadstuffs/Dregg2.  Selvage
-must consume a content/version-pinned first-order suite export with a checked
-meaning theorem; it must not hand-copy hex constants or infer a cryptographic
-suite from a benchmark fixture.  Producing that export is the prerequisite to
-the concrete Poseidon2 BaseFold instantiation.
+and current Plonky3 transcript semantics live in breadstuffs/Dregg2.  The
+content/version-pinned first-order export and checked meaning theorem now exist,
+and minidregg consumes their exact identity without hand-copying constants.
+The next proof boundary is to instantiate the concrete Poseidon2 BaseFold
+commitment/opening semantics from that source-owned data; the export itself is
+not that instantiation.
 
 The exact audit turn is deliberately below this fork: it can eventually carry
 either suite's accepted evidence, but today it carries exact-recompute Lean
@@ -227,15 +241,16 @@ are the next crossings, not footnotes.
    interface choice. Use V3 for rich checked plan/result/certificate data;
    use the V4 sidecar only where context-bound runtime-auth facts are actually
    required. In both cases the imported value remains neutral data.
-3. Continue from the now-landed raw `OpeningScheme` theorem and flat-hash
-   collision witness: instantiate the intended BabyBear-extension/Poseidon2
-   Merkle suite and discharge its retained equivocation branch there. Reuse
-   the existing commitment, BCS, RBR-to-Fiat--Shamir, and ROM abstractions and
-   the Tower256 raw controller's reduction pattern; do not relabel that
-   cSHAKE/Tower256 suite as the zkML deployment or invent a KZG-shaped PCS
-   abstraction merely to look multilinear.
-4. Serialize the exact verifier alphabet and replace the exact-audit evidence
-   with a runnable checker binding the three matmul openings,
+3. Continue from the now-landed raw `OpeningScheme` theorem, flat-hash
+   collision witness, and source-owned IR-v2 suite export: instantiate the
+   intended BabyBear-extension/Poseidon2 Merkle suite and discharge its
+   retained equivocation branch there. Reuse the existing commitment, BCS,
+   RBR-to-Fiat--Shamir, and ROM abstractions and the Tower256 raw controller's
+   reduction pattern; do not relabel that cSHAKE/Tower256 suite as the zkML
+   deployment or invent a KZG-shaped PCS abstraction merely to look
+   multilinear.
+4. Serialize the exact **BaseFold** verifier alphabet and replace the
+   exact-audit evidence with a runnable checker binding the three matmul openings,
    contraction claim, registry entry, checker version, and complete named
    failure budget into one statement. Then instantiate the audit checker's
    transport obligations and real beacon term.

@@ -71,6 +71,25 @@ known-answer/refusal vectors.  Selvage must not hand-copy constants, infer a
 suite from benchmark fixtures, or treat Rust/Plonky3 verification as its own
 theorem.
 
+The first production-rail export is now exact and source owned:
+
+- producer: breadstuffs commit
+  `e496fb48d6aaf374d4c0302c95c0fcc69bb8051d`, exporter
+  `metatheory/Dregg2/Circuit/ZkmlSuiteArtifact.lean`;
+- suite: `dregg.ir2.babybear-ext4.poseidon2-w16.fri.v1`;
+- receiver payload:
+  `artifacts/zkml-suites/dregg-ir2-babybear-poseidon2-w16-fri-v1.payload.json`,
+  6,654 identity bytes excluding its trailing newline, SHA-256
+  `b131ed2ad3e9628dbcdbf2bf6c8cf845a6f31f87eea3c91ba8aa00d019c494f0`;
+- source envelope: the adjacent `.envelope.json`, pinning the producer commit,
+  tree, exporter, Poseidon, FRI-verifier, and Cargo-lock blobs; and
+- receiving checks: `scripts/check-zkml-suite-artifact.sh` plus the exact
+  admission/refusal theorems in `Selvage/ZkmlSuiteRegistry.lean`.
+
+That is a checked export and fail-closed local identity registry.  It is not an
+authenticated production registry, a Rust-to-Lean checker refinement, a
+Plonky3 soundness theorem, or the BabyBear/Poseidon2 BaseFold instantiation.
+
 One native computation response has the shape:
 
 ```text
@@ -163,6 +182,9 @@ checked Preoscript planning data
 `Assurance/ZkmlMatmulAuditTurn.lean` is the landed semantic floor: exact tiny
 recomputation, authorized evidence disclosure, canonical logical install,
 history append, replay, and adjacent refusal.  It does not yet consume a V3/V4
-artifact, native candidate, succinct checker, deployed registry, production
-codec, or physical store.  Those crossings should replace its fixtures one at
-a time without weakening its request binding or refusal teeth.
+artifact, native candidate, succinct checker, authenticated upgradeable
+registry, production state codec, or physical store.  The repository now has
+the exact production-rail suite artifact and fail-closed identity lookup, but
+the audit turn does not yet route candidate proof bytes through them.  Those
+crossings should replace its fixtures one at a time without weakening its
+request binding or refusal teeth.

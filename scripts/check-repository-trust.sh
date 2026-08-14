@@ -14,6 +14,7 @@ cd "$repo_root"
 
 bash scripts/check-proof-hygiene.sh
 bash scripts/check-import-boundary.sh
+bash scripts/check-zkml-suite-artifact.sh
 bash scripts/check-carrier-census.sh "$@"
 if $in_git_worktree; then
   git diff --check

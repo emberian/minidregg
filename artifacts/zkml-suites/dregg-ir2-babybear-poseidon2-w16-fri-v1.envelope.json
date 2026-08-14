@@ -1,0 +1,33 @@
+{
+  "schema": "minidregg.zkml-suite-envelope.v1",
+  "suite_id": "dregg.ir2.babybear-ext4.poseidon2-w16.fri.v1",
+  "source": {
+    "repository": "https://github.com/emberian/breadstuffs",
+    "commit": "e496fb48d6aaf374d4c0302c95c0fcc69bb8051d",
+    "tree": "434f81f2be045cb50fc05907881284160d3f380d",
+    "exporter_path": "metatheory/Dregg2/Circuit/ZkmlSuiteArtifact.lean",
+    "exporter_blob": "762d7180cca7fda6b7140ca0b6cacfb8241925ff",
+    "poseidon_blob": "9878703829dc8e43a06fc6f1acac217af2ba2fd5",
+    "fri_verifier_blob": "1d7e4302aa6f18a92fdfe8092c03926be75c1998",
+    "cargo_lock_blob": "4987ba037cad521fc3ced2444ae16ce09188ae48"
+  },
+  "payload": {
+    "path": "dregg-ir2-babybear-poseidon2-w16-fri-v1.payload.json",
+    "bytes_excluding_trailing_newline": 6654,
+    "sha256": "b131ed2ad3e9628dbcdbf2bf6c8cf845a6f31f87eea3c91ba8aa00d019c494f0"
+  },
+  "checker": {
+    "id": "dregg.ir2.verify_vm_descriptor2_with_config",
+    "version": 1,
+    "content_identity": "git:e496fb48d6aaf374d4c0302c95c0fcc69bb8051d",
+    "claim_ceiling": "executable checker and checked suite-data identity; deployed Rust-to-Lean refinement remains a named residual"
+  },
+  "producer_verification": {
+    "host": "hbox",
+    "command": "LEAN_NUM_THREADS=4 lake build ZkmlSuiteGuards",
+    "jobs": 714,
+    "verdict": "PASS",
+    "emission_command": "LEAN_NUM_THREADS=4 lake env lean --run Dregg2/Circuit/ZkmlSuiteArtifact.lean",
+    "emission_verdict": "PASS"
+  }
+}
