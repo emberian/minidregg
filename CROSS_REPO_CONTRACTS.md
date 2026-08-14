@@ -174,6 +174,17 @@ facts do not prove SQLite, FFI, filesystem, fsync, stable media, power-loss,
 replication, consensus, or liveness.  Each physical adapter needs its own
 refinement statement and evidence.
 
+The exact matmul slice now instantiates the intermediate framed-WAL boundary in
+`Assurance/ZkmlMatmulFramedWal.lean`.  Its one admitted v1 record contains the
+transaction, output write, checker-derived output bytes, and audit bytes under
+distinct magic/version/checksum framing.  It proves old-state recovery before
+sync, exact atomic recovery after the abstract sync barrier, preservation under
+a torn successor, cold-start replay, corrupt-frame refusal, stale-root refusal,
+and the generic device-to-logical-protocol simulation.  This closes the closed
+fixture's use of the existing device model; it does not supply a general
+serializer, authenticated codec registry, or refinement from actual OS/storage
+operations to `DeviceStep`.
+
 ## 5. zkml-research → engineering decisions
 
 Research verdicts are decision inputs, never runtime inputs.  A promoted
@@ -215,8 +226,9 @@ into the durable audit envelope but grant no authority.
 
 The slice still does not consume an actual V3/V4 decoded artifact or native
 runner response, a succinct checker/proof, an authenticated upgradeable
-registry, a production state codec, or a physical store.  The production-rail
-suite artifact is admitted, but the toy checker remains F7 exact recomputation
-and does not accept IR-v2 or BaseFold proof bytes.  Those crossings should
-replace its fixtures one at a time without weakening its request binding or
-refusal teeth.
+registry, a general production state/WAL codec, or an actual physical store.
+Its closed framed-WAL witness reaches the abstract device boundary but not an
+OS/filesystem adapter.  The production-rail suite artifact is admitted, but
+the toy checker remains F7 exact recomputation and does not accept IR-v2 or
+BaseFold proof bytes.  Those crossings should replace its fixtures one at a
+time without weakening its request binding or refusal teeth.

@@ -111,6 +111,20 @@ committed-source persvati run
 `E-20260814T074351-99292-persvati-a7fe546c8834-lake` built the integrated target
 in 3,007 jobs with runner, command, and source-integrity exits zero.
 
+`Assurance/ZkmlMatmulFramedWal.lean` now takes the same checked turn across the
+existing physical-boundary model.  Its closed v1 payload exposes the exact
+transaction, root-bound output write, four checker-derived output bytes, and
+audit bytes inside a distinct versioned/checksummed frame.  The one admitted
+record round-trips; a pre-sync tear recovers the old checkpoint; the abstract
+sync barrier recovers the exact atomic install; a torn successor preserves it;
+cold-start retry replays; corrupt checksum and stale-root sync refuse.  The
+generic device simulation is instantiated rather than replaced.  Exact
+committed-source persvati run
+`E-20260814T075319-12919-persvati-39220a41cf8f-lake` built the target in 3,010
+jobs with runner, command, and source-integrity exits zero.  This is still a
+closed codec witness and abstract `DeviceStep`, not a general serializer or a
+POSIX/filesystem/stable-media theorem.
+
 That floor is exact recomputation, not the final succinct/deployment slice.
 The remaining boundary is therefore narrower and more concrete:
 
@@ -129,9 +143,10 @@ The remaining boundary is therefore narrower and more concrete:
    and
 4. **real crossings:** bind the selected Preoscript plan artifact and native
    candidate/proof bytes to that exact request without granting either
-   authority, then replace the four-byte fixture codec/list registry with
-   versioned deployed codecs, authenticated policy, and a physical persistence
-   refinement whose claim ceiling stays explicit.
+   authority, then replace the four-byte fixture and closed one-record WAL
+   codec/list registry with general versioned deployed codecs, authenticated
+   policy, and an actual I/O-to-`DeviceStep` persistence refinement whose claim
+   ceiling stays explicit.
 
 `HalfThresholdFriTranscript` owns the raw opened-fibre/equivocation split;
 `HalfThresholdFriQuery` and `HalfThresholdFriCoherent` own the adaptive and
