@@ -1068,8 +1068,9 @@ mod tests {
         let n = 1usize << m;
         let base = cubic_instance(m);
 
-        // zkML matmul: eq·(Â·B̂ − Ĉ) is cubicForm with D ≡ 1 and C negated
-        // (`cubicForm_matmul`).
+        // Hadamard (elementwise) zerocheck: eq·(Â·B̂ − Ĉ) is cubicForm with D ≡ 1 and
+        // C negated (`cubicForm_hadamard` — NOT the matmul face; a contraction sums an
+        // inner index, see `matmul_claim` below and `Assurance/ZkmlMatmulSumcheck.lean`).
         let matmul = CubicTables {
             e: base.e.clone(),
             a: base.a.clone(),
@@ -1092,7 +1093,7 @@ mod tests {
             ),
             P97,
         );
-        assert_eq!(cubic_combine(&o, P97), direct, "cubicForm_matmul");
+        assert_eq!(cubic_combine(&o, P97), direct, "cubicForm_hadamard");
 
         // GKR fraction-tree layer: the head table is the eq weights b ↦ χ_b(z)
         // (`cubicForm_fraction_layer`; `Selvage.eqMle_eq_mle` says its MLE is

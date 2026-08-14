@@ -22,8 +22,16 @@ products, all five multi-affine:
   `cubicForm E A B C D (x) = Ê(x)·(Â(x)·B̂(x) + Ĉ(x)·D̂(x))`
 
 and the two consumers are named as THEOREMS, not prose: `cubicForm_fraction_layer` (the `eq`
-head, via `Selvage/EqPolynomial.lean`'s `eqMle_eq_mle`) and `cubicForm_matmul` (`D ≡ 1`,
-`C` negated). `cubicForm_subsumes_prodDiff` proves the degree-2 engine is a SPECIAL CASE of
+head, via `Selvage/EqPolynomial.lean`'s `eqMle_eq_mle`) and `cubicForm_hadamard` (`D ≡ 1`,
+`C` negated).
+
+⚠ **`cubicForm_hadamard` was originally named `cubicForm_matmul` and that name was wrong.**
+`Â·B̂` is a POINTWISE product of two tables on one cube; a matmul contracts an inner index
+that appears in neither output coordinate, and `Assurance/ZkmlMatmulSumcheck.lean`'s
+`matmul_is_not_hadamard` computes the two on a 2×2 example and they differ. The matmul face
+is `mle₂_contraction` + `cubicForm_contraction` in that file, and it uses this engine at a
+DIFFERENT instance (head `E ≡ 1`, no `eq` factor, because the outer indices are bound by
+challenges before the sumcheck starts). `cubicForm_subsumes_prodDiff` proves the degree-2 engine is a SPECIAL CASE of
 this one rather than a parallel twin — the same object, not a second implementation.
 
 ## The engine
@@ -87,7 +95,7 @@ variable {m : ℕ}
 
 /-- **The degree-3 summand**: a head factor times a sum of two products of multilinear
 extensions — `Ê·(Â·B̂ + Ĉ·D̂)`. Both live consumers of this rung are instances
-(`cubicForm_fraction_layer`, `cubicForm_matmul`). -/
+(`cubicForm_fraction_layer`, `cubicForm_hadamard`). -/
 def cubicForm (E A B C D : (Fin m → Bool) → F) : (Fin m → F) → F :=
   fun x => mle E x * (mle A x * mle B x + mle C x * mle D x)
 
@@ -434,10 +442,13 @@ theorem mle_neg (f : (Fin m → Bool) → F) (x : Fin m → F) :
   simp only [mle, neg_mul, Finset.sum_neg_distrib]
 
 omit [Fintype F] [DecidableEq F] in
-/-- **CONSUMER 1 — the zkML matmul claim** `eq·(Â·B̂ − Ĉ)` IS a `cubicForm`: take the head
-`E`, the product pair `A, B`, and the second pair `(−C, 1)`. So the matmul rung is this
-engine, not a second one. -/
-theorem cubicForm_matmul (E A B C : (Fin m → Bool) → F) :
+/-- **CONSUMER 1 — the elementwise-product zerocheck** `eq·(Â·B̂ − Ĉ)` IS a `cubicForm`:
+take the head `E`, the product pair `A, B`, and the second pair `(−C, 1)`.
+
+⚠ This was named `cubicForm_matmul`; it is NOT a matmul (`Â·B̂` is pointwise, a contraction
+sums an inner index — `Assurance/ZkmlMatmulSumcheck.lean`'s `matmul_is_not_hadamard`
+decides it on data). It is the Hadamard gate's zerocheck face, which is a real consumer. -/
+theorem cubicForm_hadamard (E A B C : (Fin m → Bool) → F) :
     cubicForm E A B (fun b => -(C b)) (fun _ => 1)
       = fun x => mle E x * (mle A x * mle B x - mle C x) := by
   funext x
@@ -600,8 +611,8 @@ end CubicExample
 #guard_msgs (whitespace := lax) in #print axioms cubic_sumcheck_soundness
 /-- info: 'Minidregg.Assurance.cubic_retires_constraint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cubic_retires_constraint
-/-- info: 'Minidregg.Assurance.cubicForm_matmul' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms cubicForm_matmul
+/-- info: 'Minidregg.Assurance.cubicForm_hadamard' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cubicForm_hadamard
 /-- info: 'Minidregg.Assurance.cubicForm_fraction_layer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cubicForm_fraction_layer
 /-- info: 'Minidregg.Assurance.cubicForm_subsumes_prodDiff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
