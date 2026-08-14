@@ -162,8 +162,10 @@ def auditEvidence : AuditEvidence where
 /-- The evidence is admitted only as a disclosure of this exact authorized
 request and exact registry identity. -/
 def disclosurePolicy : DisclosurePolicy AuditEvidence where
-  Permitted := fun request evidence =>
-    request = demoRequest ∧ evidence.identity = auditIdentity
+  Permitted := fun {kind} request evidence =>
+    (⟨kind, request⟩ : Σ requestKind, Request requestKind) =
+        ⟨.object, demoRequest⟩ ∧
+      evidence.identity = auditIdentity
 
 abbrev Effect := Nat
 
@@ -275,9 +277,10 @@ def durableBefore : DataSnapshot rootBytes where
 /-- The exact result bytes, post root, audit event, and replay record install
 in one atomic model transition. -/
 theorem durable_install :
-    execute .complete durableBefore durableIntent =
+    Minidregg.Kernel.DurableDataIntent.execute
+        .complete durableBefore durableIntent =
       .accepted (DataSnapshot.install durableBefore durableIntent) := by
-  apply execute_complete_ready
+  apply Minidregg.Kernel.DurableDataIntent.execute_complete_ready
   · rfl
   · exact durable_ready
 
@@ -291,15 +294,18 @@ theorem durable_install :
       commit.postStateRoot := by
   decide
 
-@[simp] theorem installed_audit_event :
-    (DataSnapshot.install durableBefore durableIntent).model.history = [auditEvent] := by
+@[simp] theorem installed_audit_envelope :
+    (DataSnapshot.install durableBefore durableIntent).model.history =
+      [durableIntent.erase.event] := by
   rfl
 
 /-- A lost successful response reopens as the identical journaled turn. -/
 @[simp] theorem retry_replays :
-    execute .complete (DataSnapshot.install durableBefore durableIntent) durableIntent =
+    Minidregg.Kernel.DurableDataIntent.execute .complete
+        (DataSnapshot.install durableBefore durableIntent) durableIntent =
       .replayed durableIntent.erase := by
-  simp [execute, DataSnapshot.install, Snapshot.install,
+  simp [Minidregg.Kernel.DurableDataIntent.execute,
+    DataSnapshot.install, Snapshot.install,
     Snapshot.lookupRecorded, Intent.sameCheck_self]
 
 def tamperedAuditEvent : StableEvent :=
@@ -311,9 +317,9 @@ def tamperedIntent : DataIntent rootBytes :=
 /-- Same transaction id and same result bytes cannot replay with altered audit
 bytes: the exact envelope is part of journal identity. -/
 @[simp] theorem audit_tamper_rejected :
-    execute .complete (DataSnapshot.install durableBefore durableIntent) tamperedIntent =
-      .rejected (.durable .transactionConflict) := by
-  decide
+    Minidregg.Kernel.DurableDataIntent.execute .complete
+        (DataSnapshot.install durableBefore durableIntent) tamperedIntent =
+      .rejected (.durable .transactionConflict) := by rfl
 
 /-! ## Adjacent refusal tooth -/
 
@@ -323,8 +329,10 @@ theorem forged_output_refused :
     ¬ ∀ key, forgedOutput key =
       matmulTable eA eB (rowBits key) (columnBits key) := by
   intro forged
-  have := forged (0 : Key)
-  decide
+  have hfalse :
+      forgedOutput (0 : Key) ≠
+        matmulTable eA eB (rowBits 0) (columnBits 0) := by decide
+  exact hfalse (forged 0)
 
 /-! ## Axiom audit -/
 
