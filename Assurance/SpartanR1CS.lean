@@ -64,11 +64,27 @@ PCS/commitment lanes can aim at — `spartanTerminal_eq_honest` and `spartan_inn
   `mle_rowPartial_eq_mle₂` identifies an unbatched row opening with `Ã(r_x,r_y)`.
 * `spartan_reduces_to_two_openings` — the scope statement as a theorem: with the three row values
   correct, the whole outer terminal is determined by data the verifier already holds.
+* `outerReal_iff_sumcheckAccepts` — ⚠ **the idealization discharged.** Selvage's `SumcheckAccepts`
+  compares the prover's folded claim against the HONEST side's final value; a deployed verifier has
+  no honest side and compares against `eq(τ,r_x)·(v_A·v_B − v_C)`, which it computes itself.
+  `SpartanOuterRealAccepts` is that deployed predicate, with no honest side in it, and this theorem
+  says the two coincide EXACTLY when the three claims are true. Without it every bound above would
+  be a statement about an idealized verifier — the shape of a vacuity that survives a build.
+* `spartan_sound` — **SPARTAN, COMPOSED, over one joint draw `((τ,r_x),(γ,r_y))`.** An unsatisfied
+  R1CS is accepted by BOTH phases with probability at most
+  `s/|F| + s·3/|F| + 2/|F| + t·2/|F|`. Three events, three causes, added. The case split is the
+  content: either the prover told the truth about the three row openings, and phase 1 must carry
+  the lie and cannot; or it lied, and phase 2 must carry it and cannot. The provers are ADAPTIVE
+  (`outer` sees `τ`, `inner` sees `(τ,r_x,γ)`, the claims are functions of `(τ,r_x)`), and the
+  outer conjunct is `SpartanOuterRealAccepts` — so the idealization is not assumed away, it is PAID
+  FOR by phase 2.
 
 ## What is NOT proved here, named
 
 `[SPARTAN-pcs]` — the two terminal openings (`z̃(r_y)` and `wt̃γ(r_y)`) are handed to the
-verifier as values. `Selvage/MultilinearCommitment.lean`'s `MleEvalClaim` is the claim object and
+verifier as values. ⚠ Read this against `spartan_sound`: the composition moved the idealized
+terminal check OFF phase 1 and ONTO phase 2 — it did not remove it from the stack. Phase 2's
+terminal is still `SumcheckAccepts` against an honest chain. `Selvage/MultilinearCommitment.lean`'s `MleEvalClaim` is the claim object and
 `basefoldWord_injective` is the binding step; the OPENING PROTOCOL is BaseFold's braided reduction
 (or, in the BinarySpartan shape, Ligerito). `spartanOpeningsBound` states the binding consequence
 this file needs, and `SpartanOpeningProtocol` is the named obligation for the protocol itself.
@@ -236,10 +252,14 @@ noncomputable def spartanOuterHonest (A B C : R1CSMatrix F s t) (z : (Fin t → 
 
 /-- One draw of the outer phase: the zerocheck point `τ`, then the `s` sumcheck challenges. The
 prover's CLAIMED total is the constant `0` — that is exactly the zerocheck's assertion — and the
-honest truth chain is anchored at the actual value `D^(τ)`. -/
+honest truth chain is anchored at the actual value `D^(τ)`.
+
+The prover family is indexed by `τ` as well as by the challenge stream, because a real Spartan
+prover sees the zerocheck point BEFORE it sends round 0. Nothing in the proof needs it fixed. -/
 def SpartanOuterAccepts (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
-    (prover : (ℕ → F) → ℕ → Polynomial F) (w : (Fin s → F) × (Fin s → F)) : Prop :=
-  SumcheckAccepts (v := s) (prover (chalOf w.2))
+    (prover : (Fin s → F) → (ℕ → F) → ℕ → Polynomial F)
+    (w : (Fin s → F) × (Fin s → F)) : Prop :=
+  SumcheckAccepts (v := s) (prover w.1 (chalOf w.2))
     (spartanOuterHonest A B C z w.1 (chalOf w.2))
     0 (mle (r1csDefect A B C z) w.1) w.2
 
@@ -254,16 +274,16 @@ two terms are different events with different causes; adding them is the content
 either alone would be quoting a flattering half. -/
 theorem spartan_outer_sound {A B C : R1CSMatrix F s t} {z : (Fin t → Bool) → F}
     (hunsat : ¬ R1CSSat A B C z)
-    {prover : (ℕ → F) → ℕ → Polynomial F}
-    (hpm : PrefixMeasurable prover)
-    (hdeg : ∀ (χ : ℕ → F) (i : ℕ), i < s →
-      (prover χ i).degree < ((3 + 1 : ℕ) : WithBot ℕ)) :
+    {prover : (Fin s → F) → (ℕ → F) → ℕ → Polynomial F}
+    (hpm : ∀ τ : Fin s → F, PrefixMeasurable (prover τ))
+    (hdeg : ∀ (τ : Fin s → F) (χ : ℕ → F) (i : ℕ), i < s →
+      (prover τ χ i).degree < ((3 + 1 : ℕ) : WithBot ℕ)) :
     uniformProb ((Fin s → F) × (Fin s → F)) (SpartanOuterAccepts A B C z prover)
       ≤ (s : ℝ) / Fintype.card F + (s : ℝ) * (3 / Fintype.card F) := by
   have hD : r1csDefect A B C z ≠ 0 := fun h => hunsat ((r1csSat_iff_defect_zero A B C z).mpr h)
   have hstep : ∀ w : (Fin s → F) × (Fin s → F), SpartanOuterAccepts A B C z prover w →
       (mle (r1csDefect A B C z) w.1 = 0
-        ∨ AdaptiveAcceptsFalse prover (spartanOuterHonest A B C z w.1)
+        ∨ AdaptiveAcceptsFalse (prover w.1) (spartanOuterHonest A B C z w.1)
             0 (mle (r1csDefect A B C z) w.1) w.2) := by
     intro w hw
     by_cases hEq : (0 : F) = mle (r1csDefect A B C z) w.1
@@ -277,10 +297,10 @@ theorem spartan_outer_sound {A B C : R1CSMatrix F s t} {z : (Fin t → Bool) →
   · -- The sumcheck was laundered: the cubic bound, at every fixed zerocheck point.
     refine uniformProb_prod_le (by positivity) fun τ => ?_
     show uniformProb (Fin s → F)
-      (fun r => AdaptiveAcceptsFalse prover (spartanOuterHonest A B C z τ)
+      (fun r => AdaptiveAcceptsFalse (prover τ) (spartanOuterHonest A B C z τ)
         0 (mle (r1csDefect A B C z) τ) r) ≤ _
     have h := cubic_sumcheck_soundness (E := eqHead τ) (A := matVec A z) (B := matVec B z)
-      (C := fun a => -(matVec C z a)) (D := fun _ => (1 : F)) (H := (0 : F)) hpm hdeg
+      (C := fun a => -(matVec C z a)) (D := fun _ => (1 : F)) (H := (0 : F)) (hpm τ) (hdeg τ)
     rwa [spartanOuterTotal A B C z τ] at h
 
 end Outer
@@ -436,6 +456,233 @@ theorem mle_rowPartial_eq_mle₂ (A : R1CSMatrix F s t) (rx : Fin s → F) (ry :
 
 end Inner
 
+/-! ## §4b. The two phases COMPOSED — and the idealized verifier discharged
+
+⚠ **The modelling gap this section exists to close.** Selvage's `SumcheckAccepts` renders the
+terminal oracle check as *"the prover's folded claim equals the HONEST side's final value"*. A
+deployed Spartan verifier has no honest side: it computes `eq(τ,r_x)·(v_A·v_B − v_C)` from three
+values the PROVER supplied. Left unstated, everything above would be a theorem about an idealized
+verifier — exactly the shape of a vacuity that survives a green build.
+
+So it is not left unstated. `SpartanOuterRealAccepts` is the deployed predicate, with no honest
+side in it; `outerReal_iff_sumcheckAccepts` says it coincides with the idealized one EXACTLY when
+the three claims are true; and `spartan_sound` composes both phases over one joint draw, so the
+idealization is not assumed away — it is PAID FOR by phase 2, at `2/|F| + t·2/|F|`. -/
+
+section Composed
+
+variable {s t : ℕ}
+
+/-! ### Product slicing, done once at OPAQUE types
+
+`Assurance/ZkmlMatmulSumcheck.lean`'s `uniformProb_fst_le` explains the discipline and the reason
+for it: inlining a product split at the CONCRETE event types sends the elaborator into an `isDefEq`
+blow-up (measured here: a `whnf` heartbeat timeout, because `spartanBatch` unfolds through
+`batchConstraint` into three `rowPartial`s and thence into `mle`'s `Finset.sum`). So the two
+splits this section needs are performed once, on opaque `A × (B × C)`, with the event passed as an
+explicit predicate and a pointwise `Iff`. If a third consumer appears, these belong beside
+`uniformProb_prod_le` in `Selvage/Depth.lean`. -/
+
+/-- An event that reads the first and MIDDLE coordinates of a three-block draw keeps its bound. -/
+theorem uniformProb_mid_le {A B C : Type} [Fintype A] [Fintype B] [Fintype C]
+    (q : A × (B × C) → Prop) (p : A → B → Prop) (hq : ∀ w, q w ↔ p w.1 w.2.1)
+    {ε : ℝ} (hε : 0 ≤ ε) (h : ∀ a, uniformProb B (p a) ≤ ε) :
+    uniformProb (A × (B × C)) q ≤ ε := by
+  rw [uniformProb_congr hq]
+  refine uniformProb_prod_le hε fun a => ?_
+  exact uniformProb_fst_le _ (p a) (fun _ => Iff.rfl) hε (h a)
+
+/-- An event on a three-block draw whose bound holds at every fixed prefix keeps its bound. -/
+theorem uniformProb_last_le {A B C : Type} [Fintype A] [Fintype B] [Fintype C]
+    (q : A × (B × C) → Prop) (p : A → B → C → Prop) (hq : ∀ w, q w ↔ p w.1 w.2.1 w.2.2)
+    {ε : ℝ} (hε : 0 ≤ ε) (h : ∀ a b, uniformProb C (p a b) ≤ ε) :
+    uniformProb (A × (B × C)) q ≤ ε := by
+  rw [uniformProb_congr hq]
+  refine uniformProb_prod_le hε fun a => ?_
+  exact uniformProb_prod_le hε fun b => h a b
+
+/-- **The DEPLOYED outer verifier's acceptance.** The `s` round checks against the claimed total
+`0`, then the terminal comparison against the verifier's OWN expression. No honest side occurs in
+this predicate — everything in it is computable by a verifier holding `τ`, `r_x`, the prover's
+messages and the three claimed values. -/
+def SpartanOuterRealAccepts (τ rx : Fin s → F) (outer : ℕ → Polynomial F) (vA vB vC : F) : Prop :=
+  (∀ i, i < s → (outer i).eval 0 + (outer i).eval 1 = scChain (0 : F) outer (chalOf rx) i)
+    ∧ scChain (0 : F) outer (chalOf rx) s = spartanTerminal τ rx vA vB vC
+
+omit [Fintype F] [DecidableEq F] in
+/-- **The idealization, discharged.** With the three claims TRUE, the deployed predicate IS
+Selvage's `SumcheckAccepts` against the built honest side — so `spartan_outer_sound` is a statement
+about the real verifier, conditional on the claims, and phase 2 is exactly what makes that
+condition good. -/
+theorem outerReal_iff_sumcheckAccepts (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
+    (τ rx : Fin s → F) (outer : ℕ → Polynomial F) {vA vB vC : F}
+    (hA : vA = mle (matVec A z) rx) (hB : vB = mle (matVec B z) rx)
+    (hC : vC = mle (matVec C z) rx) :
+    SpartanOuterRealAccepts τ rx outer vA vB vC
+      ↔ SumcheckAccepts (v := s) outer (spartanOuterHonest A B C z τ (chalOf rx))
+          0 (mle (r1csDefect A B C z) τ) rx := by
+  simp only [SpartanOuterRealAccepts, SumcheckAccepts,
+    spartanTerminal_eq_honest A B C z τ rx hA hB hC]
+
+/-- The batched phase-2 constraint at the claimed values and the batching challenge `γ`. -/
+def spartanBatch (A B C : R1CSMatrix F s t) (rx : Fin s → F) (vA vB vC γ : F) :
+    LinearConstraint (Fin t → Bool) F :=
+  batchConstraint γ (innerBatch A B C rx vA vB vC)
+
+/-- A prover's claimed row value, as a function of the transcript prefix `(τ, r_x)` — a real
+prover chooses it after seeing both. -/
+abbrev SpartanClaim (F : Type) (s : ℕ) := (Fin s → F) → (Fin s → F) → F
+
+/-- The batched phase-2 constraint a whole transcript prefix determines: outer prefix `u = (τ,r_x)`
+fixes the three claimed values and the matrix rows, `γ` batches them. Named (rather than inlined)
+because every event below mentions it three times and the elaborator will not unfold it. -/
+def spartanBatchAt (A B C : R1CSMatrix F s t) (vA vB vC : SpartanClaim F s)
+    (u : (Fin s → F) × (Fin s → F)) (γ : F) : LinearConstraint (Fin t → Bool) F :=
+  spartanBatch A B C u.2 (vA u.1 u.2) (vB u.1 u.2) (vC u.1 u.2) γ
+
+/-- The three claims are the three TRUE row openings at `(τ, r_x)`. -/
+def ClaimsTrue (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
+    (vA vB vC : SpartanClaim F s) (u : (Fin s → F) × (Fin s → F)) : Prop :=
+  vA u.1 u.2 = mle (matVec A z) u.2 ∧ vB u.1 u.2 = mle (matVec B z) u.2
+    ∧ vC u.1 u.2 = mle (matVec C z) u.2
+
+/-- The phase-2 acceptance event at a fixed prefix: the degree-2 sumcheck on the batched claim. -/
+def SpartanInnerAccepts (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
+    (vA vB vC : SpartanClaim F s)
+    (inner : (Fin s → F) → (Fin s → F) → F → (ℕ → F) → ℕ → Polynomial F)
+    (u : (Fin s → F) × (Fin s → F)) (γ : F) (ry : Fin t → F) : Prop :=
+  SumcheckAccepts (v := t) (inner u.1 u.2 γ (chalOf ry))
+    (spartanInnerHonest (spartanBatchAt A B C vA vB vC u γ) z (chalOf ry))
+    (spartanBatchAt A B C vA vB vC u γ).target
+    (dotWt (spartanBatchAt A B C vA vB vC u γ).wt z) ry
+
+/-- The phase-2 FALSE-claim event at a fixed prefix — the thing `quad_sumcheck_soundness` bounds. -/
+def SpartanInnerFalse (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
+    (vA vB vC : SpartanClaim F s)
+    (inner : (Fin s → F) → (Fin s → F) → F → (ℕ → F) → ℕ → Polynomial F)
+    (u : (Fin s → F) × (Fin s → F)) (γ : F) (ry : Fin t → F) : Prop :=
+  AdaptiveAcceptsFalse (inner u.1 u.2 γ)
+    (spartanInnerHonest (spartanBatchAt A B C vA vB vC u γ) z)
+    (spartanBatchAt A B C vA vB vC u γ).target
+    (dotWt (spartanBatchAt A B C vA vB vC u γ).wt z) ry
+
+/-- **ONE DRAW OF THE WHOLE TWO-PHASE PROTOCOL.** The draw is `((τ, r_x), (γ, r_y))`: the zerocheck
+point, the `s` outer challenges, the batching challenge, the `t` inner challenges. Both phases must
+accept. The outer phase is the DEPLOYED predicate (no honest side); the inner phase is the degree-2
+sumcheck on the batched claim, whose claimed total batches the SAME three values the outer terminal
+consumed — that shared dependence IS the composition, and it is why one lie cannot satisfy both
+phases. -/
+def SpartanAccepts (A B C : R1CSMatrix F s t) (z : (Fin t → Bool) → F)
+    (vA vB vC : SpartanClaim F s)
+    (outer : (Fin s → F) → (ℕ → F) → ℕ → Polynomial F)
+    (inner : (Fin s → F) → (Fin s → F) → F → (ℕ → F) → ℕ → Polynomial F)
+    (w : ((Fin s → F) × (Fin s → F)) × (F × (Fin t → F))) : Prop :=
+  SpartanOuterRealAccepts w.1.1 w.1.2 (outer w.1.1 (chalOf w.1.2))
+      (vA w.1.1 w.1.2) (vB w.1.1 w.1.2) (vC w.1.1 w.1.2)
+    ∧ SpartanInnerAccepts A B C z vA vB vC inner w.1 w.2.1 w.2.2
+
+/-- **SPARTAN'S SOUNDNESS, COMPOSED.** A witness that does not satisfy the R1CS is accepted by BOTH
+phases with probability at most
+
+  `s/|F| + s·3/|F|`  — the outer phase, when the prover's three claims are TRUE
+                       (`spartan_outer_sound`, reached through `outerReal_iff_sumcheckAccepts`);
+  `+ 2/|F|`          — the γ-batch survived a FALSE triple (`batch_survives_prob_le` at three);
+  `+ t·2/|F|`        — the inner sumcheck laundered a false batched claim
+                       (`quad_sumcheck_soundness` at `d = 2`).
+
+Three events, three causes, added. The case split IS the content: either the prover told the truth
+about the three row openings, in which case phase 1 has to carry the lie and cannot; or it lied, in
+which case phase 2 has to carry it and cannot. **Nothing here is conditioned on an idealized
+verifier** — `SpartanAccepts`'s outer conjunct is `SpartanOuterRealAccepts`, which a real verifier
+evaluates from its own randomness and the prover's messages. The provers are adaptive: `outer` sees
+`τ`, `inner` sees `(τ, r_x, γ)`, and the claimed values are functions of `(τ, r_x)`.
+
+⚠ What remains outside this theorem is §5's `[SPARTAN-pcs]`, and it is NOT hidden inside it: the
+inner phase's two terminal openings (`wt̃γ(r_y)`, `z̃(r_y)`) are still compared against the honest
+chain rather than against opened commitments. **The composition moved the idealization from phase 1
+to phase 2; it did not remove it from the stack.** That is the Ligerito / BaseFold lane's object,
+and `SpartanOpeningProtocol` is its statement. -/
+theorem spartan_sound {A B C : R1CSMatrix F s t} {z : (Fin t → Bool) → F}
+    (hunsat : ¬ R1CSSat A B C z)
+    {vA vB vC : SpartanClaim F s}
+    {outer : (Fin s → F) → (ℕ → F) → ℕ → Polynomial F}
+    {inner : (Fin s → F) → (Fin s → F) → F → (ℕ → F) → ℕ → Polynomial F}
+    (houterPm : ∀ τ, PrefixMeasurable (outer τ))
+    (houterDeg : ∀ (τ : Fin s → F) (χ : ℕ → F) (i : ℕ), i < s →
+      (outer τ χ i).degree < ((3 + 1 : ℕ) : WithBot ℕ))
+    (hinnerPm : ∀ τ rx γ, PrefixMeasurable (inner τ rx γ))
+    (hinnerDeg : ∀ (τ rx : Fin s → F) (γ : F) (χ : ℕ → F) (i : ℕ), i < t →
+      (inner τ rx γ χ i).degree < ((2 + 1 : ℕ) : WithBot ℕ)) :
+    uniformProb (((Fin s → F) × (Fin s → F)) × (F × (Fin t → F)))
+        (SpartanAccepts A B C z vA vB vC outer inner)
+      ≤ ((s : ℝ) / Fintype.card F + (s : ℝ) * (3 / Fintype.card F))
+        + (2 : ℝ) / Fintype.card F
+        + (t : ℝ) * (2 / Fintype.card F) := by
+  classical
+  have hstep : ∀ w : ((Fin s → F) × (Fin s → F)) × (F × (Fin t → F)),
+      SpartanAccepts A B C z vA vB vC outer inner w →
+      ((ClaimsTrue A B C z vA vB vC w.1 ∧ SpartanOuterAccepts A B C z outer w.1)
+        ∨ ((¬ ClaimsTrue A B C z vA vB vC w.1
+              ∧ Satisfies z (spartanBatchAt A B C vA vB vC w.1 w.2.1))
+          ∨ SpartanInnerFalse A B C z vA vB vC inner w.1 w.2.1 w.2.2)) := by
+    intro w hw
+    obtain ⟨hout, hin⟩ := hw
+    by_cases hcl : ClaimsTrue A B C z vA vB vC w.1
+    · exact Or.inl ⟨hcl, (outerReal_iff_sumcheckAccepts A B C z w.1.1 w.1.2 _
+        hcl.1 hcl.2.1 hcl.2.2).mp hout⟩
+    · by_cases hsat : Satisfies z (spartanBatchAt A B C vA vB vC w.1 w.2.1)
+      · exact Or.inr (Or.inl ⟨hcl, hsat⟩)
+      · exact Or.inr (Or.inr (acceptsFalse_iff_accepts.mpr ⟨hin, fun h => hsat h.symm⟩))
+  -- Bound 1: the claims were true, so phase 1 has to carry the lie.
+  have b1 : uniformProb (((Fin s → F) × (Fin s → F)) × (F × (Fin t → F)))
+      (fun w => ClaimsTrue A B C z vA vB vC w.1 ∧ SpartanOuterAccepts A B C z outer w.1)
+      ≤ (s : ℝ) / Fintype.card F + (s : ℝ) * (3 / Fintype.card F) := by
+    refine uniformProb_fst_le _
+      (fun u => ClaimsTrue A B C z vA vB vC u ∧ SpartanOuterAccepts A B C z outer u)
+      (fun _ => Iff.rfl) (by positivity) ?_
+    exact le_trans (uniformProb_mono fun _ h => h.2)
+      (spartan_outer_sound hunsat houterPm houterDeg)
+  -- Bound 2: the claims were false, and the γ-batch failed to notice.
+  have b2step : ∀ u : (Fin s → F) × (Fin s → F),
+      uniformProb F (fun γ => ¬ ClaimsTrue A B C z vA vB vC u
+        ∧ Satisfies z (spartanBatchAt A B C vA vB vC u γ))
+      ≤ (2 : ℝ) / Fintype.card F := by
+    intro u
+    by_cases hcl : ClaimsTrue A B C z vA vB vC u
+    · rw [uniformProb_false fun _ h => h.1 hcl]
+      positivity
+    · have hbad : vA u.1 u.2 ≠ mle (matVec A z) u.2 ∨ vB u.1 u.2 ≠ mle (matVec B z) u.2
+          ∨ vC u.1 u.2 ≠ mle (matVec C z) u.2 := by
+        by_contra hcon
+        push_neg at hcon
+        exact hcl ⟨hcon.1, hcon.2.1, hcon.2.2⟩
+      exact le_trans (uniformProb_mono fun _ h => h.2)
+        (spartan_inner_batch_sound A B C z u.2 hbad)
+  have b2 : uniformProb (((Fin s → F) × (Fin s → F)) × (F × (Fin t → F)))
+      (fun w => ¬ ClaimsTrue A B C z vA vB vC w.1
+        ∧ Satisfies z (spartanBatchAt A B C vA vB vC w.1 w.2.1))
+      ≤ (2 : ℝ) / Fintype.card F :=
+    uniformProb_mid_le _
+      (fun u γ => ¬ ClaimsTrue A B C z vA vB vC u
+        ∧ Satisfies z (spartanBatchAt A B C vA vB vC u γ))
+      (fun _ => Iff.rfl) (by positivity) b2step
+  -- Bound 3: phase 2 had to carry the lie, and the degree-2 sumcheck refuses it.
+  have b3step : ∀ (u : (Fin s → F) × (Fin s → F)) (γ : F),
+      uniformProb (Fin t → F) (SpartanInnerFalse A B C z vA vB vC inner u γ)
+      ≤ (t : ℝ) * (2 / Fintype.card F) :=
+    fun u γ => spartan_inner_sound (hinnerPm u.1 u.2 γ) (hinnerDeg u.1 u.2 γ)
+  have b3 : uniformProb (((Fin s → F) × (Fin s → F)) × (F × (Fin t → F)))
+      (fun w => SpartanInnerFalse A B C z vA vB vC inner w.1 w.2.1 w.2.2)
+      ≤ (t : ℝ) * (2 / Fintype.card F) :=
+    uniformProb_last_le _ (SpartanInnerFalse A B C z vA vB vC inner)
+      (fun _ => Iff.rfl) (by positivity) b3step
+  refine le_trans (uniformProb_mono hstep) ?_
+  refine le_trans (uniformProb_or_le _ _) ?_
+  rw [add_assoc]
+  exact add_le_add b1 (le_trans (uniformProb_or_le _ _) (add_le_add b2 b3))
+
+end Composed
+
 /-! ## §5. The two named obligations
 
 House law: what is not proved is a named `Prop`, not prose and not a placeholder that quietly reads
@@ -577,6 +824,17 @@ theorem terminal_fires :
         (mle (matVec sA badZ) ![2]) (mle (matVec sB badZ) ![2])
         (mle (matVec sC badZ) ![2]) = 3 := by decide
 
+/-- **TEETH — the COMPOSED bound is USELESS at these parameters, and saying so is the whole
+ring-switching argument in one line.** `spartan_sound` at `s = t = 1` over F₇ reads
+`1/7 + 1·(3/7) + 2/7 + 1·(2/7) = 8/7 > 1`: a true statement that constrains nothing. Every term of
+every bound in this file is `k/|F|`, so a Spartan over a BINARY field must run its sumchecks in a
+large extension — the proofs are characteristic-free, the *usefulness* is not. That is why
+ring-switching (a large-field IOP over a ground-field commitment) is load-bearing rather than an
+optimization, and it is a parameter fact, not a proof obstruction. -/
+theorem composed_bound_is_vacuous_at_f7 :
+    (1 : ℝ) < ((1 : ℝ) / 7 + (1 : ℝ) * (3 / 7)) + (2 : ℝ) / 7 + (1 : ℝ) * (2 / 7) := by
+  norm_num
+
 end SpartanExample
 
 /-! ## §7. Axiom pins (house law) -/
@@ -593,6 +851,16 @@ end SpartanExample
 #guard_msgs (whitespace := lax) in #print axioms spartan_outer_sound
 /-- info: 'Minidregg.Assurance.spartanTerminal_eq_honest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms spartanTerminal_eq_honest
+/-- info: 'Minidregg.Assurance.outerReal_iff_sumcheckAccepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms outerReal_iff_sumcheckAccepts
+/-- info: 'Minidregg.Assurance.uniformProb_mid_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms uniformProb_mid_le
+/-- info: 'Minidregg.Assurance.uniformProb_last_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms uniformProb_last_le
+/-- info: 'Minidregg.Assurance.spartan_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spartan_sound
+/-- info: 'Minidregg.Assurance.SpartanExample.composed_bound_is_vacuous_at_f7' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms SpartanExample.composed_bound_is_vacuous_at_f7
 /-- info: 'Minidregg.Assurance.innerClaim_satisfied_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms innerClaim_satisfied_iff
 /-- info: 'Minidregg.Assurance.spartan_inner_batch_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
