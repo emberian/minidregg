@@ -170,11 +170,16 @@ stage:
   `queryCount ≤ BabyBearExt4.modulus`: distinct causal challenges diverge at
   the earlier terminal marker, challenge/query domains diverge immediately,
   and bounded query labels are injective.  Exact committed-source persvati run
-  `E-20260814T112202-90012-persvati-9acb7cbe883f-lake` built the target in
+  `E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the target in
   2,250 jobs with command and source-integrity exits zero.  Fixed-receipt
   schedule synthesis, deferred exhaustion, full-message routing, and uniform
-  reindexing are therefore closed.  What remains is composed off-bad
-  eager/deferred state agreement and the
+  reindexing are therefore closed.  On the same exact ledger, every eager
+  prefix has the same static answer/work/suffix counters or stops; a complete
+  eager run can stop only with the explicit
+  `PrefixHybridError.constructionMismatch`.  Exhaustion, malformed segment,
+  wrong coin shape, and wrong coin count are excluded.  What remains is to
+  prove that collision-free eager answers use their segment-last rate coins,
+  hence agree after reindexing with deferred segment heads, and then perform the
   permutation/function/deployed-Poseidon switch.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an

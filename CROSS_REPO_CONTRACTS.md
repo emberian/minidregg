@@ -219,8 +219,20 @@ sponge/RO crossing requires composed eager/deferred state agreement away from
 the already named simulator bad events, followed by the random-
 permutation/function and deployed-Poseidon idealization hops.  Exact
 committed-source run
-`E-20260814T112202-90012-persvati-9acb7cbe883f-lake` built the complete target
+`E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the complete target
 in 2,250 jobs with command and source-integrity exits zero.
+
+The same exact ledger now classifies the eager work-stream run sharply.  Every
+successful prefix has the fixed answer length, cumulative work boundary, and
+remaining suffix already proved for the deferred schedule.  A complete eager
+run therefore either consumes the whole vector with exact terminal counters or
+fails only as `PrefixHybridError.constructionMismatch`; exhaustion, malformed
+segmentation, wrong shape, and wrong count cannot occur.  This does not yet
+identify successful eager answers with the deferred answers: a reused
+primitive edge may ignore the current final rate coin.  The live semantic
+premise is precisely collision-free/fresh-path execution, under which each
+eager full-message answer must use the segment-last rate coin moved to the
+deferred segment head.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
