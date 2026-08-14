@@ -3,7 +3,9 @@
 
 This is the first deliberately narrow vertical slice from the reorientation
 note.  It does not call the still-unbuilt succinct BaseFold byte controller.
-Instead, one fixed 2x2 F7 contraction is checked exactly by Lean and the audit
+Instead, a versioned fail-closed byte checker first binds neutral planning,
+native-request, suite, checker, statement, operand, and candidate-output data;
+one fixed 2x2 F7 contraction is then checked exactly by Lean and the audit
 evidence carries:
 
 * the registered, versioned audit/checker identity;
@@ -25,6 +27,7 @@ turn, not a succinct proof, native-verifier refinement, cryptographic binding
 claim, physical durability theorem, or production registry.
 -/
 import Assurance.ZkmlMatmulBaseFold
+import Assurance.ZkmlMatmulChecker
 import Assurance.SemanticTurnReceipt
 import Kernel.DurableDataIntent
 
@@ -90,17 +93,47 @@ structure AuditIdentity where
   suiteId : Digest
   checkerId : Digest
   statementId : Digest
+  planningArtifactId : Digest
+  nativeRequestId : Digest
   codecVersion : Nat
   deriving DecidableEq, Repr
 
 def auditIdentity : AuditIdentity :=
-  ⟨⟨101⟩, ⟨102⟩, ⟨103⟩, 1⟩
+  ⟨⟨101⟩, ⟨102⟩, ⟨103⟩, ⟨104⟩, ⟨105⟩, 1⟩
 
 /-- The bounded registry selected by this slice.  Membership is evidence; a
 production registry and authenticated upgrade policy remain separate. -/
 def auditRegistry : List AuditIdentity := [auditIdentity]
 
 theorem auditIdentity_registered : auditIdentity ∈ auditRegistry := by simp [auditRegistry]
+
+/-- The durable evidence identity and the runnable byte checker's profile are
+the same first-order tuple.  The planning and native request ids are bindings,
+not authorization witnesses. -/
+theorem auditIdentity_matches_checker :
+    auditIdentity.codecVersion =
+        ZkmlMatmulChecker.expected.codecVersion.toNat ∧
+    auditIdentity.suiteId.value =
+        ZkmlMatmulChecker.expected.suiteId.toNat ∧
+    auditIdentity.checkerId.value =
+        ZkmlMatmulChecker.expected.checkerId.toNat ∧
+    auditIdentity.statementId.value =
+        ZkmlMatmulChecker.expected.statementId.toNat ∧
+    auditIdentity.planningArtifactId.value =
+        ZkmlMatmulChecker.expected.planningArtifactId.toNat ∧
+    auditIdentity.nativeRequestId.value =
+        ZkmlMatmulChecker.expected.requestId.toNat := by
+  decide
+
+/-- The canonical candidate reaches the proof-bearing checked branch. -/
+theorem candidate_checked :
+    ∃ checked,
+      ZkmlMatmulChecker.check ZkmlMatmulChecker.expected
+          ZkmlMatmulChecker.canonicalBytes = .ok checked ∧
+        checked.candidate.output =
+          ZkmlMatmulChecker.contraction checked.candidate.left
+            checked.candidate.right :=
+  ZkmlMatmulChecker.accepts_sound ZkmlMatmulChecker.canonical_accepts
 
 abbrev S := idealCommitment F (Fin 4)
 
@@ -137,6 +170,26 @@ structure AuditEvidence where
   identity : AuditIdentity
   identityExact : identity = auditIdentity
   registered : identity ∈ auditRegistry
+  checkerProfileExact :
+    auditIdentity.codecVersion =
+        ZkmlMatmulChecker.expected.codecVersion.toNat ∧
+    auditIdentity.suiteId.value =
+        ZkmlMatmulChecker.expected.suiteId.toNat ∧
+    auditIdentity.checkerId.value =
+        ZkmlMatmulChecker.expected.checkerId.toNat ∧
+    auditIdentity.statementId.value =
+        ZkmlMatmulChecker.expected.statementId.toNat ∧
+    auditIdentity.planningArtifactId.value =
+        ZkmlMatmulChecker.expected.planningArtifactId.toNat ∧
+    auditIdentity.nativeRequestId.value =
+        ZkmlMatmulChecker.expected.requestId.toNat
+  candidateChecked :
+    ∃ checked,
+      ZkmlMatmulChecker.check ZkmlMatmulChecker.expected
+          ZkmlMatmulChecker.canonicalBytes = .ok checked ∧
+        checked.candidate.output =
+          ZkmlMatmulChecker.contraction checked.candidate.left
+            checked.candidate.right
   outputExact : ∀ key, output key =
     matmulTable eA eB (rowBits key) (columnBits key)
   openingsExact : claims.output.Holds S dom₇₄ ∧
@@ -154,6 +207,8 @@ def auditEvidence : AuditEvidence where
   identity := auditIdentity
   identityExact := rfl
   registered := auditIdentity_registered
+  checkerProfileExact := auditIdentity_matches_checker
+  candidateChecked := candidate_checked
   outputExact := output_is_contraction
   openingsExact := claims_hold
   contractionAccepted := contraction_sumcheck_accepts
@@ -211,6 +266,12 @@ theorem receipt_post_is_contraction (key : Key) :
 def beforeBytes : List UInt8 := [0, 0, 0, 0]
 def outputBytes : List UInt8 := [5, 1, 1, 1]
 
+/-- The bytes installed by the semantic turn are literally the checked
+candidate's output suffix. -/
+theorem candidate_output_bytes_exact :
+    ZkmlMatmulChecker.canonicalBytes.drop 16 = outputBytes := by
+  decide
+
 /-- The byte root is intentionally only a four-byte fixture codec.  It agrees
 exactly with `stateRoot` on this slice; no general collision-resistance claim
 is made. -/
@@ -228,7 +289,7 @@ theorem output_bytes_bind : rootBytes outputBytes = commit.postStateRoot := by
 def computationCell : CellId := ⟨201⟩
 
 def auditEventBytes : List UInt8 :=
-  [1, 101, 102, 103, 5, 1, 1, 1]
+  [1, 101, 102, 103, 104, 105, 5, 1, 1, 1]
 
 def auditEvent : StableEvent where
   codecVersion := auditIdentity.codecVersion
