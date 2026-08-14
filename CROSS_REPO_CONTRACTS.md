@@ -206,10 +206,17 @@ checked Preoscript planning data
 
 `Assurance/ZkmlMatmulAuditTurn.lean` is the landed semantic floor: exact tiny
 recomputation, authorized evidence disclosure, canonical logical install,
-history append, replay, and adjacent refusal.  It does not yet consume a V3/V4
-artifact, native candidate, succinct checker, authenticated upgradeable
-registry, production state codec, or physical store.  The repository now has
-the exact production-rail suite artifact and fail-closed identity lookup, but
-the audit turn does not yet route candidate proof bytes through them.  Those
-crossings should replace its fixtures one at a time without weakening its
-request binding or refusal teeth.
+history append, replay, and adjacent refusal.  It now routes one versioned
+neutral byte envelope through `Assurance/ZkmlMatmulChecker.lean`: wrong output,
+suite, planning-artifact id, field encoding, length, and trailing bytes refuse;
+the successful branch constructs the contraction equality consumed by the
+audit evidence.  Planning-artifact and native-request identities are bound
+into the durable audit envelope but grant no authority.
+
+The slice still does not consume an actual V3/V4 decoded artifact or native
+runner response, a succinct checker/proof, an authenticated upgradeable
+registry, a production state codec, or a physical store.  The production-rail
+suite artifact is admitted, but the toy checker remains F7 exact recomputation
+and does not accept IR-v2 or BaseFold proof bytes.  Those crossings should
+replace its fixtures one at a time without weakening its request binding or
+refusal teeth.

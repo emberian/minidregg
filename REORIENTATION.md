@@ -9,7 +9,7 @@ ledger at the commit being claimed.
 Snapshot inspected while writing this note (and refreshed through the checked
 Dregg2 suite-export convergence):
 
-- `minidregg` `3d5795e0b3bc` on `main`, with an independently owned Uwueave
+- `minidregg` `a7fe546c8834` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
 - `zkml-research` `453ff3fb35a4` on `dev`, with active verdict/grinding notes and
   `vendor/` untracked; and
@@ -101,10 +101,15 @@ output, three root-bound MLE claims, an accepted contraction sumcheck, and its
 explicitly useless toy BaseFold budget carried as evidence on the same exact
 authorized `CommittedTurn`.  Its four canonical result bytes and versioned
 audit identity install atomically through `DurableDataIntent`; retry reopens
-the identical envelope and altered audit bytes conflict.  The adjacent forged
-output is refused.  Exact committed-source persvati run
-`E-20260814T062149-52844-persvati-907e880f43e1-lake` built the target in 3,006
-jobs with runner, command, and source-integrity exits zero.
+the identical envelope and altered audit bytes conflict.  The turn now first
+routes a canonical candidate envelope through a runnable versioned Lean byte
+checker.  The checked branch binds suite/checker/statement, planning-artifact,
+native-request, both operand matrices, and output; wrong output, wrong suite,
+wrong plan, noncanonical F7 bytes, wrong length, and trailing bytes refuse.
+Its installed output is literally the accepted candidate suffix.  Exact
+committed-source persvati run
+`E-20260814T074351-99292-persvati-a7fe546c8834-lake` built the integrated target
+in 3,007 jobs with runner, command, and source-integrity exits zero.
 
 That floor is exact recomputation, not the final succinct/deployment slice.
 The remaining boundary is therefore narrower and more concrete:
@@ -117,10 +122,11 @@ The remaining boundary is therefore narrower and more concrete:
    (level roots, sumcheck polynomials, openings, query seeds, and domain
    separators), then transport the interactive event through the ROM game with
    its hash/grinding terms still visible;
-3. **succinct matmul composition:** replace the exact-recompute evidence with
-   one serialized statement and executable checker that binds the C/A/B
-   openings, contraction transcript, suite/registry identity, and complete
-   named failure budget; and
+3. **succinct matmul composition:** the toy serialized statement and
+   proof-bearing exact checker are now runnable.  Replace its F7 recomputation
+   payload with a checker that binds the C/A/B openings, contraction
+   transcript, registered BaseFold suite, and complete named failure budget;
+   and
 4. **real crossings:** bind the selected Preoscript plan artifact and native
    candidate/proof bytes to that exact request without granting either
    authority, then replace the four-byte fixture codec/list registry with
