@@ -82,13 +82,14 @@ def rowOf (index : Fin 4) : Fin 2 :=
 def columnOf (index : Fin 4) : Fin 2 :=
   ⟨index.val % 2, Nat.mod_lt _ (by omega)⟩
 
-def at (matrix : Cells) (row column : Fin 2) : F :=
+def matrixAt (matrix : Cells) (row column : Fin 2) : F :=
   matrix (cellIndex row column)
 
 /-- Literal row-major `2×2 · 2×2` contraction. -/
 def contraction (left right : Cells) : Cells :=
   fun index => ∑ inner : Fin 2,
-    at left (rowOf index) inner * at right inner (columnOf index)
+    matrixAt left (rowOf index) inner *
+      matrixAt right inner (columnOf index)
 
 def canonicalFieldPayload (bytes : List UInt8) : Bool :=
   bytes.all fun byte => decide (byte.toNat < 7)
@@ -219,7 +220,7 @@ theorem accepts_sound {profile : ExpectedProfile} {bytes : List UInt8}
   unfold accepts at accepted
   cases hcheck : check profile bytes with
   | error failure => simp [hcheck] at accepted
-  | ok checked => exact ⟨checked, hcheck, checked.outputExact⟩
+  | ok checked => exact ⟨checked, rfl, checked.outputExact⟩
 
 #check @accepts_sound
 
