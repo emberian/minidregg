@@ -1,6 +1,7 @@
 # Reorientation — 2026-08-14
 
 This is a thin cross-repository orientation note, not another evidence ledger.
+`CROSS_REPO_CONTRACTS.md` is the companion boundary sheet.
 For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
 current-truth file.  For exact proof/build evidence, use each repository's own
 ledger at the commit being claimed.
