@@ -124,6 +124,18 @@ stage:
   conditional ROM specialization in 2,238 jobs with command and
   source-integrity exits zero.
 
+- `Selvage/BaseFoldBcsPadding.lean` now defines a distinct `.pad1` rate-block
+  profile instead of silently changing the proved unpadded transcript.  It
+  appends one reserved terminal block, proves that transformation injective on
+  arbitrary block lists, preserves the causal prefix and challenge/query
+  domain laws, and instantiates literal padded construction queries.  Its
+  exact receipt cost is `transcriptPrimitiveWork + m + queryCount`: one added
+  permutation call per public draw.  This closes block-level padding only;
+  canonical byte packing/decoding and transport of the padded profile through
+  the accepted strict ROM ledger remain explicit.  Exact committed-source
+  persvati run `E-20260814T100743-52177-persvati-1ed0cf08ddf2-lake` built the
+  target in 2,240 jobs with command and source-integrity exits zero.
+
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it
   proves `BabyBear.modulus - 1` factors as an exact slack coordinate times the
@@ -211,9 +223,11 @@ The remaining boundary is therefore narrower and more concrete:
    query sampler are now landed; the complete accepted query family is jointly
    uniform, and the explicit `q / p` rejection loss is carried through the
    raw-IOR/ROM ledger.  Derive the run-specific adaptive eager/deferred
-   work-space coupling, pin padding/bytes, and perform the deployed-Poseidon
-   idealization with its hash/grinding terms visible.  The current policy has
-   no retry; any future retry rule must be introduced and priced explicitly;
+   work-space coupling, carry the distinct injectively padded rate-block
+   profile through the accepted ledger, pin its canonical byte codec, and
+   perform the deployed-Poseidon idealization with its hash/grinding terms
+   visible.  The current policy has no retry; any future retry rule must be
+   introduced and priced explicitly;
 3. **succinct matmul composition:** the toy serialized statement and
    proof-bearing exact checker are now runnable.  Replace its F7 recomputation
    payload with a checker that binds the C/A/B openings, contraction

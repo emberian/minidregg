@@ -162,9 +162,13 @@ is a literal Poseidon2 sponge construction query; causality excludes future
 frames; primitive work equals absorbed block count; and accepted submitted
 paths reflect into `BaseFoldRawCommittedIorAccepts` on the same coherent query
 schedule.  Its original modulo decoder remains deterministic but is not a
-uniformity claim; the strict path below supplies unbiased sampling.  The
-adaptive work-space sponge/RO coupling, padding or byte-codec refinement, and
-deployed Poseidon2 permutation idealization remain open.
+uniformity claim; the strict path below supplies unbiased sampling.  This
+original profile is intentionally still unpadded.  The separate
+`BaseFoldBcsPadding` profile proves injective rate-block padding and its exact
+`m + queryCount` work delta without claiming a byte codec.  The adaptive
+work-space sponge/RO coupling, canonical byte refinement, transport of that
+padded profile into the accepted ledger, and deployed Poseidon2 permutation
+idealization remain open.
 
 `Selvage/BaseFoldBcsSpongeGame.lean` makes the next boundary explicit rather
 than leaving the construction outside the security game.  The exact ordered
@@ -174,6 +178,14 @@ and the still-conditional `romConstructionTarget` specializes to the concrete
 BaseFold `romError` at that ledger.  The adapter is intentionally indexed by a
 fixed candidate receipt; it does not claim the missing online-prover semantics
 or adaptive eager/deferred coin-space reindexing.
+
+`Selvage/BaseFoldBcsPadding.lean` supplies a separate `.pad1` construction
+identity rather than retroactively changing that receipt schedule.  Appending
+its reserved terminal rate block is injective on all block lists; the causal
+and domain-separated draw laws survive; and its exact primitive-work delta is
+one call per public draw, `m + queryCount` per receipt.  This is not yet a
+wire codec: bytes-to-field packing, bounded decoding, and transport of the
+padded profile into the strict accepted-query/ROM ledger remain open.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
