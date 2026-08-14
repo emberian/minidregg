@@ -141,6 +141,28 @@ Every crossing must pin a format/version, source identity, and exact claim
 ceiling. No crossing may silently promote data into authority or a host test
 into semantic/cryptographic evidence.
 
+## Two proof rails that must not be blurred
+
+The current production-shaped IR-v2 rail and the new multilinear rail share
+semantic statements, but they are not one cryptographic suite:
+
+- **IR-v2 today** is BabyBear, Ext4 challenges, Poseidon2 width 16, and the
+  existing Plonky3 FRI.  Its deployed `(log_blowup, queries, grind) =
+  (6,19,16)` query column is only 34 UDR bits.  The research tree has now
+  priced `(2,57,16)` as prover-cheaper but verifier/wire-heavier; it is not
+  landed, and the recursion verifier must first pin `num_queries` instead of
+  reading the security parameter from the child proof.
+- **Selvage's multilinear candidate** is BaseFold over Reed--Solomon in the
+  unconditional `(1−ρ)/3` band.  Its deployment target must use the selected
+  zkML field/extension and Poseidon2 commitment encoding (or explicitly choose
+  and register another suite).  The existing Tower256/cSHAKE additive-FRI raw
+  controller is a valuable implementation and reduction pattern, not a
+  drop-in zkML PCS instance.
+
+The exact audit turn is deliberately below this fork: it can eventually carry
+either suite's accepted evidence, but today it carries exact-recompute Lean
+evidence and therefore authorizes neither cryptographic rail by implication.
+
 ## First vertical slice
 
 Build **one authorized, audited exact linear-layer turn** end to end.
@@ -188,10 +210,12 @@ are the next crossings, not footnotes.
    use the V4 sidecar only where context-bound runtime-auth facts are actually
    required. In both cases the imported value remains neutral data.
 3. Continue from the now-landed raw `OpeningScheme` theorem and flat-hash
-   collision witness: discharge its retained equivocation branch for one
-   concrete Merkle/sponge suite. Reuse the existing commitment, BCS,
-   RBR-to-Fiat--Shamir, and ROM cone; do not invent a second PCS abstraction
-   merely to look multilinear.
+   collision witness: instantiate the intended BabyBear-extension/Poseidon2
+   Merkle suite and discharge its retained equivocation branch there. Reuse
+   the existing commitment, BCS, RBR-to-Fiat--Shamir, and ROM abstractions and
+   the Tower256 raw controller's reduction pattern; do not relabel that
+   cSHAKE/Tower256 suite as the zkML deployment or invent a KZG-shaped PCS
+   abstraction merely to look multilinear.
 4. Serialize the exact verifier alphabet and replace the exact-audit evidence
    with a runnable checker binding the three matmul openings,
    contraction claim, registry entry, checker version, and complete named
