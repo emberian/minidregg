@@ -186,10 +186,21 @@ stage:
   prefix has the same static answer/work/suffix counters or stops; a complete
   eager run can stop only with the explicit
   `PrefixHybridError.constructionMismatch`.  Exhaustion, malformed segment,
-  wrong coin shape, and wrong coin count are excluded.  What remains is to
-  prove that collision-free eager answers use the corresponding segment-last
-  rate coins, then perform the
-  permutation/function/deployed-Poseidon switch.
+  wrong coin shape, and wrong coin count are excluded.  The eager semantic
+  source is now exact as well.  `PrimitivePathFresh` deliberately permits
+  shared proper RO prefixes while requiring each current primitive edge and
+  complete public message to be fresh; under that condition a construction
+  returns its final supplied rate coin.  Specialized to the static receipt
+  ledger, that coin is exactly the segment-last coordinate.  The run-level
+  predicate `PaddedEagerFreshRun` applies this condition only to states actually
+  reached by successful prefixes.  Under it, the entire eager run succeeds
+  with the segment-last transcript, and the deferred run on the composed
+  reindex succeeds with a literally equal transcript.  Exact committed-source
+  persvati run `E-20260814T124344-99025-persvati-ec9f0f59d9d2-lake` built this
+  first complete semantic coupling in 2,251 jobs with command and
+  source-integrity exits zero.  What remains is to derive and price
+  `PaddedEagerFreshRun` from the capacity/path-collision ledger, then perform
+  the permutation/function/deployed-Poseidon switch.
   The full composed reindex, not merely each isolated swap, now provably sends
   every segment-last coin to its matching head; exact committed-source run
   `E-20260814T115938-94384-persvati-7ba4e6cc8f14-lake` built that target in

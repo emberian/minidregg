@@ -222,8 +222,17 @@ answer schedule while leaving the primitive simulator empty.  Exact
 committed-source run
 `E-20260814T122335-96868-persvati-aa9e5f2fc3cd-lake` built this strengthened
 target in 2,250 jobs with command and source-integrity exits zero.  The
-remaining sponge/RO crossing is solely the eager fresh-path/trie invariant and
-its off-bad agreement with that now-fixed deferred transcript, followed by the random-
+remaining sponge/RO crossing now has an explicit theorem-level boundary.
+`PrimitivePathFresh` allows shared proper RO prefixes but requires every
+primitive edge on the current construction path and the complete public
+message to be fresh.  Under the run-level `PaddedEagerFreshRun` predicate, the
+full eager execution returns the segment-last schedule and the deferred
+execution on the composed reindex returns a literally equal public transcript.
+Exact committed-source run
+`E-20260814T124344-99025-persvati-ec9f0f59d9d2-lake` built this complete
+conditional semantic coupling in 2,251 jobs with command and source-integrity
+exits zero.  The remaining obligation is to derive and price that run predicate
+from the capacity/path-collision ledger, followed by the random-
 permutation/function and deployed-Poseidon idealization hops.  Exact
 committed-source structural run
 `E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the earlier complete
@@ -237,11 +246,11 @@ fails only as `PrefixHybridError.constructionMismatch`; exhaustion, malformed
 segmentation, wrong shape, and wrong count cannot occur.  This does not yet
 identify successful eager answers with the deferred answers: a reused
 primitive edge may ignore the current final rate coin.  The live semantic
-premise is precisely collision-free/fresh-path execution, under which each
-eager full-message answer must use the segment-last rate coin moved to the
-deferred segment head.  The deferred runner now machine-checks this destination
-for the whole reindexed transcript; only the eager source characterization
-remains.  The last coordinate clause is no longer merely a
+premise is precisely collision-free/fresh-path execution, formalized now as
+`PaddedEagerFreshRun`.  Under it each eager full-message answer uses the
+segment-last rate coin moved to the deferred segment head, and the two complete
+public transcripts are proved equal.  Only derivation and probability pricing
+of that premise remain.  The last coordinate clause is no longer merely a
 per-round observation: the complete composed reindex is proved to preserve the
 transport for every round because earlier segments fix its last coordinate and
 later segments fix its head.  Exact committed-source run
