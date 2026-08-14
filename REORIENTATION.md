@@ -173,14 +173,22 @@ stage:
   `E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the target in
   2,250 jobs with command and source-integrity exits zero.  Fixed-receipt
   schedule synthesis, deferred exhaustion, full-message routing, and uniform
-  reindexing are therefore closed.  On the same exact ledger, every eager
+  reindexing are therefore closed.  The deferred semantic half is now closed
+  too: at every prefix its public answers are exactly the segment-head rate
+  coins, later public messages remain fresh in the construction RO, and the
+  primitive simulator stays empty.  At the terminal round, running the
+  deferred world on the complete composed reindex returns exactly the original
+  vector's segment-last answer schedule, consumes the entire ledger, and leaves
+  no suffix.  Exact committed-source persvati run
+  `E-20260814T122335-96868-persvati-aa9e5f2fc3cd-lake` built this strengthened
+  target in 2,250 jobs with command and source-integrity exits zero.  On the
+  same exact ledger, every eager
   prefix has the same static answer/work/suffix counters or stops; a complete
   eager run can stop only with the explicit
   `PrefixHybridError.constructionMismatch`.  Exhaustion, malformed segment,
   wrong coin shape, and wrong coin count are excluded.  What remains is to
-  prove that deferred construction answers read their segment heads and that
-  collision-free eager answers use the corresponding segment-last rate coins,
-  then perform the
+  prove that collision-free eager answers use the corresponding segment-last
+  rate coins, then perform the
   permutation/function/deployed-Poseidon switch.
   The full composed reindex, not merely each isolated swap, now provably sends
   every segment-last coin to its matching head; exact committed-source run

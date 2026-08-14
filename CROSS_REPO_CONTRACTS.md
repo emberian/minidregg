@@ -214,13 +214,20 @@ preserve its uniform counting measure exactly.  When
 proved prefix-free: distinct causal challenges diverge at padding versus the
 next challenge-result frame, challenge/query domains differ in their first
 block, and bounded query labels are injective.  This closes the structural
-full-message routing premise for every such fixed receipt.  The remaining
-sponge/RO crossing requires composed eager/deferred state agreement away from
-the already named simulator bad events, followed by the random-
-permutation/function and deployed-Poseidon idealization hops.  Exact
+full-message routing premise for every such fixed receipt.  The deferred
+semantic half is also exact: each fresh construction draw consumes its segment
+head, every later public full message remains fresh, and the full deferred run
+on the composed reindex returns precisely the original vector's segment-last
+answer schedule while leaving the primitive simulator empty.  Exact
 committed-source run
-`E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the complete target
-in 2,250 jobs with command and source-integrity exits zero.
+`E-20260814T122335-96868-persvati-aa9e5f2fc3cd-lake` built this strengthened
+target in 2,250 jobs with command and source-integrity exits zero.  The
+remaining sponge/RO crossing is solely the eager fresh-path/trie invariant and
+its off-bad agreement with that now-fixed deferred transcript, followed by the random-
+permutation/function and deployed-Poseidon idealization hops.  Exact
+committed-source structural run
+`E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the earlier complete
+schedule target in 2,250 jobs with command and source-integrity exits zero.
 
 The same exact ledger now classifies the eager work-stream run sharply.  Every
 successful prefix has the fixed answer length, cumulative work boundary, and
@@ -232,7 +239,9 @@ identify successful eager answers with the deferred answers: a reused
 primitive edge may ignore the current final rate coin.  The live semantic
 premise is precisely collision-free/fresh-path execution, under which each
 eager full-message answer must use the segment-last rate coin moved to the
-deferred segment head.  The last coordinate clause is no longer merely a
+deferred segment head.  The deferred runner now machine-checks this destination
+for the whole reindexed transcript; only the eager source characterization
+remains.  The last coordinate clause is no longer merely a
 per-round observation: the complete composed reindex is proved to preserve the
 transport for every round because earlier segments fix its last coordinate and
 later segments fix its head.  Exact committed-source run
