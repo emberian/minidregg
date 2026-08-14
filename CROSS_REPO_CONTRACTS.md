@@ -232,7 +232,12 @@ identify successful eager answers with the deferred answers: a reused
 primitive edge may ignore the current final rate coin.  The live semantic
 premise is precisely collision-free/fresh-path execution, under which each
 eager full-message answer must use the segment-last rate coin moved to the
-deferred segment head.
+deferred segment head.  The last coordinate clause is no longer merely a
+per-round observation: the complete composed reindex is proved to preserve the
+transport for every round because earlier segments fix its last coordinate and
+later segments fix its head.  Exact committed-source run
+`E-20260814T115938-94384-persvati-7ba4e6cc8f14-lake` built the target in 2,250
+jobs with command and source-integrity exits zero.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query

@@ -178,9 +178,14 @@ stage:
   eager run can stop only with the explicit
   `PrefixHybridError.constructionMismatch`.  Exhaustion, malformed segment,
   wrong coin shape, and wrong coin count are excluded.  What remains is to
-  prove that collision-free eager answers use their segment-last rate coins,
-  hence agree after reindexing with deferred segment heads, and then perform the
+  prove that deferred construction answers read their segment heads and that
+  collision-free eager answers use the corresponding segment-last rate coins,
+  then perform the
   permutation/function/deployed-Poseidon switch.
+  The full composed reindex, not merely each isolated swap, now provably sends
+  every segment-last coin to its matching head; exact committed-source run
+  `E-20260814T115938-94384-persvati-7ba4e6cc8f14-lake` built that target in
+  2,250 jobs with command and source-integrity exits zero.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it
