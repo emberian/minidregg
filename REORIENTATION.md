@@ -5,15 +5,15 @@ For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
 current-truth file.  For exact proof/build evidence, use each repository's own
 ledger at the commit being claimed.
 
-Snapshot inspected while writing this note (and refreshed after the BaseFold
-commitment/query convergence):
+Snapshot inspected while writing this note (and refreshed after the first
+authorized audit-turn convergence):
 
-- `minidregg` `1610755` on `main`, with an independently owned Uwueave
+- `minidregg` `907e880` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
-- `zkml-research` `9be47ff` on `dev`, with `vendor/` and research notes
-  untracked; and
-- `lean-uwueave` `f9396b1` on `dev`, with active finite-history,
-  finite-product, audit, and benchmark work.
+- `zkml-research` `283692e` on `dev`, with active verdict/grinding notes and
+  `vendor/` untracked; and
+- `leanuweave` `a80a29b` on `dev`, with active durable-artifact,
+  runtime-auth-V4, debt-gate, and Rust persistence work.
 
 The snapshot is an ownership marker, not a claim that later commits are stale.
 
@@ -48,13 +48,28 @@ stage:
 - each of the three matmul MLE claims now has its own arbitrary-word BaseFold
   opening price.  Their additive opening envelope is
   `2(μ+κ+ν)·3/|F|`; the contraction sumcheck's `κ·3/|F|` remains a separate
-  algebraic term and must not be counted as an opening.
+  algebraic term and must not be counted as an opening;
+- the raw BaseFold verifier now proves the corresponding top-level disjunction:
+  ideal algebraic acceptance or a retained concrete position-equivocation
+  event.  Its coherent bound is
+  `m·3/|F| + (1−τ)^q + Pr[accepted equivocation]`; and
+- the retained raw equivocation exposes an exact level and two distinct flat
+  hash preimages with the same root.  This is a real witness-level reduction,
+  but not yet the deployed Merkle/sponge/ROM reduction.
 
-The committed result is still an interactive, perfectly position-binding IOR
-statement, not a deployment claim.  The raw opening layer now retains a
-concrete `PositionEquivocation` witness instead of assuming it away, and the
-equivocation branch is inhabited by an explicit bad scheme.  What remains is
-therefore narrower and more cryptographic/semantic:
+There is also now one deliberately tiny semantic floor in
+`Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
+output, three root-bound MLE claims, an accepted contraction sumcheck, and its
+explicitly useless toy BaseFold budget carried as evidence on the same exact
+authorized `CommittedTurn`.  Its four canonical result bytes and versioned
+audit identity install atomically through `DurableDataIntent`; retry reopens
+the identical envelope and altered audit bytes conflict.  The adjacent forged
+output is refused.  Exact committed-source persvati run
+`E-20260814T062149-52844-persvati-907e880f43e1-lake` built the target in 3,006
+jobs with runner, command, and source-integrity exits zero.
+
+That floor is exact recomputation, not the final succinct/deployment slice.
+The remaining boundary is therefore narrower and more concrete:
 
 1. **`[COMMIT-CR]`:** instantiate the actual Merkle/sponge opening scheme and
    reduce every retained position equivocation to a collision, while pinning
@@ -63,12 +78,15 @@ therefore narrower and more cryptographic/semantic:
    (level roots, sumcheck polynomials, openings, query seeds, and domain
    separators), then transport the interactive event through the ROM game with
    its hash/grinding terms still visible;
-3. **matmul composition:** bind the C/A/B claims and contraction sumcheck into
-   one statement/checker/registry receipt rather than merely adding their
-   theorem bounds in prose; and
-4. **semantic durability:** authorize that exact checked statement, emit one
-   canonical receipt, append it, and reopen the same receipt through the real
-   durable-history path.
+3. **succinct matmul composition:** replace the exact-recompute evidence with
+   one serialized statement and executable checker that binds the C/A/B
+   openings, contraction transcript, suite/registry identity, and complete
+   named failure budget; and
+4. **real crossings:** bind the selected Preoscript plan artifact and native
+   candidate/proof bytes to that exact request without granting either
+   authority, then replace the four-byte fixture codec/list registry with
+   versioned deployed codecs, authenticated policy, and a physical persistence
+   refinement whose claim ceiling stays explicit.
 
 `HalfThresholdFriTranscript` owns the raw opened-fibre/equivocation split;
 `HalfThresholdFriQuery` and `HalfThresholdFriCoherent` own the adaptive and
@@ -153,6 +171,14 @@ The success criterion is deliberately narrow:
 This is not yet a claim about a whole neural network, correct backpropagation,
 PQ-128 FHE, physical stable media, or production key custody.
 
+The current landed floor satisfies the exact Lean computation,
+request-indexed authorization, audit-evidence carriage, canonical logical
+install, history append, exact replay, and adjacent output/audit-tamper refusal
+parts.  It does **not** yet consume the Preoscript artifact or native candidate,
+does not serialize/run a succinct BaseFold checker, and uses a toy field,
+fixture state codec, local list registry, and logical durability model.  Those
+are the next crossings, not footnotes.
+
 ## Immediate convergence order
 
 1. Preserve the now-landed contraction statement/native conformance seam and
@@ -161,19 +187,22 @@ PQ-128 FHE, physical stable media, or production key custody.
    interface choice. Use V3 for rich checked plan/result/certificate data;
    use the V4 sidecar only where context-bound runtime-auth facts are actually
    required. In both cases the imported value remains neutral data.
-3. Put the now-landed committed/coherent BaseFold event behind the raw
-   `OpeningScheme` boundary, and discharge its retained equivocation branch for
-   one concrete Merkle/sponge suite. Reuse the existing commitment, BCS,
+3. Continue from the now-landed raw `OpeningScheme` theorem and flat-hash
+   collision witness: discharge its retained equivocation branch for one
+   concrete Merkle/sponge suite. Reuse the existing commitment, BCS,
    RBR-to-Fiat--Shamir, and ROM cone; do not invent a second PCS abstraction
    merely to look multilinear.
-4. Serialize the exact verifier alphabet and bind the three matmul openings,
+4. Serialize the exact verifier alphabet and replace the exact-audit evidence
+   with a runnable checker binding the three matmul openings,
    contraction claim, registry entry, checker version, and complete named
    failure budget into one statement. Then instantiate the audit checker's
    transport obligations and real beacon term.
-5. Join that checked evidence to one canonical computation receipt and the
-   existing durable history path. Only after this is green should the slice widen to
-   nonlinearities, multiple layers, low-rank training deltas, or encrypted
-   computation.
+5. Reuse the landed authorized/durable audit turn as the semantic target: bind
+   the Preoscript plan and native result/proof bytes into it as neutral inputs,
+   replace its fixture codec/registry/durability assumptions one at a time, and
+   keep exact replay and tamper refusal green. Only after this is green should
+   the slice widen to nonlinearities, multiple layers, low-rank training
+   deltas, or encrypted computation.
 
 ## Things to stop doing for now
 
