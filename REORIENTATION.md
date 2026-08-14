@@ -186,21 +186,23 @@ stage:
   prefix has the same static answer/work/suffix counters or stops; a complete
   eager run can stop only with the explicit
   `PrefixHybridError.constructionMismatch`.  Exhaustion, malformed segment,
-  wrong coin shape, and wrong coin count are excluded.  The eager semantic
-  source is now exact as well.  `PrimitivePathFresh` deliberately permits
-  shared proper RO prefixes while requiring each current primitive edge and
-  complete public message to be fresh; under that condition a construction
-  returns its final supplied rate coin.  Specialized to the static receipt
-  ledger, that coin is exactly the segment-last coordinate.  The run-level
-  predicate `PaddedEagerFreshRun` applies this condition only to states actually
-  reached by successful prefixes.  Under it, the entire eager run succeeds
-  with the segment-last transcript, and the deferred run on the composed
-  reindex succeeds with a literally equal transcript.  Exact committed-source
-  persvati run `E-20260814T124344-99025-persvati-ec9f0f59d9d2-lake` built this
-  first complete semantic coupling in 2,251 jobs with command and
-  source-integrity exits zero.  What remains is to derive and price
-  `PaddedEagerFreshRun` from the capacity/path-collision ledger, then perform
-  the permutation/function/deployed-Poseidon switch.
+  wrong coin shape, and wrong coin count are excluded.  Prefix programming
+  deterministically preserves every later full-message RO lookup because the
+  padded schedule is prefix-free, so complete-message freshness is no longer a
+  probabilistic premise.  A subsequent audit caught that
+  `PrimitivePathFresh` is still too strong as the final event: it forbids
+  ordinary causal messages from consistently replaying shared primitive-prefix
+  edges.  The replay-compatible semantic boundary is now
+  `ConstructionReturnsLastRate`, lifted over reached prefixes as
+  `PaddedEagerLastRateRun`.  Under exactly that event the eager run returns the
+  segment-last transcript, while the deferred run on the composed reindex
+  returns a literally equal transcript.  `PaddedEagerFreshRun` remains only a
+  stronger compatibility witness.  Exact committed-source persvati run
+  `E-20260814T130905-2320-persvati-459fbb8d392f-lake` built this corrected
+  coupling and the deterministic routing theorem in 2,251 jobs with command
+  and source-integrity exits zero.  What remains is to characterize and price
+  failure of `PaddedEagerLastRateRun` as terminal path/conflict collisions,
+  then perform the permutation/function/deployed-Poseidon switch.
   The full composed reindex, not merely each isolated swap, now provably sends
   every segment-last coin to its matching head; exact committed-source run
   `E-20260814T115938-94384-persvati-7ba4e6cc8f14-lake` built that target in
@@ -293,9 +295,9 @@ The remaining boundary is therefore narrower and more concrete:
    query sampler are now landed; the complete accepted query family is jointly
    uniform, and the explicit `q / p` rejection loss is carried through the
    raw-IOR/ROM ledger, including the distinct injectively padded rate-block
-   profile and its exact work delta.  Complete the run-specific off-bad
-   eager/deferred state coupling over the landed bounded prefix-free schedule,
-   extend the lawful field/rate bytes to
+   profile and its exact work delta.  Price the exact replay-compatible
+   `PaddedEagerLastRateRun` boundary over the landed bounded prefix-free
+   schedule, extend the lawful field/rate bytes to
    the whole receipt and Merkle paths, and perform the deployed-Poseidon
    idealization with its hash/grinding terms visible.  The current policy has
    no retry; any future retry rule must be introduced and priced explicitly;

@@ -223,16 +223,19 @@ committed-source run
 `E-20260814T122335-96868-persvati-aa9e5f2fc3cd-lake` built this strengthened
 target in 2,250 jobs with command and source-integrity exits zero.  The
 remaining sponge/RO crossing now has an explicit theorem-level boundary.
-`PrimitivePathFresh` allows shared proper RO prefixes but requires every
-primitive edge on the current construction path and the complete public
-message to be fresh.  Under the run-level `PaddedEagerFreshRun` predicate, the
-full eager execution returns the segment-last schedule and the deferred
-execution on the composed reindex returns a literally equal public transcript.
-Exact committed-source run
-`E-20260814T124344-99025-persvati-ec9f0f59d9d2-lake` built this complete
-conditional semantic coupling in 2,251 jobs with command and source-integrity
-exits zero.  The remaining obligation is to derive and price that run predicate
-from the capacity/path-collision ledger, followed by the random-
+Successful prefix programming preserves later full-message RO freshness
+deterministically under the proved prefix-free schedule.  The initially used
+`PrimitivePathFresh` witness is deliberately retained but is too strong to be
+the final priced event: it rejects consistent replay of the proper-prefix
+primitive edges shared by ordinary causal messages.  The exact
+replay-compatible boundary is `ConstructionReturnsLastRate`, lifted over the
+reached eager prefixes as `PaddedEagerLastRateRun`.  Under that event the full
+eager execution returns the segment-last schedule and the deferred execution
+on the composed reindex returns a literally equal public transcript.  Exact
+committed-source run `E-20260814T130905-2320-persvati-459fbb8d392f-lake` built
+this corrected coupling in 2,251 jobs with command and source-integrity exits
+zero.  The remaining obligation is to characterize and price failure of that
+event as terminal path/conflict collisions, followed by the random-
 permutation/function and deployed-Poseidon idealization hops.  Exact
 committed-source structural run
 `E-20260814T114514-93029-persvati-7e9ab47c9053-lake` built the earlier complete
@@ -243,14 +246,14 @@ successful prefix has the fixed answer length, cumulative work boundary, and
 remaining suffix already proved for the deferred schedule.  A complete eager
 run therefore either consumes the whole vector with exact terminal counters or
 fails only as `PrefixHybridError.constructionMismatch`; exhaustion, malformed
-segmentation, wrong shape, and wrong count cannot occur.  This does not yet
-identify successful eager answers with the deferred answers: a reused
-primitive edge may ignore the current final rate coin.  The live semantic
-premise is precisely collision-free/fresh-path execution, formalized now as
-`PaddedEagerFreshRun`.  Under it each eager full-message answer uses the
-segment-last rate coin moved to the deferred segment head, and the two complete
-public transcripts are proved equal.  Only derivation and probability pricing
-of that premise remain.  The last coordinate clause is no longer merely a
+segmentation, wrong shape, and wrong count cannot occur.  A reused terminal
+primitive edge may still ignore the current final rate coin; proper-prefix
+replay, however, is lawful.  `PaddedEagerLastRateRun` names exactly the
+remaining semantic event, and under it each eager full-message answer uses the
+segment-last rate coin moved to the deferred segment head.  The two complete
+public transcripts are proved equal.  Only characterization and probability
+pricing of failure of that exact event remain.  The last coordinate clause is
+no longer merely a
 per-round observation: the complete composed reindex is proved to preserve the
 transport for every round because earlier segments fix its last coordinate and
 later segments fix its head.  Exact committed-source run
