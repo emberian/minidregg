@@ -86,9 +86,26 @@ The first production-rail export is now exact and source owned:
 - receiving checks: `scripts/check-zkml-suite-artifact.sh` plus the exact
   admission/refusal theorems in `Selvage/ZkmlSuiteRegistry.lean`.
 
-That is a checked export and fail-closed local identity registry.  It is not an
-authenticated production registry, a Rust-to-Lean checker refinement, a
-Plonky3 soundness theorem, or the BabyBear/Poseidon2 BaseFold instantiation.
+That is a checked export and fail-closed local identity registry.  The IR-v2
+suite identity itself is not an authenticated production registry, a
+Rust-to-Lean checker refinement, a Plonky3 soundness theorem, or a BaseFold
+suite registration.
+
+Selvage now also consumes the exported Poseidon primitive without maintaining
+a second transcription.  `scripts/render-zkml-poseidon2-data.sh` renders the
+round constants and source-derived linear columns into
+`Selvage/ZkmlPoseidon2Data.lean`; the artifact gate diffs that generated view
+against the exact admitted payload.  `Selvage/BaseFoldPoseidon2.lean` gives the
+tables BabyBear field semantics and deliberately assigns a distinct local
+profile id,
+`minidregg.basefold.babybear-ext4.poseidon2-w16.binary-merkle.v1`.  Its leaf is
+one actual quartic-field symbol in the proved `[1,X,X^2,X^3]` basis, padded to
+one eight-lane rate block with zero capacity; its ordered node is
+`left8 || right8` followed by one permutation and truncation.
+
+That local profile is a checked semantic construction, not a claim that the
+IR-v2 MMCS already uses this BaseFold leaf, not a registered production wire
+suite, and not a collision-resistance or random-oracle theorem.
 
 One native computation response has the shape:
 
@@ -121,12 +138,20 @@ evidence object must bind:
 - the claim ceiling (exact recomputation, interactive IOR, ROM theorem,
   executable checker, or deployment evidence).
 
-The raw BaseFold theorem currently supplies
-`m·3/|F| + (1−τ)^q + Pr[accepted position equivocation]` and an exact
-flat-hash collision witness.  A deployed Merkle/Poseidon2 suite must replace
-that final event with its own path/codec collision reduction and price the
-remaining sponge/ROM game.  The Tower256/cSHAKE additive-FRI controller is a
-proof pattern, not the zkML suite.
+The raw BaseFold theorem supplies
+`m·3/|F| + (1−τ)^q + Pr[accepted position equivocation]`.  The executable
+perfect-binary-tree semantics in `Selvage/BinaryMerkle.lean` now reduce that
+last event losslessly to a leaf or ordered-node collision, retaining the FRI
+level; `Selvage/BaseFoldPoseidon2.lean` specializes the reduction to the real
+quartic carrier and source-derived Poseidon2 profile.  Its fixed leaf is proved
+equal to the one-block fragment of Selvage's generic sponge, whose correct
+work-indexed ROM target and exact capacity/full-state cardinalities are named
+in `Selvage/BaseFoldPoseidon2Rom.lean`.
+
+The remaining deployment legs are the byte-level root/path/Ext4 codec
+refinement, collision-game pricing, the work-indexed sponge game, and the
+deployed-permutation idealization.  The Tower256/cSHAKE additive-FRI controller
+remains a proof pattern, not the zkML suite.
 
 Evidence does not authorize a request.  minidregg admits it only under the
 request-indexed disclosure/audit policy of the same `CommittedTurn` whose

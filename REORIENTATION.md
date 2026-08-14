@@ -9,7 +9,7 @@ ledger at the commit being claimed.
 Snapshot inspected while writing this note (and refreshed through the checked
 Dregg2 suite-export convergence):
 
-- `minidregg` `085a7978ee60` on `main`, with an independently owned Uwueave
+- `minidregg` `3d5795e0b3bc` on `main`, with an independently owned Uwueave
   Projection-V2/generated-Rust lane still active in the shared worktree;
 - `zkml-research` `453ff3fb35a4` on `dev`, with active verdict/grinding notes and
   `vendor/` untracked; and
@@ -56,9 +56,11 @@ stage:
   ideal algebraic acceptance or a retained concrete position-equivocation
   event.  Its coherent bound is
   `m·3/|F| + (1−τ)^q + Pr[accepted equivocation]`; and
-- the retained raw equivocation exposes an exact level and two distinct flat
-  hash preimages with the same root.  This is a real witness-level reduction,
-  but not yet the deployed Merkle/sponge/ROM reduction; and
+- the retained raw equivocation now enters an executable perfect binary tree
+  on the canonical LSB-first `Fin (2^k)` index.  Honest paths reconstruct the
+  root, wrong path lengths fail closed, and two accepted different values at
+  one root/index expose an exact leaf or ordered-node collision at a retained
+  FRI level; and
 - the production IR-v2 suite now has a checked source-owned first-order export
   at breadstuffs commit `e496fb48d6aaf374d4c0302c95c0fcc69bb8051d`.
   `Dregg2/Circuit/ZkmlSuiteArtifact.lean` derives the Poseidon2 round constants
@@ -76,6 +78,22 @@ stage:
   (`E-20260814T070002-31460-persvati-521b2eedbd24-lake`) and checked the payload
   and envelope (`E-20260814T070029-31799-persvati-521b2eedbd24-bash`), with
   runner, command, and source-integrity exits zero in both runs.
+- minidregg no longer hand-maintains a second Poseidon transcription:
+  `scripts/render-zkml-poseidon2-data.sh` renders the admitted constants and
+  source-derived linear columns, and the repository trust gate diffs the
+  committed Lean view against the exact payload.  The resulting BabyBear
+  evaluator uses the checked round schedule and gives BaseFold a deliberately
+  distinct local profile id with one Ext4 power-basis symbol per fixed leaf.
+  Its raw FRI equivocation theorem now ends in that profile's concrete
+  leaf-or-node collision event.  The fixed leaf is also proved equal to the
+  single-block, zero-IV fragment of Selvage's existing sponge semantics; the
+  correct unrestricted ROM target remains the work-indexed game, with capacity
+  `2013265921^8` and full state `2013265921^16` exposed exactly.  Exact
+  committed-source persvati run
+  `E-20260814T073709-84456-persvati-3d5795e0b3bc-lake` built the complete
+  construction/ROM boundary in 2,236 jobs, and hbox run
+  `E-20260814T072652-62290-hbox-ddf61fcb1a57-bash` checked the generated
+  payload view; command and source-integrity exits were zero in both runs.
 
 There is also now one deliberately tiny semantic floor in
 `Assurance/ZkmlMatmulAuditTurn.lean`.  A fixed 2-by-2 F7 contraction has exact
@@ -91,9 +109,10 @@ jobs with runner, command, and source-integrity exits zero.
 That floor is exact recomputation, not the final succinct/deployment slice.
 The remaining boundary is therefore narrower and more concrete:
 
-1. **`[COMMIT-CR]`:** instantiate the actual Merkle/sponge opening scheme and
-   reduce every retained position equivocation to a collision, while pinning
-   the root/path codec and its byte/work cost;
+1. **`[COMMIT-CR]`:** the field-level binary Merkle construction and retained
+   collision reduction are now instantiated.  Pin the deployed root/path/Ext4
+   byte codecs to these semantics and price the resulting Poseidon leaf/node
+   collision games and byte/work costs;
 2. **BCS/Fiat--Shamir:** encode the exact BaseFold oracle-message alphabet
    (level roots, sumcheck polynomials, openings, query seeds, and domain
    separators), then transport the interactive event through the ROM game with
@@ -191,17 +210,18 @@ The Poseidon2 constants, matrices, round schedule, narrow/wide AIR artifacts,
 and current Plonky3 transcript semantics live in breadstuffs/Dregg2.  The
 content/version-pinned first-order export and checked meaning theorem now exist,
 and minidregg consumes their exact identity without hand-copying constants.
-The next proof boundary is to instantiate the concrete Poseidon2 BaseFold
-commitment/opening semantics from that source-owned data; the export itself is
-not that instantiation.  The field half of that boundary is now concrete:
+The field half of the BaseFold boundary is concrete:
 `Selvage/BabyBearExt4.lean` proves `X^4-11` irreducible over BabyBear by checked
 Euler witnesses and a quadratic-tower norm argument, constructs the quotient
 field, proves its finrank is four and its generator satisfies `u^4=11`, and
 exposes its canonical four-coordinate power basis.  Exact committed-source run
 `E-20260814T070954-42349-persvati-815063f47f38-lake` built it on persvati in
-1,944 jobs with command and source-integrity exits zero.  The remaining half is
-the source-data-driven Poseidon2 leaf/node semantics and retained-collision
-reduction over that carrier.
+1,944 jobs with command and source-integrity exits zero.  The construction half
+is now concrete as well: generated source-owned Poseidon2 data feeds the actual
+field evaluator, the separately named Ext4 BaseFold leaf/node profile, and the
+binary-Merkle reduction.  What remains is deployment refinement and pricing:
+wire codecs, native checker correspondence, leaf/node CR, the work-indexed
+sponge game, and the deployed-permutation idealization.
 
 The exact audit turn is deliberately below this fork: it can eventually carry
 either suite's accepted evidence, but today it carries exact-recompute Lean
