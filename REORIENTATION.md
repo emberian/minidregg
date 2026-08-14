@@ -162,12 +162,16 @@ stage:
   is exactly `paddedTranscriptPrimitiveWork`, and the landed deferred runner
   succeeds on precisely that many work coins.  Its full run consumes every
   coordinate, leaves no suffix, and returns exactly `m + queryCount` public
-  answers.  Exact committed-source persvati run
-  `E-20260814T105258-87196-persvati-6d12a55eddff-lake` built the target in
-  2,249 jobs with command and source-integrity exits zero.  Fixed-receipt
-  schedule synthesis and deferred exhaustion are therefore closed; eager
-  coordinate reindexing, off-bad eager/deferred agreement, and the
-  permutation/function/deployed-Poseidon switch remain open.
+  answers.  Each segment's head and full-message coordinate are now also
+  machine-checked, their swap is an unconditional whole-vector involution,
+  and the per-round swaps compose into an exact uniform-measure-preserving
+  equivalence of the full fixed work space.  Exact committed-source persvati
+  run `E-20260814T105825-87814-persvati-cbdc82087c31-lake` built the target in
+  2,250 jobs with command and source-integrity exits zero.  Fixed-receipt
+  schedule synthesis, deferred exhaustion, and construction of the coin
+  reindexing program are therefore closed; composed off-bad eager/deferred
+  state agreement and the permutation/function/deployed-Poseidon switch
+  remain open.
 
 - `Selvage/BaseFoldBcsQuerySampling.lean` now gives the strict verifier path an
   unbiased query construction.  For every level with at most 28 index bits it

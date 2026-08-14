@@ -207,9 +207,12 @@ depends only on answer-list length, so the per-round primitive segments are a
 static nonempty partition whose terminal boundary is the existing ROM work
 ledger.  A full deferred run on exactly that vector cannot exhaust: it returns
 one answer per draw, consumes the entire vector, and leaves no suffix.  The
-remaining sponge/RO crossing is now the eager coordinate reindexing and its
-off-bad semantic agreement, followed by the random-permutation/function and
-deployed-Poseidon idealization hops.
+segment heads and eager full-message coordinates induce explicit swaps; those
+swaps compose into an actual equivalence of the entire work-vector space and
+preserve its uniform counting measure exactly.  The remaining sponge/RO
+crossing is composed eager/deferred state agreement away from the prefix
+conflict event, followed by the random-permutation/function and deployed-
+Poseidon idealization hops.
 
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
