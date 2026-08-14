@@ -57,15 +57,18 @@ version of this plan got wrong:
 
 ## Residuals, named not stubbed
 
-* **`[MATMUL-pcs]`** — the verifier must evaluate `Â(x,·)` and `B̂(·,y)` at the terminal
-  point. Those are two multilinear-evaluation claims. `Selvage/MultilinearCommitment.lean`
-  now gives them the correct hash-based shape (`MleEvalClaim = (root, point, value)`) over
+* **`[MATMUL-pcs]`** — a succinct verifier needs THREE multilinear-evaluation claims:
+  `Ĉ(x,y)` for the claimed output, `Â(x,r)` for the left operand, and `B̂(r,y)` for the
+  right operand. `Selvage/MultilinearCommitment.lean` gives them the correct hash-based
+  shape (`MleEvalClaim = (root, point, value)`) over
   the EXISTING positional `OpeningScheme`: a Merkle commitment remains a vector commitment,
   while BaseFold proves the evaluation by an interactive reduction compiled through
   RBR/Fiat--Shamir/BCS. `MleEvalClaim.value_unique` proves that a binding root fixes the
-  value inside the BaseFold degree window. Here the verifier is still *given* the two
-  tables: the remaining gap is the braided BaseFold `Reduction`/`RbrKnowledgeSoundness`
-  instance and its BCS query realization, not a new `openAt` abstraction.
+  value inside the BaseFold degree window, and
+  `Assurance/ZkmlMatmulCommitment.lean` binds all three exact claims. Here the mathematical
+  verifier is still *given* the tables: the remaining gap is the braided BaseFold
+  `Reduction`/`RbrKnowledgeSoundness` instance and its BCS query realization, not a new
+  `openAt` abstraction.
 * **`[MATMUL-fs]`** — the outer point `(x,y)` and the round challenges are drawn uniformly.
   Fiat–Shamir binding is `[PROVER-fs]`, open.
 * **`[MATMUL-pad]`** — the tables live on cubes; a real layer's `784` becomes `1024` by

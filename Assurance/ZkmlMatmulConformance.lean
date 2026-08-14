@@ -140,9 +140,10 @@ theorem mmH_value :
 theorem mmClaim_value :
     (∑ b, (mmE b * (mmG b * mmH b + mmC b * mmD b))) = 1401643469 := by decide
 
-/-- The five FACTORED terminal openings, decided. Two of them are the constants `1` and
-`0` — the verifier does not need an oracle for those, which is exactly why the contraction
-face costs TWO openings and not five. -/
+/-- The five FACTORED terminal values, decided. Three are verifier-known constants
+`1, 0, 1`, so the sumcheck's terminal face needs TWO operand MLE proofs, not five.
+The overall succinct contraction additionally needs the output proof `Ĉ(x,y)`; that is
+the third root-bound claim in `Assurance.ZkmlMatmulCommitment`. -/
 theorem mmOpenings_value :
     (mle mmE mmR, mle mmG mmR, mle mmH mmR, mle mmC mmR, mle mmD mmR)
       = (1, 2013175046, 1038698509, 0, 1) := by decide

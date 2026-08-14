@@ -550,10 +550,11 @@ pub fn verify_cubic_sumcheck(
 // * It is **not** the Hadamard face. `cubicForm_hadamard` (renamed — it was called
 //   `cubicForm_matmul`) is `eq·(Â·B̂ − Ĉ)`, a POINTWISE product; a contraction sums
 //   an inner index that appears in neither output coordinate.
-// * It is **not** a complete argument. `[MATMUL-pcs]`: the verifier must OPEN
-//   `Â(x,·)` and `B̂(·,y)` at the terminal point, and there is no multilinear PCS
-//   here — `verify_matmul` takes the two openings from a closure, which in the
-//   tests is honest evaluation. Everything the openings would cost is unpriced.
+// * It is **not** a complete argument. `[MATMUL-pcs]`: a succinct verifier needs
+//   THREE root-bound MLE claims: `Ĉ(x,y)`, `Â(x,r)`, and `B̂(r,y)`. The Lean claim
+//   seam exists as `MleEvalClaim`; its BaseFold RBR/BCS proof transcript does not.
+//   `verify_matmul` hides the first claim by receiving the complete output table
+//   and takes the latter two values from a closure. All three proofs are unpriced.
 
 /// A matmul claim on cubes: `A` is `2^mu × 2^kappa`, `B` is `2^kappa × 2^nu`, both
 /// row-major with LSB-first cube indices (index bit `i` = cube coordinate `i`, the
@@ -677,11 +678,14 @@ pub fn prove_matmul(
 ///
 /// 1. The target is recomputed from the CLAIMED output table (`mle2_eval`), never
 ///    read from the proof: a prover that sends a total the claimed table does not
-///    have is rejected before any round is examined.
+///    have is rejected before any round is examined. Receiving that whole table is
+///    a native-test convenience; a succinct verifier instead checks the root-bound
+///    claim `Ĉ(x,y)`.
 /// 2. The rounds are the landed degree-3 verifier, `h(1)` read from the wire.
 /// 3. The terminal check combines FIVE openings, of which three are the constants
-///    `1, 0, 1` the verifier supplies itself. Only two are oracle openings, and
-///    `open_gh` stands for the missing PCS (`[MATMUL-pcs]`).
+///    `1, 0, 1` the verifier supplies itself. Only two are terminal oracle values,
+///    and `open_gh` stands for their missing BaseFold RBR/BCS proofs. Together with
+///    the output claim above, the complete argument needs three MLE proofs.
 ///
 /// Runs; does not verify in the formal sense — there is no semantics of Rust.
 pub fn verify_matmul(
@@ -1436,7 +1440,8 @@ mod tests {
     /// descriptor JSON. This route sends `κ` round messages of four field elements.
     ///
     /// What this does NOT measure, and must not be quoted as if it did:
-    /// `[MATMUL-pcs]`, the two multilinear openings, which do not exist yet.
+    /// `[MATMUL-pcs]`, the BaseFold RBR/BCS proofs for all three root-bound MLE
+    /// claims. The claim object exists; the proof transcript does not.
     #[test]
     fn matmul_at_mnist_layer_one_size() {
         let claim = matmul_instance(1, 10, 7, 2026);
@@ -1481,7 +1486,7 @@ mod tests {
         println!(
             "matmul [2,1024]x[1024,128]: output {:?}, bind-outer {:?}, rounds {:?}, \
              prove {:?}, verify {:?}; \
-             transcript {felts} field elements = {bytes} bytes + 2 UNPRICED openings; \
+             transcript {felts} field elements = {bytes} bytes + 3 UNPRICED MLE proofs; \
              AIR route {air_gates_unpadded} gates unpadded / {air_gates_padded} padded \
              (~{} MB of descriptor at 52 B/gate)",
             t_out,
