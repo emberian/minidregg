@@ -201,6 +201,16 @@ only complete rate blocks and the reserved terminal block, refusing leftovers
 and missing or different terminals.  This is the canonical Lean wire meaning;
 no handwritten native routine is treated as refined by implication.
 
+`Selvage/BaseFoldBcsRunSchedule.lean` carries the same padded receipt into the
+actual work-indexed deferred runner.  For a fixed receipt, public query choice
+depends only on answer-list length, so the per-round primitive segments are a
+static nonempty partition whose terminal boundary is the existing ROM work
+ledger.  A full deferred run on exactly that vector cannot exhaust: it returns
+one answer per draw, consumes the entire vector, and leaves no suffix.  The
+remaining sponge/RO crossing is now the eager coordinate reindexing and its
+off-bad semantic agreement, followed by the random-permutation/function and
+deployed-Poseidon idealization hops.
+
 `Selvage/BaseFoldBcsQuerySampling.lean` supplies the strict uniform query path
 without pretending the original modulo decoder was unbiased.  For query
 domains of at most 28 bits it rejects the single zero BabyBear element and
