@@ -263,8 +263,12 @@ variable {F : Type} [Field F] [Fintype F] {μ ν : ℕ}
 `Equiv.prodComm` flip is done once, here, at OPAQUE types: inlining it at the concrete
 product types costs the elaborator an isDefEq blow-up, and the event is passed as an
 explicit `q` with a pointwise `Iff` rather than as `fun w => ?p w.1`, because the latter is
-not a Miller pattern and sends unification off a cliff. -/
-private theorem uniformProb_fst_le {A B : Type} [Fintype A] [Fintype B] (q : A × B → Prop)
+not a Miller pattern and sends unification off a cliff.
+
+Was `private`; made public 2026-08-14 so `Assurance/SpartanR1CS.lean`'s outer-reduction
+composition (zerocheck point + sumcheck challenges, same two-block shape) consumes THIS
+lemma instead of re-proving it beside it. -/
+theorem uniformProb_fst_le {A B : Type} [Fintype A] [Fintype B] (q : A × B → Prop)
     (p : A → Prop) (hq : ∀ w, q w ↔ p w.1) {ε : ℝ} (hε : 0 ≤ ε) (h : uniformProb A p ≤ ε) :
     uniformProb (A × B) q ≤ ε := by
   rw [uniformProb_congr hq, ← uniformProb_equiv (Equiv.prodComm B A) (fun w : A × B => p w.1)]

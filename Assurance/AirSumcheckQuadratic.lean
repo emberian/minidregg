@@ -94,10 +94,19 @@ deployment the one committed oracle is the wire word's own MLE `ŵ`, and each fa
 evaluation `mle A (r) = Σ_y (Σ_k χ_{enc k}(r)·selᴬ(k,y))·w(y) + (const part)` is itself a
 LinearConstraint on `w` — retirable by the LANDED linear face (`mle_retires_constraint`); the
 missing lemma is exactly this table-evaluation-to-wire-word linearization (Spartan's second
-phase). (ii) The alternative single-shot randomization `Σ_b eq(z,b)·D(b) = mle D z` (better
-parameters than the γ round: `m/|F|` vs `(t−1)/|F|`) needs the multilinear zero-test
-`Pr_{z ← F^m}[mle D z = 0] ≤ m/|F|` for `D ≠ 0` — multivariate Schwartz–Zippel for multi-affine
-functions, not yet vocabulary. (iii) `enc`/`eW` hypercube paddings (`t ≤ 2^m`) are constructed
+phase). ⚑ **UPDATE 2026-08-14: the R1CS instance of exactly this move is now BUILT** —
+`Assurance/SpartanR1CS.lean`'s `innerClaim`/`innerClaim_satisfied_iff` render a row-evaluation
+claim as a `LinearConstraint` on the WITNESS word and retire it at `t·2/|F|`
+(`spartan_inner_sound`), with the γ-batch of three at `2/|F|`. What is still open HERE is the
+gate-table analogue's selector bookkeeping, not the technique. (ii) The alternative single-shot
+randomization `Σ_b eq(z,b)·D(b) = mle D z` (better parameters than the γ round: `m/|F|` vs
+`(t−1)/|F|`) needs the multilinear zero-test `Pr_{z ← F^m}[mle D z = 0] ≤ m/|F|` for `D ≠ 0` —
+multivariate Schwartz–Zippel for multi-affine functions. ⚑ **CLOSED, and this sentence was stale
+from the day `Selvage/MultilinearZeroTest.lean` landed**: `Selvage.mle_zero_uniform_bound` proves
+exactly that bound and `Selvage.eqMle_zero_test` composes it with `Selvage.eqMle_fold` into the
+test, with teeth for nonemptiness, tightness at `m = 1`, and necessity of `D ≠ 0`. A sibling
+research lane quoted this paragraph as a live gap on 2026-08-14; that is the cost of a residual
+that outlives its repair. (iii) `enc`/`eW` hypercube paddings (`t ≤ 2^m`) are constructed
 per deployment, as hypotheses here (the `hyperIdx` precedent).
 -/
 import Assurance.AirSumcheck
