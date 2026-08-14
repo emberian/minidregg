@@ -127,4 +127,15 @@ jq -e \
    .checker.content_identity == ("git:" + $sourceCommit)' \
   "$envelope" >/dev/null
 
+# The committed Lean primitive data is a mechanical view of this exact
+# admitted payload, not a second hand-maintained transcription.
+generated=$repo_root/Selvage/ZkmlPoseidon2Data.lean
+generated_tmp=$(mktemp "${TMPDIR:-/tmp}/zkml-poseidon2-data.XXXXXX")
+trap 'rm -f "$generated_tmp"' EXIT
+bash "$repo_root/scripts/render-zkml-poseidon2-data.sh" >"$generated_tmp"
+if ! diff -u "$generated" "$generated_tmp"; then
+  echo "zkml-suite-artifact: generated Lean Poseidon2 data mismatch" >&2
+  exit 1
+fi
+
 echo "zkml-suite-artifact: PASS suite=$registered_suite bytes=$actual_bytes sha256=$actual_sha"
