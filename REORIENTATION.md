@@ -5,10 +5,11 @@ For research conclusions, `~/dev/zkml-research/docs/VERDICTS.md` is the single
 current-truth file.  For exact proof/build evidence, use each repository's own
 ledger at the commit being claimed.
 
-Snapshot inspected while writing this note:
+Snapshot inspected while writing this note (and refreshed after the BaseFold
+commitment/query convergence):
 
-- `minidregg` `1f25749` on `main`, with independently owned two-regime query,
-  Uwueave projection, and native projection work in the shared worktree;
+- `minidregg` `1610755` on `main`, with an independently owned Uwueave
+  Projection-V2/generated-Rust lane still active in the shared worktree;
 - `zkml-research` `9be47ff` on `dev`, with `vendor/` and research notes
   untracked; and
 - `lean-uwueave` `f9396b1` on `dev`, with active finite-history,
@@ -31,26 +32,51 @@ stage:
   `RbrKnowledgeSoundness` instance with exact per-round price `d/|F|`;
 - BaseFold instantiates that object at degree two, with an inhabited F5 state
   and exact `2/5` round price; and
-- the full-word BaseFold IOR verifier now checks the degree bounds, Boolean
-  recurrences, RS descent, and braided terminal on one challenge vector.  It has
-  perfect completeness and exact-codeword wrong-value soundness
-  `m·2/|F|`.
+- the full-word BaseFold IOR verifier checks degree bounds, Boolean recurrences,
+  RS descent, and the braided terminal on one challenge vector.  It has perfect
+  completeness, exact-codeword wrong-value soundness `m·2/|F|`, and arbitrary-
+  word strict-claim soundness `m·3/|F|`;
+- the committed BaseFold verifier now commits every prefix-adaptive derived
+  fold, authenticates three-symbol sampled fibres, shares the algebraic
+  challenge stream with the degree-two sumcheck, and has end-to-end interactive
+  completeness;
+- coherent power-of-two query paths now give the exact pre-cryptographic bound
+  `m·3/|F| + (1−τ)^q`, with no extra round factor on the query-miss term.  The
+  theorem keeps the finite-domain quantization premise
+  `τ ≤ 1/|level_(j+1)|` explicit rather than silently choosing a deployment
+  rate; and
+- each of the three matmul MLE claims now has its own arbitrary-word BaseFold
+  opening price.  Their additive opening envelope is
+  `2(μ+κ+ν)·3/|F|`; the contraction sumcheck's `κ·3/|F|` remains a separate
+  algebraic term and must not be counted as an opening.
 
-The last item is deliberately an IOR result, not a deployment claim.  Two
-fronts remain and must not be merged by prose:
+The committed result is still an interactive, perfectly position-binding IOR
+statement, not a deployment claim.  The raw opening layer now retains a
+concrete `PositionEquivocation` witness instead of assuming it away, and the
+equivocation branch is inhabited by an explicit bad scheme.  What remains is
+therefore narrower and more cryptographic/semantic:
 
-1. **relaxed proximity knowledge state:** product-compose the scalar state with
-   the RS/fold witness state, including the actual `FoldDistancePreserving` or
-   correlated-agreement price when a previously dead codeword state revives;
-2. **committed sampled transcript:** bind statement-first intermediate roots,
-   exact fibre openings, and multi-round sampled query consistency, then carry
-   the query-miss, commitment, and ROM terms into BCS/Fiat--Shamir.
+1. **`[COMMIT-CR]`:** instantiate the actual Merkle/sponge opening scheme and
+   reduce every retained position equivocation to a collision, while pinning
+   the root/path codec and its byte/work cost;
+2. **BCS/Fiat--Shamir:** encode the exact BaseFold oracle-message alphabet
+   (level roots, sumcheck polynomials, openings, query seeds, and domain
+   separators), then transport the interactive event through the ROM game with
+   its hash/grinding terms still visible;
+3. **matmul composition:** bind the C/A/B claims and contraction sumcheck into
+   one statement/checker/registry receipt rather than merely adding their
+   theorem bounds in prose; and
+4. **semantic durability:** authorize that exact checked statement, emit one
+   canonical receipt, append it, and reopen the same receipt through the real
+   durable-history path.
 
-`HalfThresholdFriTranscript` already owns the exact opened-fibre and
-all-position binding lemmas; do not recreate them.  The new
-`Assurance/TwoRegimeQueryBudget.lean` worktree lane is independently owned and
-appears aimed at the query-price front; reconcile after its owner commits or
-hands it over.
+`HalfThresholdFriTranscript` owns the raw opened-fibre/equivocation split;
+`HalfThresholdFriQuery` and `HalfThresholdFriCoherent` own the adaptive and
+coherent sampled bounds.  Reuse them.  `Assurance/TwoRegimeQueryBudget.lean` is
+now landed: for the current IRv2 regime it reports 34/73/130 bits under the
+UDR/JBR/withdrawn-CBR models respectively, so only the withdrawn model reaches
+128 bits.  This is configuration evidence and a refusal tooth, not permission
+to promote the withdrawn assumption into a cryptographic claim.
 
 ## One system, four responsibilities
 
@@ -135,14 +161,17 @@ PQ-128 FHE, physical stable media, or production key custody.
    interface choice. Use V3 for rich checked plan/result/certificate data;
    use the V4 sidecar only where context-bound runtime-auth facts are actually
    required. In both cases the imported value remains neutral data.
-3. Advance the landed exact-codeword BaseFold IOR through the two named fronts
-   above. Reuse the existing `OpeningScheme`, committed FRI transcript,
-   RBR-to-Fiat--Shamir, BCS, and accumulation cone; do not invent a second PCS
-   abstraction merely to look multilinear.
-4. Instantiate the audit checker's named transport obligations for the chosen
-   contraction statement, then price the real binding and beacon terms.
-5. Join that evidence to one canonical computation receipt and the existing
-   durable history path. Only after this is green should the slice widen to
+3. Put the now-landed committed/coherent BaseFold event behind the raw
+   `OpeningScheme` boundary, and discharge its retained equivocation branch for
+   one concrete Merkle/sponge suite. Reuse the existing commitment, BCS,
+   RBR-to-Fiat--Shamir, and ROM cone; do not invent a second PCS abstraction
+   merely to look multilinear.
+4. Serialize the exact verifier alphabet and bind the three matmul openings,
+   contraction claim, registry entry, checker version, and complete named
+   failure budget into one statement. Then instantiate the audit checker's
+   transport obligations and real beacon term.
+5. Join that checked evidence to one canonical computation receipt and the
+   existing durable history path. Only after this is green should the slice widen to
    nonlinearities, multiple layers, low-rank training deltas, or encrypted
    computation.
 
