@@ -8,8 +8,9 @@ to the product of the latter two. Passing the complete output table to a native
 verifier hides the first claim rather than eliminating it.
 
 This file binds all three claims to `MleEvalClaim` over Selvage's existing
-positional vector commitment. The remaining `[MATMUL-pcs]` work is the BaseFold
-`Reduction`/`RbrKnowledgeSoundness` transcript, not a new KZG-shaped `openAt`.
+positional vector commitment. `Assurance.ZkmlMatmulBaseFold` now prices the
+three arbitrary-word full-word IOR openings. The remaining `[MATMUL-pcs]` work
+is the sampled Merkle-query/BCS layer, not a new KZG-shaped `openAt`.
 -/
 import Assurance.ZkmlMatmulSumcheck
 import Selvage.MultilinearCommitment
@@ -97,7 +98,8 @@ noncomputable def honestMatmulMleClaims
       mle (colPartial B y) r⟩
 
 /-- Completeness at the commitment-claim layer: all three honest claims are true.
-This does not yet construct their BaseFold transcripts. -/
+The separate BaseFold assurance file connects each claim field to the exact
+full-word IOR; this theorem does not construct those transcripts. -/
 theorem honestMatmulMleClaims_hold
     (SA : BindingCommitment RootA F ιA OpA)
     (SB : BindingCommitment RootB F ιB OpB)
