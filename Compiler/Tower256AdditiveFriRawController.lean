@@ -179,12 +179,28 @@ structure Statement (pcs : RawMerklePcs ell) (m : Nat) where
   transcript : RawTranscript pcs
   queryCount : Nat
 
-/-! ## Exact Lean-owned transcript and raw acceptance -/
+/-! ## Exact Lean-owned transcript and raw acceptance
+
+⚑ The ordered-basis binding is spliced here exactly as in
+`Tower256AdditiveFriController`, and for the same reason
+(`Selvage.AdditiveBaseFold.keystone_basis_ambiguity`). This sibling is the one
+that is actually INHABITED — `Tower256AdditiveFriRawDeployment` is the only
+deployment witness in the tree — so leaving it on the domain-bound transcript
+would have left the hole exactly where it is reachable. The encoding is the same
+`basisPrefix`, imported rather than re-derived: two canonical encodings of one
+object is how the hole comes back. -/
+
+/-- The ordered-basis frame spliced into every raw sponge input, read off the
+statement's own `AdditiveFriTower`. -/
+def basisBinding (pcs : RawMerklePcs ell) (statement : Statement pcs m) :
+    List UInt8 :=
+  envelope (basisPrefix ell m statement.tower.beta statement.tower.offset)
 
 def challengeInput (pcs : RawMerklePcs ell) (statement : Statement pcs m)
     (pins : TranscriptPins) (receipt : Receipt ell m queryCount)
     (j : Fin m) : List UInt8 :=
   envelope pins.statementBytes ++
+    basisBinding pcs statement ++
     (List.ofFn fun n : Fin ((j : Nat) + 1) =>
       have hn : (n : Nat) <= m := by omega
       let root := statement.transcript.rootAt receipt.challenges n hn
@@ -197,9 +213,51 @@ def derivedChallenge (pcs : RawMerklePcs ell) (statement : Statement pcs m)
   digestTower (pcs.backend.cshake.xofDigest pins.challengeCustomization
     (challengeInput pcs statement pins receipt j))
 
+/-- ⭐ **THE RAW TRANSCRIPT DETERMINES THE ORDERED BASIS.** Same statement as the
+bound controller's `challengeInput_determines_basis`, on the deployment path. -/
+theorem challengeInput_determines_basis (pcs : RawMerklePcs ell)
+    (statement other : Statement pcs m)
+    (pins otherPins : TranscriptPins)
+    (receipt otherReceipt : Receipt ell m queryCount) (j otherJ : Fin m)
+    (sameInput : challengeInput pcs statement pins receipt j
+      = challengeInput pcs other otherPins otherReceipt otherJ) :
+    statement.tower.offset = other.tower.offset ∧
+      ∀ index, index < ell →
+        statement.tower.beta index = other.tower.beta index := by
+  rw [challengeInput, challengeInput, basisBinding, basisBinding] at sameInput
+  simp only [List.append_assoc] at sameInput
+  obtain ⟨-, afterStatement⟩ := envelope_append_inj sameInput
+  obtain ⟨prefixEqual, -⟩ := envelope_append_inj afterStatement
+  obtain ⟨-, -, offsetEqual, basisEqual⟩ := basisPrefix_inj prefixEqual
+  exact ⟨offsetEqual, basisEqual⟩
+
+/-- ⭐⭐ **THE CLOSURE THEOREM ON THE DEPLOYMENT PATH.** Two Boolean tables
+LCH-committed to the same codeword under two statements sharing a raw challenge
+input are equal — `keystone_basis_ambiguity`'s pair is no longer constructible
+against one transcript. -/
+theorem transcript_determines_table (pcs : RawMerklePcs ell)
+    (statement other : Statement pcs m)
+    (pins otherPins : TranscriptPins)
+    (receipt otherReceipt : Receipt ell m queryCount) (j otherJ : Fin m)
+    (sameInput : challengeInput pcs statement pins receipt j
+      = challengeInput pcs other otherPins otherReceipt otherJ)
+    (arity : Nat) (arityLe : arity <= ell) (word : Polynomial Tower256)
+    (table otherTable : (Fin arity -> Bool) -> Tower256)
+    (committed : novelPack statement.tower.beta arity
+      (booleanMobiusPolynomial arity table) = word)
+    (otherCommitted : novelPack other.tower.beta arity
+      (booleanMobiusPolynomial arity otherTable) = word) :
+    table = otherTable :=
+  table_unique_of_basis_agree statement.tower.beta other.tower.beta arity
+    (fun index bounded =>
+      (challengeInput_determines_basis pcs statement other pins otherPins receipt
+        otherReceipt j otherJ sameInput).2 index (lt_of_lt_of_le bounded arityLe))
+    table otherTable (by rw [committed, otherCommitted])
+
 def queryPrefix (pcs : RawMerklePcs ell) (statement : Statement pcs m)
     (pins : TranscriptPins) (receipt : Receipt ell m queryCount) : List UInt8 :=
   envelope pins.statementBytes ++
+    basisBinding pcs statement ++
     (List.ofFn fun n : Fin (m + 1) =>
       have hn : (n : Nat) <= m := by omega
       envelope (encodeLength n) ++ envelope
@@ -470,6 +528,10 @@ theorem run_success_integrity {Error : Type}
         exact ⟨returned, decoded, (verifier.check_iff receipt).mp checked⟩
       next rejected => simp at success
 
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.challengeInput_determines_basis' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms challengeInput_determines_basis
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.transcript_determines_table' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transcript_determines_table
 /-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.RawMerklePcs.accepted_value_eq_or_extractedCollision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms RawMerklePcs.accepted_value_eq_or_extractedCollision
 /-- info: 'Minidregg.Compiler.Tower256AdditiveFriRawController.accepted_query_pins_or_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/

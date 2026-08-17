@@ -25,6 +25,8 @@ There is no Rust proposition or Rust field semantics in this module.
 
 import Compiler.AdditiveFriReceiptClause
 import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256CshakeMerkleBinding
+import Selvage.AdditiveBasisBinding
 
 namespace Minidregg.Compiler.Tower256AdditiveFriController
 
@@ -201,12 +203,163 @@ structure TranscriptPins where
   queryCustomization : List UInt8
   customizationsDistinct : challengeCustomization ≠ queryCustomization
 
-/-- The exact prefix supplied to challenge `j`: the public statement followed
-by roots `0 .. j`, each computed from a word which depends only on challenges
-strictly before that level. -/
+/-! ### ⚑ The ordered-basis binding
+
+`Selvage/AdditiveBaseFold.lean`'s `keystone_basis_ambiguity` is a proved negative:
+one codeword on one domain is an honest LCH commitment to two DIFFERENT Boolean
+tables under two ORDERINGS of the same `GF(2)`-basis. Same span, same evaluation
+points, same Merkle leaves — so a transcript that binds the domain does not
+determine the committed multilinear.
+
+`TranscriptPins.statementBytes` above carries a docstring saying the statement
+encoding "must" be included. That is a comment: no field and no theorem related
+it to `clause.basis`, and the repository's only inhabitant
+(`Tower256AdditiveFriRawDeployment.bootstrapPins`) sets it to nine constant ASCII
+bytes. The binding is therefore made STRUCTURAL here instead — `basisPrefix` is
+spliced into every sponge input by construction, so there is nothing for a
+caller to forget.
+
+⚑ **The encoding IS the binding, so it is named once and only once.** Every
+element is framed POSITIONALLY: `basisFrame` carries the INDEX beside the value,
+and the frames are laid down in index order inside their own envelopes. An
+encoding that agreed on the span and differed on the order — a sorted list, an
+XOR fold, a set of hashes — would reintroduce the same hole one level down, and
+`basisPrefix_inj` is what forbids that: it recovers `basis index` at each index
+separately. -/
+
+/-- The canonical value codec for every field element in the transcript: the
+same Lean-selected recursive Fan--Paar codec `queryPrefix` already uses for
+challenges. Named once so the basis and the challenges cannot drift apart. -/
+abbrev transcriptValueCodec : LawfulCodec Tower256 :=
+  BinaryTower256Profile.profile.valueCodec
+
+/-- One POSITIONAL frame `(index, value)`. Carrying the index inside the frame is
+what makes the encoding order-sensitive rather than span-sensitive. -/
+def basisFrame (index : Nat) (value : Tower256) : List UInt8 :=
+  envelope (encodeLength index) ++ envelope (transcriptValueCodec.encode value)
+
+/-- ⭐ **THE CANONICAL ORDERED-BASIS ENCODING.** Domain log, round count, affine
+offset, then the `ell` basis elements as indexed frames in index order. This is
+the object the sponge absorbs; `basisPrefix_inj` proves it determines every one
+of those five things. -/
+def basisPrefix (ell m : Nat) (basis : Nat → Tower256) (offset : Tower256) :
+    List UInt8 :=
+  envelope (encodeLength ell) ++
+    envelope (encodeLength m) ++
+      envelope (transcriptValueCodec.encode offset) ++
+        (List.ofFn fun index : Fin ell =>
+          envelope (basisFrame index (basis index))).flatten
+
+/-- The single frame spliced into every sponge input, taken from the clause's
+own first-order `basis`/`offset` fields (which `Clause.basisExact` and
+`Clause.offsetExact` pin to `tower.beta` and `tower.offset`). -/
+def basisBinding (clause : FriClause pcs m manifest) : List UInt8 :=
+  envelope (basisPrefix ell m clause.basis clause.offset)
+
+/-! #### The encoding is injective, positionally -/
+
+theorem envelope_append_inj {left right leftRest rightRest : List UInt8}
+    (equal : envelope left ++ leftRest = envelope right ++ rightRest) :
+    left = right ∧ leftRest = rightRest := by
+  have parsed := congrArg Tower256CshakeMerkleBinding.parseEnvelope equal
+  rw [Tower256CshakeMerkleBinding.parseEnvelope_envelope_append,
+    Tower256CshakeMerkleBinding.parseEnvelope_envelope_append] at parsed
+  have paired := Option.some.inj parsed
+  exact ⟨congrArg Prod.fst paired, congrArg Prod.snd paired⟩
+
+theorem encodeLength_injective : Function.Injective encodeLength := by
+  intro left right equal
+  have lengths := congrArg List.length equal
+  simpa [encodeLength] using lengths
+
+theorem basisFrame_inj {leftIndex rightIndex : Nat}
+    {leftValue rightValue : Tower256}
+    (equal : basisFrame leftIndex leftValue = basisFrame rightIndex rightValue) :
+    leftIndex = rightIndex ∧ leftValue = rightValue := by
+  rw [basisFrame, basisFrame] at equal
+  obtain ⟨indexEqual, valueEqual⟩ := envelope_append_inj equal
+  exact ⟨encodeLength_injective indexEqual,
+    Tower256CshakeMerkleBinding.lawfulCodec_encode_injective _
+      (Tower256CshakeMerkleBinding.envelope_injective valueEqual)⟩
+
+/-- A run of enveloped frames is recovered frame by frame, in order — the lemma
+that makes the encoding positional rather than set-like. -/
+theorem flattenFrames_append_inj : ∀ {count : Nat}
+    {left right : Fin count → List UInt8} {leftRest rightRest : List UInt8},
+    (List.ofFn fun index => envelope (left index)).flatten ++ leftRest
+        = (List.ofFn fun index => envelope (right index)).flatten ++ rightRest →
+      left = right ∧ leftRest = rightRest := by
+  intro count
+  induction count with
+  | zero =>
+      intro left right leftRest rightRest equal
+      exact ⟨funext fun index => index.elim0, by simpa using equal⟩
+  | succ count ih =>
+      intro left right leftRest rightRest equal
+      rw [List.ofFn_succ, List.ofFn_succ] at equal
+      simp only [List.flatten_cons, List.append_assoc] at equal
+      obtain ⟨headEqual, tailEqual⟩ := envelope_append_inj equal
+      obtain ⟨tailFun, restEqual⟩ := ih tailEqual
+      refine ⟨funext fun index => ?_, restEqual⟩
+      refine Fin.cases ?_ ?_ index
+      · exact headEqual
+      · intro j; exact congrFun tailFun j
+
+/-- ⭐ **THE ENCODING DETERMINES THE ORDERED BASIS.** Domain log, round count,
+offset and every live basis element are recovered from the bytes — each index
+separately, which is exactly what `keystone_basis_ambiguity` needs and what an
+`additiveDomain` label cannot give (`Selvage.no_span_indexed_decoder`). -/
+theorem basisPrefix_append_inj {leftEll leftM rightEll rightM : Nat}
+    {leftBasis rightBasis : Nat → Tower256}
+    {leftOffset rightOffset : Tower256} {leftRest rightRest : List UInt8}
+    (equal : basisPrefix leftEll leftM leftBasis leftOffset ++ leftRest
+        = basisPrefix rightEll rightM rightBasis rightOffset ++ rightRest) :
+    leftEll = rightEll ∧ leftM = rightM ∧ leftOffset = rightOffset ∧
+      (∀ index, index < leftEll → leftBasis index = rightBasis index) ∧
+        leftRest = rightRest := by
+  rw [basisPrefix, basisPrefix] at equal
+  simp only [List.append_assoc] at equal
+  obtain ⟨ellBytes, afterEll⟩ := envelope_append_inj equal
+  have ellEqual : leftEll = rightEll := encodeLength_injective ellBytes
+  subst ellEqual
+  obtain ⟨roundBytes, afterRounds⟩ := envelope_append_inj afterEll
+  obtain ⟨offsetBytes, afterOffset⟩ := envelope_append_inj afterRounds
+  obtain ⟨frames, restEqual⟩ := flattenFrames_append_inj afterOffset
+  refine ⟨rfl, encodeLength_injective roundBytes,
+    Tower256CshakeMerkleBinding.lawfulCodec_encode_injective _ offsetBytes,
+    fun index bounded => ?_, restEqual⟩
+  exact (basisFrame_inj (congrFun frames ⟨index, bounded⟩)).2
+
+theorem basisPrefix_inj {leftEll leftM rightEll rightM : Nat}
+    {leftBasis rightBasis : Nat → Tower256}
+    {leftOffset rightOffset : Tower256}
+    (equal : basisPrefix leftEll leftM leftBasis leftOffset
+        = basisPrefix rightEll rightM rightBasis rightOffset) :
+    leftEll = rightEll ∧ leftM = rightM ∧ leftOffset = rightOffset ∧
+      ∀ index, index < leftEll → leftBasis index = rightBasis index := by
+  obtain ⟨ellEqual, roundEqual, offsetEqual, basisEqual, -⟩ :=
+    basisPrefix_append_inj (leftRest := ([] : List UInt8))
+      (rightRest := ([] : List UInt8)) (by simpa using equal)
+  exact ⟨ellEqual, roundEqual, offsetEqual, basisEqual⟩
+
+/-- ⭐ **TOOTH (byte layer): a reordering CHANGES the sponge input.** The
+contrapositive of `basisPrefix_inj` — if two bases disagree at any live index
+their transcripts disagree, so the reordered sibling cannot inherit the honest
+commitment's challenges. -/
+theorem basisPrefix_ne_of_basis_ne {ell m : Nat}
+    {basis other : Nat → Tower256} {offset : Tower256}
+    (index : Nat) (bounded : index < ell)
+    (different : basis index ≠ other index) :
+    basisPrefix ell m basis offset ≠ basisPrefix ell m other offset := fun equal =>
+  different ((basisPrefix_inj equal).2.2.2 index bounded)
+
+/-- The exact prefix supplied to challenge `j`: the public statement, ⚑ the
+ORDERED basis binding, then roots `0 .. j`, each computed from a word which
+depends only on challenges strictly before that level. -/
 def challengeInput (clause : FriClause pcs m manifest) (pins : TranscriptPins)
     (receipt : Receipt ell m queryCount) (j : Fin m) : List UInt8 :=
   envelope pins.statementBytes ++
+    basisBinding pcs clause ++
     (List.ofFn fun n : Fin ((j : Nat) + 1) =>
       have hn : (n : Nat) ≤ m := by omega
       let root := clause.transcript.rootAt receipt.challenges n hn
@@ -219,11 +372,13 @@ def derivedChallenge (clause : FriClause pcs m manifest) (pins : TranscriptPins)
   digestTower (pcs.backend.cshake.xofDigest pins.challengeCustomization
     (challengeInput pcs clause pins receipt j))
 
-/-- The post-challenge transcript bound before query sampling: statement,
-all level roots through `m`, and the canonical Tower256 challenge encodings. -/
+/-- The post-challenge transcript bound before query sampling: statement, ⚑ the
+ORDERED basis binding, all level roots through `m`, and the canonical Tower256
+challenge encodings. -/
 def queryPrefix (clause : FriClause pcs m manifest) (pins : TranscriptPins)
     (receipt : Receipt ell m queryCount) : List UInt8 :=
   envelope pins.statementBytes ++
+    basisBinding pcs clause ++
     (List.ofFn fun n : Fin (m + 1) =>
       have hn : (n : Nat) ≤ m := by omega
       envelope (encodeLength n) ++ envelope
@@ -264,6 +419,125 @@ theorem challengeInput_eq_of_samePrefix
   have hinj : (i : Nat) < (j : Nat) :=
     lt_of_lt_of_le i.isLt (Nat.lt_succ_iff.mp n.isLt)
   exact samePrefix ⟨i, lt_trans hinj j.isLt⟩ hinj
+
+/-! ### ⚑ The ambiguity is CLOSED, not merely addressed -/
+
+/-- ⭐ **THE TRANSCRIPT NOW DETERMINES THE ORDERED BASIS.** Two clauses whose
+challenge inputs agree have the same affine offset and the same basis element at
+every live index — including at the indices a reordering would permute. Before
+the splice this statement was FALSE by `keystone_basis_ambiguity`: the sponge
+input mentioned `basis` nowhere. -/
+theorem challengeInput_determines_basis
+    (clause other : FriClause pcs m manifest)
+    (pins otherPins : TranscriptPins)
+    (receipt otherReceipt : Receipt ell m queryCount) (j otherJ : Fin m)
+    (sameInput : challengeInput pcs clause pins receipt j
+      = challengeInput pcs other otherPins otherReceipt otherJ) :
+    clause.tower.offset = other.tower.offset ∧
+      ∀ index, index < ell → clause.tower.beta index = other.tower.beta index := by
+  rw [challengeInput, challengeInput, basisBinding, basisBinding] at sameInput
+  simp only [List.append_assoc] at sameInput
+  obtain ⟨-, afterStatement⟩ := envelope_append_inj sameInput
+  obtain ⟨prefixEqual, -⟩ := envelope_append_inj afterStatement
+  obtain ⟨-, -, offsetEqual, basisEqual⟩ := basisPrefix_inj prefixEqual
+  rw [clause.offsetExact, other.offsetExact, clause.basisExact,
+    other.basisExact] at *
+  exact ⟨offsetEqual, basisEqual⟩
+
+/-- ⭐⭐ **THE CLOSURE THEOREM.** Two Boolean tables that are LCH-committed to the
+SAME codeword under two clauses sharing a challenge input are EQUAL.
+
+This is the statement `keystone_basis_ambiguity` refutes for the unrepaired
+transcript, and it is the honest form of "the hazard is closed": the
+counterexample is a pair of tables, one codeword, one domain — and the only way
+it survives the splice is if the two orderings produce the same sponge input,
+which `basisPrefix_inj` forbids. The algebra is
+`Selvage.table_unique_of_basis_agree`; the bytes are `basisPrefix_inj`; this
+theorem is the weld. -/
+theorem transcript_determines_table
+    (clause other : FriClause pcs m manifest)
+    (pins otherPins : TranscriptPins)
+    (receipt otherReceipt : Receipt ell m queryCount) (j otherJ : Fin m)
+    (sameInput : challengeInput pcs clause pins receipt j
+      = challengeInput pcs other otherPins otherReceipt otherJ)
+    (arity : Nat) (arityLe : arity ≤ ell) (word : Polynomial Tower256)
+    (table otherTable : (Fin arity → Bool) → Tower256)
+    (committed : novelPack clause.tower.beta arity
+      (booleanMobiusPolynomial arity table) = word)
+    (otherCommitted : novelPack other.tower.beta arity
+      (booleanMobiusPolynomial arity otherTable) = word) :
+    table = otherTable :=
+  table_unique_of_basis_agree clause.tower.beta other.tower.beta arity
+    (fun index bounded =>
+      (challengeInput_determines_basis pcs clause other pins otherPins receipt
+        otherReceipt j otherJ sameInput).2 index (lt_of_lt_of_le bounded arityLe))
+    table otherTable (by rw [committed, otherCommitted])
+
+/-- ⭐ **THE FIX IS CONSUMED, NOT AN ISLAND.** The ordered basis the transcript
+now binds is exactly the setup parameter of `Selvage.lchRingSwitchTarget` — the
+`RingSwitchTarget` whose `Extractable` field `keystone_basis_ambiguity` was
+making FALSE (`Selvage/RingSwitching.lean` §7 item 4, the BLOCKING prerequisite).
+A clause therefore names one large-field scheme, and
+`challengeInput_determines_basis` says two clauses sharing a transcript name
+schemes agreeing at every live index. -/
+noncomputable def clauseRingSwitchTarget (clause : FriClause pcs m manifest) :
+    RingSwitchTarget Tower256 :=
+  lchRingSwitchTarget clause.tower.beta
+
+/-- The clause's large-field scheme really is extractable — the downstream
+obligation discharged at the deployed object rather than at a toy. -/
+theorem clauseRingSwitchTarget_extractable (clause : FriClause pcs m manifest) :
+    (clauseRingSwitchTarget pcs clause).pcs.Extractable :=
+  lchBasisBoundPcs_extractable clause.tower.beta
+
+/-- And its commitment is the literal LCH packing under the bound basis, so the
+handle the transcript pins and the handle the extractor reads are the same
+object. -/
+theorem clauseRingSwitchTarget_commit (clause : FriClause pcs m manifest)
+    {arity : Nat} (table : (Fin arity → Bool) → Tower256) :
+    (clauseRingSwitchTarget pcs clause).pcs.commit table
+      = ⟨arity, clause.tower.beta,
+          novelPack clause.tower.beta arity
+            (booleanMobiusPolynomial arity table)⟩ :=
+  rfl
+
+/-! ### Teeth on the repaired transcript
+
+The accept half is already in the tree and stays there:
+`Tower256AdditiveFriRawDeployment.bootstrapReceipt_accepts` and
+`honest_run_succeeds` are honest runs through this transcript, and they build
+against the spliced definitions — a splice that refused honest work would take
+them red. The refuse half is below, and the mutation is asserted to be real
+before the verdict is read. -/
+
+/-- Two orderings of one two-element basis. `toothBasis` is `(0, 1)`,
+`toothBasisSwap` is `(1, 0)` — the Tower256 shadow of the keystone's `(1, x₁)`
+versus `(x₁, 1)`. -/
+def toothBasis : Nat → Tower256
+  | 0 => 0
+  | _ => 1
+
+def toothBasisSwap : Nat → Tower256
+  | 0 => 1
+  | _ => 0
+
+/-- **The mutation is real** — assert it before reading the verdict. The two
+orderings are different functions at index `0`, and they are a permutation of
+each other, so nothing that reads the basis as a SET can separate them. -/
+theorem tooth_reordering_is_a_real_mutation :
+    toothBasis 0 ≠ toothBasisSwap 0 ∧ toothBasis 0 = toothBasisSwap 1 ∧
+      toothBasis 1 = toothBasisSwap 0 := by
+  refine ⟨?_, rfl, rfl⟩
+  show (0 : Tower256) ≠ 1
+  exact zero_ne_one
+
+/-- ⭐ **TOOTH: the repaired transcript REFUSES the reordered sibling.** Its
+sponge input is a different byte string, so it draws different challenges and
+different query seeds; it cannot be passed off as the honest commitment's
+transcript. -/
+theorem tooth_reordered_transcript_differs (m : Nat) :
+    basisPrefix 2 m toothBasis 0 ≠ basisPrefix 2 m toothBasisSwap 0 :=
+  basisPrefix_ne_of_basis_ne 0 (by omega) tooth_reordering_is_a_real_mutation.1
 
 /-! ## Exact acceptance and reflection -/
 
@@ -418,6 +692,22 @@ theorem run_success_integrity {Error : Type}
 #guard_msgs (whitespace := lax) in #print axioms MerklePcs.valueCodecExact
 /-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.challengeInput_eq_of_samePrefix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms challengeInput_eq_of_samePrefix
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.basisPrefix_inj' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms basisPrefix_inj
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.basisPrefix_ne_of_basis_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms basisPrefix_ne_of_basis_ne
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.challengeInput_determines_basis' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms challengeInput_determines_basis
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.transcript_determines_table' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transcript_determines_table
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.clauseRingSwitchTarget_extractable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clauseRingSwitchTarget_extractable
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.clauseRingSwitchTarget_commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clauseRingSwitchTarget_commit
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.tooth_reordering_is_a_real_mutation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tooth_reordering_is_a_real_mutation
+/-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.tooth_reordered_transcript_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tooth_reordered_transcript_differs
 /-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.accepts_additiveFriAdaptiveCoherentAccepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepts_additiveFriAdaptiveCoherentAccepts
 /-- info: 'Minidregg.Compiler.Tower256AdditiveFriController.run_success_integrity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
