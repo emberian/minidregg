@@ -303,52 +303,71 @@ omit [Fintype F] [DecidableEq F] in
 the table claim: round 0's target is the claimed total (`roundSum_zero` +
 `cubicForm_cube_sum`), every later round's target is the previous round polynomial folded at
 the challenge (`roundSum_succ`) — the landed sum-splitting, cited, not re-derived. -/
+theorem cubicHonest_boolean_sum_stream (E A B C D : (Fin m → Bool) → F) (χ : ℕ → F) :
+    ∀ i, i < m →
+      (cubicHonest E A B C D χ i).eval 0 + (cubicHonest E A B C D χ i).eval 1
+        = scChain (∑ b, (E b * (A b * B b + C b * D b)))
+            (cubicHonest E A B C D χ) χ i := by
+  intro i hi
+  rw [cubicHonest, dif_pos hi, cubicRoundPoly_eval, cubicRoundPoly_eval]
+  cases i with
+  | zero =>
+    show _ = ∑ b, (E b * (A b * B b + C b * D b))
+    rw [roundSum_zero hi (cubicForm E A B C D) _, cubicForm_cube_sum]
+  | succ n =>
+    show _ = (cubicHonest E A B C D χ n).eval (χ n)
+    have hn : n < m := Nat.lt_of_succ_lt hi
+    rw [cubicHonest, dif_pos hn, cubicRoundPoly_eval]
+    exact roundSum_succ hi (cubicForm E A B C D) _
+
+omit [Fintype F] [DecidableEq F] in
+/-- **Boolean-sum consistency** at a full `Fin m` challenge tuple —
+`cubicHonest_boolean_sum_stream` at `χ = chalOf r`. -/
 theorem cubicHonest_boolean_sum (E A B C D : (Fin m → Bool) → F) (r : Fin m → F) :
     ∀ i, i < m →
       (cubicHonest E A B C D (chalOf r) i).eval 0
           + (cubicHonest E A B C D (chalOf r) i).eval 1
         = scChain (∑ b, (E b * (A b * B b + C b * D b)))
-            (cubicHonest E A B C D (chalOf r)) (chalOf r) i := by
-  intro i hi
-  rw [cubicHonest, dif_pos hi, chalOf_restrict, cubicRoundPoly_eval, cubicRoundPoly_eval]
-  cases i with
+            (cubicHonest E A B C D (chalOf r)) (chalOf r) i :=
+  cubicHonest_boolean_sum_stream E A B C D (chalOf r)
+
+omit [Fintype F] [DecidableEq F] in
+/-- **The partial terminal — the composition operator, degree 3.** After `k ≤ m` rounds the
+honest truth chain holds the level-`k` RESIDUAL claim, the sum of `Ê·(Â·B̂ + Ĉ·D̂)` over the
+`m − k` variables the run has not visited. This is the GKR layer hand-off shape: a layer's
+sumcheck stops and what it hands the next layer is a sum-claim, not an oracle evaluation.
+
+`AcceptsFalse`'s round checks at every `i < k` are untouched — the chain stops early, the
+verifier does not. -/
+theorem scChain_cubicHonest_partial (E A B C D : (Fin m → Bool) → F) (χ : ℕ → F)
+    {k : ℕ} (hk : k ≤ m) :
+    scChain (∑ b, (E b * (A b * B b + C b * D b))) (cubicHonest E A B C D χ) χ k
+      = residualSum (cubicForm E A B C D) (fun j : Fin m => χ j.val) k := by
+  cases k with
   | zero =>
-    show _ = ∑ b, (E b * (A b * B b + C b * D b))
-    rw [roundSum_zero hi (cubicForm E A B C D) r, cubicForm_cube_sum]
+    show ∑ b, (E b * (A b * B b + C b * D b)) = _
+    rw [residualSum_zero, cubicForm_cube_sum]
   | succ n =>
-    show _ = (cubicHonest E A B C D (chalOf r) n).eval (chalOf r n)
-    have hn : n < m := Nat.lt_of_succ_lt hi
-    rw [cubicHonest, dif_pos hn, chalOf_restrict, cubicRoundPoly_eval,
-      chalOf_coe r ⟨n, hn⟩]
-    exact roundSum_succ hi (cubicForm E A B C D) r
+    show (cubicHonest E A B C D χ n).eval (χ n) = _
+    have hn : n < m := hk
+    rw [cubicHonest, dif_pos hn, cubicRoundPoly_eval]
+    exact residualSum_step hn (cubicForm E A B C D) _
 
 omit [Fintype F] [DecidableEq F] in
 /-- **The terminal check, FACTORED.** After all `m` rounds the honest truth chain's value is
 `Ê(r)·(Â(r)·B̂(r) + Ĉ(r)·D̂(r))` — FIVE oracle openings the verifier combines itself. This is
 the whole reason the round degree is 3: a degree-1 engine would have to target the MLE of the
-PRODUCT, which is not the product of the MLEs. -/
+PRODUCT, which is not the product of the MLEs.
+
+A COROLLARY of `scChain_cubicHonest_partial` at `k = m` (`residualSum_full` collapses the
+empty suffix cube) — one proof, not two. -/
 theorem scChain_cubicHonest_final (E A B C D : (Fin m → Bool) → F) (r : Fin m → F) :
     scChain (∑ b, (E b * (A b * B b + C b * D b)))
         (cubicHonest E A B C D (chalOf r)) (chalOf r) m
       = mle E r * (mle A r * mle B r + mle C r * mle D r) := by
-  cases m with
-  | zero =>
-    show ∑ b, (E b * (A b * B b + C b * D b)) = _
-    have key : ∀ f : (Fin 0 → Bool) → F, mle f r = f default := by
-      intro f
-      rw [mle,
-        Fintype.sum_eq_single default fun b hb =>
-          absurd (Subsingleton.elim b default) hb,
-        chiEval, Fintype.prod_empty, mul_one]
-    rw [key E, key A, key B, key C, key D,
-      Fintype.sum_eq_single default fun b hb => absurd (Subsingleton.elim b default) hb]
-  | succ n =>
-    show (cubicHonest E A B C D (chalOf r) n).eval (chalOf r n) = _
-    have hn : n < n + 1 := Nat.lt_succ_self n
-    rw [cubicHonest, dif_pos hn, chalOf_restrict, cubicRoundPoly_eval,
-      chalOf_coe r ⟨n, hn⟩, roundSum_last rfl (cubicForm E A B C D) r,
-      Function.update_eq_self]
-    rfl
+  rw [scChain_cubicHonest_partial E A B C D (chalOf r) (le_refl m), chalOf_restrict,
+    residualSum_full]
+  rfl
 
 omit [Fintype F] [DecidableEq F] in
 /-- **Completeness of the cubic realizer**: the honest family, run as both prover and truth
@@ -603,6 +622,8 @@ end CubicExample
 #guard_msgs (whitespace := lax) in #print axioms cubicHonest_degree
 /-- info: 'Minidregg.Assurance.cubicHonest_boolean_sum' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cubicHonest_boolean_sum
+/-- info: 'Minidregg.Assurance.scChain_cubicHonest_partial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scChain_cubicHonest_partial
 /-- info: 'Minidregg.Assurance.scChain_cubicHonest_final' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms scChain_cubicHonest_final
 /-- info: 'Minidregg.Assurance.cubicHonest_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
