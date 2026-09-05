@@ -196,6 +196,15 @@ constitution states — `no_forge_without_quorum` (safety needs no liveness prem
 `Nat.Partrec` elaborates cleanly at this pin, `dead_undecidable`. "A partitioned network
 stalls finality; it cannot forge it" becomes two theorems, not a sentence.
 
+LANDED (2026-09-05): `Kernel/FinalityLiveness.lean` (259 lines) and
+`Theory/RevocationConsensus.lean` (221 lines). `PostGSTProgress` is the one carrier;
+`cannot_forge` carries no liveness premise; `no_progress_without_quorum : IsEmpty
+PostGSTProgress`; the closed realizer is built and refuted at three broken siblings (dead
+quorum system, partition with only node 2 online, never-delivering schedule — the last
+refuted at the fair leg alone, provably not vacuously). `dead_undecidable` ported and
+elaborated. `[LIVENESS-authenticated]`: the authenticated layer's bare `Prop` fields should be
+replaced by this carrier; named, not done.
+
 ### 3.3 The DERIVED finalizer (the statement, for when the lace exists)
 
 Not a port of `tauOrder`. Statement-first: an ordering rule is a function `order : View → List
@@ -216,6 +225,15 @@ syntactic guard (`monotone slot` under max-merge ⇒ tier 1; `le slot c` under a
 forces ordering) and its verdict is proved sound against `eval`'s denotation. This is where
 "a guard doesn't have a price, it is priced by where it lives" lands.
 
+LANDED (2026-09-05): `Pred/CoordinationDial.lean` (482 lines), with NO second evaluator —
+the invariant is `Inv p old f := ∃ s, toFun s = f ∧ eval p old s = true` over the function
+view `Slot → WithBot ℤ` (Pi sup = slot-wise max), well-defined by `eval_congr_toFun`.
+`dial : Pred → Verdict` (free / ordering / stepShaped / thirdParty, refusals loud),
+`dial_sound` by structural induction, `dial_tier1_sound` into the ladder. The `any`
+refusal is necessity: `any [eq a 1, eq b 1]` at (1,5)/(5,1) joins to (5,5) and fails,
+computed. The PN-counter merge (where a ceiling forces ordering) is `[DIAL-pn]`, waiting on
+per-replica state in the cell schema.
+
 ### 3.5 N4
 
 No Lean tonight on purpose; the statement-first pass is `docs/N4-DISTRIBUTIVE-LAW.md`.
@@ -235,6 +253,15 @@ reads the CARRIER, and GSOS rules may only read behaviours — `Bal` must be obs
 `Obs` or conservation-gating falls outside the format. Sequencing: decide B's `Obs` and
 Σ's joint shape first (the same decision the twin audit's Phase 2 needs); the collapse
 gates only the instance file.
+
+LANDED (2026-09-05): `Compiler/DistributiveLaw.lean` (570 lines; rooted from `Minidregg.lean`
+because `Compiler.lean` carries uncommitted owner edits). `DistLaw`, `Bialgebra`, the initial
+and final bialgebras over `Term` and `PFunctor.M`, `N4_adequacy` (the unique bialgebra
+morphism, `fold denModel = M.corec opModel`) and `N4_congruence`. The note's prediction is a
+theorem: `strictLaw` and `openLaw` are both laws (`laws_inhabited`), `FailClosed` separates
+them, and `open_joint_commits` exhibits the half-committed joint turn by `rfl`.
+`sequential_law_is_option_map` records the collapse at the unary node. Residuals `[N4-home]`,
+`[N4-hyperedge-instance]`, `[N4-gsos]`.
 
 ## 4. What is NOT claimed
 
