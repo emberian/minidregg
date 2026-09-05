@@ -671,42 +671,46 @@ theorem manifest_receiptClaim_proximity {F : Type} [Field F] [DecidableEq F]
   receiptClaim_proximity rc rt T deg hδ hfold hfar
 
 /-- **`loomV0_holds`** (`Assurance/SelvageV0.lean`) — **THE v0 CAPSTONE**: the
-whole tower as ONE theorem. Bundles, at a shared final accumulator,
-soundness (`lightClientSound`), knowledge soundness
-(`lightClientKnowledgeSound`), binding (`committed_extract_bind`), and
-decision (`decider_sound`) — the proof term IS the four citations, no
-re-derivation. Honestly scoped (see the residual ledger, §8): the
-soundness slice's CLAIMED words and the knowledge/binding/decision
-slices' VERIFYING transcript are independent parameters — the landed
-theorems do not couple them; that coupling is `[ACC-extract-bind]`/
-`[FS-ROM]` at deployment. -/
+whole tower as ONE theorem. Bundles soundness (`lightClientSound`) and
+knowledge soundness (`lightClientKnowledgeSound_oneProver_committed`,
+`Selvage/LightClientKnowledge.lean`) at ONE prover's data `(f₀, ms, cols)`,
+and binding (`committed_extract_bind`) and decision (`decider_sound`) at the
+shared final accumulator — the proof term IS the four citations, no
+re-derivation. The old decoupling of the soundness slice's claimed words from
+the knowledge slice's transcripts is closed at the word level; the FS
+transport (`[FS-ROM]`) and the deployed commitment (`[COMMIT-CR]`) remain. -/
 theorem manifest_loomV0_holds {Root : Type*} {F : Type} [Field F] {ι : Type*}
     {r : ℕ} {Op : Type*} [Fintype F] [Nonempty ι] [Fintype ι] [DecidableEq ι]
     [DecidableEq F]
     {foldRoot : Root → F → Root → Root} {C : Submodule F (ι → F)}
     {A₀ : AccClaim Root F ι r} {ch : Chain Root F ι r}
-    {δ dC Bstar : ℝ} {errstar : ℝ → ℝ} {ws : List (ι → F)} {f₀ : ι → F}
+    {δ dC Bstar : ℝ} {errstar : ℝ → ℝ} {f₀ : ι → F} {ms : Fin ch.length → ι → F}
     (halign : Aligned A₀ ch)
     (hdC : ∀ u ∈ C, ∀ v ∈ C, u ≠ v → dC ≤ relDist u v)
     (hMCA : HasMutualCorrelatedAgreement (affineGenerator F) C Bstar errstar)
     (hδ0 : 0 < δ) (hδB : δ < 1 - Bstar) (hδC : δ < dC / 2)
-    (herr0 : 0 ≤ errstar δ) (hlen : ws.length = ch.length)
-    (hfalse : ∃ p ∈ ch.zip ws, ∀ v ∈ C, relDist p.2 v ≤ δ →
+    (herr0 : 0 ≤ errstar δ)
+    (hfalse : ∃ p ∈ ch.zip (List.ofFn ms), ∀ v ∈ C, relDist p.2 v ≤ δ →
       ¬ AccClaim.Satisfies C p.1.claim v)
-    {γs γalt : ℕ → F} (hseam : SeamOk ch)
-    (hne : ∀ k : Fin ch.length, γs (k : ℕ) ≠ γalt (k : ℕ))
-    {h₀ : ι → F} {hs : Fin ch.length → ι → F}
-    (hbase : AccClaim.Satisfies C (aggregate foldRoot γs A₀ ch) h₀)
-    (hpert : ∀ k, AccClaim.Satisfies C
-      (aggregate foldRoot (updSched γs γalt k) A₀ ch) (hs k))
-    {S : BindingCommitment Root F ι Op} {w e : ι → F} {oe : ι → Op}
+    (hseam : SeamOk ch) {dom : ι ↪ F} {d t : ℕ} (hdt : d ≤ t) {q : Fin t → ι}
+    (hq : Function.Injective (dom ∘ q))
+    (hms : ∀ k, ms k ∈ reedSolomonCode dom d)
+    {S : BindingCommitment Root F ι Op}
+    {rts : (Fin ch.length → F) → ℕ → Root}
+    {cols : (Fin ch.length → F) → ℕ → Fin t → F}
+    {ops : (Fin ch.length → F) → ℕ → Fin t → Op}
+    (hrts : ∀ (γv : Fin ch.length → F) (c : ℕ), c ≤ ch.length →
+      rts γv c = S.commit (partialFold (padSched γv) f₀ ms c))
+    (hver : ∀ (γv : Fin ch.length → F) (c : ℕ), c ≤ ch.length → ∀ j,
+      S.verifyOpen (rts γv c) (q j) (cols γv c j) (ops γv c j))
+    {γs : ℕ → F} {w e : ι → F} {oe : ι → Op}
     (hrt : (aggregate foldRoot γs A₀ ch).rt = S.commit w)
     (hopen : ∀ i, S.verifyOpen (aggregate foldRoot γs A₀ ch).rt i (e i) (oe i))
     (hsat : AccClaim.Satisfies C (aggregate foldRoot γs A₀ ch) e)
     (f : ι → F) :
-    SelvageV0Guarantee foldRoot C A₀ ch δ errstar ws f₀ γs γalt h₀ hs S w e f :=
-  loomV0_holds halign hdC hMCA hδ0 hδB hδC herr0 hlen hfalse hseam hne hbase
-    hpert hrt hopen hsat f
+    SelvageV0Guarantee foldRoot C A₀ ch δ errstar f₀ ms dom d q cols γs S w e f :=
+  loomV0_holds halign hdC hMCA hδ0 hδB hδC herr0 hfalse hseam hdt hq hms hrts hver
+    hrt hopen hsat f
 
 /-- **`loomV0_light_client`** (`Assurance/SelvageV0.lean`) — the
 defensibility ONE-LINER: checking a receipt history's aggregate at ONE
