@@ -1,3 +1,99 @@
+<!-- STANDING GOAL (sgoal), set 2026-09-04 23:30 by ember — this block is the live trail; the ledger below is the evidence record -->
+# STANDING GOAL — 2026-09-04 night
+
+**Goal:** Work all night achieving the best possible minidregg using Fable 5.1 (mostly) and Opus 5 (sometimes) subagents.
+
+**Current thrust:** wave 1 — the ranked next-proof queue's top items plus the one plumbing piece SLVG_THOUGHT §IV-e calls highest-leverage, briefed on exact signatures, statement-first, adversarially audited before landing. Integration gate: full `lake build Minidregg` before and after each wave (baseline running 23:30, local, nice'd; hbox has 16 GB free tonight).
+
+**Next 3 moves (revised 12:20 — repair before reach):**
+1. Repair wave R1–R4 lands: no object beside its refutation, consumers on the true objects, obligation ledger reconciled (created vs closed tonight).
+2. CT FS/prover/price lands → umbrella 5 → a Stage-0 non-interactive receipt with one visible price.
+3. Only then: [CT-sampled]/[CT-merkle-profile], queue #4–#7.
+
+**Next 3 moves (revised 10:45):**
+1. Umbrella 3 green → CT follow-up ([CT-compose] + [CT-factored7] + [CT-controller-lanes]) so a Stage-0 proof receipt exists end to end at full word.
+2. Twin decision on basefoldTableRbr vs basefoldTableRbrAllQueries; census upgrades 4/5 (inhabit HeteroComposition.KnowledgeSound at a succinct system; accRbrKnowledgeSoundBcsShifted).
+3. Queue #4–#7 as lanes as budget allows; every landing audited, rooted, path-limited, umbrella after each wave.
+
+**Original next-3 (23:30):**
+1. Baseline build → wave 1 (5 lanes): BaseFold work-capacity event (queue #1) · runnable zkML BaseFold checker (queue #3) · `ShortExceptionalCyclotomicTower` (new sorry-free ingredient from tonight's algebra question) · descriptor-reader scout→build (§IV-e) · Unit-extractor / knowledge-soundness census (Opus).
+2. Adversarial statement audit of every landed theorem (vacuity family, teeth, premise inhabitation); whole-tree build; commit named files with prose messages.
+3. Wave 2 from the census + whatever wave 1 exposes; keep `scripts/check-import-boundary.sh` green.
+
+**Co-tenant tonight:** `minidregg-66` (another orchestrator, ember's kernel/distributed-semantics goal) owns Theory/{Confluence,ViewMerge,Finality,EpistemicConsensus,LaceMerge}.lean, Kernel/{FinalityGate,HyperedgeTier,HyperedgeKnowledge}.lean, docs/DISTRIBUTED-DESIGN.md, docs/KERNEL-TWIN-AUDIT.md, and appends only to Theory.lean/Kernel.lean. This block's lanes own Selvage/*, Assurance/Zkml* + SelvageV0, Compiler/DescriptorEval.lean, the two new Theory/*ExceptionalSet* files, prover/testdata witness JSONs. Protocol agreed 00:40: pgrep before any umbrella build; named files and own hunks only; ember's 08-18 uncommitted files are nobody's to stage.
+
+**STATUS AT THE FABLE WALL — 2026-09-05 ~13:10 (read this first).**
+Tree is GREEN: `lake build Minidregg` 9,041 jobs, zero errors, covering every
+commit through `5972ad2`. Working tree clean of lane edits (only ember's own
+08-18 files + this GOAL.md are dirty). Index empty. Nothing is half-written.
+
+**Where the four repair lanes stopped:**
+- **R1 fold callers — LANDED** (`5972ad2`). Four vacuous callers deleted (4 → 0),
+  the Prop kept with its satisfiability/refutation pair, docstrings re-pointed,
+  the compression claim narrowed to the public-transcript-only extractor model.
+- **R2 HeteroComposition — DESIGNED, nothing on disk.** `notes/repair-hetero-composition.md`
+  carries the full design to the last edit, incl. the shaping fact (a *fixed*
+  ProofSystem cannot honestly carry a positive error, so the error-carrying
+  predicate belongs on an oracle-indexed family against an adversary class) and
+  the **build-chain trap**: Succinct → AccRbrFoldExtract → AccRbrFold →
+  HeteroComposition, so changing the shape reds dependents before they can be
+  checked — verify in a worktree, never in place.
+- **R3 linked shifted — CHECKPOINTED**, note only (`notes/repair-shifted-linked.md`).
+- **R4 table twin — DECIDED, nothing on disk.** Merge on the identity extractor;
+  deciding theorem drafted; prepared edit script at
+  `notes/repair-table-twin-edit_table.py` (unrun, anchor-asserted); Spartan needs
+  no edit.
+- **Hash dependency gate — RESULT LANDED** (`ecd2e29`, note written by the
+  coordinator from the script run): σ-Poseidon reaches FULL slot dependency at
+  **7 rounds of 30**; cycling exponents (5,25,17) would reach it at 3. Lean half
+  (`Selvage/CrtSlotSeparability.lean`) named, not started.
+- **Inert-tower re-pricing — NOT STARTED** (died at the wall). The brief stands in
+  `docs/VERDICTS.md` §7.2's 09-05 block.
+
+**First three moves next session:** (1) execute R4's prepared script (smallest,
+fully specified); (2) R2 in a worktree per its build-chain warning; (3) the
+CrtSlotSeparability Lean half. Every commit path-limited; pgrep before umbrellas;
+research notes commit from `~/dev/zkml-research`.
+
+**Done-log:**
+- 23:52 baseline `lake build Minidregg` green at 9,006 jobs on the dirty tree (ember's Projection-V2 + LICENSE files included); wave 1 launched: 5 lanes (queue #1 capacity event · queue #3 succinct zkML checker · Theory/ExceptionalSetLocalRing · Unit-witness census [opus] · descriptor-reader scout)
+- 00:05 zkml-research: Lova/Neo/RMFE lane folded (VERDICTS §3c scoped to structured MSIS; neo-verdict's "no implementation" retired) — the algebra follow-ups are research context for tonight's minidregg lanes, not minidregg changes
+- 00:20 descriptor scout landed (`zkml-research/notes/descriptor-reader-scout.md`): Stage-0 descriptor has no consumer; lawful path = Lean witness fill + exhibits (Lane A, launched) → generated-glue reader (Lane B) → p3 only as labelled oracle on hbox (Lane C); blocker for time-to-proof = `GateMleExt6.lean:246 CommittedTerminal` realizer (~1.8K Lean + 0.5K opaque Rust)
+- 00:20 ideal-quotient gate on the dual-mode hash ran (zkml-research): both full modes escape; σ₃₁ is the Frobenius; τ=2 cost row mis-counted; standing gate added to BRIEF 3
+- 00:35 Unit-witness census landed (`zkml-research/notes/unit-witness-census.md`, committed 215efab): genuine extractors never wired into any `.extract`; deployed 2⁻⁵⁵ has no extractor; IVC tower's KnowledgeSound = identity, zero consumers. Wave 2 launched from it: U2 light-client extractChain via seamCounterfactual (Fable) · U3 constructed foldExtract for FoldRoundBound (Fable) · stale-docstring fixes ZkRbrGame/HeteroComposition (Opus). U1 (sumcheckReduction.W → committed table) queued behind the zkML checker lane (file overlap).
+- 00:48 landed: stale-docstring fixes in Selvage/ZkRbrGame.lean (game_fs_fired superseded by native_fs_fired) and Selvage/HeteroComposition.lean (eight Reductions, foldReduction added) — docstring-only, both elaborate, committed
+- 01:05 zkml-research: inert Φ_{3⁸} tower priced (trap as single substrate; commit-to-the-ciphertext at 5.5× is the by-product to follow up) and `astra-algebra-read.md` consolidates the external answer; algebra question closed for tonight, four candidates, four negatives
+- 01:20 landed Theory/ExceptionalSetLocalRing + Theory/CyclotomicExceptionalSet (47 pins, conductor 6561 proved), rooted in Theory.lean, Theory umbrella green 3,017 jobs
+- 01:22 landed queue #3: Assurance/ZkmlMatmulSuccinctChecker (+ SuiteRegistry split, AuditTurn de-twinned, Assurance.lean rooted); 9 pins, F7 decided, budget = existing ledger + PCS event; [MATMUL-pcs] and [MATMUL-fs] named. U1 launched (sumcheckReduction.W → committed table)
+- 01:30–02:00 session limit hit; six lanes died mid-work (capacity event: generic half + bridge green, 4 run-level residuals; Lane A reading anchors; U1/U2/U3 early; Nightstream note drafted at 323 lines). Resumed all six at 02:05 with context intact.
+- 02:15 landed Lane A: Compiler/DescriptorEval.lean (b4f5f77) — fillAux + fillAux_gates_hold/emit_holds/evmAddCandidate_holds PROVED, five anvil vectors accepted + two forgeries refused as throw-teeth, five witness JSONs; rooted by an index-only patch (ember's Compiler.lean hunks untouched). Lane B (generated-glue reader, work 9103) launched.
+- 02:18 zkml-research: Nightstream audited (23cb281) — 'both legs' stands; Neo's recursive step costs 27,537,894 rows by their own Lean theorem
+- 02:40 landed queue #1: Selvage/BaseFoldBcsCapacityEvent.lean (12 pins, no obligations), rooted in Selvage.lean; item 2 warned not to double-pay the 2W²/p⁸ summand
+- 02:55 landed U3: Selvage/AccRbrFoldExtract.lean — FoldRoundBound is FALSE for every extractor below ε=1 (zero-absorb attack, toy + production); carried-witness reduction at error 0 unconditionally, capacity halves to 2^46; rooted; AccRbrFold citations fixed. Queue #2 (crossings) launched after #1.
+- 03:05 INCIDENT: my commit 50d8e0c swept minidregg-66's 12 staged files (Kernel/*, Theory/{Confluence,…}, docs/*) + their Theory.lean hunk — shared index, `git add mine && git commit` without path-limiting. Told them; proposed `reset --soft HEAD~1` + path-limited re-commit of my 3 files, holding until they ack. RULE from here: every commit is `git commit -F msg -- <paths>`. Also: their umbrella build (02:05–02:10) failed on BaseFoldBcsCapacityEvent with no olean (import landed after lake's graph); targeted `lake build` of both new Selvage modules running to confirm.
+- 03:12 split done: 50d8e0c → reset --soft, my 3 files re-committed as 8041a7e path-limited; their 13 files left staged for them. Targeted build of BaseFoldBcsCapacityEvent + AccRbrFoldExtract green (2,259 jobs): the umbrella failure was the graph race.
+- ~02:21 (per the co-tenant's clock; my earlier estimate of 03:15 was wrong) macOS watchdog hard fault (swap; load >80 with two orchestrators). Died mid-flight: U1 table witness (no file), U2 light-client (Selvage/LightClientKnowledge.lean + Assurance/SelvageV0.lean edits on disk, unaudited), Lane B reader (Compiler/NativeGlueGen.lean +127, SemanticArtifactBundle.lean +13 on disk, no Rust yet), queue #2 crossings (no file). No umbrella build has covered the post-baseline commits; that gate is still owed.
+- 09:2x reboot state: swap 0, memory 95% free, load = Spotlight/media indexing; minidregg-66's session is gone (its five in-flight lanes died; their untracked files, if any, are theirs). Resumed U2 (light client) and Lane B (reader) from their on-disk partials; U1 and queue #2 (no files) resume after; umbrella `lake build Minidregg` runs once those two land, so the gate sees finished edits.
+- 09:10 landed U2: Selvage/LightClientKnowledge.lean + Assurance/SelvageV0.lean (+ manifest guard updated, elaborates) — one prover for sound AND knowledge, Pr[verifies ∧ extraction fails] ≤ n·(err⋆+2/|F|), F5 teeth; rooted; path-limited commit.
+- 09:15 UMBRELLA GATE MET for last night: minidregg-66 (now minidregg-63) ran `lake build Minidregg` 08:58–09:01 GREEN, 9,026 jobs, zero errors, covering every commit through 8041a7e plus their four new modules; hygiene pass 506 tracked Lean files / 229 guarded footprints; boundary OK. Still uncovered: 51999d9 (U2) and Lane B's in-flight Compiler/prover edits — one more umbrella after Lane B lands.
+- 09:35 landed Lane B: Compiler/EvmStage0NativeDeployment.lean (11 pins) + NativeGlueGen/SemanticArtifactBundle edits + generated prover/generated/evm_stage0_add_aux.rs + native_dispatch.rs evaluator + test (5/5 byte-identical, cargo green in-tree); rooted in Compiler.lean and lib.rs by index-only hunks. Stage 0 is now REGISTERED on the derived path (work 9103). Umbrella build starting.
+- 09:45 UMBRELLA GREEN 9,028 jobs (covers 51999d9 U2 + e216c99 Lane B and the co-tenant's four modules).
+- 09:48 landed U1: Selvage/BaseFoldRbrTable.lean (12 pins; real extractor to the committed table; first consumer of basefoldSumcheck_fs_sound; [SPARTAN-pcs] discharged in Assurance/SpartanR1CS.lean at accept-everywhere; scope 2^m ≤ t on the label); rooted. One more umbrella after queue #2 lands.
+- 10:05 landed queue #2: Selvage/BaseFoldBcs{Crossings,ReceiptCodec,DeferredIdeal}.lean (32 pins) — capacity summand identified (same number, different event), hop chain priced once, [RP-RF-switch]/[RF-lazy-*]/[POSEIDON2-perm-ideal] named with ATLAS fields, codecs bound via bcs_accept_bytes_iff; rooted. Launched: CommittedTerminal realizer (Stage-0 time-to-proof blocker) and the [ERASURE-list] lift. Umbrella after those two.
+- 10:25 landed [ERASURE-list]: Selvage/BaseFoldRbrTableDescent.lean (22 pins) — the inverse-fold extractor is IMPOSSIBLE (fold is 2-to-1, proved); descent at 2^m ≤ 2t, all-t binding instance, DescentMiss bounded; [PROX-fold-distance] named; twin question recorded. Awaiting the CommittedTerminal realizer, then the umbrella.
+- 10:45 landed the CommittedTerminal realizer: Compiler/CommittedTerminalRealizer.lean (11 pins) — the record's type had no teeth (said loudly); full-word realizer with kernel-decided forgery refusals; Stage 0 runs through it as a compiled exhibit. Remainder to time-to-proof sized ~1,070 lines ([CT-compose], [CT-factored7], [CT-controller-lanes], [CT-merkle-profile], [CT-sampled]). Umbrella 3 running; CT follow-up lane launched (new files only until the build finishes).
+- 10:55 UMBRELLA 3 GREEN 9,033 jobs, zero errors — covers a77779a (U1), 58232ae (crossings), 2dcd284 (descent), c604944 (realizer). Every commit of the goal so far is umbrella-verified.
+- 11:05 landed U4: Selvage/HeteroCompositionSuccinct.lean (17 pins) — KnowledgeSound-at-a-succinct-system is FALSE as stated (perfect predicate vs counting bound; F5 counterexample); FsKnowledgeSoundRO at positive error; at error 0 the carried fold gives rung_sound its first real-extractor consumer. Follow-up: ComposeErrorBound provable from err_nonneg alone. CT lane still elaborating Factored7.
+- 11:20 landed the CT follow-up: Compiler/CommittedTerminal{Factored7,Compose,Controller}.lean (29 pins) — seven terminals realized, gateProof_sound ledger with sumcheck term sharp at m/|F|, computable controller; **a Stage-0 gate proof is accepted end to end at full word** (13 rounds, terminal 0; forgeries refused at root/round/terminal). Rooted (index-only hunk). Umbrella 4 running. Remainder to a measured number: [CT-factored-prover] ~300, [CT-fiat-shamir-lanes] ~200, [CT-joint-price] ~60, [CT-sampled], [CT-merkle-profile].
+- 11:35 UMBRELLA 4 GREEN 9,037 jobs — covers e3be707 (U4) and 658bacb (Stage-0 end-to-end). Launched: CT FS/prover/price lane, census upgrade 5 (shifted BCS transport-or-retire), ComposeErrorBound triviality check (Opus).
+- 11:50 landed the ComposeErrorBound check (Opus): Selvage/HeteroCompositionErrorBound.lean (25 pins) — the obligation was MIS-STATED (never mentions the composed system; inert; trivial witness); ComposeErrorBoundStrict closes, tight at F₅, two falsifiers. FOR EMBER: de-list ComposeErrorBound in docs/FORMAL_STATUS_AND_NEXT_PROOFS.md (your untracked doc) and point the row at ComposeErrorBoundStrict's transfer clause.
+- 12:05 landed U5: Selvage/AccRbrBcsShiftedTransport.lean (11 pins) — accRbrKnowledgeSoundBcsShifted RETIRED, false below ε=1 (unlinked verifier never ties consecutive roots; forces_one; F₅ refutation); the linked log route is the corrected statement; [ACC-rbr-bcs-shifted-linked] named. Census top-5 all resolved: 1 landed (scoped), 2 landed, 3/4/5 refuted-and-replaced. Awaiting the CT FS lane, then umbrella 5.
+- 12:20 STEER (ember): "are you getting into self-congratulatory loops — refute 'false as stated' and leave the system crumbling?" Checked the record: partly yes. Each refutation was proved and came with a true replacement, but the replacements landed BESIDE the refuted objects (four vacuous fold callers still standing with a stale docstring; HeteroComposition.KnowledgeSound still perfect; ComposeErrorBound still declared; the deployed shifted shape has an obligation, not an object; a table-reduction twin). Obligations up, coherence down. REPAIR WAVE launched: R1 fold callers → carried (delete/re-point); R2 HeteroComposition carries error in place, ComposeErrorBound replaced in place, siblings folded; R3 build the linked shifted knowledge object at accRbrError (or the ONE missing lemma); R4 resolve the table twin. Rule from here: a refutation lane is not done until the consumer uses the replacement and the twin is gone.
+- 12:40 Astra's SECOND answer folded (zkml-research): the ideal-quotient gate is insufficient (σ₅ passes it as a pure slot permutation) → hash lane running the dependency matrix on both real round functions + stating the classification/closure theorems in Lean (Selvage/CrtSlotSeparability.lean); the inert tower's proof-cost trap priced eager expansion → re-pricing lane; the compression claim narrowed to the transcript-only extractor model (sent to R1); extraction-source naming + replay-as-extractor (sent to R3); canonical-witness knowledge theorem (sent to R2); Hole B sharpened; numerical contract = order-independence.
+- 12:55 landed the CT Fiat–Shamir + factored prover: Compiler/CommittedTerminal{FiatShamir,FactoredProver}.lean (24 pins) — gateProof_fs_sound is fsKeystone_proved at the gate reduction; cSHAKE256 over a lawful codec; Stage-0 NON-INTERACTIVE receipt accepted end to end; stage0Price_value = 4160/p⁶ < 2^−173 per query unit, full-word label. Rooted. Umbrella 5 DEFERRED until the four repair lanes land (they are mid-edit on rooted Selvage files).
+
+---
+
 # STANDING GOAL — resumed 2026-08-11
 
 **Make minidregg as good as it can be, in `QUIESCELOG.md`'s resume order.**  The
