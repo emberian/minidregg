@@ -28,6 +28,7 @@ claim, physical durability theorem, or production registry.
 -/
 import Assurance.ZkmlMatmulBaseFold
 import Assurance.ZkmlMatmulChecker
+import Assurance.ZkmlMatmulSuiteRegistry
 import Assurance.SemanticTurnReceipt
 import Kernel.DurableDataIntent
 
@@ -37,6 +38,7 @@ open Minidregg.Assurance.SemanticReceiptRelation
 open Minidregg.Assurance.SemanticTurnReceipt
 open Minidregg.Assurance.MatmulExample
 open Minidregg.Assurance.MatmulCommitmentExample
+open Minidregg.Assurance.ZkmlMatmulSuiteRegistry
 open Minidregg.Kernel.DurableCommitProtocol
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Selvage
@@ -89,41 +91,8 @@ def stateCommitment : StateCommitment Key F where
 
 /-! ## Versioned exact-audit evidence -/
 
-structure AuditIdentity where
-  suiteId : Digest
-  checkerId : Digest
-  statementId : Digest
-  planningArtifactId : Digest
-  nativeRequestId : Digest
-  codecVersion : Nat
-  deriving DecidableEq, Repr
-
-def auditIdentity : AuditIdentity :=
-  ⟨⟨101⟩, ⟨102⟩, ⟨103⟩, ⟨104⟩, ⟨105⟩, 1⟩
-
-/-- The bounded registry selected by this slice.  Membership is evidence; a
-production registry and authenticated upgrade policy remain separate. -/
-def auditRegistry : List AuditIdentity := [auditIdentity]
-
-theorem auditIdentity_registered : auditIdentity ∈ auditRegistry := by simp [auditRegistry]
-
-/-- The durable evidence identity and the runnable byte checker's profile are
-the same first-order tuple.  The planning and native request ids are bindings,
-not authorization witnesses. -/
-theorem auditIdentity_matches_checker :
-    auditIdentity.codecVersion =
-        ZkmlMatmulChecker.expected.codecVersion.toNat ∧
-    auditIdentity.suiteId.value =
-        ZkmlMatmulChecker.expected.suiteId.toNat ∧
-    auditIdentity.checkerId.value =
-        ZkmlMatmulChecker.expected.checkerId.toNat ∧
-    auditIdentity.statementId.value =
-        ZkmlMatmulChecker.expected.statementId.toNat ∧
-    auditIdentity.planningArtifactId.value =
-        ZkmlMatmulChecker.expected.planningArtifactId.toNat ∧
-    auditIdentity.nativeRequestId.value =
-        ZkmlMatmulChecker.expected.requestId.toNat := by
-  decide
+/-! The audit identity and its bounded registry live in
+`Assurance.ZkmlMatmulSuiteRegistry`, shared with the succinct checker. -/
 
 /-- The canonical candidate reaches the proof-bearing checked branch. -/
 theorem candidate_checked :
