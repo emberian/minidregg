@@ -254,6 +254,10 @@ it is neither a semantic relation nor an acceptance predicate. -/
 inductive KernelTag where
   | tower256DotProduct
   | babyBearAdd1ZeroWitness
+  /-- EVM Stage-0 u256 add: fill the 3,298 auxiliary wires of the Lean-emitted
+  descriptor from 833 supplied variable words.  The generated table of gate rows
+  is data; the reply is candidate words for Lean's `descriptorHoldsCheck`. -/
+  | evmStage0AddAux
 deriving DecidableEq, Repr, Encodable
 
 /-- Closed byte-layout vocabulary used by generated transport glue. -/
@@ -262,6 +266,12 @@ inductive ByteCodecShape where
   | tower256CoordinateLE
   | empty
   | babyBearAdd1DescriptorU32LE
+  /-- 833 canonical BabyBear words, u32 little-endian (3,332 bytes): the
+  Stage-0 descriptor's variables. -/
+  | evmStage0AddVarsU32LE
+  /-- 4,131 canonical BabyBear words, u32 little-endian (16,524 bytes): the
+  Stage-0 descriptor's total wire vector. -/
+  | evmStage0AddWiresU32LE
 deriving DecidableEq, Repr, Encodable
 
 /-- Codec identifiers live in one of two explicit registries.  Manifest codecs
@@ -590,12 +600,15 @@ def ControllerPhase.name : ControllerPhase -> String
 def KernelTag.name : KernelTag -> String
   | .tower256DotProduct => "tower256_dot_product"
   | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
+  | .evmStage0AddAux => "evm_stage0_add_aux"
 
 def ByteCodecShape.name : ByteCodecShape -> String
   | .tower256PairVectorsU32LE => "tower256_pair_vectors_u32_le"
   | .tower256CoordinateLE => "tower256_coordinate_le"
   | .empty => "empty"
   | .babyBearAdd1DescriptorU32LE => "baby_bear_add1_descriptor_u32_le"
+  | .evmStage0AddVarsU32LE => "evm_stage0_add_vars_u32_le"
+  | .evmStage0AddWiresU32LE => "evm_stage0_add_wires_u32_le"
 
 def ByteCodecRegistry.name : ByteCodecRegistry -> String
   | .semanticManifest => "semantic_manifest"

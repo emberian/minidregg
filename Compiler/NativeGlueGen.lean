@@ -17,6 +17,7 @@ all semantic checking remains in Lean-owned controllers.
 -/
 import Compiler.SemanticArtifactBundle
 import Compiler.NativeWorkProfiles
+import Compiler.EvmAddAir
 
 namespace Minidregg.Compiler.NativeGlueGen
 
@@ -63,11 +64,20 @@ private def workName (ordinal : Nat) : String :=
 private def workTag (ordinal : Nat) : String :=
   "Work" ++ toString ordinal
 
+/-- Word counts of the two Stage-0 byte shapes: 833 variables in, 4,131 wires
+out.  `EvmStage0NativeDeployment` proves these equal the emitted descriptor's
+`nVars`/`nWires`; the shape carries the numbers so the transport layer stays
+first-order. -/
+def evmStage0RequestWords : Nat := 833
+def evmStage0ResponseWords : Nat := 4131
+
 private def responseWidth : ByteCodecShape → Nat
   | .tower256PairVectorsU32LE => 0
   | .tower256CoordinateLE => 32
   | .empty => 0
   | .babyBearAdd1DescriptorU32LE => 144
+  | .evmStage0AddVarsU32LE => 4 * evmStage0RequestWords
+  | .evmStage0AddWiresU32LE => 4 * evmStage0ResponseWords
 
 private def requestShapeConstants (stem : String) : ByteCodecShape → List String
   | .tower256PairVectorsU32LE =>
@@ -81,15 +91,25 @@ private def requestShapeConstants (stem : String) : ByteCodecShape → List Stri
   | .babyBearAdd1DescriptorU32LE =>
       ["pub const " ++ stem ++ "_REQUEST_WIRE_WIDTH: usize = 4;",
        "pub const " ++ stem ++ "_REQUEST_WIRE_COUNT: usize = 36;"]
+  | .evmStage0AddVarsU32LE =>
+      ["pub const " ++ stem ++ "_REQUEST_WIRE_WIDTH: usize = 4;",
+       "pub const " ++ stem ++ "_REQUEST_WIRE_COUNT: usize = " ++
+         toString evmStage0RequestWords ++ ";"]
+  | .evmStage0AddWiresU32LE =>
+      ["pub const " ++ stem ++ "_REQUEST_WIRE_WIDTH: usize = 4;",
+       "pub const " ++ stem ++ "_REQUEST_WIRE_COUNT: usize = " ++
+         toString evmStage0ResponseWords ++ ";"]
 
 private def kernelFunction : KernelTag → String
   | .tower256DotProduct => "crate::native_dispatch::tower256_dot_product_bytes"
   | .babyBearAdd1ZeroWitness =>
       "crate::native_dispatch::baby_bear_add1_zero_witness_bytes"
+  | .evmStage0AddAux => "crate::native_dispatch::evm_stage0_add_aux_bytes"
 
 private def kernelConstructor : KernelTag → String
   | .tower256DotProduct => "tower256_dot_product"
   | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
+  | .evmStage0AddAux => "evm_stage0_add_aux"
 
 private def benchmarkConstants (stem : String) : KernelTag → List String
   | .tower256DotProduct =>
@@ -105,6 +125,7 @@ private def benchmarkConstants (stem : String) : KernelTag → List String
        "pub const " ++ stem ++ "_BENCHMARK_SENTINEL_RESPONSE: &[u8] = " ++
          rustByteSlice tower256DotProductBenchmarkSentinelResponseBytes ++ ";"]
   | .babyBearAdd1ZeroWitness => []
+  | .evmStage0AddAux => []
 
 /-- Lean-emitted candidate for the fixed all-zero add-1 work item.  These are
 the gate-evaluated descriptor bytes, not a Rust-side arithmetic definition. -/
@@ -119,6 +140,109 @@ private def fixedCandidateConstants (stem : String) : KernelTag → List String
   | .babyBearAdd1ZeroWitness =>
       ["pub const " ++ stem ++ "_FIXED_CANDIDATE_RESPONSE: &[u8] = " ++
         rustByteSlice babyBearAdd1ZeroCandidateBytes ++ ";"]
+  | .evmStage0AddAux => []
+
+/-! ## Descriptor rows as generated data
+
+The Stage-0 kernel fills the auxiliary wires of a Lean-emitted
+`ConstraintDescriptor`.  Its gate list is rendered here as a table of
+first-order tuples that the generated module carries as a constant; Rust
+evaluates the table in order and returns candidate words.  Rust parses no
+descriptor and decides no satisfaction — `descriptorHoldsCheck` judges the
+reply on the Lean side of the plan.  The row encoding is left-invertible
+(`gateOfRow_rowOfGate`), so the emitted table is a faithful image of the gate
+list rather than a second description of it; a wire index or constant that
+does not fit the Rust literal type fails `rustc`, never silently truncates. -/
+
+/-- One gate as `(op, aKind, a, bKind, b, out)`: `op` 0 = add, 1 = mul; an
+operand is `(0, value)` for a constant (canonical `ZMod.val`) or `(1, index)`
+for a wire; `out` is the written wire index. -/
+structure GateRow where
+  op : Nat
+  aKind : Nat
+  a : Nat
+  bKind : Nat
+  b : Nat
+  out : Nat
+deriving DecidableEq, Repr
+
+def opCode : GateOp → Nat
+  | .add => 0
+  | .mul => 1
+
+def operandRow : DWire BabyBear → Nat × Nat
+  | .cnst c => (0, c.val)
+  | .wire n => (1, n)
+
+def rowOfGate (g : DGate BabyBear) : GateRow where
+  op := opCode g.op
+  aKind := (operandRow g.a).1
+  a := (operandRow g.a).2
+  bKind := (operandRow g.b).1
+  b := (operandRow g.b).2
+  out := g.out
+
+def opOfCode : Nat → Option GateOp
+  | 0 => some .add
+  | 1 => some .mul
+  | _ => none
+
+def operandOfRow : Nat × Nat → Option (DWire BabyBear)
+  | (0, value) => some (.cnst (value : BabyBear))
+  | (1, index) => some (.wire index)
+  | _ => none
+
+def gateOfRow (row : GateRow) : Option (DGate BabyBear) :=
+  match opOfCode row.op, operandOfRow (row.aKind, row.a),
+      operandOfRow (row.bKind, row.b) with
+  | some op, some a, some b => some { op := op, a := a, b := b, out := row.out }
+  | _, _, _ => none
+
+theorem opOfCode_opCode (op : GateOp) : opOfCode (opCode op) = some op := by
+  cases op <;> rfl
+
+theorem operandOfRow_operandRow (wire : DWire BabyBear) :
+    operandOfRow (operandRow wire) = some wire := by
+  cases wire with
+  | cnst value => simp [operandRow, operandOfRow]
+  | wire index => rfl
+
+/-- **The row table is a faithful image of the gate list**: decoding the tuple
+of any gate returns that gate. -/
+theorem gateOfRow_rowOfGate (gate : DGate BabyBear) :
+    gateOfRow (rowOfGate gate) = some gate := by
+  rcases gate with ⟨op, a, b, out⟩
+  simp only [gateOfRow, rowOfGate, opOfCode_opCode, Prod.mk.eta, operandOfRow_operandRow]
+
+private def rustRow (row : GateRow) : String :=
+  "(" ++ toString row.op ++ ", " ++ toString row.aKind ++ ", " ++ toString row.a ++
+    ", " ++ toString row.bKind ++ ", " ++ toString row.b ++ ", " ++
+    toString row.out ++ ")"
+
+private def rustRows (rows : List GateRow) : String :=
+  "&[" ++ String.intercalate ", " (rows.map rustRow) ++ "]"
+
+private def rustOperands (operands : List (Nat × Nat)) : String :=
+  let entries := operands.map fun operand =>
+    "(" ++ toString operand.1 ++ ", " ++ toString operand.2 ++ ")"
+  "&[" ++ String.intercalate ", " entries ++ "]"
+
+/-- The descriptor a kernel tag evaluates, rendered as generated constants: the
+field modulus, the three header counts, the gate rows in emission order, and
+the zero-checked operands (data for Lean's checker, not evaluated by Rust). -/
+private def descriptorRowConstants (stem : String) : KernelTag → List String
+  | .tower256DotProduct => []
+  | .babyBearAdd1ZeroWitness => []
+  | .evmStage0AddAux =>
+      let d := EvmAddAir.evmAddDescriptor
+      ["pub const " ++ stem ++ "_FIELD_MODULUS: u64 = " ++ toString babyBearP ++ ";",
+       "pub const " ++ stem ++ "_DESCRIPTOR_N_PUBLIC: usize = " ++ toString d.nPublic ++ ";",
+       "pub const " ++ stem ++ "_DESCRIPTOR_N_VARS: usize = " ++ toString d.nVars ++ ";",
+       "pub const " ++ stem ++ "_DESCRIPTOR_N_WIRES: usize = " ++ toString d.nWires ++ ";",
+       "pub const " ++ stem ++ "_ROWS: &[(u8, u8, u32, u8, u32, u32)] = " ++
+         rustRows (d.gates.map rowOfGate) ++ ";",
+       "pub const " ++ stem ++ "_ZEROS: &[(u8, u32)] = " ++
+         rustOperands (d.zeros.map operandRow) ++ ";"]
 
 private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String :=
   let stem := workName ordinal
@@ -133,7 +257,8 @@ private def workConstants (ordinal : Nat) (profile : WorkProfile) : List String 
      toString (responseWidth profile.responseCodec.shape) ++ ";"] ++
     requestShapeConstants stem profile.requestCodec.shape ++
     benchmarkConstants stem profile.kernel ++
-    fixedCandidateConstants stem profile.kernel
+    fixedCandidateConstants stem profile.kernel ++
+    descriptorRowConstants stem profile.kernel
 
 private def requestConstructor (ordinal : Nat) (profile : WorkProfile) : List String :=
   ["    pub fn " ++ kernelConstructor profile.kernel ++ "(request_bytes: Box<[u8]>) -> Self {",
