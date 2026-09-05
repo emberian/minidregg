@@ -129,6 +129,7 @@ constants.
 -/
 import Assurance.ZkmlMatmulCommitment
 import Assurance.ZkmlLowRankUpdate
+import Selvage.BaseFoldRbrTable
 
 namespace Minidregg.Assurance
 
@@ -687,7 +688,10 @@ end Composed
 
 House law: what is not proved is a named `Prop`, not prose and not a placeholder that quietly reads
 as `True`. Both obligations below are stated so that they are REFUTABLE — each has an instance a
-counterexample would break — and neither is discharged here. -/
+counterexample would break. `[SPARTAN-sparse]` is not discharged here. `[SPARTAN-pcs]` IS —
+at the accept-at-every-challenge `Accepts` of BaseFold's table-witness sumcheck leg
+(`spartanOpeningProtocol_basefoldTable` below, from `Selvage/BaseFoldRbrTable.lean`); its
+probabilistic content is that file's `basefoldTable_fs_holds`. -/
 
 section Obligations
 
@@ -716,6 +720,36 @@ theorem spartanOpeningsBound {Root ι Op : Type} [Fintype ι]
     (hc : c.Holds S dom) :
     c.val = mle table c.pt :=
   ((MleEvalClaim.holds_iff_of_committed S dom hcard table c hrt).mp hc).symm
+
+/-- ⭐ **`[SPARTAN-pcs]` DISCHARGED at accept-everywhere, by BaseFold's table-witness leg.**
+`Accepts c` is `BaseFoldTableAcceptsEverywhere`: some prefix-measurable prover strategy makes the
+table-witness verifier of `Selvage/BaseFoldRbrTable.lean` accept `c` at EVERY challenge vector,
+each time with a table candidate in its target relation. Inside the degree window
+(`2^t ≤ |ι|`) and at `2t < |F|`, every such claim HOLDS — its root commits a table whose
+multilinear takes the claimed value (`basefoldTable_acceptsEverywhere_holds`, CITED: the
+prover's own candidates all commit to one table by binding, and a wrong value accepted
+everywhere would beat `adaptive_sumcheck_soundness`'s `2t/|F| < 1`).
+
+Read the scope exactly. This is the deterministic shape the obligation asks for, so `Accepts`
+must be the probability-one reading; a single accepted transcript is priced instead by
+`basefoldTable_fs_holds` at `(q + t) · 2/|F|`. The predicate is inhabited by the honest
+prover (`spartanOpeningProtocol_basefoldTable_inhabited`), so the discharge is not vacuous. -/
+theorem spartanOpeningProtocol_basefoldTable {Root ι Op : Type} [Fintype ι]
+    (S : BindingCommitment Root F ι Op) (dom : ι ↪ F) {tq : ℕ} (q : Fin tq → ι)
+    (ht : 0 < t) (hcard : 2 ^ t ≤ Fintype.card ι) (hF : 2 * t < Fintype.card F) :
+    SpartanOpeningProtocol S dom (BaseFoldTableAcceptsEverywhere ht S dom q) :=
+  fun c hc => basefoldTable_acceptsEverywhere_holds ht S dom q hcard hF c hc
+
+omit [DecidableEq F] in
+/-- **Premise inhabitation for the discharge**: the honest claim on any table is accepted
+everywhere by the honest prover (`basefoldTable_honest_acceptsEverywhere`, CITED), so the
+`Accepts` at which `[SPARTAN-pcs]` is discharged is a real acceptance predicate, not `False`. -/
+theorem spartanOpeningProtocol_basefoldTable_inhabited {Root ι Op : Type}
+    (S : BindingCommitment Root F ι Op) (dom : ι ↪ F) {tq : ℕ} (q : Fin tq → ι)
+    (ht : 0 < t) (table : (Fin t → Bool) → F) (pt : Fin t → F) :
+    BaseFoldTableAcceptsEverywhere ht S dom q
+      ⟨S.commit (basefoldWord dom table), pt, mle table pt⟩ :=
+  basefoldTable_honest_acceptsEverywhere ht S dom q table pt
 
 /-- **`[SPARTAN-sparse]` — the COST obligation, and it is deliberately not a soundness one.**
 Everything above computes the row weights `rowPartial A r_x` and the openings `Ã(r_x,r_y)` from
@@ -871,6 +905,10 @@ end SpartanExample
 #guard_msgs (whitespace := lax) in #print axioms spartan_inner_terminal
 /-- info: 'Minidregg.Assurance.spartanOpeningsBound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms spartanOpeningsBound
+/-- info: 'Minidregg.Assurance.spartanOpeningProtocol_basefoldTable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spartanOpeningProtocol_basefoldTable
+/-- info: 'Minidregg.Assurance.spartanOpeningProtocol_basefoldTable_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spartanOpeningProtocol_basefoldTable_inhabited
 /-- info: 'Minidregg.Assurance.sparseEvalOracle_refutable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sparseEvalOracle_refutable
 /-- info: 'Minidregg.Assurance.SpartanExample.badZ_unsat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
