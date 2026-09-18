@@ -263,6 +263,8 @@ def family (representation : Minidregg.Kernel.HyperdocumentEventLog.Representati
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => Minidregg.Theory.HyperdocumentOperations.unitCodec
   ModeEvidence := fun declaration _ => PLift (ValidAppend representation config pre declaration)
+  Postcondition := fun declaration _ post =>
+    (declaration.patch config).ResultAt pre.logical post
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.record.operation.digest.value
@@ -360,6 +362,7 @@ def accept
       preRootBound := validated.preRoot_bound
       modeEvidence := ⟨⟨wellFormed, fresh⟩⟩
       validated := validated
+      postcondition := validated.resultAt
       disclosure := .sealed
       disclosureAllowed := trivial }
 

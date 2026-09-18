@@ -411,6 +411,69 @@ structure ValidOperation
   expectedExact : declaration.ExpectedAt config pre.logical
   rangesValid : declaration.action.RangesValidAt pre.logical
 
+/-- Stored endpoints depend on the source-owned run and atom namespaces.
+Changing unrelated content does not alter their meaning. -/
+theorem StoredRangeValidAt.of_lookup_eq
+    {before after : CellState.LogicalState cellSchema}
+    {document : DocumentId} {range : StableRange}
+    (valid : StoredRangeValidAt before document range)
+    (runs : ∀ key, lookup after .runs key = lookup before .runs key)
+    (atoms : ∀ key, lookup after .atoms key = lookup before .atoms key) :
+    StoredRangeValidAt after document range where
+  realizationStoredExact := valid.realizationStoredExact
+  start := by
+    simpa only [storedPointPresentInDocument, runs, atoms] using valid.start
+  finish := by
+    simpa only [storedPointPresentInDocument, runs, atoms] using valid.finish
+
+theorem Action.RangesValidAt.of_lookup_eq
+    {before after : CellState.LogicalState cellSchema} {action : Action}
+    (valid : action.RangesValidAt before)
+    (runs : ∀ key, lookup after .runs key = lookup before .runs key)
+    (atoms : ∀ key, lookup after .atoms key = lookup before .atoms key) :
+    action.RangesValidAt after := by
+  cases action with
+  | create _ => trivial
+  | editAtom _ => trivial
+  | link payload =>
+      intro range exact
+      exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
+  | transclude payload =>
+      intro range exact
+      exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
+  | mark payload => exact StoredRangeValidAt.of_lookup_eq valid runs atoms
+  | annotate payload =>
+      intro range exact
+      exact StoredRangeValidAt.of_lookup_eq (valid range exact) runs atoms
+
+/-- A range-bearing source action writes link/transclusion/mark/annotation
+data and preserves its run/atom dependencies. The enduring range obligation
+is therefore proved on the actual local post, ready for joint rechecking. -/
+theorem ValidOperation.ranges_post
+    {M : Hyperdocument.Materializer Digest}
+    {config : Config} {pre : Hyperdocument.Cell M} {declaration : Declaration}
+    (valid : ValidOperation config pre declaration)
+    (validated : CellState.ValidatedPatch M pre (declaration.patch config)) :
+    declaration.action.RangesValidAt validated.apply.logical := by
+  cases actionExact : declaration.action with
+  | create payload => trivial
+  | editAtom payload => trivial
+  | link payload | transclude payload | mark payload | annotate payload =>
+      rw [← actionExact]
+      apply valid.rangesValid.of_lookup_eq
+      all_goals
+        intro key
+        apply validated.field_frame
+        simp [Declaration.patch, Declaration.fieldWrites, Declaration.packedWrites,
+          actionExact, Action.packedWrites, linkWrites, transcludeWrites, markWrites,
+          annotateWrites, PackedWrite.toFieldWrite, PackedWrite.address]
+        all_goals
+          repeat' apply And.intro
+          all_goals
+            intro equal
+            have impossible := congrArg Sigma.fst equal
+            cases impossible
+
 def authenticatedObjectHead
     {M : CredentialAuthorityState.Materializer}
     {projection : CredentialAuthorityState.ProjectionUniverse}
@@ -443,6 +506,9 @@ def family
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => PLift (ValidOperation config pre declaration)
+  Postcondition := fun declaration _ post =>
+    (declaration.patch config).ResultAt pre.logical post ∧
+      declaration.action.RangesValidAt post
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.intent.nonce
@@ -509,6 +575,7 @@ def accept
       preRootBound := semantic.preRootExact
       modeEvidence := ⟨semantic⟩
       validated := validated
+      postcondition := ⟨validated.resultAt, semantic.ranges_post validated⟩
       disclosure := .sealed
       disclosureAllowed := trivial }
 
@@ -734,6 +801,8 @@ def Accepted.receiptEvent
 
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Declaration.patch_namedFields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Declaration.patch_namedFields
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.ValidOperation.ranges_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ValidOperation.ranges_post
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_fieldWrite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_fieldWrite
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/

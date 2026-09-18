@@ -345,6 +345,9 @@ def family
   outcomeCodec := fun _ => CanonicalResourceEffect.unitCodec
   ModeEvidence := fun operation _ =>
     PLift (Admission (logicalBook pre.logical) operation)
+  Postcondition := fun operation _ post =>
+    (operation.patch pre).ResultAt pre.logical post ∧
+      logicalBook post = operation.apply (logicalBook pre.logical)
   effectDigest := chargedEffectDigest manifest pre
   patch := fun operation _ => operation.patch pre
   nullifier := fun _ _ => none
@@ -399,6 +402,7 @@ noncomputable def toCellEffect
   preRootBound := rfl
   modeEvidence := PLift.up accepted.admission
   validated := accepted.validated
+  postcondition := ⟨accepted.validated.resultAt, accepted.post_logicalBook⟩
   disclosure := .sealed
   disclosureAllowed := rfl
 

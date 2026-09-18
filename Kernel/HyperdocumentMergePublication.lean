@@ -185,6 +185,7 @@ def acceptEvent
       preRootBound := validated.preRoot_bound
       modeEvidence := ⟨⟨inputs.eventWellFormed, fresh⟩⟩
       validated := validated
+      postcondition := validated.resultAt
       disclosure := .sealed
       disclosureAllowed := trivial }
 

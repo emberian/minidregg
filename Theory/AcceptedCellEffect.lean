@@ -27,6 +27,38 @@ open Minidregg.Theory.CanonicalTransition
 
 universe u v w x y z
 
+/-! ## Source-derived postconditions -/
+
+/-- The produced part of a patch has its exact source-derived result in a
+candidate post. Unrelated fields and packages remain unconstrained here, so
+independent effects can compose. Families with additional post invariants
+must retain those invariants alongside this relation in `Postcondition`.
+
+This uses the existing canonical write interpretation. It is not an alternate
+executor, a supplied Boolean, or equality of whole states. -/
+def CellState.Patch.ResultAt
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    (pre : CellState.LogicalState S) (patch : CellState.Patch S Digest)
+    (post : CellState.LogicalState S) : Prop :=
+  (∀ field ∈ patch.fieldFootprint,
+    post.fields field =
+      CellState.applyFieldWrites patch.fieldWrites pre.fields field) ∧
+  (∀ resource ∈ patch.resourceFootprint,
+    post.resources resource =
+      CellState.applyResourceWrites patch.resourceWrites pre.resources resource)
+
+/-- A verifier-minted canonical patch always realizes its own produced
+result. The same relation can later be required at a jointly composed post. -/
+theorem CellState.ValidatedPatch.resultAt
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest} {pre : CellState.Materialized M}
+    {patch : CellState.Patch S Digest}
+    (validated : CellState.ValidatedPatch M pre patch) :
+    patch.ResultAt pre.logical validated.apply.logical := by
+  exact ⟨fun _ _ => rfl, fun _ _ => rfl⟩
+
 /-! ## Independent disclosure decisions -/
 
 /-- What this accepted effect actually discloses.  Release authorization is
@@ -115,6 +147,12 @@ structure SemanticEffectFamily
   Outcome : Declaration → Type z
   outcomeCodec : (declaration : Declaration) → LawfulCodec (Outcome declaration)
   ModeEvidence : (declaration : Declaration) → Outcome declaration → Type z
+  /-- The source's persistent output obligations, evaluated at an actual
+  canonical post. Every local acceptance and every joint installation must
+  establish these same obligations. The registered source family fixes this
+  relation; an incoming host request cannot choose it. -/
+  Postcondition : (declaration : Declaration) → Outcome declaration →
+    CellState.LogicalState S → Prop
   effectDigest : Declaration → Digest
   patch : (declaration : Declaration) → Outcome declaration → CellState.Patch S Digest
   nullifier : (declaration : Declaration) → Outcome declaration → Option Nullifier
@@ -152,6 +190,7 @@ structure AcceptedCellEffect
   preRootBound : request.preStateRoot = pre.root
   modeEvidence : family.ModeEvidence declaration outcome
   validated : CellState.ValidatedPatch M pre (family.patch declaration outcome)
+  postcondition : family.Postcondition declaration outcome validated.apply.logical
   disclosure : DisclosureDecision (family.Release declaration outcome)
     (family.DeclassificationAuthority declaration outcome)
     (family.ReleaseAuthorization declaration outcome)
@@ -543,6 +582,8 @@ def family
   Outcome := fun _ => declaration.Result
   outcomeCodec := fun _ => adapter.resultCodec
   ModeEvidence := fun request result => declaration.Completion request result
+  Postcondition := fun request result post =>
+    (adapter.patch request result).ResultAt pre.logical post
   effectDigest := adapter.completeEffectDigest
   patch := adapter.patch
   nullifier := fun request _ => request.nullifier
@@ -620,6 +661,7 @@ def accept
     preRootBound := preRootBound
     modeEvidence := completion
     validated := validated
+    postcondition := validated.resultAt
     disclosure := .sealed
     disclosureAllowed := trivial
   }
@@ -802,6 +844,7 @@ encrypted-RNS/FHE modes.  Existing private completion is its exact mode
 evidence; the kernel patch remains a separate, validated semantic projection. -/
 def family
     {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
     {Nullifier : Type y} [DecidableEq Release]
     (adapter : Adapter (S := S) privateDeclaration Nullifier)
     (pre : CellState.Materialized M) :
@@ -816,6 +859,8 @@ def family
   Outcome := fun _ => privateDeclaration.Outcome
   outcomeCodec := fun _ => adapter.outcomeCodec
   ModeEvidence := fun request outcome => privateDeclaration.Completion request outcome
+  Postcondition := fun request outcome post =>
+    (adapter.patch request outcome).ResultAt pre.logical post
   effectDigest := adapter.effectDigest
   patch := adapter.patch
   nullifier := adapter.nullifier
@@ -832,6 +877,7 @@ completion, not release completion.  Both release carriers are empty, making a
 reveal or declassification constructor uninhabited at this semantic boundary. -/
 def sealedFamily
     {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
     {Nullifier : Type y}
     (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
     (pre : CellState.Materialized M) :
@@ -847,6 +893,8 @@ def sealedFamily
   outcomeCodec := fun _ => adapter.outcomeCodec
   ModeEvidence := fun request outcome =>
     privateDeclaration.ComputationCompletion request outcome
+  Postcondition := fun request outcome post =>
+    (adapter.patch request outcome).ResultAt pre.logical post
   effectDigest := adapter.effectDigest
   patch := adapter.patch
   nullifier := adapter.nullifier
@@ -862,6 +910,7 @@ def sealedFamily
 /-- The sealed family has no release value to authorize or disclose. -/
 theorem sealedFamily_no_release
     {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
     {Nullifier : Type y}
     {pre : CellState.Materialized M}
     (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
@@ -928,6 +977,7 @@ def acceptCompletion
   preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
+  postcondition := validated.resultAt
   disclosure := disclosureOfCompletion privateDeclaration completion
   disclosureAllowed := disclosureOfCompletion_allowed privateDeclaration completion
 
@@ -959,6 +1009,7 @@ def acceptCompletionSealed
   preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
+  postcondition := validated.resultAt
   disclosure := .sealed
   disclosureAllowed := trivial
 
@@ -992,6 +1043,7 @@ def acceptComputationSealed
   preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
+  postcondition := validated.resultAt
   disclosure := .sealed
   disclosureAllowed := trivial
 

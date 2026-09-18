@@ -137,6 +137,7 @@ def issueFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => IssueEvidence domain pre declaration
+  Postcondition := fun declaration _ post => declaration.patch.ResultAt pre.logical post
   effectDigest := effectDigest
   patch := fun declaration _ => declaration.patch
   nullifier := fun declaration _ => some declaration.operationNullifier
@@ -171,6 +172,7 @@ noncomputable def acceptIssue
   validated := Classical.choice <| validated_of_exact declaration.patch
     modeEvidence.preRootExact declaration.patch_namedFields.symm
       declaration.patch_namedResources.symm
+  postcondition := ⟨fun _ _ => rfl, fun _ _ => rfl⟩
   disclosure := .sealed
   disclosureAllowed := trivial
 
@@ -256,6 +258,8 @@ def attenuateFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell
   outcomeCodec := fun _ => parentCodec
   ModeEvidence := fun declaration parent =>
     AttenuateEvidence domain pre declaration parent
+  Postcondition := fun declaration parent post =>
+    (declaration.patch parent).ResultAt pre.logical post
   effectDigest := effectDigest
   patch := fun declaration parent => declaration.patch parent
   nullifier := fun declaration _ => some declaration.operationNullifier
@@ -291,6 +295,7 @@ noncomputable def acceptAttenuation
   validated := Classical.choice <| validated_of_exact (declaration.patch parent)
     modeEvidence.preRootExact (declaration.patch_namedFields parent).symm
       (declaration.patch_namedResources parent).symm
+  postcondition := ⟨fun _ _ => rfl, fun _ _ => rfl⟩
   disclosure := .sealed
   disclosureAllowed := trivial
 
@@ -348,6 +353,7 @@ def revokeFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => RevokeEvidence domain pre declaration
+  Postcondition := fun declaration _ post => declaration.patch.ResultAt pre.logical post
   effectDigest := effectDigest
   patch := fun declaration _ => declaration.patch
   nullifier := fun declaration _ => some declaration.operationNullifier
@@ -380,6 +386,7 @@ noncomputable def acceptRevocation
   validated := Classical.choice <| validated_of_exact declaration.patch
     modeEvidence.preRootExact declaration.patch_namedFields.symm
       declaration.patch_namedResources.symm
+  postcondition := ⟨fun _ _ => rfl, fun _ _ => rfl⟩
   disclosure := .sealed
   disclosureAllowed := trivial
 
@@ -470,6 +477,7 @@ def rotateEpochFamily {M : Materializer} (pre : Cell M)
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => RotateEpochEvidence pre declaration
+  Postcondition := fun declaration _ post => declaration.patch.ResultAt pre.logical post
   effectDigest := effectDigest
   patch := fun declaration _ => declaration.patch
   nullifier := fun declaration _ => some declaration.operationNullifier
@@ -502,6 +510,7 @@ noncomputable def acceptEpochRotation
   validated := Classical.choice <| validated_of_exact declaration.patch
     modeEvidence.preRootExact declaration.patch_namedFields.symm
       declaration.patch_namedResources.symm
+  postcondition := ⟨fun _ _ => rfl, fun _ _ => rfl⟩
   disclosure := .sealed
   disclosureAllowed := trivial
 

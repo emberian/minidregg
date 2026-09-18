@@ -543,6 +543,8 @@ def family {M : Hyperdocument.Materializer Digest} (config : Config)
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => PLift (ValidMerge config pre declaration)
+  Postcondition := fun declaration _ post =>
+    (declaration.patch config).ResultAt pre.logical post
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.intent.nonce
@@ -621,6 +623,7 @@ def accept
       preRootBound := semantic.preRootExact
       modeEvidence := ⟨semantic⟩
       validated := validated
+      postcondition := validated.resultAt
       disclosure := .sealed
       disclosureAllowed := trivial }
 

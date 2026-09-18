@@ -65,6 +65,7 @@ def family : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit wh
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => honestPatch.ResultAt cell.logical post
   effectDigest := fun _ => ⟨7⟩
   patch := fun _ _ => honestPatch
   nullifier := fun _ _ => none
@@ -107,6 +108,7 @@ noncomputable def accepted :
   preRootBound := rfl
   modeEvidence := ()
   validated := validatedPatch
+  postcondition := validatedPatch.resultAt
   disclosure := .sealed
   disclosureAllowed := rfl
 
@@ -131,6 +133,7 @@ def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Uni
   request := fun _ => ⟨.object, requestTrue⟩
   Outcome := fun _ => Unit
   ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => honestPatchTrue.ResultAt cellTrue.logical post
   outcomeCodec := fun _ => unitCodec
   effectDigest := fun _ => ⟨17⟩
   patch := fun _ _ => honestPatchTrue
@@ -155,6 +158,7 @@ noncomputable def acceptedTrue :
   preRootBound := by decide
   modeEvidence := ()
   validated := validatedPatchTrue
+  postcondition := validatedPatchTrue.resultAt
   disclosure := .sealed
   disclosureAllowed := rfl
 
@@ -183,6 +187,7 @@ noncomputable def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB mate
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => honestPatchB.ResultAt cellB.logical post
   effectDigest := fun _ => ⟨27⟩
   patch := fun _ _ => honestPatchB
   nullifier := fun _ _ => none
@@ -206,6 +211,7 @@ noncomputable def acceptedB :
   preRootBound := rfl
   modeEvidence := ()
   validated := validatedPatchB
+  postcondition := validatedPatchB.resultAt
   disclosure := .sealed
   disclosureAllowed := rfl
 
