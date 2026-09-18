@@ -150,8 +150,33 @@ def confirm (transport : Transport) (rootBytes : List UInt8 → Digest)
       | .replayed _ => return .confirmed kind loaded.snapshot
       | _ => return .uncertain "CAS attempted; reopened journal does not confirm the exact intent"
 
-/-- Bounded contention retry. Each attempt reloads and calls `prepare`; a
-candidate computed from a stale image is never blindly reinstalled. -/
+/-- Publish against the exact image on which the controller admitted the
+operation. In particular, a logical height derived from `loaded.image` cannot
+silently acquire a later journal boundary between admission and publication.
+
+There is one CAS attempt and no rebase. A caller wishing to retry contention
+must reconstruct admission from a fresh image. Physical success still requires
+the existing exact-intent readback; a lost response never becomes a refusal. -/
+def receiveLoaded (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
+    IO (Result rootBytes) := do
+  match prepare loaded.image loaded.snapshot loaded.represented intent with
+  | .inr (.replayed _) => return .confirmed .replayed loaded.snapshot
+  | .inr (.rejected reason) => return .rejected reason
+  | .inr _ => return .unavailable "unexpected complete-schedule outcome"
+  | .inl _ =>
+      let proposed := encode (loaded.image.append intent)
+      match ← transport.cas (some loaded.bytes) proposed with
+      | .installed | .alreadyPresent =>
+          confirm transport rootBytes intent .installed
+      | .conflict => return .contention
+      | .uncertain _ =>
+          confirm transport rootBytes intent .recoveredAfterUncertainResponse
+
+/-- Bounded contention retry for an already constructed internal intent whose
+admission does not depend on a journal-wide clock. Controllers deriving authority
+or time from one loaded image must instead call `receiveLoaded` with that image.
+Each retry here reloads and repeats the canonical durable guard checks. -/
 def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
     (intent : DataIntent rootBytes) : Nat → IO (Result rootBytes)
   | 0 => pure .contention
@@ -159,18 +184,9 @@ def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
       match ← load transport rootBytes with
       | .error message => return .unavailable message
       | .ok loaded =>
-          match prepare loaded.image loaded.snapshot loaded.represented intent with
-          | .inr (.replayed _) => return .confirmed .replayed loaded.snapshot
-          | .inr (.rejected reason) => return .rejected reason
-          | .inr _ => return .unavailable "unexpected complete-schedule outcome"
-          | .inl _ =>
-              let proposed := encode (loaded.image.append intent)
-              match ← transport.cas (some loaded.bytes) proposed with
-              | .installed | .alreadyPresent =>
-                  confirm transport rootBytes intent .installed
-              | .conflict => receive transport rootBytes intent attempts
-              | .uncertain _ =>
-                  confirm transport rootBytes intent .recoveredAfterUncertainResponse
+          match ← receiveLoaded transport rootBytes loaded intent with
+          | .contention => receive transport rootBytes intent attempts
+          | result => return result
 
 /-- Explicit bootstrap, separate from receipt acceptance. Existing different
 images are never replaced; initialization is confirmed by exact byte readback. -/

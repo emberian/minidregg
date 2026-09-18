@@ -56,6 +56,18 @@ def moveObserved (number : Nat) (old new : List UInt8) : DataIntent rootBytes wh
   postRootsBound := by simp
   guardsReadOnly := by simp
 
+/-- Advance only durable history/budget, keeping every physical cell unchanged.
+This distinguishes admission's journal clock from its per-cell guards. -/
+def advanceJournal (number : Nat) (observed : List UInt8) : DataIntent rootBytes where
+  transactionId := ⟨number⟩
+  writes := [⟨⟨3⟩, rootBytes observed, rootBytes observed, observed⟩]
+  readGuards := []
+  nullifiers := [nullifier number]
+  exactCharge := fun _ => 1
+  event := event number
+  postRootsBound := by simp
+  guardsReadOnly := by simp
+
 def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL durable receiver: {label}")
 
@@ -147,19 +159,50 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   require "stale candidate never published" (raced.snapshot.canonicalBytes ⟨1⟩ == [41] &&
     raced.snapshot.canonicalBytes ⟨3⟩ == [33] && raced.snapshot.model.history.length == 5)
 
-  require "codec rejects trailing bytes" ((decode (raced.bytes ++ [0])).isNone)
+  let pinnedCandidate := twoWrites 22 [41] [42] [51] [52] [33]
+  let clockInjected ← IO.mkRef false
+  let clockRacing : Transport :=
+    { transport with cas := fun expected proposed => do
+        unless ← clockInjected.get do
+          clockInjected.set true
+          let _ ← confirmed "concurrent journal-only advance" .installed
+            (← receive transport rootBytes (advanceJournal 21 [33]) 3)
+        transport.cas expected proposed }
+  require "pinned admission cannot rebase across journal-only advance"
+    (match ← receiveLoaded clockRacing rootBytes raced pinnedCandidate with
+      | .contention => true | _ => false)
+  let advanced ← loadExact transport
+  require "journal advanced but every candidate cell and read guard stayed unchanged"
+    (advanced.snapshot.canonicalBytes ⟨1⟩ == [41] &&
+      advanced.snapshot.canonicalBytes ⟨2⟩ == [42] &&
+      advanced.snapshot.canonicalBytes ⟨3⟩ == [33] &&
+      advanced.image.accepted.length == raced.image.accepted.length + 1)
+  require "candidate's ordinary guards remain admissible at the later boundary"
+    (match prepare advanced.image advanced.snapshot advanced.represented pinnedCandidate with
+      | .inl _ => true | _ => false)
+  let pinned ← confirmed "fresh pinned publication after explicit readmission" .installed
+    (← receiveLoaded transport rootBytes advanced pinnedCandidate)
+  require "pinned candidate charged and published only once"
+    (pinned.model.history.length == 7 && pinned.model.available .feeDebit == 93 &&
+      pinned.canonicalBytes ⟨1⟩ == [51] && pinned.canonicalBytes ⟨2⟩ == [52])
+  let finalImage ← loadExact transport
+  let _ ← confirmed "pinned exact historical replay" .replayed
+    (← receiveLoaded transport rootBytes finalImage pinnedCandidate)
+  require "pinned replay preserves physical image" ((← loadExact transport).bytes == finalImage.bytes)
+
+  require "codec rejects trailing bytes" ((decode (finalImage.bytes ++ [0])).isNone)
   require "codec rejects redundant natural digit"
-    ((decode (raced.bytes.take 1 ++ [0] ++ raced.bytes.drop 1)).isNone)
+    ((decode (finalImage.bytes.take 1 ++ [0] ++ finalImage.bytes.drop 1)).isNone)
   require "malformed native success is uncertain"
     (match parseCasOutput ⟨0, "Installed\nextra\n", ""⟩ with | .uncertain _ => true | _ => false)
-  let duplicate : Image := { raced.image with accepted := raced.image.accepted ++ [IntentRecord.ofIntent fourth] }
+  let duplicate : Image := { finalImage.image with accepted := finalImage.image.accepted ++ [IntentRecord.ofIntent fourth] }
   require "recovery rejects duplicate journal append" ((recover rootBytes (encode duplicate)).isNone)
-  let _ ← transport.cas (some raced.bytes) [0, 1, 2]
+  let _ ← transport.cas (some finalImage.bytes) [0, 1, 2]
   require "corrupt image refuses without implicit reset"
     (match ← receive transport rootBytes fourth 3 with | .unavailable _ => true | _ => false)
   require "corrupt image remains visible to operator"
     (match ← transport.read with | .ok (some bytes) => bytes == [0, 1, 2] | _ => false)
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite CAS, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response reopen, concurrent guard move, corruption; final valid image {raced.bytes.length} bytes / 5 commits"
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite CAS, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response reopen, concurrent guard move, pinned admission refuses journal-only race, corruption; final valid image {finalImage.bytes.length} bytes / 7 commits"
 
 end DurableReceiverProbe
 
