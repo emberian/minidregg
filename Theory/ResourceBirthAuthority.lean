@@ -39,11 +39,14 @@ def nullifierWrite (identifier : Nat) : FieldWrite CredentialAuthorityState.sche
 def policyEpochWrite (policy : InitialPolicy) : FieldWrite CredentialAuthorityState.schema.{0, 0} :=
   { field := .policyEpoch policy.policyId, value := some (0 : Nat) }
 
+def policyRevisionWrite (policy : InitialPolicy) : FieldWrite CredentialAuthorityState.schema.{0, 0} :=
+  { field := .policyRevision policy.policyId, value := some (0 : Nat) }
+
 def policyAddressWrite (policy : InitialPolicy) : FieldWrite CredentialAuthorityState.schema.{0, 0} :=
   { field := .policyAddress policy.policyId 0, value := some policy.address }
 
 def policyWrites (policy : InitialPolicy) : List (FieldWrite CredentialAuthorityState.schema.{0, 0}) :=
-  [policyEpochWrite policy, policyAddressWrite policy]
+  [policyEpochWrite policy, policyRevisionWrite policy, policyAddressWrite policy]
 
 def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGrant) :
     IssueDeclaration grant.kind where
@@ -73,8 +76,10 @@ structure BatchEvidence {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest} (domain : ProjectionUniverse)
     (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry) where
   slotsDistinct : ((fieldWrites descriptor).map FieldWrite.field).Nodup
+  grantIdsDistinct : descriptor.GrantIdsDistinct
   policiesFresh : ∀ policy ∈ descriptor.initialPolicies,
     pre.logical.fields (.policyEpoch policy.policyId) = none ∧
+      pre.logical.fields (.policyRevision policy.policyId) = none ∧
       pre.logical.fields (.policyAddress policy.policyId 0) = none
   nullifierFresh : isNullified pre descriptor.authorityNullifier = false
   ancestryEmpty : ∀ grant ∈ descriptor.grants, grant.capability.ancestry = []
@@ -136,11 +141,17 @@ theorem BatchEvidence.installs_policy {registry : TypeRegistry Digest}
     (evidence : BatchEvidence domain pre descriptor)
     (policy : InitialPolicy) (member : policy ∈ descriptor.initialPolicies) :
     (post pre descriptor).logical.fields (.policyEpoch policy.policyId) = some (0 : Nat) ∧
+      (post pre descriptor).logical.fields (.policyRevision policy.policyId) = some (0 : Nat) ∧
       (post pre descriptor).logical.fields (.policyAddress policy.policyId 0) = some policy.address := by
-  constructor
+  refine ⟨?_, ?_, ?_⟩
   · rw [post_fields]
     exact applyFieldWrites_member (fieldWrites descriptor) evidence.writes_distinct
       pre.logical.fields (policyEpochWrite policy)
+      (List.mem_append_left _ (List.mem_append_left _
+        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyWrites]⟩)))
+  · rw [post_fields]
+    exact applyFieldWrites_member (fieldWrites descriptor) evidence.writes_distinct
+      pre.logical.fields (policyRevisionWrite policy)
       (List.mem_append_left _ (List.mem_append_left _
         (List.mem_flatMap.mpr ⟨policy, member, by simp [policyWrites]⟩)))
   · rw [post_fields]
@@ -187,6 +198,7 @@ def Postcondition {registry : TypeRegistry Digest} (descriptor : Descriptor regi
   (∀ grant ∈ descriptor.grants, state.fields (grantField grant) = some grant.capability) ∧
     (∀ policy ∈ descriptor.initialPolicies,
       state.fields (.policyEpoch policy.policyId) = some (0 : Nat) ∧
+        state.fields (.policyRevision policy.policyId) = some (0 : Nat) ∧
         state.fields (.policyAddress policy.policyId 0) = some policy.address) ∧
     state.fields (.nullifier descriptor.authorityNullifier) = some true
 
@@ -213,7 +225,7 @@ theorem no_final_policy_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : LogicalState CredentialAuthorityState.schema.{0, 0}}
     {policy : InitialPolicy} (member : policy ∈ descriptor.initialPolicies)
     (missing : state.fields (.policyAddress policy.policyId 0) ≠ some policy.address) :
-    ¬Postcondition descriptor state := fun final => missing (final.2.1 policy member).2
+    ¬Postcondition descriptor state := fun final => missing (final.2.1 policy member).2.2
 
 theorem no_initial_policy_overwrite {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest} {domain : ProjectionUniverse}
@@ -222,6 +234,99 @@ theorem no_initial_policy_overwrite {registry : TypeRegistry Digest}
     (occupied : pre.logical.fields (.policyEpoch policy.policyId) ≠ none) :
     IsEmpty (BatchEvidence domain pre descriptor) :=
   ⟨fun evidence => occupied (evidence.policiesFresh policy member).1⟩
+
+/-- Existing source revision state cannot be overwritten by claiming its
+separate generation slot was absent. Birth requires all three policy cells fresh. -/
+theorem no_initial_revision_overwrite {registry : TypeRegistry Digest}
+    {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest} {domain : ProjectionUniverse}
+    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
+    {policy : InitialPolicy} (member : policy ∈ descriptor.initialPolicies)
+    (occupied : pre.logical.fields (.policyRevision policy.policyId) ≠ none) :
+    IsEmpty (BatchEvidence domain pre descriptor) :=
+  ⟨fun evidence => occupied (evidence.policiesFresh policy member).2.1⟩
+
+/-- A capability identifier has one revocation identity across resource kinds.
+A birth cannot overwrite or shadow an existing grant of a different kind. -/
+theorem no_batch_of_existing_grant_id {registry : TypeRegistry Digest}
+    {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest} {domain : ProjectionUniverse}
+    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
+    {grant : AuthorityGrant} (member : grant ∈ descriptor.grants)
+    (otherKind : ResourceKind) (stored : StoredCapability otherKind)
+    (occupied : readCapability pre otherKind grant.capability.head.id = some stored) :
+    IsEmpty (BatchEvidence domain pre descriptor) :=
+  ⟨fun evidence => (evidence.issue grant member).reject_existing_id otherKind stored occupied⟩
+
+/-- The final joint post must retain revision zero independently of the grant
+generation. An initial source address alone cannot discharge the postcondition. -/
+theorem no_final_revision_erasure {registry : TypeRegistry Digest}
+    {descriptor : Descriptor registry} {state : LogicalState CredentialAuthorityState.schema.{0, 0}}
+    {policy : InitialPolicy} (member : policy ∈ descriptor.initialPolicies)
+    (missing : state.fields (.policyRevision policy.policyId) ≠ some (0 : Nat)) :
+    ¬Postcondition descriptor state := fun final => missing (final.2.1 policy member).2.1
+
+/-- Distinct typed capability slots cannot excuse a shared revocation ID inside
+the same batch. This is enforced by the family mode, not only by the receiver. -/
+theorem no_batch_of_repeated_grant_id {registry : TypeRegistry Digest}
+    {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest} {domain : ProjectionUniverse}
+    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
+    (first second : AuthorityGrant) (grants : descriptor.grants = [first, second])
+    (same : first.capability.head.id = second.capability.head.id) :
+    IsEmpty (BatchEvidence domain pre descriptor) := by
+  refine ⟨fun evidence => ?_⟩
+  have distinct := evidence.grantIdsDistinct
+  simpa [Descriptor.GrantIdsDistinct, grants, same] using distinct
+
+namespace CrossKindCollisionWitness
+
+/-- Two closed grants with distinct typed slots but one global revocation ID. -/
+def objectGrant : AuthorityGrant := ⟨.object, ⟨TypedAuthorization.demoCapability, []⟩⟩
+
+def programGrant : AuthorityGrant :=
+  ⟨.program, ⟨
+    { id := TypedAuthorization.demoCapability.id
+      root := TypedAuthorization.demoCapability.id
+      parent := none
+      issuer := ⟨1⟩
+      holder := .subject ⟨4⟩
+      scope := ⟨{⟨10⟩}, {.installPolicy}, 100⟩
+      notBefore := 0
+      notAfter := 100
+      issuerEpoch := 0
+      policyId := ⟨10⟩
+      policyEpoch := 0
+      ancestors := ∅
+      channels := ∅ }, []⟩⟩
+
+def descriptor (registry : TypeRegistry Digest) : Descriptor registry where
+  factory := ⟨1⟩
+  creator := ⟨4⟩
+  transactionId := ⟨1⟩
+  nonce := 1
+  births := []
+  auxiliaryCreates := []
+  grants := [objectGrant, programGrant]
+  initialPolicies := []
+  authorityNullifier := 1
+  funding := []
+  fee := ⟨0, 1, 0, 0⟩
+
+/-- The old typed-field distinctness condition alone accepts this shape. -/
+theorem typed_fields_distinct (registry : TypeRegistry Digest) :
+    ((fieldWrites (descriptor registry)).map FieldWrite.field).Nodup := by
+  change ([.capability .object TypedAuthorization.demoCapability.id,
+    .capability .program TypedAuthorization.demoCapability.id, .nullifier 1] :
+      List AuthorityField).Nodup
+  decide
+
+/-- The mandatory source-family evidence now rejects this same concrete
+cross-kind collision for every old authority cell and revocation universe. -/
+theorem refused (registry : TypeRegistry Digest)
+    {M : CellState.Materializer CredentialAuthorityState.schema.{0, 0} Digest}
+    (domain : ProjectionUniverse) (pre : CredentialAuthorityState.Cell M) :
+    IsEmpty (BatchEvidence domain pre (descriptor registry)) :=
+  no_batch_of_repeated_grant_id objectGrant programGrant rfl rfl
+
+end CrossKindCollisionWitness
 
 /-- The authority incidence has its own actual domain pre-root. Its source
 target is the pinned factory and it commits the whole same descriptor, but

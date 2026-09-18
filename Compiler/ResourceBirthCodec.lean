@@ -188,13 +188,13 @@ def descriptorStream (registry : TypeRegistry Digest) :
   StreamCodec.xmap (descriptorTupleStream registry)
     descriptorTuple descriptorOfTuple (by intro descriptor; rfl)
 
-def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,2]
+def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,3]
 
 def framedDescriptorCodec (registry : TypeRegistry Digest) :
     LawfulCodec (Descriptor registry) where
   encode descriptor := descriptorFrame ++ (descriptorStream registry).encode descriptor
   decode
-    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 2 :: payload =>
+    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 3 :: payload =>
         (descriptorStream registry).toLawful.decode payload
     | _ => none
   decode_encode := by
@@ -228,6 +228,13 @@ theorem descriptor_legacy_version_refused (registry : TypeRegistry Digest)
     (payload : List UInt8) :
     (descriptorCodec registry).decode
       ([68,82,69,71,71,47,66,73,82,84,72,1] ++ payload) = none := rfl
+
+/-- Version two carried the old capability ancestry representation and no
+separate current policy revision. It is not reinterpreted under this ABI. -/
+theorem descriptor_pre_revision_version_refused (registry : TypeRegistry Digest)
+    (payload : List UInt8) :
+    (descriptorCodec registry).decode
+      ([68,82,69,71,71,47,66,73,82,84,72,2] ++ payload) = none := rfl
 
 /-- Full source bytes, addresses and target policy identities are retained by
 the command encoding. No content-hash injectivity is used here. -/

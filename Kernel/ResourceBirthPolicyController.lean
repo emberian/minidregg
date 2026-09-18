@@ -58,7 +58,7 @@ structure Checked {registry : TypeRegistry Digest}
   factoryExact : descriptor.factory = pins.factory
   birthsPresent : descriptor.births ≠ []
   policyPinned : oldAuthority.policyAddress pins.policyId
-    (oldAuthority.policyEpoch pins.policyId) = pins.policyAddress
+    (oldAuthority.policyRevision pins.policyId) = pins.policyAddress
   feeBound : descriptor.FeeBound pins.tariff
   feeNontrivial : descriptor.fee.amount = 0 ∨
     descriptor.fee.payer ≠ descriptor.fee.collector
@@ -133,7 +133,7 @@ def check {registry : TypeRegistry Digest}
   let factoryExact ← require (descriptor.factory = pins.factory) .wrongFactory
   let birthsPresent ← require (descriptor.births ≠ []) .emptyBirth
   let policyPinned ← require (oldAuthority.policyAddress pins.policyId
-    (oldAuthority.policyEpoch pins.policyId) = pins.policyAddress) .wrongPolicy
+    (oldAuthority.policyRevision pins.policyId) = pins.policyAddress) .wrongPolicy
   let feeBound ← require (descriptor.FeeBound pins.tariff) .wrongFee
   let feeNontrivial ← require (descriptor.fee.amount = 0 ∨
     descriptor.fee.payer ≠ descriptor.fee.collector) .positiveSelfFee
@@ -456,7 +456,8 @@ def resourceContexts (prepared : PreparedBirth profile.compilerProfile deploymen
     nonce := source.nonce
     height := height
     policyId := policyId
-    policyEpoch := (oldAuthority prepared).policyEpoch policyId }
+    policyEpoch := (oldAuthority prepared).policyEpoch policyId
+    policyRevision := (oldAuthority prepared).policyRevision policyId }
 
 def layout (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) : CellLayout (Legs descriptor) where
   schema
@@ -672,7 +673,7 @@ theorem selected_policy_evaluates_actual_tuple [DecidableEq F]
     (binding : config.stepBinding = .canonical (step prepared height tuple))
     (accepted : config.verifies request witness = true) :
     ∃ committed,
-      config.registry.resolve request.policyId request.policyEpoch = some committed ∧
+      config.registry.resolve request.policyId request.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
         (project prepared height tuple.primary tuple.source tuple.logicalPre)
         (project prepared height tuple.primary tuple.source tuple.logicalPost) = true :=
@@ -866,6 +867,7 @@ def Pending.liftAuthorization [DecidableEq F]
   policyWitness := (branch, authorized.policyWitness)
   policyMembershipWitness := authorized.policyMembershipWitness
   policyEpochExact := authorized.policyEpochExact
+  policyRevisionExact := authorized.policyRevisionExact
   policyAddressExact := authorized.policyAddressExact
   policyMembershipVerified := authorized.policyMembershipVerified
   policyVerified := by
@@ -897,7 +899,7 @@ structure BranchAccepted [DecidableEq F]
   envelopeExact : receipt.envelopeBytes = credential.envelope
   source : CanonicalCellRegistry.LoadedPolicySource deployment.domain prepared.directory.directory
     ((oldAuthority prepared).policyAddress (branchRequest prepared height branch).2.policyId
-      (branchRequest prepared height branch).2.policyEpoch)
+      (branchRequest prepared height branch).2.policyRevision)
   authorization : Authorized pending.portal (oldAuthority prepared)
     (branchRequest prepared height branch).2
   modeBound : branchRequiresCapability branch = true →
@@ -914,7 +916,7 @@ def Pending.admitBranch [DecidableEq F]
   let config := pending.branchConfig branch
   let old := oldAuthority prepared
   let source ← match CanonicalCellRegistry.loadPolicySource deployment.domain
-      prepared.directory.directory (old.policyAddress wanted.2.policyId wanted.2.policyEpoch) with
+      prepared.directory.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
     | none => .error .policySourceUnavailable
     | some loaded => .ok loaded
   let evidence : Evidence config.portal old wanted.2 ←
@@ -936,28 +938,30 @@ def Pending.admitBranch [DecidableEq F]
           else .error .signature
         else .error .credentialShape
   if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
-    match config.registry.resolve wanted.2.policyId wanted.2.policyEpoch with
-    | none => .error .policyUnavailable
-    | some committed =>
-        let witness := canonicalWitness profile.compilerProfile.compiler committed
-          (pending.branchStep branch).oldState (pending.branchStep branch).newState
-        match CanonicalPolicyAdmission.admit config old wanted.2 evidence witness
-            (.policy wanted.2.policyId wanted.2.policyEpoch) epoch with
-        | none => .error .policyRejected
-        | some admitted =>
-            let authorization := pending.liftAuthorization branch admitted
-            if modeBound : branchRequiresCapability branch = true →
-                authorization.evidence.capabilityValue.isSome = true then
-              let accepted : BranchAccepted pending branch :=
-                { credential := credential
-                  receipt := receipt
-                  envelopeExact := envelopeExact.down
-                  source := source
-                  authorization := authorization
-                  modeBound := modeBound }
-              .ok (show { accepted : BranchAccepted pending branch //
-                accepted.credential = credential } from ⟨accepted, rfl⟩)
-            else .error .capability
+    if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
+      match config.registry.resolve wanted.2.policyId wanted.2.policyRevision with
+      | none => .error .policyUnavailable
+      | some committed =>
+          let witness := canonicalWitness profile.compilerProfile.compiler committed
+            (pending.branchStep branch).oldState (pending.branchStep branch).newState
+          match CanonicalPolicyAdmission.admit config old wanted.2 evidence witness
+              (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
+          | none => .error .policyRejected
+          | some admitted =>
+              let authorization := pending.liftAuthorization branch admitted
+              if modeBound : branchRequiresCapability branch = true →
+                  authorization.evidence.capabilityValue.isSome = true then
+                let accepted : BranchAccepted pending branch :=
+                  { credential := credential
+                    receipt := receipt
+                    envelopeExact := envelopeExact.down
+                    source := source
+                    authorization := authorization
+                    modeBound := modeBound }
+                .ok (show { accepted : BranchAccepted pending branch //
+                  accepted.credential = credential } from ⟨accepted, rfl⟩)
+              else .error .capability
+    else .error .policyUnavailable
   else .error .policyUnavailable
 
 def Pending.admitBranchNative [DecidableEq F]
@@ -1023,7 +1027,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun ingress => (ingress.descriptorBytes, ingress.credentials))
     (fun pair => ⟨pair.1, pair.2⟩) (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [1]
+def ingressFrame : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
 
 def ingressRawCodec : LawfulCodec Ingress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress

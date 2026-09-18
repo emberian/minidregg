@@ -58,29 +58,14 @@ unambiguous. The modulus is stamped in the header; the reader checks it.
 -/
 import Compiler.Emit
 import Compiler.AirHash
-import Mathlib.Tactic.NormNum.Prime
+import Compiler.BabyBear
 import Lean.Data.Json
 
 namespace Minidregg.Compiler
 
 open Lean (Json toJson)
 
-/-! ## §1. `[PROVER-field]` — BabyBear, the deployed prover field. -/
-
-/-- **BabyBear** `p = 2^31 − 2^27 + 1`: the 31-bit, high-2-adicity
-(`2^27 ∣ p − 1`) prime-field instantiation used by the emitted examples and Ext6 model. -/
-def babyBearP : ℕ := 2013265921
-
-theorem babyBearP_eq : babyBearP = 2 ^ 31 - 2 ^ 27 + 1 := by norm_num [babyBearP]
-
-instance : NeZero babyBearP := ⟨by norm_num [babyBearP]⟩
-
-/-- BabyBear is prime — so `ZMod babyBearP` is a genuine `Field` and the whole emit-path
-theorem stack (`emit_faithful`, `emit_accepts_iff`, `emit_wellFormed`) applies verbatim. -/
-instance : Fact (Nat.Prime babyBearP) := ⟨by norm_num [babyBearP]⟩
-
-/-- The deployed prover field. -/
-abbrev BabyBear := ZMod babyBearP
+/-! ## §1. `[PROVER-field]` — the shared BabyBear field is imported from `Compiler.BabyBear`. -/
 
 /-! ## §2. The writer — descriptor → JSON, constants as canonical `ZMod.val`. -/
 

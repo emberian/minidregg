@@ -126,6 +126,7 @@ structure RequestContext where
   height : Height
   policyId : PolicyId
   policyEpoch : TypedAuthorization.Epoch
+  policyRevision : TypedAuthorization.PolicyRevision
 
 /-- Resource operations are balanced value movements from their posting source.
 The operation/effect commitments distinguish mint, burn, fee, and lease from an
@@ -148,6 +149,7 @@ def RequestContext.request
   preStateRoot := pre.root
   policyId := context.policyId
   policyEpoch := context.policyEpoch
+  policyRevision := context.policyRevision
   cost := operation.feeDebit
 
 @[simp] theorem RequestContext.request_target
@@ -686,6 +688,7 @@ def witnessContext : RequestContext where
   height := 10
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
 
 noncomputable def witnessAuthorization :
     Authorized demoPortal demoState
@@ -694,6 +697,7 @@ noncomputable def witnessAuthorization :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

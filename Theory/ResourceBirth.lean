@@ -346,7 +346,7 @@ structure AuthorityGrant where
 /-- Candidate-independent initial policy source. The compiler must decode
 these exact bytes as its existing canonical policy record, check the content
 address and source metadata, and preserve them durably in the same birth.
-The authority transition always installs epoch zero; no candidate AST enters
+The authority transition installs generation zero and source revision zero; no candidate AST enters
 the Theory import boundary. -/
 structure InitialPolicy where
   policyId : PolicyId
@@ -558,6 +558,7 @@ def factoryRequest {registry : TypeRegistry Digest}
   preStateRoot := factoryPreRoot
   policyId := pins.policyId
   policyEpoch := oldAuthority.policyEpoch pins.policyId
+  policyRevision := oldAuthority.policyRevision pins.policyId
   cost := descriptor.fee.amount
 
 /-- Authorization is obtained before any newborn authority or account exists.
@@ -571,7 +572,7 @@ structure FactoryAuthorization {registry : TypeRegistry Digest}
   factoryExact : descriptor.factory = pins.factory
   birthsPresent : descriptor.births ≠ []
   policyPinned : oldAuthority.policyAddress pins.policyId
-    (oldAuthority.policyEpoch pins.policyId) = pins.policyAddress
+    (oldAuthority.policyRevision pins.policyId) = pins.policyAddress
   feeBound : descriptor.FeeBound pins.tariff
   feeNontrivial : descriptor.fee.amount = 0 ∨
     descriptor.fee.payer ≠ descriptor.fee.collector
@@ -601,7 +602,7 @@ theorem no_factoryAuthorization_of_wrong_policy
     {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {descriptor : Descriptor registry}
     (wrong : oldAuthority.policyAddress pins.policyId
-      (oldAuthority.policyEpoch pins.policyId) ≠ pins.policyAddress) :
+      (oldAuthority.policyRevision pins.policyId) ≠ pins.policyAddress) :
     IsEmpty (FactoryAuthorization pins encoding portal oldAuthority factoryPreRoot
       height descriptor) :=
   ⟨fun accepted => wrong accepted.policyPinned⟩

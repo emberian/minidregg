@@ -571,32 +571,47 @@ theorem replay_wrong_event_refused (domain : Digest)
     replay domain durable ingress = some (.error .transactionConflict) := by
   simp [replay, found, different]
 
+/-- Admit against the exact snapshot already validated by the host. The native
+receiver performs one compare-and-swap against this image and returns contention
+if it changed; it never silently rebases an accepted birth onto a later image. -/
+def receiveLoaded
+    (profile : CanonicalRuntimeProfile.Profile F)
+    (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
+    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
+    (durable : ResourceBirthController.Concrete.Durable)
+    (height : Height) (bytes : List UInt8) : IO Result := do
+  match decodeIngress bytes with
+  | none => return .rejected .malformedIngress
+  | some ingress =>
+      match replay deployment.domain durable ingress with
+      | some (.ok recorded) => return .confirmed .replayed recorded
+      | some (.error reason) => return .rejected reason
+      | none =>
+          match ← admitDecodedNative profile deployment pins native durable height ingress with
+          | .error reason => return .rejected (.admission reason)
+          | .ok accepted =>
+              match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
+              | .confirmed kind _ => return .confirmed kind (receipt deployment.domain ingress)
+              | .rejected reason => return .rejected (.durable reason)
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail
+              | .uncertain detail => return .uncertain detail
+
 /-- This is the concrete external input boundary. It accepts only strict
 signed ingress, never an intent or an authority verdict. Storage readback is
-the existing native receiver's success criterion; only receipt IDs escape. -/
+the existing native receiver's success criterion; only receipt IDs escape.
+The compatibility attempt parameter does not authorize rebasing admission. -/
 def receive
     (profile : CanonicalRuntimeProfile.Profile F)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
     (height : Height) (bytes : List UInt8) (attempts : Nat := 4) : IO Result := do
+  let _ := attempts
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
-  | some ingress =>
+  | some _ =>
       match ← DurableReceiverIO.load transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable =>
-          match replay deployment.domain durable ingress with
-          | some (.ok recorded) => return .confirmed .replayed recorded
-          | some (.error reason) => return .rejected reason
-          | none =>
-              match ← admitDecodedNative profile deployment pins native durable height ingress with
-              | .error reason => return .rejected (.admission reason)
-              | .ok accepted =>
-                  match ← DurableReceiverIO.receive transport rootBytes (intent accepted) attempts with
-                  | .confirmed kind _ => return .confirmed kind (receipt deployment.domain ingress)
-                  | .rejected reason => return .rejected (.durable reason)
-                  | .contention => return .contention
-                  | .unavailable detail => return .unavailable detail
-                  | .uncertain detail => return .uncertain detail
+      | .ok durable => receiveLoaded profile deployment pins native transport durable height bytes
 
 end Minidregg.Kernel.ResourceBirthReceiver
