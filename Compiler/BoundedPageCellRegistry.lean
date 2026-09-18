@@ -1,5 +1,10 @@
 /-
-# Compiler.BoundedPageCellRegistry -- concrete sparse page cells
+# Compiler.BoundedPageCellRegistry -- scoped partial page-registry exhibit
+
+This module retains actual codec/materializer and lifecycle evidence for its
+three selected page families. The new unified birth, authority-domain and
+native receiving path uses `Compiler.CanonicalCellRegistry`, which retains
+these source-owned materializers and schema pins in its complete kind table.
 
 `BoundedPageExtensionCatalog` pins three production page codecs, but a catalog
 row alone does not show that the selected schema crosses the heterogeneous

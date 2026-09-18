@@ -1,5 +1,11 @@
 /-
-# Compiler.DeclaredEffectPageRegistry -- effect-shard lifecycle
+# Compiler.DeclaredEffectPageRegistry -- scoped effect-shard lifecycle exhibit
+
+The actual page codec/materializer and lifecycle evidence here remain useful.
+The unified receiving path selects `Compiler.CanonicalCellRegistry`, whose
+fixed semantic roles and final-state laws determine whether a declared page
+is an object, program, or account-metadata cell. This one-kind exhibit does not
+provide production kind dispatch or a second monetary store.
 
 This is the heterogeneous-cell boundary for the bounded declared-effect page.
 It pins one stable kind tag and V1 schema reference, installs the exact framed

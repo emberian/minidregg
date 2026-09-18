@@ -116,7 +116,7 @@ this consumer consumes the authorization nonce durably, so changing the
 transaction id cannot charge the same lease again. -/
 def prepayNullifier
     (lease : OpenedLease M portal authState pre) : StableNullifier where
-  codecVersion := lease.manifest.version
+  codecVersion := ReactiveTerminalCell.wireVersion
   domain := lease.manifest.semanticDigest
   nullifierId :=
     ⟨Nat.pair lease.requestContext.nonce lease.runtime.prepayTransaction.value⟩
@@ -537,7 +537,7 @@ def terminalOpenCell
     {M : Materializer CanonicalResourceKernel.schema Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) (deadline : Nat) : ReactiveTerminalCell.OpenCell where
-  codecVersion := lease.manifest.version
+  codecVersion := ReactiveTerminalCell.wireVersion
   domain := lease.manifest.eventCodecId
   promiseId := promiseId lease
   deadline := deadline
@@ -707,7 +707,7 @@ noncomputable def acceptedEffect (refund : RefundPlan outcome due) :=
     refund.requestContext refund.authorization
 
 def nullifier (refund : RefundPlan outcome due) : StableNullifier where
-  codecVersion := lease.manifest.version
+  codecVersion := ReactiveTerminalCell.wireVersion
   domain := lease.manifest.semanticDigest
   nullifierId :=
     ⟨Nat.pair refund.requestContext.nonce refund.transactionId.value⟩
@@ -725,8 +725,9 @@ def intent (refund : RefundPlan outcome due) : DataIntent M.rootBytes :=
       AuthorizedResourceCharge.exactCharge lease.manifest refund.accepted :=
   rfl
 
-/-- The refund cannot reuse the prepay authorization request: their argument
-commitments decode to disjoint resource-operation constructors. -/
+/-- The refund cannot reuse the prepay authorization request when the exact
+compared operation pair has binding argument commitments.  The source
+operations have disjoint constructors; no inverse of the hash is assumed. -/
 theorem request_ne_prepay (refund : RefundPlan outcome due)
     (binding : CanonicalResourceEffect.ArgsPairBindingPremise
       lease.terms.refundOperation lease.terms.operation) :
@@ -806,6 +807,55 @@ theorem physical_terminal_step_atomic
     (terminalPlan outcome) refinement represented stepped
 
 /-! ## Closed positive and failure witnesses -/
+
+/-- Terminal readiness uses equality of the four actual snapshot roots and
+freshness of its one nullifier.  It never reconstructs bytes from a digest or
+evaluates a cryptographic hash inside a proof of reflexive root equality. -/
+theorem terminalPlan_ready
+    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {portal : Portal} {authState : AuthState} {pre : Materialized M}
+    {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
+    {attempt : StartAttempt lease boundary}
+    {completion : CompletionBoundary attempt}
+    {deadline settledAt : Nat}
+    (outcome : Outcome attempt completion deadline settledAt)
+    (before : DataSnapshot M.rootBytes)
+    (terminal : before.model.roots lease.runtime.terminalCell =
+      M.rootBytes lease.runtime.openTerminalBytes)
+    (outbox : before.model.roots lease.runtime.outboxCell =
+      M.rootBytes lease.runtime.openOutboxBytes)
+    (clock : before.model.roots lease.runtime.clockCell =
+      M.rootBytes (terminalPlan outcome).clockBytes)
+    (trigger : before.model.roots lease.runtime.startCell =
+      attempt.settlement.logicalRoot)
+    (fresh : before.model.consumed (terminalPlan outcome).nullifier = false) :
+    (terminalPlan outcome).intent.preflight before = .ok () := by
+  have guards : (terminalPlan outcome).intent.readGuardsMatchCheck before = true := by
+    simp [DataIntent.readGuardsMatchCheck, ReactiveTerminalCell.Plan.intent,
+      ReactiveTerminalCell.Plan.clockGuard, ReactiveTerminalCell.Plan.triggerGuard,
+      ReactiveTerminalCell.Plan.clockRoot, terminalOpenCell, terminalPlan,
+      clock, trigger]
+  have roots : (terminalPlan outcome).intent.erase.rootsMatchCheck before.model = true := by
+    simp [DurableCommitProtocol.Intent.rootsMatchCheck, DataIntent.erase,
+      ReactiveTerminalCell.Plan.intent, ReactiveTerminalCell.Plan.terminalWrite,
+      ReactiveTerminalCell.Plan.outboxWrite, terminalOpenCell, terminal, outbox]
+  have unspent : (terminalPlan outcome).intent.erase.nullifiersFreshCheck
+      before.model = true := by
+    simp [DurableCommitProtocol.Intent.nullifiersFreshCheck, DataIntent.erase,
+      ReactiveTerminalCell.Plan.intent, fresh]
+  have funded : Charge.fundedCheck (terminalPlan outcome).intent.erase.exactCharge
+      before.model.available = true := by
+    apply (Charge.fundedCheck_eq_true_iff _ _).mpr
+    intro lane
+    exact Nat.zero_le _
+  unfold DataIntent.preflight
+  rw [guards]
+  simp only [Bool.not_true, Bool.false_eq_true, ite_false]
+  unfold DurableCommitProtocol.Intent.preflight
+  rw [roots, unspent, funded]
+  simp [DataIntent.erase, ReactiveTerminalCell.Plan.intent,
+    ReactiveTerminalCell.Plan.terminalWrite, ReactiveTerminalCell.Plan.outboxWrite,
+    terminalOpenCell, lease.runtime.terminalOutboxDistinct]
 
 namespace Witness
 
@@ -944,6 +994,19 @@ noncomputable def completedAttempt : StartAttempt lease startBoundary where
   forward := forwardPerformed
   plan := .commit
 
+@[simp] theorem completed_status_committed :
+    completedAttempt.settlement.status = .committed := by
+  simp [StartAttempt.settlement, completedAttempt, forwardPerformed,
+    IrreversibleEffectSettlement.settle,
+    IrreversibleEffectSettlement.Settlement.status]
+
+@[simp] theorem completed_trigger_root :
+    completedAttempt.settlement.logicalRoot =
+      CanonicalResourceKernel.materializer.rootBytes (runningBytes lease) := by
+  simp [StartAttempt.settlement, completedAttempt, forwardPerformed,
+    IrreversibleEffectSettlement.settle,
+    IrreversibleEffectSettlement.Settlement.logicalRoot, startIntent]
+
 def completionBoundary : CompletionBoundary completedAttempt where
   Evidence := fun claim => claim.providerEvidenceRoot =
     ⟨Nat.pair claim.runId.value
@@ -958,7 +1021,7 @@ def completionClaim : CompletionClaim where
 
 noncomputable def completedOutcome :
   Outcome completedAttempt completionBoundary 20 19 :=
-  .completed completionClaim rfl rfl (by decide)
+  .completed completionClaim rfl completed_status_committed (by decide)
 
 noncomputable def completedPlan := terminalPlan completedOutcome
 
@@ -967,7 +1030,7 @@ noncomputable def terminalBeforeBytes (cellId : CellId) : List UInt8 :=
   else if cellId = runtime.outboxCell then runtime.openOutboxBytes
   else if cellId = runtime.clockCell then completedPlan.clockBytes
   else if cellId = runtime.startCell then
-    List.replicate completedPlan.triggerRoot.value 0
+    runningBytes lease
   else []
 
 noncomputable def terminalBeforeModel :
@@ -985,19 +1048,20 @@ noncomputable def terminalBefore :
   canonicalBytes := terminalBeforeBytes
   coherent := fun _ => rfl
 
-@[simp] theorem completed_status_committed :
-    completedAttempt.settlement.status = .committed :=
-  rfl
-
 @[simp] theorem completed_maps_finalized :
     completedPlan.kind = .finalized :=
   rfl
 
-set_option maxRecDepth 100000 in
-set_option maxHeartbeats 1000000 in
 @[simp] theorem completed_ready :
     completedPlan.intent.preflight terminalBefore = .ok () := by
-  decide
+  apply terminalPlan_ready completedOutcome terminalBefore
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease,
+      completedPlan]
+  · rw [completed_trigger_root]
+    simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · rfl
 
 @[simp] theorem completed_commits_terminal_and_outbox :
     DurableDataIntent.execute .complete terminalBefore completedPlan.intent =

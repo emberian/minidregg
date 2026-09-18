@@ -238,7 +238,7 @@ variable {M : Materializer CanonicalResourceKernel.schema Digest}
   {lease : ProviderExecutionLease.OpenedLease M portal authState pre}
 
 def nonce (job : FeeFirstJob lease) : StableNullifier where
-  codecVersion := lease.manifest.version
+  codecVersion := ReactiveTerminalCell.wireVersion
   domain := lease.manifest.semanticDigest
   nullifierId := job.feeNullifier
   canonicalBytes := ReactiveTerminalCell.frame 190
@@ -256,7 +256,7 @@ def prologue (job : FeeFirstJob lease) : DataIntent M.rootBytes where
   nullifiers := [job.nonce]
   exactCharge := AuthorizedResourceCharge.admissionCharge lease.manifest lease.accepted
   event :=
-    { codecVersion := lease.manifest.version
+    { codecVersion := ReactiveTerminalCell.wireVersion
       domain := lease.manifest.semanticDigest
       eventId := job.feeEvent
       canonicalBytes := ReactiveTerminalCell.frame 191
@@ -612,6 +612,21 @@ noncomputable def completedAttempt :
   forward := forwardPerformed
   plan := .commit
 
+@[simp] theorem completed_status_committed :
+    completedAttempt.settlement.status = .committed := by
+  simp [ProviderExecutionLease.StartAttempt.settlement, completedAttempt,
+    forwardPerformed, IrreversibleEffectSettlement.settle,
+    IrreversibleEffectSettlement.Settlement.status]
+
+@[simp] theorem completed_trigger_root :
+    completedAttempt.settlement.logicalRoot =
+      CanonicalResourceKernel.materializer.rootBytes
+        (ProviderExecutionLease.runningBytes lease) := by
+  simp [ProviderExecutionLease.StartAttempt.settlement, completedAttempt,
+    forwardPerformed, IrreversibleEffectSettlement.settle,
+    IrreversibleEffectSettlement.Settlement.logicalRoot,
+    ProviderExecutionLease.startIntent]
+
 /-- The kernel sees only a claim and a root-binding predicate.  In particular,
 the `outputRoot` is not interpreted as proof of correct execution here. -/
 def completionBoundary : ProviderExecutionLease.CompletionBoundary completedAttempt where
@@ -628,7 +643,7 @@ def completionClaim : ProviderExecutionLease.CompletionClaim where
 
 noncomputable def completedOutcome :
     ProviderExecutionLease.Outcome completedAttempt completionBoundary 20 19 :=
-  .completed completionClaim rfl rfl (by decide)
+  .completed completionClaim rfl completed_status_committed (by decide)
 
 noncomputable def completedPlan :=
   ProviderExecutionLease.terminalPlan completedOutcome
@@ -645,7 +660,7 @@ noncomputable def terminalBeforeBytes (cellId : CellId) : List UInt8 :=
   else if cellId = runtime.outboxCell then runtime.openOutboxBytes
   else if cellId = runtime.clockCell then completedPlan.clockBytes
   else if cellId = runtime.startCell then
-    List.replicate completedPlan.triggerRoot.value 0
+    ProviderExecutionLease.runningBytes lease
   else []
 
 noncomputable def terminalBeforeModel :
@@ -663,11 +678,16 @@ noncomputable def terminalBefore :
   canonicalBytes := terminalBeforeBytes
   coherent := fun _ => rfl
 
-set_option maxRecDepth 100000 in
-set_option maxHeartbeats 1000000 in
 @[simp] theorem completedReady :
     completedPlan.intent.preflight terminalBefore = .ok () := by
-  decide
+  apply ProviderExecutionLease.terminalPlan_ready completedOutcome terminalBefore
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease,
+      completedPlan]
+  · rw [completed_trigger_root]
+    simp [terminalBefore, terminalBeforeModel, terminalBeforeBytes, runtime, lease]
+  · rfl
 
 @[simp] theorem completion_commits_terminal_and_outbox :
     DurableDataIntent.execute .complete terminalBefore completedPlan.intent =

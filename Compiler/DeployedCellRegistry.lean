@@ -1,5 +1,10 @@
 /-
-# Compiler.DeployedCellRegistry -- one concrete heterogeneous cell registry
+# Compiler.DeployedCellRegistry -- logical heterogeneous lifecycle exhibit
+
+This noncomputable, non-cryptographic registry is a scoped inhabitation and
+lifecycle witness. The unified receiving path uses
+`Compiler.CanonicalCellRegistry`; it does not select this witness as a
+production codec/root configuration.
 
 `Theory.CellSlot` deliberately leaves its deployed registry configuration
 uninhabited: a registry must choose exact schemas, lawful materializers, stable

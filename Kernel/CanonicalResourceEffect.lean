@@ -203,6 +203,9 @@ def family
   ModeEvidence := fun operation _ =>
     PLift (CanonicalResourceKernel.Admission
       (CanonicalResourceKernel.logicalBook pre.logical) operation)
+  Postcondition := fun operation _ post =>
+    (operation.patch pre).ResultAt pre.logical post ∧
+      logicalBook post = operation.apply (logicalBook pre.logical)
   effectDigest := effectDigest
   patch := fun operation _ => operation.patch pre
   nullifier := fun _ _ => none
@@ -228,6 +231,7 @@ def toCellEffect
   preRootBound := rfl
   modeEvidence := PLift.up accepted.admission
   validated := accepted.validated
+  postcondition := ⟨accepted.validated.resultAt, accepted.post_logicalBook⟩
   disclosure := .sealed
   disclosureAllowed := rfl
 
@@ -342,22 +346,25 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
   rw [feePosition_operation]
   rfl
 
+/-- The factory and Book policies observe their own primary cell roots under
+the same old authority snapshot. Their portal-indexed authorization tokens
+remain distinct; one context is never coerced into the other. -/
 structure BirthBatchEvidence {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
-    (portal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
     (descriptor : ResourceBirth.Descriptor registry) where
-  factory : ResourceBirth.FactoryAuthorization pins encoding portal oldAuthority
+  factory : ResourceBirth.FactoryAuthorization pins encoding factoryPortal oldAuthority
     factoryPreRoot height descriptor
   admission : descriptor.resourceBatch.Admission (logicalBook pre.logical)
   sources : ∀ position : Fin descriptor.resourceBatch.operations.length,
-    Authorized portal oldAuthority (batchSourceRequest encoding pre contexts descriptor position)
+    Authorized sourcePortal oldAuthority (batchSourceRequest encoding pre contexts descriptor position)
 
 def birthFamily {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
-    (portal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext) :
     SemanticEffectFamily.{0, 0, 0, 0, 0, 0} CanonicalResourceKernel.schema M Unit where
   pre := pre
@@ -367,7 +374,10 @@ def birthFamily {registry : CellRegistry.TypeRegistry Digest}
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun descriptor _ =>
-    BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height pre contexts descriptor
+    BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height pre contexts descriptor
+  Postcondition := fun descriptor _ post =>
+    (descriptor.resourceBatch.patch pre).ResultAt pre.logical post ∧
+      logicalBook post = descriptor.resourceBatch.apply (logicalBook pre.logical)
   effectDigest := encoding.effectsDigest
   patch := fun descriptor _ => descriptor.resourceBatch.patch pre
   nullifier := fun _ _ => none
@@ -376,34 +386,61 @@ def birthFamily {registry : CellRegistry.TypeRegistry Digest}
   ReleaseAuthorization := fun _ _ release => release.elim
   DisclosureAllowed := fun _ _ disclosure => disclosure = .sealed
 
+/-- Prepare the exact solvent Book result before joint policy evaluation.
+This contains no factory or source authorization and cannot mint an accepted
+effect until `PreparedPatch.accept` receives the complete `BirthBatchEvidence`.
+-/
+def prepareBirthPatch {registry : CellRegistry.TypeRegistry Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
+    (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
+    (descriptor : ResourceBirth.Descriptor registry)
+    (admission : descriptor.resourceBatch.Admission (logicalBook pre.logical)) :
+    PolicyInstall.PreparedPatch
+      (birthFamily pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height pre contexts)
+      pre descriptor () where
+  preStateBound := rfl
+  validated := (AcceptedBatch.ofAdmission admission).validated
+  postcondition := ⟨(AcceptedBatch.ofAdmission admission).validated.resultAt,
+    (AcceptedBatch.ofAdmission admission).post_logicalBook⟩
+
+/-- The preauthorization view is the existing portal-independent canonical
+batch result. A controller may use that result to assemble its policy context
+and then bind the prepared family to the resulting real portal. -/
+@[simp] theorem prepareBirthPatch_post {registry : CellRegistry.TypeRegistry Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
+    (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
+    (descriptor : ResourceBirth.Descriptor registry)
+    (admission : descriptor.resourceBatch.Admission (logicalBook pre.logical)) :
+    (prepareBirthPatch pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
+      pre contexts descriptor admission).post =
+        (AcceptedBatch.ofAdmission admission).post := rfl
+
 def toBirthCellEffect {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
-    {portal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
+    {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
     {descriptor : ResourceBirth.Descriptor registry}
-    (evidence : BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height
+    (evidence : BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
       pre contexts descriptor) :
-    AcceptedCellEffect (portal := portal) (authState := oldAuthority)
-      (birthFamily pins encoding portal oldAuthority factoryPreRoot height pre contexts)
-      (birthRequest encoding pre contexts descriptor) pre descriptor () where
-  authorization := evidence.sources (feePosition descriptor)
-  preStateBound := rfl
-  requestBound := rfl
-  effectsDigestBound := rfl
-  preRootBound := rfl
-  modeEvidence := evidence
-  validated := (AcceptedBatch.ofAdmission evidence.admission).validated
-  disclosure := .sealed
-  disclosureAllowed := rfl
+    AcceptedCellEffect (portal := sourcePortal) (authState := oldAuthority)
+      (birthFamily pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height pre contexts)
+      (birthRequest encoding pre contexts descriptor) pre descriptor () :=
+  (prepareBirthPatch pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
+    pre contexts descriptor evidence.admission).accept evidence
+      (evidence.sources (feePosition descriptor)) rfl rfl rfl .sealed rfl
 
 theorem toBirthCellEffect_post_book {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
-    {portal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
+    {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
     {descriptor : ResourceBirth.Descriptor registry}
-    (evidence : BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height
+    (evidence : BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
       pre contexts descriptor) :
     logicalBook (toBirthCellEffect evidence).prepared.post.logical =
       descriptor.resourceBatch.apply (logicalBook pre.logical) :=
@@ -412,10 +449,10 @@ theorem toBirthCellEffect_post_book {registry : CellRegistry.TypeRegistry Digest
 theorem toBirthCellEffect_conserves {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
-    {portal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
+    {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
     {descriptor : ResourceBirth.Descriptor registry}
-    (evidence : BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height
+    (evidence : BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
       pre contexts descriptor) (asset : AssetId) :
     (logicalBook (toBirthCellEffect evidence).prepared.post.logical).totalAsset asset =
       (logicalBook pre.logical).totalAsset asset :=
@@ -424,12 +461,12 @@ theorem toBirthCellEffect_conserves {registry : CellRegistry.TypeRegistry Digest
 def birth_sources_authorized {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
-    {portal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
+    {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
     {descriptor : ResourceBirth.Descriptor registry}
-    (evidence : BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height
+    (evidence : BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
       pre contexts descriptor) (position : Fin descriptor.resourceBatch.operations.length) :
-    Authorized portal oldAuthority (batchSourceRequest encoding pre contexts descriptor position) :=
+    Authorized sourcePortal oldAuthority (batchSourceRequest encoding pre contexts descriptor position) :=
   evidence.sources position
 
 /-- Possessing the factory authorization never authorizes an unrelated payer.
@@ -437,13 +474,13 @@ One missing source permission makes the batch evidence uninhabited. -/
 theorem no_birthEvidence_of_unauthorized_source {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
-    {portal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
+    {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
     {descriptor : ResourceBirth.Descriptor registry}
     (position : Fin descriptor.resourceBatch.operations.length)
-    (refused : IsEmpty (Authorized portal oldAuthority
+    (refused : IsEmpty (Authorized sourcePortal oldAuthority
       (batchSourceRequest encoding pre contexts descriptor position))) :
-    IsEmpty (BirthBatchEvidence pins encoding portal oldAuthority factoryPreRoot height
+    IsEmpty (BirthBatchEvidence pins encoding factoryPortal sourcePortal oldAuthority factoryPreRoot height
       pre contexts descriptor) :=
   ⟨fun evidence => refused.false (evidence.sources position)⟩
 
