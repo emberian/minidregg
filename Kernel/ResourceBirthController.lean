@@ -14,6 +14,7 @@ raw-DataIntent endpoint. Sharded authority needs its source-owned materializatio
 refinement in addition to the one-native-cell/one-physical-cell lift here.
 -/
 import Compiler.ResourceBirthCodec
+import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialAuthorityDomainReceiver
 import Theory.ResourceBirthAuthority
 import Kernel.CanonicalResourceEffect
@@ -536,6 +537,25 @@ def ProfileBound (profile : PolicyCompilerProfile F) (pins : FactoryPins) : Prop
 instance profileBoundDecidable (profile : PolicyCompilerProfile F) (pins : FactoryPins) :
     Decidable (ProfileBound profile pins) := by unfold ProfileBound; infer_instance
 
+/-- A creator owns one stable source coordinate within the actual deployment
+and compatible runtime. Neither a payload revision nor new observed roots
+changes it; those changes must conflict under the same retry identity. -/
+def sourceIdentity (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (creator : SubjectId) (nonce : Nat) : Digest :=
+  CredentialAuthorityReplay.birthIdentity deployment.domain profile.semantics
+    ⟨deployment.factoryId⟩ creator nonce
+
+def IdentityBound (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (descriptor : Descriptor Registry) : Prop :=
+  descriptor.transactionId = sourceIdentity profile deployment descriptor.creator descriptor.nonce ∧
+    descriptor.authorityNullifier =
+      (sourceIdentity profile deployment descriptor.creator descriptor.nonce).value
+
+instance identityBoundDecidable (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (descriptor : Descriptor Registry) : Decidable (IdentityBound profile deployment descriptor) := by
+  unfold IdentityBound
+  infer_instance
+
 private instance initialPoliciesBoundDecidable (descriptor : Descriptor Registry) :
     Decidable descriptor.InitialPoliciesBound := by
   unfold Descriptor.InitialPoliciesBound
@@ -544,6 +564,7 @@ private instance initialPoliciesBoundDecidable (descriptor : Descriptor Registry
 inductive PreparationReject where
   | deployment
   | compilerProfile
+  | identity
   | directory
   | initialPayload
   | initialPolicy
@@ -571,6 +592,7 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   deploymentValid : deployment.Valid
   pinsBound : PinsBound deployment pins
   profileBound : ProfileBound profile pins
+  identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
@@ -606,6 +628,7 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
+  let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
@@ -636,7 +659,7 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
       ∀ write ∈ writes, write.expectedPre = durable.snapshot.model.roots write.cellId)
     .physicalShape
   let finalCells ← requirePreparation (∀ write ∈ writes, PhysicalPostLaw deployment write) .finalCellLaw
-  .ok ⟨valid.down.1, valid.down.2, profileBound.down, directory, initials.down,
+  .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory, initials.down,
     policiesBound.down, factory, book, authority,
     grants, (sameCreates_iff _ _).mp aux.down, allocated, resources,
     shape.down.1, shape.down.2, finalCells.down⟩
@@ -656,6 +679,37 @@ def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : AuthState :=
   prepared.authority.snapshot.authState
+
+theorem PreparedBirth.transaction_identity {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    descriptor.transactionId = sourceIdentity profile deployment descriptor.creator descriptor.nonce :=
+  prepared.identityBound.1
+
+theorem PreparedBirth.authority_marker_identity {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    descriptor.authorityNullifier =
+      (sourceIdentity profile deployment descriptor.creator descriptor.nonce).value :=
+  prepared.identityBound.2
+
+/-- Chosen global journal identifiers never become prepared receiving effects.
+This requires no assumption that two different hash inputs have different hashes. -/
+theorem no_prepared_of_wrong_transaction {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (wrong : descriptor.transactionId ≠
+      sourceIdentity profile deployment descriptor.creator descriptor.nonce) :
+    ¬Nonempty (PreparedBirth profile deployment pins durable descriptor) := by
+  rintro ⟨prepared⟩
+  exact wrong prepared.transaction_identity
+
+theorem no_prepared_of_wrong_marker {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (wrong : descriptor.authorityNullifier ≠
+      (sourceIdentity profile deployment descriptor.creator descriptor.nonce).value) :
+    ¬Nonempty (PreparedBirth profile deployment pins durable descriptor) := by
+  rintro ⟨prepared⟩
+  exact wrong prepared.authority_marker_identity
 
 /-- A user draft has no auxiliary creates. Only the source-owned lowering may
 fill that field; every other source field remains exactly the draft's value.

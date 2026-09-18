@@ -15,6 +15,8 @@ premises are explicit here. No deployment field or product range is selected.
 import Compiler.CanonicalPolicyAdmission
 import Compiler.CanonicalCellRegistry
 import Compiler.CredentialAuthorityDomain
+import Compiler.CredentialAuthorityReplay
+import Compiler.CredentialSignatureAdmission
 import Compiler.DeclaredEffectPageMaterializer
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
@@ -113,6 +115,14 @@ role. The authority page is currently v3, complete state v2 and catalogue root v
 these are their actual exported identities, without a blanket version label. -/
 def sourceComponents : List (List UInt8) :=
   [authorizationVersion,
+   CredentialSignatureAdmission.signatureDomain,
+   CredentialSignatureAdmission.requestFrame,
+   (StreamCodec.list StreamCodec.nat).encode
+     [CredentialSignatureAdmission.ed25519Algorithm,
+      Minidregg.Kernel.CredentialSignedEnvelopeController.envelopeCodecVersion],
+   CredentialAuthorityReplay.frame,
+   CredentialAuthorityReplay.birthIdentityFrame,
+   CredentialAuthorityReplay.birthIdentityCustomization,
    CredentialAuthorityStateCodec.wireFrame,
    CredentialAuthorityStateCodec.rootCustomization,
    CredentialAuthorityPageMaterializer.wireFrame,
