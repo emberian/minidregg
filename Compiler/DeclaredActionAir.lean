@@ -16,6 +16,10 @@ constraints then enforce every guard.  Option-Int codes must be below the
 BabyBear modulus, making their field embedding injective rather than silently
 identifying distinct full-width integers modulo the field.
 
+The declaration's same scoped-action admission check selects either this
+derived system or the unsatisfiable constant relation. Its amount/target checks
+are on the pinned statement data, not a caller-supplied acceptance bit.
+
 This is not a policy verifier: `PolicyWitness`, signatures, membership proofs,
 and the policy predicate remain in `TypedAuthorization`.  It is also not a
 generic effect registry or a callback semantics.
@@ -318,8 +322,10 @@ def system {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target)
     (fields : EffectFields) :
     ConstraintSystem BabyBear (WireIx context declaration fields) :=
-  pinSystem (assignment context declaration fields) ++
-    guardSystem context declaration fields
+  if declaration.admissionCheck then
+    pinSystem (assignment context declaration fields) ++
+      guardSystem context declaration fields
+  else [cst 1]
 
 theorem guardSystem_correct {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
@@ -366,16 +372,19 @@ theorem system_correct {kind : ResourceKind} {target : ResourceId kind}
       asg = assignment context declaration fields /\
         declaration.run fields =
           some (applyFieldWrites declaration.fieldWrites fields) := by
-  rw [system, systemAccepts_append, pinSystem_correct]
-  constructor
-  · rintro ⟨rfl, guards⟩
-    refine ⟨rfl, ?_⟩
-    apply (observeGuards_exact_iff_run declaration.checkedWrites fields).mp
-    exact (guardSystem_correct context declaration fields bounded).mp guards
-  · rintro ⟨rfl, run⟩
-    refine ⟨rfl, (guardSystem_correct context declaration fields bounded).mpr ?_⟩
-    apply (observeGuards_exact_iff_run declaration.checkedWrites fields).mpr
-    simpa [Declaration.run, Declaration.fieldWrites] using run
+  by_cases admitted : declaration.admissionCheck = true
+  · rw [system, if_pos admitted, systemAccepts_append, pinSystem_correct]
+    constructor
+    · rintro ⟨rfl, guards⟩
+      refine ⟨rfl, ?_⟩
+      have run := (observeGuards_exact_iff_run declaration.checkedWrites fields).mp
+        ((guardSystem_correct context declaration fields bounded).mp guards)
+      simpa [Declaration.run, admitted, Declaration.fieldWrites] using run
+    · rintro ⟨rfl, run⟩
+      refine ⟨rfl, (guardSystem_correct context declaration fields bounded).mpr ?_⟩
+      apply (observeGuards_exact_iff_run declaration.checkedWrites fields).mpr
+      simpa [Declaration.run, admitted, Declaration.fieldWrites] using run
+  · simp [system, admitted, Declaration.run, systemAccepts, accepts, cst]
 
 def descriptor {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target)

@@ -21,6 +21,7 @@ inductive RejectReason
   | malformed
   | schemaVersion (expected actual : Nat)
   | emptyBatch
+  | inadmissibleAction
   deriving DecidableEq, Repr
 
 /-- Proof-relevant accepted artifact.  `accepted_source_decoded` below binds
@@ -30,6 +31,7 @@ structure Compiled {kind : ResourceKind} (target : ResourceId kind)
   declaration : Declaration target
   schemaVersionExact : declaration.schemaVersion = expectedVersion
   actionsPresent : declaration.actions ≠ []
+  actionsAdmitted : declaration.Admitted
 
 inductive Outcome {kind : ResourceKind} (target : ResourceId kind)
     (expectedVersion : Nat)
@@ -45,26 +47,31 @@ def compile {kind : ResourceKind} (target : ResourceId kind)
   | none => .rejected .malformed
   | some declaration =>
       if version : declaration.schemaVersion = expectedVersion then
-        if actions : declaration.actions = [] then
-          .rejected .emptyBatch
-        else
-          .accepted
-            { declaration := declaration
-              schemaVersionExact := version
-              actionsPresent := actions }
+        if admitted : declaration.admissionCheck = true then
+          if actions : declaration.actions = [] then
+            .rejected .emptyBatch
+          else
+            .accepted
+              { declaration := declaration
+                schemaVersionExact := version
+                actionsPresent := actions
+                actionsAdmitted := admitted }
+        else .rejected .inadmissibleAction
       else .rejected (.schemaVersion expectedVersion declaration.schemaVersion)
 
 /-- Canonical encoder output compiles to the original nonempty declaration. -/
 theorem compile_encode_accepted {kind : ResourceKind}
     {target : ResourceId kind} (declaration : Declaration target)
-    (actions : declaration.actions ≠ []) :
+    (actions : declaration.actions ≠ []) (admitted : declaration.Admitted) :
     compile target declaration.schemaVersion
         ((declarationCodec target).encode declaration) =
       .accepted
         { declaration := declaration
           schemaVersionExact := rfl
-          actionsPresent := actions } := by
-  simp [compile, (declarationCodec target).decode_encode declaration, actions]
+          actionsPresent := actions
+          actionsAdmitted := admitted } := by
+  simp [compile, (declarationCodec target).decode_encode declaration, actions,
+    show declaration.admissionCheck = true from admitted]
 
 /-- Every accepted artifact is exactly the declaration decoded from the input
 bytes.  This is the retained compiler invariant, stated without storing a
@@ -81,10 +88,22 @@ theorem accepted_source_decoded {kind : ResourceKind}
       simp only [decoded] at accepted
       split at accepted
       · split at accepted
+        · split at accepted
+          · simp at accepted
+          · cases accepted
+            simpa using decoded
         · simp at accepted
-        · cases accepted
-          simpa using decoded
       · simp at accepted
+
+/-- Source bytes cannot regain a raw balance write or a different authority
+target by bypassing the runtime's common admission check. -/
+theorem compile_encode_inadmissible {kind : ResourceKind}
+    {target : ResourceId kind} (declaration : Declaration target)
+    (inadmissible : declaration.admissionCheck = false) :
+    compile target declaration.schemaVersion
+        ((declarationCodec target).encode declaration) =
+      .rejected .inadmissibleAction := by
+  simp [compile, (declarationCodec target).decode_encode declaration, inadmissible]
 
 /-- Changing any byte away from canonical unary zero is malformed.  This
 tooth prevents same-length noncanonical byte aliases at the compiler edge. -/

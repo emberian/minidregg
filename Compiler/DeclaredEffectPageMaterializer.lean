@@ -475,23 +475,32 @@ def context : RequestContext where
   policyId := ⟨10⟩
   policyEpoch := 0
 
+def preLogical : LogicalState DeclaredTurn.effectSchema where
+  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey 0
+  resources := effectCell.logical.resources
+
+def preCell : Materialized effectMaterializer :=
+  materialize effectMaterializer preLogical
+
 noncomputable def declaration : DeclaredActionLowering.Declaration source where
   schemaVersion := 1
   expectedPreRoot := preCell.root
   nonce := 400
-  actions := [.move source destination asset (some 0) (some 0) amount]
+  actions := [.move source destination asset (some 14) (some 0) amount]
 
 theorem declaration_valid : ValidAt preCell declaration where
   rootExact := rfl
   guardsAndPost := by
     simp [DeclaredActionLowering.Declaration.run,
+      DeclaredActionLowering.Declaration.admissionCheck, Action.admissionCheck,
+      amount,
       DeclaredActionLowering.Declaration.checkedWrites, declaration,
       Action.checkedWrites, runCheckedWrites,
       DeclaredActionLowering.Declaration.fieldWrites,
       CheckedWrite.toFieldWrite, preCell, preLogical,
       applyFieldWrites, FieldStore.assign, source, destination]
     constructor
-    · change (show Option Int from preLogical.fields debitKey) = some 0
+    · change (show Option Int from preLogical.fields debitKey) = some 14
       unfold preLogical
       rw [FieldStore.write_other _ (by decide)]
       exact FieldStore.write_self _ _ _
@@ -517,9 +526,9 @@ noncomputable def accepted :
 def effectDomain : Digest := ⟨7001⟩
 def localShard : Nat := addressShard debitKey
 
-def debitEntry : Entry := ⟨debitKey, 0⟩
+def debitEntry : Entry := ⟨debitKey, 14⟩
 def creditEntry : Entry := ⟨creditKey, 0⟩
-def debitPostEntry : Entry := ⟨debitKey, -amount⟩
+def debitPostEntry : Entry := ⟨debitKey, 14 - amount⟩
 def creditPostEntry : Entry := ⟨creditKey, amount⟩
 
 def prePage : Page where
@@ -549,7 +558,7 @@ theorem postPage_valid : postPage.Valid := by
   decide
 
 def debitWrite : CheckedWrite :=
-  { key := debitKey, expected := some 0, replacement := some (-amount) }
+  { key := debitKey, expected := some 14, replacement := some (14 - amount) }
 
 def creditWrite : CheckedWrite :=
   { key := creditKey, expected := some 0, replacement := some amount }
@@ -577,7 +586,7 @@ theorem debit_step :
     simpa [debitWrite] using (show prePage.Owns debitKey by decide))]
   rw [dif_pos (show prePage.lookup debitWrite.key = debitWrite.expected by
     simpa [debitWrite] using
-      (show prePage.lookup debitKey = some 0 by decide))]
+      (show prePage.lookup debitKey = some 14 by decide))]
   simp only [debitWrite]
   change checkedPost middlePage = .ok middlePage
   unfold checkedPost
@@ -613,8 +622,7 @@ theorem executor_exact :
 theorem preCanonicalExact : prePage.toCanonicalState = preCell.logical := by
   simp [prePage, Page.toCanonicalState, Page.entries, Entry.install,
     debitEntry, creditEntry, preCell,
-    Minidregg.Kernel.DeclaredHyperedgeWitness.preCell,
-    Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical,
+    preLogical,
     Minidregg.Theory.DeployedMaterializerWitness.effectCell,
     Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
     materialize, debitKey, creditKey]
@@ -634,21 +642,20 @@ theorem postCanonicalExact :
     intro field
     change
       (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-          debitKey (-amount)).write creditKey amount) field =
-        ((preCell.logical.fields.assign debitKey (some (-amount))).assign
+          debitKey (14 - amount)).write creditKey amount) field =
+        ((preCell.logical.fields.assign debitKey (some (14 - amount))).assign
           creditKey (some amount)) field
     by_cases credit : field = creditKey
     · subst field
       simp [FieldStore.write, FieldStore.assign]
     by_cases debit : field = debitKey
     · subst field
-      change some (-amount) = some (-amount)
+      change some (14 - amount) = some (14 - amount)
       rfl
     ·
       have preAbsent : preCell.logical.fields field = none := by
         simp only [preCell,
-          Minidregg.Kernel.DeclaredHyperedgeWitness.preCell,
-          Minidregg.Kernel.DeclaredHyperedgeWitness.preLogical,
+          preLogical,
           Minidregg.Theory.DeployedMaterializerWitness.effectCell,
           Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
           materialize]
@@ -657,26 +664,26 @@ theorem postCanonicalExact :
         rfl
       have leftAbsent :
           (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-              debitKey (-amount)).write creditKey amount) field = none := by
+              debitKey (14 - amount)).write creditKey amount) field = none := by
         rw [FieldStore.write_other _ (Ne.symm credit)]
         rw [FieldStore.write_other _ (Ne.symm debit)]
         rfl
       have rightCredit :
-          ((preCell.logical.fields.assign debitKey (some (-amount))).assign
+          ((preCell.logical.fields.assign debitKey (some (14 - amount))).assign
               creditKey (some amount)) field =
-            (preCell.logical.fields.assign debitKey (some (-amount))) field := by
+            (preCell.logical.fields.assign debitKey (some (14 - amount))) field := by
         simpa [FieldStore.read] using
           (FieldStore.read_assign_other
-            (preCell.logical.fields.assign debitKey (some (-amount)))
+            (preCell.logical.fields.assign debitKey (some (14 - amount)))
             (field := field) (other := creditKey) (Ne.symm credit)
             (some amount))
       have rightDebit :
-          (preCell.logical.fields.assign debitKey (some (-amount))) field =
+          (preCell.logical.fields.assign debitKey (some (14 - amount))) field =
             preCell.logical.fields field := by
         simpa [FieldStore.read] using
           (FieldStore.read_assign_other preCell.logical.fields
             (field := field) (other := debitKey) (Ne.symm debit)
-            (some (-amount)))
+            (some (14 - amount)))
       rw [leftAbsent, rightCredit, rightDebit, preAbsent]
   · funext resource
     exact Empty.elim resource

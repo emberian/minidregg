@@ -64,16 +64,33 @@ def typedDeclaration {kind : ResourceKind} {target : ResourceId kind}
   legs := fun _ => leg accepted
   composition := { fieldMode := .canonical, order := [()] }
 
-/-- The resource law is closed over this exact first-order declaration.  It
-reads the declaration-derived full-width posting sum; no executor counter or
-caller callback participates. -/
+/-- Read the actual supplied leg's accepted pre/post balances over the account
+support of that leg's validated footprint. Neither a captured declaration nor
+a caller-supplied posting vector can hide another leg's balance changes. -/
 def resourceLaw {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (_accepted : Accepted portal authState context pre declaration) :
     ResourceLaw DeclaredTurn.effectSchema.{0, 0} M portal Digest Int where
-  delta := fun _ resource => postingSum declaration.postings resource
+  delta := fun {_} {pre} leg resource =>
+    ∑ account ∈ balanceAccounts leg.patch.fieldFootprint,
+      (balance leg.post.logical.fields account resource -
+        balance pre.logical.fields account resource)
+
+/-- The same validated footprint covers all balances omitted from the law's
+finite account sum, including on an arbitrary supplied semantic leg. -/
+theorem balance_frame_outside_support
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {pre : Materialized M}
+    (leg : Leg portal authState pre) (account : ResourceId .account)
+    (resource : Digest) (outside : account ∉ balanceAccounts leg.patch.fieldFootprint) :
+    balance leg.post.logical.fields account resource =
+      balance pre.logical.fields account resource := by
+  have unnamed : .accountBalance account resource ∉ leg.patch.fieldFootprint :=
+    fun member => outside (mem_balanceAccounts member)
+  have frame := leg.accepted.field_frame (.accountBalance account resource) unnamed
+  exact congrArg (fun value : Option Int => value.getD 0) frame
 
 theorem typedShape {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
@@ -144,8 +161,9 @@ def typedCommit {kind : ResourceKind} {target : ResourceId kind}
     exact congrArg Materialized.root cells
   aggregateBalanced := by
     funext resource
-    simp [TypedCellHyperedge.Declaration.aggregateDelta, resourceLaw,
-      Declaration.postingSum_zero]
+    simpa [TypedCellHyperedge.Declaration.aggregateDelta, resourceLaw,
+      typedDeclaration, leg, Leg.patch, Leg.post, family] using
+      accepted.conserves resource
 
 theorem typed_authority_exact {kind : ResourceKind}
     {target : ResourceId kind}
@@ -270,44 +288,30 @@ def context : RequestContext where
   policyId := ⟨10⟩
   policyEpoch := 0
 
-/-! ### A genuine create -> write -> move batch -/
+/-! ### Separately authorized object and account batches -/
 
 def object : ResourceId .object := ⟨700⟩
 def objectField : Digest := ⟨701⟩
 def objectKey : EffectDeclaration.StateKey := .objectField object objectField
 
-def multiDeclaration : Declaration source where
+def multiDeclaration : Declaration object where
   schemaVersion := 1
   expectedPreRoot := effectCell.root
   nonce := 399
   actions :=
     [.create objectKey 3,
-     .write objectKey (some 3) 4,
-     .move source destination asset none none amount]
+     .write objectKey (some 3) 4]
 
 theorem multiValid : ValidAt effectCell multiDeclaration where
   rootExact := rfl
   guardsAndPost := by
-    simp [Declaration.run, Declaration.checkedWrites, multiDeclaration,
+    simp [Declaration.run, Declaration.admissionCheck, Action.admissionCheck,
+      writableKeyCheck, Declaration.checkedWrites, multiDeclaration,
       Action.checkedWrites, runCheckedWrites, Declaration.fieldWrites,
       CheckedWrite.toFieldWrite, applyFieldWrites, FieldStore.assign,
       effectCell, emptyLogical, objectKey, object, objectField,
       source, destination]
-    constructor
-    · change (show Option Int from
-          (0 : FieldStore DeclaredTurn.effectSchema.{0, 0}) objectKey) = none
-      rfl
-    constructor
-    · change (show Option Int from
-          (0 : FieldStore DeclaredTurn.effectSchema.{0, 0})
-            (.accountBalance source asset)) = none
-      rfl
-    · rw [Function.update_of_ne (by decide)]
-      rw [Function.update_of_ne (by decide)]
-      change (show Option Int from
-        (0 : FieldStore DeclaredTurn.effectSchema.{0, 0})
-          (.accountBalance destination asset)) = none
-      rfl
+    rfl
 
 def multiAuthorization : Authorized permissivePortal authState
     (context.request multiDeclaration) where
@@ -324,13 +328,14 @@ def multiAccepted :
   accept multiAuthorization multiValid
 
 theorem multiCompilerAccepts :
-    compile source multiDeclaration.schemaVersion
-        ((declarationCodec source).encode multiDeclaration) =
+    compile object multiDeclaration.schemaVersion
+        ((declarationCodec object).encode multiDeclaration) =
       .accepted
         { declaration := multiDeclaration
           schemaVersionExact := rfl
-          actionsPresent := by decide } :=
-  compile_encode_accepted multiDeclaration (by decide)
+          actionsPresent := by decide
+          actionsAdmitted := by decide } :=
+  compile_encode_accepted multiDeclaration (by decide) (by decide)
 
 theorem multiHyperedge_nonempty :
     Nonempty (TypedCellHyperedge.Commit (resourceLaw multiAccepted)
@@ -340,26 +345,33 @@ theorem multiHyperedge_nonempty :
 theorem multi_action_surface :
     multiDeclaration.actions =
       [.create objectKey 3,
-       .write objectKey (some 3) 4,
-       .move source destination asset none none amount] := rfl
+       .write objectKey (some 3) 4] := rfl
 
-/-! ### Exact legacy transfer slice -/
+/-! ### Funded transfer over the existing sparse schema -/
+
+def preLogical : LogicalState DeclaredTurn.effectSchema where
+  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey 0
+  resources := effectCell.logical.resources
+
+def preCell : Materialized effectMaterializer :=
+  materialize effectMaterializer preLogical
 
 def declaration : Declaration source where
   schemaVersion := 1
   expectedPreRoot := preCell.root
   nonce := 400
-  actions := [.move source destination asset (some 0) (some 0) amount]
+  actions := [.move source destination asset (some 14) (some 0) amount]
 
 theorem valid : ValidAt preCell declaration where
   rootExact := rfl
   guardsAndPost := by
-    simp [Declaration.run, Declaration.checkedWrites, declaration,
+    simp [Declaration.run, Declaration.admissionCheck, Action.admissionCheck,
+      amount, Declaration.checkedWrites, declaration,
       Action.checkedWrites, runCheckedWrites, Declaration.fieldWrites,
       CheckedWrite.toFieldWrite, preCell, preLogical,
       applyFieldWrites, FieldStore.assign, source, destination]
     constructor
-    · change (show Option Int from preLogical.fields debitKey) = some 0
+    · change (show Option Int from preLogical.fields debitKey) = some 14
       unfold preLogical
       rw [FieldStore.write_other _ (by decide)]
       exact FieldStore.write_self _ _ _
@@ -387,18 +399,20 @@ theorem compiler_accepts :
       .accepted
         { declaration := declaration
           schemaVersionExact := rfl
-          actionsPresent := by decide } :=
-  compile_encode_accepted declaration (by decide)
+          actionsPresent := by decide
+          actionsAdmitted := by decide } :=
+  compile_encode_accepted declaration (by decide) (by decide)
 
 theorem hyperedge_nonempty :
     Nonempty (TypedCellHyperedge.Commit (resourceLaw accepted)
       (typedDeclaration accepted)) :=
   ⟨typedCommit accepted⟩
 
-theorem legacy_move_exact :
-    declaration.patch.fieldWrites =
-      Minidregg.Kernel.DeclaredHyperedgeWitness.Migration.debitPatch.fieldWrites := by
-  rfl
+theorem funded_move_debits_exact :
+    balance accepted.cellEffect.prepared.post.logical.fields source asset -
+      balance preCell.logical.fields source asset = -amount := by
+  simpa [declaration, Declaration.postings, Action.postings, postingDelta,
+    source, destination] using accepted.balance_delta source asset
 
 def available : Charge := exactCharge declaration
 
