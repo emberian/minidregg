@@ -103,6 +103,7 @@ def lifecyclePortal : Portal where
   SignatureWitness := Unit
   ProofWitness := Unit
   CapabilityCommitmentWitness := Unit
+  CapabilityUseWitness := Unit
   MembershipWitness := Unit
   IssuerWitness := Unit
   NonRevocationWitness := Unit
@@ -111,6 +112,7 @@ def lifecyclePortal : Portal where
   verifySignature := fun _ _ => true
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
+  verifyCapabilityUse := fun _ _ _ _ => true
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
@@ -619,8 +621,8 @@ theorem child_admissible_for_use :
 def tokenEvidence :
     Evidence lifecyclePortal (authState authorityDomain attenuatedCell)
       useRequest :=
-  .capability childCapability ⟨9500⟩ () () () () child_admissible_for_use
-    rfl rfl rfl rfl
+  .capability childCapability ⟨9500⟩ () () () () () child_admissible_for_use
+    rfl rfl rfl rfl rfl
     (by intro ancestor member; exact ⟨(), rfl⟩)
     (by intro channel member; exact ⟨(), rfl⟩)
 

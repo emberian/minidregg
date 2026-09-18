@@ -236,7 +236,7 @@ def Current {portal : Portal} {state : AuthState}
   | .signature _ keyEpochExact _ =>
       request.subjectKeyEpoch = state.subjectKeyEpoch request.subject
   | .proof .. => True
-  | .capability cap _ _ _ _ _ semantic .. =>
+  | .capability cap _ _ _ _ _ _ _ .. =>
       cap.issuerEpoch = state.issuerEpoch cap.issuer ∧
       RevocationKey.capability cap.id ∉ state.revoked ∧
       (∀ ancestor ∈ cap.ancestors,
@@ -271,7 +271,8 @@ theorem semanticEnvelope {portal : Portal} {state : AuthState}
       exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request,
         trivial⟩
   | capability cap commitment commitmentWitness membershipWitness issuerWitness
-      selfRevocationWitness semantic commitmentVerified membershipVerified issuerVerified
+      selfRevocationWitness useWitness semantic useVerified
+      commitmentVerified membershipVerified issuerVerified
       selfRevocationVerified ancestorVerified channelVerified =>
       exact ⟨semantic.holder, semantic.scope,
         semantic.issuerCurrent, semantic.selfNotRevoked,

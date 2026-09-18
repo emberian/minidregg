@@ -6,6 +6,36 @@ open Minidregg.Compiler.PolicyRecordCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Pred
 
+/-! These helpers build semantic fixtures through the checked domain editor
+and complete catalogue assembler. They do not claim physical store provenance;
+the production receiver obtains that from DomainReceiver.Loaded. -/
+namespace AuthorityFixture
+
+open Minidregg.Compiler
+open Minidregg.Compiler.CredentialAuthorityPageMaterializer
+open Minidregg.Theory.CellState
+open Minidregg.Theory.TypedAuthorization
+
+def fromPages (domain : Digest) (revision : Nat) (pages : List Page) :
+    IO CredentialAuthorityDomain.Snapshot := do
+  let catalogue : CredentialAuthorityDomain.Catalogue :=
+    { domain := domain, revision := revision
+      pages := pages.map fun page =>
+        { number := page.pageNumber, cellId := ⟨1000 + page.pageNumber⟩
+          physicalRoot := (materialize materializer (stateOfOption (some page))).root } }
+  match CredentialAuthorityDomain.assemble catalogue pages with
+  | none => throw (IO.userError "FAIL: complete semantic authority fixture rejected")
+  | some snapshot => pure snapshot
+
+def fromEntries (domain : Digest) (entries : List Entry) :
+    IO CredentialAuthorityDomain.Snapshot := do
+  match CredentialAuthorityDomain.runEdits domain []
+      (entries.map fun entry => { before := none, after := entry }) with
+  | none => throw (IO.userError "FAIL: routed authority fixture rejected")
+  | some pages => fromPages domain 0 pages
+
+end AuthorityFixture
+
 namespace PolicySourceV2Probe
 
 def record (predicate : Pred) : PolicyRecord where
@@ -62,30 +92,22 @@ def main : IO Unit := do
     (decide (fetched = some (encode deployed.record)))
   require "existing digest consumer selects v2 address"
     (decide (deployed.address = digest deployed.record))
-  let snapshot := Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Snapshot.ofPage
-    Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.policyPage
-    Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.policyPage_valid
-  -- The historical example record deliberately used another authority domain;
-  -- the actual receiving resolver must refuse it even though its hash matches.
+  let selectedEntry := Minidregg.Compiler.CredentialAuthorityPageMaterializer.Entry.policy
+    deployed.record.policyId deployed.record.version deployed.address
+  let snapshot ← AuthorityFixture.fromEntries ⟨91000⟩ [selectedEntry]
   require "receiving resolver refuses domain mismatch"
     ((Minidregg.Compiler.CredentialAuthorityPolicyRegistry.loadPolicy snapshot
       Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.payloadStore
       deployed.record.policyId deployed.record.version).isNone)
-  let page : Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page :=
-    { Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.policyPage with
-    authorityDomain := deployed.record.domain }
-  have pageValid : page.Valid := by
-    simpa [page, Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.Valid,
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.fields,
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.entries] using
-      Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.policyPage_valid
-  let current := Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Snapshot.ofPage page pageValid
+  let current ← AuthorityFixture.fromEntries deployed.record.domain [selectedEntry]
   require "actual receiving resolver loads current canonical source"
     ((Minidregg.Compiler.CredentialAuthorityPolicyRegistry.loadPolicy current
       Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.payloadStore
       deployed.record.policyId deployed.record.version).isSome)
-  require "actual canonical page decoder accepts current bytes"
-    ((Minidregg.Compiler.CredentialAuthorityPolicyRegistry.decodeSnapshot current.cell.bytes).isSome)
+  require "full canonical authority codec accepts actual state bytes"
+    ((Minidregg.Compiler.CredentialAuthorityStateCodec.decode current.cell.bytes).isSome)
+  require "missing catalogue shard refuses complete snapshot"
+    ((Minidregg.Compiler.CredentialAuthorityDomain.assemble current.catalogue []).isNone)
   require "actual receiving resolver refuses changed payload"
     ((Minidregg.Compiler.CredentialAuthorityPolicyRegistry.loadPolicy current
       { fetch := fun _ => some (encode { deployed.record with previous := some ⟨9876⟩ }) }
@@ -94,8 +116,9 @@ def main : IO Unit := do
 
 end PolicySourceV2Probe
 
-namespace PolicyInstallProbe
+namespace PolicyInstallPreparationProbe
 
+open Minidregg.Compiler
 open Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 open Minidregg.Kernel
@@ -103,31 +126,31 @@ open Minidregg.Kernel.CanonicalPolicyRegistry
 open Minidregg.Theory.TypedAuthorization
 
 local instance : Fact (Nat.Prime 65537) := ⟨by norm_num⟩
-
 abbrev F := ZMod 65537
+
+/-- Executable arithmetic/profile fixture, not a deployment-field choice. -/
+def runtime : CanonicalRuntimeProfile.Profile F :=
+  .source ⟨⟨99⟩, 10000, 1000⟩ ⟨65537⟩ 65537 inferInstance 8
+    (PredOrder.noWrap_zmod (by norm_num))
 
 def source (version : Nat) (previous : Option Digest) (predicate : Pred) : PolicyRecord where
   policyId := ⟨17⟩
   version := version
   domain := ⟨500⟩
-  semantics := PolicyInstallController.semantics
+  semantics := runtime.semantics
   previous := previous
   predicate := predicate
 
 def initialSource := source 0 none
-  (Pred.all [.eq "request/subject" 7, .eq "policy/version" 1])
+  (Pred.all [.eq "request/subject" 7, .eq "policy/version" 1, .monotone "policy/version"])
 
-def initialPage : Page where
-  authorityDomain := initialSource.domain
-  pageNumber := 4
-  slot0 := some (.policy initialSource.policyId 0 (policyRecordDigest initialSource))
-  slot1 := some (.subjectKeyEpoch ⟨7⟩ 2)
-  slot2 := some (.issuerEpoch ⟨99⟩ 3)
-  slot3 := some (.nullifier 123 false)
-
-theorem initialPage_valid : initialPage.Valid := by decide
-
-def initial := Snapshot.ofPage initialPage initialPage_valid
+def initialEntries : List Entry :=
+  [ .policy initialSource.policyId 0 (policyRecordDigest initialSource)
+  , .subjectKeyEpoch ⟨7⟩ 2
+  , .issuerEpoch ⟨99⟩ 3
+  , .nullifier 123 false
+  , .subjectKeyEpoch ⟨111⟩ 4
+  , .revocation (.channel ⟨42⟩) true ]
 
 def context (epoch : Nat) : PolicyInstallController.RequestContext where
   federation := ⟨20⟩
@@ -136,13 +159,8 @@ def context (epoch : Nat) : PolicyInstallController.RequestContext where
   height := 50
   policyEpoch := epoch
 
-/-- Explicit verifier fixture: this checks the controller calls the verifier
-and propagates refusal. It makes no cryptographic signature-soundness claim. -/
-def signatureFixture : Portal :=
-  { Minidregg.Theory.TypedAuthorization.demoPortal with
-    SignatureWitness := Bool
-    verifySignature := fun _ accepted => accepted }
-
+/-- The source-only fixture intentionally has no signature verifier or receipt
+constructor. Actual accepted installs run in the native capability-use probe. -/
 def store (sources : List PolicyRecord) : PayloadStore where
   fetch := fun address => sources.findSome? fun record =>
     if policyRecordDigest record = address then some (policyRecordCodec.encode record) else none
@@ -160,116 +178,80 @@ def requireError {α : Type} (label : String) (expected : PolicyInstallControlle
   | .error reason => PolicySourceV2Probe.require label (decide (reason = expected))
   | .ok _ => throw (IO.userError s!"FAIL: {label} was accepted")
 
-def main : IO Unit := do
-  let firstSource := source 1 (some (policyRecordDigest initialSource)) (.eq "policy/version" 2)
-  let firstDecl := declaration initial initialSource firstSource 11
-  let firstBytes := PolicyInstallController.encodeDeclaration firstDecl
-  let first ← match PolicyInstallController.run (F := F) initial (context 0)
-      (store [initialSource]) signatureFixture firstBytes true with
-    | .error reason => throw (IO.userError s!"FAIL: first install {repr reason}")
-    | .ok installed => pure installed
-  let firstSnapshot ← match decodeSnapshot first.post.bytes with
-    | none => throw (IO.userError "FAIL: first actual post did not decode")
-    | some decoded => pure decoded.val
-  let other ← match PolicyInstallController.prepare initial (context 0)
-      (PolicyInstallController.encodeDeclaration { firstDecl with nonce := 12 }) with
-    | .error reason => throw (IO.userError s!"FAIL: second declaration candidate {repr reason}")
-    | .ok prepared => pure prepared
-  -- This deliberately lossy view exercises the general candidate/context seam.
-  -- It is fixed here in the probe, never supplied to the production receiver.
-  let leftStep := PolicyStepContext.ofCandidate (fun _ => ⟨[]⟩)
-    PolicyInstallController.semantics first.prepared.candidate
-  let rightStep := PolicyStepContext.ofCandidate (fun _ => ⟨[]⟩)
-    PolicyInstallController.semantics other.candidate
-  PolicySourceV2Probe.require "equal predicate views are inhabited"
-    (decide (leftStep.oldState = rightStep.oldState ∧ leftStep.newState = rightStep.newState))
-  PolicySourceV2Probe.require "distinct declaration commitments are inhabited"
-    (decide (leftStep.effectsDigest ≠ rightStep.effectsDigest))
-  PolicySourceV2Probe.require "same views do not permit declaration substitution"
-    (!(PolicyStepBinding.canonical rightStep).matches
-      (PolicyInstallController.request initial (context 0) firstDecl)
-      leftStep.oldState leftStep.newState)
-  PolicySourceV2Probe.require "installed source selected in actual post"
-    (decide (PolicyInstallController.currentHead firstSnapshot.page ⟨17⟩ =
-      some ⟨1, policyRecordDigest firstSource⟩))
-  PolicySourceV2Probe.require "unrelated key epoch retained"
-    (decide ((Minidregg.Compiler.CredentialAuthorityPolicyRegistry.projection.authState
-      firstSnapshot.cell).subjectKeyEpoch ⟨7⟩ = 2))
-  requireError "signature refusal reaches actual controller" .signature
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture firstBytes false)
-  requireError "stale signing epoch refuses" .subjectKeyEpoch
-    (PolicyInstallController.run (F := F) initial
-      { context 0 with subjectKeyEpoch := 1 } (store [initialSource])
-      signatureFixture firstBytes true)
-  requireError "stale policy epoch refuses" .policyEpoch
-    (PolicyInstallController.run (F := F) initial (context 1) (store [initialSource])
-      signatureFixture firstBytes true)
-  requireError "authored subject restriction uses fixed request view" .policyRejected
-    (PolicyInstallController.run (F := F) initial
-      { context 0 with subject := ⟨8⟩, subjectKeyEpoch := 0 } (store [initialSource])
-      signatureFixture firstBytes true)
-  requireError "noncanonical install bytes refuse" .malformedDeclaration
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture (firstBytes ++ [0]) true)
-  requireError "stale actual pre root refuses" .staleRoot
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration { firstDecl with expectedPreRoot := ⟨0⟩ }) true)
-  requireError "exact old head refuses substitution" .staleHead
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration { firstDecl with expected := some ⟨0, ⟨9⟩⟩ }) true)
-  requireError "version skip refuses" .invalidSuccessor
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        { firstDecl with source := { firstSource with version := 2 } }) true)
-  requireError "wrong predecessor refuses" .invalidSuccessor
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        { firstDecl with source := { firstSource with previous := some ⟨9⟩ } }) true)
-  requireError "wrong source domain refuses" .wrongDomain
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        { firstDecl with source := { firstSource with domain := ⟨501⟩ } }) true)
-  requireError "wrong source semantics refuses" .wrongSemantics
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        { firstDecl with source := { firstSource with semantics := ⟨0⟩ } }) true)
-  requireError "missing old source refuses" .policyUnavailable
-    (PolicyInstallController.run (F := F) initial (context 0) (store [])
-      signatureFixture firstBytes true)
-  requireError "unsupported AST cannot be installed as executable policy" .unsupportedPolicy
-    (PolicyInstallController.run (F := F) initial (context 0) (store [initialSource])
-      signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        { firstDecl with source := { firstSource with predicate := .monotone "policy/version" } }) true)
-  let secondSource := source 2 (some (policyRecordDigest firstSource)) (.eq "policy/version" 9)
-  let secondDecl := declaration firstSnapshot firstSource secondSource 12
-  let second ← match PolicyInstallController.run (F := F) firstSnapshot (context 1)
-      (store [firstSource, initialSource]) signatureFixture
-      (PolicyInstallController.encodeDeclaration secondDecl) true with
-    | .error reason => throw (IO.userError s!"FAIL: installed predicate invocation {repr reason}")
-    | .ok installed => pure installed
-  let secondSnapshot ← match decodeSnapshot second.post.bytes with
-    | none => throw (IO.userError "FAIL: second actual post did not decode")
-    | some decoded => pure decoded.val
-  let weakening := source 3 (some (policyRecordDigest secondSource)) (.allL .nil)
-  requireError "new weaker policy cannot authorize its own install" .policyRejected
-    (PolicyInstallController.run (F := F) secondSnapshot (context 2)
-      (store [secondSource, firstSource, initialSource]) signatureFixture
-      (PolicyInstallController.encodeDeclaration
-        (declaration secondSnapshot secondSource weakening 13)) true)
-  PolicySourceV2Probe.require "old epoch no longer resolves after installation"
-    ((loadPolicy secondSnapshot (store [secondSource, firstSource, initialSource]) ⟨17⟩ 1).isNone)
-  IO.println "PASS policy-install: actual page install, newly installed rule invoked, old rule prevents self-authorized weakening, distinct declarations with equal views refuse, canonical bytes and signature/key/policy/root/head/version/domain/semantics/source refusals (verifier fixture, not cryptographic signature proof)"
+def prepare (snapshot : Snapshot) (epoch : Nat) (decl : PolicyInstallController.Declaration) :
+    IO (PolicyInstallController.Prepared runtime snapshot (context epoch)) :=
+  match PolicyInstallController.prepare runtime snapshot (context epoch)
+      (PolicyInstallController.encodeDeclaration decl) with
+  | .error reason => throw (IO.userError s!"FAIL: source preparation {repr reason}")
+  | .ok prepared => pure prepared
 
-end PolicyInstallProbe
+def compiledVerdict {snapshot : Snapshot} {epoch : Nat}
+    (prepared : PolicyInstallController.Prepared runtime snapshot (context epoch))
+    (sources : List PolicyRecord) : Bool :=
+  let config := prepared.policyConfig (store sources)
+  let wanted := PolicyInstallController.request runtime snapshot (context epoch) prepared.declaration
+  match config.registry.resolve wanted.policyId wanted.policyEpoch with
+  | none => false
+  | some committed => config.verifies wanted
+      (canonicalWitness runtime.compilerProfile.compiler committed prepared.step.oldState prepared.step.newState)
+
+def main : IO Unit := do
+  let initial ← AuthorityFixture.fromEntries initialSource.domain initialEntries
+  PolicySourceV2Probe.require "complete authority spans several shards"
+    (decide (initial.pages.length > 1 ∧ initial.entries.length = initialEntries.length))
+  let firstSource := source 1 (some (policyRecordDigest initialSource))
+    (Pred.all [.eq "policy/version" 2, .monotone "policy/version"])
+  let firstDecl := declaration initial initialSource firstSource 11
+  let first ← prepare initial 0 firstDecl
+  PolicySourceV2Probe.require "old compiled policy accepts exact candidate including scalar order"
+    (compiledVerdict first [initialSource])
+  let firstSnapshot ← AuthorityFixture.fromPages initial.domain 1 first.postPages
+  PolicySourceV2Probe.require "routed candidate has exact new canonical head"
+    (decide (firstSnapshot.currentHead ⟨17⟩ = some ⟨1, policyRecordDigest firstSource⟩))
+  let marker := (PolicyInstallController.requestDigest runtime initial (context 0) firstDecl).value
+  PolicySourceV2Probe.require "same candidate consumes exact signature marker"
+    (Minidregg.Theory.CredentialAuthorityState.isNullified firstSnapshot.cell marker)
+  PolicySourceV2Probe.require "retired version removed from complete authority"
+    (decide (firstSnapshot.logical.fields (.policyAddress ⟨17⟩ 0) = none))
+  PolicySourceV2Probe.require "unrelated key epoch and channel retained"
+    (decide (firstSnapshot.authState.subjectKeyEpoch ⟨7⟩ = 2 ∧
+      RevocationKey.channel ⟨42⟩ ∈ firstSnapshot.authState.revoked))
+  let other ← prepare initial 0 { firstDecl with nonce := 12 }
+  let leftStep := PolicyStepContext.ofCandidate (fun _ => ⟨[]⟩) runtime.semantics first.candidate
+  let rightStep := PolicyStepContext.ofCandidate (fun _ => ⟨[]⟩) runtime.semantics other.candidate
+  PolicySourceV2Probe.require "same lossy probe views have distinct real source commitments"
+    (decide (leftStep.oldState = rightStep.oldState ∧ leftStep.newState = rightStep.newState ∧
+      leftStep.effectsDigest ≠ rightStep.effectsDigest))
+  PolicySourceV2Probe.require "equal views cannot substitute another declaration"
+    (!(PolicyStepBinding.canonical rightStep).matches
+      (PolicyInstallController.request runtime initial (context 0) firstDecl)
+      leftStep.oldState leftStep.newState)
+  let firstBytes := PolicyInstallController.encodeDeclaration firstDecl
+  requireError "noncanonical bytes refuse" .malformedDeclaration
+    (PolicyInstallController.prepare runtime initial (context 0) (firstBytes ++ [0]))
+  for (label, expected, changed) in
+      [("stale pre-root", .staleRoot, { firstDecl with expectedPreRoot := ⟨0⟩ }),
+       ("stale head", .staleHead, { firstDecl with expected := some ⟨0, ⟨9⟩⟩ }),
+       ("skipped version", .invalidSuccessor, { firstDecl with source := { firstSource with version := 2 } }),
+       ("wrong predecessor", .invalidSuccessor, { firstDecl with source := { firstSource with previous := some ⟨9⟩ } }),
+       ("wrong domain", .wrongDomain, { firstDecl with source := { firstSource with domain := ⟨501⟩ } }),
+       ("wrong semantics", .wrongSemantics, { firstDecl with source := { firstSource with semantics := ⟨0⟩ } })] do
+    requireError label expected (PolicyInstallController.prepare runtime initial (context 0)
+      (PolicyInstallController.encodeDeclaration changed))
+  let secondSource := source 2 (some (policyRecordDigest firstSource)) (.eq "policy/version" 9)
+  let second ← prepare firstSnapshot 1 (declaration firstSnapshot firstSource secondSource 12)
+  PolicySourceV2Probe.require "newly selected source compiled on next candidate"
+    (compiledVerdict second [firstSource, initialSource])
+  let secondSnapshot ← AuthorityFixture.fromPages initial.domain 2 second.postPages
+  let weakening := source 3 (some (policyRecordDigest secondSource)) (.allL .nil)
+  let third ← prepare secondSnapshot 2 (declaration secondSnapshot secondSource weakening 13)
+  PolicySourceV2Probe.require "weaker proposed source cannot satisfy old compiled policy"
+    (!(compiledVerdict third [secondSource, firstSource, initialSource]))
+  PolicySourceV2Probe.require "missing selected source refuses compiler gate" (!(compiledVerdict first []))
+  IO.println "PASS policy preparation: complete multishard head+marker candidate, actual bounded order fold, old-source selection and weakening refusal, exact request/source binding. Native accepted installs are checked by probe-native-capability-use; no signature fixture or fabricated accepted token here."
+
+end PolicyInstallPreparationProbe
 
 def main : IO Unit := do
   PolicySourceV2Probe.main
-  PolicyInstallProbe.main
+  PolicyInstallPreparationProbe.main

@@ -239,6 +239,7 @@ def signaturePortal (verify : OpaqueVerifier Nat) : Portal where
   SignatureWitness := VerifiedWitness verify
   ProofWitness := Unit
   CapabilityCommitmentWitness := Unit
+  CapabilityUseWitness := PEmpty
   MembershipWitness := Unit
   IssuerWitness := Unit
   NonRevocationWitness := Unit
@@ -249,6 +250,7 @@ def signaturePortal (verify : OpaqueVerifier Nat) : Portal where
       requestWireBytes (encodeRequest ⟨_, request⟩)
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
+  verifyCapabilityUse := fun _ _ _ witness => PEmpty.elim witness
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true

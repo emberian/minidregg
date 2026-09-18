@@ -13,6 +13,45 @@ by that trusted controller; SQLite/OS durability remains an external floor.
 -/
 import Kernel.DurableDataIntent
 
+namespace Minidregg.Kernel.DurableDataIntent.DataSnapshot
+
+set_option autoImplicit false
+
+/-- Unique physical write identities make the shared first-match lookup
+return every member's exact post bytes. This does not assume root injectivity. -/
+theorem lookupPostBytes_of_member (writes : List DataWrite)
+    (unique : (writes.map DataWrite.cellId).Nodup) (write : DataWrite)
+    (member : write ∈ writes) :
+    lookupPostBytes write.cellId writes = some write.canonicalPostBytes := by
+  induction writes with
+  | nil => simp at member
+  | cons head rest ih =>
+      have uniqueParts : head.cellId ∉ rest.map DataWrite.cellId ∧
+          (rest.map DataWrite.cellId).Nodup := List.nodup_cons.mp unique
+      rcases List.mem_cons.mp member with rfl | inRest
+      · simp [lookupPostBytes]
+      · have different : head.cellId ≠ write.cellId := by
+          intro same
+          apply uniqueParts.1
+          exact List.mem_map.mpr ⟨write, inRest, same.symm⟩
+        rw [lookupPostBytes, if_neg different]
+        exact ih uniqueParts.2 inRest
+
+/-- The actual shared installer, rather than a second post-state function,
+installs each uniquely identified member's exact canonical bytes. -/
+theorem install_canonicalBytes_of_member
+    {rootBytes : List UInt8 → Minidregg.Theory.TypedAuthorization.Digest}
+    (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
+    (unique : (intent.writes.map DataWrite.cellId).Nodup) (write : DataWrite)
+    (member : write ∈ intent.writes) :
+    (install before intent).canonicalBytes write.cellId = write.canonicalPostBytes := by
+  change (lookupPostBytes write.cellId intent.writes).getD
+    (before.canonicalBytes write.cellId) = write.canonicalPostBytes
+  rw [lookupPostBytes_of_member intent.writes unique write member]
+  rfl
+
+end Minidregg.Kernel.DurableDataIntent.DataSnapshot
+
 namespace Minidregg.Kernel.DurableReceiver
 
 open Minidregg.Theory

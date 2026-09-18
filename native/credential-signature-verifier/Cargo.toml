@@ -1,0 +1,14 @@
+[package]
+name = "minidregg-credential-signature-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "Opaque Ed25519 signature transport for Lean-owned credential frames."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "minidregg-credential-signature-verifier"
+path = "src/main.rs"
+
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }

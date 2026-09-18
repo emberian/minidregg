@@ -1,17 +1,18 @@
 /-
-# Kernel.PolicyInstallController -- checked source installation on authority pages
+# Kernel.PolicyInstallController -- checked source installation in complete authority domains
 
-The controller decodes a canonical declaration, computes the successor page,
+The controller decodes a canonical declaration, computes the routed successor authority state,
 and derives a policy context from that candidate. Installation is authorized
 against the original authority snapshot and original policy source. The new
-source becomes selectable only from the returned post-page.
+source becomes selectable only from the returned canonical post-state.
 
-This module returns an accepted effect and its exact post bytes. A physical
-handler must stage the immutable source blob and atomically install the page
+This module returns an accepted effect and its exact post pages. A physical
+handler must stage the immutable source blob and atomically install the changed shards
 with the remaining hyperedge participants before publishing the result.
 -/
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.DeclaredHyperedgeArtifact
+import Compiler.CanonicalRuntimeProfile
 import Theory.PolicyInstall
 
 namespace Minidregg.Kernel.PolicyInstallController
@@ -30,8 +31,9 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-def semantics : Digest :=
-  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.SEMANTICS/v1".toUTF8.toList []).digest
+abbrev RuntimeProfile := CanonicalRuntimeProfile.Profile
+
+variable {F : Type} [Field F]
 
 structure Declaration where
   expectedPreRoot : Digest
@@ -73,7 +75,7 @@ def declarationOfTuple (tuple : DeclarationTuple) : Option Declaration := do
   cases declaration
   simp [declarationTuple, declarationOfTuple, policyRecordCodec.decode_encode]
 
-def declarationFrame : List UInt8 := "LOOM/POLICY/INSTALL".toUTF8.toList ++ [1]
+def declarationFrame : List UInt8 := "LOOM/POLICY/INSTALL".toUTF8.toList ++ [2]
 
 def encodeDeclaration (declaration : Declaration) : List UInt8 :=
   declarationFrame ++ declarationTupleStream.encode (declarationTuple declaration)
@@ -120,25 +122,56 @@ def declarationCodec : LawfulCodec Declaration where
   decode_encode := decodeDeclaration_encode
 
 def argsDigest (declaration : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.ARGS/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.ARGS/v2".toUTF8.toList
     (encodeDeclaration declaration)).digest
 
 def effectDigest (declaration : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.EFFECT/v2".toUTF8.toList
     (encodeDeclaration declaration)).digest
 
-/-- The current head is found from the actual page, with absence preserved.
-Validity of a `Snapshot` excludes multiple current heads for one policy id. -/
-def currentHead (page : Page) (policyId : PolicyId) : Option Head :=
-  page.entries.findSome? fun entry =>
-    match entry with
-    | .policy selected version address =>
-        if selected = policyId then some ⟨version, address⟩ else none
-    | _ => none
+/-- The selected head is read directly from the complete canonical schema;
+absence is not the default epoch or an asserted host-side registry entry. -/
+abbrev currentHead := CredentialAuthorityDomain.headAt
 
 def newEntry (declaration : Declaration) : Entry :=
   .policy declaration.source.policyId declaration.source.version
     (policyRecordDigest declaration.source)
+
+/-- All operation-dependent request coordinates are derived from this exact
+declaration and actual complete authority state. `cost` is the declared source-byte budget;
+monetary fees remain the conserved resource leg of the enclosing hyperedge. -/
+def request (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (declaration : Declaration) : Request .program where
+  domain := snapshot.domain
+  semantics := profile.semantics
+  federation := context.federation
+  subject := context.subject
+  subjectKeyEpoch := context.subjectKeyEpoch
+  target := ⟨declaration.source.policyId.value⟩
+  verb := .installPolicy
+  argsDigest := argsDigest declaration
+  effectsDigest := effectDigest declaration
+  nonce := declaration.nonce
+  height := context.height
+  preStateRoot := snapshot.cell.root
+  policyId := declaration.source.policyId
+  policyEpoch := context.policyEpoch
+  cost := (encodeDeclaration declaration).length
+
+def requestDigest (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (declaration : Declaration) : Digest :=
+  let wire := AuthorizationDeclaration.encodeRequest ⟨.program, request profile snapshot context declaration⟩
+  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.REQUEST/v2".toUTF8.toList
+    ((StreamCodec.list StreamCodec.nat).encode
+      (DeclaredHyperedgeArtifact.requestWords wire))).digest
+
+
+def edits (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (declaration : Declaration) :
+    List CredentialAuthorityDomain.Edit :=
+  CredentialAuthorityDomain.policyAndNullifierEdits snapshot declaration.source.policyId
+    declaration.source.version (policyRecordDigest declaration.source)
+    (requestDigest profile snapshot context declaration).value
 
 inductive Reject where
   | malformedDeclaration
@@ -149,80 +182,57 @@ inductive Reject where
   | unsupportedPolicy
   | invalidSuccessor
   | pageUpdateRejected
-  | invalidPatch
   | subjectKeyEpoch
   | signature
   | policyEpoch
   | policyUnavailable
   | policyRejected
+  | capability
+  | nativeSignature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
 
-/-- The semantic source checks retained by every prepared mutation. -/
-structure Ready (snapshot : Snapshot) (declaration : Declaration) : Prop where
+/-- Semantic source checks are retained beside the actual routed mutation. -/
+structure Ready (profile : RuntimeProfile F) (snapshot : Snapshot) (declaration : Declaration) : Prop where
   rootExact : declaration.expectedPreRoot = snapshot.cell.root
-  headExact : currentHead snapshot.page declaration.source.policyId = declaration.expected
-  domainExact : declaration.source.domain = snapshot.page.authorityDomain
-  semanticsExact : declaration.source.semantics = semantics
-  supported : Minidregg.Compiler.supported declaration.source.predicate = true
+  headExact : snapshot.currentHead declaration.source.policyId = declaration.expected
+  domainExact : declaration.source.domain = snapshot.domain
+  semanticsExact : declaration.source.semantics = profile.semantics
+  supported : Minidregg.Compiler.supported profile.compilerProfile.compiler declaration.source.predicate = true
   successor : Successor declaration.expected declaration.source.source
 
-/-- All semantic checks precede the single page mutation. An update uses
-exact entry replacement, never insertion that shadows an old policy head. -/
-def prepareChecked (snapshot : Snapshot) (declaration : Declaration) :
-    Except Reject { post : Page // post.Valid ∧ post.Contains (newEntry declaration) ∧
-      Ready snapshot declaration } :=
+structure CheckedPreparation (profile : RuntimeProfile F) (snapshot : Snapshot)
+    (context : RequestContext) (declaration : Declaration) where
+  ready : Ready profile snapshot declaration
+  update : CredentialAuthorityDomain.PreparedPolicyAndNullifier snapshot
+    declaration.source.policyId declaration.source.version (policyRecordDigest declaration.source)
+    (requestDigest profile snapshot context declaration).value
+
+/-- The source-owned domain editor derives the patch from the old selected
+entry, checks routed pages, and proves their exact canonical-state projection.
+The requester supplies neither the successor pages nor the field writes. -/
+def prepareChecked (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (declaration : Declaration) :
+    Except Reject (CheckedPreparation profile snapshot context declaration) :=
   if rootExact : declaration.expectedPreRoot = snapshot.cell.root then
-    if headExact : currentHead snapshot.page declaration.source.policyId = declaration.expected then
-      if domainExact : declaration.source.domain = snapshot.page.authorityDomain then
-        if semanticsExact : declaration.source.semantics = semantics then
-          if supported : Minidregg.Compiler.supported declaration.source.predicate = true then
+    if headExact : snapshot.currentHead declaration.source.policyId = declaration.expected then
+      if domainExact : declaration.source.domain = snapshot.domain then
+        if semanticsExact : declaration.source.semantics = profile.semantics then
+          if supported : Minidregg.Compiler.supported profile.compilerProfile.compiler declaration.source.predicate = true then
             if successor : checkSuccessor declaration.expected declaration.source.source = true then
-              let ready : Ready snapshot declaration :=
-                ⟨rootExact, headExact, domainExact, semanticsExact, supported,
-                  (checkSuccessor_iff _ _).mp successor⟩
-              match declaration.expected with
-              | none =>
-                  match inserted : snapshot.page.admitInsert (newEntry declaration) with
-                  | .ok post => .ok ⟨post.val, post.property,
-                      Page.insert_contains (Page.admitInsert_exact inserted).2.2, ready⟩
-                  | .error _ => .error .pageUpdateRejected
-              | some old =>
-                  match replaced : snapshot.page.admitReplace
-                      (.policy declaration.source.policyId old.version old.address)
-                      (newEntry declaration) with
-                  | .ok post => .ok ⟨post.val, post.property,
-                      Page.replaceEntry_contains
-                        (page := snapshot.page)
-                        (old := .policy declaration.source.policyId old.version old.address)
-                        (replacement := newEntry declaration) (post := post.val) (by
-                        simp [Page.replaceEntry?, (Page.admitReplace_exact replaced).2.1,
-                          (Page.admitReplace_exact replaced).2.2]), ready⟩
-                  | .error _ => .error .pageUpdateRejected
+              match CredentialAuthorityDomain.preparePolicyAndNullifier snapshot declaration.source.policyId
+                  declaration.source.version (policyRecordDigest declaration.source)
+                  (requestDigest profile snapshot context declaration).value with
+              | none => .error .pageUpdateRejected
+              | some update => .ok
+                  { ready := ⟨rootExact, headExact, domainExact, semanticsExact, supported,
+                      (checkSuccessor_iff _ _).mp successor⟩
+                    update := update }
             else .error .invalidSuccessor
           else .error .unsupportedPolicy
         else .error .wrongSemantics
       else .error .wrongDomain
     else .error .staleHead
   else .error .staleRoot
-
-def preparePost (snapshot : Snapshot) (declaration : Declaration) : Except Reject Page :=
-  (prepareChecked snapshot declaration).map Subtype.val
-
-theorem preparePost_checked {snapshot : Snapshot} {declaration : Declaration}
-    {post : Page} (accepted : preparePost snapshot declaration = .ok post) :
-    post.Valid ∧ post.Contains (newEntry declaration) ∧ Ready snapshot declaration := by
-  cases checked : prepareChecked snapshot declaration with
-  | error reason => simp [preparePost, checked, Except.map] at accepted
-  | ok result =>
-      have same : result.val = post := by
-        simpa [preparePost, checked, Except.map] using accepted
-      rw [← same]
-      exact result.property
-
-theorem preparePost_valid_contains {snapshot : Snapshot} {declaration : Declaration}
-    {post : Page} (accepted : preparePost snapshot declaration = .ok post) :
-    post.Valid ∧ post.Contains (newEntry declaration) :=
-  ⟨(preparePost_checked accepted).1, (preparePost_checked accepted).2.1⟩
 
 /-- An injectively named sequence of address bytes, with no field reduction.
 The predicate compiler still performs its explicit cast-injectivity check. -/
@@ -234,20 +244,11 @@ def addressSlots : Nat → List UInt8 → List (String × Int)
 /-- The source-owned install view keeps absent policy fields absent. Request
 identity is fixed by the declaration; projected slots cannot replace its
 complete source/effect commitment. -/
-def project (context : RequestContext) (declaration : Declaration)
-    (logical : LogicalState CredentialAuthorityPageMaterializer.schema) :
+def project (wanted : Request .program) (declaration : Declaration)
+    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) :
     Minidregg.Pred.State :=
-  let header :=
-    [ ("request/program", Int.ofNat declaration.source.policyId.value)
-    , ("request/nonce", Int.ofNat declaration.nonce)
-    , ("request/subject", Int.ofNat context.subject.value)
-    , ("request/subjectKeyEpoch", Int.ofNat context.subjectKeyEpoch)
-    , ("request/federation", Int.ofNat context.federation.value)
-    , ("request/height", Int.ofNat context.height)
-    , ("request/policyEpoch", Int.ofNat context.policyEpoch) ]
-  let fields := do
-    let page ← pageAt logical
-    currentHead page declaration.source.policyId
+  let header := CanonicalRuntimeProfile.requestSlots wanted
+  let fields := currentHead logical declaration.source.policyId
   { slots := header ++
       match fields with
       | none => []
@@ -255,230 +256,319 @@ def project (context : RequestContext) (declaration : Declaration)
           ("policy/version", Int.ofNat head.version) ::
             addressSlots 0 (Sp800185Cshake256.digestCodec.encode head.address) }
 
-def patch (snapshot : Snapshot) (post : Page) :
-    Patch CredentialAuthorityPageMaterializer.schema Digest where
-  expectedPreRoot := snapshot.cell.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some post }]
-  resourceWrites := []
+def patch (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (declaration : Declaration) :
+    Patch CredentialAuthorityState.schema.{0, 0} Digest :=
+  CredentialAuthorityDomain.editPatch snapshot (edits profile snapshot context declaration)
 
-/-- All operation-dependent request coordinates are derived from this exact
-declaration and actual pre-page. `cost` is the declared source-byte budget;
-monetary fees remain the conserved resource leg of the enclosing hyperedge. -/
-def request (snapshot : Snapshot) (context : RequestContext)
-    (declaration : Declaration) : Request .program where
-  domain := snapshot.page.authorityDomain
-  semantics := semantics
-  federation := context.federation
-  subject := context.subject
-  subjectKeyEpoch := context.subjectKeyEpoch
-  target := ⟨declaration.source.policyId.value⟩
-  verb := .installProgram
-  argsDigest := argsDigest declaration
-  effectsDigest := effectDigest declaration
-  nonce := declaration.nonce
-  height := context.height
-  preStateRoot := snapshot.cell.root
-  policyId := declaration.source.policyId
-  policyEpoch := context.policyEpoch
-  cost := (encodeDeclaration declaration).length
+private def unitCodec : LawfulCodec Unit where
+  encode := fun _ => []
+  decode := fun bytes => if bytes = [] then some () else none
+  decode_encode := by intro value; cases value; simp
 
-def requestDigest (snapshot : Snapshot) (context : RequestContext)
-    (declaration : Declaration) : Digest :=
-  let wire := AuthorizationDeclaration.encodeRequest ⟨.program, request snapshot context declaration⟩
-  (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.REQUEST/v1".toUTF8.toList
-    ((StreamCodec.list StreamCodec.nat).encode
-      (DeclaredHyperedgeArtifact.requestWords wire))).digest
-
-/-- The existing common family captures both the actual canonical pre-state
-and the entire derived request. Neither can be relabelled when minting an
-accepted effect. The mode evidence is the result of the source-owned installer. -/
-def family (snapshot : Snapshot) (context : RequestContext) :
-    SemanticEffectFamily CredentialAuthorityPageMaterializer.schema materializer Digest where
+/-- The family captures actual canonical pre-state and the entire derived
+request. Its postcondition pins exactly the selected policy head; unrelated
+authority fields may participate in the same composed turn. The fixed Pred
+view below depends only on this head and the retained declaration/context. -/
+def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) :
+    SemanticEffectFamily CredentialAuthorityState.schema.{0, 0}
+      CredentialAuthorityStateCodec.materializer Digest where
   pre := snapshot.cell
-  request := fun declaration => ⟨.program, request snapshot context declaration⟩
+  request := fun declaration => ⟨.program, request profile snapshot context declaration⟩
   Declaration := Declaration
   declarationCodec := declarationCodec
-  Outcome := fun _ => Page
-  outcomeCodec := fun _ => pageStream.toLawful
-  ModeEvidence := fun declaration post => PLift (preparePost snapshot declaration = .ok post)
+  Outcome := fun _ => Unit
+  outcomeCodec := fun _ => unitCodec
+  ModeEvidence := fun declaration _ => CheckedPreparation profile snapshot context declaration
+  Postcondition := fun declaration _ logical =>
+    currentHead logical declaration.source.policyId =
+      some ⟨declaration.source.version, policyRecordDigest declaration.source⟩ ∧
+      logical.fields (.nullifier (requestDigest profile snapshot context declaration).value) = some true
   effectDigest := effectDigest
-  patch := fun _ post => patch snapshot post
-  nullifier := fun declaration _ => some (requestDigest snapshot context declaration)
+  patch := fun declaration _ => patch profile snapshot context declaration
+  nullifier := fun declaration _ => some (requestDigest profile snapshot context declaration)
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
   ReleaseAuthorization := fun _ _ _ => Empty
   DisclosureAllowed := fun _ _ _ => True
 
-structure Prepared (snapshot : Snapshot) (context : RequestContext) where
+structure Prepared (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) where
   declaration : Declaration
-  outcome : Page
-  candidate : Candidate (family snapshot context) snapshot.cell declaration outcome
+  candidate : Candidate (family profile snapshot context) snapshot.cell declaration ()
 
-def prepare (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8) :
-    Except Reject (Prepared snapshot context) :=
+def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) :
+    CredentialAuthorityDomain.Prepared snapshot (edits profile snapshot context prepared.declaration) :=
+  prepared.candidate.modeEvidence.update.prepared
+
+def Prepared.postPages {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) : List Page := prepared.update.postPages
+
+def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8) :
+    Except Reject (Prepared profile snapshot context) :=
   match decodeDeclaration bytes with
   | none => .error .malformedDeclaration
-  | some declaration =>
-      match checked : preparePost snapshot declaration with
-      | .error reason => .error reason
-      | .ok post =>
-          match validate materializer snapshot.cell (patch snapshot post) with
-          | .rejected _ => .error .invalidPatch
-          | .accepted validated =>
-              .ok
-                { declaration := declaration
-                  outcome := post
-                  candidate :=
-                    { preStateBound := rfl
-                      modeEvidence := ⟨checked⟩
-                      validated := validated } }
+  | some declaration => do
+      let checked ← prepareChecked profile snapshot context declaration
+      .ok
+        { declaration := declaration
+          candidate :=
+            { preStateBound := rfl
+              modeEvidence := checked
+              validated := checked.update.prepared.validated
+              postcondition := by
+                change (currentHead checked.update.prepared.validated.apply.logical
+                  declaration.source.policyId =
+                    some ⟨declaration.source.version, policyRecordDigest declaration.source⟩) ∧
+                  checked.update.prepared.validated.apply.logical.fields
+                    (.nullifier (requestDigest profile snapshot context declaration).value) = some true
+                rw [← checked.update.prepared.projectionExact]
+                exact ⟨checked.update.head_exact, checked.update.nullifier_consumed⟩ } }
 
-def Prepared.step {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared snapshot context) : PolicyStepContext :=
-  PolicyStepContext.ofCandidate (project context prepared.declaration) semantics prepared.candidate
+def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) : PolicyStepContext :=
+  PolicyStepContext.ofCandidate
+    (project (request profile snapshot context prepared.declaration) prepared.declaration)
+    profile.semantics prepared.candidate
 
-def Prepared.policyConfig {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared snapshot context) (store : PayloadStore) (base : Portal) :
+/-- Policy replacement has no signature-only or opaque-proof evidence mode.
+Its native signature authenticates use of an actual stored control capability. -/
+abbrev controlPortal := CredentialAuthorityPolicyRegistry.sourceCapabilityPortal
+
+def Prepared.policyConfig [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) (store : PayloadStore) :
     CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config snapshot store base prepared.step
+  CredentialAuthorityPolicyRegistry.config profile.compilerProfile snapshot store
+    (controlPortal snapshot (requestDigest profile snapshot context prepared.declaration).value) prepared.step
 
-abbrev Prepared.Accepted {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared snapshot context) (store : PayloadStore) (base : Portal) :=
+abbrev Prepared.Accepted [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) (store : PayloadStore) :=
   AcceptedCellEffect
-    (portal := (prepared.policyConfig (F := F) store base).portal)
-    (authState := CredentialAuthorityPolicyRegistry.projection.authState snapshot.cell)
-    (family snapshot context) (request snapshot context prepared.declaration)
-    snapshot.cell prepared.declaration prepared.outcome
+    (portal := (prepared.policyConfig (F := F) store).portal)
+    (authState := snapshot.authState)
+    (family profile snapshot context) (request profile snapshot context prepared.declaration)
+    snapshot.cell prepared.declaration ()
 
-/-- Evidence is checked here, rather than supplied as an asserted Lean proof.
-Policy source is resolved from the OLD snapshot even when this operation is
-replacing that same policy. The canonical compiler constructs its own witness. -/
-def Prepared.admit {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext}
-    (prepared : Prepared snapshot context) (store : PayloadStore) (base : Portal)
-    (signature : base.SignatureWitness) : Except Reject (prepared.Accepted (F := F) store base) :=
-  let wanted := request snapshot context prepared.declaration
-  let auth := CredentialAuthorityPolicyRegistry.projection.authState snapshot.cell
-  let config := prepared.policyConfig (F := F) store base
-  if keyEpoch : wanted.subjectKeyEpoch = auth.subjectKeyEpoch wanted.subject then
-    if verified : base.verifySignature wanted signature = true then
+/-- The old stored policy-control capability is mandatory. A valid signature alone
+is never authority to replace a resource's law. The native receipt binds use of
+that capability to this exact source-derived request and operation marker. -/
+def Prepared.admit [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) (store : PayloadStore)
+    (controlCapability : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    Except Reject (prepared.Accepted store) :=
+  let wanted := request profile snapshot context prepared.declaration
+  let auth := snapshot.authState
+  let config := prepared.policyConfig store
+  match sourceCapabilityOnlyEvidence profile.compilerProfile snapshot store
+      (requestDigest profile snapshot context prepared.declaration).value prepared.step
+      wanted controlCapability receipt with
+  | none => .error .capability
+  | some evidence =>
       if epoch : wanted.policyEpoch = auth.policyEpoch wanted.policyId then
         match config.registry.resolve wanted.policyId wanted.policyEpoch with
         | none => .error .policyUnavailable
         | some committed =>
-            let evidence : Evidence config.portal auth wanted :=
-              .signature signature keyEpoch verified
-            let witness := canonicalWitness committed prepared.step.oldState prepared.step.newState
-            match CanonicalPolicyAdmission.admit config auth wanted evidence witness () epoch with
+            let witness := canonicalWitness profile.compilerProfile.compiler committed
+              prepared.step.oldState prepared.step.newState
+            match CanonicalPolicyAdmission.admit config auth wanted evidence witness
+                (.policy wanted.policyId wanted.policyEpoch) epoch with
             | none => .error .policyRejected
             | some authorization =>
                 .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
       else .error .policyEpoch
-    else .error .signature
-  else .error .subjectKeyEpoch
 
-structure Installed {F : Type} [Field F] [DecidableEq F]
-    (snapshot : Snapshot) (context : RequestContext) (store : PayloadStore) (base : Portal) where
-  prepared : Prepared snapshot context
-  accepted : prepared.Accepted (F := F) store base
+/-- The only native signature producer is invoked on the wanted request computed
+above. Its receipt is then checked by the same capability and compiled-policy path. -/
+def Prepared.admitNative [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
+    (prepared : Prepared profile snapshot context) (store : PayloadStore)
+    (native : CredentialSignatureIO.NativeConfig) (controlCapability : CapabilityId)
+    (envelopeBytes : List UInt8) : IO (Except Reject (prepared.Accepted store)) := do
+  match ← CredentialSignatureAdmission.verifyNative native snapshot
+      (requestDigest profile snapshot context prepared.declaration).value
+      (request profile snapshot context prepared.declaration) envelopeBytes with
+  | .error reason => return .error (.nativeSignature reason)
+  | .ok receipt => return prepared.admit store controlCapability receipt
 
-def run {F : Type} [Field F] [DecidableEq F]
-    (snapshot : Snapshot) (context : RequestContext) (store : PayloadStore) (base : Portal)
-    (declarationBytes : List UInt8) (signature : base.SignatureWitness) :
-    Except Reject (Installed (F := F) snapshot context store base) := do
-  let prepared ← prepare snapshot context declarationBytes
-  let accepted ← prepared.admit (F := F) store base signature
+structure Installed [DecidableEq F]
+    (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (store : PayloadStore) where
+  prepared : Prepared profile snapshot context
+  accepted : prepared.Accepted store
+
+def run [DecidableEq F]
+    (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
+    (store : PayloadStore) (declarationBytes : List UInt8)
+    (controlCapability : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    Except Reject (Installed profile snapshot context store) := do
+  let prepared ← prepare profile snapshot context declarationBytes
+  let accepted ← prepared.admit store controlCapability receipt
   .ok ⟨prepared, accepted⟩
 
-def Installed.post {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) : Materialized materializer :=
+def Installed.post [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) : Materialized CredentialAuthorityStateCodec.materializer :=
   installed.accepted.prepared.post
 
-def Installed.sourceBytes {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) : List UInt8 :=
+def Installed.sourceBytes [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) : List UInt8 :=
   policyRecordCodec.encode installed.prepared.declaration.source
 
-theorem Installed.full_request_bound {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    (⟨ResourceKind.program, request snapshot context installed.prepared.declaration⟩ : Sigma Request) =
-      (family snapshot context).request installed.prepared.declaration :=
+theorem Installed.full_request_bound [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    (⟨ResourceKind.program, request profile snapshot context installed.prepared.declaration⟩ : Sigma Request) =
+      (family profile snapshot context).request installed.prepared.declaration :=
   installed.accepted.requestBound
 
-theorem Installed.actual_pre_bound {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    snapshot.cell = (family snapshot context).pre :=
+theorem Installed.actual_pre_bound [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    snapshot.cell = (family profile snapshot context).pre :=
   installed.accepted.preStateBound
+
+/-- This is a property of every accepted installer token, including callers
+outside `run`: the concrete receiving portal has no signature/proof bypass. -/
+theorem Installed.control_capability_required [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    ∃ capability commitment,
+      installed.accepted.authorization.evidence.capabilityValue = some (capability, commitment) ∧
+      Verb.installPolicy ∈ capability.scope.verbs := by
+  cases evidence : installed.accepted.authorization.evidence with
+  | signature witness epoch verified => exact witness.elim
+  | proof witness verified => exact witness.elim
+  | capability cap commitment commitmentWitness membershipWitness issuerWitness
+      selfRevocationWitness useWitness semantic useVerified commitmentVerified
+      membershipVerified issuerVerified selfVerified ancestorVerified channelVerified =>
+      exact ⟨cap, commitment, rfl, semantic.scope.verb⟩
 
 /-- The source being changed selects its own current governing policy. A
 caller cannot name an unrelated permissive policy in the request context. -/
-theorem request_policy_is_target (snapshot : Snapshot) (context : RequestContext)
+theorem request_policy_is_target (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
     (declaration : Declaration) :
-    (request snapshot context declaration).policyId = declaration.source.policyId := rfl
+    (request profile snapshot context declaration).policyId = declaration.source.policyId := rfl
 
 /-- Every accepted installation satisfies the policy selected from the OLD
 snapshot, evaluated on the exact canonical pre-state and installed post-state.
 This holds for every accepted token, not only for calls through `run`. -/
-theorem Installed.old_policy_evaluated {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
+theorem Installed.old_policy_evaluated [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
     ∃ committed,
       (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
         context.policyEpoch = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
-        (project context installed.prepared.declaration snapshot.cell.logical)
-        (project context installed.prepared.declaration installed.post.logical) = true := by
-  have verified : (installed.prepared.policyConfig (F := F) store base).verifies
-      (request snapshot context installed.prepared.declaration)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical) = true := by
+  have verified : (installed.prepared.policyConfig (F := F) store).verifies
+      (request profile snapshot context installed.prepared.declaration)
       installed.accepted.authorization.policyWitness = true := by
     have accepted := installed.accepted.authorization.policyVerified
     exact (Bool.and_eq_true_iff.mp accepted).2
   exact (canonical_context_verifies_sound installed.prepared.step rfl verified).2.2.2
 
-theorem Installed.post_page {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    pageAt installed.post.logical = some installed.prepared.outcome := by
-  change (applyFieldWrites (patch snapshot installed.prepared.outcome).fieldWrites
-    snapshot.cell.logical.fields) () = some installed.prepared.outcome
-  simp [patch, applyFieldWrites, FieldStore.assign]
-  rfl
+/-- The accepted post is the exact canonical projection of the routed shard
+updates. This is the semantic side of the physical domain refinement. -/
+theorem Installed.post_pages_exact [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    installed.post.logical =
+      CredentialAuthorityDomain.logicalOfPages installed.prepared.postPages :=
+  installed.prepared.update.projectionExact.symm
 
-/-- The installed page contains the complete checked source's actual content
-address and version. The proof is extracted from the same mode evidence that
-the accepted effect retains. -/
-theorem Installed.source_selected_in_post {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    installed.prepared.outcome.Valid ∧
-    installed.prepared.outcome.Contains (newEntry installed.prepared.declaration) :=
-  preparePost_valid_contains installed.accepted.modeEvidence.down
+theorem Installed.source_selected_in_post [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    currentHead installed.post.logical installed.prepared.declaration.source.policyId =
+      some ⟨installed.prepared.declaration.source.version,
+        policyRecordDigest installed.prepared.declaration.source⟩ :=
+  installed.accepted.postcondition.1
+
+/-- A signature marker is consumed by the same routed authority patch as the
+policy head. No standalone signature cache is treated as a durable replay guard. -/
+theorem Installed.nullifier_consumed [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    installed.post.logical.fields
+      (.nullifier (requestDigest profile snapshot context installed.prepared.declaration).value) =
+      some true := installed.accepted.postcondition.2
+
+theorem Installed.nullifier_was_fresh [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    CredentialAuthorityState.isNullified snapshot.cell
+      (requestDigest profile snapshot context installed.prepared.declaration).value = false :=
+  installed.accepted.modeEvidence.update.nullifierFresh
+
+/-- The mandatory family postcondition transports the OLD selected predicate
+to the actual joint post-state. It preserves the complete fixed policy view
+without freezing unrelated canonical authority fields. -/
+theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store)
+    (finalState : LogicalState CredentialAuthorityState.schema.{0, 0})
+    (preserved : (family profile snapshot context).Postcondition installed.prepared.declaration
+      () finalState) :
+    ∃ committed,
+      (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
+        context.policyEpoch = some committed ∧
+      Minidregg.Pred.eval committed.record.predicate
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
+        (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState) = true := by
+  obtain ⟨committed, resolved, evaluated⟩ := installed.old_policy_evaluated
+  have headExact : currentHead finalState installed.prepared.declaration.source.policyId =
+      some ⟨installed.prepared.declaration.source.version,
+        policyRecordDigest installed.prepared.declaration.source⟩ := preserved.1
+  have viewExact : project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState =
+      project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical := by
+    unfold project
+    rw [headExact, installed.source_selected_in_post]
+  exact ⟨committed, resolved, by rw [viewExact]; exact evaluated⟩
 
 /-- The predecessor and epoch are checked against the actual old head, not
 only against fields asserted in the installation declaration. -/
-theorem Installed.source_successor {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    Successor (currentHead snapshot.page installed.prepared.declaration.source.policyId)
+theorem Installed.source_successor [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    Successor (snapshot.currentHead installed.prepared.declaration.source.policyId)
       installed.prepared.declaration.source.source := by
-  have ready := (preparePost_checked installed.accepted.modeEvidence.down).2.2
+  have ready := installed.accepted.modeEvidence.ready
   rw [ready.headExact]
   exact ready.successor
 
+/-- Updating a policy removes the retired version's address from the actual
+canonical post. It cannot remain selectable behind a newer current head. -/
+theorem Installed.retired_address_absent [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store)
+    (old : Head)
+    (current : snapshot.currentHead installed.prepared.declaration.source.policyId = some old) :
+    installed.post.logical.fields
+      (.policyAddress installed.prepared.declaration.source.policyId old.version) = none := by
+  have successor := installed.source_successor
+  rw [current] at successor
+  have different : old.version ≠ installed.prepared.declaration.source.version := by
+    have advanced := successor.1
+    change installed.prepared.declaration.source.version = old.version + 1 at advanced
+    intro same
+    exact (Nat.ne_of_lt (Nat.lt_succ_self old.version)) (same.trans advanced)
+  rw [installed.post_pages_exact]
+  exact installed.prepared.candidate.modeEvidence.update.retired_address_absent old current different
+
 /-- Installation admits only sources in the actual compiler's vocabulary;
 serializability of an AST is not evidence that it can execute. -/
-theorem Installed.source_supported {F : Type} [Field F] [DecidableEq F]
-    {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore} {base : Portal}
-    (installed : Installed (F := F) snapshot context store base) :
-    Minidregg.Compiler.supported installed.prepared.declaration.source.predicate = true :=
-  (preparePost_checked installed.accepted.modeEvidence.down).2.2.supported
+theorem Installed.source_supported [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    Minidregg.Compiler.supported profile.compilerProfile.compiler installed.prepared.declaration.source.predicate = true :=
+  installed.accepted.modeEvidence.ready.supported
 
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.old_policy_evaluated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Installed.old_policy_evaluated
@@ -486,5 +576,7 @@ theorem Installed.source_supported {F : Type} [Field F] [DecidableEq F]
 #guard_msgs (whitespace := lax) in #print axioms Installed.source_selected_in_post
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.source_successor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Installed.source_successor
+/-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.old_policy_evaluated_at_final' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Installed.old_policy_evaluated_at_final
 
 end Minidregg.Kernel.PolicyInstallController

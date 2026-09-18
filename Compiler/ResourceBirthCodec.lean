@@ -138,10 +138,17 @@ def feeStream : StreamCodec CreationFee :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
     (by intro fee; rfl)
 
+def initialPolicyStream : StreamCodec InitialPolicy :=
+  StreamCodec.xmap
+    (StreamCodec.product policyIdStream (StreamCodec.product digestStream bytesStream))
+    (fun policy => (policy.policyId, policy.address, policy.canonicalBytes))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
+    (by intro policy; rfl)
+
 abbrev DescriptorTuple (registry : TypeRegistry Digest) :=
   ResourceId .object × SubjectId × Digest × Nat × List (BirthItem registry) ×
     List (CreateRequest (CellId := Nat) registry) ×
-    List AuthorityGrant × Nat × List InitialFunding × CreationFee
+    List AuthorityGrant × List InitialPolicy × Nat × List InitialFunding × CreationFee
 
 def descriptorTupleStream (registry : TypeRegistry Digest) :
     StreamCodec (DescriptorTuple registry) :=
@@ -152,14 +159,15 @@ def descriptorTupleStream (registry : TypeRegistry Digest) :
           (StreamCodec.product (StreamCodec.list (birthItemStream registry))
             (StreamCodec.product (StreamCodec.list (createRequestStream registry))
               (StreamCodec.product (StreamCodec.list authorityGrantStream)
-                (StreamCodec.product StreamCodec.nat
-                  (StreamCodec.product (StreamCodec.list fundingStream) feeStream))))))))
+                (StreamCodec.product (StreamCodec.list initialPolicyStream)
+                  (StreamCodec.product StreamCodec.nat
+                    (StreamCodec.product (StreamCodec.list fundingStream) feeStream)))))))))
 
 def descriptorTuple {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : DescriptorTuple registry :=
   ⟨descriptor.factory, descriptor.creator, descriptor.transactionId,
     descriptor.nonce, descriptor.births, descriptor.auxiliaryCreates, descriptor.grants,
-    descriptor.authorityNullifier, descriptor.funding, descriptor.fee⟩
+    descriptor.initialPolicies, descriptor.authorityNullifier, descriptor.funding, descriptor.fee⟩
 
 def descriptorOfTuple {registry : TypeRegistry Digest}
     (tuple : DescriptorTuple registry) : Descriptor registry where
@@ -170,22 +178,23 @@ def descriptorOfTuple {registry : TypeRegistry Digest}
   births := tuple.2.2.2.2.1
   auxiliaryCreates := tuple.2.2.2.2.2.1
   grants := tuple.2.2.2.2.2.2.1
-  authorityNullifier := tuple.2.2.2.2.2.2.2.1
-  funding := tuple.2.2.2.2.2.2.2.2.1
-  fee := tuple.2.2.2.2.2.2.2.2.2
+  initialPolicies := tuple.2.2.2.2.2.2.2.1
+  authorityNullifier := tuple.2.2.2.2.2.2.2.2.1
+  funding := tuple.2.2.2.2.2.2.2.2.2.1
+  fee := tuple.2.2.2.2.2.2.2.2.2.2
 
 def descriptorStream (registry : TypeRegistry Digest) :
     StreamCodec (Descriptor registry) :=
   StreamCodec.xmap (descriptorTupleStream registry)
     descriptorTuple descriptorOfTuple (by intro descriptor; rfl)
 
-def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,1]
+def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,2]
 
 def framedDescriptorCodec (registry : TypeRegistry Digest) :
     LawfulCodec (Descriptor registry) where
   encode descriptor := descriptorFrame ++ (descriptorStream registry).encode descriptor
   decode
-    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 1 :: payload =>
+    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 2 :: payload =>
         (descriptorStream registry).toLawful.decode payload
     | _ => none
   decode_encode := by
@@ -212,6 +221,22 @@ not inferred from this theorem, and no finite hash is assumed injective. -/
 theorem descriptor_encode_injective (registry : TypeRegistry Digest) :
     Function.Injective (descriptorCodec registry).encode :=
   lawful_encode_injective (descriptorCodec registry)
+
+/-- Version-one payloads cannot be read as births with omitted installed
+source. The version boundary is checked before any payload interpretation. -/
+theorem descriptor_legacy_version_refused (registry : TypeRegistry Digest)
+    (payload : List UInt8) :
+    (descriptorCodec registry).decode
+      ([68,82,69,71,71,47,66,73,82,84,72,1] ++ payload) = none := rfl
+
+/-- Full source bytes, addresses and target policy identities are retained by
+the command encoding. No content-hash injectivity is used here. -/
+theorem descriptor_initial_sources_bound (registry : TypeRegistry Digest)
+    (left right : Descriptor registry)
+    (same : (descriptorCodec registry).encode left =
+      (descriptorCodec registry).encode right) :
+    left.initialPolicies = right.initialPolicies :=
+  congrArg Descriptor.initialPolicies (descriptor_encode_injective registry same)
 
 def commitmentBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash "DREGG.RESOURCE.BIRTH.COMMIT/v1".toUTF8.toList bytes).digest
@@ -654,5 +679,34 @@ theorem decode_exact {input : List (Nat × List UInt8)} {directory : Directory N
     exact decodeRows_lookup registry rowsDecoded id
 
 end DirectoryImage
+
+/-! ## Axiom accounting for the source and receiving laws -/
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.descriptor_decode_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.descriptor_decode_encode
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.descriptor_decode_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.descriptor_decode_canonical
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.descriptor_encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.descriptor_encode_injective
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_encode' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_encode
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.DirectoryImage.decode_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.DirectoryImage.decode_exact
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.state_image' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.state_image
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.decode_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.decode_canonical
+
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.bytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.bytes_exact
 
 end Minidregg.Compiler.ResourceBirthCodec

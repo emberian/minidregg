@@ -494,8 +494,11 @@ instance grantReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (gr
 
 def BatchReady (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) : Prop :=
-  (descriptor.grants.map ResourceBirthAuthority.grantField).Nodup ∧
+  ((ResourceBirthAuthority.fieldWrites descriptor).map FieldWrite.field).Nodup ∧
     descriptor.GrantIdsDistinct ∧
+    (∀ policy ∈ descriptor.initialPolicies,
+      snapshot.logical.fields (.policyEpoch policy.policyId) = none ∧
+        snapshot.logical.fields (.policyAddress policy.policyId 0) = none) ∧
     isNullified snapshot.cell descriptor.authorityNullifier = false ∧
     (∀ grant ∈ descriptor.grants, GrantReady snapshot grant)
 
@@ -509,15 +512,16 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
     ResourceBirthAuthority.BatchEvidence (issueUniverse snapshot descriptor.grants)
       snapshot.cell descriptor where
   slotsDistinct := ready.1
-  nullifierFresh := ready.2.2.1
-  ancestryEmpty := fun grant member => (ready.2.2.2 grant member).1
+  policiesFresh := ready.2.2.1
+  nullifierFresh := ready.2.2.2.1
+  ancestryEmpty := fun grant member => (ready.2.2.2.2 grant member).1
   issue := fun grant member => by
     obtain ⟨_, slot, parent, root, ancestors, issuer, policy, self, channels⟩ :=
-      ready.2.2.2 grant member
+      ready.2.2.2.2 grant member
     exact
       { preRootExact := rfl
         slotFresh := slot
-        nullifierFresh := ready.2.2.1
+        nullifierFresh := ready.2.2.2.1
         rootParent := parent
         rootSelf := root
         rootAncestors := ancestors
@@ -532,54 +536,78 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
 
 def grantEdits (snapshot : CredentialAuthorityDomain.Snapshot) (descriptor : Descriptor registry) :
     List Edit :=
+  descriptor.initialPolicies.map (fun policy => ⟨none, .policy policy.policyId 0 policy.address⟩) ++
   descriptor.grants.map (fun grant => ⟨none, .capability grant.kind grant.capability⟩) ++
-    [⟨(snapshot.logical.fields (.nullifier descriptor.authorityNullifier)).map
-        (fun consumed => Entry.nullifier descriptor.authorityNullifier consumed),
-      .nullifier descriptor.authorityNullifier true⟩]
+    [nullifierEdit snapshot descriptor.authorityNullifier]
 
 def requestedUserIds (descriptor : Descriptor registry) : List Nat :=
   descriptor.births.map fun item => item.create.cellId
+
+/-- Source-cell identities are known from canonical initial-policy addresses
+before the final descriptor commitment. Authority allocation must skip them. -/
+def allocationReservedIds (deployment : CanonicalCellRegistry.Deployment)
+    (descriptor : Descriptor registry) : List Nat :=
+  requestedUserIds descriptor ++
+    PolicySourceCell.initialIds deployment.domain descriptor.initialPolicies
 
 /-- The deployment fixes the anchor. This constructor prepares effects before
 factory/policy authorization. New grants are never used to authorize their
 own birth, and the full semantic family has its own old-domain-root request.
 The enclosing controller must enforce exact auxiliary-create equality before
 authorizing the final complete descriptor. -/
-structure PreparedGrantBatch {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+structure PreparedGrantBatch {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment) (directory : LoadedDirectory durable)
     (loaded : Loaded deployment.authorityAnchor durable.snapshot)
     (descriptor : Descriptor registry) where
   private mk ::
+  initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence (issueUniverse loaded.snapshot descriptor.grants)
     loaded.snapshot.cell descriptor
   prepared : Prepared loaded.snapshot (grantEdits loaded.snapshot descriptor)
   physical : Lowered directory loaded (grantEdits loaded.snapshot descriptor) prepared
-    (requestedUserIds descriptor)
+    (allocationReservedIds deployment descriptor)
   semanticExact : physical.post.logical =
     (ResourceBirthAuthority.post loaded.snapshot.cell descriptor).logical
 
-def prepareGrantBatch {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+def prepareGrantBatch {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment) (directory : LoadedDirectory durable)
     (loaded : Loaded deployment.authorityAnchor durable.snapshot)
     (descriptor : Descriptor registry) :
-    Option (PreparedGrantBatch deployment directory loaded descriptor) := do
+    Option (PreparedGrantBatch profile deployment directory loaded descriptor) := do
+  let initialSources ← PolicySourceCell.checkInitials deployment.domain profile descriptor.initialPolicies
   if ready : BatchReady loaded.snapshot descriptor then
     let prepared ← prepare loaded.snapshot (grantEdits loaded.snapshot descriptor)
-    let physical ← lower directory loaded prepared (requestedUserIds descriptor)
+    let physical ← lower directory loaded prepared (allocationReservedIds deployment descriptor)
     if same : CredentialAuthorityStateCodec.encode physical.post.logical =
         CredentialAuthorityStateCodec.encode
           (ResourceBirthAuthority.post loaded.snapshot.cell descriptor).logical then
-      some ⟨batchEvidence loaded.snapshot descriptor ready, prepared, physical,
+      some ⟨initialSources, batchEvidence loaded.snapshot descriptor ready, prepared, physical,
         CredentialAuthorityStateCodec.encode_injective same⟩
     else none
   else none
 
-theorem PreparedGrantBatch.post_exact
+def PreparedGrantBatch.auxiliaryCreates {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment} {directory : LoadedDirectory durable}
     {loaded : Loaded deployment.authorityAnchor durable.snapshot}
     {descriptor : Descriptor registry}
-    (prepared : PreparedGrantBatch deployment directory loaded descriptor) :
+    (prepared : PreparedGrantBatch profile deployment directory loaded descriptor) :
+    List (CreateRequest (CellId := Nat) registry) :=
+  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records ++
+    prepared.physical.placement.auxiliaryCreates
+
+theorem PreparedGrantBatch.post_exact {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {directory : LoadedDirectory durable}
+    {loaded : Loaded deployment.authorityAnchor durable.snapshot}
+    {descriptor : Descriptor registry}
+    (prepared : PreparedGrantBatch profile deployment directory loaded descriptor) :
     prepared.physical.post.cell = ResourceBirthAuthority.post loaded.snapshot.cell descriptor :=
   Materialized.ext prepared.semanticExact
 

@@ -165,7 +165,7 @@ def main : IO Unit := do
   let exact := match stateCodec.decode bytes with
     | some state => decide (pageAt state = some ownerPage)
     | none => false
-  IO.println s!"authority-page-v2 bytes={bytes.length} exact-roundtrip={exact}"
+  IO.println s!"authority-page-v3 bytes={bytes.length} exact-roundtrip={exact}"
   IO.println s!"owner-capability={decide (ownerPage.readCapability .object demoCapability.id = some ownerStored)}"
   IO.println s!"issuer-epoch={ownerPage.issuerEpochAt demoCapability.issuer} subject-key-epoch={ownerPage.subjectKeyEpochAt demoRequest.subject}"
   IO.println s!"issue-marker={issuedPage.isNullified 81} duplicate-grant-refused={decide (preIssuePage.admitInsertMany [ownerEntry, ownerEntry] = .error .addressConflict)}"

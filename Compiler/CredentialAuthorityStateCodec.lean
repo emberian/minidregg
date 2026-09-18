@@ -33,6 +33,7 @@ def fieldCode : AuthorityField → Nat
   | .policyEpoch policy => Nat.pair 4 policy.value
   | .policyAddress policy epoch => Nat.pair 5 (Nat.pair policy.value epoch)
   | .subjectKeyEpoch subject => Nat.pair 6 subject.value
+  | .subjectKey subject epoch => Nat.pair 10 (Nat.pair subject.value epoch)
   | .revoked (.capability identifier) => Nat.pair 7 identifier.value
   | .revoked (.channel channel) => Nat.pair 8 channel.value
   | .nullifier identifier => Nat.pair 9 identifier
@@ -49,6 +50,7 @@ def fieldOfCode (code : Nat) : AuthorityField :=
   | (7, value) => .revoked (.capability ⟨value⟩)
   | (8, value) => .revoked (.channel ⟨value⟩)
   | (9, value) => .nullifier value
+  | (10, value) => .subjectKey ⟨(Nat.unpair value).1⟩ (Nat.unpair value).2
   | _ => .nullifier 0
 
 theorem fieldOfCode_code (field : AuthorityField) :
@@ -60,6 +62,7 @@ theorem fieldOfCode_code (field : AuthorityField) :
   | policyEpoch policy => cases policy; simp [fieldCode, fieldOfCode]
   | policyAddress policy epoch => cases policy; simp [fieldCode, fieldOfCode]
   | subjectKeyEpoch subject => cases subject; simp [fieldCode, fieldOfCode]
+  | subjectKey subject epoch => cases subject; simp [fieldCode, fieldOfCode]
   | revoked key =>
       cases key with
       | capability identifier => cases identifier; simp [fieldCode, fieldOfCode]
@@ -96,6 +99,7 @@ def valueStream : (field : AuthorityField) → StreamCodec (AuthorityField.Value
   | .policyEpoch _ => StreamCodec.nat
   | .policyAddress _ _ => digestStream
   | .subjectKeyEpoch _ => StreamCodec.nat
+  | .subjectKey _ _ => CredentialSigningKeyCodec.keyRecordStream
   | .revoked _ => StreamCodec.bool
   | .nullifier _ => StreamCodec.bool
 
@@ -121,7 +125,7 @@ theorem stateOfFields_fields (state : LogicalState CredentialAuthorityState.sche
 def stateStream : StreamCodec (LogicalState CredentialAuthorityState.schema.{0, 0}) :=
   StreamCodec.xmap fieldsStream LogicalState.fields stateOfFields stateOfFields_fields
 
-def wireFrame : List UInt8 := "LOOM/AUTH/STATE".toUTF8.toList ++ [1]
+def wireFrame : List UInt8 := "LOOM/AUTH/STATE".toUTF8.toList ++ [2]
 
 def encode (state : LogicalState CredentialAuthorityState.schema.{0, 0}) : List UInt8 :=
   wireFrame ++ stateStream.encode state
@@ -141,6 +145,16 @@ def decodeRaw (bytes : List UInt8) :
 def decode (bytes : List UInt8) : Option (LogicalState CredentialAuthorityState.schema.{0, 0}) := do
   let state ← decodeRaw bytes
   if encode state = bytes then some state else none
+
+theorem decode_rejects_v1 (payload : List UInt8) :
+    decode ("LOOM/AUTH/STATE".toUTF8.toList ++ 1 :: payload) = none := by
+  let oldFrame : List UInt8 := "LOOM/AUTH/STATE".toUTF8.toList ++ [1]
+  have lengthExact : wireFrame.length = oldFrame.length := by simp [wireFrame, oldFrame]
+  have frameDifferent : oldFrame ≠ wireFrame := by simp [wireFrame, oldFrame]
+  have raw : decodeRaw (oldFrame ++ payload) = none := by
+    simp [decodeRaw, lengthExact, frameDifferent]
+  have rejected : decode (oldFrame ++ payload) = none := by simp [decode, raw]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using rejected
 
 @[simp] theorem decode_encode (state : LogicalState CredentialAuthorityState.schema.{0, 0}) :
     decode (encode state) = some state := by simp [decode]
@@ -162,7 +176,7 @@ def stateCodec : LawfulCodec (LogicalState CredentialAuthorityState.schema.{0, 0
   decode := decode
   decode_encode := decode_encode
 
-def rootCustomization : List UInt8 := "LOOM.AUTH.STATE.ROOT/v1".toUTF8.toList
+def rootCustomization : List UInt8 := "LOOM.AUTH.STATE.ROOT/v2".toUTF8.toList
 
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest

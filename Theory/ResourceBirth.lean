@@ -343,6 +343,17 @@ structure AuthorityGrant where
   kind : ResourceKind
   capability : StoredCapability kind
 
+/-- Candidate-independent initial policy source. The compiler must decode
+these exact bytes as its existing canonical policy record, check the content
+address and source metadata, and preserve them durably in the same birth.
+The authority transition always installs epoch zero; no candidate AST enters
+the Theory import boundary. -/
+structure InitialPolicy where
+  policyId : PolicyId
+  address : Digest
+  canonicalBytes : List UInt8
+  deriving DecidableEq, Repr
+
 structure InitialFunding where
   source : CanonicalResourceKernel.AccountId
   destination : CanonicalResourceKernel.AccountId
@@ -392,6 +403,7 @@ structure Descriptor (registry : TypeRegistry Digest) where
   extension point of a user-facing birth request. -/
   auxiliaryCreates : List (CreateRequest (CellId := Nat) registry)
   grants : List AuthorityGrant
+  initialPolicies : List InitialPolicy := []
   authorityNullifier : Nat
   funding : List InitialFunding
   fee : CreationFee
@@ -420,8 +432,10 @@ def Descriptor.quotedFee {registry : TypeRegistry Digest}
   tariff.base + tariff.perBirth * descriptor.births.length +
     tariff.perGrant * descriptor.grants.length +
     tariff.perInitialPayloadByte *
-      (descriptor.births.map fun item =>
-        (PackedCell.bytes registry item.create.cell).length).sum
+    (descriptor.births.map fun item =>
+        (PackedCell.bytes registry item.create.cell).length).sum +
+    tariff.perInitialPayloadByte *
+      (descriptor.initialPolicies.map fun policy => policy.canonicalBytes.length).sum
 
 def Descriptor.FeeBound {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) (tariff : CreationTariff) : Prop :=
@@ -429,18 +443,41 @@ def Descriptor.FeeBound {registry : TypeRegistry Digest}
     descriptor.fee.collector = tariff.collector ∧
     descriptor.fee.asset = tariff.asset
 
-/-- A grant is confined to one exact born target. Authorization and the
-requested owner/participant roles remain checked by the factory policy and
-the canonical authority-family admission; this is only its target binding. -/
-def AuthorityGrant.ForBirth {registry : TypeRegistry Digest}
+/-- A resource capability governs the resource's actual kind and selects its
+target-derived initial policy. More detailed holder/issuer/role bounds remain
+source-owned factory-template checks. -/
+def AuthorityGrant.NativeForBirth {registry : TypeRegistry Digest}
     (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
   grant.kind = item.resourceKind ∧
-    grant.capability.head.scope.targets = {⟨item.create.cellId⟩}
+    grant.capability.head.scope.targets = {⟨item.create.cellId⟩} ∧
+    grant.capability.head.policyId.value = item.create.cellId ∧
+    grant.capability.head.policyEpoch = 0
+
+/-- Policy installation requires a distinct, actually program-typed
+capability. Object/account authority is never coerced into install authority.
+The current policy-install consumer requests precisely this typed target. -/
+def AuthorityGrant.PolicyControlForBirth {registry : TypeRegistry Digest}
+    (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
+  match grant with
+  | ⟨.program, capability⟩ =>
+      capability.head.scope.targets = {⟨item.create.cellId⟩} ∧
+        capability.head.scope.verbs = {Verb.installPolicy} ∧
+        capability.head.policyId.value = item.create.cellId ∧
+        capability.head.policyEpoch = 0
+  | _ => False
+
+def AuthorityGrant.ForBirth {registry : TypeRegistry Digest}
+    (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
+  grant.NativeForBirth item ∨ grant.PolicyControlForBirth item
 
 def Descriptor.OwnerGrantsBound {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : Prop :=
   ∀ item ∈ descriptor.births, ∃ grant ∈ descriptor.grants,
-    grant.ForBirth item ∧ grant.capability.head.holder = .subject item.owner
+    grant.NativeForBirth item ∧ grant.capability.head.holder = .subject item.owner ∧
+      ∃ control ∈ descriptor.grants,
+        control.PolicyControlForBirth item ∧
+          control.capability.head.holder = .subject item.owner ∧
+          control.capability.head.id ≠ grant.capability.head.id
 
 /-- Every requested grant belongs to a newborn resource; adding a correct
 owner grant cannot conceal an extra grant over an existing resource. -/
@@ -451,6 +488,17 @@ def Descriptor.AllGrantsBound {registry : TypeRegistry Digest}
 def Descriptor.GrantIdsDistinct {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : Prop :=
   (descriptor.grants.map fun grant => grant.capability.head.id).Nodup
+
+/-- Each born resource receives one target-derived initial governing policy.
+No unrelated or duplicate policy can be installed under a birth permission.
+The actual source bytes and metadata are validated by the fixed compiler. -/
+def Descriptor.InitialPoliciesBound {registry : TypeRegistry Digest}
+    (descriptor : Descriptor registry) : Prop :=
+  (descriptor.initialPolicies.map InitialPolicy.policyId).Nodup ∧
+    (∀ item ∈ descriptor.births, ∃ policy ∈ descriptor.initialPolicies,
+      policy.policyId.value = item.create.cellId) ∧
+    (∀ policy ∈ descriptor.initialPolicies, ∃ item ∈ descriptor.births,
+      policy.policyId.value = item.create.cellId)
 
 def Descriptor.FundingBound {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : Prop :=
@@ -532,6 +580,7 @@ structure FactoryAuthorization {registry : TypeRegistry Digest}
   ownersBound : descriptor.OwnerGrantsBound
   allGrantsBound : descriptor.AllGrantsBound
   grantIdsDistinct : descriptor.GrantIdsDistinct
+  policiesBound : descriptor.InitialPoliciesBound
   fundingBound : descriptor.FundingBound
   authorized : Authorized portal oldAuthority
     (factoryRequest pins encoding oldAuthority factoryPreRoot height descriptor)
@@ -590,5 +639,31 @@ theorem no_factoryAuthorization_of_wrong_schema_kind
     IsEmpty (FactoryAuthorization pins encoding portal oldAuthority factoryPreRoot
       height descriptor) :=
   ⟨fun accepted => wrong (accepted.kindsBound item member)⟩
+
+/-! ## Axiom accounting for the source and receiving laws -/
+
+/-- info: 'Minidregg.Theory.ResourceBirth.allocate_success_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.allocate_success_post
+
+/-- info: 'Minidregg.Theory.ResourceBirth.allocate_success_used' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.allocate_success_used
+
+/-- info: 'Minidregg.Theory.ResourceBirth.allocate_success_created' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.allocate_success_created
+
+/-- info: 'Minidregg.Theory.ResourceBirth.allocate_of_fresh' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.allocate_of_fresh
+
+/-- info: 'Minidregg.Theory.ResourceBirth.allocate_failure_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.allocate_failure_atomic
+
+/-- info: 'Minidregg.Theory.ResourceBirth.duplicate_birth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.duplicate_birth_refused
+
+/-- info: 'Minidregg.Theory.ResourceBirth.retired_birth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.retired_birth_refused
+
+/-- info: 'Minidregg.Theory.ResourceBirth.no_factoryAuthorization_of_positive_self_fee' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirth.no_factoryAuthorization_of_positive_self_fee
 
 end Minidregg.Theory.ResourceBirth

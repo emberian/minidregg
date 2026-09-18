@@ -117,7 +117,7 @@ def checkPhysical (binary : System.FilePath) : IO Unit :=
     match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
     | .error message => throw (IO.userError message)
     | .ok loaded =>
-        require "all source kinds survive real native reopen" (loaded.cells.length == samples.length)
+        require "eight original registry samples survive real native reopen" (loaded.cells.length == samples.length)
         for (identifier, bytes) in loaded.cells do
           match (ResourceBirthCodec.LifecycleImage.codec registry).decode bytes with
           | some (.live cell) => do
@@ -125,7 +125,7 @@ def checkPhysical (binary : System.FilePath) : IO Unit :=
                 (cellCheck deployment identifier.value cell)
           | _ => throw (IO.userError "FAIL canonical registry: native cell lost lifecycle kind")
         require "unallocated id retains canonical fresh bytes" (loaded.snapshot.canonicalBytes ⟨9999⟩ == [])
-    IO.println "PASS canonical cell registry native join: fixed lifecycle root + all 8 actual source kinds survive SQLite bootstrap/reopen; this is transport coverage, not birth authorization"
+    IO.println "PASS canonical cell registry native join: fixed lifecycle root + eight original source kinds survive SQLite bootstrap/reopen; policy-source kind has its own probe; this is transport coverage, not birth authorization"
 
 end CanonicalCellRegistryProbe
 

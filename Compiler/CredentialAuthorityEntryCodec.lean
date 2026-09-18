@@ -9,6 +9,7 @@ compact prefix codec. Whole-page canonical decoding is enforced by the page
 materializer, including rejection of aliases accepted by primitive codecs.
 -/
 import Compiler.TypedAuthorizationRequestCodec
+import Compiler.CredentialSigningKeyCodec
 import Theory.CredentialAuthorityState
 import Mathlib.Data.Finset.Sort
 
@@ -78,6 +79,7 @@ def verbTag : {kind : ResourceKind} → Verb kind → Nat
   | _, .observeProgram => 1
   | _, .installProgram => 2
   | _, .delegateProgram => 3
+  | _, .installPolicy => 4
 
 def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .object, 1 => .observeObject
@@ -88,6 +90,7 @@ def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .account, _ => .delegateAccount
   | .program, 1 => .observeProgram
   | .program, 2 => .installProgram
+  | .program, 4 => .installPolicy
   | .program, _ => .delegateProgram
 
 theorem verbOfTag_tag {kind : ResourceKind} (verb : Verb kind) :

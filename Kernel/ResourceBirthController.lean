@@ -138,7 +138,23 @@ def allocationRequest {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry) (oldAuthority : AuthState)
     (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
     (height : Height) (descriptor : Descriptor registry) : Request .object :=
-  factoryRequest pins encoding oldAuthority (allocationPre before request).root height descriptor
+  { factoryRequest pins encoding oldAuthority (allocationPre before request).root height descriptor with
+    argsDigest := encoding.hashBytes
+      ("DREGG.RESOURCE.BIRTH.ALLOCATION.ARGS/v2".toUTF8.toList ++
+        Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.nat.encode request.cellId ++
+        encoding.codec.encode descriptor) }
+
+/-- The allocation coordinate and full descriptor jointly supply the signed
+argument commitment. A fresh root alone cannot identify a particular slot. -/
+theorem allocationRequest_args_source {registry : TypeRegistry Digest}
+    (pins : FactoryPins) (encoding : SourceEncoding registry) (oldAuthority : AuthState)
+    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
+    (height : Height) (descriptor : Descriptor registry) :
+    (allocationRequest pins encoding oldAuthority before request height descriptor).argsDigest =
+      encoding.hashBytes
+        ("DREGG.RESOURCE.BIRTH.ALLOCATION.ARGS/v2".toUTF8.toList ++
+          Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.nat.encode request.cellId ++
+          encoding.codec.encode descriptor) := rfl
 
 def allocationFamily {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry) (oldAuthority : AuthState)
@@ -435,6 +451,9 @@ theorem settlement_no_partial (schedule : Schedule) (before : DataSnapshot rootB
 namespace Concrete
 
 open Minidregg.Compiler
+open Minidregg.Compiler.CanonicalPolicyAdmission
+
+variable {F : Type} [Field F] {profile : PolicyCompilerProfile F}
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
@@ -509,10 +528,25 @@ def PinsBound (deployment : Deployment) (pins : FactoryPins) : Prop :=
 instance pinsBoundDecidable (deployment : Deployment) (pins : FactoryPins) :
     Decidable (PinsBound deployment pins) := by unfold PinsBound; infer_instance
 
+/-- The compiler profile comes from the receiver source. Its exact semantic
+identity, including field and arithmetic behavior, is the factory's pin. -/
+def ProfileBound (profile : PolicyCompilerProfile F) (pins : FactoryPins) : Prop :=
+  pins.semantics = profile.semantics ∧ profile.descriptor?.isSome = true
+
+instance profileBoundDecidable (profile : PolicyCompilerProfile F) (pins : FactoryPins) :
+    Decidable (ProfileBound profile pins) := by unfold ProfileBound; infer_instance
+
+private instance initialPoliciesBoundDecidable (descriptor : Descriptor Registry) :
+    Decidable descriptor.InitialPoliciesBound := by
+  unfold Descriptor.InitialPoliciesBound
+  infer_instance
+
 inductive PreparationReject where
   | deployment
+  | compilerProfile
   | directory
   | initialPayload
+  | initialPolicy
   | factory
   | resourceBook
   | authorityDomain
@@ -531,18 +565,20 @@ an arbitrary authority snapshot, Book, allocation result or post-state.
 This is preparation, not acceptance: no policy authorization has been created.
 The upper receiving controller evaluates these exact candidates and retains
 all family modes and authorizations before exposing their physical intent. -/
-structure PreparedBirth (deployment : Deployment) (pins : FactoryPins)
+structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (descriptor : Descriptor Registry) where
   private mk ::
   deploymentValid : deployment.Valid
   pinsBound : PinsBound deployment pins
+  profileBound : ProfileBound profile pins
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
+  policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
   authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
-  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch deployment directory authority descriptor
-  auxiliaryExact : descriptor.auxiliaryCreates = grants.physical.placement.auxiliaryCreates
+  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch profile deployment directory authority descriptor
+  auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   allocated : Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload descriptor.resourceBatch
   writesUnique : ((planWrites deployment descriptor factory.payload book.payload
@@ -565,13 +601,15 @@ private def fromOption {α : Type} (value : Option α) (reason : PreparationReje
 /-- The actual fail-closed receiving preparation. Even the auxiliary create
 list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
-def prepareBirth (deployment : Deployment) (pins : FactoryPins)
+def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (descriptor : Descriptor Registry) :
-    Except PreparationReject (PreparedBirth deployment pins durable descriptor) := do
+    Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
+  let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
+  let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
   let factory ← fromOption
     (observeCell deployment directory.directory deployment.factoryId .declaredObject) .factory
   let book ← fromOption
@@ -579,10 +617,10 @@ def prepareBirth (deployment : Deployment) (pins : FactoryPins)
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch deployment directory authority descriptor)
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment directory authority descriptor)
     .authorityBatch
   let aux ← requirePreparation
-    (sameCreates descriptor.auxiliaryCreates grants.physical.placement.auxiliaryCreates = true)
+    (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
     .auxiliaryCreates
   let allocated ← match allocate? Registry directory.directory descriptor with
     | .error _ => .error PreparationReject.allocation
@@ -598,65 +636,67 @@ def prepareBirth (deployment : Deployment) (pins : FactoryPins)
       ∀ write ∈ writes, write.expectedPre = durable.snapshot.model.roots write.cellId)
     .physicalShape
   let finalCells ← requirePreparation (∀ write ∈ writes, PhysicalPostLaw deployment write) .finalCellLaw
-  .ok ⟨valid.down.1, valid.down.2, directory, initials.down, factory, book, authority,
+  .ok ⟨valid.down.1, valid.down.2, profileBound.down, directory, initials.down,
+    policiesBound.down, factory, book, authority,
     grants, (sameCreates_iff _ _).mp aux.down, allocated, resources,
     shape.down.1, shape.down.2, finalCells.down⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor) : List DataWrite :=
+    (prepared : PreparedBirth profile deployment pins durable descriptor) : List DataWrite :=
   planWrites deployment descriptor prepared.factory.payload prepared.book.payload
     prepared.resources.post prepared.grants.physical.writes
 
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor) : List ReadGuard :=
+    (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
   CredentialAuthorityDomainReceiver.readonlyGuards prepared.grants.physical.readGuards prepared.writes
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor) : AuthState :=
+    (prepared : PreparedBirth profile deployment pins durable descriptor) : AuthState :=
   prepared.authority.snapshot.authState
 
 /-- A user draft has no auxiliary creates. Only the source-owned lowering may
 fill that field; every other source field remains exactly the draft's value.
 The resulting descriptor is the complete object to review, sign and submit. -/
-structure PreparedDraft (deployment : Deployment) (pins : FactoryPins)
+structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (draft : Descriptor Registry) where
   private mk ::
   noAuxiliaryInput : draft.auxiliaryCreates = []
   descriptor : Descriptor Registry
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
-  prepared : PreparedBirth deployment pins durable descriptor
+  prepared : PreparedBirth profile deployment pins durable descriptor
 
-def prepareDraft (deployment : Deployment) (pins : FactoryPins)
+def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
     (durable : Durable) (draft : Descriptor Registry) :
-    Except PreparationReject (PreparedDraft deployment pins durable draft) := do
+    Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch deployment directory authority draft)
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment directory authority draft)
     .authorityBatch
-  let descriptor := { draft with auxiliaryCreates := grants.physical.placement.auxiliaryCreates }
-  let prepared ← prepareBirth deployment pins durable descriptor
+  let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
+  let prepared ← prepareBirth profile deployment pins durable descriptor
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {draft : Descriptor Registry}
-    (prepared : PreparedDraft deployment pins durable draft) :
+    (prepared : PreparedDraft profile deployment pins durable draft) :
     prepared.descriptor.births = draft.births ∧
       prepared.descriptor.grants = draft.grants ∧
+      prepared.descriptor.initialPolicies = draft.initialPolicies ∧
       prepared.descriptor.funding = draft.funding ∧
       prepared.descriptor.fee = draft.fee ∧
       prepared.descriptor.transactionId = draft.transactionId := by
   rw [prepared.sourceExact]
-  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (write : DataWrite) (member : write ∈ prepared.writes) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_append.mp member with front | authority
@@ -671,14 +711,14 @@ theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : Factor
 
 theorem PreparedBirth.readGuards_readonly {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.cellId ∉ prepared.writes.map DataWrite.cellId :=
   of_decide_eq_true (List.mem_filter.mp member).2
 
 theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId :=
   prepared.grants.physical.readGuards_exact guard (List.mem_filter.mp member).1
@@ -688,7 +728,7 @@ a changed cell carries its old root in its unique write; an unchanged one
 remains a read guard. Newly allocated shards occur only in allocation writes. -/
 theorem PreparedBirth.authority_reads_covered {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.authority.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   rcases prepared.grants.physical.every_read_covered guard member with written | readonly
@@ -701,7 +741,7 @@ theorem PreparedBirth.authority_reads_covered {deployment : Deployment} {pins : 
 
 theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (request : CreateRequest (CellId := Nat) Registry)
     (member : request ∈ descriptor.createRequests) :
     durable.snapshot.canonicalBytes ⟨request.cellId⟩ = [] := by
@@ -710,28 +750,82 @@ theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins
 
 theorem PreparedBirth.authority_post_exact {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor) :
+    (prepared : PreparedBirth profile deployment pins durable descriptor) :
     prepared.grants.physical.post.cell =
       ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor :=
   prepared.grants.post_exact
 
+/-- Checked source records are actual allocator participants, not staging
+receipts or entries in an unrelated in-memory payload store. -/
+theorem PreparedBirth.initial_source_member {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
+    CanonicalCellRegistry.policySourceCreate deployment.domain record ∈ descriptor.createRequests := by
+  unfold Descriptor.createRequests
+  apply List.mem_append_right
+  rw [prepared.auxiliaryExact]
+  exact List.mem_append_left _ (List.mem_map.mpr ⟨record, member, rfl⟩)
+
+theorem PreparedBirth.initial_source_created {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
+    prepared.allocated.after.slots
+        (CanonicalCellRegistry.policySourceCreate deployment.domain record).cellId =
+      .present (CanonicalCellRegistry.policySourceCell record) :=
+  ResourceBirth.allocate_success_created Registry prepared.directory.directory
+    prepared.allocated.after descriptor.createRequests prepared.allocated.accepted _
+      (prepared.initial_source_member record member)
+
+/-- The same physical intent that installs the new policy heads contains
+each exact source cell. No later payload upload is needed for first use. -/
+theorem PreparedBirth.initial_source_write {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
+    birthWrite (CanonicalCellRegistry.policySourceCreate deployment.domain record) ∈ prepared.writes := by
+  apply List.mem_append_left
+  apply List.mem_append_left
+  exact List.mem_map.mpr ⟨_, prepared.initial_source_member record member, rfl⟩
+
+/-- Each submitted initial policy resolves to its exact checked source in
+the allocated result. The address equality is decoder evidence, not a free
+hash equality interpreted as equality of different source records. -/
+theorem PreparedBirth.initial_policy_created {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (initial : InitialPolicy) (member : initial ∈ descriptor.initialPolicies) :
+    ∃ record,
+      PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+      PolicySourceCell.InitialFacts deployment.domain profile initial record ∧
+      prepared.allocated.after.slots (PolicySourceCell.physicalId deployment.domain initial.address) =
+        .present (CanonicalCellRegistry.policySourceCell record) := by
+  obtain ⟨record, inRecords, decoded, facts⟩ :=
+    prepared.grants.initialSources.record_of_member initial member
+  have created := prepared.initial_source_created record inRecords
+  change prepared.allocated.after.slots
+    (PolicySourceCell.physicalId deployment.domain (PolicyRecordCodec.digest record)) = _ at created
+  rw [facts.2.2.1] at created
+  exact ⟨record, decoded, facts, created⟩
+
 theorem PreparedBirth.user_initial_law {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell :=
   prepared.initials item member
 
 theorem PreparedBirth.conserves {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor) (asset : Nat) :
+    (prepared : PreparedBirth profile deployment pins durable descriptor) (asset : Nat) :
     (CanonicalResourceKernel.logicalBook prepared.resources.post.logical).totalAsset asset =
       (CanonicalResourceKernel.logicalBook prepared.book.payload.logical).totalAsset asset :=
   prepared.resources.conserves asset
 
 theorem PreparedBirth.no_user_book {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth deployment pins durable descriptor)
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     item.create.cell.kind ≠ .resourceBook := by
   intro forbidden
@@ -743,5 +837,49 @@ theorem PreparedBirth.no_user_book {deployment : Deployment} {pins : FactoryPins
       exact CanonicalCellRegistry.no_user_book_birth deployment item.create.cellId payload initial
 
 end Concrete
+
+/-! ## Axiom accounting for the source and receiving laws -/
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.allocated_native_disjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocated_native_disjoint
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.nativeNullifiers_retains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.nativeNullifiers_retains
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.settlement_no_partial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.settlement_no_partial
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.allocation_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocation_post_exact
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.allocation_candidate_physical_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocation_candidate_physical_post
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.no_allocation_mode_of_retired' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.no_allocation_mode_of_retired
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.sameCreates_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.sameCreates_iff
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedDraft.user_source_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedDraft.user_source_preserved
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.write_roots_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.write_roots_bound
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.authority_reads_covered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.authority_reads_covered
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.fresh_before' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.fresh_before
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.authority_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.authority_post_exact
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.conserves
+
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.no_user_book' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.no_user_book
 
 end Minidregg.Kernel.ResourceBirthController

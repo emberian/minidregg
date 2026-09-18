@@ -1,17 +1,21 @@
 /-
-# Compiler.BoundedPageSchemaUpgrade -- admitted V1 -> V2 page/catalog cutover
+# Compiler.BoundedPageSchemaUpgrade -- admitted next-catalogue representation cutover
 
-The bounded content, event-history, and authority-policy pages have exact V1
-wire formats and a dependent extension catalog.  This module defines one
-concrete V2 protocol generation for all three page kinds.  V2 deliberately
-keeps the finite sparse logical carriers and their canonical semantic
-projections unchanged while changing every page frame, page-codec pin,
-controller pin, schema pin, root domain, and the catalog generation.
+The current bounded content, event-history, and authority-policy pages have
+independent wire versions in one dependent extension catalogue. This module
+constructs the next catalogue generation over those CURRENT typed carriers.
+Each page wire version advances from its own pinned version; in this source
+that is content 1→2, events 1→2, and authority 3→4. It does not reconstruct a
+historical parser using today's expanded authority vocabulary.
+
+The next generation preserves the finite sparse logical carriers and their
+canonical semantic projections while changing each page frame, page-codec
+pin, controller pin, schema pin, root domain, and the catalogue generation.
 
 Consequently migration is an exact identity on typed logical state, but it is
 not an identity on bytes.  Both generations remain separately decodable, and
 a mixed fleet can compare their canonical semantic projections without
-pretending that V1 and V2 roots are equal.  Catalog transition admission is
+equating current and next page roots.  Catalog transition admission is
 fail closed: the current generation, monotone direction, exact old/new
 controller rows, exact policy pins, and an operator authorization token are all
 checked before an admitted witness exists.
@@ -37,161 +41,125 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-/-! ## Exact V2 codecs over the existing typed state carriers -/
+/-! ## Exact next-generation codecs over the current typed state carriers -/
 
-def contentWireFrameV2 : List UInt8 :=
-  [76, 79, 79, 77, 47, 72, 68, 79, 67, 47, 67, 79, 78, 84, 69, 78, 84, 80,
-    65, 71, 69, 2, 4]
+/-- Page wire versions advance from their own deployed pins, independently of
+catalog generations. In this catalogue: content 1→2, events 1→2, authority 3→4. -/
+def nextWireVersion (kind : PageKind) : Nat := (controller kind).wireVersion + 1
 
-def eventWireFrameV2 : List UInt8 :=
-  [76, 79, 79, 77, 47, 72, 68, 79, 67, 47, 69, 86, 69, 78, 84, 80, 65, 71,
-    69, 2, 4]
+theorem nextWireVersion_fits (kind : PageKind) : nextWireVersion kind < 256 := by
+  cases kind <;> decide
 
-def authorityWireFrameV2 : List UInt8 :=
-  [76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 2, 4]
+/-- The proof argument prevents a future version increment from wrapping. -/
+def nextWireVersionByte (kind : PageKind) : UInt8 :=
+  UInt8.ofNatLT (nextWireVersion kind) (nextWireVersion_fits kind)
 
-def decodeContentV2 : List UInt8 -> Option PageKind.content.State
-  | 76 :: 79 :: 79 :: 77 :: 47 :: 72 :: 68 :: 79 :: 67 :: 47 :: 67 :: 79 ::
-      78 :: 84 :: 69 :: 78 :: 84 :: 80 :: 65 :: 71 :: 69 :: 2 :: 4 :: payload =>
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateStream.toLawful.decode
-        payload
-  | _ => none
+@[simp] theorem nextWireVersionByte_exact (kind : PageKind) :
+    (nextWireVersionByte kind).toNat = nextWireVersion kind := rfl
 
-def decodeEventV2 : List UInt8 -> Option PageKind.eventHistory.State
-  | 76 :: 79 :: 79 :: 77 :: 47 :: 72 :: 68 :: 79 :: 67 :: 47 :: 69 :: 86 ::
-      69 :: 78 :: 84 :: 80 :: 65 :: 71 :: 69 :: 2 :: 4 :: payload =>
-      Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateStream.toLawful.decode
-        payload
-  | _ => none
+theorem nextWireVersion_strict (kind : PageKind) :
+    (controller kind).wireVersion < nextWireVersion kind := Nat.lt_succ_self _
 
-def decodeAuthorityV2 : List UInt8 -> Option PageKind.authorityPolicy.State
-  | 76 :: 79 :: 79 :: 77 :: 47 :: 65 :: 85 :: 84 :: 72 :: 47 :: 80 :: 79 ::
-      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 2 :: 4 :: payload =>
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateStream.toLawful.decode
-        payload
-  | _ => none
+def stateStreamNext : (kind : PageKind) → StreamCodec kind.State
+  | .content => HyperdocumentContentPageMaterializer.stateStream
+  | .eventHistory => HyperdocumentEventPageMaterializer.stateStream
+  | .authorityPolicy => CredentialAuthorityPageMaterializer.stateStream
 
-def contentStateCodecV2 : LawfulCodec PageKind.content.State where
-  encode state := contentWireFrameV2 ++
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateStream.encode state
-  decode := decodeContentV2
-  decode_encode := by
-    intro state
-    change
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateStream.toLawful.decode
-        (Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateStream.encode state) =
-          some state
-    exact
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateStream.toLawful.decode_encode
-        state
+/-- Retain the source-owned kind prefix and capacity, advance only its version. -/
+def wireFrameNext (kind : PageKind) : List UInt8 :=
+  let old := (controller kind).wireFrame
+  old.take (old.length - 2) ++ [nextWireVersionByte kind, 4]
 
-def eventStateCodecV2 : LawfulCodec PageKind.eventHistory.State where
-  encode state := eventWireFrameV2 ++
-    Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateStream.encode state
-  decode := decodeEventV2
-  decode_encode := by
-    intro state
-    change
-      Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateStream.toLawful.decode
-        (Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateStream.encode state) =
-          some state
-    exact
-      Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateStream.toLawful.decode_encode
-        state
+def encodeNext (kind : PageKind) (state : kind.State) : List UInt8 :=
+  wireFrameNext kind ++ (stateStreamNext kind).encode state
 
-def authorityStateCodecV2 : LawfulCodec PageKind.authorityPolicy.State where
-  encode state := authorityWireFrameV2 ++
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateStream.encode state
-  decode := decodeAuthorityV2
-  decode_encode := by
-    intro state
-    change
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateStream.toLawful.decode
-        (Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateStream.encode state) =
-          some state
-    exact
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateStream.toLawful.decode_encode
-        state
+def decodeNextRaw (kind : PageKind) (bytes : List UInt8) : Option kind.State :=
+  if bytes.take (wireFrameNext kind).length = wireFrameNext kind then
+    (stateStreamNext kind).toLawful.decode (bytes.drop (wireFrameNext kind).length)
+  else none
 
-def contentRootCustomizationV2 : List UInt8 :=
-  [76, 79, 79, 77, 46, 72, 68, 79, 67, 46, 67, 79, 78, 84, 69, 78, 84, 80,
-    65, 71, 69, 46, 82, 79, 79, 84, 47, 118, 50]
+@[simp] theorem decodeNextRaw_encode (kind : PageKind) (state : kind.State) :
+    decodeNextRaw kind (encodeNext kind state) = some state := by
+  have payload := (stateStreamNext kind).toLawful.decode_encode state
+  change (stateStreamNext kind).toLawful.decode
+    ((stateStreamNext kind).encode state) = some state at payload
+  simp [decodeNextRaw, encodeNext, payload]
 
-def eventRootCustomizationV2 : List UInt8 :=
-  [76, 79, 79, 77, 46, 72, 68, 79, 67, 46, 69, 86, 69, 78, 84, 80, 65, 71,
-    69, 46, 82, 79, 79, 84, 47, 118, 50]
+def decodeNext (kind : PageKind) (bytes : List UInt8) : Option kind.State := do
+  let state ← decodeNextRaw kind bytes
+  if encodeNext kind state = bytes then some state else none
 
-def authorityRootCustomizationV2 : List UInt8 :=
-  [76, 79, 79, 77, 46, 65, 85, 84, 72, 46, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 46, 82, 79, 79, 84, 47, 118, 50]
+@[simp] theorem decodeNext_encode (kind : PageKind) (state : kind.State) :
+    decodeNext kind (encodeNext kind state) = some state := by simp [decodeNext]
 
-def rootV2 (customization bytes : List UInt8) : Digest :=
-  (Minidregg.Compiler.Sp800185Cshake256.hash customization bytes).digest
+theorem decodeNext_canonical (kind : PageKind) {bytes : List UInt8}
+    {state : kind.State} (accepted : decodeNext kind bytes = some state) :
+    encodeNext kind state = bytes := by
+  unfold decodeNext at accepted
+  cases raw : decodeNextRaw kind bytes with
+  | none => simp [raw] at accepted
+  | some selected =>
+      simp only [raw, bind, Option.bind] at accepted
+      split at accepted
+      next canonical => cases Option.some.inj accepted; exact canonical
+      next => contradiction
 
-def controllerV2 : (kind : PageKind) -> Controller kind
-  | .content =>
-      { schemaId := ⟨91101⟩
-        pageCodecId := ⟨92101⟩
-        controllerId := ⟨94101⟩
-        rootAlgorithmId := ⟨93001⟩
-        wireVersion := 2
-        capacity := 4
-        wireFrame := contentWireFrameV2
-        rootCustomization := contentRootCustomizationV2
-        codec := contentStateCodecV2
-        rootBytes := rootV2 contentRootCustomizationV2 }
-  | .eventHistory =>
-      { schemaId := ⟨91102⟩
-        pageCodecId := ⟨92102⟩
-        controllerId := ⟨94102⟩
-        rootAlgorithmId := ⟨93001⟩
-        wireVersion := 2
-        capacity := 4
-        wireFrame := eventWireFrameV2
-        rootCustomization := eventRootCustomizationV2
-        codec := eventStateCodecV2
-        rootBytes := rootV2 eventRootCustomizationV2 }
-  | .authorityPolicy =>
-      { schemaId := ⟨91103⟩
-        pageCodecId := ⟨92103⟩
-        controllerId := ⟨94103⟩
-        rootAlgorithmId := ⟨93001⟩
-        wireVersion := 2
-        capacity := 4
-        wireFrame := authorityWireFrameV2
-        rootCustomization := authorityRootCustomizationV2
-        codec := authorityStateCodecV2
-        rootBytes := rootV2 authorityRootCustomizationV2 }
+def stateCodecNext (kind : PageKind) : LawfulCodec kind.State where
+  encode := encodeNext kind
+  decode := decodeNext kind
+  decode_encode := decodeNext_encode kind
 
-@[simp] theorem controllerV2_version (kind : PageKind) :
-    (controllerV2 kind).wireVersion = 2 := by
-  cases kind <;> rfl
+def rootCustomizationNext (kind : PageKind) : List UInt8 :=
+  let stem := match kind with
+    | .content => "LOOM.HDOC.CONTENTPAGE.ROOT/v"
+    | .eventHistory => "LOOM.HDOC.EVENTPAGE.ROOT/v"
+    | .authorityPolicy => "LOOM.AUTH.POLICYPAGE.ROOT/v"
+  (stem ++ toString (nextWireVersion kind)).toUTF8.toList
 
-@[simp] theorem controllerV2_capacity (kind : PageKind) :
-    (controllerV2 kind).capacity = (controller kind).capacity := by
-  cases kind <;> rfl
+def rootNext (kind : PageKind) (bytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash (rootCustomizationNext kind) bytes).digest
+
+def controllerNext (kind : PageKind) : Controller kind where
+  schemaId := match kind with
+    | .content => ⟨91101⟩ | .eventHistory => ⟨91102⟩ | .authorityPolicy => ⟨91103⟩
+  pageCodecId := match kind with
+    | .content => ⟨92101⟩ | .eventHistory => ⟨92102⟩ | .authorityPolicy => ⟨92103⟩
+  controllerId := match kind with
+    | .content => ⟨94101⟩ | .eventHistory => ⟨94102⟩ | .authorityPolicy => ⟨94103⟩
+  rootAlgorithmId := ⟨93001⟩
+  wireVersion := nextWireVersion kind
+  capacity := (controller kind).capacity
+  wireFrame := wireFrameNext kind
+  rootCustomization := rootCustomizationNext kind
+  codec := stateCodecNext kind
+  rootBytes := rootNext kind
+
+@[simp] theorem controllerNext_version (kind : PageKind) :
+    (controllerNext kind).wireVersion = (controller kind).wireVersion + 1 := rfl
+
+@[simp] theorem controllerNext_capacity (kind : PageKind) :
+    (controllerNext kind).capacity = (controller kind).capacity := rfl
 
 /-! ## Typed migration and semantic projection -/
 
-/-- V2 changes representation identity, not the typed logical carrier. -/
+/-- The next catalogue changes representation identity, not the typed logical carrier. -/
 def migrate (kind : PageKind) (state : kind.State) : kind.State := state
 
 def oldCanonicalBytes (kind : PageKind) (state : kind.State) : List UInt8 :=
   (controller kind).codec.encode state
 
 def newCanonicalBytes (kind : PageKind) (state : kind.State) : List UInt8 :=
-  (controllerV2 kind).codec.encode (migrate kind state)
+  (controllerNext kind).codec.encode (migrate kind state)
 
 @[simp] theorem migrate_exact (kind : PageKind) (state : kind.State) :
     migrate kind state = state := rfl
 
 @[simp] theorem decode_new_migration (kind : PageKind) (state : kind.State) :
-    (controllerV2 kind).codec.decode (newCanonicalBytes kind state) = some state := by
-  exact (controllerV2 kind).codec.decode_encode state
+    (controllerNext kind).codec.decode (newCanonicalBytes kind state) = some state := by
+  exact (controllerNext kind).codec.decode_encode state
 
 theorem new_decoder_rejects_old (kind : PageKind) (state : kind.State) :
-    (controllerV2 kind).codec.decode (oldCanonicalBytes kind state) = none := by
+    (controllerNext kind).codec.decode (oldCanonicalBytes kind state) = none := by
   cases kind <;> rfl
 
 theorem old_decoder_rejects_new (kind : PageKind) (state : kind.State) :
@@ -237,7 +205,7 @@ structure MigrationRootCollision (kind : PageKind) (state : kind.State) : Prop w
   bytesDifferent : oldCanonicalBytes kind state ≠ newCanonicalBytes kind state
   rootsEqual :
     (controller kind).rootBytes (oldCanonicalBytes kind state) =
-      (controllerV2 kind).rootBytes (newCanonicalBytes kind state)
+      (controllerNext kind).rootBytes (newCanonicalBytes kind state)
 
 structure MigrationDigestSeparation (kind : PageKind)
     (state : kind.State) : Prop where
@@ -246,7 +214,7 @@ structure MigrationDigestSeparation (kind : PageKind)
 theorem migration_roots_differ (kind : PageKind) (state : kind.State)
     (binding : MigrationDigestSeparation kind state) :
     (controller kind).rootBytes (oldCanonicalBytes kind state) ≠
-      (controllerV2 kind).rootBytes (newCanonicalBytes kind state) := by
+      (controllerNext kind).rootBytes (newCanonicalBytes kind state) := by
   intro equal
   exact binding.noCollision ⟨migration_changes_canonical_bytes kind state, equal⟩
 
@@ -254,16 +222,16 @@ theorem migration_roots_differ (kind : PageKind) (state : kind.State)
 
 def upgradedCatalog : Catalog where
   catalogVersion := 2
-  content := (controllerV2 .content).catalogEntry
-  eventHistory := (controllerV2 .eventHistory).catalogEntry
-  authorityPolicy := (controllerV2 .authorityPolicy).catalogEntry
+  content := (controllerNext .content).catalogEntry
+  eventHistory := (controllerNext .eventHistory).catalogEntry
+  authorityPolicy := (controllerNext .authorityPolicy).catalogEntry
 
 @[simp] theorem upgradedCatalog_lookup_exact (kind : PageKind) :
-    upgradedCatalog.lookup kind = some (controllerV2 kind).catalogEntry := by
+    upgradedCatalog.lookup kind = some (controllerNext kind).catalogEntry := by
   cases kind <;> rfl
 
 @[simp] theorem upgradedCatalog_entry_exact (kind : PageKind) :
-    upgradedCatalog.entry kind = (controllerV2 kind).catalogEntry := by
+    upgradedCatalog.entry kind = (controllerNext kind).catalogEntry := by
   cases kind <;> rfl
 
 theorem upgradedCatalog_ne_deployed : upgradedCatalog ≠ deployedCatalog := by
@@ -320,11 +288,11 @@ structure UpgradeRequest where
 
 def ControllersCompatible (old new : Catalog) : Prop :=
   old.entry .content = (controller .content).catalogEntry ∧
-  new.entry .content = (controllerV2 .content).catalogEntry ∧
+  new.entry .content = (controllerNext .content).catalogEntry ∧
   old.entry .eventHistory = (controller .eventHistory).catalogEntry ∧
-  new.entry .eventHistory = (controllerV2 .eventHistory).catalogEntry ∧
+  new.entry .eventHistory = (controllerNext .eventHistory).catalogEntry ∧
   old.entry .authorityPolicy = (controller .authorityPolicy).catalogEntry ∧
-  new.entry .authorityPolicy = (controllerV2 .authorityPolicy).catalogEntry
+  new.entry .authorityPolicy = (controllerNext .authorityPolicy).catalogEntry
 
 instance controllersCompatibleDecidable (old new : Catalog) :
     Decidable (ControllersCompatible old new) := by
@@ -431,7 +399,15 @@ def mixedControllerRequest : UpgradeRequest :=
 
 @[simp] theorem mixed_controller_catalog_rejected :
     admit 1 mixedControllerRequest = .error .incompatibleControllers := by
-  rfl
+  have currentExact : 1 = mixedControllerRequest.fromVersion := rfl
+  have monotone : mixedControllerRequest.fromVersion < mixedControllerRequest.toVersion := by decide
+  have incompatible : ¬ ControllersCompatible mixedControllerRequest.fromCatalog
+      mixedControllerRequest.toCatalog := by
+    intro compatible
+    have pins := congrArg CatalogEntry.schemaId compatible.2.2.2.1
+    change (⟨91002⟩ : Digest) = ⟨91102⟩ at pins
+    cases pins
+  simp only [admit, dif_pos currentExact, dif_pos monotone, dif_neg incompatible]
 
 /-! ## Mixed-generation page recovery remains semantically coherent -/
 

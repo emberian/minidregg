@@ -19,6 +19,7 @@ word "sparse" here is representation, not merely vocabulary.
 -/
 import Theory.AcceptedCellEffect
 import Theory.CredentialAuthorityFamily
+import Theory.CredentialSigningKey
 
 namespace Minidregg.Theory.CredentialAuthorityState
 
@@ -38,6 +39,9 @@ inductive AuthorityField where
   /-- Content address of the exact versioned policy source. -/
   | policyAddress (policy : PolicyId) (epoch : Epoch)
   | subjectKeyEpoch (subject : SubjectId)
+  /-- Exact signing-key payload at one subject epoch. The current epoch and
+  this record are installed atomically by the source-owned physical entry. -/
+  | subjectKey (subject : SubjectId) (epoch : Epoch)
   | revoked (key : RevocationKey)
   | nullifier (id : Nat)
   deriving DecidableEq, Repr
@@ -56,6 +60,7 @@ def AuthorityField.Value : AuthorityField → Type
   | .policyEpoch _ => Epoch
   | .policyAddress _ _ => Digest
   | .subjectKeyEpoch _ => Epoch
+  | .subjectKey _ _ => CredentialSigningKey.KeyRecord
   | .revoked _ => Bool
   | .nullifier _ => Bool
 
@@ -100,6 +105,44 @@ def policyAddressAt {M : Materializer} (pre : Cell M)
 def subjectKeyEpochAt {M : Materializer} (pre : Cell M)
     (subject : SubjectId) : Epoch :=
   (pre.logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0)
+
+/-- Keyless epochs remain keyless. In particular a missing record is never
+resolved by an external key directory or by the epoch reader's zero default.
+Subject/epoch equality is checked even for arbitrary canonical sparse states;
+the complete page representation additionally forces both from the record. -/
+def currentSigningKey (logical : CellState.LogicalState schema.{0, 0})
+    (subject : SubjectId) : Option CredentialSigningKey.KeyRecord := do
+  let epoch ← logical.fields (.subjectKeyEpoch subject)
+  let key ← logical.fields (.subjectKey subject epoch)
+  if key.subject = subject.value ∧ key.keyEpoch = epoch then some key else none
+
+theorem currentSigningKey_no_epoch (logical : CellState.LogicalState schema.{0, 0})
+    (subject : SubjectId) (absent : logical.fields (.subjectKeyEpoch subject) = none) :
+    currentSigningKey logical subject = none := by
+  simp [currentSigningKey, absent, bind, Option.bind]
+
+theorem currentSigningKey_no_record (logical : CellState.LogicalState schema.{0, 0})
+    (subject : SubjectId) (epoch : Epoch)
+    (current : logical.fields (.subjectKeyEpoch subject) = some epoch)
+    (absent : logical.fields (.subjectKey subject epoch) = none) :
+    currentSigningKey logical subject = none := by
+  simp [currentSigningKey, current, absent, bind, Option.bind]
+
+theorem currentSigningKey_exact (logical : CellState.LogicalState schema.{0, 0})
+    (key : CredentialSigningKey.KeyRecord)
+    (current : logical.fields (.subjectKeyEpoch ⟨key.subject⟩) = some key.keyEpoch)
+    (record : logical.fields (.subjectKey ⟨key.subject⟩ key.keyEpoch) = some key) :
+    currentSigningKey logical ⟨key.subject⟩ = some key := by
+  simp [currentSigningKey, current, record, bind, Option.bind]
+
+theorem currentSigningKey_rejects_mismatch
+    (logical : CellState.LogicalState schema.{0, 0}) (subject : SubjectId)
+    (epoch : Epoch) (key : CredentialSigningKey.KeyRecord)
+    (current : logical.fields (.subjectKeyEpoch subject) = some epoch)
+    (record : logical.fields (.subjectKey subject epoch) = some key)
+    (mismatch : ¬ (key.subject = subject.value ∧ key.keyEpoch = epoch)) :
+    currentSigningKey logical subject = none := by
+  simp [currentSigningKey, current, record, mismatch, bind, Option.bind]
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical.fields (.revoked key)).getD false

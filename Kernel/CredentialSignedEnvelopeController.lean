@@ -18,6 +18,7 @@ explicit premises below.  The executable digest used to pin the registry is a
 representation function only; no collision-resistance theorem is claimed.
 -/
 import Compiler.Tower256ConcreteBackend
+import Compiler.CredentialSigningKeyCodec
 import Kernel.CanonicalPolicyRegistry
 import Theory.CredentialAuthorityFamily
 
@@ -36,50 +37,11 @@ def envelopeCodecVersion : Nat := 1
 
 /-! ## Versioned committed key projection -/
 
-/-- One current key projection.  `activeFrom` and `activeUntil` are registry
-epochs, not wall-clock timestamps.  Rotation changes `keyEpoch` and the
-registry commitment; revocation changes `revoked` and the commitment. -/
-structure KeyRecord where
-  keyId : Nat
-  keyEpoch : Nat
-  algorithm : Nat
-  subject : Nat
-  publicKey : List UInt8
-  activeFrom : Nat
-  activeUntil : Nat
-  revoked : Bool
-  deriving DecidableEq, Repr
+/-- The same record and codec installed in canonical authority pages. This
+compatibility name does not define a second key schema or key directory. -/
+abbrev KeyRecord := Minidregg.Theory.CredentialSigningKey.KeyRecord
 
-abbrev KeyRecordTuple :=
-  Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat × Bool
-
-def keyRecordTupleStream : StreamCodec KeyRecordTuple :=
-  StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product bytesStream
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product StreamCodec.nat StreamCodec.bool))))))
-
-def KeyRecord.toTuple (key : KeyRecord) : KeyRecordTuple :=
-  (key.keyId, key.keyEpoch, key.algorithm, key.subject, key.publicKey,
-    key.activeFrom, key.activeUntil, key.revoked)
-
-def KeyRecord.ofTuple : KeyRecordTuple -> KeyRecord
-  | (keyId, keyEpoch, algorithm, subject, publicKey, activeFrom,
-      activeUntil, revoked) =>
-    { keyId, keyEpoch, algorithm, subject, publicKey, activeFrom,
-      activeUntil, revoked }
-
-@[simp] theorem KeyRecord.ofTuple_toTuple (key : KeyRecord) :
-    KeyRecord.ofTuple key.toTuple = key := by
-  cases key
-  rfl
-
-def keyRecordStream : StreamCodec KeyRecord :=
-  StreamCodec.xmap keyRecordTupleStream KeyRecord.toTuple KeyRecord.ofTuple
-    KeyRecord.ofTuple_toTuple
+abbrev keyRecordStream := Minidregg.Compiler.CredentialSigningKeyCodec.keyRecordStream
 
 /-- This is a projection of key-custody metadata committed beneath one exact
 canonical authority root.  It is not an independently authoritative host map. -/
@@ -289,7 +251,15 @@ def prepare {NativeError : Type}
           match envelopeCodec.decode envelopeBytes with
           | none => .error .malformedEnvelope
           | some envelope =>
-              if state.codecVersion != stateCodecVersion then
+              if stateCodec.encode state != stateBytes then
+                .error .malformedState
+              else if registryCodec.encode registry != registryBytes then
+                .error .malformedRegistry
+              else if envelopeCodec.encode envelope != envelopeBytes then
+                .error .malformedEnvelope
+              else if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
+                .error .malformedRegistry
+              else if state.codecVersion != stateCodecVersion then
                 .error .wrongStateVersion
               else if registry.codecVersion != registryCodecVersion then
                 .error .wrongRegistryVersion

@@ -43,6 +43,7 @@ def fieldGroup : AuthorityField → Nat
   | .policyEpoch policy => 9 * policy.value + 4
   | .policyAddress policy _ => 9 * policy.value + 4
   | .subjectKeyEpoch subject => 9 * subject.value + 5
+  | .subjectKey subject _ => 9 * subject.value + 5
   | .revoked (.capability identifier) => 9 * identifier.value + 6
   | .revoked (.channel channel) => 9 * channel.value + 7
   | .nullifier identifier => 9 * identifier + 8
@@ -54,6 +55,7 @@ def entryGroup : Entry → Nat
   | .issuerEpoch issuer _ => 9 * issuer.value + 3
   | .policy policy _ _ => 9 * policy.value + 4
   | .subjectKeyEpoch subject _ => 9 * subject.value + 5
+  | .subjectKey key => 9 * key.subject + 5
   | .revocation (.capability identifier) _ => 9 * identifier.value + 6
   | .revocation (.channel channel) _ => 9 * channel.value + 7
   | .nullifier identifier _ => 9 * identifier + 8
@@ -80,6 +82,9 @@ theorem entry_fields_same_group (entry : Entry) (field : AuthorityField)
       simp only [Entry.fields, List.mem_singleton] at member
       subst field
       rfl
+  | subjectKey key =>
+      simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with rfl | rfl <;> rfl
   | nullifier identifier consumed =>
       simp only [Entry.fields, List.mem_singleton] at member
       subst field
@@ -314,6 +319,10 @@ def headAt (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) (poli
 def Snapshot.currentHead (snapshot : Snapshot) (policy : PolicyId) :
     Option PolicyInstall.Head := headAt snapshot.logical policy
 
+def Snapshot.currentSigningKey (snapshot : Snapshot) (subject : SubjectId) :
+    Option CredentialSigningKey.KeyRecord :=
+  CredentialAuthorityState.currentSigningKey snapshot.logical subject
+
 def Snapshot.policyContains (snapshot : Snapshot) (policy : PolicyId)
     (epoch : Epoch) (address : Digest) : Prop :=
   Entry.policy policy epoch address ∈ snapshot.entries
@@ -347,6 +356,17 @@ theorem Snapshot.policy_exact (snapshot : Snapshot) (policy : PolicyId)
     (.policyAddress policy epoch) (by simp [Entry.fields])
   simp only [Entry.install, FieldStore.write_self] at epochExact addressExact
   simp [Snapshot.currentHead, headAt, epochExact, addressExact]
+
+theorem Snapshot.signingKey_exact (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord)
+    (member : Entry.subjectKey key ∈ snapshot.entries) :
+    snapshot.currentSigningKey ⟨key.subject⟩ = some key := by
+  apply CredentialAuthorityState.currentSigningKey_exact
+  · have exactEpoch := snapshot.entry_exact (.subjectKey key) member
+      (.subjectKeyEpoch ⟨key.subject⟩) (by simp [Entry.fields])
+    simpa [Entry.install] using exactEpoch
+  · have exactKey := snapshot.entry_exact (.subjectKey key) member
+      (.subjectKey ⟨key.subject⟩ key.keyEpoch) (by simp [Entry.fields])
+    simpa [Entry.install] using exactKey
 
 /-! ## Source-derived routed updates and exact canonical patch refinement -/
 
@@ -433,6 +453,17 @@ def entryWrites (entry : Entry) : List (FieldWrite CredentialAuthorityState.sche
 theorem entryWrites_policy (policy : PolicyId) (epoch : Epoch) (address : Digest) :
     entryWrites (.policy policy epoch address) =
       [⟨.policyEpoch policy, some epoch⟩, ⟨.policyAddress policy epoch, some address⟩] := by
+  simp [entryWrites, Entry.fields, List.map, Entry.install]
+
+theorem entryWrites_subjectKey (key : CredentialSigningKey.KeyRecord) :
+    entryWrites (.subjectKey key) =
+      [⟨.subjectKeyEpoch ⟨key.subject⟩, some key.keyEpoch⟩,
+        ⟨.subjectKey ⟨key.subject⟩ key.keyEpoch, some key⟩] := by
+  simp [entryWrites, Entry.fields, List.map, Entry.install]
+
+theorem entryWrites_nullifier (nullifierId : Nat) (consumed : Bool) :
+    entryWrites (.nullifier nullifierId consumed) =
+      [⟨.nullifier nullifierId, some consumed⟩] := by
   simp [entryWrites, Entry.fields, List.map, Entry.install]
 
 def Edit.writes (edit : Edit) : List (FieldWrite CredentialAuthorityState.schema.{0, 0}) :=
@@ -549,6 +580,118 @@ theorem preparedPolicy_retired_address_absent {snapshot : Snapshot} {policy : Po
   intro equal
   exact (different (AuthorityField.policyAddress.inj equal).2).elim
 
+/-- The old current key (or explicitly keyless epoch) comes from the complete
+pre-state. The new record itself determines both coordinates. This prepares
+a patch only; the surrounding authority family must authorize installation. -/
+def signingKeyEdit (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord) : Edit where
+  before := match snapshot.currentSigningKey ⟨key.subject⟩ with
+    | some old => some (.subjectKey old)
+    | none => (snapshot.logical.fields (.subjectKeyEpoch ⟨key.subject⟩)).map
+        fun epoch => .subjectKeyEpoch ⟨key.subject⟩ epoch
+  after := .subjectKey key
+
+def prepareSigningKey (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord) :
+    Option (Prepared snapshot [signingKeyEdit snapshot key]) :=
+  prepare snapshot [signingKeyEdit snapshot key]
+
+/-- Preserve the exact optional pre-state spelling while consuming the one
+canonical operation marker. Admission separately requires it to be unused. -/
+def nullifierEdit (snapshot : Snapshot) (nullifierId : Nat) : Edit where
+  before := (snapshot.logical.fields (.nullifier nullifierId)).map
+    (Entry.nullifier nullifierId)
+  after := .nullifier nullifierId true
+
+theorem preparedSigningKey_exact {snapshot : Snapshot} {key : CredentialSigningKey.KeyRecord}
+    (prepared : Prepared snapshot [signingKeyEdit snapshot key]) :
+    CredentialAuthorityState.currentSigningKey prepared.postLogical ⟨key.subject⟩ = some key := by
+  rw [show prepared.postLogical = prepared.validated.apply.logical from prepared.projectionExact]
+  cases selected : snapshot.currentSigningKey ⟨key.subject⟩ with
+  | some old =>
+      simp [CredentialAuthorityState.currentSigningKey, ValidatedPatch.apply,
+        editPatch, Edit.writes, signingKeyEdit, selected, Entry.fields,
+        entryWrites_subjectKey, applyFieldWrites, FieldStore.assign, materialize,
+        bind, Option.bind]
+  | none =>
+      cases epoch : snapshot.logical.fields (.subjectKeyEpoch ⟨key.subject⟩) <;>
+        simp [CredentialAuthorityState.currentSigningKey, ValidatedPatch.apply,
+          editPatch, Edit.writes, signingKeyEdit, selected, epoch, Entry.fields,
+          entryWrites_subjectKey, applyFieldWrites, FieldStore.assign, materialize,
+          Option.map, List.map_cons, List.map_nil, bind, Option.bind]
+
+def policyAndNullifierEdits (snapshot : Snapshot) (policy : PolicyId)
+    (epoch : Epoch) (address : Digest) (nullifierId : Nat) : List Edit :=
+  [policyEdit snapshot policy epoch address, nullifierEdit snapshot nullifierId]
+
+/-- One grouped authority update retains the exact unused-marker evidence.
+Authorization and final joint-post checks remain with the existing family. -/
+structure PreparedPolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
+    (epoch : Epoch) (address : Digest) (nullifierId : Nat) where
+  prepared : Prepared snapshot (policyAndNullifierEdits snapshot policy epoch address nullifierId)
+  nullifierFresh : isNullified snapshot.cell nullifierId = false
+
+def preparePolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
+    (epoch : Epoch) (address : Digest) (nullifierId : Nat) :
+    Option (PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) := do
+  if fresh : isNullified snapshot.cell nullifierId = false then
+    let prepared ← prepare snapshot (policyAndNullifierEdits snapshot policy epoch address nullifierId)
+    some ⟨prepared, fresh⟩
+  else none
+
+theorem PreparedPolicyAndNullifier.head_exact
+    {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
+    (update : PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) :
+    headAt update.prepared.postLogical policy = some ⟨epoch, address⟩ := by
+  rw [show update.prepared.postLogical = update.prepared.validated.apply.logical from
+    update.prepared.projectionExact]
+  cases old : snapshot.currentHead policy <;>
+    cases marker : snapshot.logical.fields (.nullifier nullifierId) <;>
+    simp [headAt, ValidatedPatch.apply, editPatch, Edit.writes, entryWrites_policy,
+      entryWrites_nullifier, policyAndNullifierEdits, policyEdit, nullifierEdit, old, marker,
+      Entry.fields, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
+      Option.map, materialize] <;> rfl
+
+theorem PreparedPolicyAndNullifier.nullifier_consumed
+    {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
+    (update : PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) :
+    update.prepared.postLogical.fields (.nullifier nullifierId) = some true := by
+  rw [show update.prepared.postLogical = update.prepared.validated.apply.logical from
+    update.prepared.projectionExact]
+  cases old : snapshot.currentHead policy <;>
+    cases marker : snapshot.logical.fields (.nullifier nullifierId) <;>
+    simp [ValidatedPatch.apply, editPatch, Edit.writes, entryWrites_policy,
+      entryWrites_nullifier, policyAndNullifierEdits, policyEdit, nullifierEdit, old, marker,
+      Entry.fields, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
+      Option.map, materialize] <;> rfl
+
+theorem PreparedPolicyAndNullifier.retired_address_absent
+    {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
+    (update : PreparedPolicyAndNullifier snapshot policy epoch address nullifierId)
+    (old : PolicyInstall.Head) (current : snapshot.currentHead policy = some old)
+    (different : old.version ≠ epoch) :
+    update.prepared.postLogical.fields (.policyAddress policy old.version) = none := by
+  rw [show update.prepared.postLogical = update.prepared.validated.apply.logical from
+    update.prepared.projectionExact]
+  cases marker : snapshot.logical.fields (.nullifier nullifierId) <;>
+    simp [ValidatedPatch.apply, editPatch, Edit.writes, entryWrites_policy,
+      entryWrites_nullifier, policyAndNullifierEdits, policyEdit, nullifierEdit, current, marker,
+      Entry.fields, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
+      Option.map, materialize] <;>
+    simp_all [Function.update] <;>
+    intro equal <;> exact (different (AuthorityField.policyAddress.inj equal).2).elim
+
+theorem preparePolicyAndNullifier_used_refused (snapshot : Snapshot) (policy : PolicyId)
+    (epoch : Epoch) (address : Digest) (nullifierId : Nat)
+    (used : isNullified snapshot.cell nullifierId = true) :
+    preparePolicyAndNullifier snapshot policy epoch address nullifierId = none := by
+  simp [preparePolicyAndNullifier, used]
+
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.entry_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Snapshot.entry_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Prepared.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Prepared.post_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.preparedPolicy_retired_address_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedPolicy_retired_address_absent
+
 /-! ## Complete revocations and source-derived issuance registration -/
 
 theorem revoked_field_has_key (entry : Entry) (key : RevocationKey)
@@ -563,6 +706,7 @@ theorem revoked_field_has_key (entry : Entry) (key : RevocationKey)
   | capability kind stored => simp [Entry.fields] at present
   | issuerEpoch issuer epoch => simp [Entry.fields] at present
   | subjectKeyEpoch subject epoch => simp [Entry.fields] at present
+  | subjectKey key => simp [Entry.fields] at present
   | nullifier identifier consumed => simp [Entry.fields] at present
 
 theorem mem_fold_revocationKeys (entries : List Entry) (entry : Entry)

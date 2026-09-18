@@ -1,28 +1,22 @@
 /-
-# Compiler.CredentialAuthorityPolicyRegistry -- the bounded page reaches settlement
+# Compiler.CredentialAuthorityPolicyRegistry -- complete authority selects policy
 
-`CredentialAuthorityPageMaterializer` supplies a real, framed four-slot
-authority page.  `Kernel.CanonicalPolicyRegistry` proves exact policy selection
-and stale-root rejection for the canonical `CredentialAuthorityState` cell.
-This module joins those two constructions without adding a second policy root:
+The receiving registry consumes the complete canonical authority domain. Its
+policy source is the executable canonical v2 record, addressed by cSHAKE. The
+current epoch, selected address, membership, and all authority epochs come
+from that same snapshot. The physical receiver supplies complete catalogue
+and shard provenance; semantic source bytes alone cannot reconstruct it.
 
-* the selected page projects to the canonical authority logical state;
-* a schema-owned authority view reads that physical page directly, retaining
-  its actual materialized bytes and root for selection and settlement;
-* the policy source has one pinned lawful codec and cSHAKE content address;
-* page lookup, registry resolution, content fetch, authenticated membership,
-  compiler acceptance, and `Authorized` meet in one `SelectionPayload`;
-* the exact page root is installed as a read-only durable guard; and
-* a pair-bound page rotation makes the previously admitted intent stale.
-
-The inherited non-policy portal remains an input.  In particular this module
-does not turn an accepting signature Boolean into signature soundness.  Hash
-collision resistance is requested only for the concrete old/new page pair.
-The durable result remains a model result; a physical store must still supply
-`DurableDataIntent.ImplementationRefinement`.
+The explicit Example namespace retains the earlier bounded-page model only
+as an instance of the generic selection and stale-guard theorems. It is not a
+receiving configuration or decoder fallback. Signature verification remains
+the deployment portal's responsibility.
 -/
 import Compiler.CredentialAuthorityPageMaterializer
+import Compiler.CredentialAuthorityDomain
 import Compiler.PolicyRecordCodec
+import Compiler.CredentialSignatureAdmission
+import Theory.CredentialLineageAdmission
 import Kernel.CanonicalPolicyRegistry
 
 namespace Minidregg.Compiler.CredentialAuthorityPolicyRegistry
@@ -39,6 +33,7 @@ open Minidregg.Pred
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CredentialAuthorityState
+open Minidregg.Theory.CredentialLineageAdmission
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceCost
 open Minidregg.Theory.TypedAuthorization
@@ -74,57 +69,48 @@ structure PolicyRecordPairBinding (left right : PolicyRecord) : Prop where
         policyHashBytes (policyRecordCodec.encode right) ->
       left = right
 
-/-- The authority schema owns the exact projection for every entry kind. -/
-def projection := CredentialAuthorityPageMaterializer.projection
+/-! ## Complete canonical authority snapshots and source resolution -/
 
-/-! ## Canonical page snapshots and source resolution -/
+abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
-structure Snapshot where
-  private mk ::
-  page : Page
-  valid : page.Valid
+/-- Every authority coordinate is read from the full canonical schema. The
+revocation universe is derived from every checked shard, never requester
+selected. A physical receiver must provide this snapshot's provenance. -/
+def projection (snapshot : Snapshot) :
+    CredentialAuthorityState.StateProjection CredentialAuthorityState.schema.{0, 0} :=
+  snapshot.revocationUniverse.stateProjection
 
-def Snapshot.ofPage (page : Page) (valid : page.Valid) : Snapshot := ⟨page, valid⟩
-
-def Snapshot.cell (snapshot : Snapshot) : Materialized materializer :=
-  materialize materializer (stateOfOption (some snapshot.page))
-
-/-- Canonical page bytes are checked at the receiving boundary, including the
-page validity invariant. A caller cannot assert an independent page root. -/
-def decodeSnapshot (bytes : List UInt8) :
-    Option { snapshot : Snapshot // snapshot.cell.bytes = bytes } :=
-  match materializer.codec.decode bytes with
-  | none => none
-  | some logical =>
-      match pageAt logical with
-      | none => none
-      | some page =>
-          if valid : page.Valid then
-            let snapshot := Snapshot.ofPage page valid
-            if canonical : snapshot.cell.bytes = bytes then
-              some ⟨snapshot, canonical⟩
-            else none
-          else none
+@[simp] theorem projection_authState (snapshot : Snapshot) :
+    (projection snapshot).authState snapshot.cell = snapshot.authState :=
+  CredentialAuthorityState.authState_identity_projection _ _
 
 /-- Data returned by the actual resolver retains every checked source fact. -/
 structure LoadedPolicy (snapshot : Snapshot) (store : PayloadStore)
     (policyId : PolicyId) (epoch : Epoch) where
   committed : CommittedPolicy
-  current : snapshot.page.policyEpochAt policyId = epoch
-  member : snapshot.page.Contains (.policy policyId epoch committed.address)
+  current : snapshot.authState.policyEpoch policyId = epoch
+  member : snapshot.policyContains policyId epoch committed.address
   policyIdExact : committed.record.policyId = policyId
   epochExact : committed.record.version = epoch
-  domainExact : committed.record.domain = snapshot.page.authorityDomain
+  domainExact : committed.record.domain = snapshot.domain
   addressExact : policyRecordDigest committed.record = committed.address
   fetched : store.fetch committed.address = some (policyRecordCodec.encode committed.record)
+
+/-- A successful source load names the current head of the exact complete
+canonical snapshot, with no absent-to-zero shortcut in policy selection. -/
+theorem LoadedPolicy.current_head {snapshot : Snapshot} {store : PayloadStore}
+    {policyId : PolicyId} {epoch : Epoch}
+    (loaded : LoadedPolicy snapshot store policyId epoch) :
+    snapshot.currentHead policyId = some ⟨epoch, loaded.committed.address⟩ :=
+  snapshot.policy_exact policyId epoch loaded.committed.address loaded.member
 
 /-- Resolve from current canonical authority state, then fetch and decode the
 selected source. A store response cannot choose another address or record. -/
 def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
     (policyId : PolicyId) (epoch : Epoch) : Option (LoadedPolicy snapshot store policyId epoch) :=
-  let address := snapshot.page.policyAddressAt policyId epoch
-  if current : snapshot.page.policyEpochAt policyId = epoch then
-    if member : snapshot.page.Contains (.policy policyId epoch address) then
+  let address := snapshot.authState.policyAddress policyId epoch
+  if current : snapshot.authState.policyEpoch policyId = epoch then
+    if member : snapshot.policyContains policyId epoch address then
       match fetched : store.fetch address with
       | none => none
       | some bytes =>
@@ -133,7 +119,7 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
           | some record =>
               if policyIdExact : record.policyId = policyId then
                 if epochExact : record.version = epoch then
-                  if domainExact : record.domain = snapshot.page.authorityDomain then
+                  if domainExact : record.domain = snapshot.domain then
                     if addressExact : policyRecordDigest record = address then
                       some
                         { committed := ⟨address, record⟩
@@ -157,57 +143,399 @@ def policyRegistry (snapshot : Snapshot) (store : PayloadStore) : PolicyRegistry
   resolve := fun policyId epoch =>
     (loadPolicy snapshot store policyId epoch).map LoadedPolicy.committed
 
-def hasPolicyAddress (page : Page) (address : Digest) : Bool :=
-  page.entries.any fun entry =>
-    match entry with
-    | .policy _ _ selected => selected == address
-    | _ => false
+/-- Membership claims name their source role and exact canonical coordinate.
+Both roles share the semantic authority root, so the claim is data checked
+against that root rather than an independently authoritative host opening. -/
+inductive MembershipClaim where
+  | policy (identifier : PolicyId) (epoch : Epoch)
+  | capability (kind : ResourceKind) (identifier : CapabilityId)
+  deriving DecidableEq, Repr
 
-def pageMember (snapshot : Snapshot) (root address : Digest) : Prop :=
-  root = snapshot.cell.root ∧ hasPolicyAddress snapshot.page address = true
+def capabilityKindTag : ResourceKind → UInt8
+  | .object => 0
+  | .account => 1
+  | .program => 2
 
-instance pageMemberDecidable (snapshot : Snapshot) (root address : Digest) :
-    Decidable (pageMember snapshot root address) := by
-  unfold pageMember
-  infer_instance
+/-- The domain and resource kind join the COMPLETE stored head and ancestry
+in one source-owned commitment. This is not a possession proof. -/
+def storedCapabilityDigest (snapshot : Snapshot) {kind : ResourceKind}
+    (stored : StoredCapability kind) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v1".toUTF8.toList
+    (capabilityKindTag kind ::
+      (StreamCodec.product digestStream
+        (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode
+          (snapshot.domain, stored))).digest
 
-/-- This complete-page membership check is exact for policy selection. Other
-evidence families keep the deployment's verifier functions. -/
-def pagePortal (snapshot : Snapshot) (base : Portal) : Portal where
+/-- Statement first: checking a capability commitment must recover the exact
+stored head at its typed identifier, including the full stored lineage digest.
+No finite-hash injectivity or requester-selected membership map is assumed. -/
+def CapabilityBound (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) : Prop :=
+  ∃ stored, readCapability snapshot.cell kind capability.id = some stored ∧
+    stored.head = capability ∧ storedCapabilityDigest snapshot stored = commitment ∧
+    LineageValid stored ∧ LineageAnchored snapshot.cell stored
+
+def capabilityCheck (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) : Bool :=
+  match readCapability snapshot.cell kind capability.id with
+  | none => false
+  | some stored => decide (stored.head = capability ∧
+      storedCapabilityDigest snapshot stored = commitment) &&
+      storedLineageCheck snapshot.cell stored
+
+theorem capabilityCheck_iff (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) :
+    capabilityCheck snapshot capability commitment = true ↔
+      CapabilityBound snapshot capability commitment := by
+  unfold capabilityCheck CapabilityBound
+  cases selected : readCapability snapshot.cell kind capability.id <;>
+    simp [storedLineageCheck_iff, and_assoc]
+
+/-- Policy and capability claims are checked against their own exact source
+coordinates. Policy membership alone never proves capability lookup. -/
+def MembershipBound (snapshot : Snapshot) (root address : Digest) :
+    MembershipClaim → Prop
+  | .policy identifier epoch =>
+      root = snapshot.cell.root ∧ snapshot.currentHead identifier = some ⟨epoch, address⟩
+  | .capability kind identifier =>
+      root = snapshot.cell.root ∧
+        (readCapability snapshot.cell kind identifier).any
+          (fun stored => storedCapabilityDigest snapshot stored == address) = true
+
+instance membershipBoundDecidable (snapshot : Snapshot) (root address : Digest)
+    (claim : MembershipClaim) : Decidable (MembershipBound snapshot root address claim) := by
+  cases claim <;> unfold MembershipBound <;> infer_instance
+
+def domainMember (snapshot : Snapshot) (root address : Digest) : Prop :=
+  ∃ claim, MembershipBound snapshot root address claim
+
+/-- Issuer evidence is checked against an ACTUAL stored capability and the
+current complete-snapshot issuer epoch. It cannot be supplied by a base cache. -/
+def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) : Bool :=
+  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
+    snapshot.entries.any fun entry =>
+      match entry with
+      | .capability _ stored => decide (stored.head.issuer = issuer ∧
+          stored.head.issuerEpoch = epoch ∧
+          storedCapabilityDigest snapshot stored = commitment)
+      | _ => false
+
+def nonRevocationCheck (snapshot : Snapshot) (root : Digest) (key : RevocationKey) : Bool :=
+  decide (root = snapshot.cell.root ∧ key ∈ snapshot.revocationUniverse.revocationKeys ∧
+    isRevoked snapshot.cell key = false)
+
+/-- Preserve the supplied cryptographic verifier checks AND require exact
+complete-snapshot capability, issuer and revocation data. Membership has a
+source-owned typed claim. Capability invocation additionally requires the
+shared Evidence capability constructor's exact-request authentication. -/
+def domainPortal (snapshot : Snapshot) (base : Portal) : Portal where
   SignatureWitness := base.SignatureWitness
   ProofWitness := base.ProofWitness
   CapabilityCommitmentWitness := base.CapabilityCommitmentWitness
-  MembershipWitness := Unit
+  CapabilityUseWitness := base.CapabilityUseWitness
+  MembershipWitness := MembershipClaim
   IssuerWitness := base.IssuerWitness
   NonRevocationWitness := base.NonRevocationWitness
   PolicyWitness := base.PolicyWitness
   policyAddress := base.policyAddress
   verifySignature := base.verifySignature
   verifyProof := base.verifyProof
-  verifyCapabilityCommitment := base.verifyCapabilityCommitment
-  verifyMembership := fun root address _ => decide (pageMember snapshot root address)
-  verifyIssuer := base.verifyIssuer
-  verifyNonRevocation := base.verifyNonRevocation
+  verifyCapabilityUse := base.verifyCapabilityUse
+  verifyCapabilityCommitment := fun capability commitment witness =>
+    base.verifyCapabilityCommitment capability commitment witness &&
+      capabilityCheck snapshot capability commitment
+  verifyMembership := fun root address claim => decide (MembershipBound snapshot root address claim)
+  verifyIssuer := fun issuer epoch commitment witness =>
+    base.verifyIssuer issuer epoch commitment witness && issuerCheck snapshot issuer epoch commitment
+  verifyNonRevocation := fun root key witness =>
+    base.verifyNonRevocation root key witness && nonRevocationCheck snapshot root key
   verifyCommittedPolicy := base.verifyCommittedPolicy
+
+/-- A real stored capability has an inhabited exact membership opening. This
+statement does not fabricate a request signature or an accepted action. -/
+theorem stored_capability_membership (snapshot : Snapshot) {kind : ResourceKind}
+    (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind stored.head.id = some stored) :
+    MembershipBound snapshot snapshot.cell.root (storedCapabilityDigest snapshot stored)
+      (.capability kind stored.head.id) := by
+  simp [MembershipBound, present]
+
+theorem stored_capability_check (snapshot : Snapshot) {kind : ResourceKind}
+    (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind stored.head.id = some stored)
+    (valid : LineageValid stored) (anchored : LineageAnchored snapshot.cell stored) :
+    capabilityCheck snapshot stored.head (storedCapabilityDigest snapshot stored) = true :=
+  (capabilityCheck_iff snapshot _ _).mpr ⟨stored, present, rfl, rfl, valid, anchored⟩
+
+theorem no_capability_of_absent (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest)
+    (absent : readCapability snapshot.cell kind capability.id = none) :
+    capabilityCheck snapshot capability commitment = false := by
+  simp [capabilityCheck, absent]
+
+theorem no_capability_of_wrong_head (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind capability.id = some stored)
+    (wrong : stored.head ≠ capability) :
+    capabilityCheck snapshot capability commitment = false := by
+  simp [capabilityCheck, present, wrong]
+
+theorem no_capability_of_invalid_lineage (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind capability.id = some stored)
+    (invalid : ¬LineageValid stored) :
+    capabilityCheck snapshot capability commitment = false := by
+  simp [capabilityCheck, present, storedLineageCheck_refuses_invalid _ _ invalid]
+
+theorem no_capability_of_unanchored_lineage (snapshot : Snapshot) {kind : ResourceKind}
+    (capability : Capability kind) (commitment : Digest) (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind capability.id = some stored)
+    (missing : ¬LineageAnchored snapshot.cell stored) :
+    capabilityCheck snapshot capability commitment = false := by
+  simp [capabilityCheck, present, storedLineageCheck_refuses_unanchored _ _ missing]
+
+theorem no_membership_of_wrong_root (snapshot : Snapshot) (root address : Digest)
+    (wrong : root ≠ snapshot.cell.root) (claim : MembershipClaim) :
+    ¬MembershipBound snapshot root address claim := by
+  cases claim <;> exact fun bound => wrong bound.1
+
+/-- Even presenting a policy-role membership opening cannot bypass the
+separate exact stored capability lookup in the same receiving portal. -/
+theorem domain_capability_requires_stored (snapshot : Snapshot) (base : Portal)
+    {kind : ResourceKind} (capability : Capability kind) (commitment : Digest)
+    (witness : base.CapabilityCommitmentWitness)
+    (accepted : (domainPortal snapshot base).verifyCapabilityCommitment
+      capability commitment witness = true) : CapabilityBound snapshot capability commitment := by
+  exact (capabilityCheck_iff snapshot _ _).mp (Bool.and_eq_true_iff.mp accepted).2
+
+/-- Full request-bound use of a subject-owned capability. Public stored data
+and correct membership do not substitute for the native signature receipt.
+Bearer possession has no implementation in this source profile and refuses;
+the generic Holder.bearer semantics is unchanged. -/
+def capabilityUseCheck (snapshot : Snapshot) (expectedNullifier : Nat)
+    {kind : ResourceKind} (request : Request kind) (capability : Capability kind)
+    (commitment : Digest) (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) : Bool :=
+  capabilityCheck snapshot capability commitment &&
+    match capability.holder with
+    | .bearer => false
+    | .subject holder =>
+        decide (holder = request.subject ∧
+          request.subjectKeyEpoch = snapshot.authState.subjectKeyEpoch request.subject) &&
+        CredentialSignatureAdmission.verifySignature snapshot expectedNullifier request receipt
+
+/-- The one native evidence portal used by receiving policy/capability
+controllers. Source checks own capability data; the private native receipt
+owns invocation authentication. There is no arbitrary positive Boolean,
+host-selected verifier, public receipt decoder or generic proof fallback.
+The canonical policy compiler replaces the deliberately uninhabited policy
+witness below; this base component cannot itself authorize a policy. -/
+def sourcePortal (snapshot : Snapshot) (expectedNullifier : Nat) : Portal where
+  SignatureWitness := CredentialSignatureAdmission.CheckedSignature snapshot
+  ProofWitness := PEmpty
+  CapabilityCommitmentWitness := Unit
+  CapabilityUseWitness := CredentialSignatureAdmission.CheckedSignature snapshot
+  MembershipWitness := MembershipClaim
+  IssuerWitness := Unit
+  NonRevocationWitness := Unit
+  PolicyWitness := PEmpty
+  policyAddress := fun witness => nomatch witness
+  verifySignature := CredentialSignatureAdmission.verifySignature snapshot expectedNullifier
+  verifyProof := fun _ witness => nomatch witness
+  verifyCapabilityCommitment := fun capability commitment _ =>
+    capabilityCheck snapshot capability commitment
+  verifyCapabilityUse := capabilityUseCheck snapshot expectedNullifier
+  verifyMembership := fun root address claim => decide (MembershipBound snapshot root address claim)
+  verifyIssuer := fun issuer epoch commitment _ => issuerCheck snapshot issuer epoch commitment
+  verifyNonRevocation := fun root key _ => nonRevocationCheck snapshot root key
+  verifyCommittedPolicy := fun _ _ _ witness => nomatch witness
+
+/-- Mutation and policy-control receivers require capability authority in the
+actual evidence type. Native signatures still authenticate capability use;
+they cannot enter through a parallel signature-only evidence constructor. -/
+def sourceCapabilityPortal (snapshot : Snapshot) (expectedNullifier : Nat) : Portal :=
+  { sourcePortal snapshot expectedNullifier with
+    SignatureWitness := PEmpty
+    verifySignature := fun _ witness => nomatch witness }
+
+/-- Subject-bound native use retains both exact source capability lookup and
+an exact request/nullifier receipt from the selected complete authority state. -/
+theorem native_use_request_exact (snapshot : Snapshot) (expectedNullifier : Nat)
+    {kind : ResourceKind} (request : Request kind) (capability : Capability kind)
+    (commitment : Digest) (receipt : CredentialSignatureAdmission.CheckedSignature snapshot)
+    (accepted : (sourcePortal snapshot expectedNullifier).verifyCapabilityUse
+      request capability commitment receipt = true) :
+    CapabilityBound snapshot capability commitment ∧
+      receipt.request = ⟨kind, request⟩ ∧ receipt.nullifier = expectedNullifier := by
+  change capabilityUseCheck snapshot expectedNullifier request capability commitment receipt = true at accepted
+  unfold capabilityUseCheck at accepted
+  have checks := Bool.and_eq_true_iff.mp accepted
+  refine ⟨(capabilityCheck_iff snapshot _ _).mp checks.1, ?_⟩
+  cases holder : capability.holder with
+  | bearer => simp [holder] at accepted
+  | subject subject =>
+      have use := checks.2
+      rw [holder] at use
+      have signature := (Bool.and_eq_true_iff.mp use).2
+      exact CredentialSignatureAdmission.verified_request_exact
+        snapshot expectedNullifier request receipt signature
+
+theorem native_bearer_use_refused (snapshot : Snapshot) (expectedNullifier : Nat)
+    {kind : ResourceKind} (request : Request kind) (capability : Capability kind)
+    (commitment : Digest) (receipt : CredentialSignatureAdmission.CheckedSignature snapshot)
+    (bearer : capability.holder = .bearer) :
+    (sourcePortal snapshot expectedNullifier).verifyCapabilityUse
+      request capability commitment receipt = false := by
+  simp [sourcePortal, capabilityUseCheck, bearer]
 
 /-- The receiving constructor requires the exact source-derived candidate
 context. Its signature contains no binding-mode selector, digest callback or
 predicate-view callback. -/
 def config {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal)
     (step : PolicyStepContext) : CanonicalPolicyConfig F where
-  base := pagePortal snapshot base
+  base := domainPortal snapshot base
   registry := policyRegistry snapshot store
   recordDigest := policyRecordDigest
   stepBinding := .canonical step
+  compilerProfile := profile
+
+/-- Execute the existing semantic capability decider and every mandatory
+portal check against the exact old snapshot. The returned evidence is already
+for the canonical policy portal, so an upper controller cannot replace it by
+an unrelated signature-mode token while claiming capability invocation. -/
+def capabilityEvidence {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    Option (Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request) := do
+  let stored ← readCapability snapshot.cell kind identifier
+  let capability := stored.head
+  let commitment := storedCapabilityDigest snapshot stored
+  let portal := (config (F := F) profile snapshot store base step).portal
+  if semantic : AuthorizationDeclaration.capabilityAdmissibleCheck capability snapshot.authState request = true then
+    if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
+      if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
+        if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
+            (.capability kind capability.id) = true then
+          if issuer : portal.verifyIssuer capability.issuer capability.issuerEpoch commitment issuerWitness = true then
+            if self : portal.verifyNonRevocation snapshot.authState.revocationRoot
+                (.capability capability.id) (revocationWitness (.capability capability.id)) = true then
+              if ancestors : ∀ identifier ∈ capability.ancestors,
+                  portal.verifyNonRevocation snapshot.authState.revocationRoot (.capability identifier)
+                    (revocationWitness (.capability identifier)) = true then
+                if channels : ∀ channel ∈ capability.channels,
+                    portal.verifyNonRevocation snapshot.authState.revocationRoot (.channel channel)
+                      (revocationWitness (.channel channel)) = true then
+                  some (.capability capability commitment commitmentWitness
+                    (.capability kind capability.id) issuerWitness
+                    (revocationWitness (.capability capability.id)) useWitness
+                    ((AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff
+                      capability snapshot.authState request).mp semantic)
+                    used committed member issuer self
+                    (fun identifier member => ⟨revocationWitness (.capability identifier), ancestors identifier member⟩)
+                    (fun channel member => ⟨revocationWitness (.channel channel), channels channel member⟩))
+                else none
+              else none
+            else none
+          else none
+        else none
+      else none
+    else none
+  else none
+
+/-- Native receiving convenience: data openings come from the complete
+snapshot; invocation authentication comes only from the checked native receipt. -/
+def sourceCapabilityEvidence {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    Option (Evidence (config (F := F) profile snapshot store
+      (sourcePortal snapshot expectedNullifier) step).portal snapshot.authState request) :=
+  capabilityEvidence profile snapshot store (sourcePortal snapshot expectedNullifier) step
+    request identifier () receipt () (fun _ => ())
+
+/-- The same shared source checks for receivers whose type requires ownership
+capability evidence, rather than allowing a signature-mode alternative. -/
+def sourceCapabilityOnlyEvidence {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    Option (Evidence (config (F := F) profile snapshot store
+      (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :=
+  capabilityEvidence profile snapshot store (sourceCapabilityPortal snapshot expectedNullifier) step
+    request identifier () receipt () (fun _ => ())
+
+theorem source_capability_only_mode {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot) (store : PayloadStore)
+    (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} {request : Request kind}
+    (evidence : Evidence (config profile snapshot store
+      (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :
+    ∃ capability commitment, evidence.capabilityValue = some (capability, commitment) := by
+  cases evidence with
+  | signature witness _ _ => exact nomatch witness
+  | proof witness _ => exact nomatch witness
+  | capability capability commitment _ _ _ _ _ _ _ _ _ _ _ _ _ =>
+      exact ⟨capability, commitment, rfl⟩
+
+theorem source_capability_only_requires_native_request
+    {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot) (store : PayloadStore)
+    (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} {request : Request kind}
+    (evidence : Evidence (config profile snapshot store
+      (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :
+    ∃ capability commitment,
+      evidence.capabilityValue = some (capability, commitment) ∧
+      CapabilityBound snapshot capability commitment ∧
+      ∃ receipt : CredentialSignatureAdmission.CheckedSignature snapshot,
+        receipt.request = ⟨kind, request⟩ ∧ receipt.nullifier = expectedNullifier := by
+  obtain ⟨capability, commitment, named⟩ :=
+    source_capability_only_mode profile snapshot store expectedNullifier step evidence
+  obtain ⟨receipt, verified⟩ :=
+    capability_evidence_requires_use evidence capability commitment named
+  have pinned := native_use_request_exact snapshot expectedNullifier
+    request capability commitment receipt verified
+  exact ⟨capability, commitment, named, pinned.1, receipt, pinned.2⟩
+
+/-- The actual compiled-policy receiving portal cannot erase native
+capability possession. Any capability-mode evidence, even if assembled
+without the convenience helper, retains both source lookup and a private
+receipt for the exact request and shared operation marker. -/
+theorem source_capability_evidence_requires_native_request
+    {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot) (store : PayloadStore)
+    (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} {request : Request kind}
+    (evidence : Evidence (config profile snapshot store
+      (sourcePortal snapshot expectedNullifier) step).portal snapshot.authState request)
+    (capability : Capability kind) (commitment : Digest)
+    (named : evidence.capabilityValue = some (capability, commitment)) :
+    CapabilityBound snapshot capability commitment ∧
+      ∃ receipt : CredentialSignatureAdmission.CheckedSignature snapshot,
+        receipt.request = ⟨kind, request⟩ ∧ receipt.nullifier = expectedNullifier := by
+  obtain ⟨receipt, verified⟩ :=
+    capability_evidence_requires_use evidence capability commitment named
+  have pinned := native_use_request_exact snapshot expectedNullifier
+    request capability commitment receipt verified
+  exact ⟨pinned.1, receipt, pinned.2⟩
 
 @[simp] theorem config_uses_canonical {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext) :
-    (config (F := F) snapshot store base step).stepBinding = .canonical step := rfl
+    (config (F := F) profile snapshot store base step).stepBinding = .canonical step := rfl
 
 def contentAddressing {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext) :
-    ContentAddressing (config (F := F) snapshot store base step) where
+    ContentAddressing (config (F := F) profile snapshot store base step) where
   codec := policyRecordCodec
   hashBytes := policyHashBytes
   recordDigest_exact := by intro record; rfl
@@ -215,9 +543,10 @@ def contentAddressing {F : Type} [Field F] [DecidableEq F]
 /-- Availability for resolved records is proved from the same checked fetch,
 not assumed for an independent logical registry. -/
 def payloadAvailability {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext) :
-    PayloadAvailability (config (F := F) snapshot store base step)
-      (contentAddressing snapshot store base step) store where
+    PayloadAvailability (config (F := F) profile snapshot store base step)
+      (contentAddressing profile snapshot store base step) store where
   fetch_resolved := by
     intro policyId epoch committed resolved
     cases loaded : loadPolicy snapshot store policyId epoch with
@@ -228,12 +557,13 @@ def payloadAvailability {F : Type} [Field F] [DecidableEq F]
         simpa only [equal] using value.fetched
 
 def membershipSemantics {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext) :
-    MembershipSemantics (config (F := F) snapshot store base step).portal where
-  Member := pageMember snapshot
+    MembershipSemantics (config (F := F) profile snapshot store base step).portal where
+  Member := domainMember snapshot
   verifier_sound := by
     intro root address witness accepted
-    exact of_decide_eq_true accepted
+    exact ⟨witness, of_decide_eq_true accepted⟩
 
 /-! ## Explicit model examples of selection and stale-guard rejection
 
@@ -243,6 +573,8 @@ their model binding or fixed registry.
 -/
 namespace Example
 
+/-- The bounded-page projection belongs only to this explicit model. -/
+def projection := CredentialAuthorityPageMaterializer.projection
 
 
 def committedPolicy : CommittedPolicy where
@@ -321,6 +653,7 @@ def pagePortal (base : Portal) : Portal where
   SignatureWitness := base.SignatureWitness
   ProofWitness := base.ProofWitness
   CapabilityCommitmentWitness := base.CapabilityCommitmentWitness
+  CapabilityUseWitness := base.CapabilityUseWitness
   MembershipWitness := Unit
   IssuerWitness := base.IssuerWitness
   NonRevocationWitness := base.NonRevocationWitness
@@ -328,6 +661,7 @@ def pagePortal (base : Portal) : Portal where
   policyAddress := base.policyAddress
   verifySignature := base.verifySignature
   verifyProof := base.verifyProof
+  verifyCapabilityUse := base.verifyCapabilityUse
   verifyCapabilityCommitment := base.verifyCapabilityCommitment
   verifyMembership := fun root address _ =>
     decide (root = policyPageCell.root /\
@@ -347,6 +681,7 @@ def config (base : Portal) : CanonicalPolicyConfig (ZMod 13) where
   registry := policyRegistry
   recordDigest := policyRecordDigest
   stepBinding := .model demoStateDigest demoStepDigest
+  compilerProfile := .researchDisabled demoRequest.semantics
 
 @[simp] theorem config_verifyMembership (base : Portal)
     (root address : Digest) :
@@ -408,7 +743,7 @@ noncomputable def membershipSemantics (base : Portal) :
     exact claim
 
 noncomputable def policyWitness : CompiledPolicyWitness (ZMod 13) :=
-  canonicalWitness committedPolicy kOld kNew
+  canonicalWitness CompilerProfile.disabled committedPolicy kOld kNew
 
 theorem policy_verifies (base : Portal) :
     (config base).verifies demoRequest policyWitness = true := by
@@ -423,7 +758,10 @@ theorem policy_verifies (base : Portal) :
     (domainExact := rfl) (semanticsExact := rfl)
     (recordDigestExact := rfl)
     (stepExact := stepExact)
-    (supportedExact := by decide) (castExact := by decide)).mpr
+    (profileCompatible := rfl) (profileSemanticsExact := rfl)
+    (supportedExact := by change supported CompilerProfile.disabled kPol = true; decide)
+    (rangesExact := by change inputsInRange CompilerProfile.disabled kPol kOld kNew = true; decide)
+    (castExact := by decide)).mpr
   decide
 
 theorem page_membership_verified (base : Portal) :

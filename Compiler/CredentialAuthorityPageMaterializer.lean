@@ -72,6 +72,7 @@ inductive Entry where
   | capability (kind : ResourceKind) (stored : StoredCapability kind)
   | issuerEpoch (issuer : IssuerId) (epoch : Epoch)
   | subjectKeyEpoch (subject : SubjectId) (epoch : Epoch)
+  | subjectKey (key : CredentialSigningKey.KeyRecord)
   | nullifier (id : Nat) (consumed : Bool)
   deriving DecidableEq, Repr
 
@@ -91,6 +92,7 @@ def entryStream : StreamCodec Entry where
         6 :: subjectIdStream.encode subject ++ StreamCodec.nat.encode epoch
     | .nullifier nullifierId consumed =>
         7 :: StreamCodec.nat.encode nullifierId ++ StreamCodec.bool.encode consumed
+    | .subjectKey key => 8 :: CredentialSigningKeyCodec.keyRecordStream.encode key
   decodePrefix
     | 0 :: bytes => do
         let (policy, afterPolicy) <- policyIdStream.decodePrefix bytes
@@ -122,6 +124,9 @@ def entryStream : StreamCodec Entry where
         let (nullifierId, afterId) ← StreamCodec.nat.decodePrefix bytes
         let (consumed, suffix) ← StreamCodec.bool.decodePrefix afterId
         some (.nullifier nullifierId consumed, suffix)
+    | 8 :: bytes => do
+        let (key, suffix) ← CredentialSigningKeyCodec.keyRecordStream.decodePrefix bytes
+        some (.subjectKey key, suffix)
     | _ => none
   decodePrefix_encode := by
     intro entry suffix
@@ -140,6 +145,7 @@ def entryStream : StreamCodec Entry where
         simp [List.append_assoc, StreamCodec.decodePrefix_encode]
     | nullifier id consumed =>
         simp [List.append_assoc, StreamCodec.decodePrefix_encode]
+    | subjectKey key => simp [StreamCodec.decodePrefix_encode]
 
 /-- Exact canonical authority addresses written by one entry. -/
 def Entry.fields : Entry -> List AuthorityField
@@ -149,6 +155,7 @@ def Entry.fields : Entry -> List AuthorityField
   | .capability kind stored => [.capability kind stored.head.id]
   | .issuerEpoch issuer _ => [.issuerEpoch issuer]
   | .subjectKeyEpoch subject _ => [.subjectKeyEpoch subject]
+  | .subjectKey key => [.subjectKeyEpoch ⟨key.subject⟩, .subjectKey ⟨key.subject⟩ key.keyEpoch]
   | .nullifier nullifierId _ => [.nullifier nullifierId]
 
 /-- Install one entry into the canonical sparse authority field carrier. -/
@@ -162,6 +169,9 @@ def Entry.install
   | .capability kind stored => fields.write (.capability kind stored.head.id) stored
   | .issuerEpoch issuer epoch => fields.write (.issuerEpoch issuer) epoch
   | .subjectKeyEpoch subject epoch => fields.write (.subjectKeyEpoch subject) epoch
+  | .subjectKey key =>
+      (fields.write (.subjectKeyEpoch ⟨key.subject⟩) key.keyEpoch).write
+        (.subjectKey ⟨key.subject⟩ key.keyEpoch) key
   | .nullifier nullifierId consumed => fields.write (.nullifier nullifierId) consumed
 
 /-- An entry leaves every unrelated canonical coordinate unchanged. -/
@@ -187,6 +197,10 @@ theorem Entry.install_frame (entry : Entry)
   | subjectKeyEpoch subject epoch =>
       simp only [Entry.fields, List.mem_singleton] at outside
       exact CellState.FieldStore.write_other fields (Ne.symm outside) epoch
+  | subjectKey key =>
+      simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false, not_or] at outside
+      exact (CellState.FieldStore.write_other _ (Ne.symm outside.2) key).trans
+        (CellState.FieldStore.write_other fields (Ne.symm outside.1) key.keyEpoch)
   | nullifier nullifierId consumed =>
       simp only [Entry.fields, List.mem_singleton] at outside
       exact CellState.FieldStore.write_other fields (Ne.symm outside) consumed
@@ -217,6 +231,9 @@ theorem Entry.install_exact (entry : Entry)
       simp only [Entry.fields, List.mem_singleton] at inside
       subst field
       simp [Entry.install]
+  | subjectKey key =>
+      simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false] at inside
+      rcases inside with rfl | rfl <;> simp [Entry.install]
   | nullifier id consumed =>
       simp only [Entry.fields, List.mem_singleton] at inside
       subst field
@@ -814,15 +831,16 @@ def stateStream : StreamCodec (LogicalState schema) :=
   StreamCodec.xmap (StreamCodec.option pageStream) pageAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
-/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 2, capacity 4.
-Version 2 adds all canonical authority fields and exact byte canonicality. -/
+/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 3, capacity 4.
+Version 3 adds committed signing keys, atomically paired with their current
+subject epoch. Prior wire versions are not silently reinterpreted. -/
 def wireFrame : List UInt8 :=
   [76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 2, 4]
+    71, 69, 3, 4]
 
 def decodeStateRaw : List UInt8 -> Option (LogicalState schema)
   | 76 :: 79 :: 79 :: 77 :: 47 :: 65 :: 85 :: 84 :: 72 :: 47 :: 80 :: 79 ::
-      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 2 :: 4 :: payload =>
+      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 3 :: 4 :: payload =>
       stateStream.toLawful.decode payload
   | _ => none
 
@@ -840,6 +858,15 @@ trailing bytes; the raw parser alone is deliberately not an admission gate. -/
 def decodeState (bytes : List UInt8) : Option (LogicalState schema) := do
   let state ← decodeStateRaw bytes
   if encodeState state = bytes then some state else none
+
+/-- Earlier frames never reinterpret the expanded current entry vocabulary. -/
+theorem decodeState_rejects_v2 (payload : List UInt8) :
+    decodeState ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73,
+      67, 89, 80, 65, 71, 69, 2, 4] ++ payload) = none := rfl
+
+theorem decodeState_rejects_v1 (payload : List UInt8) :
+    decodeState ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73,
+      67, 89, 80, 65, 71, 69, 1, 4] ++ payload) = none := rfl
 
 @[simp] theorem decodeState_encode (state : LogicalState schema) :
     decodeState (encodeState state) = some state := by
@@ -879,7 +906,7 @@ def stateCodec : LawfulCodec (LogicalState schema) where
 
 def rootCustomization : List UInt8 :=
   [76, 79, 79, 77, 46, 65, 85, 84, 72, 46, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 46, 82, 79, 79, 84, 47, 118, 50]
+    71, 69, 46, 82, 79, 79, 84, 47, 118, 51]
 
 theorem wire_and_root_domains_distinct : wireFrame ≠ rootCustomization := by
   decide

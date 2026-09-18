@@ -1,16 +1,19 @@
 /-
 # Assurance.BoundedPageSchemaUpgradeCutover -- durable replicated page upgrade
 
-`Compiler.BoundedPageSchemaUpgrade` supplies the exact V1/V2 codecs, semantic
+`Compiler.BoundedPageSchemaUpgrade` supplies the current/next codecs, semantic
 migration, catalog bytes, and fail-closed admission decision.  This module
 binds that decision into one durable cutover payload and composes it with the
 existing replicated-settlement safety theorem.
+
+The `v1`/`v2` recovery labels below name catalogue generations. Individual
+page wire versions advance independently: authority 3→4, content/events 1→2.
 
 Recovery has one explicit linearization bit.  A prepared record (including a
 fully written V2 catalog) still recovers V1; a committed record recovers V2
 only when the old bytes, new bytes, and complete admitted payload are exact.
 Corruption fails closed.  Page recovery accepts either canonical generation,
-while the compiler theorem proves that corresponding V1/V2 pages have equal
+while the compiler theorem proves that corresponding current/next pages have equal
 canonical semantics and unequal bytes.
 
 At the replicated layer, the complete cutover payload is the event of a
@@ -204,7 +207,7 @@ def decodeMixed (kind : PageKind) (bytes : List UInt8) :
       if oldCanonicalBytes kind state = bytes then .ok (.v1 state)
       else .error .noncanonicalV1
   | none =>
-      match (controllerV2 kind).codec.decode bytes with
+      match (controllerNext kind).codec.decode bytes with
       | some state =>
           if newCanonicalBytes kind state = bytes then .ok (.v2 state)
           else .error .noncanonicalV2

@@ -23,6 +23,7 @@ import Compiler.DeclaredEffectPageMaterializer
 import Compiler.CredentialAuthorityDomain
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
+import Compiler.PolicySourceCell
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 
@@ -46,11 +47,12 @@ inductive Kind where
   | authorityCatalogue
   | accountMetadata
   | declaredProgram
+  | policySource
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authorityShard, .declaredObject,
-    .resourceBook, .authorityCatalogue, .accountMetadata, .declaredProgram]
+    .resourceBook, .authorityCatalogue, .accountMetadata, .declaredProgram, .policySource]
 
 /-- Existing bounded-page tags 1/2/3 and effect-page tag 5 are retained.
 Tag 4 remains unassigned. New tags and schema refs are deployment pins. -/
@@ -63,6 +65,7 @@ def Kind.tag : Kind → UInt8
   | .authorityCatalogue => 7
   | .accountMetadata => 8
   | .declaredProgram => 9
+  | .policySource => PolicySourceCell.registryTag
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -73,6 +76,7 @@ def kindAtTag : UInt8 → Option Kind
   | 7 => some .authorityCatalogue
   | 8 => some .accountMetadata
   | 9 => some .declaredProgram
+  | 10 => some .policySource
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -81,16 +85,18 @@ def kindAtTag : UInt8 → Option Kind
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 1⟩
   | .eventHistory => ⟨⟨91002⟩, 1⟩
-  | .authorityShard => ⟨⟨91003⟩, 2⟩
+  | .authorityShard => ⟨⟨91003⟩, 3⟩
   | .declaredObject => ⟨⟨91004⟩, 1⟩
   | .resourceBook => ⟨⟨91005⟩, 2⟩
   | .authorityCatalogue => ⟨⟨91006⟩, 1⟩
   | .accountMetadata => ⟨⟨91007⟩, 1⟩
   | .declaredProgram => ⟨⟨91008⟩, 1⟩
+  | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
-  cases left <;> cases right <;> simp [schemaRef] at same ⊢
+  cases left <;> cases right <;>
+    simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion] at same ⊢
 
 def schema : Kind → CellState.Schema.{0, 0, 0, 0}
   | .content => HyperdocumentContentPageMaterializer.schema
@@ -101,6 +107,7 @@ def schema : Kind → CellState.Schema.{0, 0, 0, 0}
   | .authorityCatalogue => CredentialAuthorityDomain.catalogueSchema
   | .accountMetadata => DeclaredEffectPageMaterializer.schema
   | .declaredProgram => DeclaredEffectPageMaterializer.schema
+  | .policySource => PolicySourceCell.schema
 
 instance fieldDecidableEq : (kind : Kind) → DecidableEq (schema kind).Field
   | .content => inferInstanceAs (DecidableEq HyperdocumentContentPageMaterializer.schema.Field)
@@ -111,6 +118,7 @@ instance fieldDecidableEq : (kind : Kind) → DecidableEq (schema kind).Field
   | .authorityCatalogue => inferInstanceAs (DecidableEq CredentialAuthorityDomain.catalogueSchema.Field)
   | .accountMetadata => inferInstanceAs (DecidableEq DeclaredEffectPageMaterializer.schema.Field)
   | .declaredProgram => inferInstanceAs (DecidableEq DeclaredEffectPageMaterializer.schema.Field)
+  | .policySource => inferInstanceAs (DecidableEq PolicySourceCell.schema.Field)
 
 instance resourceDecidableEq : (kind : Kind) → DecidableEq (schema kind).Resource
   | .content => inferInstanceAs (DecidableEq Empty)
@@ -121,6 +129,7 @@ instance resourceDecidableEq : (kind : Kind) → DecidableEq (schema kind).Resou
   | .authorityCatalogue => inferInstanceAs (DecidableEq Empty)
   | .accountMetadata => inferInstanceAs (DecidableEq Empty)
   | .declaredProgram => inferInstanceAs (DecidableEq Empty)
+  | .policySource => inferInstanceAs (DecidableEq Empty)
 
 def materializer : (kind : Kind) → Materializer (schema kind) Digest
   | .content => HyperdocumentContentPageMaterializer.materializer
@@ -131,6 +140,7 @@ def materializer : (kind : Kind) → Materializer (schema kind) Digest
   | .authorityCatalogue => CredentialAuthorityDomain.catalogueMaterializer
   | .accountMetadata => DeclaredEffectPageMaterializer.materializer
   | .declaredProgram => DeclaredEffectPageMaterializer.materializer
+  | .policySource => PolicySourceCell.materializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -178,6 +188,8 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
     registry.materializer factoryKind = DeclaredEffectPageMaterializer.materializer := rfl
 @[simp] theorem registry_account_materializer :
     registry.materializer .accountMetadata = DeclaredEffectPageMaterializer.materializer := rfl
+@[simp] theorem registry_policy_source_materializer :
+    registry.materializer .policySource = PolicySourceCell.materializer := rfl
 @[simp] theorem registry_program_materializer :
     registry.materializer .declaredProgram = DeclaredEffectPageMaterializer.materializer := rfl
 @[simp] theorem registry_lifecycle_root :
@@ -316,6 +328,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
         (CredentialAuthorityDomain.catalogueAt state)
   | .resourceBook, state => cellId = deployment.resourceBookId ∧
       (CanonicalResourcePageMaterializer.bookAt state).isSome = true
+  | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
+      (PolicySourceCell.recordAt state)
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : LogicalState (schema kind)) :
@@ -352,7 +366,8 @@ def postStateCheck (deployment : Deployment) (cellId : Nat) (kind : Kind)
 
 def FinalPostLaw (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Prop :=
-  before.kind = after.kind ∧ CellLaw deployment cellId before ∧ CellLaw deployment cellId after
+  before.kind = after.kind ∧ CellLaw deployment cellId before ∧ CellLaw deployment cellId after ∧
+    (before.kind = .policySource → PackedCell.bytes registry before = PackedCell.bytes registry after)
 
 instance finalPostLawDecidable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Decidable (FinalPostLaw deployment cellId before after) := by
@@ -367,7 +382,8 @@ def UserShape (cellId : Nat) : (kind : Kind) → LogicalState (schema kind) → 
   | .content, state => PresentLaw (fun page => page.document.digest = ⟨cellId⟩ ∧
       page.pageNumber = 0 ∧ page.entries = [])
       (HyperdocumentContentPageMaterializer.pageAt state)
-  | .eventHistory, _ | .authorityShard, _ | .authorityCatalogue, _ | .resourceBook, _ => False
+  | .eventHistory, _ | .authorityShard, _ | .authorityCatalogue, _ | .resourceBook, _ |
+      .policySource, _ => False
 
 instance userShapeDecidable (cellId : Nat) (kind : Kind) (state : LogicalState (schema kind)) :
     Decidable (UserShape cellId kind state) := by
@@ -441,6 +457,242 @@ theorem account_metadata_registered
     simpa [actualKind, resourceKindOf] using kindBound
   simp only [ResourceBirth.Descriptor.registeredAccounts, List.mem_filterMap]
   exact ⟨item, member, by simp [account]⟩
+
+/-! ## Immutable policy source cells and same-directory source resolution -/
+
+def policySourceCell (record : CanonicalPolicyAdmission.PolicyRecord) : PackedCell registry :=
+  ⟨.policySource, materialize PolicySourceCell.materializer
+    (PolicySourceCell.stateOfOption (some record))⟩
+
+def policySourceCreate (domain : Digest) (record : CanonicalPolicyAdmission.PolicyRecord) :
+    CreateRequest (CellId := Nat) registry where
+  cellId := PolicySourceCell.physicalId domain (PolicyRecordCodec.digest record)
+  expectedPreRoot := CellSlot.root registry .absent
+  cell := policySourceCell record
+
+theorem policySourceCreate_cell_law (deployment : Deployment)
+    (record : CanonicalPolicyAdmission.PolicyRecord) (valid : deployment.Valid)
+    (domainExact : record.domain = deployment.domain) :
+    CellLaw deployment (policySourceCreate deployment.domain record).cellId
+      (policySourceCreate deployment.domain record).cell := by
+  change deployment.Valid ∧ PolicySourceCell.SourceValid deployment.domain
+    (PolicySourceCell.physicalId deployment.domain (PolicyRecordCodec.digest record)) record
+  exact ⟨valid, domainExact, rfl⟩
+
+/-- Only records returned by the fixed initial-policy checker are used by the
+birth receiver. This helper derives bytes and identifiers; lifecycle admission
+still checks actual absence, permanent freshness and duplicate identifiers. -/
+def initialSourceCreates (domain : Digest) (records : List CanonicalPolicyAdmission.PolicyRecord) :
+    List (CreateRequest (CellId := Nat) registry) := records.map (policySourceCreate domain)
+
+theorem initialSourceCreates_ids {F : Type} [Field F] {domain : Digest}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {initials : List ResourceBirth.InitialPolicy}
+    (checked : PolicySourceCell.CheckedInitials domain profile initials) :
+    (initialSourceCreates domain checked.records).map CreateRequest.cellId =
+      PolicySourceCell.initialIds domain initials := by
+  simpa [initialSourceCreates, policySourceCreate, List.map_map] using checked.ids_exact
+
+structure LoadedPolicySource (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest) where
+  payload : Materialized PolicySourceCell.materializer
+  present : directory.slots (PolicySourceCell.physicalId domain address) =
+    .present ⟨.policySource, payload⟩
+  record : CanonicalPolicyAdmission.PolicyRecord
+  recordExact : PolicySourceCell.recordAt payload.logical = some record
+  domainExact : record.domain = domain
+  addressExact : PolicyRecordCodec.digest record = address
+
+def LoadedPolicySource.cell {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    PackedCell registry := ⟨.policySource, loaded.payload⟩
+
+def LoadedPolicySource.cellId {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (_loaded : LoadedPolicySource domain directory address) : Nat :=
+  PolicySourceCell.physicalId domain address
+
+def LoadedPolicySource.canonicalBytes {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) : List UInt8 :=
+  PolicyRecordCodec.encode loaded.record
+
+/-- The guard is over the actual outer physical cell, not the content digest
+or the singleton payload's native materializer root. -/
+def LoadedPolicySource.readGuard {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) : Nat × Digest :=
+  (loaded.cellId, ResourceBirthCodec.physicalRoot (.live loaded.cell))
+
+theorem LoadedPolicySource.lifecycle_exact {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    ResourceBirthCodec.LifecycleImage.view registry directory loaded.cellId = .live loaded.cell :=
+  (ResourceBirthCodec.LifecycleImage.view_live_iff registry directory loaded.cellId loaded.cell).mpr
+    loaded.present
+
+theorem LoadedPolicySource.readGuard_exact {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    loaded.readGuard.2 = ResourceBirthCodec.rootBytes
+      (ResourceBirthCodec.LifecycleImage.bytes registry
+        (ResourceBirthCodec.LifecycleImage.view registry directory loaded.cellId)) := by
+  rw [loaded.lifecycle_exact]
+  rfl
+
+theorem LoadedPolicySource.cell_exact {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    loaded.cell = policySourceCell loaded.record := by
+  have stateExact := PolicySourceCell.state_ext loaded.payload.logical
+  rw [loaded.recordExact] at stateExact
+  exact congrArg (fun (payload : Materialized PolicySourceCell.materializer) =>
+      (⟨.policySource, payload⟩ : PackedCell registry))
+    (Materialized.ext stateExact)
+
+theorem LoadedPolicySource.record_of_present {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address)
+    (record : CanonicalPolicyAdmission.PolicyRecord)
+    (present : directory.slots loaded.cellId = .present (policySourceCell record)) :
+    loaded.record = record := by
+  have sameCell : loaded.cell = policySourceCell record :=
+    CellSlot.present.inj (loaded.present.symm.trans present)
+  have sameRecord := congrArg (fun (cell : PackedCell registry) =>
+    match cell with
+    | ⟨.policySource, payload⟩ => PolicySourceCell.recordAt payload.logical
+    | _ => none) sameCell
+  change PolicySourceCell.recordAt loaded.payload.logical = some record at sameRecord
+  rw [loaded.recordExact] at sameRecord
+  exact Option.some.inj sameRecord
+
+theorem LoadedPolicySource.bytes_decode {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    PolicyRecordCodec.decode loaded.canonicalBytes = some loaded.record :=
+  PolicyRecordCodec.decode_encode loaded.record
+
+theorem LoadedPolicySource.bytes_digest {domain : Digest} {directory : Directory Nat registry}
+    {address : Digest} (loaded : LoadedPolicySource domain directory address) :
+    PolicyRecordCodec.hashBytes loaded.canonicalBytes = address := loaded.addressExact
+
+def loadPolicySource (domain : Digest) (directory : Directory Nat registry) (address : Digest) :
+    Option (LoadedPolicySource domain directory address) :=
+  match present : directory.slots (PolicySourceCell.physicalId domain address) with
+  | .present ⟨.policySource, payload⟩ =>
+      match found : PolicySourceCell.recordAt payload.logical with
+      | none => none
+      | some record =>
+          if valid : record.domain = domain ∧ PolicyRecordCodec.digest record = address then
+            some ⟨payload, present, record, found, valid.1, valid.2⟩
+          else none
+  | _ => none
+
+def fetchPolicySource (domain : Digest) (directory : Directory Nat registry) (address : Digest) :
+    Option (List UInt8) :=
+  (loadPolicySource domain directory address).map LoadedPolicySource.canonicalBytes
+
+theorem fetchPolicySource_exact (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest) (record : CanonicalPolicyAdmission.PolicyRecord)
+    (present : directory.slots (PolicySourceCell.physicalId domain address) =
+      .present (policySourceCell record))
+    (domainExact : record.domain = domain)
+    (addressExact : PolicyRecordCodec.digest record = address) :
+    fetchPolicySource domain directory address = some (PolicyRecordCodec.encode record) := by
+  unfold fetchPolicySource loadPolicySource
+  split
+  next payload found =>
+    have actual := congrArg (fun (slot : CellSlot registry) =>
+      match slot with
+      | .present ⟨.policySource, payload⟩ => PolicySourceCell.recordAt payload.logical
+      | _ => none) (found.symm.trans present)
+    change PolicySourceCell.recordAt payload.logical = some record at actual
+    split
+    next absent => simp [actual] at absent
+    next selected selectedAt =>
+      have same : selected = record := Option.some.inj (selectedAt.symm.trans actual)
+      subst selected
+      simp [domainExact, addressExact, LoadedPolicySource.canonicalBytes]
+  next => simp_all [policySourceCell]
+
+theorem missing_policy_source_refused (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest)
+    (missing : directory.slots (PolicySourceCell.physicalId domain address) = .absent) :
+    fetchPolicySource domain directory address = none := by
+  simp [fetchPolicySource, loadPolicySource, missing]
+
+theorem wrong_policy_source_kind_refused (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest) (cell : PackedCell registry)
+    (present : directory.slots (PolicySourceCell.physicalId domain address) = .present cell)
+    (wrongKind : cell.kind ≠ .policySource) :
+    fetchPolicySource domain directory address = none := by
+  rcases cell with ⟨kind, payload⟩
+  cases kind <;> simp_all [fetchPolicySource, loadPolicySource]
+
+theorem wrong_policy_source_domain_refused (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest) (record : CanonicalPolicyAdmission.PolicyRecord)
+    (present : directory.slots (PolicySourceCell.physicalId domain address) =
+      .present (policySourceCell record))
+    (wrongDomain : record.domain ≠ domain) :
+    fetchPolicySource domain directory address = none := by
+  cases result : loadPolicySource domain directory address with
+  | none => simp [fetchPolicySource, result]
+  | some loaded =>
+      have same := loaded.record_of_present record present
+      have domainExact := loaded.domainExact
+      rw [same] at domainExact
+      exact False.elim (wrongDomain domainExact)
+
+theorem wrong_policy_source_digest_refused (domain : Digest) (directory : Directory Nat registry)
+    (address : Digest) (record : CanonicalPolicyAdmission.PolicyRecord)
+    (present : directory.slots (PolicySourceCell.physicalId domain address) =
+      .present (policySourceCell record))
+    (wrongDigest : PolicyRecordCodec.digest record ≠ address) :
+    fetchPolicySource domain directory address = none := by
+  cases result : loadPolicySource domain directory address with
+  | none => simp [fetchPolicySource, result]
+  | some loaded =>
+      have same := loaded.record_of_present record present
+      have addressExact := loaded.addressExact
+      rw [same] at addressExact
+      exact False.elim (wrongDigest addressExact)
+
+theorem policy_source_no_user_birth (deployment : Deployment) (cellId : Nat)
+    (payload : Materialized PolicySourceCell.materializer) :
+    ¬UserInitial deployment cellId ⟨.policySource, payload⟩ := fun admitted => admitted.2
+
+theorem policy_source_final_bytes_immutable (deployment : Deployment) (cellId : Nat)
+    (before after : PackedCell registry) (source : before.kind = .policySource)
+    (valid : FinalPostLaw deployment cellId before after) :
+    PackedCell.bytes registry before = PackedCell.bytes registry after := valid.2.2.2 source
+
+theorem policy_source_final_state_immutable (deployment : Deployment) (cellId : Nat)
+    (before after : PackedCell registry) (source : before.kind = .policySource)
+    (valid : FinalPostLaw deployment cellId before after) : before = after := by
+  have bytesExact : cellCodec.encode before = cellCodec.encode after :=
+    policy_source_final_bytes_immutable deployment cellId before after source valid
+  have same := congrArg cellCodec.decode bytesExact
+  rw [cellCodec.decode_encode, cellCodec.decode_encode] at same
+  exact Option.some.inj same
+
+theorem policy_source_occupied_refused (domain : Digest) (directory : Directory Nat registry)
+    (record : CanonicalPolicyAdmission.PolicyRecord) (occupant : PackedCell registry)
+    (occupied : directory.slots (policySourceCreate domain record).cellId = .present occupant) :
+    CellRegistry.create registry directory (policySourceCreate domain record) =
+      .error .duplicateCreate := by
+  simp [CellRegistry.create, occupied]
+
+theorem policy_source_retired_refused (domain : Digest) (directory : Directory Nat registry)
+    (record : CanonicalPolicyAdmission.PolicyRecord)
+    (absent : directory.slots (policySourceCreate domain record).cellId = .absent)
+    (used : (policySourceCreate domain record).cellId ∈ directory.used) :
+    CellRegistry.create registry directory (policySourceCreate domain record) =
+      .error .retiredIdentifier := by
+  simp [CellRegistry.create, absent, used]
+
+theorem policy_source_identifier_collision_refused (domain : Digest)
+    (directory : Directory Nat registry) (left right : CanonicalPolicyAdmission.PolicyRecord)
+    (collision : (policySourceCreate domain left).cellId =
+      (policySourceCreate domain right).cellId) :
+    CellRegistry.create registry
+      (Directory.insert registry directory (policySourceCreate domain left).cellId
+        (policySourceCell left))
+      (policySourceCreate domain right) = .error .duplicateCreate := by
+  apply policy_source_occupied_refused domain _ right (policySourceCell left)
+  rw [collision]
+  exact Directory.insert_slot registry directory _ _
 
 namespace Witness
 

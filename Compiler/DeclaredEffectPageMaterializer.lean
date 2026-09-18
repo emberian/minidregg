@@ -252,6 +252,188 @@ def Page.applyWrites : Page -> List CheckedWrite -> Except RejectReason Page
       let post <- page.applyWrite write
       post.applyWrites writes
 
+/-! ## General correspondence with the canonical guarded-write fold -/
+
+private theorem empty_fields_apply (key : StateKey) :
+    (0 : FieldStore DeclaredTurn.effectSchema.{0, 0}) key = none := rfl
+
+private theorem entry_install_apply
+    (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (entry : Entry) (key : StateKey) :
+    Entry.install fields entry key =
+      if entry.key = key then some entry.value else fields key := by
+  by_cases same : entry.key = key
+  · subst key
+    simpa only [if_pos rfl] using
+      (FieldStore.write_self fields entry.key entry.value)
+  · simpa [Entry.install, same] using
+      (FieldStore.write_other fields same entry.value)
+
+private theorem fields_assign_apply
+    (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (key query : StateKey) (replacement : Option Int) :
+    fields.assign key replacement query =
+      if key = query then replacement else fields query := by
+  by_cases same : key = query
+  · subst query
+    simpa [FieldStore.read] using
+      (FieldStore.read_assign_self fields key replacement)
+  · simpa [FieldStore.read, same] using
+      (FieldStore.read_assign_other fields same replacement)
+
+set_option maxHeartbeats 1600000 in
+/-- Replacing a present page entry is exactly canonical sparse assignment.
+This includes explicit deletion and does not depend on a closed sample page. -/
+theorem Page.replaceExisting_fields (page : Page) (key : StateKey)
+    (replacement : Option Int) (present : page.lookup key ≠ none) :
+    (page.replaceExisting key replacement).toCanonicalState.fields =
+      page.toCanonicalState.fields.assign key replacement := by
+  rcases page with ⟨domain, shard, slot0, slot1, slot2, slot3⟩
+  cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
+    cases replacement <;>
+    apply DFinsupp.ext <;> intro query
+  all_goals
+    simp only [Page.lookup, Page.toCanonicalState, Page.entries,
+      Page.replaceExisting, replaceSlot, List.filterMap_cons, List.filterMap_nil,
+      Option.map_none, Option.map_some, fields_assign_apply] at *
+    repeat' first
+      | rfl
+      | fail_if_no_progress simp_all [entry_install_apply, empty_fields_apply]
+      | fail_if_no_progress split_ifs at *
+    all_goals exact present rfl
+
+set_option maxHeartbeats 800000 in
+/-- Insertion at an absent sparse key is the same assignment regardless of
+which physical slot was free. Full pages still refuse through `insert?`. -/
+theorem Page.insert_fields (page post : Page) (entry : Entry)
+    (absent : page.lookup entry.key = none)
+    (inserted : page.insert? entry = some post) :
+    post.toCanonicalState.fields =
+      page.toCanonicalState.fields.assign entry.key (some entry.value) := by
+  rcases page with ⟨domain, shard, slot0, slot1, slot2, slot3⟩
+  cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
+    simp only [Page.insert?, Option.some.injEq, reduceCtorEq] at inserted
+  all_goals
+    subst post
+    apply DFinsupp.ext
+    intro query
+    simp only [Page.lookup, Page.toCanonicalState, Page.entries,
+      List.filterMap_cons, List.filterMap_nil, fields_assign_apply] at *
+    repeat' first
+      | rfl
+      | fail_if_no_progress simp_all [entry_install_apply, empty_fields_apply]
+      | fail_if_no_progress split_ifs at *
+
+private theorem checkedPost_success {candidate post : Page}
+    (success : checkedPost candidate = .ok post) : candidate.Valid ∧ candidate = post := by
+  unfold checkedPost at success
+  split at success
+  · rename_i valid
+    exact ⟨valid, Except.ok.inj success⟩
+  · cases success
+
+/-- Every successful physical write retains exact sparse guard values and
+performs the canonical assignment. Page validity is preserved by the actual
+checked execution, including the absence-to-absence case. -/
+theorem Page.applyWrite_spec {page post : Page} {write : CheckedWrite}
+    (success : page.applyWrite write = .ok post) :
+    post.Valid ∧ page.lookup write.key = write.expected ∧
+      post.toCanonicalState.fields =
+        page.toCanonicalState.fields.assign write.key write.replacement := by
+  unfold Page.applyWrite at success
+  split at success
+  · rename_i valid
+    split at success
+    · rename_i owned
+      split at success
+      · rename_i guard
+        cases found : page.lookup write.key with
+        | none =>
+            cases replaced : write.replacement with
+            | none =>
+                simp only [found, replaced] at success
+                have same : page = post := Except.ok.inj success
+                subst post
+                refine ⟨valid, by simpa only [found] using guard, ?_⟩
+                apply DFinsupp.ext
+                intro query
+                rw [fields_assign_apply]
+                split
+                · rename_i sameKey
+                  subst query
+                  exact found
+                · rfl
+            | some value =>
+                simp only [found, replaced] at success
+                cases inserted : page.insert? ⟨write.key, value⟩ with
+                | none =>
+                    simp only [inserted] at success
+                    cases success
+                | some candidate =>
+                    simp only [inserted] at success
+                    obtain ⟨postValid, same⟩ := checkedPost_success success
+                    subst post
+                    refine ⟨postValid, by simpa only [found] using guard, ?_⟩
+                    simpa only [replaced] using
+                      (page.insert_fields candidate ⟨write.key, value⟩ found inserted)
+        | some value =>
+            simp only [found] at success
+            obtain ⟨postValid, same⟩ := checkedPost_success success
+            subst post
+            refine ⟨postValid, by simpa only [found] using guard, ?_⟩
+            apply page.replaceExisting_fields
+            rw [found]
+            simp
+      · cases success
+    · cases success
+  · cases success
+
+/-- The actual page executor reflects into the one canonical ordered guarded
+fold. Repeated keys and aliased actions use each intermediate state, preserving
+absence separately from stored zero. No authorization is inferred here. -/
+theorem Page.applyWrites_checked {page post : Page} {writes : List CheckedWrite}
+    (success : page.applyWrites writes = .ok post) :
+    runCheckedWrites writes page.toCanonicalState.fields =
+      some post.toCanonicalState.fields := by
+  induction writes generalizing page with
+  | nil =>
+      have same : page = post := Except.ok.inj success
+      subst post
+      rfl
+  | cons write writes induction =>
+      cases first : page.applyWrite write with
+      | error reason =>
+          simp only [Page.applyWrites, first] at success
+          cases success
+      | ok middle =>
+          have tail : middle.applyWrites writes = .ok post := by
+            simpa [Page.applyWrites, first] using success
+          obtain ⟨_, guard, fields⟩ := Page.applyWrite_spec first
+          simp only [runCheckedWrites,
+            show page.toCanonicalState.fields write.key = write.expected from guard]
+          rw [← fields]
+          exact induction tail
+
+/-- Empty batches retain their input's validity; every nonempty successful
+step obtains validity from the physical executor's mandatory checks. -/
+theorem Page.applyWrites_valid {page post : Page} {writes : List CheckedWrite}
+    (valid : page.Valid) (success : page.applyWrites writes = .ok post) :
+    post.Valid := by
+  induction writes generalizing page with
+  | nil =>
+      have same : page = post := Except.ok.inj success
+      subst post
+      exact valid
+  | cons write writes induction =>
+      cases first : page.applyWrite write with
+      | error reason =>
+          simp only [Page.applyWrites, first] at success
+          cases success
+      | ok middle =>
+          have tail : middle.applyWrites writes = .ok post := by
+            simpa [Page.applyWrites, first] using success
+          exact induction (Page.applyWrite_spec first).1 tail
+
 /-! ## Concrete framed materialization -/
 
 def schema : CellState.Schema where
@@ -383,12 +565,9 @@ structure AcceptedDelta
   prePage : Page
   postPage : Page
   preValid : prePage.Valid
-  postValid : postPage.Valid
   executorExact :
     prePage.applyWrites declaration.checkedWrites = .ok postPage
   preCanonicalExact : prePage.toCanonicalState = pre.logical
-  postCanonicalExact :
-    postPage.toCanonicalState = accepted.cellEffect.prepared.post.logical
 
 namespace AcceptedDelta
 
@@ -399,6 +578,28 @@ variable
     {pre : Materialized M}
     {declaration : DeclaredActionLowering.Declaration target}
     {accepted : Accepted portal authState context pre declaration}
+
+/-- The final page's validity follows from the actual checked executor, rather
+than a second claim supplied alongside its successful result. -/
+theorem postValid (delta : AcceptedDelta accepted) : delta.postPage.Valid :=
+  Page.applyWrites_valid delta.preValid delta.executorExact
+
+/-- Exact canonical post-state correspondence follows for every executed
+declaration, using the common ordered fold rather than a sample-specific
+post-state comparison. -/
+theorem postCanonicalExact (delta : AcceptedDelta accepted) :
+    delta.postPage.toCanonicalState = accepted.cellEffect.prepared.post.logical := by
+  have fields := runCheckedWrites_post declaration.checkedWrites
+    delta.prePage.toCanonicalState.fields delta.postPage.toCanonicalState.fields
+    (Page.applyWrites_checked delta.executorExact)
+  rw [delta.preCanonicalExact] at fields
+  change delta.postPage.toCanonicalState =
+    { fields := applyFieldWrites declaration.fieldWrites pre.logical.fields
+      resources := applyResourceWrites [] pre.logical.resources }
+  unfold Page.toCanonicalState
+  congr
+  funext resource
+  exact Empty.elim resource
 
 def preCell (delta : AcceptedDelta accepted) : Materialized materializer :=
   CellState.materialize materializer (stateOfOption (some delta.prePage))
@@ -639,72 +840,57 @@ theorem preCanonicalExact : prePage.toCanonicalState = preCell.logical := by
   funext resource
   exact Empty.elim resource
 
-theorem postCanonicalExact :
-    postPage.toCanonicalState = accepted.cellEffect.prepared.post.logical := by
-  change postPage.toCanonicalState = accepted.cellEffect.validated.apply.logical
-  change postPage.toCanonicalState =
-    { fields := applyFieldWrites declaration.fieldWrites preCell.logical.fields
-      resources := applyResourceWrites [] preCell.logical.resources }
-  unfold Page.toCanonicalState
-  congr
-  · apply DFinsupp.ext
-    intro field
-    change
-      (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-          debitKey (14 - amount)).write creditKey amount) field =
-        ((preCell.logical.fields.assign debitKey (some (14 - amount))).assign
-          creditKey (some amount)) field
-    by_cases credit : field = creditKey
-    · subst field
-      simp [FieldStore.write, FieldStore.assign]
-    by_cases debit : field = debitKey
-    · subst field
-      change some (14 - amount) = some (14 - amount)
-      rfl
-    ·
-      have preAbsent : preCell.logical.fields field = none := by
-        simp only [preCell,
-          preLogical,
-          Minidregg.Theory.DeployedMaterializerWitness.effectCell,
-          Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
-          materialize]
-        rw [FieldStore.write_other _ (by simpa [creditKey] using (Ne.symm credit))]
-        rw [FieldStore.write_other _ (by simpa [debitKey] using (Ne.symm debit))]
-        rfl
-      have leftAbsent :
-          (((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-              debitKey (14 - amount)).write creditKey amount) field = none := by
-        rw [FieldStore.write_other _ (Ne.symm credit)]
-        rw [FieldStore.write_other _ (Ne.symm debit)]
-        rfl
-      have rightCredit :
-          ((preCell.logical.fields.assign debitKey (some (14 - amount))).assign
-              creditKey (some amount)) field =
-            (preCell.logical.fields.assign debitKey (some (14 - amount))) field := by
-        simpa [FieldStore.read] using
-          (FieldStore.read_assign_other
-            (preCell.logical.fields.assign debitKey (some (14 - amount)))
-            (field := field) (other := creditKey) (Ne.symm credit)
-            (some amount))
-      have rightDebit :
-          (preCell.logical.fields.assign debitKey (some (14 - amount))) field =
-            preCell.logical.fields field := by
-        simpa [FieldStore.read] using
-          (FieldStore.read_assign_other preCell.logical.fields
-            (field := field) (other := debitKey) (Ne.symm debit)
-            (some (14 - amount)))
-      rw [leftAbsent, rightCredit, rightDebit, preAbsent]
-  · funext resource
-    exact Empty.elim resource
-
 def acceptedDelta : AcceptedDelta accepted where
   prePage := prePage
   postPage := postPage
   preValid := prePage_valid
-  postValid := postPage_valid
   executorExact := executor_exact
   preCanonicalExact := preCanonicalExact
-  postCanonicalExact := postCanonicalExact
+
+theorem postCanonicalExact :
+    postPage.toCanonicalState = accepted.cellEffect.prepared.post.logical :=
+  acceptedDelta.postCanonicalExact
+
+/-- The second guard sees the first write's actual result, even when both
+writes address the same key. -/
+theorem repeated_key_sequential :
+    prePage.applyWrites
+      [debitWrite,
+        { key := debitKey, expected := some (14 - amount), replacement := some 14 }] =
+      .ok prePage := by
+  decide
+
+theorem repeated_key_reflected :
+    runCheckedWrites
+      [debitWrite,
+        { key := debitKey, expected := some (14 - amount), replacement := some 14 }]
+      prePage.toCanonicalState.fields = some prePage.toCanonicalState.fields :=
+  Page.applyWrites_checked repeated_key_sequential
+
+theorem repeated_key_stale_guard_rejected :
+    prePage.applyWrites [debitWrite, debitWrite] = .error .guardMismatch := by
+  decide
+
+/-- Deleting and recreating a key uses sparse absence as the second guard;
+neither step silently replaces absence with a stored zero. -/
+theorem delete_then_recreate :
+    prePage.applyWrites
+      [{ key := debitKey, expected := some 14, replacement := none },
+       { key := debitKey, expected := none, replacement := some 14 }] =
+      .ok prePage := by
+  decide
+
+theorem absent_is_not_stored_zero :
+    prePage.applyWrite
+      { key := .accountBalance ⟨102⟩ asset
+        expected := some 0, replacement := some 1 } = .error .guardMismatch := by
+  decide
+
+theorem stored_zero_is_not_absent :
+    prePage.applyWrite
+      { key := creditKey, expected := none, replacement := some 1 } =
+      .error .guardMismatch := by
+  decide
 
 def overflowKey : StateKey := .accountBalance ⟨102⟩ asset
 def overflowWrite : CheckedWrite :=
@@ -773,6 +959,45 @@ structure PairBindingPremise (left right : LogicalState schema) : Prop where
 
 /-! The sparse finite-map equalities use the standard quotient extensionality
 stack; there are no project-specific postulates or `sorry` declarations. -/
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Page.replaceExisting_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Page.replaceExisting_fields
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Page.insert_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Page.insert_fields
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Page.applyWrite_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Page.applyWrite_spec
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Page.applyWrites_checked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Page.applyWrites_checked
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Page.applyWrites_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Page.applyWrites_valid
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.AcceptedDelta.postValid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms AcceptedDelta.postValid
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.AcceptedDelta.postCanonicalExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms AcceptedDelta.postCanonicalExact
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.repeated_key_sequential' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.repeated_key_sequential
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.repeated_key_reflected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.repeated_key_reflected
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.repeated_key_stale_guard_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.repeated_key_stale_guard_rejected
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.delete_then_recreate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.delete_then_recreate
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.absent_is_not_stored_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.absent_is_not_stored_zero
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.stored_zero_is_not_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.stored_zero_is_not_absent
 /-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.AcceptedDelta.balance_delta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms AcceptedDelta.balance_delta
