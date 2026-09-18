@@ -40,30 +40,35 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
+universe u v w x
+variable {S : CellState.Schema.{u, v, w, x}}
+
 /-! ## Canonical registry cell and content payload boundary -/
 
 /-- The registry cell is the existing canonical authority cell.  In
 particular, `policyRoot` is not a host-map digest supplied beside it. -/
-abbrev RegistryCell (M : CredentialAuthorityState.Materializer) :=
-  CredentialAuthorityState.Cell M
+abbrev RegistryCell (M : CellState.Materializer S Digest) :=
+  CellState.Materialized M
 
 /-- Exact sparse lookup for one versioned policy address. -/
-def addressAt {M : CredentialAuthorityState.Materializer} (cell : RegistryCell M)
+def addressAt {M : CellState.Materializer S Digest}
+    (projection : CredentialAuthorityState.StateProjection S) (cell : RegistryCell M)
     (policyId : PolicyId) (epoch : Epoch) : Digest :=
-  CredentialAuthorityState.policyAddressAt cell policyId epoch
+  ((projection.toCanonicalState cell.logical).fields
+    (.policyAddress policyId epoch)).getD ⟨0⟩
 
-@[simp] theorem projected_policy_root {M : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
+@[simp] theorem projected_policy_root {M : CellState.Materializer S Digest}
+    (projection : CredentialAuthorityState.StateProjection S)
     (cell : RegistryCell M) :
-    (CredentialAuthorityState.authState projection cell).policyRoot = cell.root :=
+    (projection.authState cell).policyRoot = cell.root :=
   rfl
 
-@[simp] theorem projected_policy_address {M : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
+@[simp] theorem projected_policy_address {M : CellState.Materializer S Digest}
+    (projection : CredentialAuthorityState.StateProjection S)
     (cell : RegistryCell M)
     (policyId : PolicyId) (epoch : Epoch) :
-    (CredentialAuthorityState.authState projection cell).policyAddress policyId epoch =
-      addressAt cell policyId epoch :=
+    (projection.authState cell).policyAddress policyId epoch =
+      addressAt projection cell policyId epoch :=
   rfl
 
 /-- Canonical source encoding and the deployment digest used by
@@ -144,7 +149,7 @@ theorem authorized_resolved_exact
   rcases (verifies_iff_verified config request authorized.policyWitness).mp
       policyAccepted with
     ⟨selected, selectedResolved, policyIdExact, epochExact, domainExact,
-      semanticsExact, recordAddress, witnessAddress, _, _, _, _, _⟩
+      semanticsExact, recordAddress, witnessAddress, _, _, _, _⟩
   rw [resolved] at selectedResolved
   cases selectedResolved
   have predicateAccepted : Minidregg.Pred.eval committed.record.predicate
@@ -169,18 +174,18 @@ the authenticated cell cannot silently select different policy content. -/
 theorem authorized_address_exact_of_resolved
     {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F}
-    {M : CredentialAuthorityState.Materializer}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {M : CellState.Materializer S Digest}
+    {projection : CredentialAuthorityState.StateProjection S}
     {cell : RegistryCell M} {kind : ResourceKind} {request : Request kind}
     (authorized : CanonicalAuthorized config
-      (CredentialAuthorityState.authState projection cell) request)
+      (projection.authState cell) request)
     {committed : CommittedPolicy}
     (resolved : config.registry.resolve request.policyId request.policyEpoch =
       some committed) :
-    addressAt cell request.policyId request.policyEpoch = committed.address := by
+    addressAt projection cell request.policyId request.policyEpoch = committed.address := by
   have verified := authorized_resolved_exact authorized resolved
   have selectedByCell : authorized.policyWitness.address =
-      addressAt cell request.policyId request.policyEpoch := by
+      addressAt projection cell request.policyId request.policyEpoch := by
     simpa [CanonicalPolicyConfig.portal] using
       authorized.policyAddressExact
   exact selectedByCell.symm.trans verified.witnessAddressExact
@@ -193,12 +198,12 @@ structure SelectionPayload
     (config : CanonicalPolicyConfig F)
     (addressing : ContentAddressing config) (store : PayloadStore)
     (membership : MembershipSemantics config.portal)
-    {M : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
+    {M : CellState.Materializer S Digest}
+    (projection : CredentialAuthorityState.StateProjection S)
     (cell : RegistryCell M)
     {kind : ResourceKind} (request : Request kind)
     (authorized : CanonicalAuthorized config
-      (CredentialAuthorityState.authState projection cell) request) where
+      (projection.authState cell) request) where
   committed : CommittedPolicy
   registryResolved :
     config.registry.resolve request.policyId request.policyEpoch = some committed
@@ -207,7 +212,7 @@ structure SelectionPayload
   recordDomainExact : committed.record.domain = request.domain
   recordSemanticsExact : committed.record.semantics = request.semantics
   registryAddressExact :
-    addressAt cell request.policyId request.policyEpoch = committed.address
+    addressAt projection cell request.policyId request.policyEpoch = committed.address
   recordAddressExact : config.recordDigest committed.record = committed.address
   canonicalBytes : List UInt8
   canonicalBytesExact : canonicalBytes = addressing.codec.encode committed.record
@@ -226,12 +231,12 @@ def SelectionPayload.ofAuthorized
     {addressing : ContentAddressing config} {store : PayloadStore}
     {membership : MembershipSemantics config.portal}
     {availability : PayloadAvailability config addressing store}
-    {M : CredentialAuthorityState.Materializer}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {M : CellState.Materializer S Digest}
+    {projection : CredentialAuthorityState.StateProjection S}
     {cell : RegistryCell M}
     {kind : ResourceKind} {request : Request kind}
     (authorized : CanonicalAuthorized config
-      (CredentialAuthorityState.authState projection cell) request)
+      (projection.authState cell) request)
     (committed : CommittedPolicy)
     (resolved : config.registry.resolve request.policyId request.policyEpoch =
       some committed) :
@@ -243,7 +248,7 @@ def SelectionPayload.ofAuthorized
       committed.address authorized.policyMembershipWitness = true := by
     have verified := authorized.policyMembershipVerified
     change config.portal.verifyMembership cell.root
-      (addressAt cell request.policyId request.policyEpoch)
+      (addressAt projection cell request.policyId request.policyEpoch)
       authorized.policyMembershipWitness = true at verified
     rw [registryAddress] at verified
     exact verified
@@ -272,15 +277,15 @@ selected address is incompatible with `Authorized`. -/
 theorem wrong_address_precludes_authorized
     {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F}
-    {M : CredentialAuthorityState.Materializer}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {M : CellState.Materializer S Digest}
+    {projection : CredentialAuthorityState.StateProjection S}
     {cell : RegistryCell M} {kind : ResourceKind} {request : Request kind}
     {committed : CommittedPolicy}
     (resolved : config.registry.resolve request.policyId request.policyEpoch =
       some committed)
-    (wrong : addressAt cell request.policyId request.policyEpoch ≠ committed.address) :
+    (wrong : addressAt projection cell request.policyId request.policyEpoch ≠ committed.address) :
     IsEmpty (CanonicalAuthorized config
-      (CredentialAuthorityState.authState projection cell) request) :=
+      (projection.authState cell) request) :=
   ⟨fun authorized =>
     wrong (authorized_address_exact_of_resolved authorized resolved)⟩
 
@@ -289,7 +294,7 @@ theorem wrong_address_precludes_authorized
 /-- The authority/registry materializer and the durable data snapshot use the
 same deployment digest function.  This is representation agreement, not CR. -/
 structure SharedDigest
-    (M : CredentialAuthorityState.Materializer)
+    (M : CellState.Materializer S Digest)
     (rootBytes : List UInt8 -> Digest) : Prop where
   exact : M.rootBytes = rootBytes
 
@@ -297,7 +302,7 @@ structure SharedDigest
 intent's writes, payload bytes, nullifiers, charge, semantic event, and prior
 guards are preserved exactly; the new guard is retained in replay identity. -/
 def guardPolicyRegistry
-    {rootBytes : List UInt8 -> Digest} {M : CredentialAuthorityState.Materializer}
+    {rootBytes : List UInt8 -> Digest} {M : CellState.Materializer S Digest}
     (cell : RegistryCell M) (cellId : CellId)
     (_digest : SharedDigest M rootBytes)
     (intent : DataIntent rootBytes)
@@ -318,7 +323,7 @@ def guardPolicyRegistry
     · exact intent.guardsReadOnly guard oldMember
 
 @[simp] theorem guardPolicyRegistry_readGuards
-    {rootBytes : List UInt8 -> Digest} {M : CredentialAuthorityState.Materializer}
+    {rootBytes : List UInt8 -> Digest} {M : CellState.Materializer S Digest}
     (cell : RegistryCell M) (cellId : CellId)
     (digest : SharedDigest M rootBytes)
     (intent : DataIntent rootBytes)
@@ -332,7 +337,7 @@ def guardPolicyRegistry
 /-- Adding the read guard does not alter ordinary durable preflight: root
 writes, nullifiers, and charge are byte-for-byte the base intent's values. -/
 theorem guardPolicyRegistry_erased_preflight
-    {rootBytes : List UInt8 -> Digest} {M : CredentialAuthorityState.Materializer}
+    {rootBytes : List UInt8 -> Digest} {M : CellState.Materializer S Digest}
     (cell : RegistryCell M) (cellId : CellId)
     (_digest : SharedDigest M rootBytes)
     (intent : DataIntent rootBytes)
@@ -345,7 +350,7 @@ theorem guardPolicyRegistry_erased_preflight
 /-- Positive tooth: if the base intent is ready and the exact registry root is
 still current, adding policy settlement keeps it ready. -/
 theorem guardPolicyRegistry_preflight_ready
-    {rootBytes : List UInt8 -> Digest} {M : CredentialAuthorityState.Materializer}
+    {rootBytes : List UInt8 -> Digest} {M : CellState.Materializer S Digest}
     (cell : RegistryCell M) (cellId : CellId)
     (digest : SharedDigest M rootBytes)
     (intent : DataIntent rootBytes)
@@ -386,7 +391,7 @@ theorem guardPolicyRegistry_preflight_ready
 /-- Stale-root tooth: policy mutation, address replacement, or epoch rotation
 which changes the canonical registry root rejects the old admitted intent. -/
 theorem policy_registry_rotation_rejects_old_intent
-    {rootBytes : List UInt8 -> Digest} {M : CredentialAuthorityState.Materializer}
+    {rootBytes : List UInt8 -> Digest} {M : CellState.Materializer S Digest}
     (cell : RegistryCell M) (cellId : CellId)
     (digest : SharedDigest M rootBytes)
     (intent : DataIntent rootBytes)

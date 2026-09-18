@@ -144,6 +144,47 @@ typed addresses and require no enumerable universe. -/
 structure ProjectionUniverse where
   revocationKeys : Finset RevocationKey
 
+/-- A schema-owned view of canonical authority fields. A concrete deployment
+fixes this projection with its schema; it is not supplied by a request or a
+host authority cache. This lets a bounded physical page retain its own exact
+materialization while sharing the same authorization judgment. -/
+structure StateProjection (S : CellState.Schema) where
+  toCanonicalState : CellState.LogicalState S → CellState.LogicalState schema.{0, 0}
+  revocationKeys : CellState.LogicalState S → Finset RevocationKey
+
+/-- Read the common authorization state from the projected logical fields
+and the actual materialized cell root. No second materializer or synthetic
+encoding of the projected state participates. -/
+def StateProjection.authState {S : CellState.Schema}
+    {M : CellState.Materializer S Digest} (projection : StateProjection S)
+    (pre : CellState.Materialized M) : AuthState :=
+  let logical := projection.toCanonicalState pre.logical
+  { capabilityRoot := pre.root
+    revocationRoot := pre.root
+    policyRoot := pre.root
+    policyAddress := fun policy epoch =>
+      (show Option Digest from logical.fields (.policyAddress policy epoch)).getD ⟨0⟩
+    revoked := (projection.revocationKeys pre.logical).filter fun key =>
+      (show Option Bool from logical.fields (.revoked key)).getD false
+    issuerEpoch := fun issuer =>
+      (logical.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
+    policyEpoch := fun policy =>
+      (logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+    subjectKeyEpoch := fun subject =>
+      (logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0) }
+
+/-- The unbounded canonical authority schema is the identity instance of the
+same state-derived view. Existing clients keep this exact interpretation. -/
+def ProjectionUniverse.stateProjection (domain : ProjectionUniverse) :
+    StateProjection schema.{0, 0} where
+  toCanonicalState := fun logical => logical
+  revocationKeys := fun _ => domain.revocationKeys
+
+@[simp] theorem StateProjection.authState_policyRoot {S : CellState.Schema}
+    {M : CellState.Materializer S Digest} (projection : StateProjection S)
+    (pre : CellState.Materialized M) :
+    (projection.authState pre).policyRoot = pre.root := rfl
+
 /-- The sole `AuthState` projection.  Capability and revocation witnesses use
 the SAME canonical cell root; revoked membership and every epoch are read from
 that exact cell. -/
@@ -157,6 +198,11 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
   issuerEpoch := issuerEpochAt pre
   policyEpoch := policyEpochAt pre
   subjectKeyEpoch := subjectKeyEpochAt pre
+
+@[simp] theorem authState_identity_projection
+    {M : CellState.Materializer schema.{0, 0} Digest}
+    (domain : ProjectionUniverse) (pre : Cell M) :
+    domain.stateProjection.authState pre = authState domain pre := rfl
 
 @[simp] theorem authState_capabilityRoot {M : Materializer}
     (domain : ProjectionUniverse) (pre : Cell M) :

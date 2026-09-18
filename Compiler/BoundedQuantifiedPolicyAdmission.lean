@@ -86,8 +86,7 @@ theorem canonical_forallView_verifies_iff
     (domainExact : committed.record.domain = request.domain)
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)
-    (preRootExact : config.stateDigest oldState = request.preStateRoot)
-    (effectDigestExact : config.stepDigest oldState newState = request.effectsDigest)
+    (stepExact : config.stepBinding.matches request oldState newState = true)
     (supportedExact : supported committed.record.predicate = true)
     (castExact : castInjOn F
       (intsOf committed.record.predicate oldState newState)) :
@@ -95,7 +94,7 @@ theorem canonical_forallView_verifies_iff
       range.all (fun index =>
         Minidregg.Pred.eval (body index) oldState newState) = true := by
   rw [canonical_verifies_iff_eval resolved policyIdExact versionExact domainExact
-    semanticsExact recordDigestExact preRootExact effectDigestExact supportedExact
+    semanticsExact recordDigestExact stepExact supportedExact
     castExact]
   rw [predicateExact, eval_forallView]
 

@@ -20,6 +20,7 @@ root, and requires the witness to name that address.  This module owns the
 canonical `PredCompile` implementation of that committed verifier.
 -/
 import Compiler.PredCompile
+import Theory.PolicyInstall
 import Theory.TypedAuthorization
 
 namespace Minidregg.Compiler.CanonicalPolicyAdmission
@@ -41,6 +42,15 @@ structure PolicyRecord where
   previous : Option Digest
   predicate : Pred
   deriving DecidableEq, Repr
+
+def PolicyRecord.source (record : PolicyRecord) :
+    Minidregg.Theory.PolicyInstall.Source Pred where
+  policyId := record.policyId
+  version := record.version
+  domain := record.domain
+  semantics := record.semantics
+  previous := record.previous
+  body := record.predicate
 
 /-- A registry entry names the exact content address beside its source record.
 The verifier independently recomputes `recordDigest record` and checks it
@@ -64,6 +74,76 @@ structure CompiledPolicyWitness (F : Type) where
   newState : State
   auxiliary : List ℕ → ℕ → F
 
+/-- A step context can be constructed only from a source-derived candidate.
+Its roots, effect identity and projected states are read-only projections of
+that construction, never independently decoded request fields. -/
+structure PolicyStepContext where
+  private mk ::
+  preStateRoot : Digest
+  effectsDigest : Digest
+  semantics : Digest
+  oldState : State
+  newState : State
+
+/-- A receiving module fixes `project` and its semantic pin in source. The
+concrete receiving API must not accept either from a host or a request. Mode
+evidence and patch validation precede policy authorization, avoiding a cycle. -/
+def PolicyStepContext.ofCandidate
+    {S : Minidregg.Theory.CellState.Schema}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : Minidregg.Theory.CellState.Materializer S Digest}
+    {Nullifier : Type}
+    {family : Minidregg.Theory.SemanticEffectFamily S M Nullifier}
+    {pre : Minidregg.Theory.CellState.Materialized M}
+    {declaration : family.Declaration} {outcome : family.Outcome declaration}
+    (project : Minidregg.Theory.CellState.LogicalState S → State)
+    (semantics : Digest)
+    (candidate : Minidregg.Theory.PolicyInstall.Candidate family pre declaration outcome) :
+    PolicyStepContext :=
+  ⟨pre.root, family.effectDigest declaration, semantics,
+    project pre.logical, project candidate.post.logical⟩
+
+/-- The abstract digest model survives only as an explicitly chosen research
+adapter. Production constructors select `canonical`; no decoded request can
+choose the adapter or its state projection. -/
+inductive PolicyStepBinding where
+  | model (stateDigest : State → Digest) (stepDigest : State → State → Digest)
+  | canonical (context : PolicyStepContext)
+
+def PolicyStepBinding.matches {kind : ResourceKind} (binding : PolicyStepBinding)
+    (request : Request kind) (oldState newState : State) : Bool :=
+  match binding with
+  | .model stateDigest stepDigest =>
+      decide (stateDigest oldState = request.preStateRoot) &&
+      decide (stepDigest oldState newState = request.effectsDigest)
+  | .canonical context =>
+      decide (request.preStateRoot = context.preStateRoot) &&
+      decide (request.effectsDigest = context.effectsDigest) &&
+      decide (request.semantics = context.semantics) &&
+      decide (oldState = context.oldState) && decide (newState = context.newState)
+
+theorem canonical_step_matches_iff {kind : ResourceKind}
+    (context : PolicyStepContext) (request : Request kind) (oldState newState : State) :
+    (PolicyStepBinding.canonical context).matches request oldState newState = true ↔
+      request.preStateRoot = context.preStateRoot ∧
+      request.effectsDigest = context.effectsDigest ∧
+      request.semantics = context.semantics ∧
+      oldState = context.oldState ∧ newState = context.newState := by
+  simp [PolicyStepBinding.matches, and_assoc]
+
+/-- Identical predicate views do not erase a distinct declaration commitment.
+This is precisely what a digest function of only `(old,new)` cannot express. -/
+theorem equal_views_do_not_erase_effect_identity {kind : ResourceKind}
+    (left right : PolicyStepContext) (request : Request kind)
+    (oldEqual : left.oldState = right.oldState)
+    (newEqual : left.newState = right.newState)
+    (different : left.effectsDigest ≠ right.effectsDigest) :
+    (PolicyStepBinding.canonical right).matches
+      { request with effectsDigest := left.effectsDigest }
+      left.oldState left.newState = false := by
+  rw [oldEqual, newEqual]
+  simp [PolicyStepBinding.matches, different]
+
 /-! ## 2. Canonical portal construction. -/
 
 /-- All inputs to the canonical policy verifier.  The base portal's policy
@@ -73,8 +153,7 @@ structure CanonicalPolicyConfig (F : Type) [Field F] [DecidableEq F] where
   base : Portal
   registry : PolicyRegistry
   recordDigest : PolicyRecord → Digest
-  stateDigest : State → Digest
-  stepDigest : State → State → Digest
+  stepBinding : PolicyStepBinding
 
 /-- The exact conjunction checked by the policy gate.  In particular, the
 verdict is acceptance of `PredCompile.lower`, not a second hand-written mirror
@@ -91,8 +170,7 @@ def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
       decide (committed.record.semantics = request.semantics) &&
       decide (config.recordDigest committed.record = committed.address) &&
       decide (witness.address = committed.address) &&
-      decide (config.stateDigest witness.oldState = request.preStateRoot) &&
-      decide (config.stepDigest witness.oldState witness.newState = request.effectsDigest) &&
+      config.stepBinding.matches request witness.oldState witness.newState &&
       supported committed.record.predicate &&
       decide (castInjOn F
         (intsOf committed.record.predicate witness.oldState witness.newState)) &&
@@ -145,8 +223,7 @@ def Verified {F : Type} [Field F] [DecidableEq F]
     committed.record.semantics = request.semantics ∧
     config.recordDigest committed.record = committed.address ∧
     witness.address = committed.address ∧
-    config.stateDigest witness.oldState = request.preStateRoot ∧
-    config.stepDigest witness.oldState witness.newState = request.effectsDigest ∧
+    config.stepBinding.matches request witness.oldState witness.newState = true ∧
     supported committed.record.predicate = true ∧
     castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState) ∧
     systemAccepts
@@ -175,7 +252,7 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
       Minidregg.Pred.eval committed.record.predicate
         witness.oldState witness.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, _, _, supportedExact,
+    ⟨committed, resolved, _, _, _, _, _, _, _, supportedExact,
       castExact, compiled⟩
   exact ⟨committed, resolved, lower_sound castExact supportedExact compiled⟩
 
@@ -202,8 +279,7 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     (domainExact : committed.record.domain = request.domain)
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)
-    (preRootExact : config.stateDigest oldState = request.preStateRoot)
-    (effectDigestExact : config.stepDigest oldState newState = request.effectsDigest)
+    (stepExact : config.stepBinding.matches request oldState newState = true)
     (supportedExact : supported committed.record.predicate = true)
     (castExact : castInjOn F
       (intsOf committed.record.predicate oldState newState)) :
@@ -219,7 +295,7 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     apply (verifies_iff_verified config request
       (canonicalWitness committed oldState newState)).mpr
     refine ⟨committed, resolved, policyIdExact, versionExact, domainExact,
-      semanticsExact, recordDigestExact, rfl, preRootExact, effectDigestExact,
+      semanticsExact, recordDigestExact, rfl, stepExact,
       supportedExact, castExact, ?_⟩
     exact lower_complete castExact supportedExact evaluated
 
@@ -341,14 +417,13 @@ theorem wrong_content_digest_rejected {F : Type} [Field F] [DecidableEq F]
   simp [CanonicalPolicyConfig.verifies, resolved, wrong]
 
 /-- Mutating the policy step without updating its request commitment fails. -/
-theorem wrong_step_digest_rejected {F : Type} [Field F] [DecidableEq F]
+theorem wrong_step_binding_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
     (resolved : config.registry.resolve request.policyId request.policyEpoch =
       some committed)
-    (wrong : config.stepDigest witness.oldState witness.newState ≠
-      request.effectsDigest) :
+    (wrong : config.stepBinding.matches request witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
   simp [CanonicalPolicyConfig.verifies, resolved, wrong]
 
@@ -404,8 +479,7 @@ def demoConfig : CanonicalPolicyConfig (ZMod 13) where
   base := demoPortal
   registry := demoRegistry
   recordDigest := demoRecordDigest
-  stateDigest := demoStateDigest
-  stepDigest := demoStepDigest
+  stepBinding := .model demoStateDigest demoStepDigest
 
 /-- Authorization state selects the exact content address resolved by the
 demo registry.  The registry root is illustrative; membership is discharged
