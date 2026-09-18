@@ -74,21 +74,8 @@ structure PolicyRecordPairBinding (left right : PolicyRecord) : Prop where
         policyHashBytes (policyRecordCodec.encode right) ->
       left = right
 
-/-- Schema-owned projection for every physical authority page. The decoder
-and receiver require page validity before admission; all roots still come
-from the exact materialized page bytes. -/
-def projection : CredentialAuthorityState.StateProjection
-    CredentialAuthorityPageMaterializer.schema where
-  toCanonicalState := fun logical =>
-    match pageAt logical with
-    | some page => page.toCanonicalState
-    | none =>
-        { fields := 0
-          resources := fun resource => nomatch resource }
-  revocationKeys := fun logical =>
-    match pageAt logical with
-    | some page => page.revoked
-    | none => ∅
+/-- The authority schema owns the exact projection for every entry kind. -/
+def projection := CredentialAuthorityPageMaterializer.projection
 
 /-! ## Canonical page snapshots and source resolution -/
 

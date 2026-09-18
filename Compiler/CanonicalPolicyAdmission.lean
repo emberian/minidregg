@@ -256,6 +256,30 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
       castExact, compiled⟩
   exact ⟨committed, resolved, lower_sound castExact supportedExact compiled⟩
 
+/-- The receiving theorem speaks about the source-derived context, not free
+predicate-state witnesses. Both the actual pre-root and full declaration
+commitment survive the projection into predicate slots. -/
+theorem canonical_context_verifies_sound {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} {witness : CompiledPolicyWitness F}
+    (context : PolicyStepContext)
+    (canonical : config.stepBinding = .canonical context)
+    (accepted : config.verifies request witness = true) :
+    request.preStateRoot = context.preStateRoot ∧
+    request.effectsDigest = context.effectsDigest ∧
+    request.semantics = context.semantics ∧
+    ∃ committed,
+      config.registry.resolve request.policyId request.policyEpoch = some committed ∧
+      Minidregg.Pred.eval committed.record.predicate context.oldState context.newState = true := by
+  rcases (verifies_iff_verified config request witness).mp accepted with
+    ⟨committed, resolved, _, _, _, _, _, _, matched, supported, cast, compiled⟩
+  rw [canonical] at matched
+  rcases (canonical_step_matches_iff context request witness.oldState witness.newState).mp
+      matched with ⟨rootExact, effectsExact, semanticsExact, oldExact, newExact⟩
+  have evaluated := lower_sound cast supported compiled
+  rw [oldExact, newExact] at evaluated
+  exact ⟨rootExact, effectsExact, semanticsExact, committed, resolved, evaluated⟩
+
 /-- The canonical prover witness is derived from the same lowering fold. -/
 def canonicalWitness {F : Type} [Field F] [DecidableEq F]
     (committed : CommittedPolicy) (oldState newState : State) :

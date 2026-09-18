@@ -78,6 +78,7 @@ structure Candidate
     (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
     (pre : Materialized M) (declaration : family.Declaration)
     (outcome : family.Outcome declaration) where
+  preStateBound : pre = family.pre
   modeEvidence : family.ModeEvidence declaration outcome
   validated : ValidatedPatch M pre (family.patch declaration outcome)
 
@@ -98,6 +99,7 @@ validated patch is exactly the candidate evaluated by the policy consumer. -/
 def accept (candidate : Candidate family pre declaration outcome)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} (authorization : Authorized portal authState request)
+    (requestBound : (⟨kind, request⟩ : Sigma Request) = family.request declaration)
     (preRoot : request.preStateRoot = pre.root)
     (effects : request.effectsDigest = family.effectDigest declaration)
     (disclosure : DisclosureDecision (family.Release declaration outcome)
@@ -107,6 +109,8 @@ def accept (candidate : Candidate family pre declaration outcome)
     AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome where
   authorization := authorization
+  preStateBound := candidate.preStateBound
+  requestBound := requestBound
   effectsDigestBound := effects
   preRootBound := preRoot
   modeEvidence := candidate.modeEvidence
@@ -117,13 +121,14 @@ def accept (candidate : Candidate family pre declaration outcome)
 theorem accepted_post_is_evaluated_post (candidate : Candidate family pre declaration outcome)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} (authorization : Authorized portal authState request)
+    (requestBound : (⟨kind, request⟩ : Sigma Request) = family.request declaration)
     (preRoot : request.preStateRoot = pre.root)
     (effects : request.effectsDigest = family.effectDigest declaration)
     (disclosure : DisclosureDecision (family.Release declaration outcome)
       (family.DeclassificationAuthority declaration outcome)
       (family.ReleaseAuthorization declaration outcome))
     (allowed : family.DisclosureAllowed declaration outcome disclosure) :
-    (candidate.accept authorization preRoot effects disclosure allowed).prepared.post =
+    (candidate.accept authorization requestBound preRoot effects disclosure allowed).prepared.post =
       candidate.post := rfl
 
 end Candidate
