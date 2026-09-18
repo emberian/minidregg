@@ -48,6 +48,7 @@ def secondAuthorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -163,6 +164,7 @@ def context : CanonicalResourceEffect.RequestContext where
   height := 9
   policyId := ⟨10⟩
   policyEpoch := 0
+  policyRevision := 0
 
 def projection : AuthorizationProjection CanonicalResourceKernel.schema where
   project := fun _ => authState
@@ -173,6 +175,7 @@ def authorization (operation : Operation) : Authorized permissivePortal authStat
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

@@ -48,6 +48,7 @@ structure RequestContext where
   subjectKeyEpoch : Epoch
   height : Height
   policyEpoch : Epoch
+  policyRevision : Nat
   deriving DecidableEq, Repr
 
 def headStream : StreamCodec Head :=
@@ -133,9 +134,9 @@ def effectDigest (declaration : Declaration) : Digest :=
 absence is not the default epoch or an asserted host-side registry entry. -/
 abbrev currentHead := CredentialAuthorityDomain.headAt
 
-def newEntry (declaration : Declaration) : Entry :=
-  .policy declaration.source.policyId declaration.source.version
-    (policyRecordDigest declaration.source)
+def newEntry (snapshot : Snapshot) (declaration : Declaration) : Entry :=
+  .policy declaration.source.policyId (snapshot.authState.policyEpoch declaration.source.policyId)
+    declaration.source.version (policyRecordDigest declaration.source)
 
 /-- All operation-dependent request coordinates are derived from this exact
 declaration and actual complete authority state. `cost` is the declared source-byte budget;
@@ -156,6 +157,7 @@ def request (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
   preStateRoot := snapshot.cell.root
   policyId := declaration.source.policyId
   policyEpoch := context.policyEpoch
+  policyRevision := context.policyRevision
   cost := (encodeDeclaration declaration).length
 
 def requestDigest (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
@@ -185,6 +187,7 @@ inductive Reject where
   | subjectKeyEpoch
   | signature
   | policyEpoch
+  | policyRevision
   | policyUnavailable
   | policyRejected
   | capability
@@ -283,6 +286,8 @@ def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Request
   Postcondition := fun declaration _ logical =>
     currentHead logical declaration.source.policyId =
       some ⟨declaration.source.version, policyRecordDigest declaration.source⟩ ∧
+      logical.fields (.policyEpoch declaration.source.policyId) =
+        snapshot.logical.fields (.policyEpoch declaration.source.policyId) ∧
       logical.fields (.nullifier (requestDigest profile snapshot context declaration).value) = some true
   effectDigest := effectDigest
   patch := fun declaration _ => patch profile snapshot context declaration
@@ -320,10 +325,13 @@ def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
                 change (currentHead checked.update.prepared.validated.apply.logical
                   declaration.source.policyId =
                     some ⟨declaration.source.version, policyRecordDigest declaration.source⟩) ∧
+                  (checked.update.prepared.validated.apply.logical.fields
+                    (.policyEpoch declaration.source.policyId) =
+                      snapshot.logical.fields (.policyEpoch declaration.source.policyId)) ∧
                   checked.update.prepared.validated.apply.logical.fields
                     (.nullifier (requestDigest profile snapshot context declaration).value) = some true
                 rw [← checked.update.prepared.projectionExact]
-                exact ⟨checked.update.head_exact, checked.update.nullifier_consumed⟩ } }
+                exact ⟨checked.update.head_exact, checked.update.generation_preserved, checked.update.nullifier_consumed⟩ } }
 
 def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     (prepared : Prepared profile snapshot context) : PolicyStepContext :=
@@ -369,16 +377,18 @@ def Prepared.admit [DecidableEq F]
   | none => .error .capability
   | some evidence =>
       if epoch : wanted.policyEpoch = auth.policyEpoch wanted.policyId then
-        match config.registry.resolve wanted.policyId wanted.policyEpoch with
-        | none => .error .policyUnavailable
-        | some committed =>
-            let witness := canonicalWitness profile.compilerProfile.compiler committed
-              prepared.step.oldState prepared.step.newState
-            match CanonicalPolicyAdmission.admit config auth wanted evidence witness
-                (.policy wanted.policyId wanted.policyEpoch) epoch with
-            | none => .error .policyRejected
-            | some authorization =>
-                .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
+        if revision : wanted.policyRevision = auth.policyRevision wanted.policyId then
+          match config.registry.resolve wanted.policyId wanted.policyRevision with
+          | none => .error .policyUnavailable
+          | some committed =>
+              let witness := canonicalWitness profile.compilerProfile.compiler committed
+                prepared.step.oldState prepared.step.newState
+              match CanonicalPolicyAdmission.admit config auth wanted evidence witness
+                  (.policy wanted.policyId wanted.policyRevision) epoch revision with
+              | none => .error .policyRejected
+              | some authorization =>
+                  .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
+        else .error .policyRevision
       else .error .policyEpoch
 
 /-- The only native signature producer is invoked on the wanted request computed
@@ -463,7 +473,7 @@ theorem Installed.old_policy_evaluated [DecidableEq F]
     (installed : Installed profile snapshot context store) :
     ∃ committed,
       (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
-        context.policyEpoch = some committed ∧
+        context.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
         (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
         (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration installed.post.logical) = true := by
@@ -491,6 +501,36 @@ theorem Installed.source_selected_in_post [DecidableEq F]
         policyRecordDigest installed.prepared.declaration.source⟩ :=
   installed.accepted.postcondition.1
 
+/-- Source revision changes preserve the grant generation in the mandatory
+family postcondition. Composition cannot smuggle an epoch rotation into an
+otherwise accepted source update. Grants still require the newly selected law. -/
+theorem Installed.generation_preserved [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) :
+    installed.post.logical.fields (.policyEpoch installed.prepared.declaration.source.policyId) =
+      snapshot.logical.fields (.policyEpoch installed.prepared.declaration.source.policyId) :=
+  installed.accepted.postcondition.2.1
+
+/-- The actual source-install patch preserves every stored capability exactly.
+No grant is rewritten or silently reissued to manufacture continued use. -/
+theorem Installed.capability_preserved [DecidableEq F]
+    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
+    (installed : Installed profile snapshot context store) (kind : ResourceKind) (id : CapabilityId) :
+    installed.post.logical.fields (.capability kind id) = snapshot.logical.fields (.capability kind id) := by
+  rw [installed.post_pages_exact]
+  change (CredentialAuthorityDomain.logicalOfPages installed.prepared.update.postPages).fields
+    (.capability kind id) = snapshot.logical.fields (.capability kind id)
+  rw [installed.prepared.update.projectionExact]
+  cases old : snapshot.currentHead installed.prepared.declaration.source.policyId <;>
+    cases marker : snapshot.logical.fields
+      (.nullifier (requestDigest profile snapshot context installed.prepared.declaration).value) <;>
+    simp [ValidatedPatch.apply, CredentialAuthorityDomain.editPatch, edits,
+      CredentialAuthorityDomain.policyAndNullifierEdits, CredentialAuthorityDomain.policyEdit,
+      CredentialAuthorityDomain.nullifierEdit, CredentialAuthorityDomain.Edit.writes,
+      CredentialAuthorityDomain.entryWrites_policy, CredentialAuthorityDomain.entryWrites_nullifier,
+      Entry.fields, old, marker, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
+      Option.map, materialize] <;> rfl
+
 /-- A signature marker is consumed by the same routed authority patch as the
 policy head. No standalone signature cache is treated as a durable replay guard. -/
 theorem Installed.nullifier_consumed [DecidableEq F]
@@ -498,7 +538,7 @@ theorem Installed.nullifier_consumed [DecidableEq F]
     (installed : Installed profile snapshot context store) :
     installed.post.logical.fields
       (.nullifier (requestDigest profile snapshot context installed.prepared.declaration).value) =
-      some true := installed.accepted.postcondition.2
+      some true := installed.accepted.postcondition.2.2
 
 theorem Installed.nullifier_was_fresh [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
@@ -518,7 +558,7 @@ theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
       () finalState) :
     ∃ committed,
       (policyRegistry snapshot store).resolve installed.prepared.declaration.source.policyId
-        context.policyEpoch = some committed ∧
+        context.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
         (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration snapshot.cell.logical)
         (project (request profile snapshot context installed.prepared.declaration) installed.prepared.declaration finalState) = true := by
@@ -532,7 +572,7 @@ theorem Installed.old_policy_evaluated_at_final [DecidableEq F]
     rw [headExact, installed.source_selected_in_post]
   exact ⟨committed, resolved, by rw [viewExact]; exact evaluated⟩
 
-/-- The predecessor and epoch are checked against the actual old head, not
+/-- The predecessor and source revision are checked against the actual old head, not
 only against fields asserted in the installation declaration. -/
 theorem Installed.source_successor [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
@@ -578,5 +618,10 @@ theorem Installed.source_supported [DecidableEq F]
 #guard_msgs (whitespace := lax) in #print axioms Installed.source_successor
 /-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.old_policy_evaluated_at_final' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Installed.old_policy_evaluated_at_final
+
+/-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.generation_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Installed.generation_preserved
+/-- info: 'Minidregg.Kernel.PolicyInstallController.Installed.capability_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Installed.capability_preserved
 
 end Minidregg.Kernel.PolicyInstallController

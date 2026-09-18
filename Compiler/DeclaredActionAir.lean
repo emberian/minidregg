@@ -8,7 +8,7 @@ projection of `runCheckedWrites`, and the reflection theorem returns to that
 same function and `Declaration.fieldWrites`.
 
 The emitted descriptor is statement-specific.  Its public prefix is the exact
-lawful declaration bytes, the request's policy-id/policy-epoch bytes, and the
+lawful declaration bytes, the request's policy-id/grant-generation/source-revision bytes, and the
 canonical pre-state root bytes.  Its private original variables are the
 expected/observed sparse values at every ordered checked write.  Pin constraints
 bind those private values to the generated observation trace; equality
@@ -97,10 +97,11 @@ theorem observeGuards_exact_iff_run (writes : List CheckedWrite)
 /-! ## Exact public bytes -/
 
 /-- The request policy selection that this AIR actually binds.  There is no
-claim here that these two scalars encode a portal's `PolicyWitness`. -/
+claim here that these three scalars encode a portal's `PolicyWitness`. -/
 def policyBytes (context : RequestContext) : List UInt8 :=
   StreamCodec.nat.encode context.policyId.value ++
-    StreamCodec.nat.encode context.policyEpoch
+    StreamCodec.nat.encode context.policyEpoch ++
+    StreamCodec.nat.encode context.policyRevision
 
 def actionBytes {kind : ResourceKind} {target : ResourceId kind}
     (declaration : Declaration target) : List UInt8 :=

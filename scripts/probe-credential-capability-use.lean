@@ -121,7 +121,7 @@ def rootStored (cap : Capability .program) : StoredCapability .program := ⟨cap
 def entries (record : KeyRecord) (control : StoredCapability .program)
     (issuerEpoch : Nat := 2) (revoked : Bool := false) : List Entry :=
   [.subjectKey record, .issuerEpoch ⟨5⟩ issuerEpoch,
-   .policy policyId 1 (policyRecordDigest oldPolicy),
+   .policy policyId 1 1 (policyRecordDigest oldPolicy),
    .capability .program (rootStored codeCapability), .capability .program control,
    .revocation (.capability controlId) revoked]
 
@@ -160,21 +160,23 @@ def physicalSource (nativeStore : System.FilePath) (entries : List Entry) : IO S
       (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot)
     pure loaded.snapshot
 
-def context : PolicyInstallController.RequestContext := ⟨⟨9⟩, ⟨7⟩, 2, 10, 1⟩
+def context (snapshot : Snapshot) : PolicyInstallController.RequestContext :=
+  ⟨⟨9⟩, ⟨7⟩, snapshot.authState.subjectKeyEpoch ⟨7⟩, 10,
+    snapshot.authState.policyEpoch policyId, snapshot.authState.policyRevision policyId⟩
 
 def declaration (snapshot : Snapshot) : PolicyInstallController.Declaration :=
   ⟨snapshot.cell.root, some ⟨1, policyRecordDigest oldPolicy⟩, 991, newPolicy⟩
 
-def prepare (snapshot : Snapshot) : IO (PolicyInstallController.Prepared profile snapshot context) :=
+def prepare (snapshot : Snapshot) : IO (PolicyInstallController.Prepared profile snapshot (context snapshot)) :=
   requireOk "source-derived policy replacement candidate"
-    (PolicyInstallController.prepare profile snapshot context
+    (PolicyInstallController.prepare profile snapshot (context snapshot)
       (PolicyInstallController.encodeDeclaration (declaration snapshot)))
 
 def envelope (signer : System.FilePath) {snapshot : Snapshot}
-    (prepared : PolicyInstallController.Prepared profile snapshot context) (seed : Nat := 7) :
+    (prepared : PolicyInstallController.Prepared profile snapshot (context snapshot)) (seed : Nat := 7) :
     IO (List UInt8) := do
-  let wanted := PolicyInstallController.request profile snapshot context prepared.declaration
-  let nullifier := (PolicyInstallController.requestDigest profile snapshot context prepared.declaration).value
+  let wanted := PolicyInstallController.request profile snapshot (context snapshot) prepared.declaration
+  let nullifier := (PolicyInstallController.requestDigest profile snapshot (context snapshot) prepared.declaration).value
   let header ← requireOk "exact request signing header"
     (CredentialSignatureAdmission.signingHeader snapshot nullifier ⟨.program, wanted⟩)
   let (_, signature) ← sign signer seed (CredentialSignedEnvelopeController.headerCodec.encode header)
@@ -192,13 +194,15 @@ def run (nativeVerifier signer nativeStore : System.FilePath) : IO Unit := do
   require "accepted evidence retains actual capability mode"
     (decide (accepted.authorization.evidence.capabilityValue =
       some (controlCapability, storedCapabilityDigest snapshot (rootStored controlCapability))))
+  let postGeneration : Option Nat := accepted.prepared.post.logical.fields (.policyEpoch policyId)
+  require "source replacement preserves the exact grant generation" (postGeneration == some 1)
   require "accepted source patch installs the requested policy head"
     (decide (CredentialAuthorityDomain.headAt accepted.prepared.post.logical policyId =
       some ⟨2, policyRecordDigest newPolicy⟩))
   refused "ordinary program-code edit cannot replace policy" .capability
     (← prepared.admitNative store native codeId signed)
   let changedNonce ← requireOk "independently prepared changed nonce"
-    (PolicyInstallController.prepare profile snapshot context
+    (PolicyInstallController.prepare profile snapshot (context snapshot)
       (PolicyInstallController.encodeDeclaration
         { declaration snapshot with nonce := (declaration snapshot).nonce + 1 }))
   refused "a checked source request cannot be relabeled with another nonce"
@@ -233,7 +237,7 @@ def run (nativeVerifier signer nativeStore : System.FilePath) : IO Unit := do
   let policyPrepared ← prepare stalePolicy
   refused "stored capability policy epoch is current" .capability
     (← policyPrepared.admitNative store native controlId (← envelope signer policyPrepared))
-  let malformed ← source (entries record ⟨controlCapability, [codeCapability]⟩)
+  let malformed ← source (entries record ⟨controlCapability, [⟨codeCapability, .strict⟩]⟩)
   let malformedPrepared ← prepare malformed
   refused "a stored ancestry hash is insufficient without valid lineage" .capability
     (← malformedPrepared.admitNative store native controlId (← envelope signer malformedPrepared))

@@ -6,6 +6,7 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.AuthorizationDeclaration
 open Minidregg.Theory.CredentialSigningKey
 open Minidregg.Compiler
+open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Compiler.CredentialAuthorityDomain
 open Minidregg.Compiler.CredentialSignatureAdmission
@@ -115,6 +116,7 @@ def request (snapshot : Snapshot) : Request .object where
   preStateRoot := ⟨6405⟩
   policyId := ⟨6406⟩
   policyEpoch := 3
+  policyRevision := 19
   cost := 27
 
 def envelope (signer : System.FilePath) (snapshot : Snapshot) (wanted : Request .object)
@@ -148,6 +150,37 @@ def run (nativeVerifier signer nativeStore : System.FilePath) : IO Unit := do
   let changedHeader := { signed.header with message := requestBytes ⟨.object, changed⟩ }
   rejectAs "modified canonical frame invalidates actual Ed25519 signature" (.envelope .invalidSignature)
     (← verifyNative config snapshot operationNullifier changed (bytes ⟨changedHeader, signed.signature⟩))
+  let changedRevision := { wanted with policyRevision := wanted.policyRevision + 1 }
+  require "native receipt binds source revision independently of grant generation"
+    (!verifySignature snapshot operationNullifier changedRevision receipt)
+  rejectAs "changed source revision cannot reuse an old signature" (.envelope .wrongMessage)
+    (← verifyNative config snapshot operationNullifier changedRevision (bytes signed))
+  let changedRevisionHeader :=
+    { signed.header with message := requestBytes ⟨.object, changedRevision⟩ }
+  rejectAs "reframing revision without signing fails real Ed25519" (.envelope .invalidSignature)
+    (← verifyNative config snapshot operationNullifier changedRevision
+      (bytes ⟨changedRevisionHeader, signed.signature⟩))
+  -- Old framing is deliberately a negative fixture, never a live decoder path.
+  let oldRequestFrame := "DREGG/AUTH/REQUEST".toUTF8.toList ++ [1]
+  let words := TypedAuthorizationRequestCodec.requestWords (encodeRequest ⟨.object, wanted⟩)
+  let oldWords := words.take 15 ++ words.drop 16
+  require "old sixteen-field request has no canonical decode or revision fallback"
+    ((TypedAuthorizationRequestCodec.someRequestCodec.decode
+      ((StreamCodec.list StreamCodec.nat).encode oldWords)).isNone)
+  let oldHeader := { signed.header with message := oldRequestFrame ++
+    (StreamCodec.list StreamCodec.nat).encode oldWords }
+  let (_, oldSignature) ← sign signer 7
+    (CredentialSignedEnvelopeController.headerCodec.encode oldHeader)
+  rejectAs "actually signed legacy request frame refuses" (.envelope .wrongMessage)
+    (← verifyNative config snapshot operationNullifier wanted
+      (bytes ⟨oldHeader, oldSignature⟩))
+  let oldDomainHeader := { signed.header with domain :=
+    "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [1] }
+  let (_, oldDomainSignature) ← sign signer 7
+    (CredentialSignedEnvelopeController.headerCodec.encode oldDomainHeader)
+  rejectAs "actually signed legacy signature domain refuses" (.envelope .wrongDomain)
+    (← verifyNative config snapshot operationNullifier wanted
+      (bytes ⟨oldDomainHeader, oldDomainSignature⟩))
   let wrongSigner ← envelope signer snapshot wanted 8
   rejectAs "wrong private key" (.envelope .invalidSignature)
     (← verifyNative config snapshot operationNullifier wanted (bytes wrongSigner))
@@ -211,7 +244,7 @@ def run (nativeVerifier signer nativeStore : System.FilePath) : IO Unit := do
   rejectAs "absent epoch0 is not signing authority" .missingCurrentKey
     (← verifyNative config empty operationNullifier
       { request empty with subjectKeyEpoch := 0 } (bytes signed))
-  IO.println "PASS credential signature: real Ed25519 through existing Lean controller; committed key from native SQLite/full authority reopen; exact request, key/epoch, canonical frame, revocation, shared nullifier and catalogue-revision activation; no standalone signature-state commit"
+  IO.println "PASS credential signature: real Ed25519 through existing Lean controller; committed key from native SQLite/full authority reopen; exact seventeen-field request including independently signed source revision, legacy-frame refusal, key/epoch, canonical frame, revocation, shared nullifier and catalogue-revision activation; no standalone signature-state commit"
 
 end CredentialSignatureProbe
 

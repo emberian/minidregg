@@ -65,6 +65,7 @@ def authState : AuthState where
   revoked := ∅
   issuerEpoch := fun _ => 0
   policyEpoch := fun _ => 0
+  policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
 
 /-- One complete request, quoting the state's policy epoch exactly. -/
@@ -83,6 +84,7 @@ def request : Request .object where
   preStateRoot := ⟨0⟩
   policyId := ⟨10⟩
   policyEpoch := 0
+  policyRevision := 0
   cost := 11
 
 /-- A second complete request, on a different target, quoting pre-state root
@@ -118,6 +120,7 @@ def authorized : Authorized permissivePortal authState request where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -131,6 +134,7 @@ def authorizedTrue : Authorized permissivePortal authState requestTrue where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -141,6 +145,7 @@ def authorizedB : Authorized permissivePortal authState requestB where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -210,6 +215,7 @@ def capabilityAuthorized : Authorized permissivePortal authState request where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -253,7 +259,7 @@ theorem authorized_isEmpty_of_policyClosed :
     IsEmpty (Authorized policyClosedPortal authState request) :=
   ⟨fun token => by
     have rejected : policyClosedPortal.verifyCommittedPolicy
-        (authState.policyAddress request.policyId request.policyEpoch)
+        (authState.policyAddress request.policyId request.policyRevision)
         request token.policyWitness
         = false := rfl
     rw [token.policyVerified] at rejected

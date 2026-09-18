@@ -7,6 +7,8 @@ both owner roles and its initial policy must all come from accepted birth.
 -/
 import Kernel.ResourceBirthReceiver
 import Kernel.DeclaredResourceController
+import Kernel.PolicyInstallReceiver
+import Kernel.CapabilityDelegationReceiver
 
 open Minidregg.Theory
 open Minidregg.Theory.CellState
@@ -21,8 +23,9 @@ open Minidregg.Kernel
 
 namespace BornResourceInvocationProbe
 
-def require (label : String) (condition : Bool) : IO Unit :=
+def require (label : String) (condition : Bool) : IO Unit := do
   unless condition do throw (IO.userError s!"FAIL born resource: {label}")
+  IO.println s!"PASS born resource: {label}"
 
 def requireSome {α : Type} (label : String) : Option α → IO α
   | some value => pure value
@@ -146,8 +149,8 @@ def sourceCell (record : PolicyRecord) : Digest × List UInt8 :=
 def seed (alice bob : KeyRecord) : IO DurableReceiver.Seed := do
   let entries : List CredentialAuthorityPageMaterializer.Entry :=
     [.subjectKey alice, .subjectKey bob, .issuerEpoch profile.template.issuer 2,
-      .policy factoryPolicy.policyId 0 (PolicyRecordCodec.digest factoryPolicy),
-      .policy payerPolicy.policyId 0 (PolicyRecordCodec.digest payerPolicy),
+      .policy factoryPolicy.policyId 0 0 (PolicyRecordCodec.digest factoryPolicy),
+      .policy payerPolicy.policyId 0 0 (PolicyRecordCodec.digest payerPolicy),
       .capability .account ⟨payerCapability, []⟩]
   let pages ← requireSome "source-routed deployment authority"
     (CredentialAuthorityDomain.runEdits deployment.domain []
@@ -243,15 +246,68 @@ def invocation (durable : ResourceBirthController.Concrete.Durable)
 
 def invocationAmbient : DeclaredResourceController.Ambient := ⟨pins.federation, height + 1⟩
 
-def signedInvocation (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snapshot)
+def signedInvocationAt (ambient : DeclaredResourceController.Ambient) (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snapshot)
     (command : DeclaredResourceController.Command) (seed : Nat := 7) : IO DeclaredResourceController.SignedCommand := do
   let marker := DeclaredResourceController.operationMarker snapshot.domain profile.semantics command
   let wanted := fun root =>
-    DeclaredResourceController.request snapshot profile.semantics invocationAmbient command root
+    DeclaredResourceController.request snapshot profile.semantics ambient command root
   pure
     { commandBytes := DeclaredResourceController.commandCodec.encode command
       targetEnvelope := ← envelope signer snapshot marker ⟨command.kind, wanted command.expectedTargetRoot⟩ seed
       authorityEnvelope := ← envelope signer snapshot marker ⟨command.kind, wanted snapshot.cell.root⟩ seed }
+
+def signedInvocation (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snapshot)
+    (command : DeclaredResourceController.Command) (seed : Nat := 7) : IO DeclaredResourceController.SignedCommand :=
+  signedInvocationAt invocationAmbient signer snapshot command seed
+
+def ownerRule (revision : Nat) (previous : Digest) (recipientMayMutate : Bool) : PolicyRecord where
+  policyId := ⟨targetId⟩
+  version := revision
+  domain := deployment.domain
+  semantics := profile.semantics
+  previous := some previous
+  predicate := .any
+    [.all [.memberOf "request/verb" [3, 4], .eq "request/subject" 7],
+      .all [.eq "request/verb" 2, .eq "request/subject" (if recipientMayMutate then 8 else 99)]]
+
+def installRules (native : CredentialSignatureIO.NativeConfig) (signer : System.FilePath)
+    (transport : DurableReceiverIO.Transport) (atHeight : Height) (nonce : Nat)
+    (source : PolicyRecord) : IO (List UInt8 × PolicyInstallReceiver.Receipt) := do
+  let loaded ← requireOk "load rule replacement" (← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes)
+  let authority ← requireSome "rule replacement complete authority"
+    (CredentialAuthorityDomainReceiver.loadDeployment deployment loaded.snapshot)
+  let snapshot := authority.snapshot
+  let context : PolicyInstallController.RequestContext :=
+    { federation := pins.federation, subject := ⟨7⟩, subjectKeyEpoch := snapshot.authState.subjectKeyEpoch ⟨7⟩,
+      height := atHeight, policyEpoch := snapshot.authState.policyEpoch source.policyId,
+      policyRevision := snapshot.authState.policyRevision source.policyId }
+  let declaration : PolicyInstallController.Declaration :=
+    ⟨snapshot.cell.root, snapshot.currentHead source.policyId, nonce, source⟩
+  let wanted := PolicyInstallController.request profile snapshot context declaration
+  let marker := (PolicyInstallController.requestDigest profile snapshot context declaration).value
+  let wire := PolicyInstallReceiver.ingressCodec.encode
+    { subject := ⟨7⟩, controlCapability := controlCapId,
+      declarationBytes := PolicyInstallController.declarationCodec.encode declaration,
+      envelopeBytes := ← envelope signer snapshot marker ⟨.program, wanted⟩ }
+  match ← PolicyInstallReceiver.receiveLoaded profile deployment native transport loaded pins.federation atHeight wire with
+  | .confirmed .installed receipt => pure (wire, receipt)
+  | .rejected reason => throw (IO.userError s!"FAIL born resource: rule replacement rejected: {repr reason}")
+  | _ => throw (IO.userError "FAIL born resource: rule replacement not durably installed")
+
+def bobCapability : Capability .object where
+  id := ⟨44⟩
+  root := ownerCapId
+  parent := some ownerCapId
+  issuer := ownerCapability.issuer
+  holder := .subject ⟨8⟩
+  scope := ⟨{⟨targetId⟩}, {.mutateObject}, 50000⟩
+  notBefore := height + 3
+  notAfter := 50
+  issuerEpoch := ownerCapability.issuerEpoch
+  policyId := ⟨targetId⟩
+  policyEpoch := 0
+  ancestors := {ownerCapId}
+  channels := ∅
 
 def birthSummary : ResourceBirthReceiver.Result → String
   | .confirmed kind _ => s!"confirmed {repr kind}"
@@ -274,6 +330,7 @@ def invocationSummary : DeclaredResourceController.ReceiveResult → String
   | .settlement (.unavailable detail) => s!"unavailable: {detail}"
   | .settlement (.uncertain detail) => s!"uncertain: {detail}"
 
+set_option maxRecDepth 4096 in
 def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
   IO.FS.withTempDir fun directory => do
     let native : CredentialSignatureIO.NativeConfig := ⟨verifier⟩
@@ -405,7 +462,163 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     | _ => throw (IO.userError "FAIL born resource: original birth replay was treated as fresh after credential expiry")
     require "historical and expired-credential retries preserve all storage, fees and admission lanes"
       (decide ((← requireOk "read both historical retries" (← transport.read)) = finalBytes))
-    IO.println "PASS born resource: actual native birth -> conserved fee + initial policy + distinct owner/control grants -> persisted reopen -> issued-owner invocation -> persisted reopen; unrelated signer and noncanonical ingress refuse; birth/invocation retries, including original birth after credential expiry, preserve exact stored image and charge once. Delegation is not covered by this probe."
+    let firstRule := ownerRule 1 (PolicyRecordCodec.digest bornPolicy) false
+    let (firstInstall, firstReceipt) ← installRules native signer transport (height + 2) 1201 firstRule
+    let once ← requireOk "reopen first rule update" (← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes)
+    let onceAuthority ← requireSome "first rule authority"
+      (CredentialAuthorityDomainReceiver.loadDeployment deployment once.snapshot)
+    require "rule update changes revision while preserving exact owner/control grants and generation"
+      (onceAuthority.snapshot.authState.policyEpoch ⟨targetId⟩ == 0 &&
+        onceAuthority.snapshot.authState.policyRevision ⟨targetId⟩ == 1 &&
+        decide (readCapability onceAuthority.snapshot.cell .object ownerCapId = some ⟨ownerCapability, []⟩) &&
+        decide (readCapability onceAuthority.snapshot.cell .program controlCapId = some ⟨controlCapability, []⟩))
+    let onceDirectory ← requireSome "first rule object directory" (CredentialAuthorityDomainReceiver.loadDirectory once)
+    let onceObject ← requireSome "first rule object"
+      (ResourceBirthController.Concrete.observeCell deployment onceDirectory.directory targetId .declaredObject)
+    let denied : DeclaredResourceController.Command :=
+      { command with
+        expectedAuthorityRoot := onceAuthority.snapshot.cell.root
+        expectedTargetRoot := onceObject.payload.root
+        nonce := 1202
+        actions := [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 1) 2] }
+    let deniedAmbient : DeclaredResourceController.Ambient := ⟨pins.federation, height + 2⟩
+    let onceBytes ← requireOk "first rule bytes" (← transport.read)
+    match ← DeclaredResourceController.receiveLoaded deployment profile deniedAmbient native transport once
+        (← signedInvocationAt deniedAmbient signer onceAuthority.snapshot denied) with
+    | .rejected .policyRejected => pure ()
+    | outcome => throw (IO.userError s!"FAIL born resource: retained owner ignored new rule: {invocationSummary outcome}")
+    require "new-rule refusal preserves exact durable image"
+      (decide ((← requireOk "read new-rule refusal" (← transport.read)) = onceBytes))
+    let secondRule := ownerRule 2 (PolicyRecordCodec.digest firstRule) true
+    let (secondInstall, secondReceipt) ← installRules native signer transport (height + 3) 1203 secondRule
+    let twice ← requireOk "reopen second rule update" (← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes)
+    let twiceAuthority ← requireSome "second rule authority"
+      (CredentialAuthorityDomainReceiver.loadDeployment deployment twice.snapshot)
+    require "same original control grant performs second rule replacement"
+      (twiceAuthority.snapshot.authState.policyEpoch ⟨targetId⟩ == 0 &&
+        twiceAuthority.snapshot.authState.policyRevision ⟨targetId⟩ == 2 &&
+        decide (readCapability twiceAuthority.snapshot.cell .program controlCapId = some ⟨controlCapability, []⟩))
+    let twiceDirectory ← requireSome "delegation resource directory" (CredentialAuthorityDomainReceiver.loadDirectory twice)
+    let twiceObject ← requireSome "delegation observed actual born resource"
+      (ResourceBirthController.Concrete.observeCell deployment twiceDirectory.directory targetId .declaredObject)
+    let delegationAmbient : CapabilityDelegationController.Ambient := ⟨pins.federation, height + 4⟩
+    let delegationDraft : CapabilityDelegationController.Command .object :=
+      { subject := ⟨7⟩, nonce := 1301, expectedTargetRoot := twiceObject.payload.root,
+        declaration := ⟨bobCapability, ownerCapId, ⟨targetId⟩, twiceAuthority.snapshot.cell.root, 0⟩ }
+    let marker := CapabilityDelegationController.operationMarker deployment.domain profile.semantics delegationDraft
+    let delegation := { delegationDraft with
+      declaration := { delegationDraft.declaration with operationNullifier := marker } }
+    let wanted := CapabilityDelegationController.request twiceAuthority.snapshot profile.semantics delegationAmbient delegation
+    let delegationEnvelope ← envelope signer twiceAuthority.snapshot marker ⟨.object, wanted⟩
+    let delegationWire := CapabilityDelegationReceiver.ingressCodec.encode
+      ⟨CapabilityDelegationController.commandCodec.encode ⟨.object, delegation⟩, delegationEnvelope⟩
+    let beforeDelegationBytes ← requireOk "before delegation bytes" (← transport.read)
+    match ← CapabilityDelegationReceiver.receive deployment profile delegationAmbient native transport (delegationWire ++ [0]) with
+    | .rejected .malformedCommand => pure ()
+    | _ => throw (IO.userError "FAIL born resource: noncanonical delegation ingress accepted")
+    let editedChild := { delegation with declaration := { delegation.declaration with child :=
+      { bobCapability with scope := { bobCapability.scope with maxCost := 100001 } } } }
+    let editedWire := CapabilityDelegationReceiver.ingressCodec.encode
+      ⟨CapabilityDelegationController.commandCodec.encode ⟨.object, editedChild⟩, delegationEnvelope⟩
+    match ← CapabilityDelegationReceiver.receive deployment profile delegationAmbient native transport editedWire with
+    | .rejected _ => pure ()
+    | _ => throw (IO.userError "FAIL born resource: amplified/edited child accepted")
+    let changedRecipient := { delegation with declaration := { delegation.declaration with child :=
+      { bobCapability with holder := .subject ⟨7⟩ } } }
+    let changedRecipientWire := CapabilityDelegationReceiver.ingressCodec.encode
+      ⟨CapabilityDelegationController.commandCodec.encode ⟨.object, changedRecipient⟩, delegationEnvelope⟩
+    match ← CapabilityDelegationReceiver.receive deployment profile delegationAmbient native transport changedRecipientWire with
+    | .rejected (.signature _) => pure ()
+    | _ => throw (IO.userError "FAIL born resource: signature permitted child recipient substitution")
+    let duplicateKind := { delegation with declaration := { delegation.declaration with child :=
+      { bobCapability with id := controlCapId } } }
+    let duplicateKindWire := CapabilityDelegationReceiver.ingressCodec.encode
+      ⟨CapabilityDelegationController.commandCodec.encode ⟨.object, duplicateKind⟩, delegationEnvelope⟩
+    match ← CapabilityDelegationReceiver.receive deployment profile delegationAmbient native transport duplicateKindWire with
+    | .rejected .descent => pure ()
+    | _ => throw (IO.userError "FAIL born resource: child identity already used by another storage kind")
+    require "delegation refusals never create child or consume marker"
+      (decide ((← requireOk "read denied delegation" (← transport.read)) = beforeDelegationBytes))
+    let delegationReceipt ← match ← CapabilityDelegationReceiver.receiveLoaded deployment profile delegationAmbient native transport twice delegationWire with
+      | .confirmed .installed receipt => pure receipt
+      | .rejected reason => throw (IO.userError s!"FAIL born resource: actual Alice delegation rejected: {repr reason}")
+      | _ => throw (IO.userError "FAIL born resource: actual Alice delegation did not commit")
+    let delegated ← requireOk "reopen delegated grant" (← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes)
+    let delegatedAuthority ← requireSome "delegated complete authority"
+      (CredentialAuthorityDomainReceiver.loadDeployment deployment delegated.snapshot)
+    let storedBob ← requireSome "source-created Bob child"
+      (readCapability delegatedAuthority.snapshot.cell .object bobCapability.id)
+    require "exact delegated child retains full source-derived origin and canonical parent"
+      (decide (storedBob.head = bobCapability) &&
+        decide (storedBob.ancestry = [⟨ownerCapability, .delegated wanted⟩]) &&
+        CredentialLineageAdmission.storedLineageCheck delegatedAuthority.snapshot.cell storedBob)
+    let recipientAmbient : DeclaredResourceController.Ambient := ⟨pins.federation, height + 5⟩
+    let recipient : DeclaredResourceController.Command :=
+      { denied with
+        subject := ⟨8⟩
+        capability := bobCapability.id
+        nonce := 1302
+        expectedAuthorityRoot := delegatedAuthority.snapshot.cell.root }
+    let delegatedBytes ← requireOk "delegated bytes" (← transport.read)
+    match ← DeclaredResourceController.receiveLoaded deployment profile recipientAmbient native transport delegated
+        (← signedInvocationAt recipientAmbient signer delegatedAuthority.snapshot recipient 7) with
+    | .rejected _ => pure ()
+    | _ => throw (IO.userError "FAIL born resource: Alice's signature invoked Bob's child")
+    require "wrong recipient signature preserves storage"
+      (decide ((← requireOk "read wrong recipient signature" (← transport.read)) = delegatedBytes))
+    let recipientWire ← signedInvocationAt recipientAmbient signer delegatedAuthority.snapshot recipient 8
+    match ← DeclaredResourceController.receiveLoaded deployment profile recipientAmbient native transport delegated recipientWire with
+    | .settlement (.confirmed .installed _) => pure ()
+    | outcome => throw (IO.userError s!"FAIL born resource: actual Bob invocation: {invocationSummary outcome}")
+    let finished ← requireOk "reopen recipient invocation" (← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes)
+    let finishedDirectory ← requireSome "recipient final directory" (CredentialAuthorityDomainReceiver.loadDirectory finished)
+    let finishedObject ← requireSome "recipient final object"
+      (ResourceBirthController.Concrete.observeCell deployment finishedDirectory.directory targetId .declaredObject)
+    let finishedPage ← requireSome "recipient final page" (DeclaredEffectPageMaterializer.pageAt finishedObject.payload.logical)
+    require "Bob's native invocation changed actual born object under revision2"
+      (decide (finishedPage.lookup (.objectField ⟨targetId⟩ ⟨1⟩) = some 2))
+    let finishedBytes ← requireOk "recipient final bytes" (← transport.read)
+    let finishedAuthority ← requireSome "final authority for forbidden redelegation"
+      (CredentialAuthorityDomainReceiver.loadDeployment deployment finished.snapshot)
+    let grandchild : Capability .object :=
+      { bobCapability with
+        id := ⟨45⟩
+        parent := some bobCapability.id
+        holder := .subject ⟨7⟩
+        scope := { bobCapability.scope with maxCost := 40000 }
+        notBefore := height + 5
+        notAfter := 40
+        ancestors := {ownerCapId, bobCapability.id} }
+    let forbiddenDraft : CapabilityDelegationController.Command .object :=
+      { subject := ⟨8⟩, nonce := 1303, expectedTargetRoot := finishedObject.payload.root,
+        declaration := ⟨grandchild, bobCapability.id, ⟨targetId⟩, finishedAuthority.snapshot.cell.root, 0⟩ }
+    let forbiddenMarker := CapabilityDelegationController.operationMarker deployment.domain profile.semantics forbiddenDraft
+    let forbidden := { forbiddenDraft with declaration :=
+      { forbiddenDraft.declaration with operationNullifier := forbiddenMarker } }
+    let forbiddenAmbient : CapabilityDelegationController.Ambient := ⟨pins.federation, height + 5⟩
+    let forbiddenRequest := CapabilityDelegationController.request finishedAuthority.snapshot profile.semantics forbiddenAmbient forbidden
+    let forbiddenWire := CapabilityDelegationReceiver.ingressCodec.encode
+      ⟨CapabilityDelegationController.commandCodec.encode ⟨.object, forbidden⟩,
+        ← envelope signer finishedAuthority.snapshot forbiddenMarker ⟨.object, forbiddenRequest⟩ 8⟩
+    match ← CapabilityDelegationReceiver.receiveLoaded deployment profile forbiddenAmbient native transport finished forbiddenWire with
+    | .rejected .shape => pure ()
+    | _ => throw (IO.userError "FAIL born resource: Bob redelegated without a delegate verb in his narrowed grant")
+    match ← CapabilityDelegationReceiver.receive deployment profile ⟨pins.federation, 20000⟩ native transport delegationWire with
+    | .confirmed .replayed receipt => require "delegation original receipt after expiry" (receipt == delegationReceipt)
+    | _ => throw (IO.userError "FAIL born resource: original delegation replay after expiry")
+    match ← DeclaredResourceController.receive deployment profile ⟨pins.federation, 20000⟩ native transport recipientWire with
+    | .replayed _ => pure ()
+    | _ => throw (IO.userError "FAIL born resource: original recipient replay after expiry")
+    for (wire, expected) in [(firstInstall, firstReceipt), (secondInstall, secondReceipt)] do
+      match ← PolicyInstallReceiver.receive profile deployment native transport pins.federation 20000 wire with
+      | .confirmed .replayed receipt => require "original rule-update receipt after later updates and expiry" (receipt == expected)
+      | _ => throw (IO.userError "FAIL born resource: historical installer replay after expiry")
+    match ← CapabilityDelegationReceiver.receive deployment profile delegationAmbient native transport editedWire with
+    | .transactionConflict => pure ()
+    | _ => throw (IO.userError "FAIL born resource: changed delegation payload at same identity was not a conflict")
+    require "all historical receipts and payload-conflict refusals preserve final exact image"
+      (decide ((← requireOk "read final historical retries" (← transport.read)) = finishedBytes))
+    IO.println "PASS born resource: native paid birth -> original owner invocation -> two rule replacements preserve owner/control grants and generation -> new law refuses old owner operation -> actual parent-authorized narrower Alice-to-Bob delegation -> Bob fresh signature/current revision invocation -> reopen; refused inputs and exact historical retries after expiry preserve durable image. Test keys and ZMod65537/scalar15 are fixture parameters."
 
 end BornResourceInvocationProbe
 

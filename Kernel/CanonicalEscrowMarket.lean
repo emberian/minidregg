@@ -1082,6 +1082,7 @@ def context (domain : Digest) (nonce : Nat) :
   height := 12
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
 
 noncomputable def authorize
     {pre : Materialized CanonicalResourceKernel.materializer}
@@ -1093,6 +1094,7 @@ noncomputable def authorize
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

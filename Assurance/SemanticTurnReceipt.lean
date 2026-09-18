@@ -160,7 +160,7 @@ verification is the common final field of `Authorized`. -/
 theorem noAuthorized_of_policyReject (request : Request kind)
     (rejects : ∀ witness,
       portal.verifyCommittedPolicy
-        (authState.policyAddress request.policyId request.policyEpoch)
+        (authState.policyAddress request.policyId request.policyRevision)
         request witness = false) :
     ¬ Nonempty (Authorized portal authState request) := by
   rintro ⟨authorized⟩
@@ -175,7 +175,7 @@ theorem noCommitted_of_policyReject (request : Request kind)
     (pre : Store Key Value)
     (rejects : ∀ witness,
       portal.verifyCommittedPolicy
-        (authState.policyAddress request.policyId request.policyEpoch)
+        (authState.policyAddress request.policyId request.policyRevision)
         request witness = false) :
     ¬ Nonempty (CommittedTurn portal authState request stateCommitment
       effectSemantics disclosurePolicy pre) := by
@@ -273,6 +273,7 @@ def authorization : Authorized targetPortal demoState demoRequest where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := by decide

@@ -23,6 +23,7 @@ remain explicit at the end of the file.
 -/
 import Assurance.DeployedCredentialLifecycle
 import Compiler.Tower256ConcreteBackend
+import Compiler.TypedAuthorizationRequestCodec
 
 namespace Minidregg.Assurance.CredentialTokenLocalEndpoint
 
@@ -41,7 +42,7 @@ noncomputable section
 /-! ## Stable first-order wire codecs -/
 
 def tokenCodecVersion : Nat := 1
-def endpointVersion : Nat := 1
+def endpointVersion : Nat := 2
 def persistentCodecVersion : Nat := 1
 
 /-- A token is transport data, never a new authorization mode.  Every field
@@ -130,68 +131,10 @@ def tokenStream : StreamCodec TokenWire :=
 
 def tokenCodec : LawfulCodec TokenWire := tokenStream.toLawful
 
-/- The complete lossless `RequestWire`, in the field order already pinned by
-`AuthorizationDeclaration.requestFieldOrder`. -/
-abbrev RequestTuple :=
-  Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat ×
-    Nat × Nat × Nat × Nat
-
-def requestTupleStream : StreamCodec RequestTuple :=
-  StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product StreamCodec.nat
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product StreamCodec.nat
-                (StreamCodec.product StreamCodec.nat
-                  (StreamCodec.product StreamCodec.nat
-                    (StreamCodec.product StreamCodec.nat
-                      (StreamCodec.product StreamCodec.nat
-                        (StreamCodec.product StreamCodec.nat
-                          (StreamCodec.product StreamCodec.nat
-                            (StreamCodec.product StreamCodec.nat
-                              (StreamCodec.product StreamCodec.nat
-                                StreamCodec.nat))))))))))))))
-
-def requestTuple (request : RequestWire) : RequestTuple :=
-  (request.domain, request.semantics, request.federation,
-    request.resourceKind, request.subject, request.subjectKeyEpoch,
-    request.target, request.verb, request.argsDigest, request.effectsDigest,
-    request.nonce, request.height, request.preStateRoot, request.policyId,
-    request.policyEpoch, request.cost)
-
-def requestOfTuple : RequestTuple -> RequestWire
-  | (domain, semantics, federation, resourceKind, subject, subjectKeyEpoch,
-      target, verb, argsDigest, effectsDigest, nonce, height, preStateRoot,
-      policyId, policyEpoch, cost) =>
-    { domain
-      semantics
-      federation
-      resourceKind
-      subject
-      subjectKeyEpoch
-      target
-      verb
-      argsDigest
-      effectsDigest
-      nonce
-      height
-      preStateRoot
-      policyId
-      policyEpoch
-      cost }
-
-@[simp] theorem requestOfTuple_tuple (request : RequestWire) :
-    requestOfTuple (requestTuple request) = request := by
-  cases request
-  rfl
-
-def requestWireStream : StreamCodec RequestWire :=
-  StreamCodec.xmap requestTupleStream requestTuple requestOfTuple
-    requestOfTuple_tuple
-
-def requestWireCodec : LawfulCodec RequestWire := requestWireStream.toLawful
+/-- Endpoint requests use the same canonical complete request codec as signatures,
+artifacts and delegated lineage. Old sixteen-field requests are refused. -/
+abbrev requestWireStream := Minidregg.Compiler.TypedAuthorizationRequestCodec.requestWireStream
+abbrev requestWireCodec := Minidregg.Compiler.TypedAuthorizationRequestCodec.requestWireCodec
 
 /-- One use request carries the token bytes and the entire canonical request
 word.  The authority root is repeated deliberately: admission checks all

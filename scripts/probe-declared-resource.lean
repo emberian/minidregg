@@ -100,7 +100,7 @@ def targetCell : PackedCell CanonicalCellRegistry.registry :=
 def seed (alice bob : KeyRecord) : IO DurableReceiver.Seed := do
   let entries : List CredentialAuthorityPageMaterializer.Entry :=
     [.subjectKey alice, .subjectKey bob, .issuerEpoch ⟨5⟩ 2,
-      .policy ⟨targetId⟩ 0 (PolicyRecordCodec.digest policy),
+      .policy ⟨targetId⟩ 0 0 (PolicyRecordCodec.digest policy),
       .capability .object ⟨owner, []⟩]
   let pages ← requireSome "source-routed authority fixture"
     (CredentialAuthorityDomain.runEdits deployment.domain []

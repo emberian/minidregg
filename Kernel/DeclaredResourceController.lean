@@ -209,6 +209,7 @@ def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambie
   preStateRoot := preRoot
   policyId := ⟨command.target⟩
   policyEpoch := snapshot.authState.policyEpoch ⟨command.target⟩
+  policyRevision := snapshot.authState.policyRevision ⟨command.target⟩
   cost := (commandCodec.encode command).length
 
 theorem request_policy_is_target (snapshot : AuthoritySnapshot) (semantics : Digest)
@@ -242,6 +243,8 @@ inductive Reject where
   | signature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected
   | policyRejected
+  | policyInputRange
+  | policyCastAlias
   | conflictingIncidences
   deriving Repr
 
@@ -459,7 +462,7 @@ structure PreparedInvocation {F : Type} [Field F]
     marker.prepared []
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨command.target⟩
-      (authority.snapshot.authState.policyEpoch ⟨command.target⟩))
+      (authority.snapshot.authState.policyRevision ⟨command.target⟩))
   postLaw : CanonicalCellRegistry.FinalPostLaw deployment command.target target.before
     (packDeclared command.kind page.candidate.post)
 
@@ -474,7 +477,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let marker ← prepareMarker authority.snapshot profile.semantics command
   let physical ← requireSome .physicalPreparation (lower directory authority marker.prepared [])
   let address := authority.snapshot.authState.policyAddress ⟨command.target⟩
-    (authority.snapshot.authState.policyEpoch ⟨command.target⟩)
+    (authority.snapshot.authState.policyRevision ⟨command.target⟩)
   let source ← requireSome .policyUnavailable
     (CanonicalCellRegistry.loadPolicySource authority.snapshot.domain directory.directory address)
   if postLaw : CanonicalCellRegistry.FinalPostLaw deployment command.target target.before
@@ -638,6 +641,13 @@ theorem source_request_epoch_current
       prepared.authority.snapshot.authState.policyEpoch (tuple.request incidence).2.policyId := by
   cases incidence <;> rfl
 
+theorem source_request_revision_current
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) :
+    (tuple.request incidence).2.policyRevision =
+      prepared.authority.snapshot.authState.policyRevision (tuple.request incidence).2.policyId := by
+  cases incidence <;> rfl
+
 def authorizeLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence)
@@ -650,12 +660,17 @@ def authorizeLeg [DecidableEq F]
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (operationMarker prepared.authority.snapshot.domain profile.semantics command)
     (step prepared tuple incidence) wanted command.capability signature)
-  let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyEpoch)
+  let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
   let witness := canonicalWitness profile.compilerProfile.compiler committed
     (step prepared tuple incidence).oldState (step prepared tuple incidence).newState
+  if inputsInRange profile.compilerProfile.compiler committed.record.predicate witness.oldState witness.newState != true then
+    throw .policyInputRange
+  if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
+    throw .policyCastAlias
   requireSome .policyRejected (CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted evidence witness
-    (.policy wanted.policyId wanted.policyEpoch)
-    (source_request_epoch_current prepared tuple incidence))
+    (.policy wanted.policyId wanted.policyRevision)
+    (source_request_epoch_current prepared tuple incidence)
+    (source_request_revision_current prepared tuple incidence))
 
 /-- Exact per-incidence envelopes share a command marker; neither can be
 retargeted to the other's root or replaced by an unrelated valid signer. -/
@@ -873,12 +888,59 @@ theorem readGuards_readonly
   · exact shape.2.2.2.1
   · exact of_decide_eq_true (List.mem_filter.mp authority).2
 
-def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
-  "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [1] ++
+/-- The retained invocation ingress has one source codec for encoding and
+historical decoding. The wire below is byte-for-byte the original frame. -/
+def signedIngressFrame : List UInt8 :=
+  "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [1]
+
+abbrev SignedIngress := Digest × Digest × SignedCommand
+
+def signedIngressStream : StreamCodec SignedIngress :=
+  StreamCodec.xmap
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream
-        (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream)))).encode
-      (domain, semantics, signed.commandBytes, signed.targetEnvelope, signed.authorityEnvelope)
+        (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
+    (fun (domain, semantics, signed) =>
+      (domain, semantics, signed.commandBytes, signed.targetEnvelope, signed.authorityEnvelope))
+    (fun (domain, semantics, command, target, authority) =>
+      (domain, semantics, ⟨command, target, authority⟩))
+    (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
+
+def signedIngressRawCodec : LawfulCodec SignedIngress where
+  encode ingress := signedIngressFrame ++ signedIngressStream.encode ingress
+  decode bytes := if bytes.take signedIngressFrame.length = signedIngressFrame then
+    signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
+  decode_encode := by
+    intro ingress
+    have decoded := signedIngressStream.toLawful.decode_encode ingress
+    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at decoded
+    simp [decoded]
+
+def signedIngressCodec : LawfulCodec SignedIngress :=
+  ResourceBirthCodec.strictCodec signedIngressRawCodec
+
+def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
+  signedIngressCodec.encode (domain, semantics, signed)
+
+/-- This factoring changes no retained event byte. -/
+theorem signedBytes_wire_unchanged (domain semantics : Digest) (signed : SignedCommand) :
+    signedBytes domain semantics signed =
+      "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [1] ++
+        (StreamCodec.product digestStream
+          (StreamCodec.product digestStream
+            (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream)))).encode
+          (domain, semantics, signed.commandBytes, signed.targetEnvelope, signed.authorityEnvelope) := rfl
+
+def decodeSignedBytes := signedIngressCodec.decode
+
+theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCommand) :
+    decodeSignedBytes (signedBytes domain semantics signed) = some (domain, semantics, signed) :=
+  signedIngressCodec.decode_encode _
+
+theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
+    (decoded : decodeSignedBytes bytes = some ingress) :
+    signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
+  ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
 
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
@@ -945,30 +1007,38 @@ inductive ReceiveResult where
 refusal, the previously recorded exact result, or shared durable publication
 outcome out. All preparation is after replay lookup and before the only CAS.
 No new authority, resource mutation or input consumption occurs on refusal. -/
-def receive {F : Type} [Field F] [DecidableEq F]
+def receiveLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (signed : SignedCommand) (attempts : Nat := 3) :
+    (transport : DurableReceiverIO.Transport) (durable : Durable) (signed : SignedCommand) :
     IO ReceiveResult := do
   match commandCodec.decode signed.commandBytes with
   | none => return .rejected .malformedCommand
   | some command =>
-      match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
-      | .error detail => return .unavailable detail
-      | .ok durable =>
-          match recordedInvocation deployment.domain profile.semantics command signed durable with
-          | .error _ => return .transactionConflict
-          | .ok (some recorded) => return .replayed recorded
-          | .ok none =>
-              match prepare deployment profile ambient durable command with
-              | .error reason => return .rejected reason
-              | .ok prepared =>
-                  if shape : PhysicalShape prepared then
-                    match ← admit native prepared signed with
-                    | .error reason => return .rejected reason
-                    | .ok accepted =>
-                        return .settlement (← DurableReceiverIO.receive transport ResourceBirthCodec.rootBytes
-                          (accepted.dataIntent shape) attempts)
-                  else return .rejected .physicalPreparation
+      match recordedInvocation deployment.domain profile.semantics command signed durable with
+      | .error _ => return .transactionConflict
+      | .ok (some recorded) => return .replayed recorded
+      | .ok none =>
+          match prepare deployment profile ambient durable command with
+          | .error reason => return .rejected reason
+          | .ok prepared =>
+              if shape : PhysicalShape prepared then
+                match ← admit native prepared signed with
+                | .error reason => return .rejected reason
+                | .ok accepted =>
+                    return .settlement (← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes
+                      durable (accepted.dataIntent shape))
+              else return .rejected .physicalPreparation
+
+/-- One load supplies both admission and the exact-image CAS. Contention is
+returned to the caller, which must construct fresh authority and clock inputs. -/
+def receive {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (signed : SignedCommand) (_attempts : Nat := 3) :
+    IO ReceiveResult := do
+  match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
+  | .error detail => return .unavailable detail
+  | .ok durable => receiveLoaded deployment profile ambient native transport durable signed
 
 end Minidregg.Kernel.DeclaredResourceController

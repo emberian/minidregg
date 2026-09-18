@@ -298,6 +298,7 @@ structure RequestContext where
   height : Height
   policyId : PolicyId
   policyEpoch : TypedAuthorization.Epoch
+  policyRevision : TypedAuthorization.PolicyRevision
 
 /-- The exact request authorized for this accepted effect.  Its scalar cost is
 the fee coordinate of the same vector later placed in durable settlement. -/
@@ -319,6 +320,7 @@ def RequestContext.requestOf
   preStateRoot := pre.root
   policyId := context.policyId
   policyEpoch := context.policyEpoch
+  policyRevision := context.policyRevision
   cost := exactChargeOf manifest pre operation .feeDebit
 
 /-- The accepted wrapper contributes no new request data. -/
@@ -686,6 +688,7 @@ def witnessContext : RequestContext where
   height := 10
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
 
 noncomputable def witnessAuthorization :
     Authorized demoPortal demoState
@@ -695,6 +698,7 @@ noncomputable def witnessAuthorization :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

@@ -913,6 +913,7 @@ def requestContext : AuthorizedResourceCharge.RequestContext where
   height := 10
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
 
 noncomputable def authorization :
     Authorized demoPortal demoState
@@ -921,6 +922,7 @@ noncomputable def authorization :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -1213,6 +1215,7 @@ def refundContext : AuthorizedResourceCharge.RequestContext where
   height := 21
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
 
 noncomputable def refundAuthorization :
     Authorized demoPortal demoState
@@ -1222,6 +1225,7 @@ noncomputable def refundAuthorization :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

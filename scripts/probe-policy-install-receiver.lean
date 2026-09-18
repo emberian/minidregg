@@ -4,11 +4,12 @@ installer, deterministic physical lowering and the SQLite receiving loop.
 Fixtures use public test keys. No accepted token, signature verdict, source map
 or authority snapshot is fabricated at the admission boundary.
 
-Current source revision and capability generation still share one epoch. This
-probe claims one replacement plus exact historical replay, not continued use
-of the old owner/control capabilities after a source update.
+The same stored ordinary owner and policy-control grants survive successive
+source revisions. Later use is checked against the newly installed law; grants
+and signatures are never reissued or silently refreshed.
 -/
 import Kernel.PolicyInstallReceiver
+import Kernel.DeclaredResourceController
 
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -60,6 +61,7 @@ def deployment : CanonicalCellRegistry.Deployment := ⟨⟨7301⟩, 10, 11, 12�
 def policyId : PolicyId := ⟨600⟩
 def controlId : CapabilityId := ⟨43⟩
 def codeId : CapabilityId := ⟨42⟩
+def ownerId : CapabilityId := ⟨44⟩
 def federation : FederationId := ⟨9⟩
 def height : Height := 10
 
@@ -88,7 +90,17 @@ def newPolicy (denies : Bool := false) : PolicyRecord where
   domain := deployment.domain
   semantics := profile.semantics
   previous := some (PolicyRecordCodec.digest (oldPolicy denies))
-  predicate := .eq "policy/version" 3
+  predicate := .any
+    [.all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag Verb.installPolicy)), .eq "policy/version" 3],
+     .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag Verb.mutateObject)), .eq "request/nonce" 1001]]
+
+def thirdPolicy : PolicyRecord where
+  policyId := policyId
+  version := 3
+  domain := deployment.domain
+  semantics := profile.semantics
+  previous := some (PolicyRecordCodec.digest newPolicy)
+  predicate := .all [.eq "request/subject" 7, .eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag Verb.mutateObject))]
 
 def capability (identifier : CapabilityId) (verb : Verb .program) : Capability .program where
   id := identifier
@@ -105,11 +117,33 @@ def capability (identifier : CapabilityId) (verb : Verb .program) : Capability .
   ancestors := ∅
   channels := ∅
 
+def ownerCapability : Capability .object where
+  id := ownerId
+  root := ownerId
+  parent := none
+  issuer := ⟨5⟩
+  holder := .subject ⟨7⟩
+  scope := ⟨{⟨policyId.value⟩}, {.mutateObject}, 100000⟩
+  notBefore := 0
+  notAfter := 10000
+  issuerEpoch := 2
+  policyId := policyId
+  policyEpoch := 1
+  ancestors := ∅
+  channels := ∅
+
+def objectCell : CellRegistry.PackedCell CanonicalCellRegistry.registry :=
+  ⟨.declaredObject, CellState.materialize DeclaredEffectPageMaterializer.materializer
+    (DeclaredEffectPageMaterializer.stateOfOption (some
+      ⟨deployment.domain, policyId.value % DeclaredEffectPageMaterializer.shardCount,
+        some ⟨.objectField ⟨policyId.value⟩ ⟨1⟩, 0⟩, none, none, none⟩))⟩
+
 def entries (publicKey : List UInt8) (denies : Bool) : List Entry :=
   [.subjectKey (key publicKey), .issuerEpoch ⟨5⟩ 2,
-    .policy policyId 1 (PolicyRecordCodec.digest (oldPolicy denies)),
+    .policy policyId 1 1 (PolicyRecordCodec.digest (oldPolicy denies)),
     .capability .program ⟨capability codeId .installProgram, []⟩,
     .capability .program ⟨capability controlId .installPolicy, []⟩,
+    .capability .object ⟨ownerCapability, []⟩,
     .revocation (.capability controlId) false]
 
 inductive SourceFixture where
@@ -139,7 +173,8 @@ def seed (publicKey : List UInt8) (fixture : SourceFixture := .fresh) (denies : 
       cells := (deployment.authorityAnchor.catalogueCellId,
           CredentialAuthorityDomainReceiver.catalogueBytes catalogue) ::
         ((catalogue.pages.zip pages).map fun (reference, page) =>
-          (reference.cellId, CredentialAuthorityDomainReceiver.shardBytes page)) ++ sourceRows ++ extraRows
+          (reference.cellId, CredentialAuthorityDomainReceiver.shardBytes page)) ++ sourceRows ++ extraRows ++
+          [(⟨policyId.value⟩, ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live objectCell))]
       available := fun _ => 10000000 }
 
 def bootstrap (nativeStore directory : System.FilePath) (publicKey : List UInt8)
@@ -149,21 +184,23 @@ def bootstrap (nativeStore directory : System.FilePath) (publicKey : List UInt8)
     (← DurableReceiverIO.bootstrap config.transport ResourceBirthCodec.rootBytes (← seed publicKey fixture denies))
   pure config
 
-def load (config : DurableReceiverIO.NativeConfig) : IO PolicyInstallReceiver.Durable :=
+def load (config : DurableReceiverIO.NativeConfig) : IO PolicyInstallReceiver.Durable := do
   requireOk "actual SQLite reopen" (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
 
 def declaration (snapshot : CredentialAuthorityDomain.Snapshot) (denies : Bool := false) :
     PolicyInstallController.Declaration :=
-  ⟨snapshot.cell.root, some ⟨1, PolicyRecordCodec.digest (oldPolicy denies)⟩, 991, newPolicy denies⟩
+  ⟨snapshot.cell.root, snapshot.currentHead policyId, 991, newPolicy denies⟩
 
 def signedIngress (signer : System.FilePath) (durable : PolicyInstallReceiver.Durable)
-    (capabilityId : CapabilityId := controlId) (testSeed : Nat := 7) (denies : Bool := false) :
+    (capabilityId : CapabilityId := controlId) (testSeed : Nat := 7) (denies : Bool := false)
+    (successor : Option PolicyRecord := none) (nonce : Nat := 991) :
     IO (List UInt8) := do
   let authority ← requireSome "complete same-snapshot authority"
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot)
   let snapshot := authority.snapshot
-  let command := declaration snapshot denies
-  let context : PolicyInstallController.RequestContext := ⟨federation, ⟨7⟩, 2, height, 1⟩
+  let command := { declaration snapshot denies with source := successor.getD (newPolicy denies), nonce := nonce }
+  let context : PolicyInstallController.RequestContext :=
+    ⟨federation, ⟨7⟩, 2, height, snapshot.authState.policyEpoch policyId, snapshot.authState.policyRevision policyId⟩
   let wanted := PolicyInstallController.request profile snapshot context command
   let marker := (PolicyInstallController.requestDigest profile snapshot context command).value
   let header ← requireOk "source-bound native signing header"
@@ -208,6 +245,56 @@ def refusedWithoutMutation (native : CredentialSignatureIO.NativeConfig) (signer
     let after ← load config
     require s!"{label}: exact SQLite bytes unchanged" (after.bytes == before.bytes)
 
+def signedOwnerInvocation (signer : System.FilePath) (durable : PolicyInstallReceiver.Durable)
+    (nonce : Nat) (oldValue newValue : Int) : IO DeclaredResourceController.SignedCommand := do
+  let authority ← requireSome "same loaded invocation authority"
+    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot)
+  let directory ← requireSome "same loaded invocation directory"
+    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+  let object ← requireSome "actual persisted object"
+    (ResourceBirthController.Concrete.observeCell deployment directory.directory policyId.value .declaredObject)
+  let command : DeclaredResourceController.Command :=
+    { kind := .object
+      target := policyId.value
+      subject := ⟨7⟩
+      capability := ownerId
+      expectedAuthorityRoot := authority.snapshot.cell.root
+      schemaVersion := 1
+      expectedTargetRoot := object.payload.root
+      nonce := nonce
+      actions := [.write (.objectField ⟨policyId.value⟩ ⟨1⟩) (some oldValue) newValue] }
+  let marker := DeclaredResourceController.operationMarker deployment.domain profile.semantics command
+  let signed : Digest → IO (List UInt8) := fun root => do
+    let wanted := DeclaredResourceController.request authority.snapshot profile.semantics
+      ⟨federation, height⟩ command root
+    let header ← requireOk "new-revision complete owner request"
+      (CredentialSignatureAdmission.signingHeader authority.snapshot marker ⟨.object, wanted⟩)
+    let (_, signature) ← sign signer 7 (CredentialSignedEnvelopeController.headerCodec.encode header)
+    pure (CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩)
+  pure
+    { commandBytes := DeclaredResourceController.commandCodec.encode command
+      targetEnvelope := ← signed object.payload.root
+      authorityEnvelope := ← signed authority.snapshot.cell.root }
+
+def confirmOwnerInvocation (label : String) (native : CredentialSignatureIO.NativeConfig)
+    (config : DurableReceiverIO.NativeConfig) (signed : DeclaredResourceController.SignedCommand) : IO Unit := do
+  match ← DeclaredResourceController.receive deployment profile ⟨federation, height⟩ native config.transport signed with
+  | .settlement (.confirmed .installed _) => require label true
+  | .rejected reason => throw (IO.userError s!"FAIL {label}: {repr reason}")
+  | _ => throw (IO.userError s!"FAIL {label}: owner operation did not install")
+
+def assertPreservedGrants (durable : PolicyInstallReceiver.Durable) (revision : Nat) : IO Unit := do
+  let authority ← requireSome "same reopened grant snapshot"
+    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot)
+  require "source revision advances independently of grant generation"
+    (authority.snapshot.authState.policyEpoch policyId == 1 &&
+      authority.snapshot.authState.policyRevision policyId == revision)
+  require "original ordinary owner grant retained exactly, not reissued"
+    (decide (readCapability authority.snapshot.cell .object ownerId = some ⟨ownerCapability, []⟩))
+  require "original policy-control grant retained exactly, not reissued"
+    (decide (readCapability authority.snapshot.cell .program controlId =
+      some ⟨capability controlId .installPolicy, []⟩))
+
 def acceptedAndReplayed (native : CredentialSignatureIO.NativeConfig) (signer nativeStore : System.FilePath)
     (publicKey : List UInt8) : IO Unit :=
   IO.FS.withTempDir fun directory => do
@@ -221,8 +308,9 @@ def acceptedAndReplayed (native : CredentialSignatureIO.NativeConfig) (signer na
     let accepted ← requireOk "actual native capability-only accepted installation"
       (← PolicyInstallReceiver.admitDecodedNative profile deployment native before federation height decoded)
     let wanted := PolicyInstallReceiver.intent accepted
-    require "new source participates in actual allocation"
-      (decide (CanonicalCellRegistry.policySourceCreate deployment.domain (newPolicy) ∈ prepared.creates))
+    require "new source identity participates in actual allocation"
+      ((prepared.creates.map (·.cellId)).contains
+        (CanonicalCellRegistry.policySourceCreate deployment.domain newPolicy).cellId)
     let lostReply : DurableReceiverIO.Transport :=
       { read := config.read
         cas := fun expected proposed => do
@@ -257,8 +345,8 @@ def acceptedAndReplayed (native : CredentialSignatureIO.NativeConfig) (signer na
         decide (after.snapshot.model.available lane + wanted.exactCharge lane =
           before.snapshot.model.available lane))
     let unavailableNative : CredentialSignatureIO.NativeConfig := ⟨directory / "missing-verifier"⟩
-    let replayed ← expectConfirmed "original expired request replayed before fresh native admission" .replayed
-      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 1000 original)
+    let replayed ← expectConfirmed "original expired-key and expired-grant request replayed before fresh native admission" .replayed
+      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 20000 original)
     require "historical replay returns only same receipt IDs" (decide (replayed = first))
     let reopened ← load config
     require "restart replay neither rewrites storage nor charges again" (reopened.bytes == after.bytes)
@@ -266,10 +354,54 @@ def acceptedAndReplayed (native : CredentialSignatureIO.NativeConfig) (signer na
     let substituted := PolicyInstallReceiver.ingressCodec.encode
       { decoded.ingress with declarationBytes := PolicyInstallController.encodeDeclaration changed }
     expectRejected "changed payload at same source-derived transaction identity conflicts" .transactionConflict
-      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 1000 substituted)
+      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 20000 substituted)
     let final ← load config
     require "payload conflict leaves exact physical bytes unchanged" (final.bytes == after.bytes)
-    IO.println s!"committed source bytes={source.canonicalBytes.length}, writes={prepared.writes.length}, guards={prepared.readGuards.length}, journal={after.snapshot.model.journal.length}"
+    assertPreservedGrants final 2
+    let refusedOwner ← signedOwnerInvocation signer final 1002 0 1
+    match ← DeclaredResourceController.receive deployment profile ⟨federation, height⟩ native config.transport refusedOwner with
+    | .rejected .policyRejected => require "retained owner grant still checks revision-two rules" true
+    | _ => throw (IO.userError "FAIL new source must reject wrong-nonce owner mutation")
+    require "new-law refusal preserves exact physical image" ((← load config).bytes == final.bytes)
+    let firstOwner ← signedOwnerInvocation signer final 1001 0 1
+    confirmOwnerInvocation "same original owner grant mutates under revision two" native config firstOwner
+    let invoked ← load config
+    assertPreservedGrants invoked 2
+    let second ← signedIngress signer invoked controlId 7 false (some thirdPolicy) 992
+    let secondReceipt ← expectConfirmed "same original control grant installs revision three" .installed
+      (← PolicyInstallReceiver.receive profile deployment native config.transport federation height second)
+    let twice ← load config
+    assertPreservedGrants twice 3
+    let secondOwner ← signedOwnerInvocation signer twice 1002 1 2
+    confirmOwnerInvocation "same owner grant now satisfies the changed revision-three rule" native config secondOwner
+    let complete ← load config
+    assertPreservedGrants complete 3
+    let completeDirectory ← requireSome "complete final object directory"
+      (CredentialAuthorityDomainReceiver.loadDirectory complete)
+    let finalObject ← requireSome "actual final persisted object"
+      (ResourceBirthController.Concrete.observeCell deployment completeDirectory.directory policyId.value .declaredObject)
+    let finalPage ← requireSome "actual final object page"
+      (DeclaredEffectPageMaterializer.pageAt finalObject.payload.logical)
+    require "both owner mutations survive actual SQLite reopen"
+      (decide (finalPage.lookup (.objectField ⟨policyId.value⟩ ⟨1⟩) = some 2))
+    require "two installs plus two accepted owner mutations are the whole journal"
+      (complete.snapshot.model.journal.length == 4)
+    let fourth : PolicyRecord :=
+      { thirdPolicy with version := 4, previous := some (PolicyRecordCodec.digest thirdPolicy), predicate := .all [] }
+    let lockout ← signedIngress signer complete controlId 7 false (some fourth) 993
+    expectRejected "self-governing rule lockout is policy refusal, not a revoked control grant"
+      (.semantic .policyRejected)
+      (← PolicyInstallReceiver.receive profile deployment native config.transport federation height lockout)
+    let historicalFirst ← expectConfirmed "first install replay survives subsequent source and object changes" .replayed
+      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 20000 original)
+    let historicalSecond ← expectConfirmed "second install replay survives subsequent object changes" .replayed
+      (← PolicyInstallReceiver.receive profile deployment unavailableNative config.transport federation 20000 second)
+    require "both historical receipts are the original receipts"
+      (decide (historicalFirst = first) && decide (historicalSecond = secondReceipt))
+    require "lockout and expired historical replay preserve all physical bytes and charges"
+      ((← load config).bytes == complete.bytes)
+    IO.println s!"committed source bytes={source.canonicalBytes.length}, first writes={prepared.writes.length}, first guards={prepared.readGuards.length}, final journal={complete.snapshot.model.journal.length}"
+
 
 def run (verifier signer nativeStore : System.FilePath) : IO Unit := do
   let native : CredentialSignatureIO.NativeConfig := ⟨verifier⟩
@@ -287,7 +419,7 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit := do
   refusedWithoutMutation native signer nativeStore publicKey "actual old policy controls replacement"
     (.semantic .policyRejected) .fresh controlId 7 true
   acceptedAndReplayed native signer nativeStore publicKey
-  IO.println "PASS policy installation: real native holder signature and control capability, same-snapshot old source, atomic durable new source+head+marker, occupied/retired/old-law/cap/key refusals, lost-reply recovery and unchanged-ingress restart replay. One replacement only; capability-generation separation remains a distinct design change."
+  IO.println "PASS policy installation: real native holder signature and control capability, same-snapshot old source, atomic durable new source+head+marker, occupied/retired/old-law/cap/key refusals, lost-reply recovery and unchanged-ingress restart replay. Successive source revisions preserve the exact original owner/control grants, newly selected rules govern actual object mutations, and deliberate self-governing install lockout remains distinct from epoch revocation."
 
 end PolicyInstallReceiverProbe
 

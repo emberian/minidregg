@@ -11,10 +11,10 @@ The original canonical signed ingress is retained for receipt-only replay before
 fresh-state admission. A replay never resigns an old request or derives a new
 marker from the current height or authority state.
 
-The current authority schema still couples source revision to the capability
-epoch. This receiver inherits revocation of old-epoch grants on replacement.
-Preserving grants while checking the new rules is the selected next schema
-change; it is not implemented by this receiving-layer checkpoint.
+Source replacement advances the selected revision while preserving the grant
+generation. Every later use checks the newly selected source. The current source
+still governs its own replacement, so a deliberately restrictive new law may
+refuse future installations even though the control grant remains current.
 -/
 import Kernel.PolicyInstallController
 import Kernel.ResourceBirthController
@@ -141,6 +141,7 @@ def context (federation : FederationId) (height : Height)
   subjectKeyEpoch := snapshot.authState.subjectKeyEpoch ingress.ingress.subject
   height := height
   policyEpoch := snapshot.authState.policyEpoch ingress.declaration.source.policyId
+  policyRevision := snapshot.authState.policyRevision ingress.declaration.source.policyId
 
 def payloadStore {durable : Durable} (deployment : Deployment)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : CanonicalPolicyRegistry.PayloadStore :=
@@ -205,7 +206,7 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
     (context federation height authority.snapshot ingress) semantic.declaration).value
   source : CanonicalCellRegistry.LoadedPolicySource deployment.domain directory.directory
     (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId
-      (context federation height authority.snapshot ingress).policyEpoch)
+      (context federation height authority.snapshot ingress).policyRevision)
   lowered : CredentialAuthorityDomainReceiver.Lowered directory authority
     (PolicyInstallController.edits profile authority.snapshot (context federation height authority.snapshot ingress)
       semantic.declaration) semantic.update [(successorCreate deployment semantic.declaration).cellId]
@@ -229,7 +230,7 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
   let markerExact ← require (ingress.marker =
     (PolicyInstallController.requestDigest profile authority.snapshot requestContext semantic.declaration).value) .markerMismatch
   let source ← fromOption (CanonicalCellRegistry.loadPolicySource deployment.domain directory.directory
-    (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId requestContext.policyEpoch))
+    (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId requestContext.policyRevision))
     .oldSourceUnavailable
   let lowered ← fromOption (CredentialAuthorityDomainReceiver.lower directory authority semantic.update
     [(successorCreate deployment semantic.declaration).cellId]) .physicalLowering
@@ -372,6 +373,23 @@ theorem AcceptedInstall.actual_post_head
         PolicyRecordCodec.digest accepted.ingress.declaration.source⟩ := by
   rw [accepted.actual_authority_post, ← accepted.prepared.declarationExact]
   exact accepted.installed.source_selected_in_post
+
+theorem AcceptedInstall.generation_preserved
+    (accepted : AcceptedInstall profile deployment durable federation height) :
+    accepted.prepared.lowered.post.logical.fields
+        (.policyEpoch accepted.ingress.declaration.source.policyId) =
+      accepted.prepared.authority.snapshot.logical.fields
+        (.policyEpoch accepted.ingress.declaration.source.policyId) := by
+  rw [accepted.actual_authority_post, ← accepted.prepared.declarationExact]
+  exact accepted.installed.generation_preserved
+
+theorem AcceptedInstall.capability_preserved
+    (accepted : AcceptedInstall profile deployment durable federation height)
+    (kind : ResourceKind) (id : CapabilityId) :
+    accepted.prepared.lowered.post.logical.fields (.capability kind id) =
+      accepted.prepared.authority.snapshot.logical.fields (.capability kind id) := by
+  rw [accepted.actual_authority_post]
+  exact accepted.installed.capability_preserved kind id
 
 theorem AcceptedInstall.marker_consumed
     (accepted : AcceptedInstall profile deployment durable federation height) :
@@ -631,30 +649,39 @@ inductive Result where
   | unavailable (detail : String)
   | uncertain (detail : String)
 
-/-- The public boundary accepts only the strict original command and native
-signature. Ambient federation and height are service inputs. Historic success
-returns the original IDs without reauthorizing, resigning or releasing state. -/
-def receive (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
+/-- Admission and publication share the exact loaded image. In particular a
+host-derived logical height cannot be transplanted onto a newer journal after a
+CAS race; the caller must reopen, reconstruct and reauthorize after contention. -/
+def receiveLoaded (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
     (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
-    (federation : FederationId) (height : Height) (bytes : List UInt8) (attempts : Nat := 4) : IO Result := do
+    (durable : Durable) (federation : FederationId) (height : Height)
+    (bytes : List UInt8) : IO Result := do
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
-      match ← DurableReceiverIO.load transport rootBytes with
-      | .error detail => return .unavailable detail
-      | .ok durable =>
-          match replay deployment.domain durable ingress with
-          | some (.ok receipt) => return .confirmed .replayed receipt
-          | some (.error reason) => return .rejected reason
-          | none =>
-              match ← admitDecodedNative profile deployment native durable federation height ingress with
-              | .error reason => return .rejected reason
-              | .ok accepted =>
-                  match ← DurableReceiverIO.receive transport rootBytes (intent accepted) attempts with
-                  | .confirmed kind _ => return .confirmed kind (receipt deployment.domain ingress)
-                  | .rejected reason => return .durableRejected reason
-                  | .contention => return .contention
-                  | .unavailable detail => return .unavailable detail
-                  | .uncertain detail => return .uncertain detail
+      match replay deployment.domain durable ingress with
+      | some (.ok receipt) => return .confirmed .replayed receipt
+      | some (.error reason) => return .rejected reason
+      | none =>
+          match ← admitDecodedNative profile deployment native durable federation height ingress with
+          | .error reason => return .rejected reason
+          | .ok accepted =>
+              match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
+              | .confirmed kind _ => return .confirmed kind (receipt deployment.domain ingress)
+              | .rejected reason => return .durableRejected reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail
+              | .uncertain detail => return .uncertain detail
+
+/-- The public boundary accepts only the strict original command and native
+signature. Ambient federation and height are service inputs. Historic success
+returns the original IDs without reauthorizing, resigning or releasing state.
+Publication never silently rebases a checked installation onto a newer image. -/
+def receive (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
+    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
+    (federation : FederationId) (height : Height) (bytes : List UInt8) : IO Result := do
+  match ← DurableReceiverIO.load transport rootBytes with
+  | .error detail => return .unavailable detail
+  | .ok durable => receiveLoaded profile deployment native transport durable federation height bytes
 
 end Minidregg.Kernel.PolicyInstallReceiver
