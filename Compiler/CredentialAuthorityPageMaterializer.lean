@@ -2,25 +2,25 @@
 # Compiler.CredentialAuthorityPageMaterializer -- bounded committed authority
 
 `CredentialAuthorityState` is the canonical, unbounded sparse authority
-semantics.  Its countability-selected materializer is an inhabitation witness,
-not a production representation.  This module supplies one concrete bounded
-representation shard: four policy/revocation entries with a stable wire frame,
+semantics. This module supplies one concrete bounded
+representation shard: four typed authority entries with a stable wire frame,
 prefix-decodable payload, and a Lean cSHAKE256 root over the exact bytes.
 
-Each entry projects to the actual dependent `AuthorityField` addresses.  A
-policy entry writes both the current epoch and the exact `(policy, epoch)`
-content address; a revocation entry writes the canonical Boolean membership
-cell.  The page's root is therefore the `policyRoot`/`revocationRoot` used by
-its `AuthState` projection.  No parallel host-authored policy lookup exists.
+Each entry projects to the actual dependent `AuthorityField` addresses:
+complete capability lineage, issuer/subject epochs, policy epoch/address,
+revocation flags, and operation nullifiers. The page's root is the
+`capabilityRoot`/`policyRoot`/`revocationRoot` used by its `AuthState`
+projection. No parallel host-authored authority lookup exists.
 
 Capacity is explicit.  `insert?` fills the first empty slot, never overwrites,
-and returns `none` exactly for a full page.  Another page number extends the
-authority domain; this page does not pretend the global authority universe is
-finite.  As with the event-page representation, collision resistance is only
+and returns `none` exactly for a full page. A page number identifies a shard;
+composing shards requires unique address routing and a combined projection.
+This page does not pretend the global authority universe is finite.
+As with the event-page representation, collision resistance is only
 a pair-scoped premise, never an impossible global injection into 256 bits.
 -/
 import Compiler.Sp800185Cshake256
-import Compiler.TypedAuthorizationRequestCodec
+import Compiler.CredentialAuthorityEntryCodec
 import Theory.CredentialAuthorityState
 
 namespace Minidregg.Compiler.CredentialAuthorityPageMaterializer
@@ -28,6 +28,7 @@ namespace Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.TypedAuthorizationRequestCodec
+open Minidregg.Compiler.CredentialAuthorityEntryCodec
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CredentialAuthorityState
@@ -44,14 +45,6 @@ theorem lawfulCodec_encode_injective {alpha : Type}
   have decoded := congrArg codec.decode equal
   rw [codec.decode_encode, codec.decode_encode] at decoded
   exact Option.some.inj decoded
-
-def capabilityIdStream : StreamCodec CapabilityId :=
-  StreamCodec.xmap StreamCodec.nat CapabilityId.value CapabilityId.mk
-    (by intro value; cases value; rfl)
-
-def channelIdStream : StreamCodec ChannelId :=
-  StreamCodec.xmap StreamCodec.nat ChannelId.value ChannelId.mk
-    (by intro value; cases value; rfl)
 
 def revocationKeyStream : StreamCodec RevocationKey where
   encode
@@ -71,11 +64,15 @@ def revocationKeyStream : StreamCodec RevocationKey where
     | capability capability => simp [capabilityIdStream.decodePrefix_encode]
     | channel channel => simp [channelIdStream.decodePrefix_encode]
 
-/-- One bounded authority record.  Policy and revocation are different wire
-constructors and cannot be retagged without changing bytes. -/
+/-- One exact authority record. Capability identity is taken from the stored
+head, so a separate caller-supplied slot cannot retarget a grant. -/
 inductive Entry where
   | policy (policy : PolicyId) (epoch : Epoch) (address : Digest)
   | revocation (key : RevocationKey) (revoked : Bool)
+  | capability (kind : ResourceKind) (stored : StoredCapability kind)
+  | issuerEpoch (issuer : IssuerId) (epoch : Epoch)
+  | subjectKeyEpoch (subject : SubjectId) (epoch : Epoch)
+  | nullifier (id : Nat) (consumed : Bool)
   deriving DecidableEq, Repr
 
 def entryStream : StreamCodec Entry where
@@ -85,6 +82,15 @@ def entryStream : StreamCodec Entry where
           digestStream.encode address
     | .revocation key revoked =>
         1 :: revocationKeyStream.encode key ++ StreamCodec.bool.encode revoked
+    | .capability .object stored => 2 :: (storedCapabilityStream .object).encode stored
+    | .capability .account stored => 3 :: (storedCapabilityStream .account).encode stored
+    | .capability .program stored => 4 :: (storedCapabilityStream .program).encode stored
+    | .issuerEpoch issuer epoch =>
+        5 :: issuerIdStream.encode issuer ++ StreamCodec.nat.encode epoch
+    | .subjectKeyEpoch subject epoch =>
+        6 :: subjectIdStream.encode subject ++ StreamCodec.nat.encode epoch
+    | .nullifier nullifierId consumed =>
+        7 :: StreamCodec.nat.encode nullifierId ++ StreamCodec.bool.encode consumed
   decodePrefix
     | 0 :: bytes => do
         let (policy, afterPolicy) <- policyIdStream.decodePrefix bytes
@@ -95,6 +101,27 @@ def entryStream : StreamCodec Entry where
         let (key, afterKey) <- revocationKeyStream.decodePrefix bytes
         let (revoked, suffix) <- StreamCodec.bool.decodePrefix afterKey
         some (.revocation key revoked, suffix)
+    | 2 :: bytes => do
+        let (stored, suffix) ← (storedCapabilityStream .object).decodePrefix bytes
+        some (.capability .object stored, suffix)
+    | 3 :: bytes => do
+        let (stored, suffix) ← (storedCapabilityStream .account).decodePrefix bytes
+        some (.capability .account stored, suffix)
+    | 4 :: bytes => do
+        let (stored, suffix) ← (storedCapabilityStream .program).decodePrefix bytes
+        some (.capability .program stored, suffix)
+    | 5 :: bytes => do
+        let (issuer, afterIssuer) ← issuerIdStream.decodePrefix bytes
+        let (epoch, suffix) ← StreamCodec.nat.decodePrefix afterIssuer
+        some (.issuerEpoch issuer epoch, suffix)
+    | 6 :: bytes => do
+        let (subject, afterSubject) ← subjectIdStream.decodePrefix bytes
+        let (epoch, suffix) ← StreamCodec.nat.decodePrefix afterSubject
+        some (.subjectKeyEpoch subject epoch, suffix)
+    | 7 :: bytes => do
+        let (nullifierId, afterId) ← StreamCodec.nat.decodePrefix bytes
+        let (consumed, suffix) ← StreamCodec.bool.decodePrefix afterId
+        some (.nullifier nullifierId consumed, suffix)
     | _ => none
   decodePrefix_encode := by
     intro entry suffix
@@ -105,12 +132,24 @@ def entryStream : StreamCodec Entry where
     | revocation key revoked =>
         simp [List.append_assoc, revocationKeyStream.decodePrefix_encode,
           StreamCodec.bool.decodePrefix_encode]
+    | capability kind stored =>
+        cases kind <;> simp [StreamCodec.decodePrefix_encode]
+    | issuerEpoch issuer epoch =>
+        simp [List.append_assoc, StreamCodec.decodePrefix_encode]
+    | subjectKeyEpoch subject epoch =>
+        simp [List.append_assoc, StreamCodec.decodePrefix_encode]
+    | nullifier id consumed =>
+        simp [List.append_assoc, StreamCodec.decodePrefix_encode]
 
 /-- Exact canonical authority addresses written by one entry. -/
 def Entry.fields : Entry -> List AuthorityField
   | .policy policyId epoch _address =>
       [.policyEpoch policyId, .policyAddress policyId epoch]
   | .revocation key _ => [.revoked key]
+  | .capability kind stored => [.capability kind stored.head.id]
+  | .issuerEpoch issuer _ => [.issuerEpoch issuer]
+  | .subjectKeyEpoch subject _ => [.subjectKeyEpoch subject]
+  | .nullifier nullifierId _ => [.nullifier nullifierId]
 
 /-- Install one entry into the canonical sparse authority field carrier. -/
 def Entry.install
@@ -120,6 +159,68 @@ def Entry.install
       (fields.write (.policyEpoch policyId) epoch).write
         (.policyAddress policyId epoch) address
   | .revocation key revoked => fields.write (.revoked key) revoked
+  | .capability kind stored => fields.write (.capability kind stored.head.id) stored
+  | .issuerEpoch issuer epoch => fields.write (.issuerEpoch issuer) epoch
+  | .subjectKeyEpoch subject epoch => fields.write (.subjectKeyEpoch subject) epoch
+  | .nullifier nullifierId consumed => fields.write (.nullifier nullifierId) consumed
+
+/-- An entry leaves every unrelated canonical coordinate unchanged. -/
+theorem Entry.install_frame (entry : Entry)
+    (fields : FieldStore CredentialAuthorityState.schema.{0, 0})
+    (field : AuthorityField) (outside : field ∉ entry.fields) :
+    Entry.install fields entry field = fields field := by
+  cases entry with
+  | policy policy epoch address =>
+      simp only [Entry.fields, List.mem_cons, List.not_mem_nil,
+        or_false, not_or] at outside
+      exact (CellState.FieldStore.write_other _ (Ne.symm outside.2) address).trans
+        (CellState.FieldStore.write_other fields (Ne.symm outside.1) epoch)
+  | revocation key revoked =>
+      simp only [Entry.fields, List.mem_singleton] at outside
+      exact CellState.FieldStore.write_other fields (Ne.symm outside) revoked
+  | capability kind stored =>
+      simp only [Entry.fields, List.mem_singleton] at outside
+      exact CellState.FieldStore.write_other fields (Ne.symm outside) stored
+  | issuerEpoch issuer epoch =>
+      simp only [Entry.fields, List.mem_singleton] at outside
+      exact CellState.FieldStore.write_other fields (Ne.symm outside) epoch
+  | subjectKeyEpoch subject epoch =>
+      simp only [Entry.fields, List.mem_singleton] at outside
+      exact CellState.FieldStore.write_other fields (Ne.symm outside) epoch
+  | nullifier nullifierId consumed =>
+      simp only [Entry.fields, List.mem_singleton] at outside
+      exact CellState.FieldStore.write_other fields (Ne.symm outside) consumed
+
+/-- On its named coordinates an entry determines the complete typed value,
+independently of the previous contents. -/
+theorem Entry.install_exact (entry : Entry)
+    (fields : FieldStore CredentialAuthorityState.schema.{0, 0})
+    (field : AuthorityField) (inside : field ∈ entry.fields) :
+    Entry.install fields entry field = Entry.install 0 entry field := by
+  cases entry with
+  | policy policy epoch address =>
+      simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false] at inside
+      rcases inside with rfl | rfl <;> simp [Entry.install]
+  | revocation key revoked =>
+      simp only [Entry.fields, List.mem_singleton] at inside
+      subst field
+      simp [Entry.install]
+  | capability kind stored =>
+      simp only [Entry.fields, List.mem_singleton] at inside
+      subst field
+      simp [Entry.install]
+  | issuerEpoch issuer epoch =>
+      simp only [Entry.fields, List.mem_singleton] at inside
+      subst field
+      simp [Entry.install]
+  | subjectKeyEpoch subject epoch =>
+      simp only [Entry.fields, List.mem_singleton] at inside
+      subst field
+      simp [Entry.install]
+  | nullifier id consumed =>
+      simp only [Entry.fields, List.mem_singleton] at inside
+      subst field
+      simp [Entry.install]
 
 /-! ## Four-slot pages, membership, and overflow -/
 
@@ -231,6 +332,14 @@ theorem Page.insert_contains {page post : Page} {entry : Entry}
     simp [Page.insert?, Page.Contains, Page.entries] at inserted ⊢ <;>
     subst post <;> simp
 
+theorem Page.insert_member_iff {page post : Page} {entry : Entry}
+    (inserted : page.insert? entry = some post) (candidate : Entry) :
+    post.Contains candidate ↔ candidate = entry ∨ page.Contains candidate := by
+  rcases page with ⟨domain, number, slot0, slot1, slot2, slot3⟩
+  cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
+    simp [Page.insert?] at inserted <;> subst post <;>
+    simp [Page.Contains, Page.entries, or_left_comm, or_comm]
+
 /-- Address conflict and capacity exhaustion are distinct admission failures. -/
 inductive InsertError where
   | invalidPage
@@ -263,12 +372,280 @@ def Page.admitInsert (page : Page) (entry : Entry) :
   else
     .error .invalidPage
 
+theorem Page.admitInsert_exact {page : Page} {entry : Entry}
+    {post : { post : Page // post.Valid }}
+    (admitted : page.admitInsert entry = .ok post) :
+    page.Valid ∧ ¬ entry.Conflicts page ∧ page.insert? entry = some post.val := by
+  unfold Page.admitInsert at admitted
+  split at admitted
+  next valid =>
+    split at admitted
+    next => contradiction
+    next fresh =>
+      cases inserted : page.insert? entry with
+      | none => simp [inserted] at admitted
+      | some candidate =>
+          simp only [inserted] at admitted
+          split at admitted
+          next =>
+            have equal := congrArg Subtype.val (Except.ok.inj admitted)
+            exact ⟨valid, fresh, congrArg some equal⟩
+          next => contradiction
+  next => contradiction
+
+/-- One physical page update for a whole fresh batch. A later failure exposes
+no partially updated page. Every step checks canonical-coordinate freshness. -/
+def Page.admitInsertMany (page : Page) : List Entry →
+    Except InsertError { post : Page // post.Valid }
+  | [] =>
+      if valid : page.Valid then .ok ⟨page, valid⟩ else .error .invalidPage
+  | entry :: rest =>
+      match page.admitInsert entry with
+      | .error reason => .error reason
+      | .ok post => post.val.admitInsertMany rest
+
+/-- Every original entry survives an accepted insertion batch unchanged. -/
+theorem Page.admitInsertMany_retains {page : Page} {entries : List Entry}
+    {post : { post : Page // post.Valid }}
+    (admitted : page.admitInsertMany entries = .ok post)
+    (entry : Entry) (member : page.Contains entry) : post.val.Contains entry := by
+  induction entries generalizing page with
+  | nil =>
+      simp only [Page.admitInsertMany] at admitted
+      split at admitted
+      next =>
+        have equal := congrArg Subtype.val (Except.ok.inj admitted)
+        exact equal ▸ member
+      next => contradiction
+  | cons first rest induction =>
+      simp only [Page.admitInsertMany] at admitted
+      cases head : page.admitInsert first with
+      | error reason => simp [head] at admitted
+      | ok next =>
+          apply induction (by simpa [head] using admitted)
+          exact (Page.insert_member_iff (Page.admitInsert_exact head).2.2 entry).mpr
+            (Or.inr member)
+
+/-- All requested records are present together in the returned valid page.
+A conflicting later grant cannot overwrite an earlier grant in the batch. -/
+theorem Page.admitInsertMany_contains {page : Page} {entries : List Entry}
+    {post : { post : Page // post.Valid }}
+    (admitted : page.admitInsertMany entries = .ok post)
+    (entry : Entry) (member : entry ∈ entries) : post.val.Contains entry := by
+  induction entries generalizing page with
+  | nil => simp at member
+  | cons first rest induction =>
+      simp only [Page.admitInsertMany] at admitted
+      cases head : page.admitInsert first with
+      | error reason => simp [head] at admitted
+      | ok next =>
+          have tail : next.val.admitInsertMany rest = .ok post := by
+            simpa [head] using admitted
+          rcases List.mem_cons.mp member with rfl | inTail
+          · apply Page.admitInsertMany_retains tail
+            exact Page.insert_contains (Page.admitInsert_exact head).2.2
+          · exact induction tail inTail
+
+def Page.mapEntries (page : Page) (transform : Entry → Entry) : Page :=
+  { page with
+      slot0 := page.slot0.map transform
+      slot1 := page.slot1.map transform
+      slot2 := page.slot2.map transform
+      slot3 := page.slot3.map transform }
+
+theorem Page.entries_mapEntries (page : Page) (transform : Entry → Entry) :
+    (page.mapEntries transform).entries = page.entries.map transform := by
+  rcases page with ⟨domain, number, slot0, slot1, slot2, slot3⟩
+  cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
+    simp [Page.entries, Page.mapEntries]
+
+def Entry.replace (old replacement entry : Entry) : Entry :=
+  if entry = old then replacement else entry
+
+/-- Exact expected-entry replacement, never an implicit upsert. On a valid
+page the expected entry has only one occurrence because its fields are unique. -/
+def Page.replaceEntry? (page : Page) (old replacement : Entry) : Option Page :=
+  if page.Contains old then some (page.mapEntries (Entry.replace old replacement))
+  else none
+
+inductive ReplaceError where
+  | invalidPage
+  | missingEntry
+  | addressConflict
+  deriving DecidableEq, Repr
+
+def Page.admitReplace (page : Page) (old replacement : Entry) :
+    Except ReplaceError { post : Page // post.Valid } :=
+  if _valid : page.Valid then
+    match page.replaceEntry? old replacement with
+    | none => .error .missingEntry
+    | some post =>
+        if valid : post.Valid then .ok ⟨post, valid⟩
+        else .error .addressConflict
+  else .error .invalidPage
+
+theorem Page.replaceEntry_exact {page post : Page} {old replacement : Entry}
+    (replaced : page.replaceEntry? old replacement = some post) :
+    page.Contains old ∧
+      post = page.mapEntries (Entry.replace old replacement) := by
+  unfold Page.replaceEntry? at replaced
+  split at replaced
+  next member => exact ⟨member, (Option.some.inj replaced).symm⟩
+  next => contradiction
+
+theorem Page.replaceEntry_address {page post : Page} {old replacement : Entry}
+    (replaced : page.replaceEntry? old replacement = some post) :
+    post.authorityDomain = page.authorityDomain ∧
+      post.pageNumber = page.pageNumber := by
+  rw [(Page.replaceEntry_exact replaced).2]
+  exact ⟨rfl, rfl⟩
+
+theorem Page.replaceEntry_contains {page post : Page} {old replacement : Entry}
+    (replaced : page.replaceEntry? old replacement = some post) :
+    post.Contains replacement := by
+  obtain ⟨member, exactPost⟩ := Page.replaceEntry_exact replaced
+  rw [exactPost]
+  change replacement ∈ (page.mapEntries (Entry.replace old replacement)).entries
+  rw [Page.entries_mapEntries]
+  exact List.mem_map.mpr ⟨old, member, by simp [Entry.replace]⟩
+
+theorem Page.replaceEntry_retains {page post : Page} {old replacement : Entry}
+    (replaced : page.replaceEntry? old replacement = some post)
+    (entry : Entry) (member : page.Contains entry) (different : entry ≠ old) :
+    post.Contains entry := by
+  rw [(Page.replaceEntry_exact replaced).2]
+  change entry ∈ (page.mapEntries (Entry.replace old replacement)).entries
+  rw [Page.entries_mapEntries]
+  exact List.mem_map.mpr ⟨entry, member, by simp [Entry.replace, different]⟩
+
+theorem Page.admitReplace_exact {page : Page} {old replacement : Entry}
+    {post : { post : Page // post.Valid }}
+    (admitted : page.admitReplace old replacement = .ok post) :
+    page.Valid ∧ page.Contains old ∧
+      post.val = page.mapEntries (Entry.replace old replacement) := by
+  unfold Page.admitReplace at admitted
+  split at admitted
+  next valid =>
+    cases replaced : page.replaceEntry? old replacement with
+    | none => simp [replaced] at admitted
+    | some candidate =>
+        simp only [replaced] at admitted
+        split at admitted
+        next =>
+          have equal := congrArg Subtype.val (Except.ok.inj admitted)
+          exact ⟨valid, (Page.replaceEntry_exact replaced).1,
+            equal.symm.trans (Page.replaceEntry_exact replaced).2⟩
+        next => contradiction
+  next => contradiction
+
 /-! ## Projection into `CredentialAuthorityState` -/
 
 def Page.toCanonicalState (page : Page) :
     LogicalState CredentialAuthorityState.schema.{0, 0} where
   fields := page.entries.foldl Entry.install 0
   resources := fun resource => nomatch resource
+
+theorem installEntries_frame (entries : List Entry)
+    (fields : FieldStore CredentialAuthorityState.schema.{0, 0})
+    (field : AuthorityField) (outside : field ∉ entries.flatMap Entry.fields) :
+    (entries.foldl Entry.install fields) field = fields field := by
+  induction entries generalizing fields with
+  | nil => rfl
+  | cons entry entries induction =>
+      have outsideHead : field ∉ entry.fields := by
+        intro member
+        exact outside (by simp [member])
+      have outsideTail : field ∉ entries.flatMap Entry.fields := by
+        intro member
+        exact outside (by simp [member])
+      change (entries.foldl Entry.install (Entry.install fields entry)) field = _
+      rw [induction _ outsideTail, Entry.install_frame entry fields field outsideHead]
+
+theorem installEntries_coordinate_congr (entries : List Entry)
+    (left right : FieldStore CredentialAuthorityState.schema.{0, 0})
+    (field : AuthorityField) (equal : left field = right field) :
+    (entries.foldl Entry.install left) field =
+      (entries.foldl Entry.install right) field := by
+  induction entries generalizing left right with
+  | nil => exact equal
+  | cons entry rest induction =>
+      apply induction
+      by_cases inside : field ∈ entry.fields
+      · rw [Entry.install_exact entry left field inside,
+          Entry.install_exact entry right field inside]
+      · rw [Entry.install_frame entry left field inside,
+          Entry.install_frame entry right field inside]
+        exact equal
+
+theorem installEntries_replace_frame (entries : List Entry)
+    (fields : FieldStore CredentialAuthorityState.schema.{0, 0})
+    (old replacement : Entry) (field : AuthorityField)
+    (outsideOld : field ∉ old.fields) (outsideNew : field ∉ replacement.fields) :
+    ((entries.map (Entry.replace old replacement)).foldl Entry.install fields) field =
+      (entries.foldl Entry.install fields) field := by
+  induction entries generalizing fields with
+  | nil => rfl
+  | cons entry rest induction =>
+      change
+        ((rest.map (Entry.replace old replacement)).foldl Entry.install
+          (Entry.install fields (Entry.replace old replacement entry))) field =
+        (rest.foldl Entry.install (Entry.install fields entry)) field
+      rw [induction]
+      apply installEntries_coordinate_congr
+      by_cases same : entry = old
+      · subst entry
+        simp only [Entry.replace, ↓reduceIte]
+        rw [Entry.install_frame replacement fields field outsideNew,
+          Entry.install_frame old fields field outsideOld]
+      · simp [Entry.replace, same]
+
+theorem installEntries_exact (entries : List Entry)
+    (valid : (entries.flatMap Entry.fields).Nodup)
+    (entry : Entry) (member : entry ∈ entries) (field : AuthorityField)
+    (inside : field ∈ entry.fields)
+    (fields : FieldStore CredentialAuthorityState.schema.{0, 0}) :
+    (entries.foldl Entry.install fields) field = Entry.install 0 entry field := by
+  induction entries generalizing fields with
+  | nil => simp at member
+  | cons head tail induction =>
+      have validAppend : (head.fields ++ tail.flatMap Entry.fields).Nodup := valid
+      have tailValid := (List.nodup_append.mp validAppend).2.1
+      rcases List.mem_cons.mp member with equal | inTail
+      · subst head
+        have outsideTail : field ∉ tail.flatMap Entry.fields := by
+          intro inTail
+          exact List.disjoint_of_nodup_append validAppend inside inTail
+        change (tail.foldl Entry.install (Entry.install fields entry)) field = _
+        rw [installEntries_frame tail _ field outsideTail]
+        exact Entry.install_exact entry fields field inside
+      · exact induction tailValid inTail (Entry.install fields head)
+
+/-- Every valid committed entry projects to its exact dependent authority
+value; no later page entry can replace a capability or epoch behind it. -/
+theorem Page.entry_projection_exact (page : Page) (valid : page.Valid)
+    (entry : Entry) (member : page.Contains entry) (field : AuthorityField)
+    (inside : field ∈ entry.fields) :
+    page.toCanonicalState.fields field = Entry.install 0 entry field :=
+  installEntries_exact page.entries valid entry member field inside 0
+
+/-- Absence is retained as absence, before an AuthState reader chooses a
+zero/false default. This theorem covers every authority coordinate. -/
+theorem Page.absent_projection (page : Page) (field : AuthorityField)
+    (outside : field ∉ page.fields) :
+    page.toCanonicalState.fields field = none :=
+  installEntries_frame page.entries 0 field outside
+
+/-- Exact replacement changes no authority coordinate outside the declared
+old/new field footprint, including fields that remain absent. -/
+theorem Page.replaceEntry_projection_frame {page post : Page} {old replacement : Entry}
+    (replaced : page.replaceEntry? old replacement = some post)
+    (field : AuthorityField) (outsideOld : field ∉ old.fields)
+    (outsideNew : field ∉ replacement.fields) :
+    post.toCanonicalState.fields field = page.toCanonicalState.fields field := by
+  rw [(Page.replaceEntry_exact replaced).2]
+  simp only [Page.toCanonicalState, Page.entries_mapEntries]
+  exact installEntries_replace_frame page.entries 0 old replacement field
+    outsideOld outsideNew
 
 def Page.policyEpochAt (page : Page) (policy : PolicyId) : Epoch :=
   (show Option Epoch from
@@ -279,12 +656,64 @@ def Page.policyAddressAt (page : Page) (policy : PolicyId)
   (show Option Digest from
     page.toCanonicalState.fields (.policyAddress policy epoch)).getD ⟨0⟩
 
+def Page.readCapability (page : Page) (kind : ResourceKind)
+    (id : CapabilityId) : Option (StoredCapability kind) :=
+  page.toCanonicalState.fields (.capability kind id)
+
+def Page.issuerEpochAt (page : Page) (issuer : IssuerId) : Epoch :=
+  (page.toCanonicalState.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
+
+def Page.subjectKeyEpochAt (page : Page) (subject : SubjectId) : Epoch :=
+  (page.toCanonicalState.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0)
+
+def Page.isNullified (page : Page) (id : Nat) : Bool :=
+  (page.toCanonicalState.fields (.nullifier id)).getD false
+
+theorem Page.capability_exact (page : Page) (valid : page.Valid)
+    (kind : ResourceKind) (stored : StoredCapability kind)
+    (member : page.Contains (.capability kind stored)) :
+    page.readCapability kind stored.head.id = some stored := by
+  have exactField := page.entry_projection_exact valid (.capability kind stored)
+    member (.capability kind stored.head.id) (by simp [Entry.fields])
+  simpa [Page.readCapability, Entry.install] using exactField
+
+theorem Page.issuerEpoch_exact (page : Page) (valid : page.Valid)
+    (issuer : IssuerId) (epoch : Epoch)
+    (member : page.Contains (.issuerEpoch issuer epoch)) :
+    page.issuerEpochAt issuer = epoch := by
+  have exactField := page.entry_projection_exact valid (.issuerEpoch issuer epoch)
+    member (.issuerEpoch issuer) (by simp [Entry.fields])
+  unfold Page.issuerEpochAt
+  rw [exactField]
+  simp [Entry.install]
+
+theorem Page.subjectKeyEpoch_exact (page : Page) (valid : page.Valid)
+    (subject : SubjectId) (epoch : Epoch)
+    (member : page.Contains (.subjectKeyEpoch subject epoch)) :
+    page.subjectKeyEpochAt subject = epoch := by
+  have exactField := page.entry_projection_exact valid (.subjectKeyEpoch subject epoch)
+    member (.subjectKeyEpoch subject) (by simp [Entry.fields])
+  unfold Page.subjectKeyEpochAt
+  rw [exactField]
+  simp [Entry.install]
+
+theorem Page.nullifier_exact (page : Page) (valid : page.Valid)
+    (nullifierId : Nat) (consumed : Bool)
+    (member : page.Contains (.nullifier nullifierId consumed)) :
+    page.isNullified nullifierId = consumed := by
+  have exactField := page.entry_projection_exact valid (.nullifier nullifierId consumed)
+    member (.nullifier nullifierId) (by simp [Entry.fields])
+  unfold Page.isNullified
+  rw [exactField]
+  simp [Entry.install]
+
 def Entry.revokedKey? : Entry -> Option RevocationKey
   | .revocation key true => some key
   | _ => none
 
 def Page.revoked (page : Page) : Finset RevocationKey :=
-  (page.entries.filterMap Entry.revokedKey?).toFinset
+  (page.entries.filterMap Entry.revokedKey?).toFinset.filter fun key =>
+    (show Option Bool from page.toCanonicalState.fields (.revoked key)).getD false
 
 /-- The page root is the committed policy and revocation root.  Every policy
 address and epoch is read back from the exact canonical sparse projection. -/
@@ -294,9 +723,9 @@ def Page.authState (page : Page) (root : Digest) : AuthState where
   policyRoot := root
   policyAddress := page.policyAddressAt
   revoked := page.revoked
-  issuerEpoch := fun _ => 0
+  issuerEpoch := page.issuerEpochAt
   policyEpoch := page.policyEpochAt
-  subjectKeyEpoch := fun _ => 0
+  subjectKeyEpoch := page.subjectKeyEpochAt
 
 @[simp] theorem Page.authState_policyRoot (page : Page) (root : Digest) :
     (page.authState root).policyRoot = root :=
@@ -332,6 +761,28 @@ def stateOfOption : Option Page -> LogicalState schema
 def pageAt (state : LogicalState schema) : Option Page :=
   state.fields ()
 
+/-- The physical schema owns this projection. Request callers select neither
+the authority field interpretation nor an independently supplied root. -/
+def projection : CredentialAuthorityState.StateProjection schema where
+  toCanonicalState logical :=
+    match pageAt logical with
+    | some page => page.toCanonicalState
+    | none =>
+        { fields := 0
+          resources := fun resource => nomatch resource }
+  revocationKeys logical :=
+    match pageAt logical with
+    | some page => page.revoked
+    | none => ∅
+
+@[simp] theorem projection_present (page : Page) :
+    projection.toCanonicalState (stateOfOption (some page)) =
+      page.toCanonicalState := rfl
+
+@[simp] theorem projection_absent :
+    projection.toCanonicalState (stateOfOption none) =
+      { fields := 0, resources := fun resource => nomatch resource } := rfl
+
 theorem state_ext (state : LogicalState schema) :
     state = stateOfOption (pageAt state) := by
   cases state with
@@ -363,28 +814,72 @@ def stateStream : StreamCodec (LogicalState schema) :=
   StreamCodec.xmap (StreamCodec.option pageStream) pageAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
-/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 1, capacity 4. -/
+/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 2, capacity 4.
+Version 2 adds all canonical authority fields and exact byte canonicality. -/
 def wireFrame : List UInt8 :=
   [76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 1, 4]
+    71, 69, 2, 4]
 
-def decodeState : List UInt8 -> Option (LogicalState schema)
+def decodeStateRaw : List UInt8 -> Option (LogicalState schema)
   | 76 :: 79 :: 79 :: 77 :: 47 :: 65 :: 85 :: 84 :: 72 :: 47 :: 80 :: 79 ::
-      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 1 :: 4 :: payload =>
+      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 2 :: 4 :: payload =>
       stateStream.toLawful.decode payload
   | _ => none
 
+def encodeState (state : LogicalState schema) : List UInt8 :=
+  wireFrame ++ stateStream.encode state
+
+@[simp] theorem decodeStateRaw_encode (state : LogicalState schema) :
+    decodeStateRaw (encodeState state) = some state := by
+  change stateStream.toLawful.decode (stateStream.encode state) = some state
+  exact stateStream.toLawful.decode_encode state
+
+/-- Only one exact spelling of every materialized authority state is admitted.
+This rejects unsorted/duplicate finite-set elements, natural/tag aliases, and
+trailing bytes; the raw parser alone is deliberately not an admission gate. -/
+def decodeState (bytes : List UInt8) : Option (LogicalState schema) := do
+  let state ← decodeStateRaw bytes
+  if encodeState state = bytes then some state else none
+
+@[simp] theorem decodeState_encode (state : LogicalState schema) :
+    decodeState (encodeState state) = some state := by
+  simp [decodeState]
+
+theorem decodeState_canonical {bytes : List UInt8}
+    {state : LogicalState schema} (accepted : decodeState bytes = some state) :
+    encodeState state = bytes := by
+  unfold decodeState at accepted
+  cases raw : decodeStateRaw bytes with
+  | none => simp [raw] at accepted
+  | some selected =>
+      simp only [raw, bind, Option.bind] at accepted
+      split at accepted
+      next canonical =>
+        cases Option.some.inj accepted
+        exact canonical
+      next => contradiction
+
+theorem decodeState_some_iff (bytes : List UInt8) (state : LogicalState schema) :
+    decodeState bytes = some state ↔ bytes = encodeState state := by
+  constructor
+  · intro accepted
+    exact (decodeState_canonical accepted).symm
+  · intro exactBytes
+    rw [exactBytes, decodeState_encode]
+
+theorem reject_noncanonical {bytes : List UInt8} {state : LogicalState schema}
+    (parsed : decodeStateRaw bytes = some state)
+    (different : encodeState state ≠ bytes) : decodeState bytes = none := by
+  simp [decodeState, parsed, different]
+
 def stateCodec : LawfulCodec (LogicalState schema) where
-  encode state := wireFrame ++ stateStream.encode state
+  encode := encodeState
   decode := decodeState
-  decode_encode := by
-    intro state
-    change stateStream.toLawful.decode (stateStream.encode state) = some state
-    exact stateStream.toLawful.decode_encode state
+  decode_encode := decodeState_encode
 
 def rootCustomization : List UInt8 :=
   [76, 79, 79, 77, 46, 65, 85, 84, 72, 46, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 46, 82, 79, 79, 84, 47, 118, 49]
+    71, 69, 46, 82, 79, 79, 84, 47, 118, 50]
 
 theorem wire_and_root_domains_distinct : wireFrame ≠ rootCustomization := by
   decide
@@ -395,6 +890,15 @@ def rootBytes (bytes : List UInt8) : Digest :=
 def materializer : CellState.Materializer schema Digest where
   codec := stateCodec
   rootBytes := rootBytes
+
+/-- The durable receiver hashes the exact canonical authority payload it
+received, under this materializer's own domain. No equality with another
+schema's root function is assumed. -/
+theorem decoded_root_exact {bytes : List UInt8} {state : LogicalState schema}
+    (accepted : stateCodec.decode bytes = some state) :
+    (CellState.materialize materializer state).root = rootBytes bytes := by
+  change rootBytes (encodeState state) = rootBytes bytes
+  exact congrArg rootBytes (decodeState_canonical accepted)
 
 @[simp] theorem encode_absent :
     stateCodec.encode (stateOfOption none) = wireFrame ++ [0] :=
@@ -408,14 +912,14 @@ def materializer : CellState.Materializer schema Digest where
 @[simp] theorem reject_wrong_version (payload : List UInt8) :
     decodeState
       ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89,
-        80, 65, 71, 69, 2, 4] ++ payload) = none := by
-  simp [decodeState]
+        80, 65, 71, 69, 1, 4] ++ payload) = none := by
+  simp [decodeState, decodeStateRaw]
 
 @[simp] theorem reject_wrong_capacity (payload : List UInt8) :
     decodeState
       ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89,
-        80, 65, 71, 69, 1, 5] ++ payload) = none := by
-  simp [decodeState]
+        80, 65, 71, 69, 2, 5] ++ payload) = none := by
+  simp [decodeState, decodeStateRaw]
 
 /-! ## Pair-scoped collision-resistance boundary -/
 
@@ -537,7 +1041,8 @@ def postCell : Materialized materializer :=
 @[simp] theorem post_revocation_member :
     exampleRevocation ∈ postPage.revoked := by
   simp [Page.revoked, Page.entries, postPage, Entry.revokedKey?,
-    activeRevocation, newPolicy]
+    activeRevocation, newPolicy, Page.toCanonicalState, Entry.install]
+  rfl
 
 @[simp] theorem committed_policy_root_exact :
     (postPage.authState postCell.root).policyRoot = postCell.root :=
@@ -618,7 +1123,17 @@ theorem fullPage_full : fullPage.Full := by
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.pageOfTuple_tuple' does not depend on any axioms -/
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.entry_projection_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Page.entry_projection_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.admitInsertMany_contains' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Page.admitInsertMany_contains
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.replaceEntry_projection_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Page.replaceEntry_projection_frame
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.decodeState_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeState_canonical
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.decoded_root_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decoded_root_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.pageOfTuple_tuple' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms pageOfTuple_tuple
 /-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.stateCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stateCodec
@@ -626,7 +1141,7 @@ theorem fullPage_full : fullPage.Full := by
 #guard_msgs (whitespace := lax) in #print axioms collision_of_root_eq_of_ne
 /-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.updatePatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms updatePatch_accepted
-/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.fullPage_overflow_rejected' does not depend on any axioms -/
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPageMaterializer.fullPage_overflow_rejected' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fullPage_overflow_rejected
 
 end Minidregg.Compiler.CredentialAuthorityPageMaterializer
