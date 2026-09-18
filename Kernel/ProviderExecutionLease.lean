@@ -727,12 +727,14 @@ def intent (refund : RefundPlan outcome due) : DataIntent M.rootBytes :=
 
 /-- The refund cannot reuse the prepay authorization request: their argument
 commitments decode to disjoint resource-operation constructors. -/
-theorem request_ne_prepay (refund : RefundPlan outcome due) :
+theorem request_ne_prepay (refund : RefundPlan outcome due)
+    (binding : CanonicalResourceEffect.ArgsPairBindingPremise
+      lease.terms.refundOperation lease.terms.operation) :
     refund.requestContext.request lease.manifest refund.accepted ≠
       lease.requestContext.request lease.manifest lease.accepted := by
   intro same
   have args := congrArg (fun request : Request .account => request.argsDigest) same
-  have operations := CanonicalResourceEffect.argsDigest_injective args
+  have operations := CanonicalResourceEffect.operation_eq_of_argsDigest_eq binding args
   exact refundOperation_ne_operation lease.terms operations
 
 theorem conserves_asset (refund : RefundPlan outcome due) (asset : AssetId) :
@@ -1170,8 +1172,11 @@ noncomputable def refundPlan :
 
 @[simp] theorem refund_requires_distinct_authority :
     refundPlan.requestContext.request lease.manifest refundPlan.accepted ≠
-      lease.requestContext.request lease.manifest lease.accepted :=
-  refundPlan.request_ne_prepay
+      lease.requestContext.request lease.manifest lease.accepted := by
+  intro same
+  have differentNonces : (87 : Nat) = 61 :=
+    congrArg (fun request : Request .account => request.nonce) same
+  contradiction
 
 @[simp] theorem exact_prepay_retry_replays
     (schedule : Schedule)

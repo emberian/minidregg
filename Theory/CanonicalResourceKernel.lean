@@ -28,7 +28,6 @@ layout may shard balances and leases into sparse fields while preserving the
 same operation normalization and conservation law.
 -/
 import Theory.CellState
-import Theory.MaterializerCardinality
 import Theory.TypedAuthorization
 
 namespace Minidregg.Theory.CanonicalResourceKernel
@@ -241,34 +240,6 @@ local instance schemaResourceDecidableEq : DecidableEq schema.Resource := by
   change DecidableEq Empty
   infer_instance
 
-local instance schemaFieldCountable : Countable schema.Field := by
-  change Countable Field
-  infer_instance
-
-local instance schemaFieldTypeCountable
-    (field : schema.Field) : Countable (schema.FieldType field) := by
-  cases field
-  change Countable Book
-  infer_instance
-
-local instance schemaLogicalStateCountable :
-    Countable (CellState.LogicalState schema) :=
-  MaterializerCardinality.sparse_schema_state_countable
-    (S := schema) (by change IsEmpty Empty; infer_instance)
-
-local instance schemaLogicalStateNonempty :
-    Nonempty (CellState.LogicalState schema) :=
-  ⟨{ fields := 0, resources := fun resource => nomatch resource }⟩
-
-/-- The typed schema is genuinely materializable.  The unary codec inherited
-from `MaterializerCardinality` is an existence witness, not a wire-format
-recommendation; production must replace it with an audited canonical codec. -/
-noncomputable def materializer : CellState.Materializer schema Digest where
-  codec := Classical.choice
-    (MaterializerCardinality.nonempty_lawfulCodec_of_countable
-      (alpha := CellState.LogicalState schema))
-  rootBytes := fun bytes => ⟨bytes.length⟩
-
 /-- Absence of the book field denotes the empty book at the semantic layer. -/
 def logicalBook (logical : CellState.LogicalState schema) : Book :=
   (logical.fields.read .book).getD Book.empty
@@ -356,6 +327,234 @@ theorem Accepted.conserves
   rw [accepted.post_logicalBook]
   exact operation.apply_conserves (logicalBook pre.logical)
     accepted.admission.sourcePresent accepted.admission.destinationPresent asset
+
+/-! ## One atomic account-registration and payment batch
+
+Registration is a semantic account-table update, not capability creation. Its
+authority is supplied by the accepted birth/factory request in the kernel
+adapter. Payment authority is required separately for every posting source.
+
+The book can contain nonzero balance coordinates outside `accounts`; ignoring
+those coordinates during registration would silently increase the conserved
+total. The finite support check below therefore precedes every insertion.
+-/
+
+def Book.registerAccount (book : Book) (account : AccountId) : Book :=
+  { book with accounts := insert account book.accounts }
+
+/-- Freshness and absence of every hidden nonzero balance are both checked. -/
+def RegistrationAdmission (book : Book) (account : AccountId) : Prop :=
+  account ∉ book.accounts ∧
+    ∀ coordinate ∈ book.balances.support, coordinate.1 ≠ account
+
+instance (book : Book) (account : AccountId) :
+    Decidable (RegistrationAdmission book account) := by
+  unfold RegistrationAdmission
+  infer_instance
+
+theorem RegistrationAdmission.balance_zero
+    {book : Book} {account : AccountId}
+    (admitted : RegistrationAdmission book account) (asset : AssetId) :
+    book.balance account asset = 0 := by
+  by_contra nonzero
+  exact admitted.2 (account, asset)
+    ((DFinsupp.mem_support_toFun _ _).mpr nonzero) rfl
+
+theorem Book.registerAccount_conserves
+    (book : Book) (account : AccountId)
+    (admitted : RegistrationAdmission book account) (asset : AssetId) :
+    (book.registerAccount account).totalAsset asset = book.totalAsset asset := by
+  change (∑ a ∈ insert account book.accounts, book.balance a asset) =
+    ∑ a ∈ book.accounts, book.balance a asset
+  rw [Finset.sum_insert admitted.1, admitted.balance_zero asset]
+  simp
+
+def registerAccounts (book : Book) : List AccountId → Book
+  | [] => book
+  | account :: rest => registerAccounts (book.registerAccount account) rest
+
+def RegistrationsAdmitted (book : Book) : List AccountId → Prop
+  | [] => True
+  | account :: rest => RegistrationAdmission book account ∧
+      RegistrationsAdmitted (book.registerAccount account) rest
+
+instance registrationsDecidable (book : Book) (accounts : List AccountId) :
+    Decidable (RegistrationsAdmitted book accounts) := by
+  induction accounts generalizing book with
+  | nil => exact instDecidableTrue
+  | cons account rest ih =>
+    unfold RegistrationsAdmitted
+    exact instDecidableAnd
+
+private def admissionConditions (book : Book) (operation : Operation) : Prop :=
+  operation.posting.source ∈ book.accounts ∧
+    operation.posting.destination ∈ book.accounts ∧
+    (operation.isIssuerMint = true ∨
+      Int.ofNat operation.posting.amount ≤
+        book.balance operation.posting.source operation.posting.asset) ∧
+    (match operation with
+     | .lease leaseId _ _ _ _ epochs _ => 0 < epochs ∧ book.leases leaseId = none
+     | _ => True)
+
+instance admissionDecidable (book : Book) (operation : Operation) :
+    Decidable (Admission book operation) := by
+  haveI : Decidable (admissionConditions book operation) := by
+    cases operation <;> unfold admissionConditions <;> infer_instance
+  apply decidable_of_iff (admissionConditions book operation)
+  cases operation <;>
+    exact ⟨fun h => ⟨h.1, h.2.1, h.2.2.1, h.2.2.2⟩,
+      fun h => ⟨h.sourcePresent, h.destinationPresent, h.sourceSolvent,
+        h.leaseWellFormed⟩⟩
+
+def applyOperations (book : Book) : List Operation → Book
+  | [] => book
+  | operation :: rest => applyOperations (operation.apply book) rest
+
+/-- Solvency is checked on the intermediate book. Two individually affordable
+debits are not accepted if their ordered sum overdraws the shared source. -/
+def OperationsAdmitted (book : Book) : List Operation → Prop
+  | [] => True
+  | operation :: rest => Admission book operation ∧
+      OperationsAdmitted (operation.apply book) rest
+
+instance operationsDecidable (book : Book) (operations : List Operation) :
+    Decidable (OperationsAdmitted book operations) := by
+  induction operations generalizing book with
+  | nil => exact instDecidableTrue
+  | cons operation rest ih =>
+    unfold OperationsAdmitted
+    exact instDecidableAnd
+
+/-- One book-cell patch, regardless of the number of registrations/payments. -/
+structure Batch where
+  registrations : List AccountId
+  operations : List Operation
+  deriving DecidableEq, Repr
+
+def Batch.apply (batch : Batch) (book : Book) : Book :=
+  applyOperations (registerAccounts book batch.registrations) batch.operations
+
+def Batch.Admission (book : Book) (batch : Batch) : Prop :=
+  RegistrationsAdmitted book batch.registrations ∧
+    OperationsAdmitted (registerAccounts book batch.registrations) batch.operations
+
+instance (book : Book) (batch : Batch) : Decidable (batch.Admission book) := by
+  unfold Batch.Admission
+  infer_instance
+
+/-- Statement first: conservation concerns the actual resulting book. It is
+not a caller's claimed resource delta or a count of balanced declarations. -/
+def Batch.ConservationStatement : Prop :=
+  ∀ (book : Book) (batch : Batch), batch.Admission book →
+    ∀ asset, (batch.apply book).totalAsset asset = book.totalAsset asset
+
+theorem registerAccounts_conserves
+    (book : Book) (accounts : List AccountId)
+    (admitted : RegistrationsAdmitted book accounts) (asset : AssetId) :
+    (registerAccounts book accounts).totalAsset asset = book.totalAsset asset := by
+  induction accounts generalizing book with
+  | nil => rfl
+  | cons account rest ih =>
+    exact (ih _ admitted.2).trans (book.registerAccount_conserves account admitted.1 asset)
+
+theorem applyOperations_conserves
+    (book : Book) (operations : List Operation)
+    (admitted : OperationsAdmitted book operations) (asset : AssetId) :
+    (applyOperations book operations).totalAsset asset = book.totalAsset asset := by
+  induction operations generalizing book with
+  | nil => rfl
+  | cons operation rest ih =>
+    exact (ih _ admitted.2).trans (operation.apply_conserves book
+      admitted.1.sourcePresent admitted.1.destinationPresent asset)
+
+theorem operationsAdmitted_append (book : Book) (priorOps suffix : List Operation) :
+    OperationsAdmitted book (priorOps ++ suffix) ↔
+      OperationsAdmitted book priorOps ∧
+        OperationsAdmitted (applyOperations book priorOps) suffix := by
+  induction priorOps generalizing book with
+  | nil => simp [OperationsAdmitted, applyOperations]
+  | cons operation rest ih =>
+    simp [OperationsAdmitted, applyOperations, ih, and_assoc]
+
+/-- Every debit reads the exact book after all earlier operations, not the
+initial balance reused for each leg. Mint's sole exception is the issuer well
+selected by the operation constructor. -/
+theorem Batch.source_solvent_at (book : Book) (batch : Batch)
+    (admitted : batch.Admission book) (priorOps suffix : List Operation)
+    (operation : Operation) (position : batch.operations = priorOps ++ operation :: suffix)
+    (notMint : operation.isIssuerMint ≠ true) :
+    Int.ofNat operation.posting.amount ≤
+      (applyOperations (registerAccounts book batch.registrations) priorOps).balance
+        operation.posting.source operation.posting.asset := by
+  have ordered := admitted.2
+  rw [position, operationsAdmitted_append] at ordered
+  exact ordered.2.1.sourceSolvent.resolve_left notMint
+
+theorem Batch.conservation : Batch.ConservationStatement := by
+  intro book batch admitted asset
+  exact (applyOperations_conserves _ _ admitted.2 asset).trans
+    (registerAccounts_conserves _ _ admitted.1 asset)
+
+/-- This is the executable fail-closed batch evaluator. A refused batch emits
+no post-book. Intermediate registration/payment books are never exposed. -/
+def Batch.run (batch : Batch) (book : Book) : Option Book :=
+  if batch.Admission book then some (batch.apply book) else none
+
+theorem Batch.run_accepts_iff (batch : Batch) (book post : Book) :
+    batch.run book = some post ↔ batch.Admission book ∧ post = batch.apply book := by
+  unfold Batch.run
+  split_ifs with admitted <;> simp [admitted, eq_comm]
+
+def Batch.patch {M : CellState.Materializer schema Digest}
+    (batch : Batch) (pre : CellState.Materialized M) : CellState.Patch schema Digest where
+  expectedPreRoot := pre.root
+  fieldFootprint := {.book}
+  resourceFootprint := ∅
+  fieldWrites := [{ field := .book, value := some (batch.apply (logicalBook pre.logical)) }]
+  resourceWrites := []
+
+theorem Batch.validated_nonempty {M : CellState.Materializer schema Digest}
+    (batch : Batch) (pre : CellState.Materialized M) :
+    Nonempty (CellState.ValidatedPatch M pre (batch.patch pre)) := by
+  have accepted : ∃ validated : CellState.ValidatedPatch M pre (batch.patch pre),
+      CellState.validate M pre (batch.patch pre) = .accepted validated := by
+    unfold CellState.validate
+    rw [dif_pos (show (batch.patch pre).expectedPreRoot = pre.root from rfl)]
+    rw [dif_pos (show (batch.patch pre).fieldFootprint = (batch.patch pre).namedFields by
+      simp [Batch.patch, CellState.Patch.namedFields])]
+    rw [dif_pos (show (batch.patch pre).resourceFootprint = (batch.patch pre).namedResources by
+      simp [Batch.patch, CellState.Patch.namedResources])]
+    exact ⟨_, rfl⟩
+  exact ⟨accepted.choose⟩
+
+structure AcceptedBatch {M : CellState.Materializer schema Digest}
+    (pre : CellState.Materialized M) (batch : Batch) : Prop where
+  admission : batch.Admission (logicalBook pre.logical)
+  validated : CellState.ValidatedPatch M pre (batch.patch pre)
+
+def AcceptedBatch.ofAdmission {M : CellState.Materializer schema Digest}
+    {pre : CellState.Materialized M} {batch : Batch}
+    (admission : batch.Admission (logicalBook pre.logical)) : AcceptedBatch pre batch :=
+  ⟨admission, Classical.choice (batch.validated_nonempty pre)⟩
+
+def AcceptedBatch.post {M : CellState.Materializer schema Digest}
+    {pre : CellState.Materialized M} {batch : Batch}
+    (accepted : AcceptedBatch pre batch) : CellState.Materialized M := accepted.validated.apply
+
+@[simp] theorem AcceptedBatch.post_logicalBook {M : CellState.Materializer schema Digest}
+    {pre : CellState.Materialized M} {batch : Batch} (accepted : AcceptedBatch pre batch) :
+    logicalBook accepted.post.logical = batch.apply (logicalBook pre.logical) := by
+  simp [AcceptedBatch.post, logicalBook, CellState.ValidatedPatch.apply,
+    CellState.materialize, Batch.patch, CellState.applyFieldWrites,
+    CellState.applyResourceWrites, CellState.FieldStore.read, CellState.FieldStore.assign]
+
+theorem AcceptedBatch.conserves {M : CellState.Materializer schema Digest}
+    {pre : CellState.Materialized M} {batch : Batch}
+    (accepted : AcceptedBatch pre batch) (asset : AssetId) :
+    (logicalBook accepted.post.logical).totalAsset asset =
+      (logicalBook pre.logical).totalAsset asset := by
+  rw [accepted.post_logicalBook]
+  exact Batch.conservation _ _ accepted.admission asset
 
 /-! ## Positive poles: the five constructors do real work -/
 
@@ -456,14 +655,6 @@ def witnessLogical : CellState.LogicalState schema where
   fields := (0 : CellState.FieldStore schema).write .book witnessBook
   resources := fun resource => nomatch resource
 
-noncomputable def witnessCell : CellState.Materialized materializer :=
-  CellState.materialize materializer witnessLogical
-
-@[simp] theorem witnessCell_logicalBook :
-    logicalBook witnessCell.logical = witnessBook := by
-  simp [witnessCell, witnessLogical, logicalBook, CellState.materialize,
-    CellState.FieldStore.read]
-
 def witnessMintAdmission :
     Admission witnessBook (.mint 0 1 2) where
   sourcePresent := by decide
@@ -471,9 +662,57 @@ def witnessMintAdmission :
   sourceSolvent := Or.inl rfl
   leaseWellFormed := trivial
 
-noncomputable def witnessMintAccepted :
-    Accepted witnessCell (.mint 0 1 2) :=
-  Accepted.ofAdmission (by simpa using witnessMintAdmission)
+/-- An inhabited creation/payment batch: account 3 is opened at zero, a real
+fee is paid, then the same payer funds the new account. -/
+def witnessBirthBatch : Batch where
+  registrations := [3]
+  operations := [.fee 1 2 0 1, .transfer 1 3 0 2]
+
+theorem witnessBirthBatch_admitted : witnessBirthBatch.Admission witnessBook := by decide
+
+theorem witnessBirthBatch_payer :
+    (witnessBirthBatch.apply witnessBook).balance 1 0 = 2 := by decide
+
+theorem witnessBirthBatch_collector :
+    (witnessBirthBatch.apply witnessBook).balance 2 0 = 4 := by decide
+
+theorem witnessBirthBatch_funding :
+    (witnessBirthBatch.apply witnessBook).balance 3 0 = 2 := by decide
+
+theorem witnessBirthBatch_conserves (asset : AssetId) :
+    (witnessBirthBatch.apply witnessBook).totalAsset asset = witnessBook.totalAsset asset :=
+  Batch.conservation _ _ witnessBirthBatch_admitted asset
+
+/-- Both payments fit the initial balance separately, but not in sequence. -/
+def witnessOverdrawBatch : Batch where
+  registrations := [3]
+  operations := [.fee 1 2 0 4, .transfer 1 3 0 2]
+
+theorem witnessOverdrawBatch_rejected : ¬ witnessOverdrawBatch.Admission witnessBook := by decide
+
+theorem witnessOverdrawBatch_no_post : witnessOverdrawBatch.run witnessBook = none := by decide
+
+def witnessHiddenBook : Book where
+  accounts := ∅
+  balances := DFinsupp.single (9, 0) 7
+  leaseRecords := 0
+
+theorem registration_rejects_hidden_balance {book : Book} {account : AccountId}
+    {asset : AssetId} (hidden : book.balance account asset ≠ 0) :
+    ¬ RegistrationAdmission book account :=
+  fun admitted => hidden (admitted.balance_zero asset)
+
+theorem witnessHiddenBook_registration_rejected :
+    ¬ RegistrationAdmission witnessHiddenBook 9 := by decide
+
+theorem witnessHiddenBook_unguarded_registration_changes_total :
+    (witnessHiddenBook.registerAccount 9).totalAsset 0 ≠
+      witnessHiddenBook.totalAsset 0 := by decide
+
+theorem duplicate_registration_rejected (book : Book) (account : AccountId) :
+    ¬ RegistrationsAdmitted book [account, account] := by
+  intro admitted
+  exact admitted.2.1.1 (by simp [Book.registerAccount])
 
 example : witnessBook.totalAsset 0 = 0 := by
   simp only [Book.totalAsset, witnessBook]
@@ -488,11 +727,6 @@ example :
 example :
     ((Operation.mint 0 1 2).apply witnessBook).totalAsset 0 = 0 := by
   exact Operation.apply_conserves _ _ (by decide) (by decide) 0
-
-example :
-    (logicalBook witnessMintAccepted.post.logical).totalAsset 0 =
-      (logicalBook witnessCell.logical).totalAsset 0 :=
-  witnessMintAccepted.conserves 0
 
 example :
     (witnessBook.creditOnly 1 0 2).totalAsset 0 ≠ witnessBook.totalAsset 0 :=

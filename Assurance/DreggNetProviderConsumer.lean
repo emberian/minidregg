@@ -814,8 +814,11 @@ noncomputable def refundPlan :
 
 @[simp] theorem refund_is_fresh_authority :
     refundPlan.requestContext.request lease.manifest refundPlan.accepted ≠
-      lease.requestContext.request lease.manifest lease.accepted :=
-  refundPlan.request_ne_prepay
+      lease.requestContext.request lease.manifest lease.accepted := by
+  intro same
+  have differentNonces : (461 : Nat) = 443 :=
+    congrArg (fun request : Request .account => request.nonce) same
+  contradiction
 
 @[simp] theorem refund_retry_is_exact_replay
     (schedule : Schedule)
