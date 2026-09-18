@@ -9,12 +9,13 @@ that cell.  The unique joint post is obtained by validating and applying the
 ordered concatenation of those effects' typed patches.
 
 Resource replacement packages do not have a schema-independent additive
-meaning.  Consequently conservation is parameterized by an explicit typed
-`ResourceLaw`; it is checked over the exact per-incidence accepted post-cells.
-Resource footprints must remain disjoint.  Field writes may either be
-disjoint or use one declared later-wins order.  This avoids pretending that
-two independently pre-authorized authority-package replacements can be
-sequentially composed.
+meaning. Consequently conservation is parameterized by an explicit typed
+`ResourceLaw` over actual logical pre/post states and validated footprints.
+Both the incidence aggregate and its equality to the actual joint-state delta
+are checked. Each accepted field outcome must survive in that joint state.
+Canonical order therefore allows agreeing overlaps, not unchecked overwrites
+of independently accepted outcomes. Sequentially dependent mutations belong
+inside one source-admitted ordered batch.
 -/
 import Kernel.DeclaredHyperedge
 import Theory.AcceptedCellEffect
@@ -104,6 +105,8 @@ end Leg
 
 inductive FieldCompositionMode
   | disjoint
+  /-- A fixed patch order whose accepted field outcomes must all survive.
+  `Commit.fieldsPreserved` is mandatory even when structural overlap is allowed. -/
   | canonical
   deriving DecidableEq, Repr
 
@@ -111,18 +114,29 @@ structure CompositionPlan (Incidence : Type z) where
   fieldMode : FieldCompositionMode
   order : List Incidence
 
-/-- A resource law gives typed meaning to an accepted semantic leg.  Its
-coordinate type is independent of the physical cell layout: a balance may
-live in a typed resource package, an account field, or mode evidence.  The
-law receives the complete accepted leg and therefore cannot accidentally be
-applied to a different request, pre-cell, family, or outcome. -/
+/-- A resource law measures the actual logical-state change over the exact
+validated footprints. The same source-owned primitive is used for each leg
+and for the joint post; there is no independently supplied aggregate meaning.
+Its explicit evidence universe preserves the existing heterogeneous-leg API. -/
 structure ResourceLaw
     (S : CellState.Schema.{u, v, w, x})
     [DecidableEq S.Field] [DecidableEq S.Resource]
     (M : CellState.Materializer S Digest) (portal : Portal)
-    (Coordinate : Type y) (Balance : Type b) [AddCommMonoid Balance] where
-  delta : {authState : AuthState} -> {pre : CellState.Materialized M} ->
-    Leg.{u, v, w, x, y, z} portal authState pre -> Coordinate -> Balance
+    (Coordinate : Type y) (Balance : Type b) [AddCommMonoid Balance] :
+    Type (max u v w x y z b) where
+  stateDelta : CellState.LogicalState S -> CellState.LogicalState S ->
+    Finset S.Field -> Finset S.Resource -> Coordinate -> Balance
+
+def ResourceLaw.delta
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest} {portal : Portal}
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    {authState : AuthState} {pre : CellState.Materialized M}
+    (leg : Leg.{u, v, w, x, y, z} portal authState pre) : Coordinate -> Balance :=
+  law.stateDelta pre.logical leg.post.logical
+    leg.patch.fieldFootprint leg.patch.resourceFootprint
 
 /-- One flat family of accepted incidences.  All legs are definitionally
 indexed by the same canonical pre-cell and by the authorization projection of
@@ -226,6 +240,47 @@ def aggregateDelta
   fun coordinate => Finset.univ.sum fun incidence =>
     law.delta (declaration.legs incidence) coordinate
 
+/-- Every incidence's final value on each field it owns must survive the
+actual joint installation. Agreeing overlaps satisfy this condition; lost
+fees, balance credits, and non-monetary field effects do not. -/
+def FieldOutcomesPreserved
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (post : CellState.Materialized M) : Prop :=
+  forall incidence field, field ∈ (declaration.legPatch incidence).fieldFootprint ->
+    post.logical.fields field = (declaration.legs incidence).post.logical.fields field
+
+def jointDelta
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (post : CellState.Materialized M) : Coordinate -> Balance :=
+  law.stateDelta declaration.pre.logical post.logical
+    declaration.jointPatch.fieldFootprint declaration.jointPatch.resourceFootprint
+
+/-- The concatenated patch has its exact derived root and named footprints.
+Semantic composition and conservation remain separate mandatory commit
+conditions; structural patch validation alone does not admit a joint turn. -/
+theorem jointPatch_validated
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
+    Nonempty (CellState.ValidatedPatch M declaration.pre declaration.jointPatch) := by
+  have witness : ∃ validated :
+      CellState.ValidatedPatch M declaration.pre declaration.jointPatch,
+      CellState.validate M declaration.pre declaration.jointPatch =
+        CellState.ValidationOutcome.accepted validated := by
+    unfold CellState.validate
+    rw [dif_pos (show declaration.jointPatch.expectedPreRoot = declaration.pre.root from rfl)]
+    rw [dif_pos (show declaration.jointPatch.fieldFootprint =
+      declaration.jointPatch.namedFields from rfl)]
+    rw [dif_pos (show declaration.jointPatch.resourceFootprint =
+      declaration.jointPatch.namedResources from rfl)]
+    exact ⟨_, rfl⟩
+  exact ⟨witness.choose⟩
+
+noncomputable def jointValidated
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) :
+    CellState.ValidatedPatch M declaration.pre declaration.jointPatch :=
+  Classical.choice declaration.jointPatch_validated
+
 end Declaration
 
 /-! ## Proof-relevant joint admission and one prepared post -/
@@ -248,6 +303,9 @@ structure Commit
   shape : declaration.ShapeValid
   validated : CellState.ValidatedPatch M declaration.pre declaration.jointPatch
   apexExact : validated.apply.root = declaration.apex
+  fieldsPreserved : declaration.FieldOutcomesPreserved validated.apply
+  jointDeltaExact : declaration.jointDelta law validated.apply =
+    declaration.aggregateDelta law
   aggregateBalanced : declaration.aggregateDelta law = 0
 
 namespace Commit
@@ -283,6 +341,19 @@ def prepared (commit : Commit law declaration) :
     commit.prepared.delta.resourceFootprint =
       declaration.jointPatch.resourceFootprint :=
   rfl
+
+/-- Conservation concerns the actual installed joint post, even for a
+nonlinear resource law or an allowed agreeing field overlap. -/
+theorem joint_resources_exact (commit : Commit law declaration) :
+    declaration.jointDelta law commit.prepared.post = 0 :=
+  commit.jointDeltaExact.trans commit.aggregateBalanced
+
+theorem leg_field_outcome_preserved (commit : Commit law declaration)
+    (incidence : Incidence) (field : S.Field)
+    (present : field ∈ (declaration.legPatch incidence).fieldFootprint) :
+    commit.prepared.post.logical.fields field =
+      (declaration.legs incidence).post.logical.fields field :=
+  commit.fieldsPreserved incidence field present
 
 theorem field_frame (commit : Commit law declaration)
     (field : S.Field) (outside : field ∉ declaration.jointPatch.fieldFootprint) :
@@ -415,6 +486,169 @@ theorem no_commit_of_nonzero_resource
     (nonzero : declaration.aggregateDelta law coordinate ≠ 0) :
     IsEmpty (Commit law declaration) :=
   ⟨fun commit => nonzero (congrFun commit.aggregateBalanced coordinate)⟩
+
+/-- Local zero-sum equations cannot admit a different actual joint delta. -/
+theorem no_commit_of_nonzero_joint_resource
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (coordinate : Coordinate)
+    (nonzero : forall validated :
+      CellState.ValidatedPatch M declaration.pre declaration.jointPatch,
+      declaration.jointDelta law validated.apply coordinate ≠ 0) :
+    IsEmpty (Commit law declaration) :=
+  ⟨fun commit => nonzero commit.validated
+    (congrFun commit.joint_resources_exact coordinate)⟩
+
+/-- Even a resource-neutral overwrite is refused when it drops an accepted
+field outcome, such as a prior fee in a field-stored resource book. -/
+theorem no_commit_of_lost_field
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (incidence : Incidence) (field : S.Field)
+    (present : field ∈ (declaration.legPatch incidence).fieldFootprint)
+    (lost : forall validated :
+      CellState.ValidatedPatch M declaration.pre declaration.jointPatch,
+      validated.apply.logical.fields field ≠
+        (declaration.legs incidence).post.logical.fields field) :
+    IsEmpty (Commit law declaration) :=
+  ⟨fun commit => lost commit.validated (commit.fieldsPreserved incidence field present)⟩
+
+/-! ## Resource-package outcomes survive disjoint composition -/
+
+namespace ResourceWriteComposition
+
+variable {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Resource]
+
+theorem applyResourceWrites_append
+    (left right : List (CellState.ResourceWrite S))
+    (resources : (resource : S.Resource) -> CellState.ResourceCell S resource) :
+    CellState.applyResourceWrites (left ++ right) resources =
+      CellState.applyResourceWrites right
+        (CellState.applyResourceWrites left resources) := by
+  induction left generalizing resources with
+  | nil => rfl
+  | cons write rest ih =>
+      exact ih _
+
+/-- The final read at one resource depends only on its initial read and the
+fixed ordered writes, even though complete resource packages are dependent. -/
+theorem applyResourceWrites_read_congr
+    (writes : List (CellState.ResourceWrite S))
+    (left right : (resource : S.Resource) -> CellState.ResourceCell S resource)
+    (resource : S.Resource) (agree : left resource = right resource) :
+    CellState.applyResourceWrites writes left resource =
+      CellState.applyResourceWrites writes right resource := by
+  induction writes generalizing left right with
+  | nil => exact agree
+  | cons write rest ih =>
+      apply ih
+      by_cases same : resource = write.resource
+      · subst resource
+        simp only [Function.update_self]
+      · simpa only [Function.update_of_ne same] using agree
+
+theorem applyResourceWrites_flatMap_frame
+    {Index : Type y} (writes : Index -> List (CellState.ResourceWrite S))
+    (order : List Index)
+    (resources : (resource : S.Resource) -> CellState.ResourceCell S resource)
+    (resource : S.Resource)
+    (outside : ∀ index ∈ order,
+      resource ∉ ((writes index).map CellState.ResourceWrite.resource).toFinset) :
+    CellState.applyResourceWrites (order.flatMap writes) resources resource =
+      resources resource := by
+  apply CellState.applyResourceWrites_frame
+  intro present
+  rcases List.mem_map.mp (List.mem_toFinset.mp present) with
+    ⟨write, writePresent, writeResource⟩
+  rcases List.mem_flatMap.mp writePresent with ⟨index, indexPresent, writePresent⟩
+  exact outside index indexPresent
+    (List.mem_toFinset.mpr (List.mem_map.mpr ⟨write, writePresent, writeResource⟩))
+
+/-- Concatenating pairwise resource-disjoint legs preserves the full local
+outcome at a resource of its unique owning incidence. -/
+theorem applyResourceWrites_flatMap_owner
+    {Index : Type y} [DecidableEq Index]
+    (writes : Index -> List (CellState.ResourceWrite S))
+    (order : List Index) (owner : Index) (resource : S.Resource) :
+    order.Nodup -> owner ∈ order ->
+    (∀ other ∈ order, other ≠ owner ->
+      resource ∉ ((writes other).map CellState.ResourceWrite.resource).toFinset) ->
+    forall resources : (resource : S.Resource) -> CellState.ResourceCell S resource,
+      CellState.applyResourceWrites (order.flatMap writes) resources resource =
+        CellState.applyResourceWrites (writes owner) resources resource := by
+  induction order with
+  | nil =>
+      intro _ ownerPresent
+      cases ownerPresent
+  | cons first rest ih =>
+      intro nodup ownerPresent outside resources
+      have nodupRest := List.nodup_cons.mp nodup
+      rw [List.flatMap_cons, applyResourceWrites_append]
+      by_cases same : first = owner
+      · subst first
+        apply applyResourceWrites_flatMap_frame
+        intro other otherPresent
+        apply outside other (List.mem_cons_of_mem owner otherPresent)
+        intro same
+        subst other
+        exact nodupRest.1 otherPresent
+      · have ownerRest : owner ∈ rest := by
+          rcases List.mem_cons.mp ownerPresent with equal | present
+          · exact False.elim (same equal.symm)
+          · exact present
+        have outsideRest : ∀ other ∈ rest, other ≠ owner ->
+            resource ∉ ((writes other).map CellState.ResourceWrite.resource).toFinset := by
+          intro other present different
+          exact outside other (List.mem_cons_of_mem first present) different
+        rw [ih nodupRest.2 ownerRest outsideRest]
+        apply applyResourceWrites_read_congr
+        exact CellState.applyResourceWrites_frame (writes first) resources resource
+          (outside first List.mem_cons_self same)
+
+end ResourceWriteComposition
+
+namespace Commit
+
+variable
+    {S : CellState.Schema.{u, v, w, x}}
+    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : CellState.Materializer S Digest}
+    {portal : Portal} {projection : AuthorizationProjection S}
+    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
+
+/-- Resource disjointness forces every accepted authority/evidence package to
+survive in the actual joint post. No additional admission premise is needed. -/
+theorem leg_resource_outcome_preserved (commit : Commit law declaration)
+    (incidence : Incidence) (resource : S.Resource)
+    (present : resource ∈ (declaration.legPatch incidence).resourceFootprint) :
+    commit.prepared.post.logical.resources resource =
+      (declaration.legs incidence).post.logical.resources resource := by
+  change CellState.applyResourceWrites
+      (declaration.composition.order.flatMap fun other =>
+        (declaration.legPatch other).resourceWrites)
+      declaration.pre.logical.resources resource =
+    CellState.applyResourceWrites (declaration.legPatch incidence).resourceWrites
+      declaration.pre.logical.resources resource
+  refine ResourceWriteComposition.applyResourceWrites_flatMap_owner
+    (fun other => (declaration.legPatch other).resourceWrites)
+    declaration.composition.order incidence resource
+    commit.shape.orderComplete.1 (commit.shape.orderComplete.2 incidence)
+    ?_ declaration.pre.logical.resources
+  intro other _ different
+  have footprintExact :
+      (declaration.legPatch other).resourceFootprint =
+        ((declaration.legPatch other).resourceWrites.map
+          CellState.ResourceWrite.resource).toFinset :=
+    (declaration.legs other).accepted.validated.resources_exact
+  rw [← footprintExact]
+  exact (Finset.disjoint_left.mp
+    (commit.shape.resourcesDisjoint incidence other (Ne.symm different))) present
+
+end Commit
+
 
 /-! ## Exact legacy migration boundary
 
@@ -551,10 +785,20 @@ end LegacyAdapter
 #guard_msgs (whitespace := lax) in #print axioms Commit.prepared_postRoot
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_resourceFootprint_subset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Commit.leg_resourceFootprint_subset
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_resource_outcome_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.leg_resource_outcome_preserved
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.joint_resources_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.joint_resources_exact
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_field_outcome_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.leg_field_outcome_preserved
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_nonzero_resource' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_resource
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_nonzero_joint_resource' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_joint_resource
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_lost_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_lost_field
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.LegacyAdapter.committed_post_matches_legacy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LegacyAdapter.committed_post_matches_legacy
 

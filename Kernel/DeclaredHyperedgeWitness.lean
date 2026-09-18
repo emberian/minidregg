@@ -356,6 +356,8 @@ def debitFamily :
     SemanticEffectFamily DeclaredTurn.effectSchema effectMaterializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
+  pre := preCell
+  request := fun _ => ⟨.account, (declaration.legs false).request⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
@@ -371,6 +373,8 @@ def creditFamily :
     SemanticEffectFamily DeclaredTurn.effectSchema effectMaterializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
+  pre := preCell
+  request := fun _ => ⟨.account, (declaration.legs true).request⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
@@ -438,6 +442,8 @@ noncomputable def debitAccepted :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       debitFamily (declaration.legs false).request preCell () () where
   authorization := debitAuthorization
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := rfl
   modeEvidence := ()
@@ -449,6 +455,8 @@ noncomputable def creditAccepted :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       creditFamily (declaration.legs true).request preCell () () where
   authorization := creditAuthorization
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := rfl
   modeEvidence := ()
@@ -492,7 +500,7 @@ coordinate.  Both kernels check it is identically zero. -/
 def typedLaw :
     TypedCellHyperedge.ResourceLaw DeclaredTurn.effectSchema effectMaterializer
       permissivePortal Digest Int where
-  delta := fun _ _ => 0
+  stateDelta := fun _ _ _ _ _ => 0
 
 theorem typedShape : typedDeclaration.ShapeValid where
   orderComplete := ⟨by decide, fun incidence => by cases incidence <;> decide⟩
@@ -540,9 +548,27 @@ noncomputable def typedCommit :
   shape := typedShape
   validated := typedValidated
   apexExact := rfl
+  fieldsPreserved := by
+    intro incidence field present
+    cases incidence
+    · change field ∈ ({debitKey, creditKey} : Finset EffectDeclaration.StateKey) at present
+      rcases Finset.mem_insert.mp present with same | last
+      · subst field
+        rfl
+      · have same := Finset.mem_singleton.mp last
+        subst field
+        rfl
+    · simp [TypedCellHyperedge.Declaration.legPatch, TypedCellHyperedge.Leg.patch,
+        typedDeclaration, typedLeg, creditFamily, creditPatch] at present
+  jointDeltaExact := by
+    funext coordinate
+    simp [TypedCellHyperedge.Declaration.jointDelta,
+      TypedCellHyperedge.Declaration.aggregateDelta, TypedCellHyperedge.ResourceLaw.delta,
+      typedLaw]
   aggregateBalanced := by
     funext coordinate
-    simp [TypedCellHyperedge.Declaration.aggregateDelta, typedLaw]
+    simp [TypedCellHyperedge.Declaration.aggregateDelta,
+      TypedCellHyperedge.ResourceLaw.delta, typedLaw]
 
 theorem typed_commit_nonempty :
     Nonempty (TypedCellHyperedge.Commit typedLaw typedDeclaration) :=
@@ -575,7 +601,8 @@ theorem bridgeCertificate :
   aggregateExact := by
     rw [aggregate_conserved]
     funext coordinate
-    simp [TypedCellHyperedge.Declaration.aggregateDelta, typedLaw]
+    simp [TypedCellHyperedge.Declaration.aggregateDelta,
+      TypedCellHyperedge.ResourceLaw.delta, typedLaw]
 
 /-- The canonical typed commit reaches exactly the legacy committed post. -/
 theorem typed_post_matches_legacy :

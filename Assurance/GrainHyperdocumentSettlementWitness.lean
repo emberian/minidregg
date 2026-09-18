@@ -55,7 +55,7 @@ noncomputable def linkLeg :
     Leg (S := S) (M := M) Portal
       (projection.project genesisPost.logical) genesisPost where
   Nullifier := Nat
-  family := HyperdocumentOperations.family config
+  family := HyperdocumentOperations.family config genesisPost
   kind := .object
   request := linkDeclaration.toRequest config
   declaration := linkDeclaration
@@ -70,7 +70,7 @@ noncomputable def declaration : Declaration S M Portal projection Incidence wher
   composition := { fieldMode := .canonical, order := [()] }
 
 def law : ResourceLaw S M Portal Unit Int where
-  delta := fun _ _ => 0
+  stateDelta := fun _ _ _ _ _ => 0
 
 theorem shapeValid : declaration.ShapeValid where
   orderComplete := by
@@ -119,9 +119,18 @@ noncomputable def commit : Commit law declaration where
     change jointValidated.apply.root =
       linkAccepted.accepted.prepared.post.root
     exact congrArg CellState.Materialized.root jointPostExact
+  fieldsPreserved := by
+    intro incidence field _present
+    cases incidence
+    change jointValidated.apply.logical.fields field =
+      linkAccepted.accepted.prepared.post.logical.fields field
+    rw [jointPostExact]
+  jointDeltaExact := by
+    funext coordinate
+    simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]
   aggregateBalanced := by
     funext coordinate
-    simp [Declaration.aggregateDelta, law]
+    simp [Declaration.aggregateDelta, ResourceLaw.delta, law]
 
 /-! ## Exact current head, proposal branch, and sparse focus -/
 
@@ -341,7 +350,7 @@ noncomputable def conflictingDeclaration :
   composition := { fieldMode := .disjoint, order := [false, true] }
 
 def conflictingLaw : ResourceLaw S M Portal Unit Int where
-  delta := fun _ _ => 0
+  stateDelta := fun _ _ _ _ _ => 0
 
 theorem linkFieldInFootprint (side : Bool) :
     (⟨.links, linkId⟩ : Hyperdocument.Address) ∈

@@ -49,7 +49,7 @@ def leg {kind : ResourceKind} {target : ResourceId kind}
     (accepted : Accepted portal authState context pre declaration) :
     Leg portal authState pre where
   Nullifier := Nat
-  family := family target pre
+  family := family target context pre
   kind := kind
   request := context.request declaration
   declaration := declaration
@@ -77,10 +77,9 @@ def resourceLaw {kind : ResourceKind} {target : ResourceId kind}
     {pre : Materialized M} {declaration : Declaration target}
     (_accepted : Accepted portal authState context pre declaration) :
     ResourceLaw DeclaredTurn.effectSchema.{0, 0} M portal Digest Int where
-  delta := fun {_} {pre} leg resource =>
-    ∑ account ∈ balanceAccounts leg.patch.fieldFootprint,
-      (balance leg.post.logical.fields account resource -
-        balance pre.logical.fields account resource)
+  stateDelta := fun before after fields _ resource =>
+    ∑ account ∈ balanceAccounts fields,
+      (balance after.fields account resource - balance before.fields account resource)
 
 /-- The same validated footprint covers all balances omitted from the law's
 finite account sum, including on an arbitrary supplied semantic leg. -/
@@ -143,6 +142,18 @@ def typedValidated {kind : ResourceKind} {target : ResourceId kind}
     ValidatedPatch M pre (typedDeclaration accepted).jointPatch :=
   Classical.choice (jointPatch_validated accepted)
 
+theorem typedPost_eq {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
+    {pre : Materialized M} {declaration : Declaration target}
+    (accepted : Accepted portal authState context pre declaration) :
+    (typedValidated accepted).apply = accepted.cellEffect.validated.apply := by
+  apply Materialized.ext
+  simp [ValidatedPatch.apply, typedDeclaration,
+    TypedCellHyperedge.Declaration.jointPatch,
+    TypedCellHyperedge.Declaration.legPatch, Leg.patch,
+    leg, family, Declaration.patch]
+
 /-- One batch becomes an actual generic typed commit and hence an actual
 `Kernel.Hyperedge`, not merely a compatibility certificate. -/
 def typedCommit {kind : ResourceKind} {target : ResourceId kind}
@@ -155,17 +166,29 @@ def typedCommit {kind : ResourceKind} {target : ResourceId kind}
   shape := typedShape accepted
   validated := typedValidated accepted
   apexExact := by
-    have cells : (typedValidated accepted).apply =
-        accepted.cellEffect.validated.apply := by
-      apply Materialized.ext
-      simp [ValidatedPatch.apply, typedDeclaration,
-        TypedCellHyperedge.Declaration.jointPatch,
-        TypedCellHyperedge.Declaration.legPatch, Leg.patch,
-        leg, family, Declaration.patch]
-    exact congrArg Materialized.root cells
+    exact congrArg Materialized.root (typedPost_eq accepted)
+  fieldsPreserved := by
+    intro incidence field _present
+    cases incidence
+    change (typedValidated accepted).apply.logical.fields field =
+      accepted.cellEffect.validated.apply.logical.fields field
+    rw [typedPost_eq]
+  jointDeltaExact := by
+    funext resource
+    conv_rhs => unfold TypedCellHyperedge.Declaration.aggregateDelta
+    simp only [Fintype.sum_unique]
+    change (typedDeclaration accepted).jointDelta (resourceLaw accepted)
+      (typedValidated accepted).apply resource =
+        (resourceLaw accepted).delta (leg accepted) resource
+    rw [typedPost_eq accepted]
+    simp [TypedCellHyperedge.Declaration.jointDelta,
+      ResourceLaw.delta,
+      typedDeclaration, TypedCellHyperedge.Declaration.jointPatch,
+      TypedCellHyperedge.Declaration.legPatch, leg, Leg.patch, Leg.post,
+      family, Declaration.patch]
   aggregateBalanced := by
     funext resource
-    simpa [TypedCellHyperedge.Declaration.aggregateDelta, resourceLaw,
+    simpa [TypedCellHyperedge.Declaration.aggregateDelta, ResourceLaw.delta, resourceLaw,
       typedDeclaration, leg, Leg.patch, Leg.post, family] using
       accepted.conserves resource
 
@@ -500,19 +523,67 @@ def jointValidated :
     ValidatedPatch effectMaterializer preCell jointDeclaration.jointPatch :=
   Classical.choice joint_validated
 
+theorem joint_account_support :
+    balanceAccounts jointDeclaration.jointPatch.fieldFootprint = {source, destination} := by
+  decide
+
+theorem transfer_account_support :
+    balanceAccounts declaration.patch.fieldFootprint = {source, destination} := by
+  decide
+
+theorem object_account_support :
+    balanceAccounts jointObjectDeclaration.patch.fieldFootprint = ∅ := by
+  decide
+
 def jointCommit : TypedCellHyperedge.Commit (resourceLaw accepted) jointDeclaration where
   shape := jointShape
   validated := jointValidated
   apexExact := rfl
+  fieldsPreserved := by
+    intro incidence field present
+    cases incidence
+    · simp [jointDeclaration, TypedCellHyperedge.Declaration.legPatch,
+        Leg.patch, leg, family, Declaration.patch, Declaration.fieldWrites,
+        Declaration.checkedWrites, jointObjectDeclaration, multiDeclaration,
+        Action.checkedWrites, CheckedWrite.toFieldWrite] at present
+      subst field
+      rfl
+    · simp [jointDeclaration, TypedCellHyperedge.Declaration.legPatch,
+        Leg.patch, leg, family, Declaration.patch, Declaration.fieldWrites,
+        Declaration.checkedWrites, declaration,
+        Action.checkedWrites, CheckedWrite.toFieldWrite] at present
+      rcases present with rfl | rfl <;> rfl
+  jointDeltaExact := by
+    funext resource
+    change
+      (∑ account ∈ balanceAccounts jointDeclaration.jointPatch.fieldFootprint,
+        (balance jointValidated.apply.logical.fields account resource -
+          balance preCell.logical.fields account resource)) =
+      (∑ account ∈ balanceAccounts declaration.patch.fieldFootprint,
+        (balance accepted.cellEffect.prepared.post.logical.fields account resource -
+          balance preCell.logical.fields account resource)) +
+      (∑ account ∈ balanceAccounts jointObjectDeclaration.patch.fieldFootprint,
+        (balance jointObjectAccepted.cellEffect.prepared.post.logical.fields account resource -
+          balance preCell.logical.fields account resource))
+    rw [joint_account_support, transfer_account_support, object_account_support]
+    simp only [Finset.sum_empty, add_zero]
+    apply Finset.sum_congr rfl
+    intro account member
+    rcases Finset.mem_insert.mp member with same | last
+    · subst account
+      rfl
+    · have same := Finset.mem_singleton.mp last
+      subst account
+      rfl
   aggregateBalanced := by
     funext resource
     have objectBalanced :
         (resourceLaw accepted).delta (leg jointObjectAccepted) resource = 0 := by
-      simpa [resourceLaw, leg, Leg.patch, Leg.post, family] using
+      simpa [ResourceLaw.delta, resourceLaw, leg, Leg.patch, Leg.post, family] using
         jointObjectAccepted.conserves resource
     have accountBalanced :
         (resourceLaw accepted).delta (leg accepted) resource = 0 := by
-      simpa [resourceLaw, leg, Leg.patch, Leg.post, family] using
+      simpa [ResourceLaw.delta, resourceLaw, leg, Leg.patch, Leg.post, family] using
         accepted.conserves resource
     simpa [TypedCellHyperedge.Declaration.aggregateDelta, jointDeclaration,
       Fintype.sum_bool] using congrArg₂ (· + ·) accountBalanced objectBalanced
@@ -606,8 +677,19 @@ theorem staleRequest_ne : staleRequest.preStateRoot ≠ preCell.root := by
 
 theorem no_effect_at_stale_request :
     IsEmpty (AcceptedCellEffect (portal := permissivePortal)
-      (authState := authState) (family source preCell) staleRequest preCell declaration ()) :=
+      (authState := authState) (family source context preCell) staleRequest preCell declaration ()) :=
   no_cellEffect_of_stale_root staleRequest staleRequest_ne
+
+/-- Copying the correct effect digest and root into authority for a different
+account cannot manufacture a generic accepted token. -/
+def relabeledRequest : Request .account :=
+  { context.request declaration with target := destination }
+
+theorem no_effect_at_relabeled_request :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) (family source context preCell)
+      relabeledRequest preCell declaration ()) :=
+  no_cellEffect_of_wrong_target (by decide)
 
 end Witness
 

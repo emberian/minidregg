@@ -63,7 +63,7 @@ noncomputable def declaration :
 /-- A law charging nothing, so conservation holds and the interesting equation
 here is the apex one. -/
 def law : ResourceLaw schema materializer permissivePortal Unit Int where
-  delta := fun _ _ => 0
+  stateDelta := fun _ _ _ _ _ => 0
 
 theorem shapeValid : declaration.ShapeValid where
   orderComplete := ⟨by decide, fun incidence => by cases incidence; decide⟩
@@ -96,9 +96,17 @@ noncomputable def commit : Commit law declaration where
   shape := shapeValid
   validated := jointValidated
   apexExact := by decide
+  fieldsPreserved := by
+    intro incidence field _present
+    cases incidence
+    cases field
+    rfl
+  jointDeltaExact := by
+    funext coordinate
+    simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]
   aggregateBalanced := by
     funext coordinate
-    simp [Declaration.aggregateDelta, law]
+    simp [Declaration.aggregateDelta, ResourceLaw.delta, law]
 
 theorem commit_nonempty : Nonempty (Commit law declaration) := ⟨commit⟩
 
@@ -112,6 +120,67 @@ theorem no_commit_of_wrong_apex :
     have collapsed : (⟨99⟩ : Digest) = ⟨1⟩ := by rw [← exact]; rfl
     exact absurd collapsed (by decide)⟩
 
+/-! ## Canonical order retains agreeing overlaps -/
+
+/-- Two incidences independently authorize the same final value. Canonical
+composition keeps both accepted outcomes even though the field footprints
+overlap; the stronger commit contract does not simply ban all overlap. -/
+noncomputable def agreeingDeclaration :
+    Declaration schema materializer permissivePortal projection Bool where
+  pre := cell
+  apex := ⟨1⟩
+  legs := fun _ => leg
+  composition := { fieldMode := .canonical, order := [false, true] }
+
+theorem agreeingShape : agreeingDeclaration.ShapeValid where
+  orderComplete := by
+    constructor
+    · decide
+    · intro incidence
+      cases incidence <;> decide
+  resourcesDisjoint := by
+    intro left right _different
+    cases left <;> cases right <;> decide
+  fieldsValid := trivial
+
+theorem agreeingPatchAccepted :
+    Nonempty (CellState.ValidatedPatch materializer cell agreeingDeclaration.jointPatch) := by
+  have witness : ∃ validated :
+      CellState.ValidatedPatch materializer cell agreeingDeclaration.jointPatch,
+      CellState.validate materializer cell agreeingDeclaration.jointPatch =
+        CellState.ValidationOutcome.accepted validated := by
+    unfold CellState.validate
+    rw [dif_pos (show agreeingDeclaration.jointPatch.expectedPreRoot = cell.root from rfl)]
+    rw [dif_pos (show agreeingDeclaration.jointPatch.fieldFootprint =
+      agreeingDeclaration.jointPatch.namedFields from rfl)]
+    rw [dif_pos (show agreeingDeclaration.jointPatch.resourceFootprint =
+      agreeingDeclaration.jointPatch.namedResources from rfl)]
+    exact ⟨_, rfl⟩
+  exact ⟨witness.choose⟩
+
+noncomputable def agreeingCommit : Commit law agreeingDeclaration where
+  shape := agreeingShape
+  validated := Classical.choice agreeingPatchAccepted
+  apexExact := rfl
+  fieldsPreserved := by
+    intro incidence field _present
+    cases incidence <;> cases field <;> rfl
+  jointDeltaExact := by
+    funext coordinate
+    simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]
+  aggregateBalanced := by
+    funext coordinate
+    simp [Declaration.aggregateDelta, ResourceLaw.delta, law]
+
+theorem agreeing_fields_overlap : ¬ agreeingDeclaration.FieldFootprintsDisjoint := by
+  intro disjoint
+  have impossible := disjoint false true (by decide)
+  exact (show ¬ Disjoint (agreeingDeclaration.legPatch false).fieldFootprint
+    (agreeingDeclaration.legPatch true).fieldFootprint by decide) impossible
+
+theorem agreeing_joint_post :
+    agreeingCommit.prepared.post.logical.fields () = some true := rfl
+
 /-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.shapeValid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms shapeValid
 /-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.jointPatch_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -120,6 +189,10 @@ theorem no_commit_of_wrong_apex :
 #guard_msgs (whitespace := lax) in #print axioms commit_nonempty
 /-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.no_commit_of_wrong_apex' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_commit_of_wrong_apex
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.agreeing_fields_overlap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms agreeing_fields_overlap
+/-- info: 'Minidregg.Kernel.TypedCellHyperedgeWitness.agreeing_joint_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms agreeing_joint_post
 
 end
 

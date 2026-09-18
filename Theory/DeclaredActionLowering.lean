@@ -671,23 +671,6 @@ structure ValidAt {kind : ResourceKind} {target : ResourceId kind}
   guardsAndPost : declaration.run pre.logical.fields =
     some (applyFieldWrites declaration.fieldWrites pre.logical.fields)
 
-def family {kind : ResourceKind} (target : ResourceId kind)
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    (pre : Materialized M) :
-    SemanticEffectFamily DeclaredTurn.effectSchema.{0, 0} M Nat where
-  Declaration := Declaration target
-  declarationCodec := declarationCodec target
-  Outcome := fun _ => Unit
-  outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun declaration _ => PLift (ValidAt pre declaration)
-  effectDigest := effectDigest
-  patch := fun declaration _ => declaration.patch
-  nullifier := fun declaration _ => some declaration.nonce
-  Release := fun _ _ => PEmpty
-  DeclassificationAuthority := fun _ _ => PEmpty
-  ReleaseAuthorization := fun _ _ release => release.elim
-  DisclosureAllowed := fun _ _ decision => decision = .sealed
-
 /-! ## Complete request and accepted lowering -/
 
 structure RequestContext where
@@ -721,6 +704,26 @@ def RequestContext.request {kind : ResourceKind} {target : ResourceId kind}
   policyEpoch := context.policyEpoch
   cost := exactCharge declaration .feeDebit
 
+def family {kind : ResourceKind} (target : ResourceId kind)
+    (context : RequestContext)
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    (pre : Materialized M) :
+    SemanticEffectFamily DeclaredTurn.effectSchema.{0, 0} M Nat where
+  Declaration := Declaration target
+  declarationCodec := declarationCodec target
+  pre := pre
+  request := fun declaration => ⟨kind, context.request declaration⟩
+  Outcome := fun _ => Unit
+  outcomeCodec := fun _ => unitCodec
+  ModeEvidence := fun declaration _ => PLift (ValidAt pre declaration)
+  effectDigest := effectDigest
+  patch := fun declaration _ => declaration.patch
+  nullifier := fun declaration _ => some declaration.nonce
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => release.elim
+  DisclosureAllowed := fun _ _ decision => decision = .sealed
+
 theorem patch_validated {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
     {pre : Materialized M} {declaration : Declaration target}
@@ -747,7 +750,7 @@ structure Accepted {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (pre : Materialized M)
     (declaration : Declaration target) : Type where
   cellEffect : AcceptedCellEffect (portal := portal) (authState := authState)
-    (family target pre) (context.request declaration) pre declaration ()
+    (family target context pre) (context.request declaration) pre declaration ()
 
 /-- Validation lives on the family face, so a generic accepted-effect consumer
 cannot discard it when the wrapper is projected away. -/
@@ -768,6 +771,8 @@ def accept {kind : ResourceKind} {target : ResourceId kind}
     Accepted portal authState context pre declaration where
   cellEffect :=
     { authorization := authorization
+      preStateBound := rfl
+      requestBound := rfl
       effectsDigestBound := rfl
       preRootBound := valid.rootExact.trans rfl
       modeEvidence := PLift.up valid
@@ -884,22 +889,43 @@ theorem no_accepted_of_inadmissible {kind : ResourceKind}
 code constructs both occurrences of `pre` from one reopened canonical cell. -/
 theorem cellEffect_valid {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    {portal : Portal} {authState : AuthState}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
     (effect : AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target pre) request pre declaration ()) :
+      (family target context pre) request pre declaration ()) :
     ValidAt pre declaration := effect.modeEvidence.down
+
+/-- The family now derives the complete request from source data, so generic
+consumers retain the same authority target rather than only its effect digest. -/
+theorem cellEffect_target_exact {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
+    {pre : Materialized M} {declaration : Declaration target}
+    {request : Request kind}
+    (effect : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family target context pre) request pre declaration ()) :
+    request.target.value = target.value :=
+  effect.request_projection (fun packed => packed.2.target.value)
+
+theorem no_cellEffect_of_wrong_target {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
+    {pre : Materialized M} {declaration : Declaration target}
+    {request : Request kind} (wrong : request.target.value ≠ target.value) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family target context pre) request pre declaration ()) :=
+  ⟨fun effect => wrong (cellEffect_target_exact effect)⟩
 
 theorem no_cellEffect_of_inadmissible {kind : ResourceKind}
     {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    {portal : Portal} {authState : AuthState}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
     (inadmissible : declaration.admissionCheck = false) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target pre) request pre declaration ()) :=
+      (family target context pre) request pre declaration ()) :=
   ⟨fun effect => by
     have admitted := ((declaration.run_eq_some_iff _ _).mp
       (cellEffect_valid effect).guardsAndPost).1
@@ -908,12 +934,12 @@ theorem no_cellEffect_of_inadmissible {kind : ResourceKind}
 theorem no_cellEffect_of_guard_mismatch {kind : ResourceKind}
     {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    {portal : Portal} {authState : AuthState}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
     (mismatch : declaration.run pre.logical.fields = none) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target pre) request pre declaration ()) :=
+      (family target context pre) request pre declaration ()) :=
   ⟨fun effect => by
     have exactPost := (cellEffect_valid effect).guardsAndPost
     rw [mismatch] at exactPost
@@ -934,22 +960,22 @@ theorem no_accepted_of_guard_mismatch {kind : ResourceKind}
 theorem no_cellEffect_of_wrong_digest {kind : ResourceKind}
     {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    {portal : Portal} {authState : AuthState}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (request : Request kind)
     (wrong : request.effectsDigest ≠ effectDigest declaration) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target pre) request pre declaration ()) :=
+      (family target context pre) request pre declaration ()) :=
   ⟨fun accepted => wrong accepted.effectsDigestBound⟩
 
 theorem no_cellEffect_of_stale_root {kind : ResourceKind}
     {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    {portal : Portal} {authState : AuthState}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (request : Request kind) (stale : request.preStateRoot ≠ pre.root) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target pre) request pre declaration ()) :=
+      (family target context pre) request pre declaration ()) :=
   ⟨fun accepted => stale accepted.preRootBound⟩
 
 /-! ## Executable admission teeth, without evaluating the unary wire codec -/
@@ -1087,6 +1113,9 @@ def ofLegacyMove (source destination : ResourceId .account) (resource : Digest)
 /-- info: 'Minidregg.Theory.DeclaredActionLowering.no_cellEffect_of_guard_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms no_cellEffect_of_guard_mismatch
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.no_cellEffect_of_wrong_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms no_cellEffect_of_wrong_target
 /-- info: 'Minidregg.Theory.DeclaredActionLowering.ScopeWitness.self_transfer_sequential' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ScopeWitness.self_transfer_sequential
