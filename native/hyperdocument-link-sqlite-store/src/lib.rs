@@ -1,4 +1,4 @@
-//! Opaque, fallible SQLite transport for one bounded Lean-authored byte record.
+//! Opaque, fallible exact-byte SQLite compare-and-swap transport.
 //!
 //! This crate assigns no Hyperdocument, link, authorization, replay, checksum,
 //! or acceptance meaning to the bytes.  It uses SQLite's rollback-journal
@@ -18,7 +18,9 @@ use std::path::{Path, PathBuf};
 use std::ptr::{self, NonNull};
 use std::slice;
 
-pub const MAX_RECORD_BYTES: usize = 4096;
+// A deployment bound, not a semantic resource allowance. Lean owns the
+// snapshot/journal encoding and the exact resource charge of each intent.
+pub const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 const DATABASE_NAME: &str = "forward-link.sqlite3";
 
 const SQLITE_OK: c_int = 0;
@@ -76,6 +78,7 @@ extern "C" {
     ) -> c_int;
     fn sqlite3_column_blob(statement: *mut sqlite3_stmt, column: c_int) -> *const c_void;
     fn sqlite3_column_bytes(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
+    fn sqlite3_column_int(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,7 +112,9 @@ impl fmt::Display for StoreError {
             Self::TooLarge { actual, maximum } => {
                 write!(formatter, "record has {actual} bytes; maximum is {maximum}")
             }
-            Self::Conflict => formatter.write_str("a different byte record already exists"),
+            Self::Conflict => {
+                formatter.write_str("current bytes differ from expected and proposed bytes")
+            }
             Self::InvalidRoot(path) => {
                 write!(
                     formatter,
@@ -290,7 +295,7 @@ impl Drop for Statement<'_> {
 }
 
 struct Transaction<'store> {
-    store: &'store SqliteLinkStore,
+    store: &'store SqliteByteStore,
     active: bool,
 }
 
@@ -310,13 +315,17 @@ impl Drop for Transaction<'_> {
     }
 }
 
-pub struct SqliteLinkStore {
+pub struct SqliteByteStore {
     root: PathBuf,
     database_path: PathBuf,
     database: Database,
 }
 
-impl SqliteLinkStore {
+// Existing link clients use the exact same transport. This alias carries no
+// separate publication implementation or semantic store.
+pub type SqliteLinkStore = SqliteByteStore;
+
+impl SqliteByteStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
         fs::create_dir_all(root.as_ref())?;
         // Canonicalize the already-created directory before asking SQLite for
@@ -369,14 +378,13 @@ impl SqliteLinkStore {
         database.exec(b"PRAGMA synchronous=EXTRA\0")?;
         database.exec(b"PRAGMA fullfsync=ON\0")?;
         database.exec(b"PRAGMA checkpoint_fullfsync=ON\0")?;
-        database.exec(
-            b"CREATE TABLE IF NOT EXISTS opaque_record (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=4096)) WITHOUT ROWID\0",
-        )?;
-        Ok(Self {
+        let store = Self {
             root,
             database_path,
             database,
-        })
+        };
+        store.upgrade_schema()?;
+        Ok(store)
     }
 
     pub fn root(&self) -> &Path {
@@ -385,6 +393,43 @@ impl SqliteLinkStore {
 
     pub fn database_path(&self) -> &Path {
         &self.database_path
+    }
+
+    fn upgrade_schema(&self) -> Result<(), StoreError> {
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        let statement = self.database.prepare(b"PRAGMA user_version\0")?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        // SAFETY: the pragma result has one integer column and is on ROW.
+        let version = unsafe { sqlite3_column_int(statement.raw.as_ptr(), 0) };
+        drop(statement);
+        match version {
+            0 => {
+                // Preserve the old one-shot table's exact BLOB while replacing
+                // its 4096-byte bound, all within one SQLite transaction.
+                self.database.exec(b"CREATE TABLE IF NOT EXISTS opaque_record (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=4096)) WITHOUT ROWID\0")?;
+                self.database.exec(b"CREATE TABLE opaque_record_v2 (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864)) WITHOUT ROWID\0")?;
+                self.database
+                    .exec(b"INSERT INTO opaque_record_v2 SELECT slot,bytes FROM opaque_record\0")?;
+                self.database.exec(b"DROP TABLE opaque_record\0")?;
+                self.database
+                    .exec(b"ALTER TABLE opaque_record_v2 RENAME TO opaque_record\0")?;
+                self.database.exec(b"PRAGMA user_version=2\0")?;
+            }
+            2 => {}
+            _ => {
+                return Err(StoreError::Sqlite {
+                    code: version,
+                    message: "unsupported opaque byte-store schema version".to_owned(),
+                })
+            }
+        }
+        transaction.commit()
     }
 
     fn validate_bound(bytes: &[u8]) -> Result<(), StoreError> {
@@ -414,18 +459,40 @@ impl SqliteLinkStore {
     }
 
     pub fn publish(&self, bytes: &[u8]) -> Result<PublishStatus, StoreError> {
-        self.publish_with_hook(bytes, |_| {})
+        self.compare_exchange(None, bytes)
     }
 
-    pub fn publish_with_hook<F>(
+    pub fn publish_with_hook<F>(&self, bytes: &[u8], hook: F) -> Result<PublishStatus, StoreError>
+    where
+        F: FnMut(PublishPhase),
+    {
+        self.compare_exchange_with_hook(None, bytes, hook)
+    }
+
+    /// Exact-byte CAS with idempotent recognition of the proposed post image.
+    /// `None` means physically absent; an empty BLOB is `Some(&[])`.
+    /// No digest, transaction id, or semantic field is interpreted here.
+    pub fn compare_exchange(
         &self,
-        bytes: &[u8],
+        expected: Option<&[u8]>,
+        proposed: &[u8],
+    ) -> Result<PublishStatus, StoreError> {
+        self.compare_exchange_with_hook(expected, proposed, |_| {})
+    }
+
+    pub fn compare_exchange_with_hook<F>(
+        &self,
+        expected: Option<&[u8]>,
+        proposed: &[u8],
         mut hook: F,
     ) -> Result<PublishStatus, StoreError>
     where
         F: FnMut(PublishPhase),
     {
-        Self::validate_bound(bytes)?;
+        Self::validate_bound(proposed)?;
+        if let Some(expected) = expected {
+            Self::validate_bound(expected)?;
+        }
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
@@ -433,24 +500,65 @@ impl SqliteLinkStore {
         };
         hook(PublishPhase::Begun);
 
-        if let Some(current) = self.select_record()? {
-            if current != bytes {
-                return Err(StoreError::Conflict);
-            }
+        let current = self.select_record()?;
+        if current.as_deref() == Some(proposed) {
             transaction.commit()?;
             hook(PublishPhase::Committed);
             return Ok(PublishStatus::AlreadyPresent);
         }
+        if current.as_deref() != expected {
+            return Err(StoreError::Conflict);
+        }
 
         let statement = self
             .database
-            .prepare(b"INSERT INTO opaque_record(slot,bytes) VALUES(1,?1)\0")?;
-        statement.bind_blob(bytes)?;
-        debug_assert_eq!(statement.step()?, SQLITE_DONE);
+            .prepare(b"INSERT INTO opaque_record(slot,bytes) VALUES(1,?1) ON CONFLICT(slot) DO UPDATE SET bytes=excluded.bytes\0")?;
+        statement.bind_blob(proposed)?;
+        let status = statement.step()?;
+        if status != SQLITE_DONE {
+            return Err(self.database.error(status));
+        }
         drop(statement);
         hook(PublishPhase::Inserted);
         transaction.commit()?;
         hook(PublishPhase::Committed);
         Ok(PublishStatus::Installed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn old_bounded_table_upgrades_without_rewriting_its_blob() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "dregg-sqlite-upgrade-{}-{nonce}",
+            std::process::id()
+        ));
+        let store = SqliteByteStore::open(&root).unwrap();
+        // Build the exact old physical schema in this isolated test database.
+        store.database.exec(b"DROP TABLE opaque_record\0").unwrap();
+        store.database.exec(b"CREATE TABLE opaque_record (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=4096)) WITHOUT ROWID\0").unwrap();
+        store.database.exec(b"PRAGMA user_version=0\0").unwrap();
+        store.publish(b"exact legacy payload\0\xff").unwrap();
+        drop(store);
+        let reopened = SqliteByteStore::open(&root).unwrap();
+        assert_eq!(reopened.read().unwrap(), b"exact legacy payload\0\xff");
+        let larger = vec![17; 8192];
+        assert_eq!(
+            reopened
+                .compare_exchange(Some(b"exact legacy payload\0\xff"), &larger)
+                .unwrap(),
+            PublishStatus::Installed
+        );
+        assert_eq!(reopened.read().unwrap(), larger);
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
     }
 }

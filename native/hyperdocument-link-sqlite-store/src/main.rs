@@ -25,7 +25,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT"
+        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT"
     );
     std::process::exit(2)
 }
@@ -48,6 +48,41 @@ fn run() -> Result<(), StoreError> {
         ("read", [root]) => {
             let store = SqliteLinkStore::open(root)?;
             io::stdout().write_all(&store.read()?)?;
+        }
+        ("read-to", [root, output]) => {
+            let store = SqliteLinkStore::open(root)?;
+            let bytes = store.read()?;
+            fs::write(output, bytes)?;
+        }
+        ("cas", [root, expected, input]) => {
+            let store = SqliteLinkStore::open(root)?;
+            let expected = if expected == "-" {
+                None
+            } else {
+                Some(read_input(Path::new(expected))?)
+            };
+            println!(
+                "{:?}",
+                store.compare_exchange(expected.as_deref(), &read_input(Path::new(input))?)?
+            );
+        }
+        ("cas-crash", [root, expected, input, phase]) => {
+            let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
+                usage()
+            };
+            let store = SqliteLinkStore::open(root)?;
+            let expected = if expected == "-" {
+                None
+            } else {
+                Some(read_input(Path::new(expected))?)
+            };
+            let proposed = read_input(Path::new(input))?;
+            let _ =
+                store.compare_exchange_with_hook(expected.as_deref(), &proposed, |observed| {
+                    if observed == target {
+                        std::process::exit(exit_code);
+                    }
+                })?;
         }
         ("publish", [root, input]) => {
             let store = SqliteLinkStore::open(root)?;
@@ -99,7 +134,11 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("sqlite-store error: {error}");
-            ExitCode::from(1)
+            ExitCode::from(match error {
+                StoreError::Missing => 3,
+                StoreError::Conflict => 4,
+                _ => 1,
+            })
         }
     }
 }

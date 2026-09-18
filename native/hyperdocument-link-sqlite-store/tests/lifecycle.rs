@@ -189,3 +189,120 @@ fn oversize_fails_before_transaction() {
     ));
     assert!(matches!(store.read(), Err(StoreError::Missing)));
 }
+
+#[test]
+fn repeated_cas_preserves_exact_expected_bytes_and_absence() {
+    let temp = TempDir::new("repeated-cas");
+    let store = SqliteLinkStore::open(temp.path()).unwrap();
+    assert!(matches!(
+        store.compare_exchange(Some(&[]), b"wrong-absence"),
+        Err(StoreError::Conflict)
+    ));
+    assert_eq!(
+        store.compare_exchange(None, &[]).unwrap(),
+        PublishStatus::Installed
+    );
+    assert_eq!(store.read().unwrap(), b"");
+    assert_eq!(
+        store.compare_exchange(Some(&[]), b"one").unwrap(),
+        PublishStatus::Installed
+    );
+    assert_eq!(
+        store.compare_exchange(Some(b"one"), b"two").unwrap(),
+        PublishStatus::Installed
+    );
+    assert!(matches!(
+        store.compare_exchange(Some(b"one"), b"stale"),
+        Err(StoreError::Conflict)
+    ));
+    assert_eq!(
+        store.compare_exchange(Some(b"one"), b"two").unwrap(),
+        PublishStatus::AlreadyPresent
+    );
+    let large = vec![171; 8192];
+    assert_eq!(
+        store.compare_exchange(Some(b"two"), &large).unwrap(),
+        PublishStatus::Installed
+    );
+    drop(store);
+    assert_eq!(
+        SqliteLinkStore::open(temp.path()).unwrap().read().unwrap(),
+        large
+    );
+}
+
+#[test]
+fn update_crash_before_commit_preserves_old_image_after_commit_preserves_new() {
+    for (phase, committed) in [
+        ("after-begin", false),
+        ("after-insert", false),
+        ("after-commit", true),
+    ] {
+        let temp = TempDir::new(phase);
+        let store = SqliteLinkStore::open(temp.path()).unwrap();
+        store.publish(b"whole-before-image").unwrap();
+        drop(store);
+        let before = input_file(&temp, "before.bin", b"whole-before-image");
+        let after = input_file(&temp, "after.bin", b"whole-after-image-with-all-cells");
+        let status = Command::new(binary())
+            .arg("cas-crash")
+            .arg(temp.path())
+            .arg(before)
+            .arg(after)
+            .arg(phase)
+            .status()
+            .unwrap();
+        assert!(!status.success());
+        let reopened = SqliteLinkStore::open(temp.path()).unwrap();
+        let expected: &[u8] = if committed {
+            b"whole-after-image-with-all-cells"
+        } else {
+            b"whole-before-image"
+        };
+        assert_eq!(reopened.read().unwrap(), expected);
+    }
+}
+
+#[test]
+fn concurrent_cas_writers_cannot_both_replace_the_same_preimage() {
+    use minidregg_hyperdocument_link_sqlite_store::PublishPhase;
+    use std::sync::mpsc;
+    let temp = TempDir::new("concurrent-cas");
+    SqliteLinkStore::open(temp.path())
+        .unwrap()
+        .publish(b"pre")
+        .unwrap();
+    let first_path = temp.path().to_path_buf();
+    let second_path = first_path.clone();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let first = thread::spawn(move || {
+        let store = SqliteLinkStore::open(first_path).unwrap();
+        store
+            .compare_exchange_with_hook(Some(b"pre"), b"first", |phase| {
+                if phase == PublishPhase::Inserted {
+                    ready_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                }
+            })
+            .unwrap()
+    });
+    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let second = thread::spawn(move || {
+        let store = SqliteLinkStore::open(second_path).unwrap();
+        let result = store.compare_exchange(Some(b"pre"), b"second");
+        done_tx
+            .send(matches!(result, Err(StoreError::Conflict)))
+            .unwrap();
+    });
+    assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    release_tx.send(()).unwrap();
+    assert_eq!(first.join().unwrap(), PublishStatus::Installed);
+    assert!(done_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+    second.join().unwrap();
+    assert_eq!(
+        SqliteLinkStore::open(temp.path()).unwrap().read().unwrap(),
+        b"first"
+    );
+}
