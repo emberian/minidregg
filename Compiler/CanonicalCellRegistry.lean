@@ -24,6 +24,7 @@ import Compiler.CredentialAuthorityDomain
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
+import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 
@@ -327,7 +328,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       PresentLaw (fun catalogue => catalogue.domain = deployment.domain ∧ catalogue.Valid)
         (CredentialAuthorityDomain.catalogueAt state)
   | .resourceBook, state => cellId = deployment.resourceBookId ∧
-      (CanonicalResourcePageMaterializer.bookAt state).isSome = true
+      (CanonicalResourcePageMaterializer.bookAt state).isSome = true ∧
+      (CanonicalResourceKernel.logicalBook state).AccountSupported
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
 
@@ -432,6 +434,22 @@ theorem book_identity_is_pinned (deployment : Deployment) (cellId : Nat)
     (payload : Materialized CanonicalResourcePageMaterializer.materializer)
     (valid : CellLaw deployment cellId ⟨.resourceBook, payload⟩) :
     cellId = deployment.resourceBookId := valid.2.1
+
+/-- Loaded and final canonical Books cannot carry balances for unregistered
+accounts. The lossless wire codec deliberately imposes no such semantic law. -/
+theorem book_accountSupported (deployment : Deployment) (cellId : Nat)
+    (payload : Materialized CanonicalResourcePageMaterializer.materializer)
+    (valid : CellLaw deployment cellId ⟨.resourceBook, payload⟩) :
+    (CanonicalResourceKernel.logicalBook payload.logical).AccountSupported := valid.2.2.2
+
+theorem hidden_book_refused (deployment : Deployment) (cellId : Nat)
+    (payload : Materialized CanonicalResourcePageMaterializer.materializer)
+    (account asset : Nat)
+    (absent : account ∉ (CanonicalResourceKernel.logicalBook payload.logical).accounts)
+    (hidden : (CanonicalResourceKernel.logicalBook payload.logical).balance account asset ≠ 0) :
+    ¬ CellLaw deployment cellId ⟨.resourceBook, payload⟩ := by
+  intro valid
+  exact hidden ((book_accountSupported _ _ _ valid).balance_zero absent asset)
 
 theorem no_user_book_birth (deployment : Deployment) (cellId : Nat)
     (payload : Materialized CanonicalResourcePageMaterializer.materializer) :

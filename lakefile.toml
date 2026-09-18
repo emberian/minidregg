@@ -65,3 +65,9 @@ name = "Selvage"
 # Assurance/ — generated ledger machinery; no hand-maintained ledger anywhere.
 [[lean_lib]]
 name = "Assurance"
+
+# Source-owned native receiving process. Explicit target: never a substitute
+# for the full Minidregg integration gate.
+[[lean_exe]]
+name = "minidregg-host"
+root = "Host.Main"

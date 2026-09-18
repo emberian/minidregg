@@ -1,0 +1,213 @@
+/-
+Compiled Mini host. The operator selects one config at startup. Binary calls
+and replies use Lean's strict source-owned codecs; this process never handles
+private signing keys. `assemble` combines detached custody signatures only.
+
+stdio framing: four-byte little-endian length, then one operation byte and
+payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
+5=authorized query. Reply operation byte matches; failures use 255 plus a
+strict Outcome. Max frame is 1 MiB. EOF at a
+frame boundary ends normally; truncated/oversized/unknown frames terminate.
+-/
+import Kernel.NativeHost
+import Kernel.NativeHostGenesis
+import Lean.Data.Json
+
+open Lean
+open Minidregg.Compiler
+open Minidregg.Compiler.NativeHostCodec
+open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Kernel
+
+namespace Minidregg.Host
+
+structure Settings where
+  domain : Nat
+  federation : Nat
+  factoryId : Nat
+  resourceBookId : Nat
+  authorityCatalogueId : Nat
+  issuer : Nat
+  ownerBudget : Nat
+  lifetime : Nat
+  tariffBase : Nat
+  tariffPerBirth : Nat
+  tariffPerGrant : Nat
+  tariffPerInitialPayloadByte : Nat
+  collector : Nat
+  asset : Nat
+  genesisHeight : Nat
+  expectedSeed : Nat
+  storageBinary : String
+  storageRoot : String
+  signatureBinary : String
+  deriving FromJson, ToJson
+
+def Settings.config (settings : Settings) : NativeHost.Config where
+  deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCatalogueId⟩
+  federation := ⟨settings.federation⟩
+  template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
+  tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
+    settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
+  genesisHeight := settings.genesisHeight
+  expectedSeed := ⟨settings.expectedSeed⟩
+  storage := ⟨settings.storageBinary, settings.storageRoot⟩
+  signature := ⟨settings.signatureBinary⟩
+
+def loadSettings (path : System.FilePath) : IO Settings := do
+  let text ← IO.FS.readFile path
+  let json ← IO.ofExcept (Json.parse text)
+  let settings : Settings ← IO.ofExcept (fromJson? json)
+  pure settings
+
+def description (config : NativeHost.Config) : IO Json := do
+  discard <| IO.ofExcept (← NativeHost.openExisting config)
+  pure <| Json.mkObj
+    [("runtime", toJson "minidregg-native"),
+     ("semantics", toJson config.profile.semantics.value),
+     ("domain", toJson config.deployment.domain.value),
+     ("fieldModulus", toJson Minidregg.Compiler.babyBearP),
+     ("orderDifferenceWidth", toJson NativeHostProfile.orderWidth),
+     ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
+     ("operations", toJson (["birth", "invoke", "install", "delegate"] : List String)),
+     ("authorizedQueries", toJson true), ("delegation", toJson true)]
+
+def failure (phase detail : String) : List UInt8 :=
+  outcomeCodec.encode (.refused phase.toUTF8.toList detail.toUTF8.toList)
+
+def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  match operation with
+  | 0 =>
+      unless payload.isEmpty do throw (IO.userError "describe does not accept a payload")
+      pure (0, (← description config).compress.toUTF8.toList)
+  | 1 =>
+      match ← NativeHost.prepare config payload with
+      | .ok plan => pure (1, signingPlanCodec.encode plan)
+      | .error detail => pure (255, failure "prepare" detail)
+  | 2 => pure (2, outcomeCodec.encode (← NativeHost.submit config payload))
+  | 3 => pure (3, outcomeCodec.encode (← NativeHost.lookup config payload))
+  | 4 =>
+      match ← NativeHost.challenge config payload with
+      | .ok challenge => pure (4, NativeObservationCodec.challengeCodec.encode challenge)
+      | .error detail => pure (255, failure "observation" detail)
+  | 5 =>
+      match ← NativeHost.query config payload with
+      | .ok view => pure (5, view)
+      | .error detail => pure (255, failure "observation" detail)
+  | _ => throw (IO.userError "unsupported native host operation")
+
+def maxFrame : Nat := 1048576
+
+partial def readExactly (input : IO.FS.Stream) (count : Nat) (acc : ByteArray := ByteArray.empty) :
+    IO ByteArray := do
+  if acc.size == count then return acc
+  let chunk ← input.read (count - acc.size).toUSize
+  if chunk.isEmpty then throw (IO.userError "truncated native host frame")
+  readExactly input count (acc ++ chunk)
+
+def frameLength (bytes : ByteArray) : Nat :=
+  bytes.toList.foldr (fun byte rest => byte.toNat + 256 * rest) 0
+
+def lengthBytes (length : Nat) : ByteArray :=
+  [UInt8.ofNat length, UInt8.ofNat (length / 256),
+    UInt8.ofNat (length / 65536), UInt8.ofNat (length / 16777216)].toByteArray
+
+partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : IO Unit := do
+  let first ← input.read 1
+  if first.isEmpty then return
+  let lengthWire ← readExactly input 4 first
+  let length := frameLength lengthWire
+  if length == 0 || length > maxFrame then throw (IO.userError "invalid native host frame length")
+  let frame ← readExactly input length
+  let (operation, payload) ← match frame.toList with
+    | [] => throw (IO.userError "empty native host frame")
+    | operation :: payload => dispatch config operation payload
+  let response := (operation :: payload).toByteArray
+  if response.size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
+  output.write (lengthBytes response.size ++ response)
+  output.flush
+  serve config input output
+
+def readBytes (path : String) : IO (List UInt8) :=
+  return (← IO.FS.readBinFile path).toList
+
+def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
+  IO.FS.writeBinFile path bytes.toByteArray
+
+def usage : String :=
+  "minidregg-host CONFIG.json describe|stdio|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin"
+
+def run (arguments : List String) : IO UInt32 := do
+  match arguments with
+  | configPath :: command :: rest =>
+      let settings ← loadSettings configPath
+      let config := settings.config
+      match command, rest with
+      | "genesis", [input, imageOutput, configOutput] =>
+          let (source, built) ← IO.ofExcept <|
+            (NativeHostGenesis.buildBytes config.profile (← readBytes input)).mapError (fun error => s!"{repr error}")
+          unless source.deployment == config.deployment && source.federation == config.federation &&
+              source.tariff == config.tariff && source.genesisHeight == config.genesisHeight do
+            throw (IO.userError "genesis source and operator runtime manifest differ")
+          let pinned := { settings with expectedSeed := (NativeHost.seedIdentity built.seed).value }
+          let genesis := DurableReceiverCodec.encode built.image
+          discard <| IO.ofExcept <| do
+            let loaded ← DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes genesis
+            NativeHost.validateLoaded pinned.config loaded
+          writeBytes imageOutput genesis
+          IO.FS.writeFile configOutput (toJson pinned).pretty
+          pure 0
+      | "describe", [] => IO.println (← description config).pretty; pure 0
+      | "stdio", [] =>
+          discard <| IO.ofExcept (← NativeHost.openExisting config)
+          serve config (← IO.getStdin) (← IO.getStdout)
+          pure 0
+      | "bootstrap", [path] =>
+          IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
+          pure 0
+      | "prepare", [input, output] =>
+          let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
+          writeBytes output (signingPlanCodec.encode plan)
+          pure 0
+      | "challenge", [input, output] =>
+          let challenge ← IO.ofExcept (← NativeHost.challenge config (← readBytes input))
+          writeBytes output (NativeObservationCodec.challengeCodec.encode challenge)
+          pure 0
+      | "observe-assemble", [challengePath, signaturesPath, output] =>
+          let some challenge := NativeObservationCodec.challengeCodec.decode (← readBytes challengePath)
+            | throw (IO.userError "noncanonical observation challenge")
+          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
+            | throw (IO.userError "noncanonical signature list")
+          let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
+          writeBytes output (NativeObservationCodec.signedCodec.encode signed)
+          pure 0
+      | "query", [input, output] =>
+          writeBytes output (← IO.ofExcept (← NativeHost.query config (← readBytes input)))
+          pure 0
+      | "assemble", [planPath, signaturesPath, output] =>
+          let some plan := signingPlanCodec.decode (← readBytes planPath)
+            | throw (IO.userError "noncanonical signing plan")
+          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
+            | throw (IO.userError "noncanonical signature list")
+          let call ← IO.ofExcept (NativeHost.assemble plan signatures)
+          writeBytes output (callCodec.encode call)
+          pure 0
+      | "submit", [input, output] =>
+          writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
+          pure 0
+      | "lookup", [input, output] =>
+          writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
+          pure 0
+      | _, _ => throw (IO.userError usage)
+  | _ => throw (IO.userError usage)
+
+end Minidregg.Host
+
+def main (arguments : List String) : IO UInt32 := do
+  try Minidregg.Host.run arguments
+  catch error =>
+    (← IO.getStderr).putStrLn s!"minidregg-host: {error}"
+    pure 1
