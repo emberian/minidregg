@@ -20,12 +20,15 @@ physical refinement and liveness obligations explicitly; it does not claim
 that a filesystem, database, scheduler, or transport discharges them.
 -/
 import Kernel.DurableDataIntent
+import Compiler.Tower256ConcreteBackend
 
 namespace Minidregg.Kernel.ReactiveTerminalCell
 
 open Minidregg.Kernel.DurableCommitProtocol
 open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceCost
 open Minidregg.Theory.TypedAuthorization
 
@@ -88,7 +91,7 @@ theorem expired_after {deadline settledAt : Nat}
 
 end Decision
 
-/-! ## Stable open cell and canonical wire payloads -/
+/-! ## Stable open cell and canonical V2 wire payloads -/
 
 /-- All identities and pre-images are fixed when the promise opens.  In
 particular, every terminal alternative uses the same transaction and
@@ -114,18 +117,121 @@ structure OpenCell where
   terminalTriggerDistinct : terminalCell ≠ triggerCell
   outboxTriggerDistinct : outboxCell ≠ triggerCell
 
-/-- Unary-length framing is deliberately simple Lean semantics: deterministic,
-prefix-delimited, and independent of host serialization.  A deployment may
-refine it to a bounded production codec only by preserving the exact bytes
-used by roots, replay identity, and events. -/
+/-- Canonical wire migration. V1 used unary naturals, including unary expansion
+of 256-bit digest values, and was therefore not executable with the deployed
+cSHAKE roots. V2 is a new byte identity: the version is encoded in every frame
+and V1/V2 roots must never be equated silently. -/
+def wireVersion : Nat := 2
+
+/-- One generic envelope shared by clock, outbox, terminal, event, and
+nullifier payloads. Fields remain opaque byte strings here; their typed
+builders below choose their order and meaning. -/
+structure FramedFields where
+  kind : UInt8
+  fields : List (List UInt8)
+  deriving DecidableEq, Repr
+
+abbrev FramedFieldsWire := Nat × (UInt8 × List (List UInt8))
+
+def FramedFields.toWire (framed : FramedFields) : FramedFieldsWire :=
+  (wireVersion, framed.kind, framed.fields)
+
+def FramedFields.ofWire (wire : FramedFieldsWire) : FramedFields :=
+  ⟨wire.2.1, wire.2.2⟩
+
+@[simp] theorem FramedFields.ofWire_toWire (framed : FramedFields) :
+    FramedFields.ofWire framed.toWire = framed := by
+  cases framed
+  rfl
+
+/-- The framing grammar is composed only from the shared compact streaming
+codec nucleus: base-255 naturals, bytes, length-delimited lists, and products.
+No terminal-specific serializer or parser exists beside it. -/
+def framedFieldsStream : StreamCodec FramedFields :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.byte
+        (StreamCodec.list bytesStream)))
+    FramedFields.toWire FramedFields.ofWire FramedFields.ofWire_toWire
+
+def rawFramedFieldsCodec : LawfulCodec FramedFields :=
+  framedFieldsStream.toLawful
+
+/-- Encode one V2 frame through the shared stream codec itself. -/
+def frame (kind : UInt8) (fields : List (List UInt8)) : List UInt8 :=
+  framedFieldsStream.encode ⟨kind, fields⟩
+
+/-- Full-consumption, canonical decoder. `toLawful` rejects a suffix and the
+re-encode check rejects alternate spellings such as overlong naturals. -/
+def decodeFrame (bytes : List UInt8) : Option FramedFields := do
+  let framed ← rawFramedFieldsCodec.decode bytes
+  if frame framed.kind framed.fields = bytes then some framed else none
+
+@[simp] theorem decodeFrame_frame (kind : UInt8)
+    (fields : List (List UInt8)) :
+    decodeFrame (frame kind fields) = some ⟨kind, fields⟩ := by
+  have decoded := rawFramedFieldsCodec.decode_encode
+    ({ kind := kind, fields := fields } : FramedFields)
+  have decodedStream : rawFramedFieldsCodec.decode
+      (framedFieldsStream.encode { kind := kind, fields := fields }) =
+      some { kind := kind, fields := fields } := by
+    exact decoded
+  unfold decodeFrame
+  change rawFramedFieldsCodec.decode
+      (framedFieldsStream.encode { kind := kind, fields := fields }) >>= _ = _
+  rw [decodedStream]
+  simp [frame]
+
+/-- Every accepted frame is exactly the canonical re-encoding. This is the
+decoder-side law needed at a durable identity boundary; `decode_encode` alone
+would not exclude a second byte spelling. -/
+theorem decodeFrame_canonical {bytes : List UInt8} {framed : FramedFields}
+    (accepted : decodeFrame bytes = some framed) :
+    frame framed.kind framed.fields = bytes := by
+  unfold decodeFrame at accepted
+  cases parsed : rawFramedFieldsCodec.decode bytes with
+  | none => simp [parsed] at accepted
+  | some selected =>
+      simp only [parsed, bind, Option.bind] at accepted
+      split at accepted
+      next canonical =>
+        cases Option.some.inj accepted
+        exact canonical
+      next => contradiction
+
+def framedFieldsCodec : LawfulCodec FramedFields where
+  encode framed := frame framed.kind framed.fields
+  decode := decodeFrame
+  decode_encode framed := by cases framed; simp
+
+theorem decodeFrame_some_iff (bytes : List UInt8) (framed : FramedFields) :
+    decodeFrame bytes = some framed ↔ bytes = frame framed.kind framed.fields := by
+  constructor
+  · intro accepted
+    exact (decodeFrame_canonical accepted).symm
+  · intro canonical
+    rw [canonical, decodeFrame_frame]
+
+theorem frame_injective : Function.Injective framedFieldsCodec.encode := by
+  intro left right equal
+  apply Option.some.inj
+  calc
+    some left = decodeFrame (framedFieldsCodec.encode left) := by
+      cases left
+      simp [framedFieldsCodec]
+    _ = decodeFrame (framedFieldsCodec.encode right) := congrArg decodeFrame equal
+    _ = some right := by
+      cases right
+      simp [framedFieldsCodec]
+
+/-- Compact shared natural encoding (base-255 digits plus terminator). -/
 def encodeNat (value : Nat) : List UInt8 :=
-  List.replicate value 0 ++ [255]
+  StreamCodec.nat.encode value
 
+/-- Digests use the shared compact digest stream; a 256-bit root is bounded
+by its base-255 representation rather than expanded to `digest.value` bytes. -/
 def encodeDigest (digest : Digest) : List UInt8 :=
-  encodeNat digest.value
-
-def frame (tag : UInt8) (fields : List (List UInt8)) : List UInt8 :=
-  tag :: fields.flatMap fun field => encodeNat field.length ++ field
+  StreamCodec.nat.encode digest.value
 
 structure OutboxRecord where
   codecVersion : Nat
@@ -152,10 +258,10 @@ structure TerminalRecord where
   outboxRoot : Digest
   deriving DecidableEq, Repr
 
-/-- The decision tag is the first framed field.  This makes distinct terminal
+/-- The decision tag is the first framed field. This makes distinct terminal
 alternatives byte-distinct even when `rootBytes` is collision-prone. -/
 def TerminalRecord.canonicalBytes (record : TerminalRecord) : List UInt8 :=
-  record.kind.tag :: frame 162 [encodeNat record.codecVersion,
+  StreamCodec.byte.encode record.kind.tag ++ frame 162 [encodeNat record.codecVersion,
     encodeDigest record.domain, encodeDigest record.promiseId,
     encodeNat record.deadline, encodeNat record.settledAt,
     encodeDigest record.evidenceRoot, encodeDigest record.outboxRoot]
@@ -367,7 +473,7 @@ private theorem terminalBytes_kind_ne
   intro equal
   have heads := congrArg List.head? equal
   simp [Plan.terminalBytes, Plan.terminalRecord,
-    TerminalRecord.canonicalBytes, frame] at heads
+    TerminalRecord.canonicalBytes, StreamCodec.byte] at heads
   exact different (TerminalKind.tag_injective heads)
 
 theorem competing_decision_conflicts
@@ -451,7 +557,7 @@ def lengthRoot (bytes : List UInt8) : Digest := ⟨bytes.length⟩
 def zeroCharge : Charge := fun _ => 0
 
 def openCell : OpenCell where
-  codecVersion := 1
+  codecVersion := wireVersion
   domain := ⟨10⟩
   promiseId := ⟨11⟩
   deadline := 7
@@ -554,19 +660,27 @@ end Witness
 
 /-! Kernel-facing theorem audit. -/
 
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.terminal_and_outbox_atomic' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.decodeFrame_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeFrame_frame
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.decodeFrame_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeFrame_canonical
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.decodeFrame_some_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeFrame_some_iff
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.frame_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms frame_injective
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.terminal_and_outbox_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Plan.terminal_and_outbox_atomic
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.retry_after_install' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Plan.retry_after_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Plan.retry_after_install
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.competing_decision_conflicts' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.competing_decision_conflicts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms competing_decision_conflicts
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.distinct_terminals_mutually_exclusive' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.distinct_terminals_mutually_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms distinct_terminals_mutually_exclusive
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.physical_step_terminal_atomic' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.physical_step_terminal_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms physical_step_terminal_atomic
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.finalize_commits' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.finalize_commits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.finalize_commits
-/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.cancel_loses_finalize_race' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ReactiveTerminalCell.Witness.cancel_loses_finalize_race' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.cancel_loses_finalize_race
 
 end Minidregg.Kernel.ReactiveTerminalCell
