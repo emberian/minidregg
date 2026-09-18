@@ -20,8 +20,11 @@ root, and requires the witness to name that address.  This module owns the
 canonical `PredCompile` implementation of that committed verifier.
 -/
 import Compiler.PredCompile
+import Compiler.Tower256ConcreteBackend
+import Compiler.Sp800185Cshake256
 import Theory.PolicyInstall
 import Theory.TypedAuthorization
+import Kernel.MultiCellHyperedge
 
 namespace Minidregg.Compiler.CanonicalPolicyAdmission
 
@@ -103,6 +106,49 @@ def PolicyStepContext.ofCandidate
   ⟨pre.root, family.effectDigest declaration, semantics,
     project pre.logical, project candidate.post.logical⟩
 
+universe u v w x y z
+
+/-- Joint policy inputs come from the same source-owned preparation plan that
+later produces the existing heterogeneous turn. The primary incidence chooses
+the actual request pre-root; every new-state component is the corresponding
+validated final patch result. Neither roots nor predicate states are arguments.
+
+The receiving source fixes `project` and the semantic profile. In particular,
+an unchanged factory cell can inspect changed authority and resource cells
+without a caller supplying independent old/new predicate views. -/
+def PolicyStepContext.ofPreparedTuple
+    {Incidence : Type z}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z}
+      layout Source}
+    (project : Source →
+      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) →
+      State)
+    (semantics : Digest)
+    (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan) : PolicyStepContext :=
+  ⟨(prepared.pre prepared.primary).root, plan.legEffectsDigest prepared.source prepared.primary, semantics,
+    project prepared.source prepared.logicalPre,
+    project prepared.source prepared.logicalPost⟩
+
+theorem PolicyStepContext.prepared_tuple_exact
+    {Incidence : Type z}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z}
+      layout Source}
+    (project : Source →
+      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) →
+      State)
+    (semantics : Digest)
+    (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan) :
+    (ofPreparedTuple project semantics prepared).preStateRoot =
+        (prepared.pre prepared.primary).root ∧
+      (ofPreparedTuple project semantics prepared).effectsDigest = plan.legEffectsDigest prepared.source prepared.primary ∧
+      (ofPreparedTuple project semantics prepared).oldState = project prepared.source prepared.logicalPre ∧
+      (ofPreparedTuple project semantics prepared).newState = project prepared.source prepared.logicalPost :=
+  ⟨rfl, rfl, rfl, rfl⟩
+
 /-- The abstract digest model survives only as an explicitly chosen research
 adapter. Production constructors select `canonical`; no decoded request can
 choose the adapter or its state projection. -/
@@ -144,6 +190,114 @@ theorem equal_views_do_not_erase_effect_identity {kind : ResourceKind}
   rw [oldEqual, newEqual]
   simp [PolicyStepBinding.matches, different]
 
+/-! ## Source-owned compiler semantics -/
+
+/-- Every arithmetic parameter is committed in the canonical source profile bytes.
+The receiver label names the complete compatible runtime across its operation families.
+The backend/field identity is selected by receiving source. Its characteristic is
+additionally tied to the actual Lean field by `CharP`, never inferred from a name. -/
+structure CompilerSemanticDescriptor where
+  receiverSemantics : Digest
+  compilerVersion : Nat
+  fieldIdentity : Digest
+  characteristic : Nat
+  orderWidth : Option Nat
+  deriving DecidableEq, Repr
+
+def compilerSemanticVersion : Nat := 1
+
+open Minidregg.Compiler.Tower256ConcreteBackend in
+def compilerDescriptorStream :
+    StreamCodec (Digest × (Nat × (Digest × (Nat × Option Nat)))) :=
+  StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product digestStream
+      (StreamCodec.product StreamCodec.nat (StreamCodec.option StreamCodec.nat))))
+
+def CompilerSemanticDescriptor.tuple (descriptor : CompilerSemanticDescriptor) :
+    Digest × (Nat × (Digest × (Nat × Option Nat))) :=
+  (descriptor.receiverSemantics, descriptor.compilerVersion, descriptor.fieldIdentity,
+    descriptor.characteristic, descriptor.orderWidth)
+
+def CompilerSemanticDescriptor.encode (descriptor : CompilerSemanticDescriptor) : List UInt8 :=
+  compilerDescriptorStream.encode descriptor.tuple
+
+/-- Canonical profile bytes preserve every descriptor component before hashing. -/
+theorem CompilerSemanticDescriptor.encode_injective :
+    Function.Injective CompilerSemanticDescriptor.encode := by
+  intro left right same
+  have decoded := congrArg compilerDescriptorStream.toLawful.decode same
+  have leftDecoded := compilerDescriptorStream.toLawful.decode_encode left.tuple
+  have rightDecoded := compilerDescriptorStream.toLawful.decode_encode right.tuple
+  change compilerDescriptorStream.toLawful.decode
+    (compilerDescriptorStream.encode left.tuple) = some left.tuple at leftDecoded
+  change compilerDescriptorStream.toLawful.decode
+    (compilerDescriptorStream.encode right.tuple) = some right.tuple at rightDecoded
+  change compilerDescriptorStream.toLawful.decode
+    (compilerDescriptorStream.encode left.tuple) =
+      compilerDescriptorStream.toLawful.decode
+        (compilerDescriptorStream.encode right.tuple) at decoded
+  rw [leftDecoded, rightDecoded] at decoded
+  cases left
+  cases right
+  simp_all [CompilerSemanticDescriptor.tuple]
+
+/-- Domain-separated cSHAKE binds compatible receiving-runtime semantics, version, field and arithmetic
+profile. Hash collision resistance is not asserted as an injectivity theorem. -/
+def CompilerSemanticDescriptor.digest (descriptor : CompilerSemanticDescriptor) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.POLICY.COMPILER.PROFILE/v1".toUTF8.toList
+    descriptor.encode).digest
+
+/-- Only receiving source constructs these values. A source profile derives its
+semantic identity from canonical descriptor bytes and carries its actual field
+and no-wrap premises. The research constructor exists for explicit model fixtures;
+canonical state bindings reject it, including when their predicates contain no order. -/
+inductive PolicyCompilerProfile (F : Type) [Field F] where
+  | source (receiverSemantics fieldIdentity : Digest) (characteristic : Nat)
+      (characteristicCorrect : CharP F characteristic) (compiler : CompilerProfile)
+      (admissible : compiler.Admissible F)
+  | researchDisabled (semantics : Digest)
+
+def PolicyCompilerProfile.compiler {F : Type} [Field F] :
+    PolicyCompilerProfile F → CompilerProfile
+  | .source _ _ _ _ compiler _ => compiler
+  | .researchDisabled _ => CompilerProfile.disabled
+
+theorem PolicyCompilerProfile.admissible {F : Type} [Field F] :
+    (profile : PolicyCompilerProfile F) → profile.compiler.Admissible F
+  | .source _ _ _ _ _ admissible => admissible
+  | .researchDisabled _ => True.intro
+
+def sourceCompilerDescriptor (receiverSemantics fieldIdentity : Digest)
+    (characteristic : Nat) (compiler : CompilerProfile) : CompilerSemanticDescriptor where
+  receiverSemantics := receiverSemantics
+  fieldIdentity := fieldIdentity
+  characteristic := characteristic
+  compilerVersion := compilerSemanticVersion
+  orderWidth := match compiler.order with | .disabled => none | .scalar width => some width
+
+def PolicyCompilerProfile.descriptor? {F : Type} [Field F] :
+    PolicyCompilerProfile F → Option CompilerSemanticDescriptor
+  | .source receiverSemantics fieldIdentity characteristic _ compiler _ =>
+      some (sourceCompilerDescriptor receiverSemantics fieldIdentity characteristic compiler)
+  | .researchDisabled _ => none
+
+def PolicyCompilerProfile.semantics {F : Type} [Field F] :
+    PolicyCompilerProfile F → Digest
+  | .source receiverSemantics fieldIdentity characteristic _ compiler _ =>
+      (sourceCompilerDescriptor receiverSemantics fieldIdentity characteristic compiler).digest
+  | .researchDisabled semantics => semantics
+
+def PolicyCompilerProfile.compatible {F : Type} [Field F]
+    (profile : PolicyCompilerProfile F) : PolicyStepBinding → Bool
+  | .model _ _ => true
+  | .canonical _ => profile.descriptor?.isSome
+
+/-- Canonical bindings never accept the explicit research profile. -/
+theorem research_profile_canonical_refused {F : Type} [Field F]
+    (semantics : Digest) (context : PolicyStepContext) :
+    (PolicyCompilerProfile.researchDisabled (F := F) semantics).compatible (.canonical context) = false :=
+  rfl
+
 /-! ## 2. Canonical portal construction. -/
 
 /-- All inputs to the canonical policy verifier.  The base portal's policy
@@ -154,6 +308,7 @@ structure CanonicalPolicyConfig (F : Type) [Field F] [DecidableEq F] where
   registry : PolicyRegistry
   recordDigest : PolicyRecord → Digest
   stepBinding : PolicyStepBinding
+  compilerProfile : PolicyCompilerProfile F
 
 /-- The exact conjunction checked by the policy gate.  In particular, the
 verdict is acceptance of `PredCompile.lower`, not a second hand-written mirror
@@ -171,12 +326,16 @@ def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
       decide (config.recordDigest committed.record = committed.address) &&
       decide (witness.address = committed.address) &&
       config.stepBinding.matches request witness.oldState witness.newState &&
-      supported committed.record.predicate &&
+      config.compilerProfile.compatible config.stepBinding &&
+      decide (request.semantics = config.compilerProfile.semantics) &&
+      supported config.compilerProfile.compiler committed.record.predicate &&
+      inputsInRange config.compilerProfile.compiler committed.record.predicate
+        witness.oldState witness.newState &&
       decide (castInjOn F
         (intsOf committed.record.predicate witness.oldState witness.newState)) &&
       decide (systemAccepts
         (stepAsg witness.oldState witness.newState witness.auxiliary)
-        (lower committed.record.predicate))
+        (lower config.compilerProfile.compiler committed.record.predicate))
 
 /-- Replace the arbitrary policy face of a portal by the committed compiler
 gate.  The inherited policy witness and inherited policy verifier are erased. -/
@@ -185,6 +344,7 @@ def CanonicalPolicyConfig.portal {F : Type} [Field F] [DecidableEq F]
   SignatureWitness := config.base.SignatureWitness
   ProofWitness := config.base.ProofWitness
   CapabilityCommitmentWitness := config.base.CapabilityCommitmentWitness
+  CapabilityUseWitness := config.base.CapabilityUseWitness
   MembershipWitness := config.base.MembershipWitness
   IssuerWitness := config.base.IssuerWitness
   NonRevocationWitness := config.base.NonRevocationWitness
@@ -193,6 +353,7 @@ def CanonicalPolicyConfig.portal {F : Type} [Field F] [DecidableEq F]
   verifySignature := config.base.verifySignature
   verifyProof := config.base.verifyProof
   verifyCapabilityCommitment := config.base.verifyCapabilityCommitment
+  verifyCapabilityUse := config.base.verifyCapabilityUse
   verifyMembership := config.base.verifyMembership
   verifyIssuer := config.base.verifyIssuer
   verifyNonRevocation := config.base.verifyNonRevocation
@@ -224,11 +385,15 @@ def Verified {F : Type} [Field F] [DecidableEq F]
     config.recordDigest committed.record = committed.address ∧
     witness.address = committed.address ∧
     config.stepBinding.matches request witness.oldState witness.newState = true ∧
-    supported committed.record.predicate = true ∧
+    config.compilerProfile.compatible config.stepBinding = true ∧
+    request.semantics = config.compilerProfile.semantics ∧
+    supported config.compilerProfile.compiler committed.record.predicate = true ∧
+    inputsInRange config.compilerProfile.compiler committed.record.predicate
+      witness.oldState witness.newState = true ∧
     castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState) ∧
     systemAccepts
       (stepAsg witness.oldState witness.newState witness.auxiliary)
-      (lower committed.record.predicate)
+      (lower config.compilerProfile.compiler committed.record.predicate)
 
 /-- The executable verifier has exactly the explicit reading above. -/
 theorem verifies_iff_verified {F : Type} [Field F] [DecidableEq F]
@@ -252,9 +417,10 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
       Minidregg.Pred.eval committed.record.predicate
         witness.oldState witness.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, _, supportedExact,
-      castExact, compiled⟩
-  exact ⟨committed, resolved, lower_sound castExact supportedExact compiled⟩
+    ⟨committed, resolved, _, _, _, _, _, _, _, _, _, supportedExact,
+      rangesExact, castExact, compiled⟩
+  exact ⟨committed, resolved, lower_sound config.compilerProfile.compiler config.compilerProfile.admissible
+    castExact supportedExact rangesExact compiled⟩
 
 /-- The receiving theorem speaks about the source-derived context, not free
 predicate-state witnesses. Both the actual pre-root and full declaration
@@ -272,22 +438,51 @@ theorem canonical_context_verifies_sound {F : Type} [Field F] [DecidableEq F]
       config.registry.resolve request.policyId request.policyEpoch = some committed ∧
       Minidregg.Pred.eval committed.record.predicate context.oldState context.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
-    ⟨committed, resolved, _, _, _, _, _, _, matched, supported, cast, compiled⟩
+    ⟨committed, resolved, _, _, _, _, _, _, matched, _, _, supported, ranges, cast, compiled⟩
   rw [canonical] at matched
   rcases (canonical_step_matches_iff context request witness.oldState witness.newState).mp
       matched with ⟨rootExact, effectsExact, semanticsExact, oldExact, newExact⟩
-  have evaluated := lower_sound cast supported compiled
+  have evaluated := lower_sound config.compilerProfile.compiler config.compilerProfile.admissible
+    cast supported ranges compiled
   rw [oldExact, newExact] at evaluated
   exact ⟨rootExact, effectsExact, semanticsExact, committed, resolved, evaluated⟩
 
+/-- The accepted canonical request names a descriptor-derived semantic identity,
+with the actual field characteristic, fixed compiler version and no-wrap law.
+The field/backend tag is a source-owned identifier, not a proof of deployment. -/
+theorem canonical_verifies_profile_bound {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} {witness : CompiledPolicyWitness F}
+    (context : PolicyStepContext)
+    (canonical : config.stepBinding = .canonical context)
+    (accepted : config.verifies request witness = true) :
+    ∃ descriptor, config.compilerProfile.descriptor? = some descriptor ∧
+      request.semantics = descriptor.digest ∧
+      descriptor.compilerVersion = compilerSemanticVersion ∧
+      CharP F descriptor.characteristic ∧
+      (match descriptor.orderWidth with | none => True | some width => PredOrder.NoWrap F width) := by
+  rcases (verifies_iff_verified config request witness).mp accepted with
+    ⟨_, _, _, _, _, _, _, _, _, compatible, semanticsExact, _, _, _, _⟩
+  rw [canonical] at compatible
+  cases hp : config.compilerProfile with
+  | researchDisabled semantics =>
+      simp [hp, PolicyCompilerProfile.compatible, PolicyCompilerProfile.descriptor?] at compatible
+  | source receiver field characteristic characteristicCorrect compiler admissible =>
+      refine ⟨sourceCompilerDescriptor receiver field characteristic compiler, ?_, ?_, rfl,
+        characteristicCorrect, ?_⟩
+      · simp [PolicyCompilerProfile.descriptor?]
+      · simpa only [hp, PolicyCompilerProfile.semantics] using semanticsExact
+      · cases compiler with
+        | mk order => cases order <;> exact admissible
+
 /-- The canonical prover witness is derived from the same lowering fold. -/
 def canonicalWitness {F : Type} [Field F] [DecidableEq F]
-    (committed : CommittedPolicy) (oldState newState : State) :
+    (profile : CompilerProfile) (committed : CommittedPolicy) (oldState newState : State) :
     CompiledPolicyWitness F where
   address := committed.address
   oldState := oldState
   newState := newState
-  auxiliary := wit committed.record.predicate oldState newState
+  auxiliary := wit profile committed.record.predicate oldState newState
 
 /-- Exact reflection for a resolved, digest-bound deployment instance.  The
 forward implication is adversarial soundness; the reverse implication uses the
@@ -304,10 +499,14 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)
     (stepExact : config.stepBinding.matches request oldState newState = true)
-    (supportedExact : supported committed.record.predicate = true)
+    (profileCompatible : config.compilerProfile.compatible config.stepBinding = true)
+    (profileSemanticsExact : request.semantics = config.compilerProfile.semantics)
+    (supportedExact : supported config.compilerProfile.compiler committed.record.predicate = true)
+    (rangesExact : inputsInRange config.compilerProfile.compiler committed.record.predicate
+      oldState newState = true)
     (castExact : castInjOn F
       (intsOf committed.record.predicate oldState newState)) :
-    config.verifies request (canonicalWitness committed oldState newState) = true ↔
+    config.verifies request (canonicalWitness config.compilerProfile.compiler committed oldState newState) = true ↔
       Minidregg.Pred.eval committed.record.predicate oldState newState = true := by
   constructor
   · intro accepted
@@ -317,11 +516,12 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     exact evaluated
   · intro evaluated
     apply (verifies_iff_verified config request
-      (canonicalWitness committed oldState newState)).mpr
+      (canonicalWitness config.compilerProfile.compiler committed oldState newState)).mpr
     refine ⟨committed, resolved, policyIdExact, versionExact, domainExact,
       semanticsExact, recordDigestExact, rfl, stepExact,
-      supportedExact, castExact, ?_⟩
-    exact lower_complete castExact supportedExact evaluated
+      profileCompatible, profileSemanticsExact, supportedExact, rangesExact, castExact, ?_⟩
+    exact lower_complete config.compilerProfile.compiler config.compilerProfile.admissible
+      castExact supportedExact rangesExact evaluated
 
 /-! ## 4. Admission adapter and negative teeth. -/
 
@@ -451,6 +651,38 @@ theorem wrong_step_binding_rejected {F : Type} [Field F] [DecidableEq F]
     config.verifies request witness = false := by
   simp [CanonicalPolicyConfig.verifies, resolved, wrong]
 
+/-- A witness cannot select different compiler semantics by rebinding the record alone. -/
+theorem wrong_compiler_semantics_rejected {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} (witness : CompiledPolicyWitness F)
+    (wrong : request.semantics ≠ config.compilerProfile.semantics) :
+    config.verifies request witness = false := by
+  cases resolved : config.registry.resolve request.policyId request.policyEpoch <;>
+    simp [CanonicalPolicyConfig.verifies, resolved, wrong]
+
+/-- Source bounds are checked independently of the supplied AIR auxiliary values. -/
+theorem out_of_range_rejected {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} {committed : CommittedPolicy}
+    (witness : CompiledPolicyWitness F)
+    (resolved : config.registry.resolve request.policyId request.policyEpoch = some committed)
+    (outside : inputsInRange config.compilerProfile.compiler committed.record.predicate
+      witness.oldState witness.newState = false) :
+    config.verifies request witness = false := by
+  simp [CanonicalPolicyConfig.verifies, resolved, outside]
+
+/-- An explicit research profile cannot serve any canonical receiving context. -/
+theorem research_profile_verifier_refused {F : Type} [Field F] [DecidableEq F]
+    {config : CanonicalPolicyConfig F} {kind : ResourceKind}
+    {request : Request kind} (witness : CompiledPolicyWitness F)
+    (context : PolicyStepContext) (semantics : Digest)
+    (canonical : config.stepBinding = .canonical context)
+    (research : config.compilerProfile = .researchDisabled semantics) :
+    config.verifies request witness = false := by
+  cases resolved : config.registry.resolve request.policyId request.policyEpoch <;>
+    simp [CanonicalPolicyConfig.verifies, resolved, canonical, research,
+      PolicyCompilerProfile.compatible, PolicyCompilerProfile.descriptor?]
+
 /-- Even if all digest equalities collide or are rebound, a source-level policy
 failure cannot be hidden by a malicious auxiliary assignment. -/
 theorem policy_false_rejected {F : Type} [Field F] [DecidableEq F]
@@ -504,6 +736,7 @@ def demoConfig : CanonicalPolicyConfig (ZMod 13) where
   registry := demoRegistry
   recordDigest := demoRecordDigest
   stepBinding := .model demoStateDigest demoStepDigest
+  compilerProfile := .researchDisabled demoRequest.semantics
 
 /-- Authorization state selects the exact content address resolved by the
 demo registry.  The registry root is illustrative; membership is discharged
@@ -516,7 +749,7 @@ def demoAuthState : AuthState :=
       else ⟨0⟩ }
 
 def demoWitness : CompiledPolicyWitness (ZMod 13) :=
-  canonicalWitness demoCommitted kOld kNew
+  canonicalWitness demoConfig.compilerProfile.compiler demoCommitted kOld kNew
 
 /-- Positive pole: the exact versioned policy, state commitment, effect
 commitment, and emitted AIR witness are accepted. -/
@@ -533,7 +766,7 @@ def demoWrongAddressWitness : CompiledPolicyWitness (ZMod 13) :=
   { demoWitness with address := ⟨9999⟩ }
 
 def demoMutatedWitness : CompiledPolicyWitness (ZMod 13) :=
-  canonicalWitness demoCommitted kOld kBad
+  canonicalWitness demoConfig.compilerProfile.compiler demoCommitted kOld kBad
 
 /-- Wrong policy id and version both fail closed at registry resolution. -/
 theorem demo_wrong_policy_rejected :
@@ -571,5 +804,10 @@ theorem demo_reflects_source :
 
 /-- info: 'Minidregg.Compiler.CanonicalPolicyAdmission.canonical_verifies_iff_eval' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_verifies_iff_eval
+
+/-- info: 'Minidregg.Compiler.CanonicalPolicyAdmission.canonical_verifies_profile_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms canonical_verifies_profile_bound
+/-- info: 'Minidregg.Compiler.CanonicalPolicyAdmission.CompilerSemanticDescriptor.encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CompilerSemanticDescriptor.encode_injective
 
 end Minidregg.Compiler.CanonicalPolicyAdmission

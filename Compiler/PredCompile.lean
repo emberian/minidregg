@@ -1,84 +1,106 @@
 /-
-# `Compiler/PredCompile.lean` — [PRED-COMPILE]: the GENERAL `Pred → ConstraintSystem` compiler
+# The sole profile-aware `Pred → ConstraintSystem` compiler
 
-ATLAS law 11 (widen the source, not the emitter) applied to `Compiler/`: until this file,
-`Compiler/` was a GADGET LIBRARY — every constraint system (`boolGadget`, `rangeGadget`,
-`noteSpend`, …) hand-instantiated, n = 1 each. This file is the n = ∀ transition: a lowering
-from the `Pred` policy AST (`Pred/Core`, the ONE predicate algebra) to `ConstraintSystem`
-(`Compiler/AirRange`), with ONE refinement theorem for ALL predicates.
+This module lowers the first-party `Pred` AST to the existing AIR DSL through one
+structural recursion. The same fold emits an indicator and forcing constraints;
+`wit` follows the same AST to generate auxiliary values. There is no separate
+policy interpreter or hand-written Rust circuit.
 
-**Substrate, said out loud: this is Lean-authored arithmetization, and the constraints come
-out of a LOWERING FOLD over the `Pred` AST.** `lowerA`/`lowerL` is one structural recursion
-over the policy algebra emitting DSL terms (`vr`/`cst`/`add'`/`mul'`, read through
-`Compiler/Air`'s one fold); NO constraint is hand-written per predicate — a new policy
-compiles without a new gadget — and the refinement `lower_correct` is ONE mutual induction
-over `Pred`/`PredList`, not a per-gadget argument. Rust appears nowhere.
+The source step is pinned on value and presence input wires. Prover auxiliaries
+are path-addressed, so children of `all`/`any` have disjoint witness namespaces.
+Every accepted node forces its complete Boolean result, including false results
+under negation and disjunction:
 
-## Placement (the boundary question, resolved by reading, not vibes)
+* `eq`/`memberOf`: presence-masked zero indicators.
+* `writeOnce`: the existing combination of two zero indicators.
+* `le`/`monotone`: the forced order gadget from `PredOrderGadget`, selected by an
+  explicit scalar width. Missing operands force false and impose no unused range.
+* `witnessed`: the first-party false indicator; negation composes faithfully.
+* `not`/`all`/`any`: the same indicator algebra and child-prefix renaming.
 
-`scripts/check-import-boundary.sh` mechanically constrains ONLY `Theory/` and `Selvage/`;
-`Compiler/` is not constrained by the script. `Pred/Core` imports core Lean only (it cannot
-and does not import `Compiler`), so `Compiler → Pred.Core` introduces no cycle and keeps the
-direction right: ATLAS §7 carves `Compiler/` as the arithmetization spine that CONSUMES
-source vocabularies. The lowering therefore lives HERE, importing `Pred.Core`; the source
-never learns the emitter.
+The general refinement quantifies over every auxiliary assignment for soundness
+and exhibits the executable witness for completeness:
 
-## The compilation scheme (statement-first)
+  `(∃ A, systemAccepts (stepAsg old new A) (lower profile p)) ↔ Pred.eval p old new = true`
 
-The step `(old, new)` is pinned onto INPUT wires (`Wire.val`, `Wire.pres` — value and
-presence per slot, fail-closed absence made circuit-visible); the compiler allocates
-AUXILIARY wires (`Wire.aux`, path-addressed by AST position) that the PROVER supplies —
-exactly `AirFlatten`'s wire-forcing shape. Each node lowers to an INDICATOR term (a DSL
-term whose value is forced to `if Pred.eval … then 1 else 0`) plus forcing constraints:
+Its separate premises remain explicit:
 
-* `eq`/`memberOf` — the difference-is-zero (resp. product-of-differences) fed through the
-  `isZero` combinator (two constraints `b·d ≐ 0`, `b + d·w − 1 ≐ 0` force `b = [d = 0]`),
-  masked by the presence wire (fail-closed).
-* `writeOnce` — presence-masked combination of two `isZero`s (`old = 0`, `new = old`).
-* `witnessed` — the first-party evaluator FAILS CLOSED, so the indicator is the constant
-  `0`; under `not` this composes correctly (`¬witnessed` is first-party TRUE).
-* `not` — `1 − t`; `allL` — `∏ tᵢ`; `anyL` — `1 − ∏(1 − tᵢ)` (child aux wires disjoint by
-  path prefixing, `pfx`).
-* `le`/`monotone` — NOT lowered (order needs range decomposition): per ATLAS law 10 the
-  refusal is LOUD — an unsatisfiable `1 ≐ 0`, never silence. `[PRED-COMPILE-order]` below.
+1. `castInjOn F (intsOf p old new)` preserves the existing equality interpretation.
+2. `profile.Admissible F` requires injectivity over the entire order decomposition
+   interval `[0,2^(width+1))`, not only the finitely mentioned source integers.
+3. `inputsInRange profile p old new = true` checks actual source integer differences
+   in `[-2^width,2^width)`. It descends through every order atom, including all
+   children of `not` and `any`, independently of their Boolean outcome.
+4. `supported profile p = true` selects the explicit fragment. A scalar profile
+   supports both order atoms. The explicit disabled research profile refuses them
+   with unsatisfiable constraints; it is never an implicit default.
 
-The refinement (`lower_sound` + `lower_complete` = `lower_correct`) is a satisfiability
-equivalence with the step wires PINNED and only the aux wires existential — the same shape
-as `AirFlatten`'s gate-system refinement, and the only true shape (a pointwise iff over ALL
-assignments is false for any aux-carrying system: junk aux must be rejectable):
+Receiving source must commit the compiler version, field identity and arithmetic
+profile in its semantics, use the same profile for installation and invocation,
+and check source ranges before accepting a compiled result. Neither witnesses nor
+requests may select their own width. This file does not choose a deployment field
+or product range. Larger integer promises require a bounded-limb extension.
 
-  `(∃ A, systemAccepts (stepAsg old new A) (lower p)) ↔ Pred.eval p old new = true`
-
-soundness quantifying over EVERY aux assignment (a forger cannot pick clever witnesses) and
-completeness EXHIBITING the witness generator `wit` (derived in the same fold — the compiler
-emits constraints AND the prover's witness routine from one recursion).
-
-## Honest scope
-
-* `castInjOn F (intsOf p old new)` — the deployment parameter constraint (the analog of
-  `AirRange`'s `2^k ≤ p`): the finitely many `Int`s the instance touches must embed
-  injectively into `F`. Not a residual — a label; `decide`-checkable per instance.
-* `[PRED-COMPILE-order]` — `le`/`monotone` (Int order) need bounded-range decomposition
-  (a bit-width parameter + `rangeGadget` reuse for `new − old` / `v − new`); today they
-  lower to the LOUD unsatisfiable system (`lower_le_refuses`/`lower_monotone_refuses`) and
-  are excluded from `supported`. The iff is stated (and proved) for the supported fragment.
-* `[PRED-COMPILE-oracle]` — `witnessed` is compiled at its FIRST-PARTY semantics (`eval`,
-  fail-closed — the iff genuinely holds). Arithmetizing an ORACLE-discharged claim
-  (`evalWith O`) means importing the third party's verifier circuit (AirHash/AirMembership
-  territory), not a per-predicate gadget.
-* `[PRED-COMPILE-quant]` — `Pred/Core` has NO quantifier constructors today (the quantified
-  views are `Pred/Placeholder` future work), so nothing is dropped here; when the source
-  grows quantifiers, this compiler grows finite-domain expansion vocabulary — widen the
-  source, then the lowering, never a bespoke gadget.
+`Compiler → Pred.Core` preserves the source/emitter import boundary. Oracle-backed
+`witnessed` remains distinct from first-party semantics; new source vocabulary must
+be lowered here rather than added through a second policy verifier.
 -/
 import Pred.Core
-import Compiler.AirRange
+import Compiler.PredOrderGadget
 
 namespace Minidregg.Compiler
 
 open Minidregg.Pred (Pred PredList State Slot Vk)
 
 variable {F : Type} [Field F] {Idx Idx' : Type}
+
+/-- Arithmetic options are selected by receiving source, never by an auxiliary witness. -/
+inductive OrderMode where
+  | disabled
+  | scalar (width : Nat)
+  deriving DecidableEq, Repr
+
+/-- Explicit compiler profile. The receiving semantics pins its field, version and content. -/
+structure CompilerProfile where
+  order : OrderMode
+  deriving DecidableEq, Repr
+
+def CompilerProfile.disabled : CompilerProfile := ⟨.disabled⟩
+def CompilerProfile.scalar (width : Nat) : CompilerProfile := ⟨.scalar width⟩
+
+/-- Global interval condition; finite equality cast injectivity is separately required. -/
+def CompilerProfile.Admissible (profile : CompilerProfile) (F : Type) [Field F] : Prop :=
+  match profile.order with
+  | .disabled => True
+  | .scalar width => PredOrder.NoWrap F width
+
+/-- Actual source integer; absence is tracked separately, never inferred from this zero. -/
+def intOf (st : State) (s : Slot) : Int := (st.get s).getD 0
+
+mutual
+/-- Every order atom is checked, including children of negation and disjunction. -/
+def inputsInRange (profile : CompilerProfile) : Pred → State → State → Bool
+  | .le s v, _, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width (new.get s).isSome (intOf new s) v)
+  | .monotone s, old, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width
+            ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s))
+  | .not p, old, new => inputsInRange profile p old new
+  | .allL ps, old, new => inputsInRangeL profile ps old new
+  | .anyL ps, old, new => inputsInRangeL profile ps old new
+  | _, _, _ => true
+
+def inputsInRangeL (profile : CompilerProfile) : PredList → State → State → Bool
+  | .nil, _, _ => true
+  | .cons p ps, old, new =>
+      inputsInRange profile p old new && inputsInRangeL profile ps old new
+end
 
 /-! ## §1. Wires — the step pinned on input wires, prover witnesses on path-addressed aux. -/
 
@@ -314,6 +336,50 @@ def woD2 (s : Slot) : Term (AirSig F Wire) :=
   simp only [woD2, eval_add', eval_mul', eval_vr, eval_cst, stepAsg, cond_true, cond_false]
   ring
 
+/-- Order aux 0 is the shifted value; bits occupy exactly 1..width+1. -/
+def orderBits (width : Nat) (i : Fin (width + 1)) : Wire := .aux [] (i.val + 1)
+
+def orderAux (width : Nat) (present : Bool) (a b : Int) (index : Nat) : F :=
+  if index = 0 then (PredOrder.shiftedNat width present a b : F)
+  else if hi : index - 1 < width + 1 then
+    (PredOrder.binaryDigits (width + 1) (PredOrder.shiftedNat width present a b)
+      ⟨index - 1, hi⟩ : F)
+  else 0
+
+@[simp] theorem orderAux_zero (width : Nat) (present : Bool) (a b : Int) :
+    orderAux (F := F) width present a b 0 = (PredOrder.shiftedNat width present a b : F) := by
+  simp [orderAux]
+
+@[simp] theorem orderAux_bit (width : Nat) (present : Bool) (a b : Int)
+    (i : Fin (width + 1)) :
+    orderAux (F := F) width present a b (i.val + 1) =
+      (PredOrder.binaryDigits (width + 1) (PredOrder.shiftedNat width present a b) i : F) := by
+  simp [orderAux, i.isLt]
+
+@[simp] theorem valOf_intOf (st : State) (s : Slot) :
+    valOf (F := F) st s = (intOf st s : F) := by
+  cases h : st.get s <;> simp [valOf, intOf, h]
+
+@[simp] theorem presOf_bool (st : State) (s : Slot) :
+    presOf (F := F) st s = if (st.get s).isSome then 1 else 0 := by
+  cases h : st.get s <;> simp [presOf, h]
+
+@[simp] theorem presOf_both (old new : State) (s : Slot) :
+    presOf (F := F) old s * presOf new s =
+      if (old.get s).isSome && (new.get s).isSome then 1 else 0 := by
+  cases ho : old.get s <;> cases hn : new.get s <;> simp [presOf, ho, hn]
+
+theorem eval_le_source (old new : State) (s : Slot) (v : Int) :
+    Minidregg.Pred.eval (.le s v) old new =
+      ((new.get s).isSome && decide (intOf new s ≤ v)) := by
+  cases h : new.get s <;> simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, intOf, h]
+
+theorem eval_monotone_source (old new : State) (s : Slot) :
+    Minidregg.Pred.eval (.monotone s) old new =
+      (((old.get s).isSome && (new.get s).isSome) && decide (intOf old s ≤ intOf new s)) := by
+  cases ho : old.get s <;> cases hn : new.get s <;>
+    simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, intOf, ho, hn]
+
 /-! ## §6. THE LOWERING — one structural fold over the `Pred` AST. Each node yields an
 indicator TERM (forced to `[Pred.eval]`) and forcing CONSTRAINTS; nothing else, for any
 predicate, ever. -/
@@ -322,12 +388,17 @@ mutual
 /-- **The lowering fold** (per node): indicator term + forcing constraints. Aux wires of
 this node live at path `[]`; children of `allL`/`anyL` are renamed under their child index
 (`pfx`), keeping sibling witnesses disjoint by construction. -/
-def lowerA : Pred → Term (AirSig F Wire) × ConstraintSystem F Wire
+def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × ConstraintSystem F Wire
   | .eq s v =>
       (mul' (vr (.pres true s)) (vr (.aux [] 0)),
        isZero (eqD s v) (.aux [] 0) (.aux [] 1))
-  | .le _ _ =>
-      (cst 0, [cst 1])   -- [PRED-COMPILE-order]: LOUD unsatisfiable (ATLAS law 10)
+  | .le s v =>
+      match profile.order with
+      | .disabled => (cst 0, [cst 1])
+      | .scalar width =>
+          (PredOrder.indicator width (vr (.pres true s)) (orderBits width),
+           PredOrder.gadget width (vr (.pres true s)) (vr (.val true s)) (cst (v : F))
+             (.aux [] 0) (orderBits width))
   | .memberOf s xs =>
       (mul' (vr (.pres true s)) (vr (.aux [] 0)),
        isZero (memD s xs) (.aux [] 0) (.aux [] 1))
@@ -337,53 +408,58 @@ def lowerA : Pred → Term (AirSig F Wire) × ConstraintSystem F Wire
               (notT (mul' (vr (.pres true s)) (vr (.aux [] 2)))))),
        isZero (woD1 s) (.aux [] 0) (.aux [] 1)
          ++ isZero (woD2 s) (.aux [] 2) (.aux [] 3))
-  | .monotone _ =>
-      (cst 0, [cst 1])   -- [PRED-COMPILE-order]: LOUD unsatisfiable (ATLAS law 10)
+  | .monotone s =>
+      match profile.order with
+      | .disabled => (cst 0, [cst 1])
+      | .scalar width =>
+          let present := mul' (vr (.pres false s)) (vr (.pres true s))
+          (PredOrder.indicator width present (orderBits width),
+           PredOrder.gadget width present (vr (.val false s)) (vr (.val true s))
+             (.aux [] 0) (orderBits width))
   | .witnessed _ =>
       (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
   | .not p =>
-      let l := lowerA p
+      let l := lowerA profile p
       (notT l.1, l.2)
   | .allL ps =>
-      let l := lowerL ps 0
+      let l := lowerL profile ps 0
       (prodT l.1, l.2)
   | .anyL ps =>
-      let l := lowerL ps 0
+      let l := lowerL profile ps 0
       (notT (prodT (l.1.map notT)), l.2)
 
 /-- Child lowering: each child renamed under its position index. -/
-def lowerL : PredList → ℕ → List (Term (AirSig F Wire)) × ConstraintSystem F Wire
+def lowerL (profile : CompilerProfile) : PredList → ℕ → List (Term (AirSig F Wire)) × ConstraintSystem F Wire
   | .nil, _ => ([], [])
   | .cons p ps, i =>
-      let hd := lowerA p
-      let tl := lowerL ps (i + 1)
+      let hd := lowerA profile p
+      let tl := lowerL profile ps (i + 1)
       (renameT (pfx i) hd.1 :: tl.1, renameS (pfx i) hd.2 ++ tl.2)
 end
 
-/-- **`lower`** — the compiled system: the forcing constraints plus the top-level
+/-- **`lower profile`** — the compiled system: the forcing constraints plus the top-level
 assertion `indicator ≐ 1`. -/
-def lower (p : Pred) : ConstraintSystem F Wire :=
-  (lowerA p).2 ++ [add' (lowerA p).1 (cst (-1))]
+def lower (profile : CompilerProfile) (p : Pred) : ConstraintSystem F Wire :=
+  (lowerA profile p).2 ++ [add' (lowerA profile p).1 (cst (-1))]
 
 /-! ## §7. The supported fragment and the cast-injectivity label. -/
 
 mutual
-/-- The fragment this compiler lowers faithfully: everything except the order atoms
-(`le`/`monotone` — `[PRED-COMPILE-order]`). Decidable, structural. -/
-def supported : Pred → Bool
+/-- Structural support under an explicit profile. Order is enabled only by a scalar profile. -/
+def supported (profile : CompilerProfile) : Pred → Bool
   | .eq _ _       => true
-  | .le _ _       => false
+  | .le _ _       => match profile.order with | .disabled => false | .scalar _ => true
   | .memberOf _ _ => true
   | .writeOnce _  => true
-  | .monotone _   => false
+  | .monotone _   => match profile.order with | .disabled => false | .scalar _ => true
   | .witnessed _  => true
-  | .not p        => supported p
-  | .allL ps      => supportedL ps
-  | .anyL ps      => supportedL ps
+  | .not p        => supported profile p
+  | .allL ps      => supportedL profile ps
+  | .anyL ps      => supportedL profile ps
 
-def supportedL : PredList → Bool
+def supportedL (profile : CompilerProfile) : PredList → Bool
   | .nil       => true
-  | .cons p ps => supported p && supportedL ps
+  | .cons p ps => supported profile p && supportedL profile ps
 end
 
 mutual
@@ -417,27 +493,34 @@ variable [DecidableEq F]
 
 mutual
 /-- The canonical aux assignment making a TRUE (supported) predicate's system accept. -/
-def wit : Pred → State → State → List ℕ → ℕ → F
+def wit (profile : CompilerProfile) : Pred → State → State → List ℕ → ℕ → F
   | .eq s v       => fun _ new _ k => auxPair (valOf new s - (v : F)) k
-  | .le _ _       => fun _ _ _ _ => 0
+  | .le s v       => fun _ new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width (new.get s).isSome (intOf new s) v k
   | .memberOf s xs => fun _ new _ k =>
       auxPair ((xs.map fun c : ℤ => valOf new s - (c : F)).prod) k
   | .writeOnce s  => fun old new _ k =>
       if k < 2 then auxPair (valOf old s) k
       else auxPair (valOf new s - valOf old s) (k - 2)
-  | .monotone _   => fun _ _ _ _ => 0
+  | .monotone s   => fun old new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width
+          ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s) k
   | .witnessed _  => fun _ _ _ _ => 0
-  | .not p        => wit p
-  | .allL ps      => witL ps 0
-  | .anyL ps      => witL ps 0
+  | .not p        => wit profile p
+  | .allL ps      => witL profile ps 0
+  | .anyL ps      => witL profile ps 0
 
-def witL : PredList → ℕ → State → State → List ℕ → ℕ → F
+def witL (profile : CompilerProfile) : PredList → ℕ → State → State → List ℕ → ℕ → F
   | .nil, _       => fun _ _ _ _ => 0
   | .cons p ps, i => fun old new path k =>
       match path with
       | []        => 0
-      | j :: rest => if j = i then wit p old new rest k
-                     else witL ps (i + 1) old new (j :: rest) k
+      | j :: rest => if j = i then wit profile p old new rest k
+                     else witL profile ps (i + 1) old new (j :: rest) k
 end
 
 end DecEqF
@@ -506,16 +589,18 @@ section DecEqF
 variable [DecidableEq F]
 
 -- (the mutual block generalizes section variables jointly; the linter's per-theorem
--- "unused [DecidableEq F]" on `lowerL_forced` is a mutual-block artifact)
+-- "unused [DecidableEq F]" on `lowerL_forced profile hprofile` is a mutual-block artifact)
 set_option linter.unusedSectionVars false in
 mutual
-theorem lowerA_forced :
+theorem lowerA_forced (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) :
     ∀ (p : Pred) (old new : State) (A : List ℕ → ℕ → F),
-      castInjOn F (intsOf p old new) → supported p = true →
-      systemAccepts (stepAsg old new A) (lowerA p).2 →
-      eval (stepAsg old new A) (lowerA p).1
+      castInjOn F (intsOf p old new) → supported profile p = true →
+      inputsInRange profile p old new = true →
+      systemAccepts (stepAsg old new A) (lowerA profile p).2 →
+      eval (stepAsg old new A) (lowerA profile p).1
         = if Minidregg.Pred.eval p old new = true then 1 else 0
-  | .eq s v, old, new, A, hinj, _, h => by
+  | .eq s v, old, new, A, hinj, _, _, h => by
     simp only [lowerA] at h ⊢
     have hb := isZero_forced h
     simp only [eval_mul', eval_vr, hb, eval_eqD]
@@ -534,9 +619,23 @@ theorem lowerA_forced :
       · have : ¬((x : F) - (v : F) = 0) := fun hc =>
           hxv (hinj x hx v hv (sub_eq_zero.mp hc))
         simp [hxv, this]
-  | .le s v, old, new, A, _, hsup, h => by
-    simp [supported] at hsup
-  | .memberOf s xs, old, new, A, hinj, _, h => by
+  | .le s v, old, new, A, _, hsup, hrange, h => by
+    cases hmode : profile.order with
+    | disabled => simp [supported, hmode] at hsup
+    | scalar width =>
+      simp only [lowerA, hmode] at h ⊢
+      have hr : PredOrder.InputsInRange width (new.get s).isSome (intOf new s) v := by
+        simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+      have hnw : PredOrder.NoWrap F width := by
+        simpa only [CompilerProfile.Admissible, hmode] using hprofile
+      have hf := PredOrder.forced width (vr (.pres true s)) (vr (.val true s)) (cst (v : F))
+        (.aux [] 0) (orderBits width) (stepAsg old new A)
+        (new.get s).isSome (intOf new s) v hnw hr
+        (by simpa only [eval_vr, stepAsg, cond_true] using presOf_bool (F := F) new s)
+        (by simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new s)
+        rfl h
+      simpa only [eval_le_source] using hf
+  | .memberOf s xs, old, new, A, hinj, _, _, h => by
     simp only [lowerA] at h ⊢
     have hb := isZero_forced h
     simp only [eval_mul', eval_vr, hb, eval_memD]
@@ -562,7 +661,7 @@ theorem lowerA_forced :
         have hxc : x = c := hinj x hx c hcI (sub_eq_zero.mp hc0)
         rw [hxc] at hmem
         exact hmem hc
-  | .writeOnce s, old, new, A, hinj, _, h => by
+  | .writeOnce s, old, new, A, hinj, _, _, h => by
     simp only [lowerA, systemAccepts_append] at h
     obtain ⟨h₁, h₂⟩ := h
     have hb₁ := isZero_forced h₁
@@ -598,48 +697,71 @@ theorem lowerA_forced :
           · have hsub : ¬((n : F) - (o : F) = 0) := fun hc =>
               hno (hinj n hn o ho (sub_eq_zero.mp hc))
             simp [hno, hsub]
-  | .monotone s, old, new, A, _, hsup, h => by
-    simp [supported] at hsup
-  | .witnessed vk, old, new, A, _, _, _ => by
+  | .monotone s, old, new, A, _, hsup, hrange, h => by
+    cases hmode : profile.order with
+    | disabled => simp [supported, hmode] at hsup
+    | scalar width =>
+      simp only [lowerA, hmode] at h ⊢
+      have hr : PredOrder.InputsInRange width
+          ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s) := by
+        simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+      have hnw : PredOrder.NoWrap F width := by
+        simpa only [CompilerProfile.Admissible, hmode] using hprofile
+      have hf := PredOrder.forced width (mul' (vr (.pres false s)) (vr (.pres true s)))
+        (vr (.val false s)) (vr (.val true s)) (.aux [] 0) (orderBits width)
+        (stepAsg old new A) ((old.get s).isSome && (new.get s).isSome)
+        (intOf old s) (intOf new s) hnw hr
+        (by simpa only [eval_mul', eval_vr, stepAsg, cond_true, cond_false]
+              using presOf_both (F := F) old new s)
+        (by simpa only [eval_vr, stepAsg, cond_false] using valOf_intOf (F := F) old s)
+        (by simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new s) h
+      simpa only [eval_monotone_source] using hf
+  | .witnessed vk, old, new, A, _, _, _, _ => by
     simp [lowerA, eval_cst, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
       Minidregg.Pred.failClosed]
-  | .not p, old, new, A, hinj, hsup, h => by
+  | .not p, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     have hinj' : castInjOn F (intsOf p old new) := by
       simpa only [intsOf, lits] using hinj
     simp only [lowerA] at h ⊢
-    rw [eval_notT, lowerA_forced p old new A hinj' hsup h]
+    rw [eval_notT, lowerA_forced profile hprofile p old new A hinj' hsup hrange h]
     simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith]
     exact one_sub_ind _
-  | .allL ps, old, new, A, hinj, hsup, h => by
+  | .allL ps, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     have hinj' : castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) := by
       simpa only [intsOf, lits] using hinj
     simp only [lowerA] at h ⊢
-    rw [eval_prodT, lowerL_forced ps 0 old new A hinj' hsup h, prod_ind]
+    rw [eval_prodT, lowerL_forced profile hprofile ps 0 old new A hinj' hsup hrange h, prod_ind]
     simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, evalWithAll_toList]
     rfl
-  | .anyL ps, old, new, A, hinj, hsup, h => by
+  | .anyL ps, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     have hinj' : castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) := by
       simpa only [intsOf, lits] using hinj
     simp only [lowerA] at h ⊢
-    rw [eval_notT, eval_prodT_notT, lowerL_forced ps 0 old new A hinj' hsup h,
+    rw [eval_notT, eval_prodT_notT, lowerL_forced profile hprofile ps 0 old new A hinj' hsup hrange h,
       prod_one_sub_ind, all_not_eq_not_any]
     simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, evalWithAny_toList]
     exact one_sub_ind_not _
 
-theorem lowerL_forced :
+theorem lowerL_forced (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) :
     ∀ (ps : PredList) (i : ℕ) (old new : State) (A : List ℕ → ℕ → F),
       castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) →
-      supportedL ps = true →
-      systemAccepts (stepAsg old new A) (lowerL ps i).2 →
-      (lowerL ps i).1.map (eval (stepAsg old new A))
+      supportedL profile ps = true →
+      inputsInRangeL profile ps old new = true →
+      systemAccepts (stepAsg old new A) (lowerL profile ps i).2 →
+      (lowerL profile ps i).1.map (eval (stepAsg old new A))
         = ps.toList.map fun q =>
             if Minidregg.Pred.eval q old new = true then 1 else 0
-  | .nil, _, _, _, _, _, _, _ => rfl
-  | .cons p ps, i, old, new, A, hinj, hsup, h => by
+  | .nil, _, _, _, _, _, _, _, _ => rfl
+  | .cons p ps, i, old, new, A, hinj, hsup, hrange, h => by
     simp only [supportedL, Bool.and_eq_true] at hsup
+    simp only [inputsInRangeL, Bool.and_eq_true] at hrange
     simp only [lowerL, systemAccepts_append] at h
     obtain ⟨h₁, h₂⟩ := h
     rw [systemAccepts_renameS, stepAsg_pfx] at h₁
@@ -653,9 +775,9 @@ theorem lowerL_forced :
         intro a ha
         simp only [litsL, List.mem_cons, List.mem_append] at ha ⊢
         tauto) hinj
-    have ih₁ := lowerA_forced p old new (fun path k => A (i :: path) k)
-      hinjp hsup.1 h₁
-    have ih₂ := lowerL_forced ps (i + 1) old new A hinjps hsup.2 h₂
+    have ih₁ := lowerA_forced profile hprofile p old new (fun path k => A (i :: path) k)
+      hinjp hsup.1 hrange.1 h₁
+    have ih₂ := lowerL_forced profile hprofile ps (i + 1) old new A hinjps hsup.2 hrange.2 h₂
     simp only [lowerL, Minidregg.Pred.PredList.toList, List.map_cons]
     rw [eval_renameT, stepAsg_pfx, ih₁, ih₂]
 end
@@ -670,25 +792,40 @@ section DecEqF
 variable [DecidableEq F]
 
 mutual
-theorem lowerA_complete :
-    ∀ (p : Pred) (old new : State), supported p = true →
-      systemAccepts (stepAsg old new (wit (F := F) p old new)) (lowerA p).2
-  | .eq s v, old, new, _ => by
+theorem lowerA_complete (profile : CompilerProfile) :
+    ∀ (p : Pred) (old new : State), supported profile p = true →
+      inputsInRange profile p old new = true →
+      systemAccepts (stepAsg old new (wit profile (F := F) p old new)) (lowerA profile p).2
+  | .eq s v, old, new, _, _ => by
     simp only [lowerA]
     apply isZero_complete
     · show auxPair (valOf new s - (v : F)) 0 = _
       rw [eval_eqD]; simp [auxPair]
     · show auxPair (valOf new s - (v : F)) 1 = _
       rw [eval_eqD]; simp [auxPair]
-  | .le s v, old, new, hsup => by simp [supported] at hsup
-  | .memberOf s xs, old, new, _ => by
+  | .le s v, old, new, hsup, hrange => by
+    cases hmode : profile.order with
+    | disabled => simp [supported, hmode] at hsup
+    | scalar width =>
+      simp only [lowerA, hmode]
+      have hr : PredOrder.InputsInRange width (new.get s).isSome (intOf new s) v := by
+        simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+      refine PredOrder.complete (F := F) width (vr (.pres true s)) (vr (.val true s)) (cst (v : F))
+        (.aux [] 0) (orderBits width) (stepAsg old new (wit profile (.le s v) old new))
+        (new.get s).isSome (intOf new s) v hr ?_ ?_ rfl ?_ ?_
+      · simpa only [eval_vr, stepAsg, cond_true] using presOf_bool (F := F) new s
+      · simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new s
+      · simp only [stepAsg, wit, hmode, orderAux_zero]
+      · intro i
+        simp only [orderBits, stepAsg, wit, hmode, orderAux_bit]
+  | .memberOf s xs, old, new, _, _ => by
     simp only [lowerA]
     apply isZero_complete
     · show auxPair ((xs.map fun c : ℤ => valOf new s - (c : F)).prod) 0 = _
       rw [eval_memD]; simp [auxPair]
     · show auxPair ((xs.map fun c : ℤ => valOf new s - (c : F)).prod) 1 = _
       rw [eval_memD]; simp [auxPair]
-  | .writeOnce s, old, new, _ => by
+  | .writeOnce s, old, new, _, _ => by
     simp only [lowerA, systemAccepts_append]
     constructor
     · apply isZero_complete
@@ -705,43 +842,66 @@ theorem lowerA_complete :
       · show (if (3 : ℕ) < 2 then auxPair (valOf old s) 3
               else auxPair (valOf new s - valOf old s) (3 - 2)) = _
         rw [eval_woD2]; simp [auxPair]
-  | .monotone s, old, new, hsup => by simp [supported] at hsup
-  | .witnessed vk, old, new, _ => by
+  | .monotone s, old, new, hsup, hrange => by
+    cases hmode : profile.order with
+    | disabled => simp [supported, hmode] at hsup
+    | scalar width =>
+      simp only [lowerA, hmode]
+      have hr : PredOrder.InputsInRange width
+          ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s) := by
+        simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+      refine PredOrder.complete (F := F) width (mul' (vr (.pres false s)) (vr (.pres true s)))
+        (vr (.val false s)) (vr (.val true s)) (.aux [] 0) (orderBits width)
+        (stepAsg old new (wit profile (.monotone s) old new))
+        ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s) hr ?_ ?_ ?_ ?_ ?_
+      · simpa only [eval_mul', eval_vr, stepAsg, cond_true, cond_false]
+          using presOf_both (F := F) old new s
+      · simpa only [eval_vr, stepAsg, cond_false] using valOf_intOf (F := F) old s
+      · simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new s
+      · simp only [stepAsg, wit, hmode, orderAux_zero]
+      · intro i
+        simp only [orderBits, stepAsg, wit, hmode, orderAux_bit]
+  | .witnessed vk, old, new, _, _ => by
     simp only [lowerA]
     exact systemAccepts_nil _
-  | .not p, old, new, hsup => by
+  | .not p, old, new, hsup, hrange => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     simp only [lowerA, wit]
-    exact lowerA_complete p old new hsup
-  | .allL ps, old, new, hsup => by
+    exact lowerA_complete profile p old new hsup hrange
+  | .allL ps, old, new, hsup, hrange => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     simp only [lowerA, wit]
-    exact lowerL_complete ps 0 old new (witL ps 0 old new)
-      (fun _ _ _ _ => rfl) hsup
-  | .anyL ps, old, new, hsup => by
+    exact lowerL_complete profile ps 0 old new (witL profile ps 0 old new)
+      (fun _ _ _ _ => rfl) hsup hrange
+  | .anyL ps, old, new, hsup, hrange => by
     simp only [supported] at hsup
+    simp only [inputsInRange] at hrange
     simp only [lowerA, wit]
-    exact lowerL_complete ps 0 old new (witL ps 0 old new)
-      (fun _ _ _ _ => rfl) hsup
+    exact lowerL_complete profile ps 0 old new (witL profile ps 0 old new)
+      (fun _ _ _ _ => rfl) hsup hrange
 
-theorem lowerL_complete :
+theorem lowerL_complete (profile : CompilerProfile) :
     ∀ (ps : PredList) (i : ℕ) (old new : State) (A : List ℕ → ℕ → F),
-      (∀ j, i ≤ j → ∀ path k, A (j :: path) k = witL ps i old new (j :: path) k) →
-      supportedL ps = true →
-      systemAccepts (stepAsg old new A) (lowerL ps i).2
-  | .nil, _, _, _, _, _, _ => systemAccepts_nil _
-  | .cons p ps, i, old, new, A, hA, hsup => by
+      (∀ j, i ≤ j → ∀ path k, A (j :: path) k = witL profile ps i old new (j :: path) k) →
+      supportedL profile ps = true →
+      inputsInRangeL profile ps old new = true →
+      systemAccepts (stepAsg old new A) (lowerL profile ps i).2
+  | .nil, _, _, _, _, _, _, _ => systemAccepts_nil _
+  | .cons p ps, i, old, new, A, hA, hsup, hrange => by
     simp only [supportedL, Bool.and_eq_true] at hsup
+    simp only [inputsInRangeL, Bool.and_eq_true] at hrange
     simp only [lowerL, systemAccepts_append]
     constructor
     · rw [systemAccepts_renameS, stepAsg_pfx]
-      have hfun : (fun path k => A (i :: path) k) = wit p old new := by
+      have hfun : (fun path k => A (i :: path) k) = wit profile p old new := by
         funext path k
         rw [hA i (le_refl i) path k]
         simp [witL]
       rw [hfun]
-      exact lowerA_complete p old new hsup.1
-    · refine lowerL_complete ps (i + 1) old new A ?_ hsup.2
+      exact lowerA_complete profile p old new hsup.1 hrange.1
+    · refine lowerL_complete profile ps (i + 1) old new A ?_ hsup.2 hrange.2
       intro j hj path k
       rw [hA j (by omega) path k]
       simp only [witL]
@@ -758,55 +918,60 @@ variable [DecidableEq F]
 
 /-- **General soundness** (∀ aux — a forger cannot pick clever witnesses): any accepted
 assignment with the step pinned means the policy HOLDS. -/
-theorem lower_sound {p : Pred} {old new : State} {A : List ℕ → ℕ → F}
-    (hinj : castInjOn F (intsOf p old new)) (hsup : supported p = true)
-    (h : systemAccepts (stepAsg old new A) (lower p)) :
+theorem lower_sound (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) {p : Pred} {old new : State} {A : List ℕ → ℕ → F}
+    (hinj : castInjOn F (intsOf p old new)) (hsup : supported profile p = true)
+    (hrange : inputsInRange profile p old new = true)
+    (h : systemAccepts (stepAsg old new A) (lower profile p)) :
     Minidregg.Pred.eval p old new = true := by
   rw [lower, systemAccepts_append, systemAccepts_cons] at h
   obtain ⟨hsys, htop, -⟩ := h
   unfold accepts at htop
-  rw [eval_add', eval_cst, lowerA_forced p old new A hinj hsup hsys] at htop
+  rw [eval_add', eval_cst, lowerA_forced profile hprofile p old new A hinj hsup hrange hsys] at htop
   by_cases he : Minidregg.Pred.eval p old new = true
   · exact he
   · rw [if_neg he] at htop
     exact absurd (by linear_combination htop : (0 : F) = 1) zero_ne_one
 
 /-- **General completeness**: a TRUE (supported) policy's system accepts at the emitted
-witness generator `wit`. -/
-theorem lower_complete {p : Pred} {old new : State}
-    (hinj : castInjOn F (intsOf p old new)) (hsup : supported p = true)
+witness generator `wit profile`. -/
+theorem lower_complete (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) {p : Pred} {old new : State}
+    (hinj : castInjOn F (intsOf p old new)) (hsup : supported profile p = true)
+    (hrange : inputsInRange profile p old new = true)
     (he : Minidregg.Pred.eval p old new = true) :
-    systemAccepts (stepAsg old new (wit (F := F) p old new)) (lower p) := by
+    systemAccepts (stepAsg old new (wit profile (F := F) p old new)) (lower profile p) := by
   rw [lower, systemAccepts_append, systemAccepts_cons]
-  have hsys := lowerA_complete (F := F) p old new hsup
+  have hsys := lowerA_complete profile (F := F) p old new hsup hrange
   refine ⟨hsys, ?_, systemAccepts_nil _⟩
   unfold accepts
   rw [eval_add', eval_cst,
-    lowerA_forced p old new (wit p old new) hinj hsup hsys, if_pos he]
+    lowerA_forced profile hprofile p old new (wit profile p old new) hinj hsup hrange hsys, if_pos he]
   ring
 
 /-- **`lower_correct` — THE general compiler refinement** (the n = ∀ theorem): with the
 step pinned on the input wires and the aux wires prover-existential, the compiled system
 accepts **iff** the predicate holds — for EVERY predicate of the supported fragment, by one
 mutual induction over the `Pred` AST. No bespoke gadget, no per-predicate argument. -/
-theorem lower_correct {p : Pred} {old new : State}
-    (hinj : castInjOn F (intsOf p old new)) (hsup : supported p = true) :
-    (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower p))
+theorem lower_correct (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) {p : Pred} {old new : State}
+    (hinj : castInjOn F (intsOf p old new)) (hsup : supported profile p = true)
+    (hrange : inputsInRange profile p old new = true) :
+    (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower profile p))
       ↔ Minidregg.Pred.eval p old new = true :=
-  ⟨fun ⟨_, h⟩ => lower_sound hinj hsup h,
-   fun he => ⟨wit p old new, lower_complete hinj hsup he⟩⟩
+  ⟨fun ⟨_, h⟩ => lower_sound profile hprofile hinj hsup hrange h,
+   fun he => ⟨wit profile p old new, lower_complete profile hprofile hinj hsup hrange he⟩⟩
 
 end DecEqF
 
-/-! ## §13. LOUD refusal (ATLAS law 10) — the order atoms are not silently dropped: their
-lowering rejects EVERYTHING, on any assignment, any field. -/
+/-! ## §13. The explicit disabled profile refuses order on every assignment and field. -/
 
-theorem lower_le_refuses (s : Slot) (v : ℤ) (asg : Wire → F) :
-    ¬ systemAccepts asg (lower (.le s v)) := fun h =>
+theorem lower_le_disabled_refuses (s : Slot) (v : ℤ) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower CompilerProfile.disabled (.le s v)) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
-theorem lower_monotone_refuses (s : Slot) (asg : Wire → F) :
-    ¬ systemAccepts asg (lower (.monotone s)) := fun h =>
+theorem lower_monotone_disabled_refuses (s : Slot) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower CompilerProfile.disabled (.monotone s)) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
 /-! ## §14. SUBSUMPTION — the general compiler reproduces the hand gadget (n = 1 → n = ∀).
@@ -825,12 +990,13 @@ variable [DecidableEq F]
 /-- **The subsumption theorem**: on a present slot (with the cast label), the GENERAL
 compiler's verdict on the booleanity POLICY is exactly the hand-written `boolGadget`'s
 verdict on the value wire. -/
-theorem lower_subsumes_boolGadget {old new : State} {s : Slot} {x : ℤ}
+theorem lower_subsumes_boolGadget (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) {old new : State} {s : Slot} {x : ℤ}
     (hget : new.get s = some x)
     (hinj : castInjOn F (intsOf (boolPol s) old new)) :
-    (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower (boolPol s)))
+    (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower profile (boolPol s)))
       ↔ accepts (fun _ : Unit => (x : F)) (boolGadget ()) := by
-  rw [lower_correct hinj rfl, boolGadget_correct]
+  rw [lower_correct profile hprofile hinj rfl rfl, boolGadget_correct]
   have h0 : (0 : ℤ) ∈ intsOf (boolPol s) old new := by simp [intsOf]
   have h1 : (1 : ℤ) ∈ intsOf (boolPol s) old new := by
     simp [intsOf, boolPol, Pred.any, Minidregg.Pred.PredList.ofList, lits, litsL]
@@ -861,7 +1027,7 @@ def kOld : State := ⟨[("x", 3), ("z", 0)]⟩
 /-- Keystone post-state: `x = 5`, `y = 2`, `z = 4`. -/
 def kNew : State := ⟨[("x", 5), ("y", 2), ("z", 4)]⟩
 
-/-- A compound policy exercising every supported constructor: two atoms, membership,
+/-- A compound policy exercising every equality-fragment constructor: two atoms, membership,
 write-once, negation, and the fail-closed `witnessed` under `not`. -/
 def kPol : Pred :=
   Pred.all [.eq "y" 2, .memberOf "x" [1, 3, 5], .writeOnce "z",
@@ -875,55 +1041,54 @@ example : castInjOn (ZMod 7) (intsOf kPol kOld kNew) := by decide
 example : castInjOn (ZMod 13) (intsOf kPol kOld kNew) := by decide
 
 -- The fragment check and the source-level evaluations (kernel-decided):
-example : supported kPol = true := by decide
+example : supported CompilerProfile.disabled kPol = true := by decide
 example : Minidregg.Pred.eval kPol kOld kNew = true := by decide
 example : Minidregg.Pred.eval kPol kOld kBad = false := by decide
 
 /-- *Satisfiable, COMPUTED (ZMod 7)*: the compiled system accepts the emitted witness —
 lowering fold, witness generator, and constraint evaluation all reduced in the kernel. -/
-example : systemAccepts (stepAsg kOld kNew (wit kPol kOld kNew (F := ZMod 7)))
-    (lower kPol) := by decide
+example : systemAccepts (stepAsg kOld kNew (wit CompilerProfile.disabled kPol kOld kNew (F := ZMod 7)))
+    (lower CompilerProfile.disabled kPol) := by decide
 
 /-- *Satisfiable, COMPUTED (ZMod 13)*: same pipeline, second field. -/
-example : systemAccepts (stepAsg kOld kNew (wit kPol kOld kNew (F := ZMod 13)))
-    (lower kPol) := by decide
+example : systemAccepts (stepAsg kOld kNew (wit CompilerProfile.disabled kPol kOld kNew (F := ZMod 13)))
+    (lower CompilerProfile.disabled kPol) := by decide
 
 /-- *The general theorem FIRES on the instance (ZMod 7)*: `lower_correct` (the ∀-predicate
 refinement, not a bespoke argument) yields the acceptance from the source-level eval. -/
 example : ∃ A : List ℕ → ℕ → ZMod 7,
-    systemAccepts (stepAsg kOld kNew A) (lower kPol) :=
-  (lower_correct (by decide) (by decide)).mpr (by decide)
+    systemAccepts (stepAsg kOld kNew A) (lower CompilerProfile.disabled kPol) :=
+  (lower_correct CompilerProfile.disabled (by trivial) (by decide) (by decide) (by decide)).mpr (by decide)
 
 /-- *Teeth via the general theorem (ZMod 7)*: on the hostile step NO aux assignment
 whatsoever makes the compiled system accept — quantified over every prover strategy. -/
 example : ¬ ∃ A : List ℕ → ℕ → ZMod 7,
-    systemAccepts (stepAsg kOld kBad A) (lower kPol) := fun h => by
-  have := (lower_correct (by decide) (by decide)).mp h
+    systemAccepts (stepAsg kOld kBad A) (lower CompilerProfile.disabled kPol) := fun h => by
+  have := (lower_correct CompilerProfile.disabled (by trivial) (by decide) (by decide) (by decide)).mp h
   simp [show Minidregg.Pred.eval kPol kOld kBad = false from by decide] at this
 
 /-- *Teeth, COMPUTED (ZMod 13)*: the hostile step rejects even at the honest generator's
 own aux values. -/
-example : ¬ systemAccepts (stepAsg kOld kBad (wit kPol kOld kBad (F := ZMod 13)))
-    (lower kPol) := by decide
+example : ¬ systemAccepts (stepAsg kOld kBad (wit CompilerProfile.disabled kPol kOld kBad (F := ZMod 13)))
+    (lower CompilerProfile.disabled kPol) := by decide
 
-/-- *Loud refusal, instantiated*: an order atom's lowering rejects everything (law 10 —
-the unsupported leg is an unsatisfiable boundary, never silence). -/
+/-- The explicitly disabled research profile refuses order on every assignment. -/
 example : ¬ systemAccepts (stepAsg kOld kNew (fun _ _ => (0 : ZMod 7)))
-    (lower (.le "x" 9)) :=
-  lower_le_refuses "x" 9 _
+    (lower CompilerProfile.disabled (.le "x" 9)) :=
+  lower_le_disabled_refuses "x" 9 _
 
 /-- *Fail-closed composition, COMPUTED*: `¬witnessed` is first-party TRUE and its
 compilation accepts — the escape hatch's fail-closed indicator composes under negation. -/
 example : systemAccepts
-    (stepAsg kOld kNew (wit (.not (.witnessed ⟨"vk"⟩)) kOld kNew (F := ZMod 7)))
-    (lower (.not (.witnessed ⟨"vk"⟩))) := by decide
+    (stepAsg kOld kNew (wit CompilerProfile.disabled (.not (.witnessed ⟨"vk"⟩)) kOld kNew (F := ZMod 7)))
+    (lower CompilerProfile.disabled (.not (.witnessed ⟨"vk"⟩))) := by decide
 
 /-- *Subsumption, instantiated (ZMod 7)*: on `kNew` (where `x = 5`), the compiled
 booleanity POLICY and the hand `boolGadget` on the same value agree — here both REJECT
 (`5` is not boolean), teeth on the subsumption face. -/
 example : ¬ ∃ A : List ℕ → ℕ → ZMod 7,
-    systemAccepts (stepAsg kOld kNew A) (lower (boolPol "x")) := fun h => by
-  have := (lower_subsumes_boolGadget (x := 5) (by decide) (by decide)).mp h
+    systemAccepts (stepAsg kOld kNew A) (lower CompilerProfile.disabled (boolPol "x")) := fun h => by
+  have := (lower_subsumes_boolGadget CompilerProfile.disabled (by trivial) (x := 5) (by decide) (by decide)).mp h
   rw [boolGadget_correct] at this
   exact absurd this (by decide)
 
@@ -933,8 +1098,8 @@ def kNewB : State := ⟨[("x", 1)]⟩
 /-- *Subsumption, accepting pole (ZMod 7)*: `x = 1` — the compiled policy accepts, via the
 subsumption iff, exactly because the hand gadget accepts `1`. -/
 example : ∃ A : List ℕ → ℕ → ZMod 7,
-    systemAccepts (stepAsg kOld kNewB A) (lower (boolPol "x")) :=
-  (lower_subsumes_boolGadget (x := 1) (by decide) (by decide)).mpr
+    systemAccepts (stepAsg kOld kNewB A) (lower CompilerProfile.disabled (boolPol "x")) :=
+  (lower_subsumes_boolGadget CompilerProfile.disabled (by trivial) (x := 1) (by decide) (by decide)).mpr
     (by rw [boolGadget_correct]; exact Or.inr rfl)
 
 /-- info: 'Minidregg.Compiler.lower_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -944,16 +1109,16 @@ example : ∃ A : List ℕ → ℕ → ZMod 7,
 
 /-! ### Closing audit note
 
-`lower_correct` is GENERAL: `lowerA_forced`/`lowerL_forced` and `lowerA_complete`/
-`lowerL_complete` are mutual inductions with one arm per `Pred`/`PredList` constructor —
-`eq`, `le`, `memberOf`, `writeOnce`, `monotone`, `witnessed`, `not`, `allL`, `anyL`, `nil`,
-`cons` — none elided, no example-driven case. The keystones consume the theorem; they do
-not constitute it. Residuals: `[PRED-COMPILE-order]` (the two order atoms, loudly
-unsatisfiable until range-decomposed), `[PRED-COMPILE-oracle]` (oracle-discharged
-`witnessed`), `[PRED-COMPILE-quant]` (no quantifiers in the source yet — widen `Pred`
-first). The cast label `castInjOn` is a per-deployment parameter constraint, stated on
-every theorem that needs it. Downstream: `lower`'s output is an `AirRange`
-`ConstraintSystem`, so `AirFlatten`/`Emit` consume it unchanged — the policy-to-prover
-path is compiler-authored end to end. -/
+`lowerA_forced`/`lowerL_forced` and `lowerA_complete`/`lowerL_complete` remain mutual
+inductions over every `Pred`/`PredList` constructor. Both order arms now invoke the
+same generic forced indicator and executable witness used in the rest of the fold.
+The existing equality keystones use an explicit disabled research profile; the
+focused `PredCompileOrderWitness` supplies enabled compound policies, adversarial
+witness substitution, absence, and source-bound/no-wrap teeth.
+
+Oracle-backed `witnessed` remains outside the first-party statement. Quantifier
+views must expand through the same source AST and compiler. The output remains an
+`AirRange.ConstraintSystem` consumed by the existing flattening/emission path.
+-/
 
 end Minidregg.Compiler

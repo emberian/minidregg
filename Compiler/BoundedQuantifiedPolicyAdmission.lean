@@ -22,50 +22,80 @@ set_option autoImplicit false
 
 /-! ## Supported-fragment projection -/
 
-theorem supportedL_ofList (predicates : List Pred) :
-    supportedL (PredList.ofList predicates) =
-      predicates.all supported := by
+theorem supportedL_ofList (profile : CompilerProfile) (predicates : List Pred) :
+    supportedL profile (PredList.ofList predicates) =
+      predicates.all (supported profile) := by
   induction predicates with
   | nil => rfl
   | cons predicate rest induction =>
       simp [PredList.ofList, supportedL, induction]
 
 /-- A bounded universal is supported exactly when all instantiated bodies are. -/
-theorem supported_forallView {Index : Type} (range : List Index)
+theorem supported_forallView (profile : CompilerProfile) {Index : Type} (range : List Index)
     (body : Index -> Pred) :
-    supported (forallView range body) =
-      range.all (fun index => supported (body index)) := by
+    supported profile (forallView range body) =
+      range.all (fun index => supported profile (body index)) := by
   simp [forallView, Pred.all, supported, supportedL_ofList, Function.comp_def]
 
 /-- The existential uses the same existing structural support check. -/
-theorem supported_existsView {Index : Type} (range : List Index)
+theorem supported_existsView (profile : CompilerProfile) {Index : Type} (range : List Index)
     (body : Index -> Pred) :
-    supported (existsView range body) =
-      range.all (fun index => supported (body index)) := by
+    supported profile (existsView range body) =
+      range.all (fun index => supported profile (body index)) := by
   simp [existsView, Pred.any, supported, supportedL_ofList, Function.comp_def]
+
+/-- Source-range validation is universal over instantiated bodies, even for an existential. -/
+theorem inputsInRangeL_ofList (profile : CompilerProfile) (predicates : List Pred)
+    (old new : State) :
+    inputsInRangeL profile (PredList.ofList predicates) old new =
+      predicates.all (fun predicate => inputsInRange profile predicate old new) := by
+  induction predicates with
+  | nil => rfl
+  | cons predicate rest induction =>
+      simp [PredList.ofList, inputsInRangeL, induction]
+
+theorem inputsInRange_forallView (profile : CompilerProfile) {Index : Type}
+    (range : List Index) (body : Index → Pred) (old new : State) :
+    inputsInRange profile (forallView range body) old new =
+      range.all (fun index => inputsInRange profile (body index) old new) := by
+  simp [forallView, Pred.all, inputsInRange, inputsInRangeL_ofList, Function.comp_def]
+
+theorem inputsInRange_existsView (profile : CompilerProfile) {Index : Type}
+    (range : List Index) (body : Index → Pred) (old new : State) :
+    inputsInRange profile (existsView range body) old new =
+      range.all (fun index => inputsInRange profile (body index) old new) := by
+  simp [existsView, Pred.any, inputsInRange, inputsInRangeL_ofList, Function.comp_def]
 
 /-! ## Existing AIR compiler, specialized without a second lowering -/
 
 theorem lower_forallView_correct {F Index : Type} [Field F] [DecidableEq F]
+    (profile : CompilerProfile) (profileAdmissible : profile.Admissible F)
     (range : List Index) (body : Index -> Pred) (old new : State)
     (castExact : castInjOn F (intsOf (forallView range body) old new))
-    (allSupported : range.all (fun index => supported (body index)) = true) :
+    (allSupported : range.all (fun index => supported profile (body index)) = true)
+    (allInputsInRange : range.all (fun index => inputsInRange profile (body index) old new) = true) :
     (exists auxiliary : List Nat -> Nat -> F,
         systemAccepts (stepAsg old new auxiliary)
-          (lower (forallView range body))) <->
+          (lower profile (forallView range body))) <->
       range.all (fun index => Minidregg.Pred.eval (body index) old new) = true := by
-  rw [lower_correct castExact (by simpa [supported_forallView] using allSupported)]
+  rw [lower_correct profile profileAdmissible castExact
+    (by simpa [supported_forallView] using allSupported)
+    (by simpa [inputsInRange_forallView] using allInputsInRange)]
   exact Bool.eq_iff_iff.mp (eval_forallView range body old new)
 
 theorem lower_existsView_correct {F Index : Type} [Field F] [DecidableEq F]
+    (profile : CompilerProfile) (profileAdmissible : profile.Admissible F)
     (range : List Index) (body : Index -> Pred) (old new : State)
     (castExact : castInjOn F (intsOf (existsView range body) old new))
-    (allSupported : range.all (fun index => supported (body index)) = true) :
+    (allSupported : range.all (fun index => supported profile (body index)) = true)
+    (allInputsInRange : range.all (fun index => inputsInRange profile (body index) old new) = true) :
     (exists auxiliary : List Nat -> Nat -> F,
         systemAccepts (stepAsg old new auxiliary)
-          (lower (existsView range body))) <->
+          (lower profile (existsView range body))) <->
       range.any (fun index => Minidregg.Pred.eval (body index) old new) = true := by
-  rw [lower_correct castExact (by simpa [supported_existsView] using allSupported)]
+  rw [lower_correct profile profileAdmissible castExact
+    (by simpa [supported_existsView] using allSupported)
+    (by simpa [inputsInRange_existsView] using allInputsInRange)]
   exact Bool.eq_iff_iff.mp (eval_existsView range body old new)
 
 /-! ## The committed canonical policy gate, specialized to a universal view -/
@@ -87,15 +117,19 @@ theorem canonical_forallView_verifies_iff
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)
     (stepExact : config.stepBinding.matches request oldState newState = true)
-    (supportedExact : supported committed.record.predicate = true)
+    (profileCompatible : config.compilerProfile.compatible config.stepBinding = true)
+    (profileSemanticsExact : request.semantics = config.compilerProfile.semantics)
+    (supportedExact : supported config.compilerProfile.compiler committed.record.predicate = true)
+    (rangesExact : inputsInRange config.compilerProfile.compiler committed.record.predicate
+      oldState newState = true)
     (castExact : castInjOn F
       (intsOf committed.record.predicate oldState newState)) :
-    config.verifies request (canonicalWitness committed oldState newState) = true <->
+    config.verifies request (canonicalWitness config.compilerProfile.compiler committed oldState newState) = true <->
       range.all (fun index =>
         Minidregg.Pred.eval (body index) oldState newState) = true := by
   rw [canonical_verifies_iff_eval resolved policyIdExact versionExact domainExact
-    semanticsExact recordDigestExact stepExact supportedExact
-    castExact]
+    semanticsExact recordDigestExact stepExact profileCompatible profileSemanticsExact supportedExact
+    rangesExact castExact]
   rw [predicateExact, eval_forallView]
 
 /-! ## Concrete AIR non-vacuity through the shared lowering -/
@@ -103,17 +137,17 @@ theorem canonical_forallView_verifies_iff
 theorem witness_forall_air_accepts :
     exists auxiliary : List Nat -> Nat -> ZMod 7,
       systemAccepts (stepAsg witnessOld witnessGood auxiliary)
-        (lower (forallView witnessRange witnessBody)) := by
-  apply (lower_forallView_correct witnessRange witnessBody witnessOld witnessGood
-    (by decide) (by decide)).mpr
+        (lower CompilerProfile.disabled (forallView witnessRange witnessBody)) := by
+  apply (lower_forallView_correct CompilerProfile.disabled (by trivial) witnessRange witnessBody witnessOld witnessGood
+    (by decide) (by decide) (by decide)).mpr
   decide
 
 theorem witness_forall_air_rejects :
     ¬ (exists auxiliary : List Nat -> Nat -> ZMod 7,
       systemAccepts (stepAsg witnessOld witnessBad auxiliary)
-        (lower (forallView witnessRange witnessBody))) := by
-  rw [lower_forallView_correct witnessRange witnessBody witnessOld witnessBad
-    (by decide) (by decide)]
+        (lower CompilerProfile.disabled (forallView witnessRange witnessBody))) := by
+  rw [lower_forallView_correct CompilerProfile.disabled (by trivial) witnessRange witnessBody witnessOld witnessBad
+    (by decide) (by decide) (by decide)]
   decide
 
 /-! ## Axiom audit -/
