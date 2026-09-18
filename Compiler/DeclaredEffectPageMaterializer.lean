@@ -455,6 +455,16 @@ theorem canonical_post_exact (delta : AcceptedDelta accepted) :
       accepted.cellEffect.prepared.post.logical :=
   delta.postCanonicalExact
 
+/-- The bounded page consumer preserves the actual coordinate law; a raw
+page executor success is not sufficient to inhabit this accepted refinement. -/
+theorem balance_delta (delta : AcceptedDelta accepted)
+    (account : ResourceId .account) (resource : Digest) :
+    balance delta.postPage.toCanonicalState.fields account resource -
+      balance delta.prePage.toCanonicalState.fields account resource =
+        postingDelta declaration.postings account resource := by
+  rw [delta.postCanonicalExact, delta.preCanonicalExact]
+  exact accepted.balance_delta account resource
+
 end AcceptedDelta
 
 /-! ## Closed non-vacuous transfer and rejection teeth -/
@@ -475,11 +485,11 @@ def context : RequestContext where
   policyId := ⟨10⟩
   policyEpoch := 0
 
-def preLogical : LogicalState DeclaredTurn.effectSchema where
-  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey 0
+noncomputable def preLogical : LogicalState DeclaredTurn.effectSchema where
+  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey (0 : Int)
   resources := effectCell.logical.resources
 
-def preCell : Materialized effectMaterializer :=
+noncomputable def preCell : Materialized effectMaterializer :=
   materialize effectMaterializer preLogical
 
 noncomputable def declaration : DeclaredActionLowering.Declaration source where
@@ -626,7 +636,6 @@ theorem preCanonicalExact : prePage.toCanonicalState = preCell.logical := by
     Minidregg.Theory.DeployedMaterializerWitness.effectCell,
     Minidregg.Theory.DeployedMaterializerWitness.emptyLogical,
     materialize, debitKey, creditKey]
-  congr
   funext resource
   exact Empty.elim resource
 
@@ -764,6 +773,9 @@ structure PairBindingPremise (left right : LogicalState schema) : Prop where
 
 /-! The sparse finite-map equalities use the standard quotient extensionality
 stack; there are no project-specific postulates or `sorry` declarations. -/
+/-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.AcceptedDelta.balance_delta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms AcceptedDelta.balance_delta
 /-- info: 'Minidregg.Compiler.DeclaredEffectPageMaterializer.Witness.overflow_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Witness.overflow_rejected

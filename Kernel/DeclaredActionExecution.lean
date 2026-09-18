@@ -34,6 +34,10 @@ noncomputable section
 
 /-! ## The exact single-incidence typed hyperedge -/
 
+/-- A closed supplied-state adapter retained for this migration carrier and
+its inhabitation witnesses. Receiving controllers must instead project
+authority from their canonical authority page and retain its durable read
+guard; this constant function is not that deployment refinement. -/
 def projection (authState : AuthState) :
     AuthorizationProjection DeclaredTurn.effectSchema.{0, 0} where
   project := fun _ => authState
@@ -45,7 +49,7 @@ def leg {kind : ResourceKind} {target : ResourceId kind}
     (accepted : Accepted portal authState context pre declaration) :
     Leg portal authState pre where
   Nullifier := Nat
-  family := family target
+  family := family target pre
   kind := kind
   request := context.request declaration
   declaration := declaration
@@ -309,8 +313,7 @@ theorem multiValid : ValidAt effectCell multiDeclaration where
       writableKeyCheck, Declaration.checkedWrites, multiDeclaration,
       Action.checkedWrites, runCheckedWrites, Declaration.fieldWrites,
       CheckedWrite.toFieldWrite, applyFieldWrites, FieldStore.assign,
-      effectCell, emptyLogical, objectKey, object, objectField,
-      source, destination]
+      effectCell, emptyLogical, objectKey, object, objectField]
     rfl
 
 def multiAuthorization : Authorized permissivePortal authState
@@ -334,8 +337,8 @@ theorem multiCompilerAccepts :
         { declaration := multiDeclaration
           schemaVersionExact := rfl
           actionsPresent := by decide
-          actionsAdmitted := by decide } :=
-  compile_encode_accepted multiDeclaration (by decide) (by decide)
+          actionsAdmitted := rfl } :=
+  compile_encode_accepted multiDeclaration (by decide) rfl
 
 theorem multiHyperedge_nonempty :
     Nonempty (TypedCellHyperedge.Commit (resourceLaw multiAccepted)
@@ -350,7 +353,7 @@ theorem multi_action_surface :
 /-! ### Funded transfer over the existing sparse schema -/
 
 def preLogical : LogicalState DeclaredTurn.effectSchema where
-  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey 0
+  fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey (0 : Int)
   resources := effectCell.logical.resources
 
 def preCell : Materialized effectMaterializer :=
@@ -393,6 +396,10 @@ def authorization : Authorized permissivePortal authState
 def accepted : Accepted permissivePortal authState context preCell declaration :=
   accept authorization valid
 
+theorem executable_admission_exact :
+    admit preCell declaration authorization = some accepted :=
+  admit_eq_some authorization valid
+
 theorem compiler_accepts :
     compile source declaration.schemaVersion
         ((declarationCodec source).encode declaration) =
@@ -400,8 +407,8 @@ theorem compiler_accepts :
         { declaration := declaration
           schemaVersionExact := rfl
           actionsPresent := by decide
-          actionsAdmitted := by decide } :=
-  compile_encode_accepted declaration (by decide) (by decide)
+          actionsAdmitted := rfl } :=
+  compile_encode_accepted declaration (by decide) rfl
 
 theorem hyperedge_nonempty :
     Nonempty (TypedCellHyperedge.Commit (resourceLaw accepted)
@@ -413,6 +420,133 @@ theorem funded_move_debits_exact :
       balance preCell.logical.fields source asset = -amount := by
   simpa [declaration, Declaration.postings, Action.postings, postingDelta,
     source, destination] using accepted.balance_delta source asset
+
+/-! ### One joint turn with separately authorized object and account incidences -/
+
+def jointObjectDeclaration : Declaration object :=
+  { multiDeclaration with expectedPreRoot := preCell.root, nonce := 401 }
+
+theorem jointObjectValid : ValidAt preCell jointObjectDeclaration where
+  rootExact := rfl
+  guardsAndPost := rfl
+
+def jointObjectAuthorization : Authorized permissivePortal authState
+    (context.request jointObjectDeclaration) where
+  evidence := .proof () rfl
+  policyWitness := ()
+  policyMembershipWitness := ()
+  policyEpochExact := rfl
+  policyAddressExact := rfl
+  policyMembershipVerified := rfl
+  policyVerified := rfl
+
+def jointObjectAccepted :
+    Accepted permissivePortal authState context preCell jointObjectDeclaration :=
+  accept jointObjectAuthorization jointObjectValid
+
+def jointPost : Materialized effectMaterializer :=
+  materialize effectMaterializer
+    { fields := applyFieldWrites
+        (jointObjectDeclaration.fieldWrites ++ declaration.fieldWrites)
+        preCell.logical.fields
+      resources := preCell.logical.resources }
+
+/-- The object and account requests are distinct incidences over one canonical
+pre-cell. Their footprints are disjoint, so joint installation realizes both
+locally accepted posts without overwriting either incidence's changes. -/
+def jointDeclaration :
+    TypedCellHyperedge.Declaration DeclaredTurn.effectSchema.{0, 0}
+      effectMaterializer permissivePortal (projection authState) Bool where
+  pre := preCell
+  apex := jointPost.root
+  legs := fun
+    | false => leg jointObjectAccepted
+    | true => leg accepted
+  composition := { fieldMode := .disjoint, order := [false, true] }
+
+theorem jointShape : jointDeclaration.ShapeValid where
+  orderComplete := by
+    constructor
+    · decide
+    · intro incidence
+      cases incidence <;> decide
+  resourcesDisjoint := by
+    intro left right different
+    cases left <;> cases right <;> decide
+  fieldsValid := by
+    intro left right different
+    cases left <;> cases right
+    · exact False.elim (different rfl)
+    · decide
+    · decide
+    · exact False.elim (different rfl)
+
+theorem joint_validated :
+    Nonempty (ValidatedPatch effectMaterializer preCell jointDeclaration.jointPatch) := by
+  have witness : ∃ validated :
+      ValidatedPatch effectMaterializer preCell jointDeclaration.jointPatch,
+      validate effectMaterializer preCell jointDeclaration.jointPatch =
+        ValidationOutcome.accepted validated := by
+    unfold validate
+    rw [dif_pos (show jointDeclaration.jointPatch.expectedPreRoot = preCell.root from rfl)]
+    rw [dif_pos (show jointDeclaration.jointPatch.fieldFootprint =
+      jointDeclaration.jointPatch.namedFields from rfl)]
+    rw [dif_pos (show jointDeclaration.jointPatch.resourceFootprint =
+      jointDeclaration.jointPatch.namedResources from rfl)]
+    exact ⟨_, rfl⟩
+  exact ⟨witness.choose⟩
+
+def jointValidated :
+    ValidatedPatch effectMaterializer preCell jointDeclaration.jointPatch :=
+  Classical.choice joint_validated
+
+def jointCommit : TypedCellHyperedge.Commit (resourceLaw accepted) jointDeclaration where
+  shape := jointShape
+  validated := jointValidated
+  apexExact := rfl
+  aggregateBalanced := by
+    funext resource
+    have objectBalanced :
+        (resourceLaw accepted).delta (leg jointObjectAccepted) resource = 0 := by
+      simpa [resourceLaw, leg, Leg.patch, Leg.post, family] using
+        jointObjectAccepted.conserves resource
+    have accountBalanced :
+        (resourceLaw accepted).delta (leg accepted) resource = 0 := by
+      simpa [resourceLaw, leg, Leg.patch, Leg.post, family] using
+        accepted.conserves resource
+    simpa [TypedCellHyperedge.Declaration.aggregateDelta, jointDeclaration,
+      Fintype.sum_bool] using congrArg₂ (· + ·) accountBalanced objectBalanced
+
+theorem joint_account_authority_exact :
+    (jointCommit.legAuthorization true).evidence = authorization.evidence := rfl
+
+theorem joint_object_authority_exact :
+    (jointCommit.legAuthorization false).evidence = jointObjectAuthorization.evidence := rfl
+
+theorem joint_object_post_exact :
+    scalarAt jointCommit.prepared.post.logical.fields objectKey = some 4 := rfl
+
+theorem joint_account_post_exact :
+    (balance jointCommit.prepared.post.logical.fields source asset,
+      balance jointCommit.prepared.post.logical.fields destination asset) = (7, 7) := rfl
+
+/-- Combining these actions under the source account's one request is refused;
+the admitted joint construction above retains both distinct authorities. -/
+def wrongSingleTarget : Declaration source :=
+  { declaration with actions := jointObjectDeclaration.actions ++ declaration.actions }
+
+theorem wrong_single_target_refused : wrongSingleTarget.run preCell.logical.fields = none :=
+  rfl
+
+theorem wrong_single_target_compiler_refused :
+    compile source wrongSingleTarget.schemaVersion
+        ((declarationCodec source).encode wrongSingleTarget) =
+      .rejected .inadmissibleAction :=
+  compile_encode_inadmissible wrongSingleTarget (by decide)
+
+theorem wrong_single_target_no_accepted :
+    IsEmpty (Accepted permissivePortal authState context preCell wrongSingleTarget) :=
+  no_accepted_of_inadmissible rfl
 
 def available : Charge := exactCharge declaration
 
@@ -472,10 +606,28 @@ theorem staleRequest_ne : staleRequest.preStateRoot ≠ preCell.root := by
 
 theorem no_effect_at_stale_request :
     IsEmpty (AcceptedCellEffect (portal := permissivePortal)
-      (authState := authState) (family source) staleRequest preCell declaration ()) :=
+      (authState := authState) (family source preCell) staleRequest preCell declaration ()) :=
   no_cellEffect_of_stale_root staleRequest staleRequest_ne
 
 end Witness
+
+/-! ## Axiom audit for the actual-state law and separate-authority joint turn -/
+
+/-- info: 'Minidregg.Kernel.DeclaredActionExecution.typed_resources_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms typed_resources_exact
+/-- info: 'Minidregg.Kernel.DeclaredActionExecution.balance_frame_outside_support' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms balance_frame_outside_support
+/-- info: 'Minidregg.Kernel.DeclaredActionExecution.Witness.joint_account_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.joint_account_post_exact
+/-- info: 'Minidregg.Kernel.DeclaredActionExecution.Witness.joint_object_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.joint_object_post_exact
+/-- info: 'Minidregg.Kernel.DeclaredActionExecution.Witness.wrong_single_target_no_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Witness.wrong_single_target_no_accepted
 
 end
 

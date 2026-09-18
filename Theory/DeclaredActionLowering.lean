@@ -220,6 +220,43 @@ theorem runCheckedWrites_post
           induction (fields.assign write.key write.replacement) run
       · contradiction
 
+theorem Action.admitted_move_iff
+    (target source destination : ResourceId .account) (resource : Digest)
+    (sourceExpected destinationExpected : Option Int) (amount : Int) :
+    (Action.move source destination resource sourceExpected destinationExpected
+      amount).Admitted target ↔
+      source = target ∧ 0 ≤ amount ∧ amount ≤ sourceExpected.getD 0 := by
+  simp only [Action.Admitted, Action.admissionCheck, Bool.and_eq_true,
+    decide_eq_true_eq]
+  tauto
+
+/-- Every successful admitted move leaves its source nonnegative. The first
+guard binds solvency to the actual source read, and telescoping handles the
+self-transfer case without assuming distinct endpoints. -/
+theorem Action.run_move_source_nonnegative
+    (target source destination : ResourceId .account) (resource : Digest)
+    (sourceExpected destinationExpected : Option Int) (amount : Int)
+    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (admitted : (Action.move source destination resource sourceExpected
+      destinationExpected amount).Admitted target)
+    (run : runCheckedWrites
+      (Action.move source destination resource sourceExpected destinationExpected
+        amount).checkedWrites fields = some post) :
+    0 ≤ balance post source resource := by
+  have scopeFacts := (Action.admitted_move_iff target source destination resource
+    sourceExpected destinationExpected amount).mp admitted
+  have firstRead : scalarAt fields (.accountBalance source resource) = sourceExpected := by
+    by_contra mismatch
+    have mismatch' : fields (.accountBalance source resource) ≠ sourceExpected := mismatch
+    simp [Action.checkedWrites, runCheckedWrites, mismatch'] at run
+  have funded : amount ≤ balance fields source resource := by
+    simpa only [balance, firstRead] using scopeFacts.2.2
+  have delta := runCheckedWrites_balance _ fields post run source resource
+  simp only [Action.checkedWrites, List.map_cons, List.map_nil,
+    List.sum_cons, List.sum_nil, CheckedWrite.balanceDelta,
+    Option.getD_some, StateKey.accountBalance.injEq] at delta
+  split_ifs at delta <;> omega
+
 /-- Account support is derived from an actual patch footprint, not supplied
 beside the patch or captured from another declaration. -/
 def balanceAccounts (footprint : Finset StateKey) : Finset (ResourceId .account) :=
@@ -625,14 +662,24 @@ def unitCodec : LawfulCodec Unit where
   decode := fun bytes => if bytes = [] then some () else none
   decode_encode := by simp
 
+/-- Scoped admission and ordered guard success concern the exact canonical
+pre-cell used by this family's receiving constructor. -/
+structure ValidAt {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    (pre : Materialized M) (declaration : Declaration target) : Prop where
+  rootExact : declaration.expectedPreRoot = pre.root
+  guardsAndPost : declaration.run pre.logical.fields =
+    some (applyFieldWrites declaration.fieldWrites pre.logical.fields)
+
 def family {kind : ResourceKind} (target : ResourceId kind)
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest} :
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    (pre : Materialized M) :
     SemanticEffectFamily DeclaredTurn.effectSchema.{0, 0} M Nat where
   Declaration := Declaration target
   declarationCodec := declarationCodec target
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun _ _ => Unit
+  ModeEvidence := fun declaration _ => PLift (ValidAt pre declaration)
   effectDigest := effectDigest
   patch := fun declaration _ => declaration.patch
   nullifier := fun declaration _ => some declaration.nonce
@@ -674,15 +721,6 @@ def RequestContext.request {kind : ResourceKind} {target : ResourceId kind}
   policyEpoch := context.policyEpoch
   cost := exactCharge declaration .feeDebit
 
-/-- Guard success is tied to the exact sparse pre-state and to the same field
-writes installed by the family patch. -/
-structure ValidAt {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
-    (pre : Materialized M) (declaration : Declaration target) : Prop where
-  rootExact : declaration.expectedPreRoot = pre.root
-  guardsAndPost : declaration.run pre.logical.fields =
-    some (applyFieldWrites declaration.fieldWrites pre.logical.fields)
-
 theorem patch_validated {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
     {pre : Materialized M} {declaration : Declaration target}
@@ -701,16 +739,24 @@ theorem patch_validated {kind : ResourceKind} {target : ResourceId kind}
     exact ⟨_, rfl⟩
   exact ⟨accepted.choose⟩
 
-/-- Positive lowering carrier.  It adds only the guard/post equality that the
-generic accepted-effect type intentionally leaves family-specific. -/
+/-- Positive lowering carrier with scoped admission and guard/post equality
+retained by the generic accepted effect's family evidence. -/
 structure Accepted {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
     (portal : Portal) (authState : AuthState)
     (context : RequestContext) (pre : Materialized M)
     (declaration : Declaration target) : Type where
-  valid : ValidAt pre declaration
   cellEffect : AcceptedCellEffect (portal := portal) (authState := authState)
-    (family target) (context.request declaration) pre declaration ()
+    (family target pre) (context.request declaration) pre declaration ()
+
+/-- Validation lives on the family face, so a generic accepted-effect consumer
+cannot discard it when the wrapper is projected away. -/
+def Accepted.valid {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
+    {pre : Materialized M} {declaration : Declaration target}
+    (accepted : Accepted portal authState context pre declaration) :
+    ValidAt pre declaration := accepted.cellEffect.modeEvidence.down
 
 def accept {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
@@ -720,12 +766,11 @@ def accept {kind : ResourceKind} {target : ResourceId kind}
     (authorization : Authorized portal authState (context.request declaration))
     (valid : ValidAt pre declaration) :
     Accepted portal authState context pre declaration where
-  valid := valid
   cellEffect :=
     { authorization := authorization
       effectsDigestBound := rfl
       preRootBound := valid.rootExact.trans rfl
-      modeEvidence := ()
+      modeEvidence := PLift.up valid
       validated := Classical.choice (patch_validated valid)
       disclosure := .sealed
       disclosureAllowed := rfl }
@@ -751,6 +796,23 @@ def admit {kind : ResourceKind} {target : ResourceId kind}
                 pre.logical.fields post checked.2
               simpa [Declaration.fieldWrites, exactPost] using run })
   else none
+
+/-- The executable constructor is complete for the same family validity
+evidence consumed by the proof-relevant lowering. -/
+theorem admit_eq_some {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState} {context : RequestContext}
+    {pre : Materialized M} {declaration : Declaration target}
+    (authorization : Authorized portal authState (context.request declaration))
+    (valid : ValidAt pre declaration) :
+    admit pre declaration authorization = some (accept authorization valid) := by
+  simp only [admit, dif_pos valid.rootExact]
+  split
+  · rename_i refused
+    have exactPost := valid.guardsAndPost
+    rw [refused] at exactPost
+    cases exactPost
+  · rfl
 
 theorem Accepted.admitted {kind : ResourceKind} {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
@@ -818,6 +880,45 @@ theorem no_accepted_of_inadmissible {kind : ResourceKind}
     have admitted := accepted.admitted
     simp [Declaration.Admitted, inadmissible] at admitted⟩
 
+/-- The public family face retains the same exact-pre guard proof. Receiving
+code constructs both occurrences of `pre` from one reopened canonical cell. -/
+theorem cellEffect_valid {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState}
+    {pre : Materialized M} {declaration : Declaration target}
+    {request : Request kind}
+    (effect : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family target pre) request pre declaration ()) :
+    ValidAt pre declaration := effect.modeEvidence.down
+
+theorem no_cellEffect_of_inadmissible {kind : ResourceKind}
+    {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState}
+    {pre : Materialized M} {declaration : Declaration target}
+    {request : Request kind}
+    (inadmissible : declaration.admissionCheck = false) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family target pre) request pre declaration ()) :=
+  ⟨fun effect => by
+    have admitted := ((declaration.run_eq_some_iff _ _).mp
+      (cellEffect_valid effect).guardsAndPost).1
+    simp [Declaration.Admitted, inadmissible] at admitted⟩
+
+theorem no_cellEffect_of_guard_mismatch {kind : ResourceKind}
+    {target : ResourceId kind}
+    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {portal : Portal} {authState : AuthState}
+    {pre : Materialized M} {declaration : Declaration target}
+    {request : Request kind}
+    (mismatch : declaration.run pre.logical.fields = none) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family target pre) request pre declaration ()) :=
+  ⟨fun effect => by
+    have exactPost := (cellEffect_valid effect).guardsAndPost
+    rw [mismatch] at exactPost
+    simp at exactPost⟩
+
 theorem no_accepted_of_guard_mismatch {kind : ResourceKind}
     {target : ResourceId kind}
     {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
@@ -838,7 +939,7 @@ theorem no_cellEffect_of_wrong_digest {kind : ResourceKind}
     (request : Request kind)
     (wrong : request.effectsDigest ≠ effectDigest declaration) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target) request pre declaration ()) :=
+      (family target pre) request pre declaration ()) :=
   ⟨fun accepted => wrong accepted.effectsDigestBound⟩
 
 theorem no_cellEffect_of_stale_root {kind : ResourceKind}
@@ -848,8 +949,106 @@ theorem no_cellEffect_of_stale_root {kind : ResourceKind}
     {pre : Materialized M} {declaration : Declaration target}
     (request : Request kind) (stale : request.preStateRoot ≠ pre.root) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
-      (family target) request pre declaration ()) :=
+      (family target pre) request pre declaration ()) :=
   ⟨fun accepted => stale accepted.preRootBound⟩
+
+/-! ## Executable admission teeth, without evaluating the unary wire codec -/
+
+namespace ScopeWitness
+
+def source : ResourceId .account := ⟨1⟩
+def destination : ResourceId .account := ⟨2⟩
+def asset : Digest := ⟨3⟩
+
+def fields : FieldStore DeclaredTurn.effectSchema.{0, 0} :=
+  ((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
+    (.accountBalance source asset) (7 : Int)).write
+      (.accountBalance destination asset) (0 : Int)
+
+def batch (actions : List Action) : Declaration source where
+  schemaVersion := 1
+  expectedPreRoot := ⟨0⟩
+  nonce := 1
+  actions := actions
+
+def object : ResourceId .object := ⟨4⟩
+def otherObject : ResourceId .object := ⟨5⟩
+def program : ResourceId .program := ⟨6⟩
+def otherProgram : ResourceId .program := ⟨7⟩
+
+theorem different_object_write_refused :
+    (Action.write (.objectField otherObject asset) none 1).admissionCheck object = false :=
+  rfl
+
+theorem object_to_program_write_refused :
+    (Action.write (.programCode program) none 1).admissionCheck object = false := rfl
+
+theorem different_program_write_refused :
+    (Action.write (.programCode otherProgram) none 1).admissionCheck program = false := rfl
+
+theorem program_to_balance_write_refused :
+    (Action.write (.accountBalance source asset) (some 7) 100).admissionCheck program =
+      false := rfl
+
+theorem raw_balance_write_refused :
+    (batch [.write (.accountBalance source asset) (some 7) 100]).run fields = none :=
+  rfl
+
+theorem raw_balance_create_refused :
+    (batch [.create (.accountBalance destination asset) 100]).run fields = none :=
+  rfl
+
+theorem different_source_refused :
+    (batch [.move destination source asset (some 7) (some 0) 4]).run fields = none :=
+  rfl
+
+theorem negative_amount_refused :
+    (batch [.move source destination asset (some 7) (some 0) (-1)]).run fields = none :=
+  rfl
+
+theorem unfunded_move_refused :
+    (batch [.move source destination asset (some 7) (some 0) 8]).run fields = none :=
+  rfl
+
+/-- A self-transfer's credit guard observes the debit's result, not a second
+copy of the initial balance. The net coordinate change is zero. -/
+theorem self_transfer_sequential :
+    ((batch [.move source source asset (some 7) (some 3) 4]).run fields).map
+      (fun post => balance post source asset) = some 7 :=
+  rfl
+
+theorem self_transfer_stale_credit_refused :
+    (batch [.move source source asset (some 7) (some 7) 4]).run fields = none :=
+  rfl
+
+theorem sequential_moves :
+    ((batch
+      [.move source destination asset (some 7) (some 0) 4,
+       .move source destination asset (some 3) (some 4) 3]).run fields).map
+        (fun post => (balance post source asset, balance post destination asset)) =
+      some (0, 7) :=
+  rfl
+
+theorem sequential_stale_source_refused :
+    (batch
+      [.move source destination asset (some 7) (some 0) 4,
+       .move source destination asset (some 7) (some 4) 3]).run fields = none :=
+  rfl
+
+/-- Presence participates in the guard even when the semantic balance is zero. -/
+theorem absent_and_zero_differ :
+    (batch [.move source destination asset (some 7) none 4]).run fields = none :=
+  rfl
+
+theorem missing_destination_can_receive :
+    ((batch [.move source destination asset (some 7) none 4]).run
+      ((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
+        (.accountBalance source asset) (7 : Int))).map
+          (fun post => (balance post source asset, balance post destination asset)) =
+      some (3, 4) :=
+  rfl
+
+end ScopeWitness
 
 /-! ## A narrow, checked legacy correspondence -/
 
@@ -867,5 +1066,38 @@ def ofLegacyMove (source destination : ResourceId .account) (resource : Digest)
       destinationExpected amount).postings =
       [{ account := source, resource := resource, amount := -amount },
        { account := destination, resource := resource, amount := amount }] := rfl
+
+/-! ## Axiom audit for conservation, the family boundary, and aliasing teeth -/
+
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.Declaration.run_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Declaration.run_balance
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.Action.run_move_source_nonnegative' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Action.run_move_source_nonnegative
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.Accepted.conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Accepted.conserves
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.Accepted.unposted_account_unchanged' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Accepted.unposted_account_unchanged
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.no_cellEffect_of_inadmissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms no_cellEffect_of_inadmissible
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.no_cellEffect_of_guard_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms no_cellEffect_of_guard_mismatch
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.ScopeWitness.self_transfer_sequential' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScopeWitness.self_transfer_sequential
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.ScopeWitness.self_transfer_stale_credit_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScopeWitness.self_transfer_stale_credit_refused
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.ScopeWitness.sequential_moves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScopeWitness.sequential_moves
+/-- info: 'Minidregg.Theory.DeclaredActionLowering.ScopeWitness.sequential_stale_source_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScopeWitness.sequential_stale_source_refused
 
 end Minidregg.Theory.DeclaredActionLowering

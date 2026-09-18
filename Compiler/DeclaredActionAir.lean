@@ -385,6 +385,8 @@ theorem system_correct {kind : ResourceKind} {target : ResourceId kind}
       apply (observeGuards_exact_iff_run declaration.checkedWrites fields).mpr
       simpa [Declaration.run, admitted, Declaration.fieldWrites] using run
   · simp [system, admitted, Declaration.run, systemAccepts, accepts, cst]
+    change (1 : BabyBear) ≠ 0
+    exact one_ne_zero
 
 def descriptor {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target)
@@ -414,6 +416,30 @@ def DescriptorAccepts {kind : ResourceKind} {target : ResourceId kind}
       wireValues index.val =
         ((publicBytes context declaration).get index).toNat) /\
     descriptorHolds (descriptor context declaration fields) wireValues
+
+/-- Ill-scoped or unfunded source syntax emits an inconsistent constraint.
+This refusal is independent of guard-value bounds and holds for every
+assignment supplied to the emitted descriptor. -/
+theorem no_descriptorAccepts_of_inadmissible {kind : ResourceKind}
+    {target : ResourceId kind} (context : RequestContext)
+    (declaration : Declaration target) (fields : EffectFields)
+    (inadmissible : ¬ declaration.Admitted) :
+    ¬ DescriptorAccepts context declaration fields := by
+  rintro ⟨wireValues, _, holds⟩
+  have emitted := (emit_faithful Fin.val
+    (publicBytes context declaration).length
+    (wireCount (publicBytes context declaration).length
+      (observations declaration fields).length)
+    (system context declaration fields) wireValues).mp holds
+  have accepted := flattenSystem_forces
+    (fun index : WireIx context declaration fields => wireValues index.val)
+    (readAux (wireCount (publicBytes context declaration).length
+      (observations declaration fields).length) wireValues)
+    (system context declaration fields) 0 emitted.1 emitted.2
+  have check : declaration.admissionCheck ≠ true := inadmissible
+  have impossible := accepted (cst 1) (by simp [system, check])
+  change (1 : BabyBear) = 0 at impossible
+  exact one_ne_zero impossible
 
 /-- **Load-bearing reflection.**  The emitted descriptor accepts its exact
 action/policy/root public bytes iff the existing declaration guard fold reaches
@@ -512,5 +538,8 @@ theorem generated_public_bytes_exact {kind : ResourceKind}
 /-- info: 'Minidregg.Compiler.DeclaredActionAir.descriptor_accepts_iff_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms descriptor_accepts_iff_run
+/-- info: 'Minidregg.Compiler.DeclaredActionAir.no_descriptorAccepts_of_inadmissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms no_descriptorAccepts_of_inadmissible
 
 end Minidregg.Compiler.DeclaredActionAir
