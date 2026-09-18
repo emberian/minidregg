@@ -81,6 +81,9 @@ inductive Verb : ResourceKind → Type
   | delegateObject : Verb .object
   | delegateAccount : Verb .account
   | delegateProgram : Verb .program
+  /-- Replacing a program resource's acceptance policy is distinct from
+  editing its code. Ordinary installProgram authority cannot change its law. -/
+  | installPolicy : Verb .program
   deriving DecidableEq, Repr
 
 /-- The complete semantic authorization request.  Verifiers receive this value
@@ -295,6 +298,10 @@ structure Portal where
   SignatureWitness : Type
   ProofWitness : Type
   CapabilityCommitmentWitness : Type
+  /-- Request-bound invocation authority is distinct from public capability
+  data. Subject holders can use an exact-request signature; bearer holders
+  require a genuine possession verifier, not knowledge of a public lookup. -/
+  CapabilityUseWitness : Type
   MembershipWitness : Type
   IssuerWitness : Type
   NonRevocationWitness : Type
@@ -306,6 +313,9 @@ structure Portal where
   verifyCapabilityCommitment :
     {kind : ResourceKind} → Capability kind → Digest →
       CapabilityCommitmentWitness → Bool
+  verifyCapabilityUse :
+    {kind : ResourceKind} → Request kind → Capability kind → Digest →
+      CapabilityUseWitness → Bool
   verifyMembership : Digest → Digest → MembershipWitness → Bool
   verifyIssuer : IssuerId → Epoch → Digest → IssuerWitness → Bool
   verifyNonRevocation : Digest → RevocationKey → NonRevocationWitness → Bool
@@ -337,7 +347,9 @@ inductive Evidence (portal : Portal) (state : AuthState)
       (membershipWitness : portal.MembershipWitness)
       (issuerWitness : portal.IssuerWitness)
       (selfRevocationWitness : portal.NonRevocationWitness)
+      (useWitness : portal.CapabilityUseWitness)
       (semantic : cap.Admissible state request)
+      (useVerified : portal.verifyCapabilityUse request cap commitment useWitness = true)
       (commitmentVerified :
         portal.verifyCapabilityCommitment cap commitment commitmentWitness = true)
       (membershipVerified :
@@ -358,6 +370,46 @@ inductive Evidence (portal : Portal) (state : AuthState)
             portal.verifyNonRevocation state.revocationRoot
               (.channel channel) witness = true) :
       Evidence portal state request
+
+/-- Which public capability data a capability-mode evidence value names.
+Signature and proof modes do not silently become capability invocations. -/
+def Evidence.capabilityValue {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind} :
+    Evidence portal state request → Option (Capability kind × Digest)
+  | .capability cap commitment .. => some (cap, commitment)
+  | _ => none
+
+/-- Every capability invocation retains a verifier result bound to its whole
+actual request, exact capability, and exact commitment. Membership, issuer
+verification, and public stored-capability bytes cannot substitute for it. -/
+theorem capability_evidence_requires_use {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind}
+    (evidence : Evidence portal state request) (capability : Capability kind)
+    (commitment : Digest)
+    (named : evidence.capabilityValue = some (capability, commitment)) :
+    ∃ witness, portal.verifyCapabilityUse request capability commitment witness = true := by
+  cases evidence with
+  | signature witness epoch verified => simp [Evidence.capabilityValue] at named
+  | proof witness verified => simp [Evidence.capabilityValue] at named
+  | capability cap address commitmentWitness membershipWitness issuerWitness
+      selfRevocationWitness useWitness semantic useVerified commitmentVerified
+      membershipVerified issuerVerified selfVerified ancestors channels =>
+      have equal : (cap, address) = (capability, commitment) := Option.some.inj named
+      rcases Prod.mk.inj equal with ⟨rfl, rfl⟩
+      exact ⟨useWitness, useVerified⟩
+
+/-- Copying public capability data does not construct the invocation when
+every request-bound use witness is refused by the selected verifier. -/
+theorem no_capability_evidence_of_use_refused {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind}
+    (capability : Capability kind) (commitment : Digest)
+    (refused : ∀ witness,
+      portal.verifyCapabilityUse request capability commitment witness ≠ true) :
+    ¬∃ evidence : Evidence portal state request,
+      evidence.capabilityValue = some (capability, commitment) := by
+  rintro ⟨evidence, named⟩
+  obtain ⟨witness, verified⟩ := capability_evidence_requires_use evidence capability commitment named
+  exact refused witness verified
 
 /-- Policy selection is one common final gate for every evidence constructor;
 no evidence mode may return before it. -/
@@ -391,6 +443,17 @@ theorem target_substitution_rejected {kind : ResourceKind}
   intro admitted
   apply outside
   simpa [Request.retarget] using admitted.scope.target
+
+/-- Code-edit authority cannot silently become authority to replace the
+acceptance policy, even at the same program target and with a valid signer. -/
+theorem program_edit_capability_cannot_install_policy
+    (cap : Capability .program) (state : AuthState) (request : Request .program)
+    (codeOnly : cap.scope.verbs = {.installProgram})
+    (policyChange : request.verb = .installPolicy) :
+    ¬ cap.Admissible state request := by
+  intro admitted
+  have allowed := admitted.scope.verb
+  simp [codeOnly, policyChange] at allowed
 
 /-- A caller cannot pre-load a capability with a future issuer epoch.  Exact
 equality to current state rejects every strictly forward epoch. -/
@@ -517,6 +580,7 @@ def demoPortal : Portal where
   SignatureWitness := Unit
   ProofWitness := Unit
   CapabilityCommitmentWitness := Unit
+  CapabilityUseWitness := Unit
   MembershipWitness := Unit
   IssuerWitness := Unit
   NonRevocationWitness := Unit
@@ -525,14 +589,15 @@ def demoPortal : Portal where
   verifySignature := fun _ _ => true
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
+  verifyCapabilityUse := fun _ _ _ _ => true
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
   verifyCommittedPolicy := fun _ _ _ _ => true
 
 def demoEvidence : Evidence demoPortal demoState demoRequest :=
-  .capability demoCapability ⟨32⟩ () () () () demoCapability_admissible
-    rfl rfl rfl rfl
+  .capability demoCapability ⟨32⟩ () () () () () demoCapability_admissible
+    rfl rfl rfl rfl rfl
     (by
       intro ancestor hmem
       simp [demoCapability] at hmem)

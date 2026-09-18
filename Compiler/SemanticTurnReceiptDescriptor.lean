@@ -17,6 +17,7 @@ construct its gates or residual schedule.
 import Assurance.SemanticReceiptRuntimeCodec
 import Compiler.EmitSerialize
 import Theory.IndexedProgram
+import Theory.AuthorizationDeclaration
 
 namespace Minidregg.Compiler.SemanticTurnReceiptDescriptor
 
@@ -62,31 +63,30 @@ def resourceKindCodec : LawfulCodec ResourceKind where
 the index for a first-order wire tag and does not erase it in the semantics. -/
 abbrev SomeVerb := Σ kind : ResourceKind, Verb kind
 
-/-- Numeric tag of an existing dependent Lean verb constructor. -/
-def verbTag : SomeVerb → UInt8
-  | ⟨.object, .observeObject⟩ => 1
-  | ⟨.object, .mutateObject⟩ => 2
-  | ⟨.object, .delegateObject⟩ => 3
-  | ⟨.account, .observeAccount⟩ => 4
-  | ⟨.account, .transfer⟩ => 5
-  | ⟨.account, .delegateAccount⟩ => 6
-  | ⟨.program, .observeProgram⟩ => 7
-  | ⟨.program, .installProgram⟩ => 8
-  | ⟨.program, .delegateProgram⟩ => 9
+/-- The receipt transports the authoritative authorization tag in one byte;
+there is no receipt-local numbering of the dependent verb constructors. -/
+def verbTag (verb : SomeVerb) : UInt8 :=
+  UInt8.ofNat (Minidregg.Theory.AuthorizationDeclaration.verbTag verb.2)
+
+/-- Every current tag fits exactly; conversion to a byte loses no identity. -/
+theorem verbTag_exact (verb : SomeVerb) :
+    (verbTag verb).toNat = Minidregg.Theory.AuthorizationDeclaration.verbTag verb.2 := by
+  rcases verb with ⟨kind, verb⟩
+  cases verb <;> rfl
 
 /-- Exact one-byte verb codec projected from the existing dependent constructors. -/
 def verbCodec : LawfulCodec SomeVerb where
   encode verb := [verbTag verb]
   decode
-    | [1] => some ⟨.object, .observeObject⟩
-    | [2] => some ⟨.object, .mutateObject⟩
-    | [3] => some ⟨.object, .delegateObject⟩
-    | [4] => some ⟨.account, .observeAccount⟩
-    | [5] => some ⟨.account, .transfer⟩
-    | [6] => some ⟨.account, .delegateAccount⟩
-    | [7] => some ⟨.program, .observeProgram⟩
-    | [8] => some ⟨.program, .installProgram⟩
-    | [9] => some ⟨.program, .delegateProgram⟩
+    | [tag] =>
+        match Minidregg.Theory.AuthorizationDeclaration.decodeVerb .object tag.toNat with
+        | some verb => some ⟨.object, verb⟩
+        | none =>
+            match Minidregg.Theory.AuthorizationDeclaration.decodeVerb .account tag.toNat with
+            | some verb => some ⟨.account, verb⟩
+            | none =>
+                (Minidregg.Theory.AuthorizationDeclaration.decodeVerb .program tag.toNat).map
+                  fun verb => ⟨.program, verb⟩
     | _ => none
   decode_encode := by
     rintro ⟨kind, verb⟩
@@ -350,6 +350,7 @@ def verbName : SomeVerb → String
   | ⟨.program, .observeProgram⟩ => "observe_program"
   | ⟨.program, .installProgram⟩ => "install_program"
   | ⟨.program, .delegateProgram⟩ => "delegate_program"
+  | ⟨.program, .installPolicy⟩ => "install_policy"
 
 def someVerbKind : SomeVerb → ResourceKind
   | ⟨kind, _⟩ => kind
@@ -373,7 +374,20 @@ def allVerbs : List SomeVerb :=
     ⟨.object, .delegateObject⟩, ⟨.account, .observeAccount⟩,
     ⟨.account, .transfer⟩, ⟨.account, .delegateAccount⟩,
     ⟨.program, .observeProgram⟩, ⟨.program, .installProgram⟩,
-    ⟨.program, .delegateProgram⟩ ]
+    ⟨.program, .delegateProgram⟩, ⟨.program, .installPolicy⟩ ]
+
+/-- The artifact catalogue covers the entire dependent source vocabulary. -/
+theorem allVerbs_complete (verb : SomeVerb) : verb ∈ allVerbs := by
+  rcases verb with ⟨kind, verb⟩
+  cases verb <;> decide
+
+theorem allVerbs_distinct : allVerbs.Nodup := by decide
+
+/-- Installing policy is distinguishable from editing ordinary program code
+at the actual receipt byte boundary. -/
+theorem installPolicy_code_distinct :
+    verbCodec.encode ⟨.program, .installPolicy⟩ ≠
+      verbCodec.encode ⟨.program, .installProgram⟩ := by decide
 
 def allAuthorizationModes : List AuthorizationMode :=
   [.signature, .proof, .capability]
@@ -450,5 +464,14 @@ example : ¬ ∃ wireValues : Nat → BabyBear,
 #guard_msgs (whitespace := lax) in #print axioms descriptor_accepts_iff_boundRelation
 /-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.committedTurn_descriptor_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms committedTurn_descriptor_accepts
+
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.verbTag_exact' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms verbTag_exact
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.allVerbs_complete' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms allVerbs_complete
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.allVerbs_distinct' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms allVerbs_distinct
+/-- info: 'Minidregg.Compiler.SemanticTurnReceiptDescriptor.installPolicy_code_distinct' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms installPolicy_code_distinct
 
 end Minidregg.Compiler.SemanticTurnReceiptDescriptor

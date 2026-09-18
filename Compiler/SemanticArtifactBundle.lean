@@ -137,6 +137,7 @@ def authorizationCheckTag : Minidregg.Theory.AuthorizationDeclaration.Check -> N
   | .signature => 2
   | .proof => 3
   | .capabilitySemantic => 4
+  | .capabilityUse => 15
   | .capabilityCommitment => 5
   | .capabilityMembership => 6
   | .issuer => 7
@@ -148,10 +149,32 @@ def authorizationCheckTag : Minidregg.Theory.AuthorizationDeclaration.Check -> N
   | .policyMembership => 13
   | .policy => 14
 
+/-- Distinct source checks remain distinct in the emitted plan.  In particular,
+the invocation-use check cannot alias capability possession or issuer checks. -/
+theorem authorizationCheckTag_injective : Function.Injective authorizationCheckTag := by
+  intro left right same
+  cases left <;> cases right <;> simp_all [authorizationCheckTag]
+
 def authorizationModeArtifact
     (plan : Minidregg.Theory.AuthorizationDeclaration.ModePlan) :
     AuthorizationModeArtifact :=
   ⟨authorizationModeTag plan.mode, plan.checks.map authorizationCheckTag⟩
+
+/-- Emission preserves precisely the checks present in every source plan. -/
+theorem authorizationModeArtifact_check_present_iff
+    (plan : Minidregg.Theory.AuthorizationDeclaration.ModePlan)
+    (check : Minidregg.Theory.AuthorizationDeclaration.Check) :
+    authorizationCheckTag check ∈ (authorizationModeArtifact plan).checkTags ↔
+      check ∈ plan.checks := by
+  change authorizationCheckTag check ∈ plan.checks.map authorizationCheckTag ↔ _
+  constructor
+  · intro present
+    rcases List.mem_map.mp present with ⟨other, member, same⟩
+    have exactCheck : other = check := authorizationCheckTag_injective same
+    subst other
+    exact member
+  · intro present
+    exact List.mem_map.mpr ⟨check, present, rfl⟩
 
 /-- The authorization artifact is a projection of the one existing declaration. -/
 def authorizationArtifact
@@ -164,6 +187,29 @@ def authorizationArtifact
     schemaVersion := declaration.schemaVersion
     requestFieldTags := declaration.requestFields.map requestFieldTag
     modes := declaration.modes.map authorizationModeArtifact }
+
+/-- Schema 3 records the mandatory request-and-capability-bound invocation
+evidence.  Request field encoding and signature/proof mode plans are unchanged. -/
+theorem authorizationArtifact_schema_version
+    (declarationId declarationCodecId requestCodecId : Digest) :
+    (authorizationArtifact declarationId declarationCodecId requestCodecId).schemaVersion = 3 :=
+  rfl
+
+/-- Every emitted capability-mode plan requires the distinct invocation-use
+check; an artifact retaining the old possession-only plan fails this property. -/
+theorem authorizationArtifact_capability_use_required
+    (declarationId declarationCodecId requestCodecId : Digest)
+    (mode : AuthorizationModeArtifact)
+    (member : mode ∈
+      (authorizationArtifact declarationId declarationCodecId requestCodecId).modes)
+    (capabilityMode : mode.modeTag = authorizationModeTag .capability) :
+    authorizationCheckTag .capabilityUse ∈ mode.checkTags := by
+  simp only [authorizationArtifact,
+    Minidregg.Theory.AuthorizationDeclaration.declaration, List.map_cons, List.map_nil,
+    List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with rfl | rfl | rfl <;>
+    simp_all [authorizationModeArtifact, authorizationModeTag, authorizationCheckTag,
+      Minidregg.Theory.AuthorizationDeclaration.checksFor]
 
 /-! ## Projections from the existing effect/reactive/disclosure declarations -/
 
@@ -698,5 +744,14 @@ structure BuildTarget where
 
 def BuildTarget.run (target : BuildTarget) : IO Unit :=
   writeArtifactBundleJson target.path target.bundle
+
+/-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationCheckTag_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizationCheckTag_injective
+/-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationModeArtifact_check_present_iff' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizationModeArtifact_check_present_iff
+/-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationArtifact_schema_version' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms authorizationArtifact_schema_version
+/-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationArtifact_capability_use_required' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizationArtifact_capability_use_required
 
 end Minidregg.Compiler.SemanticArtifactBundle

@@ -36,6 +36,7 @@ def permissivePortal : Portal where
   SignatureWitness := Unit
   ProofWitness := Unit
   CapabilityCommitmentWitness := Unit
+  CapabilityUseWitness := Unit
   MembershipWitness := Unit
   IssuerWitness := Unit
   NonRevocationWitness := Unit
@@ -44,6 +45,7 @@ def permissivePortal : Portal where
   verifySignature := fun _ _ => true
   verifyProof := fun _ _ => true
   verifyCapabilityCommitment := fun _ _ _ => true
+  verifyCapabilityUse := fun _ _ _ _ => true
   verifyMembership := fun _ _ _ => true
   verifyIssuer := fun _ _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
@@ -198,7 +200,7 @@ the constructor, alongside the portal's commitment, membership, issuer, and
 non-revocation checks -- which the permissive portal does discharge, and which
 is exactly why the semantic field is the load-bearing one. -/
 def capabilityEvidence : Evidence permissivePortal authState request :=
-  .capability capability ⟨300⟩ () () () () capability_admissible rfl rfl rfl rfl
+  .capability capability ⟨300⟩ () () () () () capability_admissible rfl rfl rfl rfl rfl
     (fun _ member => absurd member (by simp [capability]))
     (fun _ member => absurd member (by simp [capability]))
 

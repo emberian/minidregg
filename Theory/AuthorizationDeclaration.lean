@@ -75,6 +75,7 @@ def verbTag {kind : ResourceKind} : Verb kind → Nat
   | .observeProgram => 7
   | .installProgram => 8
   | .delegateProgram => 9
+  | .installPolicy => 10
 
 /-- Kind-directed decoding makes an ill-kinded verb tag fail rather than
 manufacturing an equality proof after the fact. -/
@@ -89,6 +90,7 @@ def decodeVerb (kind : ResourceKind) (tag : Nat) : Option (Verb kind) :=
   | .program, 7 => some .observeProgram
   | .program, 8 => some .installProgram
   | .program, 9 => some .delegateProgram
+  | .program, 10 => some .installPolicy
   | _, _ => none
 
 @[simp] theorem decodeVerb_tag {kind : ResourceKind} (verb : Verb kind) :
@@ -172,6 +174,7 @@ inductive Check where
   | signature
   | proof
   | capabilitySemantic
+  | capabilityUse
   | capabilityCommitment
   | capabilityMembership
   | issuer
@@ -198,7 +201,7 @@ def checksFor : Mode → List Check
   | .proof =>
       [.proof, .policyEpoch, .policyAddress, .policyMembership, .policy]
   | .capability =>
-      [.capabilitySemantic, .capabilityCommitment,
+      [.capabilitySemantic, .capabilityUse, .capabilityCommitment,
        .capabilityMembership, .issuer, .selfNonRevocation,
        .ancestorNonRevocations, .channelNonRevocations,
        .policyEpoch, .policyAddress, .policyMembership, .policy]
@@ -211,7 +214,7 @@ structure Declaration where
   deriving DecidableEq, Repr
 
 def declaration : Declaration where
-  schemaVersion := 2
+  schemaVersion := 3
   requestFields := requestFieldOrder
   modes :=
     [{ mode := .signature, checks := checksFor .signature },
@@ -267,6 +270,7 @@ structure CapabilityPresentation (portal : Portal) (kind : ResourceKind) where
   cap : Capability kind
   commitment : Digest
   commitmentWitness : portal.CapabilityCommitmentWitness
+  useWitness : portal.CapabilityUseWitness
   membershipWitness : portal.MembershipWitness
   issuerWitness : portal.IssuerWitness
   revocationOpenings : List (RevocationOpening portal)
@@ -488,6 +492,11 @@ def evalCheck {portal : Portal} {state : AuthState}
           portal.verifyCapabilityCommitment capPresentation.cap
             capPresentation.commitment capPresentation.commitmentWitness
       | _ => false
+  | .capabilityUse => match presentation.evidence with
+      | .capability capPresentation =>
+          portal.verifyCapabilityUse request capPresentation.cap
+            capPresentation.commitment capPresentation.useWitness
+      | _ => false
   | .capabilityMembership => match presentation.evidence with
       | .capability capPresentation =>
           portal.verifyMembership state.capabilityRoot
@@ -630,6 +639,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         (by simp [PresentedEvidence.mode, checksFor])
       have hcommitment := satisfied .capabilityCommitment
         (by simp [PresentedEvidence.mode, checksFor])
+      have huse := satisfied .capabilityUse
+        (by simp [PresentedEvidence.mode, checksFor])
       have hmembership := satisfied .capabilityMembership
         (by simp [PresentedEvidence.mode, checksFor])
       have hissuer := satisfied .issuer
@@ -668,7 +679,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
       refine ⟨{
         evidence := .capability capPresentation.cap capPresentation.commitment
           capPresentation.commitmentWitness capPresentation.membershipWitness
-          capPresentation.issuerWitness selfWitness semantic ?_ ?_ ?_ selfVerified
+          capPresentation.issuerWitness selfWitness capPresentation.useWitness
+          semantic ?_ ?_ ?_ ?_ selfVerified
           ?_ ?_
         policyWitness := policyWitness
         policyMembershipWitness := policyMembershipWitness
@@ -676,6 +688,7 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         policyAddressExact := ?_
         policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
+      · simpa [evalCheck] using huse
       · simpa [evalCheck] using hcommitment
       · simpa [evalCheck] using hmembership
       · simpa [evalCheck] using hissuer
@@ -713,7 +726,7 @@ theorem checksFor_policy_suffix (mode : Mode) :
   cases mode
   · exact ⟨[.subjectKeyEpoch, .signature], rfl⟩
   · exact ⟨[.proof], rfl⟩
-  · exact ⟨[.capabilitySemantic, .capabilityCommitment,
+  · exact ⟨[.capabilitySemantic, .capabilityUse, .capabilityCommitment,
       .capabilityMembership, .issuer, .selfNonRevocation,
       .ancestorNonRevocations, .channelNonRevocations], rfl⟩
 
