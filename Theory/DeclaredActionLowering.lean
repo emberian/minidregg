@@ -716,6 +716,8 @@ def family {kind : ResourceKind} (target : ResourceId kind)
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => PLift (ValidAt pre declaration)
+  Postcondition := fun declaration _ post =>
+    declaration.patch.ResultAt pre.logical post
   effectDigest := effectDigest
   patch := fun declaration _ => declaration.patch
   nullifier := fun declaration _ => some declaration.nonce
@@ -777,6 +779,7 @@ def accept {kind : ResourceKind} {target : ResourceId kind}
       preRootBound := valid.rootExact.trans rfl
       modeEvidence := PLift.up valid
       validated := Classical.choice (patch_validated valid)
+      postcondition := (Classical.choice (patch_validated valid)).resultAt
       disclosure := .sealed
       disclosureAllowed := rfl }
 

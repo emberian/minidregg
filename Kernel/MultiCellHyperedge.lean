@@ -19,6 +19,7 @@ equation.
 -/
 import Kernel.Turn
 import Theory.AcceptedCellEffect
+import Theory.PolicyInstall
 import Mathlib.Algebra.Group.ULift
 
 namespace Minidregg.Kernel.MultiCellHyperedge
@@ -48,6 +49,147 @@ structure CellFamily (Incidence : Type z) where
   projectAuthority : (incidence : Incidence) ->
     CellState.LogicalState (schema incidence) -> AuthState
   cellId : Incidence -> Digest
+
+/-- The physical and semantic cell layout before any policy portal has been
+constructed. This is the portal-independent part of the existing `CellFamily`,
+so preparing policy inputs never needs a placeholder authorization portal. -/
+structure CellLayout (Incidence : Type z) where
+  schema : Incidence -> CellState.Schema.{u, v, w, x}
+  fieldDecidableEq : (incidence : Incidence) ->
+    DecidableEq (schema incidence).Field
+  resourceDecidableEq : (incidence : Incidence) ->
+    DecidableEq (schema incidence).Resource
+  materializer : (incidence : Incidence) ->
+    CellState.Materializer (schema incidence) Digest
+  projectAuthority : (incidence : Incidence) ->
+    CellState.LogicalState (schema incidence) -> AuthState
+  cellId : Incidence -> Digest
+
+/-- Policy construction supplies only the portals; it cannot replace the
+layout, authority projections, or physical cell identities it evaluated. -/
+def CellLayout.withPortals {Incidence : Type z}
+    (layout : CellLayout.{u, v, w, x, z} Incidence) (portals : Incidence -> Portal) :
+    CellFamily.{u, v, w, x, z} Incidence where
+  schema := layout.schema
+  fieldDecidableEq := layout.fieldDecidableEq
+  resourceDecidableEq := layout.resourceDecidableEq
+  materializer := layout.materializer
+  projectAuthority := layout.projectAuthority
+  cellId := layout.cellId
+  portal := portals
+
+local instance layoutFieldDecidableEq
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    (incidence : Incidence) : DecidableEq (layout.schema incidence).Field :=
+  layout.fieldDecidableEq incidence
+
+local instance layoutResourceDecidableEq
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    (incidence : Incidence) : DecidableEq (layout.schema incidence).Resource :=
+  layout.resourceDecidableEq incidence
+
+/-- Raw source data for one final per-cell patch. It contains neither a
+semantic family nor a portal: some families mention authorization in their
+mode-evidence type, so even selecting those families must be deferred. -/
+structure CandidateLegData
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    (incidence : Incidence) where
+  pre : CellState.Materialized (layout.materializer incidence)
+  patch : CellState.Patch (layout.schema incidence) Digest
+  request : PackedEffectRequest
+  Postcondition : CellState.LogicalState (layout.schema incidence) -> Prop
+
+/-- A source-owned late interpretation of one already-prepared raw leg. Every
+pure facet agrees exactly with the prepared source; choosing a real policy
+portal may change evidence types, never the state, request, patch, or result
+relation that policy evaluation already consumed. -/
+structure SemanticLegBinding
+    {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
+    {incidence : Incidence} (raw : CandidateLegData layout incidence) :
+    Type (max u v w x (y + 1) (z + 1)) where
+  Nullifier : Type y
+  family : SemanticEffectFamily.{u, v, w, x, y, z}
+    (layout.schema incidence) (layout.materializer incidence) Nullifier
+  declaration : family.Declaration
+  outcome : family.Outcome declaration
+  preExact : raw.pre = family.pre
+  requestExact : raw.request = family.request declaration
+  effectsExact : raw.request.2.effectsDigest = family.effectDigest declaration
+  patchExact : family.patch declaration outcome = raw.patch
+  postconditionExact : forall post,
+    family.Postcondition declaration outcome post ↔ raw.Postcondition post
+
+/-- A receiving module fixes this plan in code. The complete descriptor
+derives each raw leg and its later semantic interpretation. These functions
+and the state projection are never decoded from an incoming request. -/
+structure PreparationPlan
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    (Source : Type z) where
+  leg : Source -> (incidence : Incidence) -> CandidateLegData layout incidence
+  /-- Concrete plans commit canonical full source coordinates, including
+  domain, semantics, nonce and relevant expected-state identities. -/
+  jointDigest : Source -> Digest
+  /-- Native effects remain distinct; the full descriptor derives every one. -/
+  legEffectsDigest : Source -> Incidence -> Digest
+  bindFamily : (source : Source) -> (portals : Incidence -> Portal) ->
+    (incidence : Incidence) ->
+      SemanticLegBinding.{u, v, w, x, y, z} (leg source incidence)
+
+/-- One complete source-derived raw tuple before any portal, authorization, or
+mode evidence exists. Its posts are the existing canonical patch interpreter's
+results. Distinct physical cells each have one final patch; a source combines
+its sequential operations before entering this tuple. -/
+structure PreparedTuple
+    {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z} (plan : PreparationPlan.{u, v, w, x, y, z} layout Source) where
+  source : Source
+  primary : Incidence
+  validated : (incidence : Incidence) ->
+    CellState.ValidatedPatch (layout.materializer incidence)
+      (plan.leg source incidence).pre (plan.leg source incidence).patch
+  postconditions : forall incidence,
+    (plan.leg source incidence).Postcondition (validated incidence).apply.logical
+  cellIdsDistinct : Function.Injective layout.cellId
+  requestRoots : forall incidence,
+    (plan.leg source incidence).request.2.preStateRoot =
+      (plan.leg source incidence).pre.root
+  requestEffects : forall incidence,
+    (plan.leg source incidence).request.2.effectsDigest =
+      plan.legEffectsDigest source incidence
+
+namespace PreparedTuple
+
+variable {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z} {plan : PreparationPlan.{u, v, w, x, y, z} layout Source}
+
+def pre (prepared : PreparedTuple plan) (incidence : Incidence) :
+    CellState.Materialized (layout.materializer incidence) :=
+  (plan.leg prepared.source incidence).pre
+
+def post (prepared : PreparedTuple plan) (incidence : Incidence) :
+    CellState.Materialized (layout.materializer incidence) :=
+  (prepared.validated incidence).apply
+
+def logicalPre (prepared : PreparedTuple plan) (incidence : Incidence) :
+    CellState.LogicalState (layout.schema incidence) :=
+  (prepared.pre incidence).logical
+
+def logicalPost (prepared : PreparedTuple plan) (incidence : Incidence) :
+    CellState.LogicalState (layout.schema incidence) :=
+  (prepared.post incidence).logical
+
+def request (prepared : PreparedTuple plan) (incidence : Incidence) :
+    PackedEffectRequest :=
+  (plan.leg prepared.source incidence).request
+
+theorem post_exact (prepared : PreparedTuple plan) (incidence : Incidence) :
+    prepared.post incidence = (prepared.validated incidence).apply := rfl
+
+theorem local_postcondition (prepared : PreparedTuple plan) (incidence : Incidence) :
+    (plan.leg prepared.source incidence).Postcondition (prepared.post incidence).logical :=
+  prepared.postconditions incidence
+
+end PreparedTuple
 
 /-- Recover each schema's equality procedures only when that exact incidence
 is in scope.  These are projections of declaration data, not global axioms. -/
@@ -154,6 +296,152 @@ def authorization (accepted : declaration.AcceptedLegs)
   (accepted incidence).authorization
 
 end Declaration
+
+/-! ## Authorize the already-prepared tuple without changing its post -/
+
+namespace PreparedTuple
+
+variable {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z} {plan : PreparationPlan.{u, v, w, x, y, z} layout Source}
+
+def binding (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (incidence : Incidence) : SemanticLegBinding (plan.leg prepared.source incidence) :=
+  plan.bindFamily prepared.source portals incidence
+
+/-- The joint identity is the full descriptor commitment; native request
+identities remain per-leg. Only the eventual apex is supplied at the existing
+joint commitment boundary. -/
+def header (prepared : PreparedTuple plan) (apex : Digest) : Header where
+  domain := (prepared.request prepared.primary).2.domain
+  turnId := plan.jointDigest prepared.source
+  apex := apex
+
+/-- Construct the existing declaration after real portals are selected. The
+late source binding cannot choose different requests, patches or pre-cells. -/
+def toDeclaration (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) :
+    Declaration.{u, v, w, x, y, z} (layout.withPortals portals) where
+  header := prepared.header apex
+  pre := prepared.pre
+  legs := fun incidence =>
+    { Nullifier := (prepared.binding portals incidence).Nullifier
+      family := (prepared.binding portals incidence).family
+      kind := (prepared.request incidence).1
+      request := (prepared.request incidence).2
+      declaration := (prepared.binding portals incidence).declaration
+      outcome := (prepared.binding portals incidence).outcome }
+
+/-- Transport the already-validated raw patch across the exact source binding.
+There is no second patch executor or post-selection step. -/
+def boundValidated (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (incidence : Incidence) :
+    CellState.ValidatedPatch (layout.materializer incidence) (prepared.pre incidence)
+      ((prepared.binding portals incidence).family.patch
+        (prepared.binding portals incidence).declaration
+        (prepared.binding portals incidence).outcome) := by
+  simpa only [(prepared.binding portals incidence).patchExact] using
+    prepared.validated incidence
+
+theorem bound_post_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (incidence : Incidence) :
+    (prepared.boundValidated portals incidence).apply = prepared.post incidence := by
+  apply CellState.Materialized.ext
+  simp only [CellState.ValidatedPatch.apply, (prepared.binding portals incidence).patchExact]
+  rfl
+
+/-- All evidence deferred during raw preparation is mandatory at final
+admission. In particular an authority-bearing mode is never replaced by an
+empty witness merely to construct a policy context. -/
+structure AdmissionEvidence (prepared : PreparedTuple plan) (portals : Incidence -> Portal) where
+  modes : forall incidence,
+    (prepared.binding portals incidence).family.ModeEvidence
+      (prepared.binding portals incidence).declaration
+      (prepared.binding portals incidence).outcome
+  authorizations : forall incidence,
+    Authorized (portals incidence)
+      (layout.projectAuthority incidence (prepared.pre incidence).logical)
+      (prepared.request incidence).2
+  disclosure : (incidence : Incidence) ->
+    DisclosureDecision
+      ((prepared.binding portals incidence).family.Release
+        (prepared.binding portals incidence).declaration
+        (prepared.binding portals incidence).outcome)
+      ((prepared.binding portals incidence).family.DeclassificationAuthority
+        (prepared.binding portals incidence).declaration
+        (prepared.binding portals incidence).outcome)
+      ((prepared.binding portals incidence).family.ReleaseAuthorization
+        (prepared.binding portals incidence).declaration
+        (prepared.binding portals incidence).outcome)
+  disclosureAllowed : forall incidence,
+    (prepared.binding portals incidence).family.DisclosureAllowed
+      (prepared.binding portals incidence).declaration
+      (prepared.binding portals incidence).outcome (disclosure incidence)
+
+/-- Add all exact source mode and authorization evidence to the one evaluated
+raw tuple, producing the existing complete `AcceptedLegs` barrier. -/
+def accept (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) (evidence : prepared.AdmissionEvidence portals) :
+    (prepared.toDeclaration portals apex).AcceptedLegs :=
+  fun incidence =>
+    { authorization := evidence.authorizations incidence
+      preStateBound := (prepared.binding portals incidence).preExact
+      requestBound := (prepared.binding portals incidence).requestExact
+      effectsDigestBound := (prepared.binding portals incidence).effectsExact
+      preRootBound := prepared.requestRoots incidence
+      modeEvidence := evidence.modes incidence
+      validated := prepared.boundValidated portals incidence
+      postcondition := by
+        apply ((prepared.binding portals incidence).postconditionExact _).mpr
+        change (plan.leg prepared.source incidence).Postcondition
+          (prepared.boundValidated portals incidence).apply.logical
+        exact (congrArg
+          (fun cell : CellState.Materialized (layout.materializer incidence) =>
+            (plan.leg prepared.source incidence).Postcondition cell.logical)
+          (prepared.bound_post_exact portals incidence)).mpr (prepared.postconditions incidence)
+      disclosure := evidence.disclosure incidence
+      disclosureAllowed := evidence.disclosureAllowed incidence }
+
+/-- Every final accepted post is the raw post seen by policy before the real
+portals or mode evidence existed. Exact patch equality, not hash reflection,
+justifies this correspondence. -/
+theorem accepted_posts_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) (evidence : prepared.AdmissionEvidence portals) (incidence : Incidence) :
+    (prepared.toDeclaration portals apex).post
+      (prepared.accept portals apex evidence) incidence = prepared.post incidence :=
+  prepared.bound_post_exact portals incidence
+
+theorem accepted_mode_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) (evidence : prepared.AdmissionEvidence portals) (incidence : Incidence) :
+    (prepared.accept portals apex evidence incidence).modeEvidence = evidence.modes incidence := rfl
+
+theorem declaration_pre_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) (incidence : Incidence) :
+    (prepared.toDeclaration portals apex).pre incidence = prepared.pre incidence := rfl
+
+theorem declaration_effects_exact (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
+    (apex : Digest) (incidence : Incidence) :
+    ((prepared.toDeclaration portals apex).legs incidence).request.effectsDigest =
+      plan.legEffectsDigest prepared.source incidence :=
+  prepared.requestEffects incidence
+
+theorem declaration_joint_identity_exact (prepared : PreparedTuple plan)
+    (portals : Incidence -> Portal) (apex : Digest) :
+    (prepared.toDeclaration portals apex).header.turnId = plan.jointDigest prepared.source := rfl
+
+/-- The family declaration is computed from the retained full source by the
+same fixed late plan, even if two external hashes were hypothetically equal. -/
+theorem declaration_source_exact (prepared : PreparedTuple plan)
+    (portals : Incidence -> Portal) (apex : Digest) (incidence : Incidence) :
+    ((prepared.toDeclaration portals apex).legs incidence).declaration =
+      (plan.bindFamily prepared.source portals incidence).declaration := rfl
+
+theorem no_prepared_tuple_of_conflicting_cell
+    (left right : Incidence) (different : left ≠ right)
+    (sameCell : layout.cellId left = layout.cellId right) :
+    IsEmpty (PreparedTuple plan) :=
+  ⟨fun prepared => different (prepared.cellIdsDistinct sameCell)⟩
+
+end PreparedTuple
 
 /-! ## Joint receipt input and resource semantics -/
 
@@ -433,6 +721,14 @@ theorem no_commit_of_conflicting_cell
 
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Declaration.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Declaration.post_exact
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_posts_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTuple.accepted_posts_exact
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.accepted_mode_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTuple.accepted_mode_exact
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.declaration_source_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_source_exact
+/-- info: 'Minidregg.Kernel.MultiCellHyperedge.PreparedTuple.declaration_joint_identity_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTuple.declaration_joint_identity_exact
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Commit.toHyperedge' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Commit.toHyperedge
 /-- info: 'Minidregg.Kernel.MultiCellHyperedge.Admission.rejected_atomic' depends on axioms: [propext, Classical.choice, Quot.sound] -/

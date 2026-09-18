@@ -361,6 +361,7 @@ def debitFamily :
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => debitPatch.ResultAt preCell.logical post
   effectDigest := fun _ => debitEffects.digest
   patch := fun _ _ => debitPatch
   nullifier := fun _ _ => none
@@ -378,6 +379,7 @@ def creditFamily :
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => creditPatch.ResultAt preCell.logical post
   effectDigest := fun _ => creditEffects.digest
   patch := fun _ _ => creditPatch
   nullifier := fun _ _ => none
@@ -448,6 +450,7 @@ noncomputable def debitAccepted :
   preRootBound := rfl
   modeEvidence := ()
   validated := debitValidated
+  postcondition := debitValidated.resultAt
   disclosure := .sealed
   disclosureAllowed := rfl
 
@@ -461,6 +464,7 @@ noncomputable def creditAccepted :
   preRootBound := rfl
   modeEvidence := ()
   validated := creditValidated
+  postcondition := creditValidated.resultAt
   disclosure := .sealed
   disclosureAllowed := rfl
 
@@ -560,6 +564,25 @@ noncomputable def typedCommit :
         rfl
     · simp [TypedCellHyperedge.Declaration.legPatch, TypedCellHyperedge.Leg.patch,
         typedDeclaration, typedLeg, creditFamily, creditPatch] at present
+  postconditions := by
+    intro incidence
+    cases incidence
+    · constructor
+      · intro field present
+        change field ∈ ({debitKey, creditKey} : Finset EffectDeclaration.StateKey) at present
+        rcases Finset.mem_insert.mp present with same | last
+        · subst field
+          rfl
+        · have same := Finset.mem_singleton.mp last
+          subst field
+          rfl
+      · intro resource
+        exact resource.elim
+    · constructor
+      · intro field present
+        simp [creditPatch] at present
+      · intro resource
+        exact resource.elim
   jointDeltaExact := by
     funext coordinate
     simp [TypedCellHyperedge.Declaration.jointDelta,

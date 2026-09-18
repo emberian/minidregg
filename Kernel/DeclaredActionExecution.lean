@@ -173,6 +173,12 @@ def typedCommit {kind : ResourceKind} {target : ResourceId kind}
     change (typedValidated accepted).apply.logical.fields field =
       accepted.cellEffect.validated.apply.logical.fields field
     rw [typedPost_eq]
+  postconditions := by
+    intro incidence
+    cases incidence
+    change declaration.patch.ResultAt pre.logical (typedValidated accepted).apply.logical
+    rw [typedPost_eq accepted]
+    exact accepted.cellEffect.postcondition
   jointDeltaExact := by
     funext resource
     conv_rhs => unfold TypedCellHyperedge.Declaration.aggregateDelta
@@ -553,6 +559,28 @@ def jointCommit : TypedCellHyperedge.Commit (resourceLaw accepted) jointDeclarat
         Declaration.checkedWrites, declaration,
         Action.checkedWrites, CheckedWrite.toFieldWrite] at present
       rcases present with rfl | rfl <;> rfl
+  postconditions := by
+    intro incidence
+    cases incidence
+    · change jointObjectDeclaration.patch.ResultAt preCell.logical jointValidated.apply.logical
+      constructor
+      · intro field present
+        simp [Declaration.patch, Declaration.fieldWrites,
+          Declaration.checkedWrites, jointObjectDeclaration, multiDeclaration,
+          Action.checkedWrites, CheckedWrite.toFieldWrite] at present
+        subst field
+        rfl
+      · intro resource
+        exact resource.elim
+    · change declaration.patch.ResultAt preCell.logical jointValidated.apply.logical
+      constructor
+      · intro field present
+        simp [Declaration.patch, Declaration.fieldWrites,
+          Declaration.checkedWrites, declaration,
+          Action.checkedWrites, CheckedWrite.toFieldWrite] at present
+        rcases present with rfl | rfl <;> rfl
+      · intro resource
+        exact resource.elim
   jointDeltaExact := by
     funext resource
     change

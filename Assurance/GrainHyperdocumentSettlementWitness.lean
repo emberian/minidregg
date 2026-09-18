@@ -125,6 +125,13 @@ noncomputable def commit : Commit law declaration where
     change jointValidated.apply.logical.fields field =
       linkAccepted.accepted.prepared.post.logical.fields field
     rw [jointPostExact]
+  postconditions := by
+    intro incidence
+    cases incidence
+    change linkLeg.family.Postcondition linkLeg.declaration linkLeg.outcome
+      jointValidated.apply.logical
+    rw [jointPostExact]
+    exact linkAccepted.accepted.postcondition
   jointDeltaExact := by
     funext coordinate
     simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]

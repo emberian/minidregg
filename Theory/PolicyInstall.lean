@@ -6,11 +6,11 @@ A policy source has complete version/domain/semantics metadata. An initial
 source starts at epoch zero without a predecessor; an update advances exactly
 one epoch and names the current content address.
 
-Policy evaluation consumes a candidate already derived from one canonical
-pre-cell and one semantic family declaration. That candidate contains mode
-evidence and the validated patch, but no authorization. Authorization is
-added only after evaluation; the resulting accepted effect installs precisely
-the candidate that was evaluated.
+Policy evaluation consumes a source-derived validated patch from one exact
+canonical pre-cell and semantic family declaration. Final acceptance still
+requires the entire family mode evidence and authorization. Separating these
+stages permits modes that themselves retain authorization to be evaluated
+against the actual joint post-state without inventing placeholder tokens.
 -/
 import Theory.AcceptedCellEffect
 
@@ -70,6 +70,73 @@ theorem successor_inhabited {Body : Type} (source : Source Body) (current : Head
 
 universe u v w x y z
 
+/-- The preauthorization face of the same effect: exact pre-state, validated
+source patch and source postcondition. It cannot mint an accepted effect until
+the entire family mode and authorization have subsequently been supplied. -/
+structure PreparedPatch
+    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : Materializer S Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    (pre : Materialized M) (declaration : family.Declaration)
+    (outcome : family.Outcome declaration) where
+  preStateBound : pre = family.pre
+  validated : ValidatedPatch M pre (family.patch declaration outcome)
+  postcondition : family.Postcondition declaration outcome validated.apply.logical
+
+namespace PreparedPatch
+
+variable
+    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
+    {M : Materializer S Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {pre : Materialized M} {declaration : family.Declaration}
+    {outcome : family.Outcome declaration}
+
+def post (prepared : PreparedPatch family pre declaration outcome) : Materialized M :=
+  prepared.validated.apply
+
+/-- Preparation is not authorization. The complete mode evidence is required
+here, even if it contains independently checked source-leg authorizations. -/
+def accept (prepared : PreparedPatch family pre declaration outcome)
+    (modeEvidence : family.ModeEvidence declaration outcome)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {request : Request kind} (authorization : Authorized portal authState request)
+    (requestBound : (⟨kind, request⟩ : Sigma Request) = family.request declaration)
+    (preRoot : request.preStateRoot = pre.root)
+    (effects : request.effectsDigest = family.effectDigest declaration)
+    (disclosure : DisclosureDecision (family.Release declaration outcome)
+      (family.DeclassificationAuthority declaration outcome)
+      (family.ReleaseAuthorization declaration outcome))
+    (allowed : family.DisclosureAllowed declaration outcome disclosure) :
+    AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome where
+  authorization := authorization
+  preStateBound := prepared.preStateBound
+  requestBound := requestBound
+  effectsDigestBound := effects
+  preRootBound := preRoot
+  modeEvidence := modeEvidence
+  validated := prepared.validated
+  postcondition := prepared.postcondition
+  disclosure := disclosure
+  disclosureAllowed := allowed
+
+theorem accepted_post_is_prepared_post (prepared : PreparedPatch family pre declaration outcome)
+    (modeEvidence : family.ModeEvidence declaration outcome)
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {request : Request kind} (authorization : Authorized portal authState request)
+    (requestBound : (⟨kind, request⟩ : Sigma Request) = family.request declaration)
+    (preRoot : request.preStateRoot = pre.root)
+    (effects : request.effectsDigest = family.effectDigest declaration)
+    (disclosure : DisclosureDecision (family.Release declaration outcome)
+      (family.DeclassificationAuthority declaration outcome)
+      (family.ReleaseAuthorization declaration outcome))
+    (allowed : family.DisclosureAllowed declaration outcome disclosure) :
+    (prepared.accept modeEvidence authorization requestBound preRoot effects disclosure allowed).prepared.post =
+      prepared.post := rfl
+
+end PreparedPatch
+
 /-- A candidate is prepared before policy authorization. In particular the
 post-state cannot be an unconstrained witness supplied beside the request. -/
 structure Candidate
@@ -81,6 +148,7 @@ structure Candidate
   preStateBound : pre = family.pre
   modeEvidence : family.ModeEvidence declaration outcome
   validated : ValidatedPatch M pre (family.patch declaration outcome)
+  postcondition : family.Postcondition declaration outcome validated.apply.logical
 
 namespace Candidate
 
@@ -94,8 +162,14 @@ variable
 def post (candidate : Candidate family pre declaration outcome) : Materialized M :=
   candidate.validated.apply
 
-/-- The existing accepted-effect token is the only admission result. Its
-validated patch is exactly the candidate evaluated by the policy consumer. -/
+def toPreparedPatch (candidate : Candidate family pre declaration outcome) :
+    PreparedPatch family pre declaration outcome where
+  preStateBound := candidate.preStateBound
+  validated := candidate.validated
+  postcondition := candidate.postcondition
+
+/-- Existing callers with mode evidence use the same two-stage admission;
+there is no second accepted-effect path or weaker family. -/
 def accept (candidate : Candidate family pre declaration outcome)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} (authorization : Authorized portal authState request)
@@ -107,16 +181,9 @@ def accept (candidate : Candidate family pre declaration outcome)
       (family.ReleaseAuthorization declaration outcome))
     (allowed : family.DisclosureAllowed declaration outcome disclosure) :
     AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome where
-  authorization := authorization
-  preStateBound := candidate.preStateBound
-  requestBound := requestBound
-  effectsDigestBound := effects
-  preRootBound := preRoot
-  modeEvidence := candidate.modeEvidence
-  validated := candidate.validated
-  disclosure := disclosure
-  disclosureAllowed := allowed
+      family request pre declaration outcome :=
+  candidate.toPreparedPatch.accept candidate.modeEvidence authorization requestBound preRoot effects
+    disclosure allowed
 
 theorem accepted_post_is_evaluated_post (candidate : Candidate family pre declaration outcome)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}

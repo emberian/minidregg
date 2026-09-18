@@ -13,6 +13,8 @@ meaning. Consequently conservation is parameterized by an explicit typed
 `ResourceLaw` over actual logical pre/post states and validated footprints.
 Both the incidence aggregate and its equality to the actual joint-state delta
 are checked. Each accepted field outcome must survive in that joint state.
+Every source-owned family postcondition is also required on that actual
+joint state; local acceptance cannot hide a broken cross-field invariant.
 Canonical order therefore allows agreeing overlaps, not unchecked overwrites
 of independently accepted outcomes. Sequentially dependent mutations belong
 inside one source-admitted ordered batch.
@@ -249,6 +251,16 @@ def FieldOutcomesPreserved
   forall incidence field, field ∈ (declaration.legPatch incidence).fieldFootprint ->
     post.logical.fields field = (declaration.legs incidence).post.logical.fields field
 
+/-- Every source postcondition is evaluated on the one actual composed post,
+including invariants which observe fields written by other incidences. -/
+def JointPostconditions
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (post : CellState.Materialized M) : Prop :=
+  forall incidence,
+    (declaration.legs incidence).family.Postcondition
+      (declaration.legs incidence).declaration
+      (declaration.legs incidence).outcome post.logical
+
 def jointDelta
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
     (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
@@ -304,6 +316,7 @@ structure Commit
   validated : CellState.ValidatedPatch M declaration.pre declaration.jointPatch
   apexExact : validated.apply.root = declaration.apex
   fieldsPreserved : declaration.FieldOutcomesPreserved validated.apply
+  postconditions : declaration.JointPostconditions validated.apply
   jointDeltaExact : declaration.jointDelta law validated.apply =
     declaration.aggregateDelta law
   aggregateBalanced : declaration.aggregateDelta law = 0
@@ -354,6 +367,14 @@ theorem leg_field_outcome_preserved (commit : Commit law declaration)
     commit.prepared.post.logical.fields field =
       (declaration.legs incidence).post.logical.fields field :=
   commit.fieldsPreserved incidence field present
+
+/-- The very same source relation which admitted the local candidate holds
+at the actual jointly installed post, not only at that tentative candidate. -/
+theorem leg_postcondition (commit : Commit law declaration) (incidence : Incidence) :
+    (declaration.legs incidence).family.Postcondition
+      (declaration.legs incidence).declaration
+      (declaration.legs incidence).outcome commit.prepared.post.logical :=
+  commit.postconditions incidence
 
 theorem field_frame (commit : Commit law declaration)
     (field : S.Field) (outside : field ∉ declaration.jointPatch.fieldFootprint) :
@@ -512,6 +533,20 @@ theorem no_commit_of_lost_field
         (declaration.legs incidence).post.logical.fields field) :
     IsEmpty (Commit law declaration) :=
   ⟨fun commit => lost commit.validated (commit.fieldsPreserved incidence field present)⟩
+
+/-- Disjoint writes and exact local outcomes cannot admit a joint state that
+breaks a retained source predicate. -/
+theorem no_commit_of_failed_postcondition
+    (law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance)
+    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (incidence : Incidence)
+    (failed : forall validated :
+      CellState.ValidatedPatch M declaration.pre declaration.jointPatch,
+      ¬ (declaration.legs incidence).family.Postcondition
+        (declaration.legs incidence).declaration
+        (declaration.legs incidence).outcome validated.apply.logical) :
+    IsEmpty (Commit law declaration) :=
+  ⟨fun commit => failed commit.validated (commit.postconditions incidence)⟩
 
 /-! ## Resource-package outcomes survive disjoint composition -/
 
@@ -793,12 +828,16 @@ end LegacyAdapter
 #guard_msgs (whitespace := lax) in #print axioms Commit.joint_resources_exact
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_field_outcome_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Commit.leg_field_outcome_preserved
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.Commit.leg_postcondition' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Commit.leg_postcondition
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_nonzero_resource' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_resource
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_nonzero_joint_resource' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_commit_of_nonzero_joint_resource
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_lost_field' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_commit_of_lost_field
+/-- info: 'Minidregg.Kernel.TypedCellHyperedge.no_commit_of_failed_postcondition' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_commit_of_failed_postcondition
 /-- info: 'Minidregg.Kernel.TypedCellHyperedge.LegacyAdapter.committed_post_matches_legacy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LegacyAdapter.committed_post_matches_legacy
 

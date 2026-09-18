@@ -101,6 +101,15 @@ noncomputable def commit : Commit law declaration where
     cases incidence
     cases field
     rfl
+  postconditions := by
+    intro incidence
+    cases incidence
+    constructor
+    · intro field _present
+      cases field
+      rfl
+    · intro resource
+      exact resource.elim
   jointDeltaExact := by
     funext coordinate
     simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]
@@ -165,6 +174,13 @@ noncomputable def agreeingCommit : Commit law agreeingDeclaration where
   fieldsPreserved := by
     intro incidence field _present
     cases incidence <;> cases field <;> rfl
+  postconditions := by
+    intro incidence
+    constructor
+    · intro field _present
+      cases incidence <;> cases field <;> rfl
+    · intro resource
+      exact resource.elim
   jointDeltaExact := by
     funext coordinate
     simp [Declaration.jointDelta, Declaration.aggregateDelta, ResourceLaw.delta, law]
