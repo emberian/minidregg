@@ -179,7 +179,7 @@ def promiseSpec
     (condition : Condition) (deadline : Height)
     (continuation : Continuation)
     (cancelKind : ResourceKind) (cancelRequest : Request cancelKind) :
-    PromiseSpec U (family (M := MDoc) contentConfig)
+    PromiseSpec U (family (M := MDoc) contentConfig documentPre)
       Height Condition Continuation where
   promiseId := promiseId
   kind := .object
@@ -336,7 +336,7 @@ def finalized
 def receiptEvent
     {interfaceId : InterfaceId}
     (operation : AcceptedAt interfaceId) :
-    ReceiptEvent (family (M := MDoc) contentConfig) :=
+    ReceiptEvent (family (M := MDoc) contentConfig documentPre) :=
   finalizedToReceiptEvent operation.finalized
 
 @[simp] theorem receiptEvent_exact
@@ -357,7 +357,7 @@ supplied at finalization; no replacement post-state can be inserted. -/
 does not assert membership or physical persistence without separate evidence. -/
 def historyClaim
     {interfaceId : InterfaceId}
-    (projection : HistoryProjection (family (M := MDoc) contentConfig) n F)
+    (projection : HistoryProjection (family (M := MDoc) contentConfig documentPre) n F)
     (finalHeaderCells : HistoryAdmissionContext → BindingIx → F)
     (context : HistoryAdmissionContext)
     (operation : AcceptedAt interfaceId) :
@@ -455,7 +455,7 @@ structure PublishedOperation
   finalizedContent : AcceptedCellEffect
     (portal := contentPortal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (family (M := MDoc) contentConfig)
+    (family (M := MDoc) contentConfig documentPre)
     (contentDeclaration.toRequest contentConfig) documentPre
     contentDeclaration ()
   finalizedExact : finalizedContent = content.accepted
@@ -491,7 +491,7 @@ def build
     (finalizedContent : AcceptedCellEffect
       (portal := contentPortal)
       (authState := CredentialAuthorityState.authState projection authorityPre)
-      (family (M := MDoc) contentConfig)
+      (family (M := MDoc) contentConfig documentPre)
       (contentDeclaration.toRequest contentConfig) documentPre
       contentDeclaration ())
     (finalizedExact : finalizedContent = content.accepted)

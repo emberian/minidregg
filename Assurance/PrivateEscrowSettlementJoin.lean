@@ -120,7 +120,7 @@ theorem disclosure_sealed (_source : SemanticCell) :
 theorem no_release (_source : SemanticCell)
     (release : (ComputationCellEffect.family
       (M := Minidregg.Assurance.MpcSealedCellExecution.materializer)
-      declaration adapter).Release honestRequest honestResult) : False :=
+      declaration adapter pre).Release honestRequest honestResult) : False :=
   accepted_has_no_release release
 
 end MpcSource

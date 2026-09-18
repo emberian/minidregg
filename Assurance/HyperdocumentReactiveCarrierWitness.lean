@@ -479,7 +479,7 @@ def promiseId : Digest := ⟨50⟩
 def continuationId : Digest := ⟨51⟩
 
 def promiseSpec : PromiseSpec firstOrder
-    (HyperdocumentOperations.family (M := HW.materializer) HW.config)
+    (HyperdocumentOperations.family (M := HW.materializer) HW.config HW.pre)
     Nat Digest Digest :=
   HyperdocumentAgentOperation.promiseSpec
     (U := firstOrder) (MDoc := HW.materializer)

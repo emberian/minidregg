@@ -133,7 +133,8 @@ structure EventAccepted
   accepted : AcceptedCellEffect
     (portal := eventPortal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (Minidregg.Kernel.HyperdocumentVersionEffects.family representation eventConfig)
+    (Minidregg.Kernel.HyperdocumentVersionEffects.family representation eventConfig
+      (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store))
     ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig)
     (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
     (derivedEventDeclaration merge expectedLogRoot) ()
@@ -178,9 +179,11 @@ def acceptEvent
       inputs.eventWellFormed) fresh
   accepted :=
     { authorization := authorization
+      preStateBound := rfl
+      requestBound := rfl
       effectsDigestBound := rfl
       preRootBound := validated.preRoot_bound
-      modeEvidence := ⟨inputs.eventWellFormed⟩
+      modeEvidence := ⟨⟨inputs.eventWellFormed, fresh⟩⟩
       validated := validated
       disclosure := .sealed
       disclosureAllowed := trivial }
@@ -311,7 +314,7 @@ def declaration
   legs
     | .content =>
         { Nullifier := Nat
-          family := Minidregg.Kernel.HyperdocumentMerge.family (M := MDoc) mergeConfig
+          family := Minidregg.Kernel.HyperdocumentMerge.family (M := MDoc) mergeConfig documentPre
           kind := .object
           request := mergeDeclaration.toRequest mergeConfig
           declaration := mergeDeclaration
@@ -319,6 +322,7 @@ def declaration
     | .eventLog =>
         { Nullifier := Nat
           family := Minidregg.Kernel.HyperdocumentVersionEffects.family representation eventConfig
+            (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
           kind := .object
           request :=
             (derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig

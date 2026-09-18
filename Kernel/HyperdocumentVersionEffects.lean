@@ -239,15 +239,30 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) → Prop
   | .reveal _ _ => False
   | .declassify _ _ _ => False
 
+/-- A generic event-log effect is an append at its actual canonical pre-cell.
+Freshness is retained here, so projecting away the publication wrapper cannot
+turn its immutable event allocation into an overwrite.  Content provenance is
+the separate `SourceExact` relation consumed by the publication constructor. -/
+structure ValidAppend
+    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (config : Config) (pre : CellState.Materialized representation.cellMaterializer)
+    (declaration : Declaration) : Prop where
+  wellFormed : declaration.record.CausallyWellFormed
+  fresh : pre.logical.fields
+    ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
+      declaration.key config⟩ = none
+
 def family (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
-    (config : Config) :
+    (config : Config) (pre : CellState.Materialized representation.cellMaterializer) :
     SemanticEffectFamily Minidregg.Kernel.HyperdocumentEventLog.cellSchema
       representation.cellMaterializer Nat where
   Declaration := Declaration
   declarationCodec := config.declarationCodec
+  pre := pre
+  request := fun declaration => ⟨.object, declaration.toRequest config⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => Minidregg.Theory.HyperdocumentOperations.unitCodec
-  ModeEvidence := fun declaration _ => PLift declaration.record.CausallyWellFormed
+  ModeEvidence := fun declaration _ => PLift (ValidAppend representation config pre declaration)
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.record.operation.digest.value
@@ -255,6 +270,21 @@ def family (representation : Minidregg.Kernel.HyperdocumentEventLog.Representati
   DeclassificationAuthority := fun _ _ => Unit
   ReleaseAuthorization := fun _ _ _ => Unit
   DisclosureAllowed := fun _ _ => sealedOnly
+
+/-- An occupied final event key cannot be overwritten through a bare generic
+accepted effect.  This no longer depends on retaining the outer sparse-log
+publication wrapper. -/
+theorem no_accepted_at_occupied_key
+    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {config : Config} {pre : CellState.Materialized representation.cellMaterializer}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {request : Request kind} {declaration : Declaration}
+    (occupied : pre.logical.fields
+      ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
+        declaration.key config⟩ ≠ none) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family representation config pre) request pre declaration ()) :=
+  ⟨fun accepted => occupied accepted.modeEvidence.down.fresh⟩
 
 structure Accepted
     {MDoc : Hyperdocument.Materializer Digest}
@@ -284,7 +314,7 @@ structure Accepted
   accepted : AcceptedCellEffect
     (portal := portal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (family representation config) (declaration.toRequest config)
+    (family representation config (cellPre representation store)) (declaration.toRequest config)
     (cellPre representation store) declaration ()
 
 def accept
@@ -324,9 +354,11 @@ def accept
   sparse := Minidregg.Kernel.HyperdocumentEventLog.Sparse.accept (declaration.stored config wellFormed) fresh
   accepted :=
     { authorization := authorization
+      preStateBound := rfl
+      requestBound := rfl
       effectsDigestBound := rfl
       preRootBound := validated.preRoot_bound
-      modeEvidence := ⟨wellFormed⟩
+      modeEvidence := ⟨⟨wellFormed, fresh⟩⟩
       validated := validated
       disclosure := .sealed
       disclosureAllowed := trivial }

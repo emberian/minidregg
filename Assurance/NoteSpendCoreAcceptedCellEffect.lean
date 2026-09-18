@@ -191,6 +191,8 @@ def accept
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
     (authorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (ComputationCellEffect.family declaration adapter pre).request request)
     (argsDigestBound :
       commonRequest.argsDigest = adapter.completeRequestDigest request)
     (effectsDigestBound :
@@ -202,7 +204,7 @@ def accept
     (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
     Accepted (portal := portal) (authState := authState)
       adapter commonRequest pre request result where
-  computation := ComputationCellEffect.accept declaration adapter authorization
+  computation := ComputationCellEffect.accept declaration adapter authorization requestBound
     argsDigestBound effectsDigestBound preRootBound completion validated
   resourceEffectsExact := resourceEffectsExact
   eagerNullifierExact := eagerNullifierExact

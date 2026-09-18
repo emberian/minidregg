@@ -486,7 +486,7 @@ variable
       contentPortal contentDeclaration}
     {historyProjection : HistoryProjection
       (Minidregg.Theory.HyperdocumentOperations.family
-        (M := MDoc) contentConfig) n F}
+        (M := MDoc) contentConfig documentPre) n F}
 
 /-- An accepted forward link admitted at one exact semantic-history entry.
 The opened value is the layout encoding of the same concrete `LinkRecord`
@@ -500,7 +500,7 @@ structure HeadLinkEvent
     (RandomOracleModel : BoundSemanticReceiptClaim n F -> Prop)
     (historyProjection : HistoryProjection
       (Minidregg.Theory.HyperdocumentOperations.family
-        (M := MDoc) contentConfig) n F)
+        (M := MDoc) contentConfig documentPre) n F)
     (layout : CanonicalPostLayout n F)
     (head : HistoryHead)
     (linkRelationId : Digest) where

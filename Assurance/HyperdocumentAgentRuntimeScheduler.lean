@@ -155,7 +155,7 @@ theorem requestPreRootExact :
   rfl
 
 def promiseSpec : PromiseSpec ReactiveWitness.firstOrder
-    (HyperdocumentOperations.family (M := Link.materializer) Link.config)
+    (HyperdocumentOperations.family (M := Link.materializer) Link.config Link.pre)
     Nat Digest Digest :=
   HyperdocumentAgentOperation.promiseSpec
     (U := ReactiveWitness.firstOrder) (MDoc := Link.materializer)

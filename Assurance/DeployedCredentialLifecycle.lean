@@ -129,7 +129,7 @@ def authorityDomain : ProjectionUniverse where
     { .capability ⟨100⟩, .capability ⟨101⟩, .channel ⟨9⟩ }
 
 noncomputable def adminRequest (pre : Cell AuthorityMaterializer) (effects : Digest)
-    (nonce : Nat) : Request .object where
+    (nonce : Nat) (args : Digest := ⟨9002⟩) : Request .object where
   domain := prePage.authorityDomain
   semantics := ⟨9001⟩
   federation := ⟨1⟩
@@ -137,7 +137,7 @@ noncomputable def adminRequest (pre : Cell AuthorityMaterializer) (effects : Dig
   subjectKeyEpoch := 0
   target := ⟨700⟩
   verb := .mutateObject
-  argsDigest := ⟨9002⟩
+  argsDigest := args
   effectsDigest := effects
   nonce := nonce
   height := 20
@@ -146,13 +146,36 @@ noncomputable def adminRequest (pre : Cell AuthorityMaterializer) (effects : Dig
   policyEpoch := policyEpochAt pre examplePolicy
   cost := 1
 
+/-- Non-cryptographic argument addressing for this inhabitation fixture only.
+The family still hashes the complete lawful declaration encoding, and no
+digest-reflection claim is made. -/
+def adminArgsDigest (bytes : List UInt8) : Digest := ⟨bytes.length⟩
+
+noncomputable def adminContext (pre : Cell AuthorityMaterializer) :
+    CredentialAuthorityEffects.RequestContext where
+  authority :=
+    { kind := .object
+      domain := prePage.authorityDomain
+      semantics := ⟨9001⟩
+      federation := ⟨1⟩
+      subject := ⟨41⟩
+      subjectKeyEpoch := 0
+      target := ⟨700⟩
+      verb := .mutateObject
+      nonce := 0 -- each family replaces this with its operation nullifier
+      height := 20
+      policyId := examplePolicy
+      policyEpoch := policyEpochAt pre examplePolicy
+      cost := 1 }
+  argsDigestBytes := adminArgsDigest
+
 /-- Every administrative effect still crosses the common policy-address,
 membership, epoch, and policy gates.  Proof mode avoids pretending the
 signature face above is sound. -/
 noncomputable def adminAuthorization (pre : Cell AuthorityMaterializer) (effects : Digest)
-    (nonce : Nat) :
+    (nonce : Nat) (args : Digest := ⟨9002⟩) :
     Authorized lifecyclePortal (authState authorityDomain pre)
-      (adminRequest pre effects nonce) where
+      (adminRequest pre effects nonce args) where
   evidence := .proof () rfl
   policyWitness := policyAddressAt pre examplePolicy
     (policyEpochAt pre examplePolicy)
@@ -292,9 +315,10 @@ def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration w
     rfl
 
 noncomputable def issued :=
-  acceptIssue authorityDomain initialCell issueCodec issueDigest issueDeclaration
-    (adminAuthorization initialCell (issueDigest issueDeclaration) 1001)
-    rfl rfl issueEvidence
+  acceptIssue authorityDomain initialCell (adminContext initialCell) issueCodec issueDigest issueDeclaration
+    (adminAuthorization initialCell (issueDigest issueDeclaration) 1001
+      (adminArgsDigest (issueCodec.encode issueDeclaration)))
+    rfl rfl rfl issueEvidence
 
 noncomputable abbrev issuedCell : Cell AuthorityMaterializer :=
   issued.prepared.post
@@ -446,10 +470,11 @@ def attenuateEvidence :
     rfl
 
 noncomputable def attenuated :=
-  acceptAttenuation authorityDomain issuedCell attenuateCodec
+  acceptAttenuation authorityDomain issuedCell (adminContext issuedCell) attenuateCodec
     storedCapabilityCodec attenuateDigest attenuateDeclaration parentStored
-    (adminAuthorization issuedCell (attenuateDigest attenuateDeclaration) 1002)
-    rfl rfl attenuateEvidence
+    (adminAuthorization issuedCell (attenuateDigest attenuateDeclaration) 1002
+      (adminArgsDigest (attenuateCodec.encode attenuateDeclaration)))
+    rfl rfl rfl attenuateEvidence
 
 noncomputable abbrev attenuatedCell : Cell AuthorityMaterializer :=
   attenuated.prepared.post
@@ -677,10 +702,11 @@ def revokeEvidence :
   nullifierFresh := attenuated_nullifier_fresh
 
 noncomputable def revoked :=
-  acceptRevocation authorityDomain attenuatedCell revokeCodec revokeDigest
+  acceptRevocation authorityDomain attenuatedCell (adminContext attenuatedCell) revokeCodec revokeDigest
     revokeDeclaration
-    (adminAuthorization attenuatedCell (revokeDigest revokeDeclaration) 1003)
-    rfl rfl revokeEvidence
+    (adminAuthorization attenuatedCell (revokeDigest revokeDeclaration) 1003
+      (adminArgsDigest (revokeCodec.encode revokeDeclaration)))
+    rfl rfl rfl revokeEvidence
 
 noncomputable abbrev revokedCell : Cell AuthorityMaterializer :=
   revoked.prepared.post
@@ -759,10 +785,11 @@ def rotateEvidence : RotateEpochEvidence revokedCell rotateDeclaration where
   nullifierFresh := revoked_rotation_nullifier_fresh
 
 noncomputable def rotated :=
-  acceptEpochRotation authorityDomain revokedCell rotateCodec rotateDigest
+  acceptEpochRotation authorityDomain revokedCell (adminContext revokedCell) rotateCodec rotateDigest
     rotateDeclaration
-    (adminAuthorization revokedCell (rotateDigest rotateDeclaration) 1004)
-    rfl rfl rotateEvidence
+    (adminAuthorization revokedCell (rotateDigest rotateDeclaration) 1004
+      (adminArgsDigest (rotateCodec.encode rotateDeclaration)))
+    rfl rfl rfl rotateEvidence
 
 noncomputable abbrev finalCell : Cell AuthorityMaterializer :=
   rotated.prepared.post

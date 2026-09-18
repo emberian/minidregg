@@ -60,6 +60,8 @@ and both authority carriers are empty, so no disclosure decision other than
 def family : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
+  pre := cell
+  request := fun _ => ⟨.object, request⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
@@ -99,6 +101,8 @@ noncomputable def accepted :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       family request cell () () where
   authorization := authorized
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := rfl
   modeEvidence := ()
@@ -123,6 +127,8 @@ writes the field back. -/
 def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
+  pre := cellTrue
+  request := fun _ => ⟨.object, requestTrue⟩
   Outcome := fun _ => Unit
   ModeEvidence := fun _ _ => Unit
   outcomeCodec := fun _ => unitCodec
@@ -143,6 +149,8 @@ noncomputable def acceptedTrue :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       familyTrue requestTrue cellTrue () () where
   authorization := authorizedTrue
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := by decide
   modeEvidence := ()
@@ -167,9 +175,11 @@ materializer differ, not just whose values do.  This one lives on `schemaB`:
 two field keys carrying `Unit`, against the first schema's one key carrying
 `Bool`. -/
 
-def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB materializerB Unit where
+noncomputable def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB materializerB Unit where
   Declaration := Unit
   declarationCodec := unitCodec
+  pre := cellB
+  request := fun _ => ⟨.object, requestB⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun _ _ => Unit
@@ -190,6 +200,8 @@ noncomputable def acceptedB :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       familyB requestB cellB () () where
   authorization := authorizedB
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := rfl
   modeEvidence := ()
@@ -238,6 +250,94 @@ theorem no_accepted_of_stalePreRoot :
       (authState := authState) family stalePreRootRequest cell () ()) :=
   ⟨fun token => stalePreRoot_not_bound token.preRootBound⟩
 
+/-! ## The complete request and actual pre-state are mandatory
+
+These are construction-time refusals of the generic token itself, not of an
+optional application wrapper.  The requests preserve the old effect/root
+equalities, and the state substitution preserves the root deliberately.
+-/
+
+def wrongTargetRequest : Request .object :=
+  { request with target := ⟨99⟩ }
+
+def wrongVerbRequest : Request .object :=
+  { request with verb := .observeObject }
+
+def wrongArgsRequest : Request .object :=
+  { request with argsDigest := ⟨99⟩ }
+
+def wrongNonceRequest : Request .object :=
+  { request with nonce := 99 }
+
+theorem no_accepted_of_wrongTarget :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) family wrongTargetRequest cell () ()) := by
+  apply AcceptedCellEffect.no_accepted_of_request_mismatch
+  intro same
+  have target := congrArg (fun packed : PackedEffectRequest => packed.2.target.value) same
+  change (99 : Nat) = 5 at target
+  omega
+
+theorem no_accepted_of_wrongVerb :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) family wrongVerbRequest cell () ()) := by
+  apply AcceptedCellEffect.no_accepted_of_request_mismatch
+  intro same
+  have verb := congrArg (fun packed : PackedEffectRequest =>
+    (⟨packed.1, packed.2.verb⟩ : (kind : ResourceKind) × Verb kind)) same
+  have : (.observeObject : Verb .object) = .mutateObject := by
+    exact (Sigma.mk.inj verb).2.eq
+  cases this
+
+theorem no_accepted_of_wrongArgs :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) family wrongArgsRequest cell () ()) := by
+  apply AcceptedCellEffect.no_accepted_of_request_mismatch
+  intro same
+  have args := congrArg (fun packed : PackedEffectRequest => packed.2.argsDigest.value) same
+  change (99 : Nat) = 6 at args
+  omega
+
+theorem no_accepted_of_wrongNonce :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) family wrongNonceRequest cell () ()) := by
+  apply AcceptedCellEffect.no_accepted_of_request_mismatch
+  intro same
+  have nonce := congrArg (fun packed : PackedEffectRequest => packed.2.nonce) same
+  change (99 : Nat) = 8 at nonce
+  omega
+
+/-- The deliberately constant-root second schema makes collision resistance
+unavailable, while its canonical logical state still distinguishes presence. -/
+noncomputable def collidingCellB : Materialized materializerB :=
+  materialize materializerB
+    { logicalB with fields := logicalB.fields.write false () }
+
+theorem collidingCellB_same_root : collidingCellB.root = cellB.root := rfl
+
+theorem collidingCellB_ne : collidingCellB ≠ cellB := by
+  intro same
+  have field := congrArg (fun c : Materialized materializerB => c.logical.fields false) same
+  simp [collidingCellB, cellB, logicalB, materialize] at field
+
+/-- Even the old patch validator accepts at the colliding root.  The new
+canonical-pre equality, rather than a hidden validator failure, closes it. -/
+theorem collidingCellB_patch_validates :
+    Nonempty (ValidatedPatch materializerB collidingCellB honestPatchB) := by
+  have accepted : ∃ validated : ValidatedPatch materializerB collidingCellB honestPatchB,
+      validate materializerB collidingCellB honestPatchB = .accepted validated := by
+    unfold validate
+    rw [dif_pos (show honestPatchB.expectedPreRoot = collidingCellB.root from rfl)]
+    rw [dif_pos (show honestPatchB.fieldFootprint = honestPatchB.namedFields by decide)]
+    rw [dif_pos (show honestPatchB.resourceFootprint = honestPatchB.namedResources by decide)]
+    exact ⟨_, rfl⟩
+  exact ⟨accepted.choose⟩
+
+theorem no_accepted_of_collidingPre :
+    IsEmpty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) familyB requestB collidingCellB () ()) :=
+  AcceptedCellEffect.no_accepted_of_pre_mismatch collidingCellB_ne
+
 /-- The sealed effect carries no release, and that is a refutation too: the
 accepted effect's disclosure decision cannot be anything else. -/
 theorem accepted_is_sealed : accepted.disclosure = .sealed := rfl
@@ -265,6 +365,16 @@ theorem no_accepted_of_staleEpoch :
       (authState := rotatedState) family request cell () ()) :=
   ⟨fun token => authorized_isEmpty_of_staleEpoch.false token.authorization⟩
 
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_wrongTarget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongTarget
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_wrongVerb' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongVerb
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_wrongArgs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongArgs
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_wrongNonce' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongNonce
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_collidingPre' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_collidingPre
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.disclosure_forced_sealed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms disclosure_forced_sealed
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.acceptedCellEffect_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/

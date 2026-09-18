@@ -232,8 +232,11 @@ def RealizesResourceEffects (request : SpendRequest) (result : SpendResult)
     (patch : CellState.Patch schema Digest) : Prop :=
   patch = spendPatch request result
 
-noncomputable def adapter :
+/-- The caller selects the complete first-order authority scope independently
+of the submitted request; acceptance below checks that request against it. -/
+noncomputable def adapter (requestContext : EffectRequestContext) :
     ComputationCellEffect.Adapter (S := schema) declaration where
+  requestContext := requestContext
   requestCodec := requestCodec
   resultCodec := resultCodec
   requestDigestBytes := requestDigestBytes
@@ -253,17 +256,19 @@ noncomputable def adapter :
     intro request result
     rfl
 
+variable {requestContext : EffectRequestContext}
+
 @[simp] theorem adapter_patch (request : SpendRequest) (result : SpendResult) :
-    adapter.patch request result = spendPatch request result :=
+    (adapter requestContext).patch request result = spendPatch request result :=
   rfl
 
 @[simp] theorem adapter_completeRequestDigest (request : SpendRequest) :
-    adapter.completeRequestDigest request =
+    (adapter requestContext).completeRequestDigest request =
       requestDigestBytes (requestCodec.encode request) :=
   rfl
 
 @[simp] theorem adapter_completeEffectDigest (request : SpendRequest) :
-    adapter.completeEffectDigest request =
+    (adapter requestContext).completeEffectDigest request =
       effectDigestBytes (effectIntentCodec.encode
         (request.resourceEffects, request.footprint, request.nullifier)) :=
   rfl
@@ -280,19 +285,21 @@ def accept
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (authorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (ComputationCellEffect.family declaration (adapter requestContext) pre).request request)
     (argsDigestBound :
-      commonRequest.argsDigest = adapter.completeRequestDigest request)
+      commonRequest.argsDigest = (adapter requestContext).completeRequestDigest request)
     (effectsDigestBound :
-      commonRequest.effectsDigest = adapter.completeEffectDigest request)
+      commonRequest.effectsDigest = (adapter requestContext).completeEffectDigest request)
     (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : declaration.Completion request result)
     (resourceEffectsExact : request.resourceEffects = [intendedEffect request])
     (eagerNullifierExact : request.nullifier = some request.inputValue.nullifier)
     (validated : CellState.ValidatedPatch M pre
-      (adapter.patch request result)) :
+      ((adapter requestContext).patch request result)) :
     Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result :=
-  NoteSpendCoreAcceptedCellEffect.accept adapter authorization
+      (adapter requestContext) commonRequest pre request result :=
+  NoteSpendCoreAcceptedCellEffect.accept (adapter requestContext) authorization requestBound
     argsDigestBound effectsDigestBound preRootBound completion
     resourceEffectsExact eagerNullifierExact validated
 
@@ -304,7 +311,7 @@ theorem accepted_preRoot_exact
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
+      (adapter requestContext) commonRequest pre request result) :
     pre.root = rootDigest request.inputValue.root := by
   have bound := accepted.computation.cellEffect.validated.preRoot_bound
   exact bound.symm
@@ -315,7 +322,7 @@ theorem accepted_commonPreRoot_exact
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
+      (adapter requestContext) commonRequest pre request result) :
     commonRequest.preStateRoot = rootDigest request.inputValue.root :=
   accepted.computation.cellEffect.preRootBound.trans
     (accepted_preRoot_exact accepted)
@@ -326,7 +333,7 @@ theorem accepted_cellValue_exact
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
+      (adapter requestContext) commonRequest pre request result) :
     cellValue request result =
       { effects := [intendedEffect request]
         requestOutputCommitment := request.outputCommitment
@@ -345,8 +352,8 @@ theorem accepted_patch_exact
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
-    adapter.patch request result =
+      (adapter requestContext) commonRequest pre request result) :
+    (adapter requestContext).patch request result =
       { expectedPreRoot := rootDigest request.inputValue.root
         fieldFootprint := {()}
         resourceFootprint := ∅
@@ -369,9 +376,9 @@ theorem no_accepted_of_args_mismatch
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (mismatch : commonRequest.argsDigest ≠
-      adapter.completeRequestDigest request) :
+      (adapter requestContext).completeRequestDigest request) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch accepted.computation.argsDigestBound⟩
 
 theorem no_accepted_of_effects_mismatch
@@ -380,9 +387,9 @@ theorem no_accepted_of_effects_mismatch
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (mismatch : commonRequest.effectsDigest ≠
-      adapter.completeEffectDigest request) :
+      (adapter requestContext).completeEffectDigest request) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch accepted.computation.cellEffect.effectsDigestBound⟩
 
 theorem no_accepted_of_preRoot_mismatch
@@ -393,7 +400,7 @@ theorem no_accepted_of_preRoot_mismatch
     (mismatch : commonRequest.preStateRoot ≠
       rootDigest request.inputValue.root) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch (accepted_commonPreRoot_exact accepted)⟩
 
 theorem no_accepted_of_resourceEffects_mismatch
@@ -403,7 +410,7 @@ theorem no_accepted_of_resourceEffects_mismatch
     {request : SpendRequest} {result : SpendResult}
     (mismatch : request.resourceEffects ≠ [intendedEffect request]) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch accepted.resourceEffectsExact⟩
 
 theorem no_accepted_of_nullifier_mismatch
@@ -413,7 +420,7 @@ theorem no_accepted_of_nullifier_mismatch
     {request : SpendRequest} {result : SpendResult}
     (mismatch : request.nullifier ≠ some request.inputValue.nullifier) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch accepted.eagerNullifierExact⟩
 
 theorem no_accepted_of_outputCommitment_mismatch
@@ -424,7 +431,7 @@ theorem no_accepted_of_outputCommitment_mismatch
     (mismatch : result.outputRepresentation.commitment ≠
       request.outputCommitment) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :=
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch (accepted_relation accepted).2.2.2.2.2.2.1⟩
 
 /-- The same authorized common request cannot be replayed against a cell with
@@ -436,10 +443,10 @@ theorem no_replay_at_different_preRoot
     {pre replayedPre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result)
+      (adapter requestContext) commonRequest pre request result)
     (different : replayedPre.root ≠ pre.root) :
     IsEmpty (Accepted (portal := portal) (authState := authState)
-      adapter commonRequest replayedPre request result) := by
+      (adapter requestContext) commonRequest replayedPre request result) := by
   constructor
   intro replayed
   apply different
@@ -452,16 +459,17 @@ theorem accepted_disclosure_sealed
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
+      (adapter requestContext) commonRequest pre request result) :
     accepted.computation.cellEffect.disclosure = .sealed :=
   accepted.computation.disclosure_sealed
 
 theorem accepted_has_no_release
     {M : CellState.Materializer schema Digest}
+    {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
-    (release : (ComputationCellEffect.family (M := M) declaration adapter).Release
+    (release : (ComputationCellEffect.family (M := M) declaration (adapter requestContext) pre).Release
       request result) : False :=
-  ComputationCellEffect.family_no_release declaration adapter request result release
+  ComputationCellEffect.family_no_release declaration (adapter requestContext) request result release
 
 /-! ## Conditional semantic admission stays on this exact cell effect -/
 
@@ -475,7 +483,7 @@ structure SemanticAcceptedCellEffect
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result)
+      (adapter requestContext) commonRequest pre request result)
     (bound : Minidregg.Compiler.NoteSpendProofController.BoundReflectedSuite
       (CoreJoin.statementOf accepted))
     (ledger : FailureLedger Omega)
@@ -491,7 +499,7 @@ variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : SpendRequest} {result : SpendResult}
 variable {accepted : Accepted (portal := portal) (authState := authState)
-  adapter commonRequest pre request result}
+  (adapter requestContext) commonRequest pre request result}
 variable {bound : Minidregg.Compiler.NoteSpendProofController.BoundReflectedSuite
   (CoreJoin.statementOf accepted)}
 variable {ledger : FailureLedger Omega}
@@ -509,7 +517,7 @@ def authorization
 accepted cell effect. -/
 def validatedPatch
     (_semantic : SemanticAcceptedCellEffect accepted bound ledger laws omega) :
-    CellState.ValidatedPatch M pre (adapter.patch request result) :=
+    CellState.ValidatedPatch M pre ((adapter requestContext).patch request result) :=
   accepted.validatedPatch
 
 theorem validSpend
@@ -529,7 +537,7 @@ theorem disclosure_sealed
 
 theorem no_release
     (_semantic : SemanticAcceptedCellEffect accepted bound ledger laws omega)
-    (release : (ComputationCellEffect.family (M := M) declaration adapter).Release
+    (release : (ComputationCellEffect.family (M := M) declaration (adapter requestContext) pre).Release
       request result) : False :=
   accepted_has_no_release release
 
@@ -545,7 +553,7 @@ theorem no_current_semanticAcceptedCellEffect
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
-      adapter commonRequest pre request result) :
+      (adapter requestContext) commonRequest pre request result) :
     ¬∃ bound : Minidregg.Compiler.NoteSpendProofController.BoundReflectedSuite
         (CoreJoin.statementOf accepted),
       ∃ ledger : FailureLedger Omega,

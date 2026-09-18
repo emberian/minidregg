@@ -533,14 +533,16 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) -> Prop
   | .reveal _ _ => False
   | .declassify _ _ _ => False
 
-def family {M : Hyperdocument.Materializer Digest} (config : Config) :
+def family {M : Hyperdocument.Materializer Digest} (config : Config)
+    (pre : Hyperdocument.Cell M) :
     SemanticEffectFamily cellSchema M Nat where
   Declaration := Declaration
   declarationCodec := config.declarationCodec
+  pre := pre
+  request := fun declaration => ⟨.object, declaration.toRequest config⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun declaration _ => PLift
-    (declaration.intent.actionBytes = config.bodyCodec.encode declaration.body)
+  ModeEvidence := fun declaration _ => PLift (ValidMerge config pre declaration)
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.intent.nonce
@@ -574,7 +576,7 @@ structure Accepted
   accepted : AcceptedCellEffect
     (portal := portal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (family config) (declaration.toRequest config) documentPre declaration ()
+    (family config documentPre) (declaration.toRequest config) documentPre declaration ()
 
 def accept
     {MDoc : Hyperdocument.Materializer Digest}
@@ -613,9 +615,11 @@ def accept
   namedCapabilityAdmissible := namedCapabilityAdmissible
   accepted :=
     { authorization := authorization
+      preStateBound := rfl
+      requestBound := rfl
       effectsDigestBound := rfl
       preRootBound := semantic.preRootExact
-      modeEvidence := ⟨semantic.actionBytesExact⟩
+      modeEvidence := ⟨semantic⟩
       validated := validated
       disclosure := .sealed
       disclosureAllowed := trivial }
@@ -661,7 +665,7 @@ theorem Accepted.field_frame
     (accepted : Accepted history config projection authorityPre documentPre portal declaration)
     (address : Address)
     (outside : address ∉
-      ((family (M := MDoc) config).patch declaration ()).fieldFootprint) :
+      ((family (M := MDoc) config documentPre).patch declaration ()).fieldFootprint) :
     accepted.accepted.prepared.post.logical.fields address =
       documentPre.logical.fields address :=
   accepted.accepted.field_frame address outside
@@ -681,7 +685,7 @@ theorem Accepted.changed_only_declared
     (changed : accepted.accepted.prepared.post.logical.fields address ≠
       documentPre.logical.fields address) :
     address ∈
-      ((family (M := MDoc) config).patch declaration ()).fieldFootprint :=
+      ((family (M := MDoc) config documentPre).patch declaration ()).fieldFootprint :=
   accepted.accepted.field_changed_only_declared address changed
 
 theorem Accepted.post_contains_mark

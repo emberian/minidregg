@@ -1,17 +1,13 @@
 /-
-# Theory.AcceptedCellEffectRequestBinding -- complete common-request binding
+# Theory.AcceptedCellEffectRequestBinding -- source argument projections
 
-`AcceptedCellEffect` retains one exact `Authorized` token and binds the common
-request's effect digest and pre-state root.  It intentionally does not choose
-what `Request.argsDigest` means.  This module adds that missing family-generic
-layer without changing the base token: each family selects one first-order
-argument projection with a lawful codec, and `Bound` retains the original
-accepted effect plus the one missing equality.
-
-The digest projection is abstract.  No collision resistance or equality
-reflection is claimed; clients which need reflection must supply the explicit
-`BindingPremise` below.  The wrapper does not carry a second authorization
-witness, patch, post-state, or declaration interpreter.
+The complete request and exact canonical pre-state are mandatory fields of
+`AcceptedCellEffect`. This module identifies the first-order source represented
+by the family's already-bound `argsDigest`; it no longer introduces a stronger
+optional admission wrapper. `Bound` is an abbreviation for the existing token.
+Every `DeclarationAddressing` must prove its source projection is the argument
+address already selected by the family. Digest reflection remains an explicit
+pair-scoped premise and is never inferred from request equality.
 -/
 import Theory.AcceptedCellEffect
 import Theory.CredentialAuthorityEffects
@@ -44,6 +40,9 @@ structure DeclarationAddressing
   argumentCodec : LawfulCodec Argument
   arguments : family.Declaration → Argument
   digestBytes : List UInt8 → Digest
+  argsDigestExact : ∀ declaration,
+    (family.request declaration).2.argsDigest =
+      digestBytes (argumentCodec.encode (arguments declaration))
 
 /-- The common special case where the selected argument is the entire semantic
 declaration.  This reuses the family's authoritative codec. -/
@@ -51,11 +50,14 @@ def wholeDeclarationAddressing
     {S : CellState.Schema.{u, v, w, x}}
     {M : CellState.Materializer S Digest} {Nullifier : Type y}
     (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
-    (digestBytes : List UInt8 → Digest) : DeclarationAddressing family where
+    (digestBytes : List UInt8 → Digest)
+    (exact : ∀ declaration, (family.request declaration).2.argsDigest =
+      digestBytes (family.declarationCodec.encode declaration)) : DeclarationAddressing family where
   Argument := family.Declaration
   argumentCodec := family.declarationCodec
   arguments := id
   digestBytes := digestBytes
+  argsDigestExact := exact
 
 def DeclarationAddressing.digest
     {S : CellState.Schema.{u, v, w, x}}
@@ -95,47 +97,28 @@ structure DeclarationAddressing.BindingPremise
     {S : CellState.Schema.{u, v, w, x}}
     {M : CellState.Materializer S Digest} {Nullifier : Type y}
     {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
-    (addressing : DeclarationAddressing family) : Prop where
-  reflectsArgument : ∀ {left right : addressing.Argument},
-    addressing.digestBytes (addressing.argumentCodec.encode left) =
+    (addressing : DeclarationAddressing family)
+    (left right : addressing.Argument) : Prop where
+  reflectsArgument : addressing.digestBytes (addressing.argumentCodec.encode left) =
         addressing.digestBytes (addressing.argumentCodec.encode right) →
       left = right
 
 /-! ## Complete accepted request binding -/
 
-/-- The original accepted effect is the sole authorization/transition token.
-This wrapper adds only the declaration-derived argument equality missing from
-the base structure. -/
-structure Bound
+/-- There is one admission token. The addressing argument is checked source
+metadata, not an additional acceptance gate or a wrapper that callers can drop. -/
+abbrev Bound
     {S : CellState.Schema.{u, v, w, x}}
     [DecidableEq S.Field] [DecidableEq S.Resource]
     {M : CellState.Materializer S Digest} {Nullifier : Type y}
     {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
-    (addressing : DeclarationAddressing family)
+    (_addressing : DeclarationAddressing family)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     (request : Request kind) (pre : CellState.Materialized M)
     (declaration : family.Declaration)
-    (outcome : family.Outcome declaration) : Type (max u v w x y z) where
-  accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+    (outcome : family.Outcome declaration) : Type (max u v w x y z) :=
+  AcceptedCellEffect (portal := portal) (authState := authState)
     family request pre declaration outcome
-  argsDigestBound : request.argsDigest = addressing.digest declaration
-
-def bind
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
-    {addressing : DeclarationAddressing family}
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {request : Request kind} {pre : CellState.Materialized M}
-    {declaration : family.Declaration}
-    {outcome : family.Outcome declaration}
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (argsDigestBound : request.argsDigest = addressing.digest declaration) :
-    Bound (portal := portal) (authState := authState)
-      addressing request pre declaration outcome :=
-  ⟨accepted, argsDigestBound⟩
 
 namespace Bound
 
@@ -150,30 +133,30 @@ variable
     {declaration : family.Declaration}
     {outcome : family.Outcome declaration}
 
-/-- The only authorization evidence is the one already retained by the nested
-accepted effect. -/
-def authorization
+/-- Argument equality is forced by the base token and the source projection. -/
+theorem argsDigestBound
     (bound : Bound (portal := portal) (authState := authState)
       addressing request pre declaration outcome) :
-    Authorized portal authState request :=
-  bound.accepted.authorization
+    request.argsDigest = addressing.digest declaration :=
+  bound.request_argsDigest_exact.trans (addressing.argsDigestExact declaration)
 
 @[simp] theorem effectsDigest_exact
     (bound : Bound (portal := portal) (authState := authState)
       addressing request pre declaration outcome) :
     request.effectsDigest = family.effectDigest declaration :=
-  bound.accepted.effectsDigestBound
+  bound.effectsDigestBound
 
 @[simp] theorem preRoot_exact
     (bound : Bound (portal := portal) (authState := authState)
       addressing request pre declaration outcome) :
     request.preStateRoot = pre.root :=
-  bound.accepted.preRootBound
+  bound.preRootBound
 
 omit [DecidableEq S.Field] [DecidableEq S.Resource] in
 theorem argument_eq_of_same_digest
-    (binding : addressing.BindingPremise)
     {left right : family.Declaration}
+    (binding : addressing.BindingPremise (addressing.arguments left)
+      (addressing.arguments right))
     (same : addressing.digest left = addressing.digest right) :
     addressing.arguments left = addressing.arguments right :=
   binding.reflectsArgument same
@@ -195,7 +178,7 @@ theorem no_bound_of_args_mismatch
     (mismatch : request.argsDigest ≠ addressing.digest declaration) :
     IsEmpty (Bound (portal := portal) (authState := authState)
       addressing request pre declaration outcome) :=
-  ⟨fun bound => mismatch bound.argsDigestBound⟩
+  ⟨fun bound => mismatch (Bound.argsDigestBound bound)⟩
 
 /-! ## Existing private-computation wrapper is exactly this generic shape -/
 
@@ -211,12 +194,13 @@ def computationAddressing
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier
       ModeEvidencePins)
-    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (S := S) declaration) :
+    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (S := S) declaration)
+    (pre : CellState.Materialized M) :
     DeclarationAddressing
-      (Minidregg.Theory.ComputationCellEffect.family (M := M) declaration adapter) :=
+      (Minidregg.Theory.ComputationCellEffect.family (M := M) declaration adapter pre) :=
   wholeDeclarationAddressing
-    (Minidregg.Theory.ComputationCellEffect.family (M := M) declaration adapter)
-    adapter.requestDigestBytes
+    (Minidregg.Theory.ComputationCellEffect.family (M := M) declaration adapter pre)
+    adapter.requestDigestBytes (fun _ => rfl)
 
 def ofComputationAccepted
     {language : PrivateComputationLanguage} {mode : PrivateComputationKind}
@@ -237,17 +221,15 @@ def ofComputationAccepted
     (accepted : Minidregg.Theory.ComputationCellEffect.Accepted (portal := portal)
       (authState := authState) declaration adapter commonRequest pre request result) :
     Bound (portal := portal) (authState := authState)
-      (computationAddressing (M := M) declaration adapter)
-      commonRequest pre request result where
-  accepted := accepted.cellEffect
-  argsDigestBound := accepted.argsDigestBound
+      (computationAddressing (M := M) declaration adapter pre)
+      commonRequest pre request result :=
+  accepted.cellEffect
 
-/-! ## Credential-authority family adapters
+/-! ## Credential-authority source projections
 
-The four current credential acceptors bind effects and pre-state through
-`AcceptedCellEffect`, but do not select an argument digest or retain its
-equality.  Their adapters therefore require both pieces explicitly; this is a
-real API residual, not a derivation hidden in this module. -/
+All four families now select the codec/digest operation and exact request as
+part of their trusted source. No per-token `argsExact` premise is needed.
+-/
 
 def bindIssue
     {M : CredentialAuthorityState.Materializer}
@@ -257,19 +239,19 @@ def bindIssue
     {codec : LawfulCodec (CredentialAuthorityEffects.IssueDeclaration kind)}
     {effectDigest : CredentialAuthorityEffects.IssueDeclaration kind → Digest}
     {declaration : CredentialAuthorityEffects.IssueDeclaration kind}
-    (digestBytes : List UInt8 → Digest)
+    {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest)
+      (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest context)
       request pre declaration ())
-    (argsExact : request.argsDigest = digestBytes (codec.encode declaration)) :
+    :
     Bound (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest)
-        digestBytes)
+        (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest context)
+        context.argsDigestBytes (fun _ => rfl))
       request pre declaration () :=
-  bind accepted argsExact
+  accepted
 
 def bindAttenuation
     {M : CredentialAuthorityState.Materializer}
@@ -281,18 +263,18 @@ def bindAttenuation
     {effectDigest : CredentialAuthorityEffects.AttenuateDeclaration kind → Digest}
     {declaration : CredentialAuthorityEffects.AttenuateDeclaration kind}
     {parent : CredentialAuthorityState.StoredCapability kind}
-    (digestBytes : List UInt8 → Digest)
+    {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
       (CredentialAuthorityEffects.attenuateFamily domain pre codec parentCodec
-        effectDigest) request pre declaration parent)
-    (argsExact : request.argsDigest = digestBytes (codec.encode declaration)) :
+        effectDigest context) request pre declaration parent)
+    :
     Bound (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
       (wholeDeclarationAddressing
         (CredentialAuthorityEffects.attenuateFamily domain pre codec parentCodec
-          effectDigest) digestBytes) request pre declaration parent :=
-  bind accepted argsExact
+          effectDigest context) context.argsDigestBytes (fun _ => rfl)) request pre declaration parent :=
+  accepted
 
 def bindRevocation
     {M : CredentialAuthorityState.Materializer}
@@ -302,19 +284,19 @@ def bindRevocation
     {codec : LawfulCodec CredentialAuthorityEffects.RevokeDeclaration}
     {effectDigest : CredentialAuthorityEffects.RevokeDeclaration → Digest}
     {declaration : CredentialAuthorityEffects.RevokeDeclaration}
-    (digestBytes : List UInt8 → Digest)
+    {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest)
+      (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest context)
       request pre declaration ())
-    (argsExact : request.argsDigest = digestBytes (codec.encode declaration)) :
+    :
     Bound (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest)
-        digestBytes)
+        (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest context)
+        context.argsDigestBytes (fun _ => rfl))
       request pre declaration () :=
-  bind accepted argsExact
+  accepted
 
 def bindEpochRotation
     {M : CredentialAuthorityState.Materializer}
@@ -324,19 +306,19 @@ def bindEpochRotation
     {codec : LawfulCodec CredentialAuthorityEffects.RotateEpochDeclaration}
     {effectDigest : CredentialAuthorityEffects.RotateEpochDeclaration → Digest}
     {declaration : CredentialAuthorityEffects.RotateEpochDeclaration}
-    (digestBytes : List UInt8 → Digest)
+    {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest)
+      (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest context)
       request pre declaration ())
-    (argsExact : request.argsDigest = digestBytes (codec.encode declaration)) :
+    :
     Bound (portal := portal)
       (authState := CredentialAuthorityState.authState domain pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest)
-        digestBytes)
+        (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest context)
+        context.argsDigestBytes (fun _ => rfl))
       request pre declaration () :=
-  bind accepted argsExact
+  accepted
 
 /-! ## Hyperdocument staged-intent adapter -/
 
@@ -345,21 +327,22 @@ request envelope, as the arguments named by `argsDigest`.  The digest projection
 is exactly the existing domain-separated operation-id derivation. -/
 def hyperdocumentAddressing
     {MDoc : Hyperdocument.Materializer Digest}
-    (config : HyperdocumentOperations.Config) :
+    (config : HyperdocumentOperations.Config) (pre : Hyperdocument.Cell MDoc) :
     DeclarationAddressing
-      (HyperdocumentOperations.family (M := MDoc) config) where
+      (HyperdocumentOperations.family (M := MDoc) config pre) where
   Argument := HyperdocumentOperationIntent.OperationIntent
   argumentCodec := config.intentAddressing.codec
   arguments := HyperdocumentOperations.Declaration.intent
   digestBytes := fun bytes =>
     (Hyperdocument.deriveIdentifier config.intentAddressing.derivation
       (⟨bytes⟩ : Hyperdocument.IdPreimage .v1 .operationIntent)).digest
+  argsDigestExact := fun _ => rfl
 
 @[simp] theorem hyperdocumentAddressing_digest
     {MDoc : Hyperdocument.Materializer Digest}
-    (config : HyperdocumentOperations.Config)
+    (config : HyperdocumentOperations.Config) (pre : Hyperdocument.Cell MDoc)
     (declaration : HyperdocumentOperations.Declaration) :
-    (hyperdocumentAddressing (MDoc := MDoc) config).digest declaration =
+    (hyperdocumentAddressing (MDoc := MDoc) config pre).digest declaration =
       (declaration.operationId config).digest :=
   rfl
 
@@ -378,9 +361,9 @@ def bindHyperdocument
       documentPre portal declaration) :
     Bound (portal := portal)
       (authState := CredentialAuthorityState.authState projection authorityPre)
-      (hyperdocumentAddressing (MDoc := MDoc) config)
+      (hyperdocumentAddressing (MDoc := MDoc) config documentPre)
       (declaration.toRequest config) documentPre declaration () :=
-  bind accepted.accepted rfl
+  accepted.accepted
 
 /-- Load-bearing audit tooth: every generic Hyperdocument binding exposes the
 same staged operation-id equality retained by its common request. -/
@@ -391,11 +374,11 @@ theorem hyperdocument_args_name_operation_intent
     {documentPre : Hyperdocument.Cell MDoc}
     {declaration : HyperdocumentOperations.Declaration}
     (bound : Bound (portal := portal) (authState := authState)
-      (hyperdocumentAddressing (MDoc := MDoc) config)
+      (hyperdocumentAddressing (MDoc := MDoc) config documentPre)
       (declaration.toRequest config) documentPre declaration ()) :
     (declaration.toRequest config).argsDigest =
       (declaration.operationId config).digest := by
-  simpa using bound.argsDigestBound
+  simpa using (Bound.argsDigestBound bound)
 
 /-! ## Reactive residual
 

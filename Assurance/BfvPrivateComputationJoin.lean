@@ -288,6 +288,8 @@ noncomputable def acceptCore
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
     (authorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (ComputationCellEffect.family dialect.declaration adapter pre).request request)
     (argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.completeEffectDigest request)
     (preRootBound : commonRequest.preStateRoot = pre.root)
@@ -295,7 +297,7 @@ noncomputable def acceptCore
     (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
     ComputationCellEffect.Accepted (portal := portal) (authState := authState)
       dialect.declaration adapter commonRequest pre request result :=
-  ComputationCellEffect.accept dialect.declaration adapter authorization argsDigestBound
+  ComputationCellEffect.accept dialect.declaration adapter authorization requestBound argsDigestBound
     effectsDigestBound preRootBound completion validated
 
 /-- An accepted pure BFV effect retains all request bindings, is necessarily

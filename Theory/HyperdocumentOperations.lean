@@ -434,13 +434,15 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) -> Prop
 
 def family
     {M : Hyperdocument.Materializer Digest}
-    (config : Config) :
+    (config : Config) (pre : Hyperdocument.Cell M) :
     SemanticEffectFamily cellSchema M Nat where
   Declaration := Declaration
   declarationCodec := config.declarationCodec
+  pre := pre
+  request := fun declaration => ⟨.object, declaration.toRequest config⟩
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun declaration _ => PLift (declaration.Canonical config)
+  ModeEvidence := fun declaration _ => PLift (ValidOperation config pre declaration)
   effectDigest := Declaration.effectDigest config
   patch := fun declaration _ => declaration.patch config
   nullifier := fun declaration _ => some declaration.intent.nonce
@@ -472,7 +474,7 @@ structure Accepted
   accepted : AcceptedCellEffect
     (portal := portal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (family config) (declaration.toRequest config) documentPre declaration ()
+    (family config documentPre) (declaration.toRequest config) documentPre declaration ()
 
 def accept
     {MDoc : Hyperdocument.Materializer Digest}
@@ -501,9 +503,11 @@ def accept
   namedCapabilityAdmissible := namedCapabilityAdmissible
   accepted :=
     { authorization := authorization
+      preStateBound := rfl
+      requestBound := rfl
       effectsDigestBound := rfl
       preRootBound := semantic.preRootExact
-      modeEvidence := ⟨semantic.canonical⟩
+      modeEvidence := ⟨semantic⟩
       validated := validated
       disclosure := .sealed
       disclosureAllowed := trivial }
@@ -713,7 +717,7 @@ def Accepted.receiptEvent
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
     (accepted : Accepted config projection authorityPre documentPre portal declaration) :
-    ReceiptEvent (family (M := MDoc) config) :=
+    ReceiptEvent (family (M := MDoc) config documentPre) :=
   accepted.accepted.toReceiptEvent
 
 @[simp] theorem Accepted.request_exact

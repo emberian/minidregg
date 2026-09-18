@@ -127,7 +127,7 @@ def declaration
     | .content =>
         { Nullifier := Nat
           family := Minidregg.Theory.HyperdocumentOperations.family
-            (M := MDoc) contentConfig
+            (M := MDoc) contentConfig documentPre
           kind := .object
           request := contentDeclaration.toRequest contentConfig
           declaration := contentDeclaration
@@ -136,6 +136,7 @@ def declaration
         { Nullifier := Nat
           family := Minidregg.Kernel.HyperdocumentVersionEffects.family
             representation eventConfig
+              (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
           kind := .object
           request := eventDeclaration.toRequest eventConfig
           declaration := eventDeclaration

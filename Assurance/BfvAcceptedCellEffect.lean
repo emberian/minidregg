@@ -125,6 +125,9 @@ noncomputable def acceptBatchSealed
     {request : authority.declaration.Request}
     {outcome : authority.declaration.ComputationOutcome}
     (commonAuthorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (PrivateCellEffect.sealedFamily
+        (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
     (preRootBound : commonRequest.preStateRoot = pre.root)
@@ -136,12 +139,12 @@ noncomputable def acceptBatchSealed
       (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (PrivateCellEffect.sealedFamily (M := M)
-        (privateDeclaration := authority.declaration) adapter :
+        (privateDeclaration := authority.declaration) adapter pre :
           SemanticEffectFamily S M Nullifier)
       commonRequest pre request outcome :=
   PrivateCellEffect.acceptComputationSealed
     (privateDeclaration := authority.declaration) adapter
-    commonAuthorization effectsDigestBound preRootBound
+    commonAuthorization requestBound effectsDigestBound preRootBound
     (completionOfBatchAdmission authority admission commitmentId legs statementExact)
     validated
 
@@ -160,6 +163,9 @@ noncomputable def acceptBatchSealed
     {request : authority.declaration.Request}
     {outcome : authority.declaration.ComputationOutcome}
     (commonAuthorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (PrivateCellEffect.sealedFamily
+        (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
     (preRootBound : commonRequest.preStateRoot = pre.root)
@@ -170,7 +176,7 @@ noncomputable def acceptBatchSealed
     (validated : CellState.ValidatedPatch M pre
       (adapter.patch request outcome)) :
     (acceptBatchSealed authority admission commitmentId adapter
-      commonAuthorization effectsDigestBound preRootBound legs statementExact
+      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
       validated).disclosure = .sealed :=
   rfl
 
@@ -188,7 +194,7 @@ theorem accepted_every_exact_integer_equation
     {outcome : authority.declaration.ComputationOutcome}
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       (PrivateCellEffect.sealedFamily (M := M)
-        (privateDeclaration := authority.declaration) adapter :
+        (privateDeclaration := authority.declaration) adapter pre :
           SemanticEffectFamily S M Nullifier)
       commonRequest pre request outcome)
     (rowIndex : Fin equationsPerOwner) :
@@ -219,6 +225,9 @@ noncomputable def historyClaimOfBatchSealed
     {request : authority.declaration.Request}
     {outcome : authority.declaration.ComputationOutcome}
     (commonAuthorization : Authorized portal authState commonRequest)
+    (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
+      (PrivateCellEffect.sealedFamily
+        (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
     (preRootBound : commonRequest.preStateRoot = pre.root)
@@ -231,14 +240,14 @@ noncomputable def historyClaimOfBatchSealed
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (projection : HistoryProjection
       (PrivateCellEffect.sealedFamily (M := M)
-        (privateDeclaration := authority.declaration) adapter :
+        (privateDeclaration := authority.declaration) adapter pre :
           SemanticEffectFamily S M Nullifier) n F)
     (headerCells : HistoryAdmissionContext -> BindingIx -> F)
     (context : HistoryAdmissionContext) :
     BoundSemanticReceiptClaim n F :=
   projection.historyClaim headerCells context
     (acceptBatchSealed authority admission commitmentId adapter
-      commonAuthorization effectsDigestBound preRootBound legs statementExact validated)
+      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact validated)
 
 /-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.completionOfBatchAdmission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms completionOfBatchAdmission

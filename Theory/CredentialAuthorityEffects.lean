@@ -37,6 +37,25 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) → Prop
 is also written to the canonical sparse nullifier plane by every patch. -/
 abbrev OperationNullifier := Nat
 
+/-- The deployment fixes the authority-control resource and ambient identity
+in first-order data.  Each operation derives its argument address from the
+whole lawful declaration codec, its nonce from its eager nullifier, and its
+root from the exact canonical authority cell. -/
+structure RequestContext where
+  authority : EffectRequestContext
+  argsDigestBytes : List UInt8 → Digest
+
+def RequestContext.request {Declaration : Type}
+    (context : RequestContext) (codec : LawfulCodec Declaration)
+    (effectDigest : Declaration → Digest) (preRoot : Digest)
+    (nonce : Nat) (declaration : Declaration) : PackedEffectRequest :=
+  ⟨context.authority.kind,
+    { context.authority.request
+        (context.argsDigestBytes (codec.encode declaration))
+        (effectDigest declaration) preRoot with nonce := nonce }⟩
+
+variable {context : RequestContext}
+
 /-- Exact generated patches are not merely well shaped: the public validator
 can mint their `ValidatedPatch` token.  This is the common positive path used
 by all four operation families. -/
@@ -108,10 +127,13 @@ structure IssueEvidence {M : Materializer} (domain : ProjectionUniverse)
 
 def issueFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
     {kind : ResourceKind} (codec : LawfulCodec (IssueDeclaration kind))
-    (effectDigest : IssueDeclaration kind → Digest) :
+    (effectDigest : IssueDeclaration kind → Digest) (context : RequestContext) :
     SemanticEffectFamily schema M OperationNullifier where
   Declaration := IssueDeclaration kind
   declarationCodec := codec
+  pre := pre
+  request := fun declaration => context.request codec effectDigest pre.root
+    declaration.operationNullifier declaration
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => IssueEvidence domain pre declaration
@@ -127,17 +149,22 @@ def issueFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
 patch and the mode evidence's exact canonical pre-root. -/
 noncomputable def acceptIssue
     {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
+    (context : RequestContext)
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     (codec : LawfulCodec (IssueDeclaration kind))
     (effectDigest : IssueDeclaration kind → Digest)
     (declaration : IssueDeclaration kind)
     (authorization : Authorized portal (authState domain pre) request)
+    (requestBound : (⟨kind, request⟩ : PackedEffectRequest) =
+      context.request codec effectDigest pre.root declaration.operationNullifier declaration)
     (requestDigestExact : request.effectsDigest = effectDigest declaration)
     (requestPreExact : request.preStateRoot = pre.root)
     (modeEvidence : IssueEvidence domain pre declaration) :
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (issueFamily domain pre codec effectDigest) request pre declaration () where
+      (issueFamily domain pre codec effectDigest context) request pre declaration () where
   authorization := authorization
+  preStateBound := rfl
+  requestBound := requestBound
   effectsDigestBound := requestDigestExact
   preRootBound := requestPreExact
   modeEvidence := modeEvidence
@@ -218,10 +245,13 @@ structure AttenuateEvidence {M : Materializer} (domain : ProjectionUniverse)
 def attenuateFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
     {kind : ResourceKind} (codec : LawfulCodec (AttenuateDeclaration kind))
     (parentCodec : LawfulCodec (StoredCapability kind))
-    (effectDigest : AttenuateDeclaration kind → Digest) :
+    (effectDigest : AttenuateDeclaration kind → Digest) (context : RequestContext) :
     SemanticEffectFamily schema M OperationNullifier where
   Declaration := AttenuateDeclaration kind
   declarationCodec := codec
+  pre := pre
+  request := fun declaration => context.request codec effectDigest pre.root
+    declaration.operationNullifier declaration
   Outcome := fun _ => StoredCapability kind
   outcomeCodec := fun _ => parentCodec
   ModeEvidence := fun declaration parent =>
@@ -236,6 +266,7 @@ def attenuateFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell
 
 noncomputable def acceptAttenuation
     {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
+    (context : RequestContext)
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     (codec : LawfulCodec (AttenuateDeclaration kind))
     (parentCodec : LawfulCodec (StoredCapability kind))
@@ -243,13 +274,17 @@ noncomputable def acceptAttenuation
     (declaration : AttenuateDeclaration kind)
     (parent : StoredCapability kind)
     (authorization : Authorized portal (authState domain pre) request)
+    (requestBound : (⟨kind, request⟩ : PackedEffectRequest) =
+      context.request codec effectDigest pre.root declaration.operationNullifier declaration)
     (requestDigestExact : request.effectsDigest = effectDigest declaration)
     (requestPreExact : request.preStateRoot = pre.root)
     (modeEvidence : AttenuateEvidence domain pre declaration parent) :
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (attenuateFamily domain pre codec parentCodec effectDigest)
+      (attenuateFamily domain pre codec parentCodec effectDigest context)
       request pre declaration parent where
   authorization := authorization
+  preStateBound := rfl
+  requestBound := requestBound
   effectsDigestBound := requestDigestExact
   preRootBound := requestPreExact
   modeEvidence := modeEvidence
@@ -303,10 +338,13 @@ structure RevokeEvidence {M : Materializer} (domain : ProjectionUniverse)
 
 def revokeFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
     (codec : LawfulCodec RevokeDeclaration)
-    (effectDigest : RevokeDeclaration → Digest) :
+    (effectDigest : RevokeDeclaration → Digest) (context : RequestContext) :
     SemanticEffectFamily schema M OperationNullifier where
   Declaration := RevokeDeclaration
   declarationCodec := codec
+  pre := pre
+  request := fun declaration => context.request codec effectDigest pre.root
+    declaration.operationNullifier declaration
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => RevokeEvidence domain pre declaration
@@ -320,17 +358,22 @@ def revokeFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
 
 noncomputable def acceptRevocation
     {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
+    (context : RequestContext)
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     (codec : LawfulCodec RevokeDeclaration)
     (effectDigest : RevokeDeclaration → Digest)
     (declaration : RevokeDeclaration)
     (authorization : Authorized portal (authState domain pre) request)
+    (requestBound : (⟨kind, request⟩ : PackedEffectRequest) =
+      context.request codec effectDigest pre.root declaration.operationNullifier declaration)
     (requestDigestExact : request.effectsDigest = effectDigest declaration)
     (requestPreExact : request.preStateRoot = pre.root)
     (modeEvidence : RevokeEvidence domain pre declaration) :
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (revokeFamily domain pre codec effectDigest) request pre declaration () where
+      (revokeFamily domain pre codec effectDigest context) request pre declaration () where
   authorization := authorization
+  preStateBound := rfl
+  requestBound := requestBound
   effectsDigestBound := requestDigestExact
   preRootBound := requestPreExact
   modeEvidence := modeEvidence
@@ -417,10 +460,13 @@ structure RotateEpochEvidence {M : Materializer} (pre : Cell M)
 
 def rotateEpochFamily {M : Materializer} (pre : Cell M)
     (codec : LawfulCodec RotateEpochDeclaration)
-    (effectDigest : RotateEpochDeclaration → Digest) :
+    (effectDigest : RotateEpochDeclaration → Digest) (context : RequestContext) :
     SemanticEffectFamily schema M OperationNullifier where
   Declaration := RotateEpochDeclaration
   declarationCodec := codec
+  pre := pre
+  request := fun declaration => context.request codec effectDigest pre.root
+    declaration.operationNullifier declaration
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun declaration _ => RotateEpochEvidence pre declaration
@@ -434,17 +480,22 @@ def rotateEpochFamily {M : Materializer} (pre : Cell M)
 
 noncomputable def acceptEpochRotation
     {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
+    (context : RequestContext)
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     (codec : LawfulCodec RotateEpochDeclaration)
     (effectDigest : RotateEpochDeclaration → Digest)
     (declaration : RotateEpochDeclaration)
     (authorization : Authorized portal (authState domain pre) request)
+    (requestBound : (⟨kind, request⟩ : PackedEffectRequest) =
+      context.request codec effectDigest pre.root declaration.operationNullifier declaration)
     (requestDigestExact : request.effectsDigest = effectDigest declaration)
     (requestPreExact : request.preStateRoot = pre.root)
     (modeEvidence : RotateEpochEvidence pre declaration) :
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (rotateEpochFamily pre codec effectDigest) request pre declaration () where
+      (rotateEpochFamily pre codec effectDigest context) request pre declaration () where
   authorization := authorization
+  preStateBound := rfl
+  requestBound := requestBound
   effectsDigestBound := requestDigestExact
   preRootBound := requestPreExact
   modeEvidence := modeEvidence
@@ -477,7 +528,7 @@ theorem authorization_consults_same_canonical_pre
     {declaration : IssueDeclaration kind}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (issueFamily domain pre codec effectDigest) request pre declaration ()) :
+      (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
     accepted.prepared.post.logical.fields
         (.capability kind declaration.capability.id) =
       some ⟨declaration.capability, []⟩ := by
@@ -495,7 +546,7 @@ theorem authorization_consults_same_canonical_pre
     {declaration : IssueDeclaration kind}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (issueFamily domain pre codec effectDigest) request pre declaration ()) :
+      (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
     isNullified accepted.prepared.post declaration.operationNullifier = true := by
   simp [isNullified, AcceptedCellEffect.prepared,
     CanonicalTransition.PreparedTurn.ofValidatedPatch,
@@ -513,7 +564,7 @@ theorem authorization_consults_same_canonical_pre
     {declaration : AttenuateDeclaration kind} {parent : StoredCapability kind}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (attenuateFamily domain pre codec parentCodec effectDigest)
+      (attenuateFamily domain pre codec parentCodec effectDigest context)
       request pre declaration parent) :
     readCapability accepted.prepared.post kind declaration.child.id =
       some (descendedCapability declaration.child parent) := by
@@ -536,7 +587,7 @@ theorem attenuation_post_lineage_valid
     {declaration : AttenuateDeclaration kind} {parent : StoredCapability kind}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (attenuateFamily domain pre codec parentCodec effectDigest)
+      (attenuateFamily domain pre codec parentCodec effectDigest context)
       request pre declaration parent) :
     ∃ stored,
       readCapability accepted.prepared.post kind declaration.child.id = some stored ∧
@@ -553,7 +604,7 @@ theorem attenuation_post_lineage_valid
     {declaration : RevokeDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (revokeFamily domain pre codec effectDigest) request pre declaration ()) :
+      (revokeFamily domain pre codec effectDigest context) request pre declaration ()) :
     isRevoked accepted.prepared.post declaration.key = true := by
   simp [isRevoked, AcceptedCellEffect.prepared,
     CanonicalTransition.PreparedTurn.ofValidatedPatch,
@@ -572,7 +623,7 @@ theorem revocation_post_is_authorizer_member
     {declaration : RevokeDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (revokeFamily domain pre codec effectDigest) request pre declaration ()) :
+      (revokeFamily domain pre codec effectDigest context) request pre declaration ()) :
     declaration.key ∈ (authState domain accepted.prepared.post).revoked := by
   apply (mem_authState_revoked_iff domain accepted.prepared.post declaration.key).2
   exact ⟨accepted.modeEvidence.registered, revocation_post_exact accepted⟩
@@ -585,7 +636,7 @@ theorem revocation_post_is_authorizer_member
     {declaration : RotateEpochDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (rotateEpochFamily pre codec effectDigest) request pre declaration ()) :
+      (rotateEpochFamily pre codec effectDigest context) request pre declaration ()) :
     declaration.target.read accepted.prepared.post = declaration.nextEpoch := by
   rcases declaration with ⟨target, expectedEpoch, nextEpoch, expectedPreRoot,
     operationNullifier⟩
@@ -607,7 +658,7 @@ theorem rotation_post_is_authorizer_epoch
     {declaration : RotateEpochDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (rotateEpochFamily pre codec effectDigest) request pre declaration ()) :
+      (rotateEpochFamily pre codec effectDigest context) request pre declaration ()) :
     declaration.target.readAuth (authState domain accepted.prepared.post) =
       declaration.nextEpoch := by
   rw [declaration.target.readAuth_authState]
@@ -623,7 +674,7 @@ theorem revoke_frame
     {declaration : RevokeDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (revokeFamily domain pre codec effectDigest) request pre declaration ())
+      (revokeFamily domain pre codec effectDigest context) request pre declaration ())
     (field : AuthorityField)
     (outside : field ∉ declaration.patch.fieldFootprint) :
     accepted.prepared.post.logical.fields field = pre.logical.fields field :=
@@ -639,7 +690,7 @@ theorem revoke_nullifier_exact
     {declaration : RevokeDeclaration}
     (accepted : AcceptedCellEffect (portal := portal)
       (authState := authState domain pre)
-      (revokeFamily domain pre codec effectDigest) request pre declaration ()) :
+      (revokeFamily domain pre codec effectDigest context) request pre declaration ()) :
     accepted.prepared.nullifier = some declaration.operationNullifier := rfl
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.AttenuateEvidence.childLineageValid' depends on axioms: [propext, Quot.sound] -/

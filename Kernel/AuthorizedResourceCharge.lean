@@ -285,27 +285,6 @@ theorem effectDigestWithCharge_charge_injective (operation : Operation) :
     simpa [effectDigestWithCharge] using congrArg Digest.value same
   exact (Nat.pair_eq_pair.mp values).2
 
-/-- This family differs from the legacy resource adapter in one load-bearing
-way: its effect digest includes the exact ten-lane settlement charge. -/
-def family
-    {M : Materializer CanonicalResourceKernel.schema Digest}
-    (manifest : DeploymentManifest) (pre : Materialized M) :
-    SemanticEffectFamily.{0, 0, 0, 0, 0, 0}
-      CanonicalResourceKernel.schema M Unit where
-  Declaration := Operation
-  declarationCodec := CanonicalResourceEffect.operationCodec
-  Outcome := fun _ => Unit
-  outcomeCodec := fun _ => CanonicalResourceEffect.unitCodec
-  ModeEvidence := fun operation _ =>
-    PLift (Admission (logicalBook pre.logical) operation)
-  effectDigest := chargedEffectDigest manifest pre
-  patch := fun operation _ => operation.patch pre
-  nullifier := fun _ _ => none
-  Release := fun _ _ => PEmpty
-  DeclassificationAuthority := fun _ _ => PEmpty
-  ReleaseAuthorization := fun _ _ release => release.elim
-  DisclosureAllowed := fun _ _ disclosure => disclosure = .sealed
-
 /-! ## One authorization request and one durable payload -/
 
 /-- Ambient request fields only.  Notably, neither a semantics digest nor a
@@ -322,11 +301,10 @@ structure RequestContext where
 
 /-- The exact request authorized for this accepted effect.  Its scalar cost is
 the fee coordinate of the same vector later placed in durable settlement. -/
-def RequestContext.request
+def RequestContext.requestOf
     {M : Materializer CanonicalResourceKernel.schema Digest}
-    {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
-    (accepted : Accepted pre operation) : Request .account where
+    (pre : Materialized M) (operation : Operation) : Request .account where
   domain := context.domain
   semantics := manifest.semanticDigest
   federation := context.federation
@@ -341,7 +319,39 @@ def RequestContext.request
   preStateRoot := pre.root
   policyId := context.policyId
   policyEpoch := context.policyEpoch
-  cost := exactCharge manifest accepted .feeDebit
+  cost := exactChargeOf manifest pre operation .feeDebit
+
+/-- The accepted wrapper contributes no new request data. -/
+def RequestContext.request
+    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {pre : Materialized M} {operation : Operation}
+    (context : RequestContext) (manifest : DeploymentManifest)
+    (_accepted : Accepted pre operation) : Request .account :=
+  context.requestOf manifest pre operation
+
+/-- This family differs from the legacy resource adapter in one load-bearing
+way: its effect digest includes the exact ten-lane settlement charge. -/
+def family
+    {M : Materializer CanonicalResourceKernel.schema Digest}
+    (manifest : DeploymentManifest) (pre : Materialized M)
+    (context : RequestContext) :
+    SemanticEffectFamily.{0, 0, 0, 0, 0, 0}
+      CanonicalResourceKernel.schema M Unit where
+  Declaration := Operation
+  declarationCodec := CanonicalResourceEffect.operationCodec
+  pre := pre
+  request := fun operation => ⟨.account, context.requestOf manifest pre operation⟩
+  Outcome := fun _ => Unit
+  outcomeCodec := fun _ => CanonicalResourceEffect.unitCodec
+  ModeEvidence := fun operation _ =>
+    PLift (Admission (logicalBook pre.logical) operation)
+  effectDigest := chargedEffectDigest manifest pre
+  patch := fun operation _ => operation.patch pre
+  nullifier := fun _ _ => none
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => release.elim
+  DisclosureAllowed := fun _ _ disclosure => disclosure = .sealed
 
 @[simp] theorem RequestContext.request_semantics
     {M : Materializer CanonicalResourceKernel.schema Digest}
@@ -380,9 +390,11 @@ noncomputable def toCellEffect
     (authorization : Authorized portal authState
       (context.request manifest accepted)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
-      (family manifest pre)
+      (family manifest pre context)
       (context.request manifest accepted) pre operation () where
   authorization := authorization
+  preStateBound := rfl
+  requestBound := rfl
   effectsDigestBound := rfl
   preRootBound := rfl
   modeEvidence := PLift.up accepted.admission
@@ -637,11 +649,22 @@ def witnessUnitFee : Charge
   | .incidences => 3
   | _ => 0
 
+/-- Source codec identifiers for the concrete v2 stream format. These name
+schema/version commitments; native implementation correspondence remains the
+explicit deployment refinement documented above. -/
+def canonicalStateCodecId : Digest :=
+  (Compiler.Sp800185Cshake256.hash "DREGG.CODEC.IDENTITY/v1".toUTF8.toList
+    "DREGG/RESOURCE/v2/kind0/canonical-sorted-book-state".toUTF8.toList).digest
+
+def canonicalOperationCodecId : Digest :=
+  (Compiler.Sp800185Cshake256.hash "DREGG.CODEC.IDENTITY/v1".toUTF8.toList
+    "DREGG/RESOURCE/v2/kind1/tagged-operation".toUTF8.toList).digest
+
 def witnessManifest : DeploymentManifest where
-  version := 1
-  stateCodecId := ⟨101⟩
-  operationCodecId := ⟨102⟩
-  eventCodecId := ⟨103⟩
+  version := 2
+  stateCodecId := canonicalStateCodecId
+  operationCodecId := canonicalOperationCodecId
+  eventCodecId := canonicalOperationCodecId
   tariff :=
     { authorizationWitnessBytes := 8
       baseProofWork := 5
@@ -674,7 +697,7 @@ noncomputable def witnessAuthorization :
 
 noncomputable def witnessPlan :
     AcceptedCellEffect (portal := demoPortal) (authState := demoState)
-      (family witnessManifest CanonicalResourceKernel.witnessCell)
+      (family witnessManifest CanonicalResourceKernel.witnessCell witnessContext)
       (witnessContext.request witnessManifest
         CanonicalResourceKernel.witnessMintAccepted)
       CanonicalResourceKernel.witnessCell (.mint 0 1 2) () :=

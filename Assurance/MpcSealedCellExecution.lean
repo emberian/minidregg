@@ -363,8 +363,26 @@ def requestDigestBytes (bytes : List UInt8) : Digest :=
 def effectDigestBytes (bytes : List UInt8) : Digest :=
   ⟨3300 + bytes.length⟩
 
+/-- Fixed scope of the inhabited MPC fixture.  Argument/effect digests and the
+pre-root are derived separately from the actual declaration and cell state. -/
+def requestContext : EffectRequestContext where
+  kind := .object
+  domain := ⟨1⟩
+  semantics := ⟨3410⟩
+  federation := ⟨3⟩
+  subject := ⟨4⟩
+  subjectKeyEpoch := 0
+  target := ⟨3411⟩
+  verb := .mutateObject
+  nonce := 3412
+  height := 9
+  policyId := ⟨10⟩
+  policyEpoch := 0
+  cost := 11
+
 noncomputable def adapter :
     ComputationCellEffect.Adapter (S := schema) declaration where
+  requestContext := requestContext
   requestCodec := requestCodec
   resultCodec := resultCodec
   requestDigestBytes := requestDigestBytes
@@ -485,13 +503,8 @@ noncomputable def validated :
   honestPatch_accepted.choose
 
 noncomputable def commonRequest : Request .object :=
-  { Minidregg.Theory.TypedAuthorizationWitness.request with
-    semantics := ⟨3410⟩
-    target := ⟨3411⟩
-    argsDigest := adapter.completeRequestDigest honestRequest
-    effectsDigest := adapter.completeEffectDigest honestRequest
-    nonce := 3412
-    preStateRoot := pre.root }
+  requestContext.request (adapter.completeRequestDigest honestRequest)
+    (adapter.completeEffectDigest honestRequest) pre.root
 
 noncomputable def authorization :
     Authorized Minidregg.Theory.TypedAuthorizationWitness.permissivePortal
@@ -511,7 +524,7 @@ noncomputable def accepted :
       (authState := Minidregg.Theory.TypedAuthorizationWitness.authState)
       declaration adapter commonRequest pre honestRequest honestResult :=
   ComputationCellEffect.accept declaration adapter authorization
-    rfl rfl rfl honestCompletion validated
+    rfl rfl rfl rfl honestCompletion validated
 
 theorem accepted_nonempty : Nonempty
     (ComputationCellEffect.Accepted
@@ -562,13 +575,13 @@ theorem accepted_disclosure_sealed :
 
 theorem accepted_has_no_release
     (release : (ComputationCellEffect.family (M := materializer)
-      declaration adapter).Release honestRequest honestResult) : False :=
+      declaration adapter pre).Release honestRequest honestResult) : False :=
   ComputationCellEffect.family_no_release declaration adapter
     honestRequest honestResult release
 
 theorem accepted_has_no_declassification_authority
     (authority : (ComputationCellEffect.family (M := materializer)
-      declaration adapter).DeclassificationAuthority honestRequest honestResult) :
+      declaration adapter pre).DeclassificationAuthority honestRequest honestResult) :
     False :=
   nomatch authority
 
