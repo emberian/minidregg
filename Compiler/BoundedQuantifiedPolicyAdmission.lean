@@ -109,10 +109,10 @@ theorem canonical_forallView_verifies_iff
     {request : Request kind} {committed : CommittedPolicy}
     {oldState newState : State} {range : List Index} {body : Index -> Pred}
     (predicateExact : committed.record.predicate = forallView range body)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (policyIdExact : committed.record.policyId = request.policyId)
-    (versionExact : committed.record.version = request.policyEpoch)
+    (versionExact : committed.record.version = request.policyRevision)
     (domainExact : committed.record.domain = request.domain)
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)

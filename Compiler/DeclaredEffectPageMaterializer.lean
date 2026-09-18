@@ -685,6 +685,7 @@ def context : RequestContext where
   height := 9
   policyId := ⟨10⟩
   policyEpoch := 0
+  policyRevision := 0
 
 noncomputable def preLogical : LogicalState DeclaredTurn.effectSchema where
   fields := (effectCell.logical.fields.write debitKey (14 : Int)).write creditKey (0 : Int)
@@ -726,6 +727,7 @@ def authorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

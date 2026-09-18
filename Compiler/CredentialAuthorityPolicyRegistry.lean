@@ -3,7 +3,7 @@
 
 The receiving registry consumes the complete canonical authority domain. Its
 policy source is the executable canonical v2 record, addressed by cSHAKE. The
-current epoch, selected address, membership, and all authority epochs come
+current source revision, selected address, membership, and all authority epochs come
 from that same snapshot. The physical receiver supplies complete catalogue
 and shard provenance; semantic source bytes alone cannot reconstruct it.
 
@@ -86,12 +86,12 @@ def projection (snapshot : Snapshot) :
 
 /-- Data returned by the actual resolver retains every checked source fact. -/
 structure LoadedPolicy (snapshot : Snapshot) (store : PayloadStore)
-    (policyId : PolicyId) (epoch : Epoch) where
+    (policyId : PolicyId) (revision : PolicyRevision) where
   committed : CommittedPolicy
-  current : snapshot.authState.policyEpoch policyId = epoch
-  member : snapshot.policyContains policyId epoch committed.address
+  current : snapshot.authState.policyRevision policyId = revision
+  member : snapshot.policyContains policyId (snapshot.authState.policyEpoch policyId) revision committed.address
   policyIdExact : committed.record.policyId = policyId
-  epochExact : committed.record.version = epoch
+  revisionExact : committed.record.version = revision
   domainExact : committed.record.domain = snapshot.domain
   addressExact : policyRecordDigest committed.record = committed.address
   fetched : store.fetch committed.address = some (policyRecordCodec.encode committed.record)
@@ -99,18 +99,18 @@ structure LoadedPolicy (snapshot : Snapshot) (store : PayloadStore)
 /-- A successful source load names the current head of the exact complete
 canonical snapshot, with no absent-to-zero shortcut in policy selection. -/
 theorem LoadedPolicy.current_head {snapshot : Snapshot} {store : PayloadStore}
-    {policyId : PolicyId} {epoch : Epoch}
-    (loaded : LoadedPolicy snapshot store policyId epoch) :
-    snapshot.currentHead policyId = some ⟨epoch, loaded.committed.address⟩ :=
-  snapshot.policy_exact policyId epoch loaded.committed.address loaded.member
+    {policyId : PolicyId} {revision : PolicyRevision}
+    (loaded : LoadedPolicy snapshot store policyId revision) :
+    snapshot.currentHead policyId = some ⟨revision, loaded.committed.address⟩ :=
+  snapshot.policy_exact policyId (snapshot.authState.policyEpoch policyId) revision loaded.committed.address loaded.member
 
 /-- Resolve from current canonical authority state, then fetch and decode the
 selected source. A store response cannot choose another address or record. -/
 def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
-    (policyId : PolicyId) (epoch : Epoch) : Option (LoadedPolicy snapshot store policyId epoch) :=
-  let address := snapshot.authState.policyAddress policyId epoch
-  if current : snapshot.authState.policyEpoch policyId = epoch then
-    if member : snapshot.policyContains policyId epoch address then
+    (policyId : PolicyId) (revision : PolicyRevision) : Option (LoadedPolicy snapshot store policyId revision) :=
+  let address := snapshot.authState.policyAddress policyId revision
+  if current : snapshot.authState.policyRevision policyId = revision then
+    if member : snapshot.policyContains policyId (snapshot.authState.policyEpoch policyId) revision address then
       match fetched : store.fetch address with
       | none => none
       | some bytes =>
@@ -118,7 +118,7 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
           | none => none
           | some record =>
               if policyIdExact : record.policyId = policyId then
-                if epochExact : record.version = epoch then
+                if revisionExact : record.version = revision then
                   if domainExact : record.domain = snapshot.domain then
                     if addressExact : policyRecordDigest record = address then
                       some
@@ -126,7 +126,7 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
                           current := current
                           member := member
                           policyIdExact := policyIdExact
-                          epochExact := epochExact
+                          revisionExact := revisionExact
                           domainExact := domainExact
                           addressExact := addressExact
                           fetched := by
@@ -140,14 +140,14 @@ def loadPolicy (snapshot : Snapshot) (store : PayloadStore)
   else none
 
 def policyRegistry (snapshot : Snapshot) (store : PayloadStore) : PolicyRegistry where
-  resolve := fun policyId epoch =>
-    (loadPolicy snapshot store policyId epoch).map LoadedPolicy.committed
+  resolve := fun policyId revision =>
+    (loadPolicy snapshot store policyId revision).map LoadedPolicy.committed
 
 /-- Membership claims name their source role and exact canonical coordinate.
 Both roles share the semantic authority root, so the claim is data checked
 against that root rather than an independently authoritative host opening. -/
 inductive MembershipClaim where
-  | policy (identifier : PolicyId) (epoch : Epoch)
+  | policy (identifier : PolicyId) (revision : PolicyRevision)
   | capability (kind : ResourceKind) (identifier : CapabilityId)
   deriving DecidableEq, Repr
 
@@ -160,11 +160,20 @@ def capabilityKindTag : ResourceKind → UInt8
 in one source-owned commitment. This is not a possession proof. -/
 def storedCapabilityDigest (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v2".toUTF8.toList
     (capabilityKindTag kind ::
       (StreamCodec.product digestStream
         (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode
           (snapshot.domain, stored))).digest
+
+/-- Capability commitments include the historical origin data, but not the
+current signing-key plane. A fresh invocation still authenticates against
+the new snapshot root and the current recipient key. -/
+theorem storedCapabilityDigest_eq_of_domain_eq (left right : Snapshot)
+    (domain : left.domain = right.domain) {kind : ResourceKind}
+    (stored : StoredCapability kind) :
+    storedCapabilityDigest left stored = storedCapabilityDigest right stored := by
+  simp only [storedCapabilityDigest, domain]
 
 /-- Statement first: checking a capability commitment must recover the exact
 stored head at its typed identifier, including the full stored lineage digest.
@@ -190,6 +199,25 @@ theorem capabilityCheck_iff (snapshot : Snapshot) {kind : ResourceKind}
   unfold capabilityCheck CapabilityBound
   cases selected : readCapability snapshot.cell kind capability.id <;>
     simp [storedLineageCheck_iff, and_assoc]
+
+/-- Historical grantor-key rotation does not erase the recorded ancestry.
+This is a data-check invariance statement; it does not reuse an old signature
+receipt at a different authority root. -/
+theorem capabilityCheck_eq_of_capability_reads_eq (left right : Snapshot)
+    (domain : left.domain = right.domain)
+    (same : ∀ readKind identifier, readCapability left.cell readKind identifier =
+      readCapability right.cell readKind identifier)
+    {kind : ResourceKind} (capability : Capability kind) (commitment : Digest) :
+    capabilityCheck left capability commitment =
+      capabilityCheck right capability commitment := by
+  unfold capabilityCheck
+  rw [same kind capability.id]
+  cases readCapability right.cell kind capability.id with
+  | none => rfl
+  | some stored =>
+      dsimp only
+      rw [storedCapabilityDigest_eq_of_domain_eq left right domain stored,
+        storedLineageCheck_congr left.cell right.cell same stored]
 
 /-- Policy and capability claims are checked against their own exact source
 coordinates. Policy membership alone never proves capability lookup. -/
@@ -380,6 +408,27 @@ theorem native_use_request_exact (snapshot : Snapshot) (expectedNullifier : Nat)
       exact CredentialSignatureAdmission.verified_request_exact
         snapshot expectedNullifier request receipt signature
 
+/-- A mixed lineage does not authenticate the current user as the historical
+grantor. The capability's actual recipient and that recipient's current key
+epoch are mandatory on the same exact invocation request. -/
+theorem native_use_holder_current (snapshot : Snapshot) (expectedNullifier : Nat)
+    {kind : ResourceKind} (request : Request kind) (capability : Capability kind)
+    (commitment : Digest) (receipt : CredentialSignatureAdmission.CheckedSignature snapshot)
+    (accepted : (sourcePortal snapshot expectedNullifier).verifyCapabilityUse
+      request capability commitment receipt = true) :
+    capability.holder = .subject request.subject ∧
+      request.subjectKeyEpoch = snapshot.authState.subjectKeyEpoch request.subject := by
+  change capabilityUseCheck snapshot expectedNullifier request capability commitment receipt = true at accepted
+  unfold capabilityUseCheck at accepted
+  have checks := Bool.and_eq_true_iff.mp accepted
+  cases holder : capability.holder with
+  | bearer => simp [holder] at accepted
+  | subject subject =>
+      have use := checks.2
+      rw [holder] at use
+      have current := of_decide_eq_true (Bool.and_eq_true_iff.mp use).1
+      exact ⟨congrArg Holder.subject current.1, current.2⟩
+
 theorem native_bearer_use_refused (snapshot : Snapshot) (expectedNullifier : Nat)
     {kind : ResourceKind} (request : Request kind) (capability : Capability kind)
     (commitment : Digest) (receipt : CredentialSignatureAdmission.CheckedSignature snapshot)
@@ -405,40 +454,46 @@ def config {F : Type} [Field F] [DecidableEq F]
 portal check against the exact old snapshot. The returned evidence is already
 for the canonical policy portal, so an upper controller cannot replace it by
 an unrelated signature-mode token while claiming capability invocation. -/
-def capabilityEvidence {F : Type} [Field F] [DecidableEq F]
+private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
     {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
     (commitmentWitness : base.CapabilityCommitmentWitness)
     (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
     (revocationWitness : RevocationKey → base.NonRevocationWitness) :
-    Option (Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request) := do
-  let stored ← readCapability snapshot.cell kind identifier
-  let capability := stored.head
-  let commitment := storedCapabilityDigest snapshot stored
-  let portal := (config (F := F) profile snapshot store base step).portal
-  if semantic : AuthorizationDeclaration.capabilityAdmissibleCheck capability snapshot.authState request = true then
-    if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
-      if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
-        if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
-            (.capability kind capability.id) = true then
-          if issuer : portal.verifyIssuer capability.issuer capability.issuerEpoch commitment issuerWitness = true then
-            if self : portal.verifyNonRevocation snapshot.authState.revocationRoot
-                (.capability capability.id) (revocationWitness (.capability capability.id)) = true then
-              if ancestors : ∀ identifier ∈ capability.ancestors,
-                  portal.verifyNonRevocation snapshot.authState.revocationRoot (.capability identifier)
-                    (revocationWitness (.capability identifier)) = true then
-                if channels : ∀ channel ∈ capability.channels,
-                    portal.verifyNonRevocation snapshot.authState.revocationRoot (.channel channel)
-                      (revocationWitness (.channel channel)) = true then
-                  some (.capability capability commitment commitmentWitness
-                    (.capability kind capability.id) issuerWitness
-                    (revocationWitness (.capability capability.id)) useWitness
-                    ((AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff
-                      capability snapshot.authState request).mp semantic)
-                    used committed member issuer self
-                    (fun identifier member => ⟨revocationWitness (.capability identifier), ancestors identifier member⟩)
-                    (fun channel member => ⟨revocationWitness (.channel channel), channels channel member⟩))
+    Option { evidence : Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request //
+      ∃ stored, readCapability snapshot.cell kind identifier = some stored ∧
+        evidence.capabilityValue = some (stored.head, storedCapabilityDigest snapshot stored) } :=
+  match readCapability snapshot.cell kind identifier with
+  | none => none
+  | some stored =>
+    let capability := stored.head
+    let commitment := storedCapabilityDigest snapshot stored
+    let portal := (config (F := F) profile snapshot store base step).portal
+    if semantic : AuthorizationDeclaration.capabilityAdmissibleCheck capability snapshot.authState request = true then
+      if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
+        if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
+          if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
+              (.capability kind capability.id) = true then
+            if issuer : portal.verifyIssuer capability.issuer capability.issuerEpoch commitment issuerWitness = true then
+              if self : portal.verifyNonRevocation snapshot.authState.revocationRoot
+                  (.capability capability.id) (revocationWitness (.capability capability.id)) = true then
+                if ancestors : ∀ identifier ∈ capability.ancestors,
+                    portal.verifyNonRevocation snapshot.authState.revocationRoot (.capability identifier)
+                      (revocationWitness (.capability identifier)) = true then
+                  if channels : ∀ channel ∈ capability.channels,
+                      portal.verifyNonRevocation snapshot.authState.revocationRoot (.channel channel)
+                        (revocationWitness (.channel channel)) = true then
+                    some ⟨(.capability capability commitment commitmentWitness
+                      (.capability kind capability.id) issuerWitness
+                      (revocationWitness (.capability capability.id)) useWitness
+                      ((AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff
+                        capability snapshot.authState request).mp semantic)
+                      used committed member issuer self
+                      (fun identifier member => ⟨revocationWitness (.capability identifier), ancestors identifier member⟩)
+                      (fun channel member => ⟨revocationWitness (.channel channel), channels channel member⟩)),
+                      ⟨stored, rfl, rfl⟩⟩
+                  else none
                 else none
               else none
             else none
@@ -446,7 +501,42 @@ def capabilityEvidence {F : Type} [Field F] [DecidableEq F]
         else none
       else none
     else none
-  else none
+
+/-- The single receiving constructor projects evidence from the checked source
+result. Its erased proof records the exact parent lookup at the construction
+site, while all semantic, native-use, membership and revocation gates above
+remain mandatory. -/
+def capabilityEvidence {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    Option (Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request) :=
+  (capabilityEvidenceChecked profile snapshot store base step request identifier
+    commitmentWitness useWitness issuerWitness revocationWitness).map Subtype.val
+
+/-- Success preserves the exact storage lookup at the caller's identifier and
+returns that stored head with its complete source-owned lineage commitment.
+This is the shared constructor's identity law, not an endpoint-specific check. -/
+theorem capabilityEvidence_success {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness)
+    {evidence : Evidence (config (F := F) profile snapshot store base step).portal
+      snapshot.authState request}
+    (accepted : capabilityEvidence profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness = some evidence) :
+    ∃ stored, readCapability snapshot.cell kind identifier = some stored ∧
+      evidence.capabilityValue = some (stored.head, storedCapabilityDigest snapshot stored) := by
+  unfold capabilityEvidence at accepted
+  obtain ⟨checked, _, equal⟩ := Option.map_eq_some_iff.mp accepted
+  rw [← equal]
+  exact checked.property
 
 /-- Native receiving convenience: data openings come from the complete
 snapshot; invocation authentication comes only from the checked native receipt. -/
@@ -471,6 +561,24 @@ def sourceCapabilityOnlyEvidence {F : Type} [Field F] [DecidableEq F]
       (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :=
   capabilityEvidence profile snapshot store (sourceCapabilityPortal snapshot expectedNullifier) step
     request identifier () receipt () (fun _ => ())
+
+/-- The native capability-only helper names exactly the requested parent
+record. Invocation authentication remains the current holder's checked receipt. -/
+theorem sourceCapabilityOnlyEvidence_names_parent
+    {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (snapshot : Snapshot) (store : PayloadStore)
+    (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot)
+    {evidence : Evidence (config (F := F) profile snapshot store
+      (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request}
+    (accepted : sourceCapabilityOnlyEvidence profile snapshot store expectedNullifier step
+      request identifier receipt = some evidence) :
+    ∃ stored, readCapability snapshot.cell kind identifier = some stored ∧
+      evidence.capabilityValue = some (stored.head, storedCapabilityDigest snapshot stored) :=
+  capabilityEvidence_success profile snapshot store
+    (sourceCapabilityPortal snapshot expectedNullifier) step request identifier
+    () receipt () (fun _ => ()) accepted
 
 theorem source_capability_only_mode {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F) (snapshot : Snapshot) (store : PayloadStore)
@@ -582,7 +690,7 @@ def committedPolicy : CommittedPolicy where
   record := demoRecord
 
 def policyEntry : Entry :=
-  .policy demoRequest.policyId demoRequest.policyEpoch committedPolicy.address
+  .policy demoRequest.policyId demoRequest.policyEpoch demoRequest.policyRevision committedPolicy.address
 
 def policyPage : Page where
   authorityDomain := ⟨91000⟩
@@ -601,14 +709,14 @@ theorem policyPage_valid : policyPage.Valid := by
 @[simp] theorem policyPage_contains : policyPage.Contains policyEntry := by
   simp [Page.Contains, Page.entries, policyPage]
 
-@[simp] theorem policyPage_epoch_exact :
-    policyPage.policyEpochAt demoRequest.policyId = demoRequest.policyEpoch := by
-  simp [Page.policyEpochAt, Page.toCanonicalState, Page.entries, policyPage,
+@[simp] theorem policyPage_revision_exact :
+    policyPage.policyRevisionAt demoRequest.policyId = demoRequest.policyRevision := by
+  simp [Page.policyRevisionAt, Page.toCanonicalState, Page.entries, policyPage,
     policyEntry, Entry.install]
   rfl
 
 @[simp] theorem policyPage_address_exact :
-    policyPage.policyAddressAt demoRequest.policyId demoRequest.policyEpoch =
+    policyPage.policyAddressAt demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address := by
   simp [Page.policyAddressAt, Page.toCanonicalState, Page.entries, policyPage,
     policyEntry, Entry.install]
@@ -632,14 +740,14 @@ def authorityCell : RegistryCell authorityMaterializer := policyPageCell
 @[simp] theorem authorityCell_root_exact :
     authorityCell.root = policyPageCell.root := rfl
 
-@[simp] theorem authorityCell_epoch_exact :
-    (projection.authState authorityCell).policyEpoch
-        demoRequest.policyId = demoRequest.policyEpoch := by
-  change (some demoRequest.policyEpoch).getD 0 = demoRequest.policyEpoch
+@[simp] theorem authorityCell_revision_exact :
+    (projection.authState authorityCell).policyRevision
+        demoRequest.policyId = demoRequest.policyRevision := by
+  change (some demoRequest.policyRevision).getD 0 = demoRequest.policyRevision
   rfl
 
 @[simp] theorem authorityCell_address_exact :
-    addressAt projection authorityCell demoRequest.policyId demoRequest.policyEpoch =
+    addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address := by
   change (some committedPolicy.address).getD ⟨0⟩ = committedPolicy.address
   rfl
@@ -672,7 +780,7 @@ def pagePortal (base : Portal) : Portal where
 
 def policyRegistry : PolicyRegistry where
   resolve := fun policyId epoch =>
-    if policyId = demoRequest.policyId /\ epoch = demoRequest.policyEpoch then
+    if policyId = demoRequest.policyId /\ epoch = demoRequest.policyRevision then
       some committedPolicy
     else none
 
@@ -691,7 +799,7 @@ def config (base : Portal) : CanonicalPolicyConfig (ZMod 13) where
   rfl
 
 @[simp] theorem registry_resolves (base : Portal) :
-    (config base).registry.resolve demoRequest.policyId demoRequest.policyEpoch =
+    (config base).registry.resolve demoRequest.policyId demoRequest.policyRevision =
       some committedPolicy := by
   simp [config, policyRegistry]
 
@@ -712,7 +820,7 @@ noncomputable def payloadAvailability (base : Portal) :
   fetch_resolved := by
     intro policyId epoch selected resolved
     by_cases key :
-        policyId = demoRequest.policyId /\ epoch = demoRequest.policyEpoch
+        policyId = demoRequest.policyId /\ epoch = demoRequest.policyRevision
     · have selectedExact : selected = committedPolicy := by
         have reverse : committedPolicy = selected := by
           simpa [config, policyRegistry, key] using resolved
@@ -785,14 +893,17 @@ noncomputable def positiveAuthorized
   policyWitness := policyWitness
   policyMembershipWitness := ()
   policyEpochExact := by
-    exact authorityCell_epoch_exact.symm
+    change demoRequest.policyEpoch = (some demoRequest.policyEpoch).getD 0
+    rfl
+  policyRevisionExact := by
+    exact authorityCell_revision_exact.symm
   policyAddressExact := by
     change committedPolicy.address =
-      addressAt projection authorityCell demoRequest.policyId demoRequest.policyEpoch
+      addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision
     exact authorityCell_address_exact.symm
   policyMembershipVerified := by
     change (config base).portal.verifyMembership authorityCell.root
-      (addressAt projection authorityCell demoRequest.policyId demoRequest.policyEpoch)
+      (addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision)
       () = true
     rw [authorityCell_address_exact]
     exact page_membership_verified base
@@ -801,7 +912,7 @@ noncomputable def positiveAuthorized
     rw [Bool.and_eq_true]
     refine ⟨?_, policy_verifies base⟩
     apply decide_eq_true
-    change addressAt projection authorityCell demoRequest.policyId demoRequest.policyEpoch =
+    change addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address
     exact authorityCell_address_exact
 
@@ -944,7 +1055,7 @@ theorem guardedIntent_ready : guardedIntent.preflight readySnapshot = .ok () :=
 /-! ## Pair-bound page rotation rejects the old authorization intent -/
 
 noncomputable def rotatedPolicyEntry : Entry :=
-  .policy demoRequest.policyId (demoRequest.policyEpoch + 1) ⟨91040⟩
+  .policy demoRequest.policyId demoRequest.policyEpoch (demoRequest.policyRevision + 1) ⟨91040⟩
 
 noncomputable def rotatedPage : Page :=
   { policyPage with slot0 := some rotatedPolicyEntry }
@@ -992,7 +1103,7 @@ theorem rotatedSnapshot_moved
     rotatedSnapshot.model.roots registryCellId ≠ authorityCell.root := by
   simpa [rotatedSnapshot, rotatedSnapshotBytes] using rotated_root_ne binding
 
-/-- Stale page-update tooth.  A policy epoch/address rotation changes the
+/-- Stale page-update tooth.  A policy revision/address rotation changes the
 pair-bound page root, so the old content+authorization intent is rejected at
 the read guard before its data write can be installed. -/
 theorem rotated_page_rejects_old_intent

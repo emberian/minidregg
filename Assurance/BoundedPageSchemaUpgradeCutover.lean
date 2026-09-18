@@ -7,7 +7,7 @@ binds that decision into one durable cutover payload and composes it with the
 existing replicated-settlement safety theorem.
 
 The `v1`/`v2` recovery labels below name catalogue generations. Individual
-page wire versions advance independently: authority 3→4, content/events 1→2.
+page wire versions advance independently: authority 4→5, content/events 1→2.
 
 Recovery has one explicit linearization bit.  A prepared record (including a
 fully written V2 catalog) still recovers V1; a committed record recovers V2

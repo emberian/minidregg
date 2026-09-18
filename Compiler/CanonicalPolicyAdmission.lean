@@ -8,7 +8,7 @@ only from a versioned, content-addressed `Pred` record and acceptance of
 `PredCompile.lower`.  The other verifier portals remain explicit inputs.
 
 The construction is honest about its boundary.  The request commits a policy
-identifier and epoch, while a deployment registry resolves that pair to an
+identifier and source revision, while a deployment registry resolves that pair to an
 addressed record.  Exact digest equalities bind the record and the `(old,new)`
 policy step.  Collision resistance, registry authenticity, signature
 soundness, and the concrete field/cast label remain deployment obligations;
@@ -39,7 +39,7 @@ is the version-chain link; `domain` and `semantics` prevent a policy record from
 being replayed into a different semantic universe. -/
 structure PolicyRecord where
   policyId : PolicyId
-  version : Epoch
+  version : PolicyRevision
   domain : Digest
   semantics : Digest
   previous : Option Digest
@@ -63,10 +63,10 @@ structure CommittedPolicy where
   record : PolicyRecord
   deriving DecidableEq, Repr
 
-/-- The deployment-owned resolution of `(PolicyId, Epoch)`.  Authenticating
+/-- The deployment-owned resolution of `(PolicyId, source revision)`.  Authenticating
 this finite/durable registry and its root is deliberately outside this module. -/
 structure PolicyRegistry where
-  resolve : PolicyId → Epoch → Option CommittedPolicy
+  resolve : PolicyId → PolicyRevision → Option CommittedPolicy
 
 /-- The only policy witness type installed by the canonical portal.  It carries
 the exact policy step and the AIR auxiliary assignment.  There is no predicate
@@ -316,11 +316,11 @@ of the predicate evaluator. -/
 def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) {kind : ResourceKind}
     (request : Request kind) (witness : CompiledPolicyWitness F) : Bool :=
-  match config.registry.resolve request.policyId request.policyEpoch with
+  match config.registry.resolve request.policyId request.policyRevision with
   | none => false
   | some committed =>
       decide (committed.record.policyId = request.policyId) &&
-      decide (committed.record.version = request.policyEpoch) &&
+      decide (committed.record.version = request.policyRevision) &&
       decide (committed.record.domain = request.domain) &&
       decide (committed.record.semantics = request.semantics) &&
       decide (config.recordDigest committed.record = committed.address) &&
@@ -336,6 +336,21 @@ def CanonicalPolicyConfig.verifies {F : Type} [Field F] [DecidableEq F]
       decide (systemAccepts
         (stepAsg witness.oldState witness.newState witness.auxiliary)
         (lower config.compilerProfile.compiler committed.record.predicate))
+
+/-- Source selection is independent of capability generation. The common
+`Authorized` gate still requires exact generation equality; this law does not
+transfer evidence or signatures across a generation change. -/
+theorem verifies_policy_generation_independent
+    {F : Type} [Field F] [DecidableEq F]
+    (config : CanonicalPolicyConfig F) {kind : ResourceKind}
+    (request : Request kind) (witness : CompiledPolicyWitness F) (generation : Epoch) :
+    config.verifies { request with policyEpoch := generation } witness =
+      config.verifies request witness := by
+  unfold CanonicalPolicyConfig.verifies
+  cases config.registry.resolve request.policyId request.policyRevision with
+  | none => rfl
+  | some committed =>
+      cases config.stepBinding <;> rfl
 
 /-- Replace the arbitrary policy face of a portal by the committed compiler
 gate.  The inherited policy witness and inherited policy verifier are erased. -/
@@ -377,9 +392,9 @@ def Verified {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) {kind : ResourceKind}
     (request : Request kind) (witness : CompiledPolicyWitness F) : Prop :=
   ∃ committed,
-    config.registry.resolve request.policyId request.policyEpoch = some committed ∧
+    config.registry.resolve request.policyId request.policyRevision = some committed ∧
     committed.record.policyId = request.policyId ∧
-    committed.record.version = request.policyEpoch ∧
+    committed.record.version = request.policyRevision ∧
     committed.record.domain = request.domain ∧
     committed.record.semantics = request.semantics ∧
     config.recordDigest committed.record = committed.address ∧
@@ -400,7 +415,7 @@ theorem verifies_iff_verified {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) {kind : ResourceKind}
     (request : Request kind) (witness : CompiledPolicyWitness F) :
     config.verifies request witness = true ↔ Verified config request witness := by
-  cases hresolve : config.registry.resolve request.policyId request.policyEpoch with
+  cases hresolve : config.registry.resolve request.policyId request.policyRevision with
   | none => simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
   | some committed =>
       simp [CanonicalPolicyConfig.verifies, Verified, hresolve]
@@ -413,7 +428,7 @@ theorem verifies_sound {F : Type} [Field F] [DecidableEq F]
     {request : Request kind} {witness : CompiledPolicyWitness F}
     (accepted : config.verifies request witness = true) :
     ∃ committed,
-      config.registry.resolve request.policyId request.policyEpoch = some committed ∧
+      config.registry.resolve request.policyId request.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
         witness.oldState witness.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
@@ -435,7 +450,7 @@ theorem canonical_context_verifies_sound {F : Type} [Field F] [DecidableEq F]
     request.effectsDigest = context.effectsDigest ∧
     request.semantics = context.semantics ∧
     ∃ committed,
-      config.registry.resolve request.policyId request.policyEpoch = some committed ∧
+      config.registry.resolve request.policyId request.policyRevision = some committed ∧
       Minidregg.Pred.eval committed.record.predicate context.oldState context.newState = true := by
   rcases (verifies_iff_verified config request witness).mp accepted with
     ⟨committed, resolved, _, _, _, _, _, _, matched, _, _, supported, ranges, cast, compiled⟩
@@ -491,10 +506,10 @@ theorem canonical_verifies_iff_eval {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     {oldState newState : State}
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (policyIdExact : committed.record.policyId = request.policyId)
-    (versionExact : committed.record.version = request.policyEpoch)
+    (versionExact : committed.record.version = request.policyRevision)
     (domainExact : committed.record.domain = request.domain)
     (semanticsExact : committed.record.semantics = request.semantics)
     (recordDigestExact : config.recordDigest committed.record = committed.address)
@@ -532,7 +547,7 @@ abbrev CanonicalAuthorized {F : Type} [Field F] [DecidableEq F]
     {kind : ResourceKind} (request : Request kind) : Type :=
   Authorized config.portal state request
 
-/-- Executable admission: after evidence and the exact current epoch are
+/-- Executable admission: after evidence and the exact current generation and source revision are
 present, the only remaining branch is the canonical compiled verifier. -/
 def admit {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) (state : AuthState)
@@ -540,12 +555,13 @@ def admit {F : Type} [Field F] [DecidableEq F]
     (evidence : Evidence config.portal state request)
     (witness : CompiledPolicyWitness F)
     (policyMembershipWitness : config.portal.MembershipWitness)
-    (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId) :
+    (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId)
+    (policyRevisionExact : request.policyRevision = state.policyRevision request.policyId) :
     Option (CanonicalAuthorized config state request) :=
   if addressExact : witness.address =
-      state.policyAddress request.policyId request.policyEpoch then
+      state.policyAddress request.policyId request.policyRevision then
     if membershipAccepted : config.portal.verifyMembership state.policyRoot
-        (state.policyAddress request.policyId request.policyEpoch)
+        (state.policyAddress request.policyId request.policyRevision)
         policyMembershipWitness = true then
       if accepted : config.verifies request witness = true then
         some
@@ -553,6 +569,7 @@ def admit {F : Type} [Field F] [DecidableEq F]
             policyWitness := witness
             policyMembershipWitness := policyMembershipWitness
             policyEpochExact := policyEpochExact
+            policyRevisionExact := policyRevisionExact
             policyAddressExact := addressExact
             policyMembershipVerified := membershipAccepted
             policyVerified := by
@@ -561,24 +578,46 @@ def admit {F : Type} [Field F] [DecidableEq F]
     else none
   else none
 
+/-- The receiving constructor retains the exact evidence supplied by its caller.
+In particular, parent-capability identity is not erased by the policy gate. -/
+theorem admit_preserves_evidence {F : Type} [Field F] [DecidableEq F]
+    (config : CanonicalPolicyConfig F) (state : AuthState)
+    {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal state request)
+    (witness : CompiledPolicyWitness F)
+    (policyMembershipWitness : config.portal.MembershipWitness)
+    (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId)
+    (policyRevisionExact : request.policyRevision = state.policyRevision request.policyId)
+    {authorized : CanonicalAuthorized config state request}
+    (accepted : admit config state request evidence witness policyMembershipWitness
+      policyEpochExact policyRevisionExact = some authorized) :
+    authorized.evidence = evidence := by
+  unfold admit at accepted
+  split at accepted <;> try contradiction
+  split at accepted <;> try contradiction
+  split at accepted <;> try contradiction
+  cases accepted
+  rfl
+
 theorem admit_isSome_iff {F : Type} [Field F] [DecidableEq F]
     (config : CanonicalPolicyConfig F) (state : AuthState)
     {kind : ResourceKind} (request : Request kind)
     (evidence : Evidence config.portal state request)
     (witness : CompiledPolicyWitness F)
     (policyMembershipWitness : config.portal.MembershipWitness)
-    (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId) :
+    (policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId)
+    (policyRevisionExact : request.policyRevision = state.policyRevision request.policyId) :
     (admit config state request evidence witness policyMembershipWitness
-      policyEpochExact).isSome = true ↔
-      witness.address = state.policyAddress request.policyId request.policyEpoch ∧
+      policyEpochExact policyRevisionExact).isSome = true ↔
+      witness.address = state.policyAddress request.policyId request.policyRevision ∧
       config.portal.verifyMembership state.policyRoot
-        (state.policyAddress request.policyId request.policyEpoch)
+        (state.policyAddress request.policyId request.policyRevision)
         policyMembershipWitness = true ∧
       config.verifies request witness = true := by
   by_cases addressExact :
-      witness.address = state.policyAddress request.policyId request.policyEpoch
+      witness.address = state.policyAddress request.policyId request.policyRevision
   · by_cases membershipAccepted : config.portal.verifyMembership state.policyRoot
-        (state.policyAddress request.policyId request.policyEpoch)
+        (state.policyAddress request.policyId request.policyRevision)
         policyMembershipWitness = true
     · by_cases accepted : config.verifies request witness = true <;>
         simp [admit, addressExact, membershipAccepted, accepted]
@@ -589,7 +628,7 @@ theorem admit_isSome_iff {F : Type} [Field F] [DecidableEq F]
 theorem unresolved_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} (witness : CompiledPolicyWitness F)
-    (unresolved : config.registry.resolve request.policyId request.policyEpoch = none) :
+    (unresolved : config.registry.resolve request.policyId request.policyRevision = none) :
     config.verifies request witness = false := by
   simp [CanonicalPolicyConfig.verifies, unresolved]
 
@@ -599,7 +638,7 @@ theorem wrong_policy_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (wrong : committed.record.policyId ≠ request.policyId) :
     config.verifies request witness = false := by
@@ -610,10 +649,10 @@ theorem wrong_version_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (policyIdExact : committed.record.policyId = request.policyId)
-    (wrong : committed.record.version ≠ request.policyEpoch) :
+    (wrong : committed.record.version ≠ request.policyRevision) :
     config.verifies request witness = false := by
   simp [CanonicalPolicyConfig.verifies, resolved, policyIdExact, wrong]
 
@@ -622,7 +661,7 @@ theorem wrong_address_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (wrong : witness.address ≠ committed.address) :
     config.verifies request witness = false := by
@@ -634,7 +673,7 @@ theorem wrong_content_digest_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (wrong : config.recordDigest committed.record ≠ committed.address) :
     config.verifies request witness = false := by
@@ -645,7 +684,7 @@ theorem wrong_step_binding_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
     (wrong : config.stepBinding.matches request witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
@@ -657,7 +696,7 @@ theorem wrong_compiler_semantics_rejected {F : Type} [Field F] [DecidableEq F]
     {request : Request kind} (witness : CompiledPolicyWitness F)
     (wrong : request.semantics ≠ config.compilerProfile.semantics) :
     config.verifies request witness = false := by
-  cases resolved : config.registry.resolve request.policyId request.policyEpoch <;>
+  cases resolved : config.registry.resolve request.policyId request.policyRevision <;>
     simp [CanonicalPolicyConfig.verifies, resolved, wrong]
 
 /-- Source bounds are checked independently of the supplied AIR auxiliary values. -/
@@ -665,7 +704,7 @@ theorem out_of_range_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {committed : CommittedPolicy}
     (witness : CompiledPolicyWitness F)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch = some committed)
+    (resolved : config.registry.resolve request.policyId request.policyRevision = some committed)
     (outside : inputsInRange config.compilerProfile.compiler committed.record.predicate
       witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
@@ -679,7 +718,7 @@ theorem research_profile_verifier_refused {F : Type} [Field F] [DecidableEq F]
     (canonical : config.stepBinding = .canonical context)
     (research : config.compilerProfile = .researchDisabled semantics) :
     config.verifies request witness = false := by
-  cases resolved : config.registry.resolve request.policyId request.policyEpoch <;>
+  cases resolved : config.registry.resolve request.policyId request.policyRevision <;>
     simp [CanonicalPolicyConfig.verifies, resolved, canonical, research,
       PolicyCompilerProfile.compatible, PolicyCompilerProfile.descriptor?]
 
@@ -689,7 +728,7 @@ theorem policy_false_rejected {F : Type} [Field F] [DecidableEq F]
     {config : CanonicalPolicyConfig F} {kind : ResourceKind}
     {request : Request kind} {witness : CompiledPolicyWitness F}
     (policyFalse : ∀ committed,
-      config.registry.resolve request.policyId request.policyEpoch = some committed →
+      config.registry.resolve request.policyId request.policyRevision = some committed →
       Minidregg.Pred.eval committed.record.predicate
         witness.oldState witness.newState = false) :
     config.verifies request witness = false := by
@@ -704,7 +743,7 @@ collision-prone; they witness the interface, not cryptographic deployment. -/
 
 def demoRecord : PolicyRecord where
   policyId := demoRequest.policyId
-  version := demoRequest.policyEpoch
+  version := demoRequest.policyRevision
   domain := demoRequest.domain
   semantics := demoRequest.semantics
   previous := none
@@ -720,7 +759,7 @@ def demoCommitted : CommittedPolicy where
 
 def demoRegistry : PolicyRegistry where
   resolve := fun policyId version =>
-    if policyId = demoRequest.policyId ∧ version = demoRequest.policyEpoch then
+    if policyId = demoRequest.policyId ∧ version = demoRequest.policyRevision then
       some demoCommitted
     else
       none
@@ -744,7 +783,7 @@ by `demoPortal` and carries no cryptographic claim. -/
 def demoAuthState : AuthState :=
   { demoState with
     policyAddress := fun policyId version =>
-      if policyId = demoRequest.policyId ∧ version = demoRequest.policyEpoch then
+      if policyId = demoRequest.policyId ∧ version = demoRequest.policyRevision then
         demoCommitted.address
       else ⟨0⟩ }
 
@@ -760,7 +799,7 @@ def demoWrongPolicyRequest : Request .object :=
   { demoRequest with policyId := ⟨999⟩ }
 
 def demoWrongVersionRequest : Request .object :=
-  { demoRequest with policyEpoch := demoRequest.policyEpoch + 1 }
+  { demoRequest with policyRevision := demoRequest.policyRevision + 1 }
 
 def demoWrongAddressWitness : CompiledPolicyWitness (ZMod 13) :=
   { demoWitness with address := ⟨9999⟩ }
@@ -790,7 +829,7 @@ def demoEvidence : Evidence demoConfig.portal demoAuthState demoRequest :=
 /-- The adapter produces an actual request-indexed authorization from the
 compiled gate; this is not merely a standalone Boolean-verifier example. -/
 theorem demo_admission_isSome :
-    (admit demoConfig demoAuthState demoRequest demoEvidence demoWitness () rfl).isSome = true := by
+    (admit demoConfig demoAuthState demoRequest demoEvidence demoWitness () rfl rfl).isSome = true := by
   decide
 
 /-- The theorem-level reflection really fires on the deployed keystone. -/

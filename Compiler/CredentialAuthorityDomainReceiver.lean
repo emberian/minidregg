@@ -22,6 +22,7 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialAuthorityState
+open Minidregg.Theory.CredentialLineageAdmission
 open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Compiler.CredentialAuthorityDomain
@@ -476,7 +477,7 @@ theorem issueUniverse_authState_exact (snapshot : CredentialAuthorityDomain.Snap
 
 def GrantReady (snapshot : CredentialAuthorityDomain.Snapshot) (grant : AuthorityGrant) : Prop :=
   grant.capability.ancestry = [] ∧
-    CredentialAuthorityState.readCapability snapshot.cell grant.kind grant.capability.head.id = none ∧
+    CapabilityIdFresh snapshot.cell grant.capability.head.id ∧
     grant.capability.head.parent = none ∧
     grant.capability.head.root = grant.capability.head.id ∧
     grant.capability.head.ancestors = ∅ ∧
@@ -498,6 +499,7 @@ def BatchReady (snapshot : CredentialAuthorityDomain.Snapshot)
     descriptor.GrantIdsDistinct ∧
     (∀ policy ∈ descriptor.initialPolicies,
       snapshot.logical.fields (.policyEpoch policy.policyId) = none ∧
+        snapshot.logical.fields (.policyRevision policy.policyId) = none ∧
         snapshot.logical.fields (.policyAddress policy.policyId 0) = none) ∧
     isNullified snapshot.cell descriptor.authorityNullifier = false ∧
     (∀ grant ∈ descriptor.grants, GrantReady snapshot grant)
@@ -512,6 +514,7 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
     ResourceBirthAuthority.BatchEvidence (issueUniverse snapshot descriptor.grants)
       snapshot.cell descriptor where
   slotsDistinct := ready.1
+  grantIdsDistinct := ready.2.1
   policiesFresh := ready.2.2.1
   nullifierFresh := ready.2.2.2.1
   ancestryEmpty := fun grant member => (ready.2.2.2.2 grant member).1
@@ -536,7 +539,7 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
 
 def grantEdits (snapshot : CredentialAuthorityDomain.Snapshot) (descriptor : Descriptor registry) :
     List Edit :=
-  descriptor.initialPolicies.map (fun policy => ⟨none, .policy policy.policyId 0 policy.address⟩) ++
+  descriptor.initialPolicies.map (fun policy => ⟨none, .policy policy.policyId 0 0 policy.address⟩) ++
   descriptor.grants.map (fun grant => ⟨none, .capability grant.kind grant.capability⟩) ++
     [nullifierEdit snapshot descriptor.authorityNullifier]
 
@@ -610,6 +613,96 @@ theorem PreparedGrantBatch.post_exact {F : Type} [Field F]
     (prepared : PreparedGrantBatch profile deployment directory loaded descriptor) :
     prepared.physical.post.cell = ResourceBirthAuthority.post loaded.snapshot.cell descriptor :=
   Materialized.ext prepared.semanticExact
+
+/-! ## Exact physical lowering of explicit grant-generation rotation -/
+
+/-- The generation changes while the exact selected source revision/address
+remain in the same physical entry. This is preparation, never authorization. -/
+def policyGenerationEdits (snapshot : CredentialAuthorityDomain.Snapshot)
+    (policy : PolicyId) (head : PolicyInstall.Head) (next : Epoch)
+    (marker : Nat) : List Edit :=
+  [⟨some (.policy policy (snapshot.authState.policyEpoch policy) head.version head.address),
+      .policy policy next head.version head.address⟩,
+    nullifierEdit snapshot marker]
+
+structure PreparedPolicyGeneration
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {deployment : CanonicalCellRegistry.Deployment}
+    (directory : LoadedDirectory durable)
+    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
+    (policy : PolicyId) (marker : Nat) where
+  private mk ::
+  head : PolicyInstall.Head
+  headCurrent : loaded.snapshot.currentHead policy = some head
+  declaration : RotateEpochDeclaration
+  targetExact : declaration.target = .policy policy
+  markerExact : declaration.operationNullifier = marker
+  mode : RotateEpochEvidence loaded.snapshot.cell declaration
+  prepared : Prepared loaded.snapshot
+    (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker)
+  physical : Lowered directory loaded
+    (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker) prepared []
+  semantic : ValidatedPatch CredentialAuthorityStateCodec.materializer
+    loaded.snapshot.cell declaration.patch
+  semanticExact : physical.post.logical = semantic.apply.logical
+
+/-- No caller-supplied epoch or head is trusted. The existing source rotation
+patch is validated independently, then exact canonical bytes join the grouped
+physical rewrite to that patch; no root-collision assumption is used. -/
+def preparePolicyGeneration
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {deployment : CanonicalCellRegistry.Deployment}
+    (directory : LoadedDirectory durable)
+    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
+    (policy : PolicyId) (marker : Nat) :
+    Option (PreparedPolicyGeneration directory loaded policy marker) := do
+  match headCurrent : loaded.snapshot.currentHead policy with
+  | none => none
+  | some head =>
+    let generation := loaded.snapshot.authState.policyEpoch policy
+    let declaration : RotateEpochDeclaration :=
+      { target := .policy policy
+        expectedEpoch := generation
+        nextEpoch := generation + 1
+        expectedPreRoot := loaded.snapshot.cell.root
+        operationNullifier := marker }
+    if fresh : isNullified loaded.snapshot.cell marker = false then
+      let prepared ← prepare loaded.snapshot
+        (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker)
+      let physical ← lower directory loaded prepared []
+      match validate CredentialAuthorityStateCodec.materializer loaded.snapshot.cell declaration.patch with
+      | .rejected _ => none
+      | .accepted semantic =>
+        if exactBytes : CredentialAuthorityStateCodec.encode physical.post.logical =
+            CredentialAuthorityStateCodec.encode semantic.apply.logical then
+          some
+            { head := head
+              headCurrent := headCurrent
+              declaration := declaration
+              targetExact := rfl
+              markerExact := rfl
+              mode := ⟨rfl, rfl, rfl, fresh⟩
+              prepared := prepared
+              physical := physical
+              semantic := semantic
+              semanticExact := CredentialAuthorityStateCodec.encode_injective exactBytes }
+        else none
+    else none
+
+theorem PreparedPolicyGeneration.source_framed
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {deployment : CanonicalCellRegistry.Deployment}
+    {directory : LoadedDirectory durable}
+    {loaded : Loaded deployment.authorityAnchor durable.snapshot}
+    {policy : PolicyId} {marker : Nat}
+    (prepared : PreparedPolicyGeneration directory loaded policy marker) :
+    prepared.physical.post.logical.fields (.policyRevision policy) =
+      loaded.snapshot.logical.fields (.policyRevision policy) ∧
+    ∀ revision, prepared.physical.post.logical.fields (.policyAddress policy revision) =
+      loaded.snapshot.logical.fields (.policyAddress policy revision) := by
+  rw [prepared.semanticExact]
+  have framed := prepared.declaration.source_framed prepared.semantic
+  simpa [prepared.targetExact, EpochTarget.SourceFramed] using framed
 
 def loadDeployment (deployment : CanonicalCellRegistry.Deployment)
     (physical : PhysicalSnapshot) : Option (Loaded deployment.authorityAnchor physical) :=

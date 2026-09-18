@@ -14,6 +14,7 @@ are abstract; a concrete controller must bind it to its registered codec.
 
 import Kernel.DeclaredHyperedge
 import Compiler.DeclaredEffectArtifact
+import Compiler.TypedAuthorizationRequestCodec
 
 namespace Minidregg.Compiler.DeclaredHyperedgeArtifact
 
@@ -25,15 +26,20 @@ open Minidregg.Theory.CellState
 
 set_option autoImplicit false
 
-/-- Literal order of the existing sixteen-field request wire. -/
-def requestWords (request : RequestWire) : List Nat :=
-  [request.domain, request.semantics, request.federation, request.resourceKind,
-   request.subject, request.subjectKeyEpoch, request.target, request.verb,
-   request.argsDigest, request.effectsDigest, request.nonce, request.height,
-   request.preStateRoot, request.policyId, request.policyEpoch, request.cost]
+/-- The sole low request projection also supplies signing and transport bytes. -/
+abbrev requestWords := TypedAuthorizationRequestCodec.requestWords
 
 @[simp] theorem requestWords_length (request : RequestWire) :
-    (requestWords request).length = 16 := rfl
+    (requestWords request).length = 17 := rfl
+
+/-- The emitted joint request and native signature adapter share this exact
+source-owned signed request. The signer forwards `signedRequestBytes`; neither
+consumer maintains its own field list. -/
+theorem signedRequestBytes_exact_artifact (request : SomeRequest) :
+    TypedAuthorizationRequestCodec.signedRequestBytes request =
+      TypedAuthorizationRequestCodec.requestFrame ++
+        (Tower256ConcreteBackend.StreamCodec.list Tower256ConcreteBackend.StreamCodec.nat).encode
+          (requestWords (encodeRequest request)) := rfl
 
 /-- One incidence's complete public semantic description. -/
 structure LegArtifact where
@@ -81,7 +87,7 @@ def legArtifact
 def ofDeclaration
     (declaration : Declaration portal materializer Incidence)
     (presentationRoot : Incidence -> Digest) : Header where
-  schemaVersion := 1
+  schemaVersion := 2
   preRoot := declaration.pre.root.value
   apex := declaration.apex.value
   compositionMode := compositionModeTag declaration.composition.mode
@@ -151,5 +157,8 @@ theorem ofDeclaration_leg_count
 #guard_msgs (whitespace := lax) in #print axioms legArtifact_request_decodes
 /-- info: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.ofDeclaration_leg_count' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ofDeclaration_leg_count
+
+/-- info: 'Minidregg.Compiler.DeclaredHyperedgeArtifact.signedRequestBytes_exact_artifact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms signedRequestBytes_exact_artifact
 
 end Minidregg.Compiler.DeclaredHyperedgeArtifact

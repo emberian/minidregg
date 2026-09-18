@@ -26,7 +26,7 @@ def ownerPage : Page where
   authorityDomain := ⟨9200⟩
   pageNumber := 0
   slot0 := some ownerEntry
-  slot1 := some (.policy demoCapability.policyId demoCapability.policyEpoch ⟨9201⟩)
+  slot1 := some (.policy demoCapability.policyId demoCapability.policyEpoch demoRequest.policyRevision ⟨9201⟩)
   slot2 := some (.issuerEpoch demoCapability.issuer demoCapability.issuerEpoch)
   slot3 := some (.subjectKeyEpoch demoRequest.subject demoRequest.subjectKeyEpoch)
 
@@ -165,7 +165,7 @@ def main : IO Unit := do
   let exact := match stateCodec.decode bytes with
     | some state => decide (pageAt state = some ownerPage)
     | none => false
-  IO.println s!"authority-page-v3 bytes={bytes.length} exact-roundtrip={exact}"
+  IO.println s!"authority-page-v4 bytes={bytes.length} exact-roundtrip={exact}"
   IO.println s!"owner-capability={decide (ownerPage.readCapability .object demoCapability.id = some ownerStored)}"
   IO.println s!"issuer-epoch={ownerPage.issuerEpochAt demoCapability.issuer} subject-key-epoch={ownerPage.subjectKeyEpochAt demoRequest.subject}"
   IO.println s!"issue-marker={issuedPage.isNullified 81} duplicate-grant-refused={decide (preIssuePage.admitInsertMany [ownerEntry, ownerEntry] = .error .addressConflict)}"

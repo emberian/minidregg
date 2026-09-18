@@ -19,10 +19,9 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.TypedAuthorizationRequestCodec
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialAuthorityState
+open Minidregg.Theory.CredentialAuthorityFamily
 
 set_option autoImplicit false
-
-deriving instance DecidableEq for StoredCapability
 
 /-- Sorting is a computable canonical enumeration of the finite set. -/
 def natSetStream : StreamCodec (Finset Nat) :=
@@ -183,14 +182,53 @@ def capabilityStream (kind : ResourceKind) : StreamCodec (Capability kind) :=
   StreamCodec.xmap (capabilityTupleStream kind) capabilityTuple capabilityOfTuple
     capabilityOfTuple_tuple
 
+/-- Exact origin data. A delegated request is historical source data, not
+an authorization certificate; the effect family owns its creation proof. -/
+def lineageOriginStream (kind : ResourceKind) : StreamCodec (LineageOrigin kind) where
+  encode
+    | .strict => [0]
+    | .delegated request => 1 :: (requestStreamFor kind).encode request
+  decodePrefix
+    | 0 :: suffix => some (.strict, suffix)
+    | 1 :: bytes => do
+        let (request, suffix) ← (requestStreamFor kind).decodePrefix bytes
+        some (.delegated request, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro origin suffix
+    cases origin with
+    | strict => rfl
+    | delegated request => simp [(requestStreamFor kind).decodePrefix_encode]
+
+def parentLinkStream (kind : ResourceKind) : StreamCodec (ParentLink kind) :=
+  StreamCodec.xmap
+    (StreamCodec.product (capabilityStream kind) (lineageOriginStream kind))
+    (fun link => (link.parent, link.origin))
+    (fun pair => ⟨pair.1, pair.2⟩)
+    (by intro link; rfl)
+
 def storedCapabilityStream (kind : ResourceKind) :
     StreamCodec (StoredCapability kind) :=
   StreamCodec.xmap
     (StreamCodec.product (capabilityStream kind)
-      (StreamCodec.list (capabilityStream kind)))
+      (StreamCodec.list (parentLinkStream kind)))
     (fun stored => (stored.head, stored.ancestry))
     (fun tuple => ⟨tuple.1, tuple.2⟩)
     (by intro stored; rfl)
+
+/-- Origin tags never conflate a strict step with an explicit delegated step. -/
+theorem lineage_origin_tags_separate (kind : ResourceKind) (request : Request kind) :
+    (lineageOriginStream kind).encode .strict ≠
+      (lineageOriginStream kind).encode (.delegated request) := by
+  simp [lineageOriginStream]
+
+/-- Retaining the resource-kind coordinate rejects a request transplanted
+from a different kind, even inside an otherwise valid lineage record. -/
+theorem lineage_origin_wrong_request_kind {actual expected : ResourceKind}
+    (request : Request actual) (suffix : List UInt8) (different : actual ≠ expected) :
+    (lineageOriginStream expected).decodePrefix
+      (1 :: (someRequestStream.encode ⟨actual, request⟩ ++ suffix)) = none := by
+  simp [lineageOriginStream, requestStreamFor_wrong_kind request suffix different]
 
 /-- Every field of the capability, including lineage, survives transport. -/
 theorem storedCapability_roundtrip (kind : ResourceKind)

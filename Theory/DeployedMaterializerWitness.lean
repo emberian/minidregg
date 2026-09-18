@@ -42,6 +42,9 @@ deriving instance Countable for Scope
 deriving instance Countable for Capability
 deriving instance Countable for RevocationKey
 deriving instance Countable for AuthorityField
+deriving instance Countable for Request
+deriving instance Countable for Minidregg.Theory.CredentialAuthorityFamily.LineageOrigin
+deriving instance Countable for Minidregg.Theory.CredentialAuthorityFamily.ParentLink
 deriving instance Countable for StoredCapability
 
 instance authorityValueCountable (field : AuthorityField) :

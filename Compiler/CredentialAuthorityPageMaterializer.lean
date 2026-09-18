@@ -7,7 +7,7 @@ representation shard: four typed authority entries with a stable wire frame,
 prefix-decodable payload, and a Lean cSHAKE256 root over the exact bytes.
 
 Each entry projects to the actual dependent `AuthorityField` addresses:
-complete capability lineage, issuer/subject epochs, policy epoch/address,
+complete capability lineage, issuer/subject epochs, policy generation/revision/address,
 revocation flags, and operation nullifiers. The page's root is the
 `capabilityRoot`/`policyRoot`/`revocationRoot` used by its `AuthState`
 projection. No parallel host-authored authority lookup exists.
@@ -67,7 +67,7 @@ def revocationKeyStream : StreamCodec RevocationKey where
 /-- One exact authority record. Capability identity is taken from the stored
 head, so a separate caller-supplied slot cannot retarget a grant. -/
 inductive Entry where
-  | policy (policy : PolicyId) (epoch : Epoch) (address : Digest)
+  | policy (policy : PolicyId) (generation : Epoch) (revision : Nat) (address : Digest)
   | revocation (key : RevocationKey) (revoked : Bool)
   | capability (kind : ResourceKind) (stored : StoredCapability kind)
   | issuerEpoch (issuer : IssuerId) (epoch : Epoch)
@@ -78,8 +78,9 @@ inductive Entry where
 
 def entryStream : StreamCodec Entry where
   encode
-    | .policy policy epoch address =>
-        0 :: policyIdStream.encode policy ++ StreamCodec.nat.encode epoch ++
+    | .policy policy generation revision address =>
+        0 :: policyIdStream.encode policy ++ StreamCodec.nat.encode generation ++
+          StreamCodec.nat.encode revision ++
           digestStream.encode address
     | .revocation key revoked =>
         1 :: revocationKeyStream.encode key ++ StreamCodec.bool.encode revoked
@@ -96,9 +97,10 @@ def entryStream : StreamCodec Entry where
   decodePrefix
     | 0 :: bytes => do
         let (policy, afterPolicy) <- policyIdStream.decodePrefix bytes
-        let (epoch, afterEpoch) <- StreamCodec.nat.decodePrefix afterPolicy
-        let (address, suffix) <- digestStream.decodePrefix afterEpoch
-        some (.policy policy epoch address, suffix)
+        let (generation, afterGeneration) <- StreamCodec.nat.decodePrefix afterPolicy
+        let (revision, afterRevision) <- StreamCodec.nat.decodePrefix afterGeneration
+        let (address, suffix) <- digestStream.decodePrefix afterRevision
+        some (.policy policy generation revision address, suffix)
     | 1 :: bytes => do
         let (key, afterKey) <- revocationKeyStream.decodePrefix bytes
         let (revoked, suffix) <- StreamCodec.bool.decodePrefix afterKey
@@ -131,7 +133,7 @@ def entryStream : StreamCodec Entry where
   decodePrefix_encode := by
     intro entry suffix
     cases entry with
-    | policy policy epoch address =>
+    | policy policy generation revision address =>
         simp [List.append_assoc, policyIdStream.decodePrefix_encode,
           StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
     | revocation key revoked =>
@@ -149,8 +151,8 @@ def entryStream : StreamCodec Entry where
 
 /-- Exact canonical authority addresses written by one entry. -/
 def Entry.fields : Entry -> List AuthorityField
-  | .policy policyId epoch _address =>
-      [.policyEpoch policyId, .policyAddress policyId epoch]
+  | .policy policyId _generation revision _address =>
+      [.policyEpoch policyId, .policyRevision policyId, .policyAddress policyId revision]
   | .revocation key _ => [.revoked key]
   | .capability kind stored => [.capability kind stored.head.id]
   | .issuerEpoch issuer _ => [.issuerEpoch issuer]
@@ -162,9 +164,9 @@ def Entry.fields : Entry -> List AuthorityField
 def Entry.install
     (fields : FieldStore CredentialAuthorityState.schema.{0, 0}) :
     Entry -> FieldStore CredentialAuthorityState.schema.{0, 0}
-  | .policy policyId epoch address =>
-      (fields.write (.policyEpoch policyId) epoch).write
-        (.policyAddress policyId epoch) address
+  | .policy policyId generation revision address =>
+      ((fields.write (.policyEpoch policyId) generation).write
+        (.policyRevision policyId) revision).write (.policyAddress policyId revision) address
   | .revocation key revoked => fields.write (.revoked key) revoked
   | .capability kind stored => fields.write (.capability kind stored.head.id) stored
   | .issuerEpoch issuer epoch => fields.write (.issuerEpoch issuer) epoch
@@ -180,11 +182,12 @@ theorem Entry.install_frame (entry : Entry)
     (field : AuthorityField) (outside : field ∉ entry.fields) :
     Entry.install fields entry field = fields field := by
   cases entry with
-  | policy policy epoch address =>
+  | policy policy generation revision address =>
       simp only [Entry.fields, List.mem_cons, List.not_mem_nil,
         or_false, not_or] at outside
-      exact (CellState.FieldStore.write_other _ (Ne.symm outside.2) address).trans
-        (CellState.FieldStore.write_other fields (Ne.symm outside.1) epoch)
+      exact (CellState.FieldStore.write_other _ (Ne.symm outside.2.2) address).trans
+        ((CellState.FieldStore.write_other _ (Ne.symm outside.2.1) revision).trans
+          (CellState.FieldStore.write_other fields (Ne.symm outside.1) generation))
   | revocation key revoked =>
       simp only [Entry.fields, List.mem_singleton] at outside
       exact CellState.FieldStore.write_other fields (Ne.symm outside) revoked
@@ -212,9 +215,9 @@ theorem Entry.install_exact (entry : Entry)
     (field : AuthorityField) (inside : field ∈ entry.fields) :
     Entry.install fields entry field = Entry.install 0 entry field := by
   cases entry with
-  | policy policy epoch address =>
+  | policy policy generation revision address =>
       simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false] at inside
-      rcases inside with rfl | rfl <;> simp [Entry.install]
+      rcases inside with rfl | rfl | rfl <;> simp [Entry.install]
   | revocation key revoked =>
       simp only [Entry.fields, List.mem_singleton] at inside
       subst field
@@ -668,6 +671,9 @@ def Page.policyEpochAt (page : Page) (policy : PolicyId) : Epoch :=
   (show Option Epoch from
     page.toCanonicalState.fields (.policyEpoch policy)).getD (show Epoch from 0)
 
+def Page.policyRevisionAt (page : Page) (policy : PolicyId) : Nat :=
+  (show Option Nat from page.toCanonicalState.fields (.policyRevision policy)).getD 0
+
 def Page.policyAddressAt (page : Page) (policy : PolicyId)
     (epoch : Epoch) : Digest :=
   (show Option Digest from
@@ -742,6 +748,7 @@ def Page.authState (page : Page) (root : Digest) : AuthState where
   revoked := page.revoked
   issuerEpoch := page.issuerEpochAt
   policyEpoch := page.policyEpochAt
+  policyRevision := page.policyRevisionAt
   subjectKeyEpoch := page.subjectKeyEpochAt
 
 @[simp] theorem Page.authState_policyRoot (page : Page) (root : Digest) :
@@ -831,16 +838,16 @@ def stateStream : StreamCodec (LogicalState schema) :=
   StreamCodec.xmap (StreamCodec.option pageStream) pageAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
-/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 3, capacity 4.
-Version 3 adds committed signing keys, atomically paired with their current
-subject epoch. Prior wire versions are not silently reinterpreted. -/
+/-- Stable marker: `LOOM/AUTH/POLICYPAGE`, wire version 4, capacity 4.
+Version 4 separates grant generation from source revision and records complete
+strict/delegated lineage origins. Signing keys remain paired with their subject epoch. Prior wire versions are not silently reinterpreted. -/
 def wireFrame : List UInt8 :=
   [76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 3, 4]
+    71, 69, 4, 4]
 
 def decodeStateRaw : List UInt8 -> Option (LogicalState schema)
   | 76 :: 79 :: 79 :: 77 :: 47 :: 65 :: 85 :: 84 :: 72 :: 47 :: 80 :: 79 ::
-      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 3 :: 4 :: payload =>
+      76 :: 73 :: 67 :: 89 :: 80 :: 65 :: 71 :: 69 :: 4 :: 4 :: payload =>
       stateStream.toLawful.decode payload
   | _ => none
 
@@ -860,6 +867,10 @@ def decodeState (bytes : List UInt8) : Option (LogicalState schema) := do
   if encodeState state = bytes then some state else none
 
 /-- Earlier frames never reinterpret the expanded current entry vocabulary. -/
+theorem decodeState_rejects_v3 (payload : List UInt8) :
+    decodeState ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73,
+      67, 89, 80, 65, 71, 69, 3, 4] ++ payload) = none := rfl
+
 theorem decodeState_rejects_v2 (payload : List UInt8) :
     decodeState ([76, 79, 79, 77, 47, 65, 85, 84, 72, 47, 80, 79, 76, 73,
       67, 89, 80, 65, 71, 69, 2, 4] ++ payload) = none := rfl
@@ -906,7 +917,7 @@ def stateCodec : LawfulCodec (LogicalState schema) where
 
 def rootCustomization : List UInt8 :=
   [76, 79, 79, 77, 46, 65, 85, 84, 72, 46, 80, 79, 76, 73, 67, 89, 80, 65,
-    71, 69, 46, 82, 79, 79, 84, 47, 118, 51]
+    71, 69, 46, 82, 79, 79, 84, 47, 118, 52]
 
 theorem wire_and_root_domains_distinct : wireFrame ≠ rootCustomization := by
   decide
@@ -985,8 +996,8 @@ theorem state_eq_of_root_eq
 def examplePolicy : PolicyId := ⟨17⟩
 def exampleRevocation : RevocationKey := .channel ⟨9⟩
 
-def oldPolicy : Entry := .policy examplePolicy 2 ⟨2200⟩
-def newPolicy : Entry := .policy examplePolicy 3 ⟨3300⟩
+def oldPolicy : Entry := .policy examplePolicy 2 2 ⟨2200⟩
+def newPolicy : Entry := .policy examplePolicy 2 3 ⟨3300⟩
 def activeRevocation : Entry := .revocation exampleRevocation true
 
 def prePage : Page where
@@ -1028,7 +1039,7 @@ def postCell : Materialized materializer :=
   rfl
 
 @[simp] theorem post_policy_epoch_exact :
-    postPage.policyEpochAt examplePolicy = 3 := by
+    postPage.policyEpochAt examplePolicy = 2 := by
   simp [Page.policyEpochAt, Page.toCanonicalState, Page.entries, postPage,
     Entry.install, newPolicy, activeRevocation, examplePolicy]
   rfl
@@ -1041,28 +1052,14 @@ def postCell : Materialized materializer :=
 
 @[simp] theorem old_policy_address_absent :
     postPage.policyAddressAt examplePolicy 2 = ⟨0⟩ := by
-  change
-    (((0 : FieldStore CredentialAuthorityState.schema.{0, 0}).write
-        (.policyEpoch examplePolicy)
-          (show CredentialAuthorityState.schema.{0, 0}.FieldType
-              (.policyEpoch examplePolicy) from (3 : Epoch))).write
-      (.policyAddress examplePolicy 3) ⟨3300⟩
-      (.policyAddress examplePolicy 2)).getD ⟨0⟩ = ⟨0⟩
-  rw [CellState.FieldStore.write_other
-    (fields := (0 : FieldStore CredentialAuthorityState.schema.{0, 0}).write
-      (.policyEpoch examplePolicy)
-        (show CredentialAuthorityState.schema.{0, 0}.FieldType
-            (.policyEpoch examplePolicy) from (3 : Epoch)))
-    (field := .policyAddress examplePolicy 2)
-    (other := .policyAddress examplePolicy 3)
-    (different := by decide) (value := ⟨3300⟩)]
-  rw [CellState.FieldStore.write_other
-    (fields := (0 : FieldStore CredentialAuthorityState.schema.{0, 0}))
-    (field := .policyAddress examplePolicy 2)
-    (other := .policyEpoch examplePolicy)
-    (different := by decide)
-    (value := show CredentialAuthorityState.schema.{0, 0}.FieldType
-        (.policyEpoch examplePolicy) from (3 : Epoch))]
+  simp [Page.policyAddressAt, Page.toCanonicalState, Page.entries, postPage,
+    newPolicy, activeRevocation, Entry.install, examplePolicy]
+  rw [FieldStore.write_other _ (by decide :
+    AuthorityField.policyAddress ⟨17⟩ 3 ≠ .policyAddress ⟨17⟩ 2)]
+  rw [FieldStore.write_other _ (by decide :
+    AuthorityField.policyRevision ⟨17⟩ ≠ .policyAddress ⟨17⟩ 2)]
+  rw [FieldStore.write_other _ (by decide :
+    AuthorityField.policyEpoch ⟨17⟩ ≠ .policyAddress ⟨17⟩ 2)]
   rfl
 
 @[simp] theorem post_revocation_member :
@@ -1132,15 +1129,15 @@ theorem fullPage_full : fullPage.Full := by
   decide
 
 @[simp] theorem fullPage_overflow_rejected :
-    fullPage.insert? (.policy ⟨99⟩ 1 ⟨9999⟩) = none :=
+    fullPage.insert? (.policy ⟨99⟩ 1 1 ⟨9999⟩) = none :=
   rfl
 
 @[simp] theorem fullPage_admission_reports_full :
-    fullPage.admitInsert (.policy ⟨99⟩ 1 ⟨9999⟩) = .error .full := by
+    fullPage.admitInsert (.policy ⟨99⟩ 1 1 ⟨9999⟩) = .error .full := by
   decide
 
 @[simp] theorem policy_address_conflict_rejected :
-    postPage.admitInsert (.policy examplePolicy 4 ⟨4400⟩) =
+    postPage.admitInsert (.policy examplePolicy 2 4 ⟨4400⟩) =
       .error .addressConflict := by
   decide
 

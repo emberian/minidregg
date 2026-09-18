@@ -26,8 +26,10 @@ set_option autoImplicit false
 def id (value : Nat) : Digest := ⟨value⟩
 
 def receiptCodec : CodecPin := ⟨id 1, id 1001, 1⟩
-def authorizationDeclarationCodec : CodecPin := ⟨id 2, id 1002, 1⟩
-def authorizationRequestCodec : CodecPin := ⟨id 3, id 1003, 1⟩
+def authorizationDeclarationCodec : CodecPin :=
+  ⟨id 2, id 1002, Minidregg.Theory.AuthorizationDeclaration.declaration.schemaVersion⟩
+def authorizationRequestCodec : CodecPin :=
+  ⟨id 3, id 1003, Minidregg.Theory.AuthorizationDeclaration.requestCodecVersion⟩
 def effectDeclarationCodec : CodecPin := ⟨id 4, id 1004, 1⟩
 def moveOperationCodec : CodecPin := ⟨id 5, id 1005, 1⟩
 def kernelStateCodec : CodecPin := ⟨id 6, id 1006, 1⟩

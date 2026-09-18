@@ -21,7 +21,6 @@ open TypedAuthorization
 
 set_option autoImplicit false
 
-deriving instance DecidableEq for StoredCapability
 
 instance authorityValueDecidableEq (field : AuthorityField) :
     DecidableEq (AuthorityField.Value field) := by

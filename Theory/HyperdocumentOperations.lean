@@ -247,6 +247,7 @@ structure RequestEnvelope where
   height : Height
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
   deriving DecidableEq, Repr
 
@@ -333,6 +334,7 @@ def Declaration.toRequest (config : Config) (declaration : Declaration) :
   preStateRoot := declaration.intent.expectedContentRoot
   policyId := declaration.request.policyId
   policyEpoch := declaration.request.policyEpoch
+  policyRevision := declaration.request.policyRevision
   cost := declaration.request.cost
 
 def Declaration.requestId (config : Config) (declaration : Declaration) : Digest :=

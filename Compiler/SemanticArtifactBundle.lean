@@ -125,7 +125,8 @@ def requestFieldTag : Minidregg.Theory.AuthorizationDeclaration.RequestField -> 
   | .preStateRoot => 13
   | .policyId => 14
   | .policyEpoch => 15
-  | .cost => 16
+  | .policyRevision => 16
+  | .cost => 17
 
 def authorizationModeTag : Minidregg.Theory.AuthorizationDeclaration.Mode -> Nat
   | .signature => 1
@@ -145,6 +146,7 @@ def authorizationCheckTag : Minidregg.Theory.AuthorizationDeclaration.Check -> N
   | .ancestorNonRevocations => 9
   | .channelNonRevocations => 10
   | .policyEpoch => 11
+  | .policyRevision => 16
   | .policyAddress => 12
   | .policyMembership => 13
   | .policy => 14
@@ -188,11 +190,11 @@ def authorizationArtifact
     requestFieldTags := declaration.requestFields.map requestFieldTag
     modes := declaration.modes.map authorizationModeArtifact }
 
-/-- Schema 3 records the mandatory request-and-capability-bound invocation
-evidence.  Request field encoding and signature/proof mode plans are unchanged. -/
+/-- Schema 4 separates signed source revision from exact grant generation.
+Every authorization mode checks the current revision and current source policy. -/
 theorem authorizationArtifact_schema_version
     (declarationId declarationCodecId requestCodecId : Digest) :
-    (authorizationArtifact declarationId declarationCodecId requestCodecId).schemaVersion = 3 :=
+    (authorizationArtifact declarationId declarationCodecId requestCodecId).schemaVersion = 4 :=
   rfl
 
 /-- Every emitted capability-mode plan requires the distinct invocation-use
@@ -209,6 +211,20 @@ theorem authorizationArtifact_capability_use_required
     List.mem_cons, List.not_mem_nil, or_false] at member
   rcases member with rfl | rfl | rfl <;>
     simp_all [authorizationModeArtifact, authorizationModeTag, authorizationCheckTag,
+      Minidregg.Theory.AuthorizationDeclaration.checksFor]
+
+/-- No emitted authorization mode can bypass the current source-revision check. -/
+theorem authorizationArtifact_policy_revision_required
+    (declarationId declarationCodecId requestCodecId : Digest)
+    (mode : AuthorizationModeArtifact)
+    (member : mode ∈
+      (authorizationArtifact declarationId declarationCodecId requestCodecId).modes) :
+    authorizationCheckTag .policyRevision ∈ mode.checkTags := by
+  simp only [authorizationArtifact,
+    Minidregg.Theory.AuthorizationDeclaration.declaration, List.map_cons, List.map_nil,
+    List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with rfl | rfl | rfl <;>
+    simp [authorizationModeArtifact, authorizationCheckTag,
       Minidregg.Theory.AuthorizationDeclaration.checksFor]
 
 /-! ## Projections from the existing effect/reactive/disclosure declarations -/
@@ -753,5 +769,8 @@ def BuildTarget.run (target : BuildTarget) : IO Unit :=
 #guard_msgs (whitespace := lax) in #print axioms authorizationArtifact_schema_version
 /-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationArtifact_capability_use_required' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizationArtifact_capability_use_required
+
+/-- info: 'Minidregg.Compiler.SemanticArtifactBundle.authorizationArtifact_policy_revision_required' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizationArtifact_policy_revision_required
 
 end Minidregg.Compiler.SemanticArtifactBundle

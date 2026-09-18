@@ -3,7 +3,7 @@
 
 The complete authority snapshot selects the current committed key. Lean
 derives the singleton key projection, authority root, catalogue revision,
-canonical sixteen-field request and shared operation nullifier. The existing
+canonical seventeen-field request and shared operation nullifier. The existing
 SignedEnvelope controller checks canonical framing, key identity/epoch,
 revocation, activation and replay before the native verifier sees bytes.
 
@@ -21,7 +21,7 @@ Lean proof of Ed25519 or physical commit.
 -/
 import Compiler.CredentialSignatureIO
 import Compiler.CredentialAuthorityDomain
-import Compiler.DeclaredHyperedgeArtifact
+import Compiler.TypedAuthorizationRequestCodec
 import Compiler.ResourceBirthCodec
 
 namespace Minidregg.Compiler.CredentialSignatureAdmission
@@ -41,8 +41,8 @@ set_option autoImplicit false
 /-- Source-pinned algorithm code for this receiving adapter. -/
 def ed25519Algorithm : Nat := 1
 
-def signatureDomain : List UInt8 := "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [1]
-def requestFrame : List UInt8 := "DREGG/AUTH/REQUEST".toUTF8.toList ++ [1]
+def signatureDomain : List UInt8 := "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [2]
+abbrev requestFrame := TypedAuthorizationRequestCodec.requestFrame
 
 /-- Canonical ingress uses the existing signed-envelope parser and encoding.
 The legacy stream remains useful inside a source-owned ordered bundle, whose
@@ -57,33 +57,29 @@ theorem canonicalEnvelopeCodec_accepted_bytes
     canonicalEnvelopeCodec.encode envelope = bytes :=
   ResourceBirthCodec.strictCodec_canonical CredentialSignedEnvelopeController.envelopeCodec accepted
 
-/-- Reuses the existing complete dependent request projection and field order.
-No caller supplies a second target, effect digest, epoch or cost to sign. -/
-def requestBytes (request : SomeRequest) : List UInt8 :=
-  requestFrame ++ (StreamCodec.list StreamCodec.nat).encode
-    (DeclaredHyperedgeArtifact.requestWords (encodeRequest request))
+/-- Signing uses the sole complete kind-indexed codec. No second projection of
+request fields exists in the native signature adapter. -/
+abbrev requestBytes := TypedAuthorizationRequestCodec.signedRequestBytes
 
-theorem requestWords_injective : Function.Injective DeclaredHyperedgeArtifact.requestWords := by
-  intro left right equal
-  cases left
-  cases right
-  simpa [DeclaredHyperedgeArtifact.requestWords] using equal
+theorem requestWords_injective : Function.Injective TypedAuthorizationRequestCodec.requestWords :=
+  TypedAuthorizationRequestCodec.requestWords_injective
 
-theorem requestBytes_injective : Function.Injective requestBytes := by
-  intro left right equal
-  unfold requestBytes at equal
-  have words : DeclaredHyperedgeArtifact.requestWords (encodeRequest left) =
-      DeclaredHyperedgeArtifact.requestWords (encodeRequest right) := by
-    let codec := (StreamCodec.list StreamCodec.nat).toLawful
-    have payload : codec.encode (DeclaredHyperedgeArtifact.requestWords (encodeRequest left)) =
-        codec.encode (DeclaredHyperedgeArtifact.requestWords (encodeRequest right)) :=
-      List.append_cancel_left equal
-    have decoded := congrArg codec.decode payload
-    rw [codec.decode_encode, codec.decode_encode] at decoded
-    exact Option.some.inj decoded
-  have decoded := congrArg decodeRequest (requestWords_injective words)
-  rw [decodeRequest_encodeRequest, decodeRequest_encodeRequest] at decoded
-  exact Option.some.inj decoded
+theorem requestBytes_injective : Function.Injective requestBytes :=
+  TypedAuthorizationRequestCodec.signedRequestBytes_injective
+
+/-- The native adapter signs precisely the sole source-owned request projection,
+for every kind and every request; source revision is never defaulted. -/
+theorem requestBytes_exact_projection (request : SomeRequest) :
+    requestBytes request = requestFrame ++
+      (StreamCodec.list StreamCodec.nat).encode
+        (TypedAuthorizationRequestCodec.requestWords (encodeRequest request)) := rfl
+
+theorem requestBytes_separates_policyRevision {kind : ResourceKind}
+    (request : Request kind) (revision : Nat) (different : request.policyRevision ≠ revision) :
+    requestBytes ⟨kind, request⟩ ≠ requestBytes ⟨kind, { request with policyRevision := revision }⟩ := by
+  intro same
+  have sameWire := congrArg encodeRequest (requestBytes_injective same)
+  exact different (congrArg RequestWire.policyRevision sameWire)
 
 inductive Reject where
   | wrongDomain
@@ -282,5 +278,10 @@ theorem issued_of_checked
       receipt.prepared.controller.frame receipt.prepared.controller.envelope.signature :=
   completion.issued_of_verified receipt.prepared.controller
     (ioRefinement.exactResult _ _ _ _ observed)
+
+/-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_exact_projection' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestBytes_exact_projection
+/-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_separates_policyRevision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestBytes_separates_policyRevision
 
 end Minidregg.Compiler.CredentialSignatureAdmission

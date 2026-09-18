@@ -561,11 +561,12 @@ def requestEnvelopeStream : StreamCodec RequestEnvelope :=
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat
           (StreamCodec.product policyIdStream
-            (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product StreamCodec.nat StreamCodec.nat))))))
     (fun value => (value.federation, value.subjectKeyEpoch, value.height,
-      value.policyId, value.policyEpoch, value.cost))
+      value.policyId, value.policyEpoch, value.policyRevision, value.cost))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
 noncomputable def declarationStream : StreamCodec Declaration :=

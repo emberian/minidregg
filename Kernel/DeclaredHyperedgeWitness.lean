@@ -101,6 +101,7 @@ def seed (target : ResourceId .account) (nonce : Nat) : Seed .account where
   height := 9
   policyId := ⟨10⟩
   policyEpoch := 0
+  policyRevision := 0
   cost := 11
 
 def leg (preRoot apex : Digest) : Bool -> Leg permissivePortal preRoot apex
@@ -426,6 +427,7 @@ def debitAuthorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -436,6 +438,7 @@ def creditAuthorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

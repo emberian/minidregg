@@ -682,6 +682,7 @@ structure RequestContext where
   height : Height
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
 
 def RequestContext.request {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target) : Request kind where
@@ -702,6 +703,7 @@ def RequestContext.request {kind : ResourceKind} {target : ResourceId kind}
   preStateRoot := declaration.expectedPreRoot
   policyId := context.policyId
   policyEpoch := context.policyEpoch
+  policyRevision := context.policyRevision
   cost := exactCharge declaration .feeDebit
 
 def family {kind : ResourceKind} (target : ResourceId kind)

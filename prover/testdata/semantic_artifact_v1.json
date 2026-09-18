@@ -61,8 +61,8 @@
   "dialectClauses": [],
   "codecs":
   [{"version": 1, "valueTypeId": 1001, "codecId": 1},
-   {"version": 1, "valueTypeId": 1002, "codecId": 2},
-   {"version": 1, "valueTypeId": 1003, "codecId": 3},
+   {"version": 4, "valueTypeId": 1002, "codecId": 2},
+   {"version": 2, "valueTypeId": 1003, "codecId": 3},
    {"version": 1, "valueTypeId": 1004, "codecId": 4},
    {"version": 1, "valueTypeId": 1005, "codecId": 5},
    {"version": 1, "valueTypeId": 1006, "codecId": 6},
@@ -154,12 +154,13 @@
   "declarationCodecId": 10},
  "canonicalEncoding": "minidregg/encodable/v1",
  "authorization":
- {"schemaVersion": 3,
-  "requestFieldTags": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+ {"schemaVersion": 4,
+  "requestFieldTags":
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
   "requestCodecId": 3,
   "modes":
-  [{"modeTag": 1, "checkTags": [1, 2, 11, 12, 13, 14]},
-   {"modeTag": 2, "checkTags": [3, 11, 12, 13, 14]},
-   {"modeTag": 3, "checkTags": [4, 15, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]}],
+  [{"modeTag": 1, "checkTags": [1, 2, 11, 16, 12, 13, 14]},
+   {"modeTag": 2, "checkTags": [3, 11, 16, 12, 13, 14]},
+   {"modeTag": 3, "checkTags": [4, 15, 5, 6, 7, 8, 9, 10, 11, 16, 12, 13, 14]}],
   "declarationId": 601,
   "declarationCodecId": 2}}

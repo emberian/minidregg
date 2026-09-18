@@ -63,6 +63,7 @@ structure Seed (kind : ResourceKind) where
   height : Height
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
 
 /-- Reuse `DeclaredTurn.RequestSeed.derive`; the shared apex occupies the
@@ -72,8 +73,12 @@ def Seed.derive {kind : ResourceKind} (seed : Seed kind)
     (apex effectsDigest preStateRoot : Digest) : Request kind :=
   (DeclaredTurn.RequestSeed.mk seed.domain seed.semantics seed.federation
     seed.subject seed.subjectKeyEpoch seed.target seed.verb apex seed.nonce
-    seed.height seed.policyId seed.policyEpoch seed.cost).derive
+    seed.height seed.policyId seed.policyEpoch seed.policyRevision seed.cost).derive
       effectsDigest preStateRoot
+
+@[simp] theorem Seed.derive_policyRevision {kind : ResourceKind} (seed : Seed kind)
+    (apex effectsDigest preStateRoot : Digest) :
+    (seed.derive apex effectsDigest preStateRoot).policyRevision = seed.policyRevision := rfl
 
 /-- One incidence.  Its presentation is indexed by the exact request derived
 from this effect declaration, the common pre-root, and the common apex. -/

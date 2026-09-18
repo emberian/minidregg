@@ -119,7 +119,7 @@ def authorityPolicyController : Controller .authorityPolicy where
   pageCodecId := ⟨92003⟩
   controllerId := ⟨94003⟩
   rootAlgorithmId := ⟨93001⟩
-  wireVersion := 3
+  wireVersion := 4
   capacity := 4
   wireFrame :=
     Minidregg.Compiler.CredentialAuthorityPageMaterializer.wireFrame

@@ -2,7 +2,7 @@
 # Kernel.CanonicalPolicyRegistry -- durable committed policy selection
 
 `CredentialAuthorityState` already makes the policy registry canonical: its
-typed `(PolicyId, Epoch)` field stores the selected content address and the
+typed `(PolicyId, source revision)` field stores the selected content address and the
 cell root is projected as `AuthState.policyRoot`.  `CanonicalPolicyAdmission`
 then resolves the same key to a versioned `Pred` record and accepts only the
 compiler-emitted verifier for that addressed record.
@@ -15,7 +15,7 @@ a second policy state model:
   authenticated membership, canonical source bytes, and content-store fetch
   are joined in one proof-relevant payload;
 * a durable data intent adds the exact registry cell as a read-only guard;
-* registry mutation or epoch/address rotation between admission and install
+* registry mutation or revision/address rotation between admission and install
   rejects the old intent before any post bytes are exposed.
 
 Membership soundness and payload availability are explicit deployment
@@ -53,9 +53,9 @@ abbrev RegistryCell (M : CellState.Materializer S Digest) :=
 /-- Exact sparse lookup for one versioned policy address. -/
 def addressAt {M : CellState.Materializer S Digest}
     (projection : CredentialAuthorityState.StateProjection S) (cell : RegistryCell M)
-    (policyId : PolicyId) (epoch : Epoch) : Digest :=
+    (policyId : PolicyId) (revision : PolicyRevision) : Digest :=
   ((projection.toCanonicalState cell.logical).fields
-    (.policyAddress policyId epoch)).getD ⟨0⟩
+    (.policyAddress policyId revision)).getD ⟨0⟩
 
 @[simp] theorem projected_policy_root {M : CellState.Materializer S Digest}
     (projection : CredentialAuthorityState.StateProjection S)
@@ -66,9 +66,9 @@ def addressAt {M : CellState.Materializer S Digest}
 @[simp] theorem projected_policy_address {M : CellState.Materializer S Digest}
     (projection : CredentialAuthorityState.StateProjection S)
     (cell : RegistryCell M)
-    (policyId : PolicyId) (epoch : Epoch) :
-    (projection.authState cell).policyAddress policyId epoch =
-      addressAt projection cell policyId epoch :=
+    (policyId : PolicyId) (revision : PolicyRevision) :
+    (projection.authState cell).policyAddress policyId revision =
+      addressAt projection cell policyId revision :=
   rfl
 
 /-- Canonical source encoding and the deployment digest used by
@@ -127,7 +127,7 @@ structure ResolvedExact
     (request : Request kind) (witness : CompiledPolicyWitness F)
     (committed : CommittedPolicy) : Prop where
   recordPolicyExact : committed.record.policyId = request.policyId
-  recordEpochExact : committed.record.version = request.policyEpoch
+  recordRevisionExact : committed.record.version = request.policyRevision
   recordDomainExact : committed.record.domain = request.domain
   recordSemanticsExact : committed.record.semantics = request.semantics
   recordAddressExact : config.recordDigest committed.record = committed.address
@@ -142,7 +142,7 @@ theorem authorized_resolved_exact
     {state : AuthState} {kind : ResourceKind} {request : Request kind}
     (authorized : CanonicalAuthorized config state request)
     {committed : CommittedPolicy}
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed) :
     ResolvedExact config request authorized.policyWitness committed := by
   have policyAccepted := authorized_verifies authorized
@@ -161,7 +161,7 @@ theorem authorized_resolved_exact
     exact evaluated
   exact
     { recordPolicyExact := policyIdExact
-      recordEpochExact := epochExact
+      recordRevisionExact := epochExact
       recordDomainExact := domainExact
       recordSemanticsExact := semanticsExact
       recordAddressExact := recordAddress
@@ -180,12 +180,12 @@ theorem authorized_address_exact_of_resolved
     (authorized : CanonicalAuthorized config
       (projection.authState cell) request)
     {committed : CommittedPolicy}
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed) :
-    addressAt projection cell request.policyId request.policyEpoch = committed.address := by
+    addressAt projection cell request.policyId request.policyRevision = committed.address := by
   have verified := authorized_resolved_exact authorized resolved
   have selectedByCell : authorized.policyWitness.address =
-      addressAt projection cell request.policyId request.policyEpoch := by
+      addressAt projection cell request.policyId request.policyRevision := by
     simpa [CanonicalPolicyConfig.portal] using
       authorized.policyAddressExact
   exact selectedByCell.symm.trans verified.witnessAddressExact
@@ -206,13 +206,13 @@ structure SelectionPayload
       (projection.authState cell) request) where
   committed : CommittedPolicy
   registryResolved :
-    config.registry.resolve request.policyId request.policyEpoch = some committed
+    config.registry.resolve request.policyId request.policyRevision = some committed
   recordPolicyExact : committed.record.policyId = request.policyId
-  recordEpochExact : committed.record.version = request.policyEpoch
+  recordRevisionExact : committed.record.version = request.policyRevision
   recordDomainExact : committed.record.domain = request.domain
   recordSemanticsExact : committed.record.semantics = request.semantics
   registryAddressExact :
-    addressAt projection cell request.policyId request.policyEpoch = committed.address
+    addressAt projection cell request.policyId request.policyRevision = committed.address
   recordAddressExact : config.recordDigest committed.record = committed.address
   canonicalBytes : List UInt8
   canonicalBytesExact : canonicalBytes = addressing.codec.encode committed.record
@@ -238,7 +238,7 @@ def SelectionPayload.ofAuthorized
     (authorized : CanonicalAuthorized config
       (projection.authState cell) request)
     (committed : CommittedPolicy)
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed) :
     SelectionPayload config addressing store membership projection cell request
       authorized := by
@@ -248,7 +248,7 @@ def SelectionPayload.ofAuthorized
       committed.address authorized.policyMembershipWitness = true := by
     have verified := authorized.policyMembershipVerified
     change config.portal.verifyMembership cell.root
-      (addressAt projection cell request.policyId request.policyEpoch)
+      (addressAt projection cell request.policyId request.policyRevision)
       authorized.policyMembershipWitness = true at verified
     rw [registryAddress] at verified
     exact verified
@@ -256,7 +256,7 @@ def SelectionPayload.ofAuthorized
     { committed := committed
       registryResolved := resolved
       recordPolicyExact := exact.recordPolicyExact
-      recordEpochExact := exact.recordEpochExact
+      recordRevisionExact := exact.recordRevisionExact
       recordDomainExact := exact.recordDomainExact
       recordSemanticsExact := exact.recordSemanticsExact
       registryAddressExact := registryAddress
@@ -281,9 +281,9 @@ theorem wrong_address_precludes_authorized
     {projection : CredentialAuthorityState.StateProjection S}
     {cell : RegistryCell M} {kind : ResourceKind} {request : Request kind}
     {committed : CommittedPolicy}
-    (resolved : config.registry.resolve request.policyId request.policyEpoch =
+    (resolved : config.registry.resolve request.policyId request.policyRevision =
       some committed)
-    (wrong : addressAt projection cell request.policyId request.policyEpoch ≠ committed.address) :
+    (wrong : addressAt projection cell request.policyId request.policyRevision ≠ committed.address) :
     IsEmpty (CanonicalAuthorized config
       (projection.authState cell) request) :=
   ⟨fun authorized =>

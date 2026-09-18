@@ -5,7 +5,7 @@ The current bounded content, event-history, and authority-policy pages have
 independent wire versions in one dependent extension catalogue. This module
 constructs the next catalogue generation over those CURRENT typed carriers.
 Each page wire version advances from its own pinned version; in this source
-that is content 1→2, events 1→2, and authority 3→4. It does not reconstruct a
+that is content 1→2, events 1→2, and authority 4→5. It does not reconstruct a
 historical parser using today's expanded authority vocabulary.
 
 The next generation preserves the finite sparse logical carriers and their
@@ -44,7 +44,7 @@ set_option autoImplicit false
 /-! ## Exact next-generation codecs over the current typed state carriers -/
 
 /-- Page wire versions advance from their own deployed pins, independently of
-catalog generations. In this catalogue: content 1→2, events 1→2, authority 3→4. -/
+catalog generations. In this catalogue: content 1→2, events 1→2, authority 4→5. -/
 def nextWireVersion (kind : PageKind) : Nat := (controller kind).wireVersion + 1
 
 theorem nextWireVersion_fits (kind : PageKind) : nextWireVersion kind < 256 := by

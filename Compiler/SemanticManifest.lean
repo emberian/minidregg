@@ -479,43 +479,21 @@ structure AdmissionContext where
   dialectClauseRoots : List DialectClauseRoots
 deriving DecidableEq, Repr
 
+/-- Mathematical admission encoding retains the sole source-owned request word
+rather than maintaining a second scalar-field record. Invalid shapes refuse. -/
 structure RequestEncoding where
-  domain : Nat
-  semantics : Nat
-  federation : Nat
-  resourceKind : Nat
-  subject : Nat
-  subjectKeyEpoch : Nat
-  target : Nat
-  verb : Nat
-  argsDigest : Nat
-  effectsDigest : Nat
-  nonce : Nat
-  height : Nat
-  preStateRoot : Nat
-  policyId : Nat
-  policyEpoch : Nat
-  cost : Nat
+  words : List Nat
 deriving DecidableEq, Repr, Encodable
 
-def RequestEncoding.ofWire
-    (wire : Minidregg.Theory.AuthorizationDeclaration.RequestWire) : RequestEncoding :=
-  ⟨wire.domain, wire.semantics, wire.federation, wire.resourceKind,
-    wire.subject, wire.subjectKeyEpoch, wire.target, wire.verb,
-    wire.argsDigest, wire.effectsDigest, wire.nonce, wire.height,
-    wire.preStateRoot, wire.policyId, wire.policyEpoch, wire.cost⟩
+def RequestEncoding.ofWire (wire : RequestWire) : RequestEncoding :=
+  ⟨Minidregg.Theory.AuthorizationDeclaration.requestWords wire⟩
 
-def RequestEncoding.toWire (wire : RequestEncoding) :
-    Minidregg.Theory.AuthorizationDeclaration.RequestWire :=
-  ⟨wire.domain, wire.semantics, wire.federation, wire.resourceKind,
-    wire.subject, wire.subjectKeyEpoch, wire.target, wire.verb,
-    wire.argsDigest, wire.effectsDigest, wire.nonce, wire.height,
-    wire.preStateRoot, wire.policyId, wire.policyEpoch, wire.cost⟩
+def RequestEncoding.toWire (wire : RequestEncoding) : Option RequestWire :=
+  Minidregg.Theory.AuthorizationDeclaration.requestWireOfWords wire.words
 
-@[simp] theorem RequestEncoding.toWire_ofWire
-    (wire : Minidregg.Theory.AuthorizationDeclaration.RequestWire) :
-    (RequestEncoding.ofWire wire).toWire = wire := by
-  cases wire <;> rfl
+@[simp] theorem RequestEncoding.toWire_ofWire (wire : RequestWire) :
+    (RequestEncoding.ofWire wire).toWire = some wire :=
+  Minidregg.Theory.AuthorizationDeclaration.requestWireOfWords_requestWords wire
 
 inductive AdmissionOutcomeEncoding where
   | rejected (errorId : Nat)
@@ -587,7 +565,8 @@ def AdmissionContext.canonicalEncoding (context : AdmissionContext) :
 
 def AdmissionContextEncoding.decode (wire : AdmissionContextEncoding) :
     Option AdmissionContext := do
-  let request <- Minidregg.Theory.AuthorizationDeclaration.decodeRequest wire.request.toWire
+  let requestWire ← wire.request.toWire
+  let request ← Minidregg.Theory.AuthorizationDeclaration.decodeRequest requestWire
   some
     { manifestAddress := ⟨wire.manifestAddress⟩
       historyDomain := ⟨wire.historyDomain⟩

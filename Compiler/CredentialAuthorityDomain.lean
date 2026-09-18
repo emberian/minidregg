@@ -3,8 +3,8 @@
 
 The catalogue enumerates every physical shard in one authority domain.
 Shard placement is data in that committed catalogue; semantic coordinate
-routing is fixed here. A policy's epoch and versioned address are one entry
-group, not two independently routed fields. Four entry groups occupy a shard.
+routing is fixed here. A policy's grant generation, source revision and revision-indexed address
+are one entry group, never independently routed fields. Four entry groups occupy a shard.
 
 The checked complete view folds the actual shard entries into the existing
 `CredentialAuthorityState.schema`. Its genuine sparse materializer computes
@@ -41,6 +41,7 @@ def fieldGroup : AuthorityField → Nat
   | .capability .program identifier => 9 * identifier.value + 2
   | .issuerEpoch issuer => 9 * issuer.value + 3
   | .policyEpoch policy => 9 * policy.value + 4
+  | .policyRevision policy => 9 * policy.value + 4
   | .policyAddress policy _ => 9 * policy.value + 4
   | .subjectKeyEpoch subject => 9 * subject.value + 5
   | .subjectKey subject _ => 9 * subject.value + 5
@@ -53,7 +54,7 @@ def entryGroup : Entry → Nat
   | .capability .account stored => 9 * stored.head.id.value + 1
   | .capability .program stored => 9 * stored.head.id.value + 2
   | .issuerEpoch issuer _ => 9 * issuer.value + 3
-  | .policy policy _ _ => 9 * policy.value + 4
+  | .policy policy _ _ _ => 9 * policy.value + 4
   | .subjectKeyEpoch subject _ => 9 * subject.value + 5
   | .subjectKey key => 9 * key.subject + 5
   | .revocation (.capability identifier) _ => 9 * identifier.value + 6
@@ -63,9 +64,9 @@ def entryGroup : Entry → Nat
 theorem entry_fields_same_group (entry : Entry) (field : AuthorityField)
     (member : field ∈ entry.fields) : fieldGroup field = entryGroup entry := by
   cases entry with
-  | policy policy epoch address =>
+  | policy policy generation revision address =>
       simp only [Entry.fields, List.mem_cons, List.not_mem_nil, or_false] at member
-      rcases member with rfl | rfl <;> rfl
+      rcases member with rfl | rfl | rfl <;> rfl
   | revocation key revoked =>
       simp only [Entry.fields, List.mem_singleton] at member
       subst field
@@ -207,7 +208,7 @@ def catalogueStateStream : StreamCodec (LogicalState catalogueSchema) :=
   StreamCodec.xmap (StreamCodec.option catalogueStream) catalogueAt catalogueState
     catalogueState_at
 
-def catalogueFrame : List UInt8 := "LOOM/AUTH/DOMAIN".toUTF8.toList ++ [1]
+def catalogueFrame : List UInt8 := "LOOM/AUTH/DOMAIN".toUTF8.toList ++ [2]
 
 def encodeCatalogueState (state : LogicalState catalogueSchema) : List UInt8 :=
   catalogueFrame ++ catalogueStateStream.encode state
@@ -227,6 +228,17 @@ def decodeCatalogueRaw (bytes : List UInt8) : Option (LogicalState catalogueSche
 def decodeCatalogueState (bytes : List UInt8) : Option (LogicalState catalogueSchema) := do
   let state ← decodeCatalogueRaw bytes
   if encodeCatalogueState state = bytes then some state else none
+
+theorem decodeCatalogueState_rejects_v1 (payload : List UInt8) :
+    decodeCatalogueState ("LOOM/AUTH/DOMAIN".toUTF8.toList ++ 1 :: payload) = none := by
+  let oldFrame : List UInt8 := "LOOM/AUTH/DOMAIN".toUTF8.toList ++ [1]
+  have lengthExact : catalogueFrame.length = oldFrame.length := by simp [catalogueFrame, oldFrame]
+  have frameDifferent : oldFrame ≠ catalogueFrame := by simp [catalogueFrame, oldFrame]
+  have raw : decodeCatalogueRaw (oldFrame ++ payload) = none := by
+    simp [decodeCatalogueRaw, lengthExact, frameDifferent]
+  have rejected : decodeCatalogueState (oldFrame ++ payload) = none := by
+    simp [decodeCatalogueState, raw]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using rejected
 
 @[simp] theorem decodeCatalogueState_encode (state : LogicalState catalogueSchema) :
     decodeCatalogueState (encodeCatalogueState state) = some state := by
@@ -250,7 +262,7 @@ def catalogueCodec : LawfulCodec (LogicalState catalogueSchema) where
   decode := decodeCatalogueState
   decode_encode := decodeCatalogueState_encode
 
-def catalogueRootCustomization : List UInt8 := "LOOM.AUTH.DOMAIN.ROOT/v1".toUTF8.toList
+def catalogueRootCustomization : List UInt8 := "LOOM.AUTH.DOMAIN.ROOT/v2".toUTF8.toList
 
 def catalogueRoot (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash catalogueRootCustomization bytes).digest
@@ -312,9 +324,22 @@ def Snapshot.authState (snapshot : Snapshot) : AuthState :=
 
 def headAt (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) (policy : PolicyId) :
     Option PolicyInstall.Head := do
-  let epoch ← logical.fields (.policyEpoch policy)
-  let address ← logical.fields (.policyAddress policy epoch)
-  some ⟨epoch, address⟩
+  let _generation ← logical.fields (.policyEpoch policy)
+  let revision ← logical.fields (.policyRevision policy)
+  let address ← logical.fields (.policyAddress policy revision)
+  some ⟨revision, address⟩
+
+theorem headAt_missing_generation
+    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) (policy : PolicyId)
+    (missing : logical.fields (.policyEpoch policy) = none) :
+    headAt logical policy = none := by simp [headAt, missing]
+
+theorem headAt_missing_revision
+    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) (policy : PolicyId)
+    (missing : logical.fields (.policyRevision policy) = none) :
+    headAt logical policy = none := by
+  unfold headAt
+  cases logical.fields (.policyEpoch policy) <;> simp [missing]
 
 def Snapshot.currentHead (snapshot : Snapshot) (policy : PolicyId) :
     Option PolicyInstall.Head := headAt snapshot.logical policy
@@ -324,12 +349,12 @@ def Snapshot.currentSigningKey (snapshot : Snapshot) (subject : SubjectId) :
   CredentialAuthorityState.currentSigningKey snapshot.logical subject
 
 def Snapshot.policyContains (snapshot : Snapshot) (policy : PolicyId)
-    (epoch : Epoch) (address : Digest) : Prop :=
-  Entry.policy policy epoch address ∈ snapshot.entries
+    (generation : Epoch) (revision : Nat) (address : Digest) : Prop :=
+  Entry.policy policy generation revision address ∈ snapshot.entries
 
 instance snapshotPolicyContainsDecidable (snapshot : Snapshot) (policy : PolicyId)
-    (epoch : Epoch) (address : Digest) :
-    Decidable (snapshot.policyContains policy epoch address) := by
+    (generation : Epoch) (revision : Nat) (address : Digest) :
+    Decidable (snapshot.policyContains policy generation revision address) := by
   unfold Snapshot.policyContains
   infer_instance
 
@@ -348,14 +373,17 @@ theorem Snapshot.cell_projection_exact (snapshot : Snapshot) :
     snapshot.cell.logical = snapshot.logical := rfl
 
 theorem Snapshot.policy_exact (snapshot : Snapshot) (policy : PolicyId)
-    (epoch : Epoch) (address : Digest) (member : snapshot.policyContains policy epoch address) :
-    snapshot.currentHead policy = some ⟨epoch, address⟩ := by
-  have epochExact := snapshot.entry_exact (.policy policy epoch address) member
+    (generation : Epoch) (revision : Nat) (address : Digest)
+    (member : snapshot.policyContains policy generation revision address) :
+    snapshot.currentHead policy = some ⟨revision, address⟩ := by
+  have generationExact := snapshot.entry_exact (.policy policy generation revision address) member
     (.policyEpoch policy) (by simp [Entry.fields])
-  have addressExact := snapshot.entry_exact (.policy policy epoch address) member
-    (.policyAddress policy epoch) (by simp [Entry.fields])
-  simp only [Entry.install, FieldStore.write_self] at epochExact addressExact
-  simp [Snapshot.currentHead, headAt, epochExact, addressExact]
+  have revisionExact := snapshot.entry_exact (.policy policy generation revision address) member
+    (.policyRevision policy) (by simp [Entry.fields])
+  have addressExact := snapshot.entry_exact (.policy policy generation revision address) member
+    (.policyAddress policy revision) (by simp [Entry.fields])
+  simp [Entry.install] at generationExact revisionExact addressExact
+  simp [Snapshot.currentHead, headAt, generationExact, revisionExact, addressExact]
 
 theorem Snapshot.signingKey_exact (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord)
     (member : Entry.subjectKey key ∈ snapshot.entries) :
@@ -450,9 +478,11 @@ interpreter. This does not reimplement dependent authority values. -/
 def entryWrites (entry : Entry) : List (FieldWrite CredentialAuthorityState.schema.{0, 0}) :=
   entry.fields.map fun field => ⟨field, Entry.install 0 entry field⟩
 
-theorem entryWrites_policy (policy : PolicyId) (epoch : Epoch) (address : Digest) :
-    entryWrites (.policy policy epoch address) =
-      [⟨.policyEpoch policy, some epoch⟩, ⟨.policyAddress policy epoch, some address⟩] := by
+theorem entryWrites_policy (policy : PolicyId) (generation : Epoch)
+    (revision : Nat) (address : Digest) :
+    entryWrites (.policy policy generation revision address) =
+      [⟨.policyEpoch policy, some generation⟩, ⟨.policyRevision policy, some revision⟩,
+        ⟨.policyAddress policy revision, some address⟩] := by
   simp [entryWrites, Entry.fields, List.map, Entry.install]
 
 theorem entryWrites_subjectKey (key : CredentialSigningKey.KeyRecord) :
@@ -536,12 +566,14 @@ authorization are checked by the existing policy family. -/
 def policyEdit (snapshot : Snapshot) (policy : PolicyId) (epoch : Epoch)
     (address : Digest) : Edit where
   before := (snapshot.currentHead policy).map fun head =>
-    .policy policy head.version head.address
-  after := .policy policy epoch address
+    .policy policy (snapshot.authState.policyEpoch policy) head.version head.address
+  after := .policy policy (snapshot.authState.policyEpoch policy) epoch address
 
 def preparePolicy (snapshot : Snapshot) (policy : PolicyId) (epoch : Epoch)
     (address : Digest) : Option (Prepared snapshot [policyEdit snapshot policy epoch address]) :=
-  prepare snapshot [policyEdit snapshot policy epoch address]
+  if (snapshot.currentHead policy).isSome then
+    prepare snapshot [policyEdit snapshot policy epoch address]
+  else none
 
 theorem policyEdit_sameGroup (snapshot : Snapshot) (policy : PolicyId)
     (epoch : Epoch) (address : Digest) :
@@ -628,13 +660,19 @@ structure PreparedPolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
     (epoch : Epoch) (address : Digest) (nullifierId : Nat) where
   prepared : Prepared snapshot (policyAndNullifierEdits snapshot policy epoch address nullifierId)
   nullifierFresh : isNullified snapshot.cell nullifierId = false
+  generationPresent : snapshot.logical.fields (.policyEpoch policy) =
+    some (snapshot.authState.policyEpoch policy)
 
 def preparePolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
     (epoch : Epoch) (address : Digest) (nullifierId : Nat) :
     Option (PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) := do
   if fresh : isNullified snapshot.cell nullifierId = false then
-    let prepared ← prepare snapshot (policyAndNullifierEdits snapshot policy epoch address nullifierId)
-    some ⟨prepared, fresh⟩
+    if present : (show Option Epoch from snapshot.logical.fields (.policyEpoch policy)) =
+        some (snapshot.authState.policyEpoch policy) then
+      let _old ← snapshot.currentHead policy
+      let prepared ← prepare snapshot (policyAndNullifierEdits snapshot policy epoch address nullifierId)
+      some ⟨prepared, fresh, present⟩
+    else none
   else none
 
 theorem PreparedPolicyAndNullifier.head_exact
@@ -649,6 +687,27 @@ theorem PreparedPolicyAndNullifier.head_exact
       entryWrites_nullifier, policyAndNullifierEdits, policyEdit, nullifierEdit, old, marker,
       Entry.fields, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
       Option.map, materialize] <;> rfl
+
+theorem PreparedPolicyAndNullifier.generation_exact
+    {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
+    (update : PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) :
+    update.prepared.postLogical.fields (.policyEpoch policy) =
+      some (snapshot.authState.policyEpoch policy) := by
+  rw [show update.prepared.postLogical = update.prepared.validated.apply.logical from
+    update.prepared.projectionExact]
+  cases old : snapshot.currentHead policy <;>
+    cases marker : snapshot.logical.fields (.nullifier nullifierId) <;>
+    simp [ValidatedPatch.apply, editPatch, Edit.writes, entryWrites_policy,
+      entryWrites_nullifier, policyAndNullifierEdits, policyEdit, nullifierEdit, old, marker,
+      Entry.fields, applyFieldWrites, FieldStore.assign, List.map_cons, List.map_nil,
+      Option.map, materialize] <;> rfl
+
+theorem PreparedPolicyAndNullifier.generation_preserved
+    {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
+    (update : PreparedPolicyAndNullifier snapshot policy epoch address nullifierId) :
+    update.prepared.postLogical.fields (.policyEpoch policy) =
+      snapshot.logical.fields (.policyEpoch policy) :=
+  update.generation_exact.trans update.generationPresent.symm
 
 theorem PreparedPolicyAndNullifier.nullifier_consumed
     {snapshot : Snapshot} {policy : PolicyId} {epoch : Epoch} {address : Digest} {nullifierId : Nat}
@@ -698,7 +757,7 @@ theorem revoked_field_has_key (entry : Entry) (key : RevocationKey)
     (present : AuthorityField.revoked key ∈ entry.fields) :
     key ∈ entryRevocationKeys entry := by
   cases entry with
-  | policy policy epoch address => simp [Entry.fields] at present
+  | policy policy generation revision address => simp [Entry.fields] at present
   | revocation other revoked =>
       simp only [Entry.fields, List.mem_singleton, AuthorityField.revoked.injEq] at present
       subst other

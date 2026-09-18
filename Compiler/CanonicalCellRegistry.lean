@@ -85,10 +85,10 @@ def kindAtTag : UInt8 → Option Kind
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 1⟩
   | .eventHistory => ⟨⟨91002⟩, 1⟩
-  | .authorityShard => ⟨⟨91003⟩, 3⟩
+  | .authorityShard => ⟨⟨91003⟩, 4⟩
   | .declaredObject => ⟨⟨91004⟩, 1⟩
   | .resourceBook => ⟨⟨91005⟩, 2⟩
-  | .authorityCatalogue => ⟨⟨91006⟩, 1⟩
+  | .authorityCatalogue => ⟨⟨91006⟩, 2⟩
   | .accountMetadata => ⟨⟨91007⟩, 1⟩
   | .declaredProgram => ⟨⟨91008⟩, 1⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
