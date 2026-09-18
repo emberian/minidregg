@@ -118,6 +118,7 @@ structure RequestSeed (kind : ResourceKind) where
   height : Height
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
 
 def RequestSeed.derive {kind : ResourceKind} (seed : RequestSeed kind)
@@ -136,6 +137,7 @@ def RequestSeed.derive {kind : ResourceKind} (seed : RequestSeed kind)
   preStateRoot := preStateRoot
   policyId := seed.policyId
   policyEpoch := seed.policyEpoch
+  policyRevision := seed.policyRevision
   cost := seed.cost
 
 /-! ## §3. The one declared turn and total execution -/

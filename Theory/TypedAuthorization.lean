@@ -55,6 +55,8 @@ structure Digest where
   deriving DecidableEq, Repr
 
 abbrev Epoch := Nat
+/-- Source revision is independent of the revocable grant generation. -/
+abbrev PolicyRevision := Nat
 abbrev Height := Nat
 
 /-- Resource kinds index both resource identifiers and their legal verbs. -/
@@ -103,6 +105,7 @@ structure Request (kind : ResourceKind) where
   preStateRoot : Digest
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
   deriving DecidableEq, Repr
 
@@ -194,11 +197,12 @@ structure AuthState where
   /-- Root of the authenticated policy registry.  `policyAddress` below is the
   exact logical projection whose membership is checked against this root. -/
   policyRoot : Digest
-  /-- The committed content address selected by an exact `(id,epoch)` pair. -/
-  policyAddress : PolicyId → Epoch → Digest
+  /-- The committed content address selected by an exact `(id,revision)` pair. -/
+  policyAddress : PolicyId → PolicyRevision → Digest
   revoked : Finset RevocationKey
   issuerEpoch : IssuerId → Epoch
   policyEpoch : PolicyId → Epoch
+  policyRevision : PolicyId → PolicyRevision
   subjectKeyEpoch : SubjectId → Epoch
 
 namespace Capability
@@ -419,17 +423,62 @@ structure Authorized (portal : Portal) (state : AuthState)
   policyWitness : portal.PolicyWitness
   policyMembershipWitness : portal.MembershipWitness
   policyEpochExact : request.policyEpoch = state.policyEpoch request.policyId
+  policyRevisionExact : request.policyRevision = state.policyRevision request.policyId
   policyAddressExact :
     portal.policyAddress policyWitness =
-      state.policyAddress request.policyId request.policyEpoch
+      state.policyAddress request.policyId request.policyRevision
   policyMembershipVerified :
     portal.verifyMembership state.policyRoot
-      (state.policyAddress request.policyId request.policyEpoch)
+      (state.policyAddress request.policyId request.policyRevision)
       policyMembershipWitness = true
   policyVerified :
     portal.verifyCommittedPolicy
-      (state.policyAddress request.policyId request.policyEpoch)
+      (state.policyAddress request.policyId request.policyRevision)
       request policyWitness = true
+
+/-- Retained grants follow the current mutable policy. Changing source revision
+and snapshot roots does not change the immutable capability bounds. This
+transports only semantic capability admission: a fresh signature, current-source
+membership and acceptance by the new predicate remain separate obligations. -/
+theorem Capability.Admissible.at_policy_revision {kind : ResourceKind}
+    {cap : Capability kind} {before after : AuthState} {request : Request kind}
+    (admitted : cap.Admissible before request)
+    (sameRevocations : after.revoked = before.revoked)
+    (sameIssuer : after.issuerEpoch cap.issuer = before.issuerEpoch cap.issuer)
+    (sameGeneration : after.policyEpoch cap.policyId = before.policyEpoch cap.policyId)
+    (revision : PolicyRevision) (preRoot : Digest) :
+    cap.Admissible after
+      { request with policyRevision := revision, preStateRoot := preRoot } where
+  holder := admitted.holder
+  scope := ⟨admitted.scope.target, admitted.scope.verb, admitted.scope.cost⟩
+  validFrom := admitted.validFrom
+  validUntil := admitted.validUntil
+  policyId := admitted.policyId
+  policyEpoch := admitted.policyEpoch
+  policyCurrent := admitted.policyCurrent.trans sameGeneration.symm
+  issuerCurrent := admitted.issuerCurrent.trans sameIssuer.symm
+  selfNotRevoked := by simpa only [sameRevocations] using admitted.selfNotRevoked
+  ancestorNotRevoked := by simpa only [sameRevocations] using admitted.ancestorNotRevoked
+  channelNotRevoked := by simpa only [sameRevocations] using admitted.channelNotRevoked
+
+/-- No evidence mode, including signature-only and proof-only modes, can select
+an obsolete or future policy source revision. -/
+theorem wrong_policy_revision_rejected {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind}
+    (wrong : request.policyRevision ≠ state.policyRevision request.policyId) :
+    ¬ Nonempty (Authorized portal state request) := by
+  rintro ⟨accepted⟩
+  exact wrong accepted.policyRevisionExact
+
+/-- Source selection uses the current revision even when the grant generation
+has a different numeric value. -/
+theorem Authorized.current_policy_address {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind}
+    (accepted : Authorized portal state request) :
+    portal.policyAddress accepted.policyWitness =
+      state.policyAddress request.policyId (state.policyRevision request.policyId) := by
+  rw [← accepted.policyRevisionExact]
+  exact accepted.policyAddressExact
 
 /-! ## §5. Negative teeth. -/
 
@@ -510,6 +559,7 @@ def demoRequest : Request .object where
   preStateRoot := ⟨8⟩
   policyId := ⟨9⟩
   policyEpoch := 5
+  policyRevision := 11
   cost := 4
 
 def demoScope : Scope .object where
@@ -540,6 +590,7 @@ def demoState : AuthState where
   revoked := ∅
   issuerEpoch := fun _ => 3
   policyEpoch := fun _ => 5
+  policyRevision := fun _ => 11
   subjectKeyEpoch := fun _ => 2
 
 theorem demoCapability_admissible :
@@ -612,6 +663,7 @@ def demo_authorized_positive : Authorized demoPortal demoState demoRequest where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -646,5 +698,29 @@ theorem demo_ancestor_revocation_rejected :
       (ancestor := (⟨99⟩ : CapabilityId))
   · simp [demoAncestorCapability]
   · simp [demoAncestorRevokedState]
+
+/-- The positive fixture deliberately has generation five and revision eleven:
+source version is not a synonym for grant generation. -/
+theorem demo_generation_revision_independent :
+    demoRequest.policyEpoch ≠ demoRequest.policyRevision := by decide
+
+theorem demo_existing_grant_survives_source_update :
+    demoCapability.Admissible
+      { demoState with policyRevision := fun _ => 12, policyAddress := fun _ _ => ⟨35⟩ }
+      { demoRequest with policyRevision := 12, preStateRoot := ⟨36⟩ } :=
+  demoCapability_admissible.at_policy_revision
+    (after := { demoState with policyRevision := fun _ => 12, policyAddress := fun _ _ => ⟨35⟩ }) rfl rfl rfl 12 ⟨36⟩
+
+theorem demo_stale_revision_rejected :
+    ¬ Nonempty (Authorized demoPortal
+      { demoState with policyRevision := fun _ => 12 } demoRequest) := by
+  apply wrong_policy_revision_rejected
+  decide
+
+theorem demo_explicit_generation_rotation_revokes :
+    ¬ demoCapability.Admissible
+      { demoState with policyEpoch := fun _ => 6 } demoRequest := by
+  apply stale_policy_epoch_rejected
+  decide
 
 end Minidregg.Theory.TypedAuthorization

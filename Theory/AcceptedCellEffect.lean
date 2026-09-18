@@ -106,6 +106,7 @@ structure EffectRequestContext where
   height : Height
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
 
 def EffectRequestContext.request (context : EffectRequestContext)
@@ -124,6 +125,7 @@ def EffectRequestContext.request (context : EffectRequestContext)
   preStateRoot := preStateRoot
   policyId := context.policyId
   policyEpoch := context.policyEpoch
+  policyRevision := context.policyRevision
   cost := context.cost
 
 /-- A semantic family separates first-order boundary data from its typed Lean
@@ -315,6 +317,12 @@ theorem request_policyEpoch_exact
       family request pre declaration outcome) :
     request.policyEpoch = (family.request declaration).2.policyEpoch :=
   accepted.request_projection (fun packed => packed.2.policyEpoch)
+
+theorem request_policyRevision_exact
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) :
+    request.policyRevision = (family.request declaration).2.policyRevision :=
+  accepted.request_projection (fun packed => packed.2.policyRevision)
 
 theorem request_cost_exact
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)

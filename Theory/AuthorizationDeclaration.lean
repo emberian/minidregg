@@ -46,6 +46,7 @@ structure RequestWire where
   preStateRoot : Nat
   policyId : Nat
   policyEpoch : Nat
+  policyRevision : Nat
   cost : Nat
   deriving DecidableEq, Repr
 
@@ -114,6 +115,7 @@ def encodeRequest : SomeRequest → RequestWire
         preStateRoot := request.preStateRoot.value
         policyId := request.policyId.value
         policyEpoch := request.policyEpoch
+        policyRevision := request.policyRevision
         cost := request.cost }
 
 def decodeRequest (wire : RequestWire) : Option SomeRequest := do
@@ -134,6 +136,7 @@ def decodeRequest (wire : RequestWire) : Option SomeRequest := do
       preStateRoot := ⟨wire.preStateRoot⟩
       policyId := ⟨wire.policyId⟩
       policyEpoch := wire.policyEpoch
+      policyRevision := wire.policyRevision
       cost := wire.cost }⟩
 
 /-- The structured codec is lossless for every typed request. -/
@@ -142,7 +145,7 @@ def decodeRequest (wire : RequestWire) : Option SomeRequest := do
   rcases request with ⟨kind, request⟩
   cases request with
   | mk domain semantics federation subject subjectKeyEpoch target verb
-      argsDigest effectsDigest nonce height preStateRoot policyId policyEpoch cost =>
+      argsDigest effectsDigest nonce height preStateRoot policyId policyEpoch policyRevision cost =>
     cases verb <;> rfl
 
 /-! ## §2. First-order emitted declaration — no propositions -/
@@ -152,14 +155,58 @@ inductive RequestField where
   | domain | semantics | federation | resourceKind
   | subject | subjectKeyEpoch | target | verb
   | argsDigest | effectsDigest | nonce | height
-  | preStateRoot | policyId | policyEpoch | cost
+  | preStateRoot | policyId | policyEpoch | policyRevision | cost
   deriving DecidableEq, Repr
 
 def requestFieldOrder : List RequestField :=
   [.domain, .semantics, .federation, .resourceKind,
    .subject, .subjectKeyEpoch, .target, .verb,
    .argsDigest, .effectsDigest, .nonce, .height,
-   .preStateRoot, .policyId, .policyEpoch, .cost]
+   .preStateRoot, .policyId, .policyEpoch, .policyRevision, .cost]
+
+/-- The complete request wire protocol identity, shared by all emitted artifacts
+and the byte codec without importing any concrete compiler backend. -/
+def requestCodecVersion : Nat := 2
+
+/-- Sole canonical projection of the complete signed request, including current source revision. -/
+def requestWords (request : RequestWire) : List Nat :=
+  [request.domain, request.semantics, request.federation, request.resourceKind,
+   request.subject, request.subjectKeyEpoch, request.target, request.verb,
+   request.argsDigest, request.effectsDigest, request.nonce, request.height,
+   request.preStateRoot, request.policyId, request.policyEpoch, request.policyRevision, request.cost]
+
+def requestWordCount : Nat := requestFieldOrder.length
+
+@[simp] theorem requestWords_length (request : RequestWire) :
+    (requestWords request).length = requestWordCount := rfl
+
+def requestWireOfWords : List Nat → Option RequestWire
+  | [domain, semantics, federation, resourceKind, subject, subjectKeyEpoch,
+     target, verb, argsDigest, effectsDigest, nonce, height, preStateRoot,
+     policyId, policyEpoch, policyRevision, cost] =>
+    some ⟨domain, semantics, federation, resourceKind, subject, subjectKeyEpoch,
+      target, verb, argsDigest, effectsDigest, nonce, height, preStateRoot,
+      policyId, policyEpoch, policyRevision, cost⟩
+  | _ => none
+
+@[simp] theorem requestWireOfWords_requestWords (request : RequestWire) :
+    requestWireOfWords (requestWords request) = some request := by
+  cases request
+  rfl
+
+theorem requestWireOfWords_exact {words : List Nat} {request : RequestWire}
+    (decoded : requestWireOfWords words = some request) :
+    requestWords request = words := by
+  unfold requestWireOfWords at decoded
+  split at decoded
+  · cases Option.some.inj decoded
+    rfl
+  · contradiction
+
+theorem requestWords_injective : Function.Injective requestWords := by
+  intro left right same
+  have decoded := congrArg requestWireOfWords same
+  simpa only [requestWireOfWords_requestWords, Option.some.injEq] using decoded
 
 inductive Mode where
   | signature
@@ -182,6 +229,7 @@ inductive Check where
   | ancestorNonRevocations
   | channelNonRevocations
   | policyEpoch
+  | policyRevision
   | policyAddress
   | policyMembership
   | policy
@@ -196,15 +244,15 @@ structure ModePlan where
 which can bypass current-policy selection. -/
 def checksFor : Mode → List Check
   | .signature =>
-      [.subjectKeyEpoch, .signature, .policyEpoch, .policyAddress,
+      [.subjectKeyEpoch, .signature, .policyEpoch, .policyRevision, .policyAddress,
        .policyMembership, .policy]
   | .proof =>
-      [.proof, .policyEpoch, .policyAddress, .policyMembership, .policy]
+      [.proof, .policyEpoch, .policyRevision, .policyAddress, .policyMembership, .policy]
   | .capability =>
       [.capabilitySemantic, .capabilityUse, .capabilityCommitment,
        .capabilityMembership, .issuer, .selfNonRevocation,
        .ancestorNonRevocations, .channelNonRevocations,
-       .policyEpoch, .policyAddress, .policyMembership, .policy]
+       .policyEpoch, .policyRevision, .policyAddress, .policyMembership, .policy]
 
 /-- Complete emitted declaration.  It is intentionally first-order data. -/
 structure Declaration where
@@ -214,7 +262,7 @@ structure Declaration where
   deriving DecidableEq, Repr
 
 def declaration : Declaration where
-  schemaVersion := 3
+  schemaVersion := 4
   requestFields := requestFieldOrder
   modes :=
     [{ mode := .signature, checks := checksFor .signature },
@@ -525,16 +573,18 @@ def evalCheck {portal : Portal} {state : AuthState}
       | _ => false
   | .policyEpoch =>
       decide (request.policyEpoch = state.policyEpoch request.policyId)
+  | .policyRevision =>
+      decide (request.policyRevision = state.policyRevision request.policyId)
   | .policyAddress =>
       decide (portal.policyAddress presentation.policyWitness =
-        state.policyAddress request.policyId request.policyEpoch)
+        state.policyAddress request.policyId request.policyRevision)
   | .policyMembership =>
       portal.verifyMembership state.policyRoot
-        (state.policyAddress request.policyId request.policyEpoch)
+        (state.policyAddress request.policyId request.policyRevision)
         presentation.policyMembershipWitness
   | .policy =>
       portal.verifyCommittedPolicy
-        (state.policyAddress request.policyId request.policyEpoch)
+        (state.policyAddress request.policyId request.policyRevision)
         request presentation.policyWitness
 
 /-! ## §5. Total executable verifier and proof layer -/
@@ -590,6 +640,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
         (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyRevision := satisfied .policyRevision
+        (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyAddress := satisfied .policyAddress
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyMembership := satisfied .policyMembership
@@ -601,12 +653,14 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         policyWitness := policyWitness
         policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyRevisionExact := ?_
         policyAddressExact := ?_
         policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
       · simpa [evalCheck] using hkey
       · simpa [evalCheck] using hsignature
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyRevision
       · simpa [evalCheck] using hpolicyAddress
       · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
@@ -614,6 +668,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
       have hproof := satisfied .proof
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyRevision := satisfied .policyRevision
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyAddress := satisfied .policyAddress
         (by simp [PresentedEvidence.mode, checksFor])
@@ -626,11 +682,13 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         policyWitness := policyWitness
         policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyRevisionExact := ?_
         policyAddressExact := ?_
         policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
       · simpa [evalCheck] using hproof
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyRevision
       · simpa [evalCheck] using hpolicyAddress
       · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
@@ -652,6 +710,8 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
       have hchannels := satisfied .channelNonRevocations
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyEpoch := satisfied .policyEpoch
+        (by simp [PresentedEvidence.mode, checksFor])
+      have hpolicyRevision := satisfied .policyRevision
         (by simp [PresentedEvidence.mode, checksFor])
       have hpolicyAddress := satisfied .policyAddress
         (by simp [PresentedEvidence.mode, checksFor])
@@ -685,6 +745,7 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         policyWitness := policyWitness
         policyMembershipWitness := policyMembershipWitness
         policyEpochExact := ?_
+        policyRevisionExact := ?_
         policyAddressExact := ?_
         policyMembershipVerified := ?_
         policyVerified := ?_ }⟩
@@ -699,6 +760,7 @@ theorem planSatisfied_authorized {portal : Portal} {state : AuthState}
         rcases channelsVerified channel hmem with ⟨witness, -, verified⟩
         exact ⟨witness, verified⟩
       · simpa [evalCheck] using hpolicyEpoch
+      · simpa [evalCheck] using hpolicyRevision
       · simpa [evalCheck] using hpolicyAddress
       · simpa [evalCheck] using hpolicyMembership
       · simpa [evalCheck] using hpolicy
@@ -711,9 +773,20 @@ theorem verify_accepted_authorized {portal : Portal} {state : AuthState}
   planSatisfied_authorized presentation
     ((verify_accepted_iff presentation).mp accepted)
 
+/-- The executable common suffix enforces current revision independently of
+which credential mode supplies its earlier checks. -/
+theorem verify_wrong_policy_revision_rejected {portal : Portal} {state : AuthState}
+    {kind : ResourceKind} {request : Request kind}
+    (presentation : Presentation portal request)
+    (wrong : request.policyRevision ≠ state.policyRevision request.policyId) :
+    verify (state := state) presentation ≠ .accepted := by
+  intro accepted
+  exact wrong_policy_revision_rejected wrong
+    (verify_accepted_authorized presentation accepted)
+
 /-! ## §6. Small declaration/program teeth -/
 
-example : declaration.requestFields.length = 16 := by decide
+theorem declaration_requestFields_length : declaration.requestFields.length = 17 := by decide
 
 example : (checksFor .signature).getLast? = some .policy := rfl
 example : (checksFor .proof).getLast? = some .policy := rfl
@@ -722,7 +795,7 @@ example : (checksFor .capability).getLast? = some .policy := rfl
 /-- Mode-specific verification cannot skip the common policy suffix. -/
 theorem checksFor_policy_suffix (mode : Mode) :
     ∃ headChecks, checksFor mode = headChecks ++
-      [.policyEpoch, .policyAddress, .policyMembership, .policy] := by
+      [.policyEpoch, .policyRevision, .policyAddress, .policyMembership, .policy] := by
   cases mode
   · exact ⟨[.subjectKeyEpoch, .signature], rfl⟩
   · exact ⟨[.proof], rfl⟩

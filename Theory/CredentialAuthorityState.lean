@@ -8,9 +8,11 @@ deployment universe turns the sparse revocation plane into the exact `Finset`
 required by `TypedAuthorization.AuthState`; both authenticated-set roots are
 the root of the same canonical materialization.
 
-Capability lineage is retained as first-order capability data.  Its Lean
-validity predicate checks every adjacent strict-attenuation edge, including
-holder narrowing, rather than trusting parent identifiers.
+Capability lineage is retained as first-order capability and edge-origin data.
+Its validity predicate checks every adjacent strict attenuation or explicit
+subject delegation against its own relation, including the terminal root.
+The accepted mutation family establishes authority to create a delegated edge;
+the stored origin alone is not a cryptographic certificate.
 
 `CellState.LogicalState` stores a finite dependent map.  Absent epoch and
 membership entries are read through explicit zero/false defaults below;
@@ -36,8 +38,9 @@ inductive AuthorityField where
   | capability (kind : ResourceKind) (id : CapabilityId)
   | issuerEpoch (issuer : IssuerId)
   | policyEpoch (policy : PolicyId)
+  | policyRevision (policy : PolicyId)
   /-- Content address of the exact versioned policy source. -/
-  | policyAddress (policy : PolicyId) (epoch : Epoch)
+  | policyAddress (policy : PolicyId) (revision : PolicyRevision)
   | subjectKeyEpoch (subject : SubjectId)
   /-- Exact signing-key payload at one subject epoch. The current epoch and
   this record are installed atomically by the source-owned physical entry. -/
@@ -50,7 +53,15 @@ inductive AuthorityField where
 grandparent, and so on.  Validity is a separate Lean proposition below. -/
 structure StoredCapability (kind : ResourceKind) where
   head : Capability kind
-  ancestry : List (Capability kind)
+  ancestry : List (ParentLink kind)
+  deriving DecidableEq
+
+def strictAncestry {kind : ResourceKind} : List (ParentLink kind) → Prop
+  | [] => True
+  | link :: tail => link.origin = .strict ∧ strictAncestry tail
+
+def StoredCapability.IsStrict {kind : ResourceKind} (stored : StoredCapability kind) : Prop :=
+  strictAncestry stored.ancestry
 
 /-- Dependent values prevent a capability for one resource kind from being
 written into another kind's slot. -/
@@ -58,6 +69,7 @@ def AuthorityField.Value : AuthorityField → Type
   | .capability kind _ => StoredCapability kind
   | .issuerEpoch _ => Epoch
   | .policyEpoch _ => Epoch
+  | .policyRevision _ => PolicyRevision
   | .policyAddress _ _ => Digest
   | .subjectKeyEpoch _ => Epoch
   | .subjectKey _ _ => CredentialSigningKey.KeyRecord
@@ -94,6 +106,9 @@ def issuerEpochAt {M : Materializer} (pre : Cell M) (issuer : IssuerId) : Epoch 
 
 def policyEpochAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : Epoch :=
   (pre.logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+
+def policyRevisionAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : PolicyRevision :=
+  (pre.logical.fields (.policyRevision policy)).getD (show PolicyRevision from 0)
 
 /-- Missing sparse policy records resolve to the distinguished zero address;
 production policy admission still requires membership under `pre.root`, so an
@@ -152,8 +167,9 @@ def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
 
 /-! ## Proof-relevant validity of stored lineage -/
 
-/-- Every stored parent is the actual next capability and every edge is strict
-attenuation.  The terminal record is a genuine root. -/
+/-- Every stored edge retains its explicit origin and its matching static
+relation. The terminal record is a root; historical operation authorization
+is supplied by the accepted state transition, not by the serialized marker. -/
 inductive LineageValid {kind : ResourceKind} : StoredCapability kind → Prop
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
@@ -161,14 +177,20 @@ inductive LineageValid {kind : ResourceKind} : StoredCapability kind → Prop
       (ancestorsEmpty : cap.ancestors = ∅) :
       LineageValid ⟨cap, []⟩
   | attenuate (child parent : Capability kind)
-      (tail : List (Capability kind))
+      (tail : List (ParentLink kind))
       (parentValid : LineageValid ⟨parent, tail⟩)
       (edge : child.StrictAttenuates parent) :
-      LineageValid ⟨child, parent :: tail⟩
+      LineageValid ⟨child, ⟨parent, .strict⟩ :: tail⟩
+  | delegate (child parent : Capability kind)
+      (tail : List (ParentLink kind)) (request : Request kind)
+      (parentValid : LineageValid ⟨parent, tail⟩)
+      (shape : DelegationShape request child parent) :
+      LineageValid ⟨child, ⟨parent, .delegated request⟩ :: tail⟩
 
-theorem LineageValid.root_admissible {kind : ResourceKind}
+theorem LineageValid.root_admissible_of_strict {kind : ResourceKind}
     {stored : StoredCapability kind} {state : AuthState}
     {request : Request kind} (valid : LineageValid stored)
+    (strict : stored.IsStrict)
     (admitted : stored.head.Admissible state request) :
     ∃ root : Capability kind,
       root.parent = none ∧ root.root = root.id ∧
@@ -177,7 +199,36 @@ theorem LineageValid.root_admissible {kind : ResourceKind}
   | root cap parentNone rootSelf ancestorsEmpty =>
       exact ⟨cap, parentNone, rootSelf, admitted⟩
   | attenuate child parent tail parentValid edge ih =>
-      exact ih (Capability.strict_attenuation_admits_subset edge admitted)
+      exact ih strict.2 (Capability.strict_attenuation_admits_subset edge admitted)
+  | delegate child parent tail request parentValid shape ih =>
+      cases strict.1
+
+theorem LineageValid.root_bounds {kind : ResourceKind}
+    {stored : StoredCapability kind} (valid : LineageValid stored) :
+    ∃ root : Capability kind, root.parent = none ∧ root.root = root.id ∧
+      Capability.LineageBounds stored.head root := by
+  induction valid with
+  | root cap parentNone rootSelf ancestorsEmpty =>
+      exact ⟨cap, parentNone, rootSelf, Capability.LineageBounds.refl cap⟩
+  | attenuate child parent tail parentValid edge ih =>
+      obtain ⟨root, parentNone, rootSelf, bound⟩ := ih
+      exact ⟨root, parentNone, rootSelf, edge.payload.lineageBounds.trans bound⟩
+  | delegate child parent tail request parentValid shape ih =>
+      obtain ⟨root, parentNone, rootSelf, bound⟩ := ih
+      exact ⟨root, parentNone, rootSelf, shape.payload.lineageBounds.trans bound⟩
+
+theorem LineageValid.nonempty_lineage {kind : ResourceKind}
+    {stored : StoredCapability kind} (valid : LineageValid stored) :
+    Nonempty stored.head.Lineage := by
+  induction valid with
+  | root cap parentNone rootSelf ancestorsEmpty =>
+      exact ⟨.root cap parentNone rootSelf ancestorsEmpty⟩
+  | attenuate child parent tail parentValid edge ih =>
+      obtain ⟨lineage⟩ := ih
+      exact ⟨.attenuate child parent lineage edge⟩
+  | delegate child parent tail request parentValid shape ih =>
+      obtain ⟨lineage⟩ := ih
+      exact ⟨.delegate child parent request lineage shape⟩
 
 /-! ## Exact projection into the common authorization judgment -/
 
@@ -213,6 +264,8 @@ def StateProjection.authState {S : CellState.Schema}
       (logical.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
     policyEpoch := fun policy =>
       (logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+    policyRevision := fun policy =>
+      (logical.fields (.policyRevision policy)).getD (show PolicyRevision from 0)
     subjectKeyEpoch := fun subject =>
       (logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0) }
 
@@ -240,6 +293,7 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
   revoked := domain.revocationKeys.filter fun key => isRevoked pre key
   issuerEpoch := issuerEpochAt pre
   policyEpoch := policyEpochAt pre
+  policyRevision := policyRevisionAt pre
   subjectKeyEpoch := subjectKeyEpochAt pre
 
 @[simp] theorem authState_identity_projection
@@ -273,6 +327,10 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
     (domain : ProjectionUniverse) (pre : Cell M) (policy : PolicyId) :
     (authState domain pre).policyEpoch policy = policyEpochAt pre policy := rfl
 
+@[simp] theorem authState_policyRevision {M : Materializer}
+    (domain : ProjectionUniverse) (pre : Cell M) (policy : PolicyId) :
+    (authState domain pre).policyRevision policy = policyRevisionAt pre policy := rfl
+
 @[simp] theorem authState_subjectKeyEpoch {M : Materializer}
     (domain : ProjectionUniverse) (pre : Cell M) (subject : SubjectId) :
     (authState domain pre).subjectKeyEpoch subject = subjectKeyEpochAt pre subject := rfl
@@ -291,8 +349,8 @@ theorem not_mem_authState_revoked_of_outside {M : Materializer}
     key ∉ (authState domain pre).revoked := by
   simpa [mem_authState_revoked_iff, outside]
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff
 
