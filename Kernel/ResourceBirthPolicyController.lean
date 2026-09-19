@@ -953,6 +953,10 @@ structure BranchAccepted [DecidableEq F]
   source : CanonicalCellRegistry.LoadedPolicySource deployment.domain prepared.directory.directory
     ((oldAuthority prepared).policyAddress (branchRequest prepared height branch).2.policyId
       (branchRequest prepared height branch).2.policyRevision)
+  /-- Retain the already selected source's exact physical guard. Reconstructing
+  its dependent address index later would recompute the entire branch request. -/
+  sourceGuard : Nat × Digest
+  sourceGuardExact : sourceGuard = source.readGuard
   authorization : Authorized pending.portal (oldAuthority prepared)
     (branchRequest prepared height branch).2
   modeBound : branchRequiresCapability branch = true →
@@ -1009,6 +1013,8 @@ def Pending.admitBranch [DecidableEq F]
                     receipt := receipt
                     envelopeExact := envelopeExact.down
                     source := source
+                    sourceGuard := source.readGuard
+                    sourceGuardExact := rfl
                     authorization := authorization
                     modeBound := modeBound }
                 .ok (show { accepted : BranchAccepted pending branch //
@@ -1041,7 +1047,18 @@ theorem BranchAccepted.source_capability_required [DecidableEq F]
 def BranchAccepted.readGuard [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
-    (accepted : BranchAccepted pending branch) := accepted.source.readGuard
+    (accepted : BranchAccepted pending branch) := accepted.sourceGuard
+
+/-- Retaining the guard changes no dependency, physical root, or branch
+selection: it is exactly the value derived during this admission. -/
+theorem BranchAccepted.readGuard_eq_source [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
+    (accepted : BranchAccepted pending branch) :
+    accepted.readGuard = accepted.source.readGuard := accepted.sourceGuardExact
+
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.BranchAccepted.readGuard_eq_source' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BranchAccepted.readGuard_eq_source
 
 
 structure CredentialBundle where

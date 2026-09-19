@@ -177,8 +177,9 @@ private theorem branch_read_exact {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
     (branch : Branch accepted.descriptor) :
     (accepted.branches branch).readGuard.2 =
-      durable.snapshot.model.roots ⟨(accepted.branches branch).readGuard.1⟩ :=
-  (accepted.branches branch).source.readGuard_exact.trans
+      durable.snapshot.model.roots ⟨(accepted.branches branch).readGuard.1⟩ := by
+  rw [BranchAccepted.readGuard_eq_source]
+  exact (accepted.branches branch).source.readGuard_exact.trans
     ((congrArg rootBytes (accepted.prepared.directory.bytes_exact _)).trans
       (durable.snapshot.coherent _))
 
