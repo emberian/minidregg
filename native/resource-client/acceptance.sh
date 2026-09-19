@@ -310,7 +310,10 @@ SCALAR_ROOT=$(page_root "$EVIDENCE/query-scalar-before/view.json")
 JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-scalar-before/challenge.json")
-jq -e '.page.entries == []' "$EVIDENCE/query-scalar-before/view.json" >/dev/null
+jq -e '(.page.entries | length) == 1 and
+  .page.entries[0].key.type == "object" and .page.entries[0].key.resource == "601" and
+  .page.entries[0].key.field == "1" and .page.entries[0].value == "0"' \
+  "$EVIDENCE/query-scalar-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/joint-intent.json" <<EOF
 {
