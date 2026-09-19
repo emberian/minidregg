@@ -202,6 +202,23 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       pure <| if tag = "all" then Pred.all children else Pred.any children
   | _ => failAt (path ++ ".type") "unknown predicate constructor"
 
+private partial def predicateJson : Pred → Lean.Json
+  | .eq slot value => .mkObj [("type", "eq"), ("slot", .str slot),
+      ("value", signedDecimal value)]
+  | .le slot value => .mkObj [("type", "le"), ("slot", .str slot),
+      ("value", signedDecimal value)]
+  | .memberOf slot values => .mkObj [("type", "memberOf"), ("slot", .str slot),
+      ("values", .arr (values.toArray.map signedDecimal))]
+  | .writeOnce slot => .mkObj [("type", "writeOnce"), ("slot", .str slot)]
+  | .monotone slot => .mkObj [("type", "monotone"), ("slot", .str slot)]
+  | .witnessed identifier => .mkObj [("type", "witnessed"),
+      ("identifier", .str identifier.id)]
+  | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]
+  | .allL children => .mkObj [("type", "all"),
+      ("predicates", .arr (children.toList.toArray.map predicateJson))]
+  | .anyL children => .mkObj [("type", "any"),
+      ("predicates", .arr (children.toList.toArray.map predicateJson))]
+
 private def resourceKind (path : String) (json : Lean.Json) : Result ResourceKind := do
   match ← string path json with
   | "object" => pure .object
@@ -1077,8 +1094,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
       pure <| .mkObj [("type", "policy"), ("canonical", hexJson (PolicyRecordCodec.encode value)),
         ("policyId", decimal value.policyId.value), ("version", decimal value.version),
+        ("address", decimal (PolicyRecordCodec.digest value).value),
         ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
-        ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null)]
+        ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
+        ("predicate", predicateJson value.predicate)]
   | "view-capability" =>
       let accepted :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .object).toLawful.decode bytes).isSome ||
