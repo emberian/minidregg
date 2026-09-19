@@ -3,7 +3,7 @@
 
 The canonical Hyperdocument cell is an unbounded dependent sparse map.  This
 module chooses one concrete production shard for the forward-link workflow: a
-four-slot page containing document, element, and link records.  The page has a
+sixteen-entry page containing document, element, link, run and byte-valued atom records. The page has a
 stable version/capacity frame, compact prefix codecs, and a Lean cSHAKE256 root
 over the exact framed bytes.
 
@@ -12,6 +12,12 @@ carry an explicit `PageRef` (content domain, page number, expected page root).
 Projection to `Hyperdocument.LinkRecord` retains the canonical semantic target;
 the production page retains and root-commits physical cross-page routing.
 Nothing silently treats a globally named element as local to this page.
+
+Atom and run entries extend the entry grammar with tags 3 and 4; entry tags
+0/1/2 retain their encodings. Page epoch 2 adds a bounded overflow list after
+the four existing slots and changes the page frame and root domain. Old page
+bytes are refused rather than silently reinterpreted. Atom bodies use the
+canonical `AtomRecord` codec, including exact payload bytes and provenance.
 
 The bounded page projects into the existing `Hyperdocument.cellSchema`; it is
 not a replacement materializer for every unbounded Hyperdocument state.
@@ -71,6 +77,18 @@ def elementRecordStream : StreamCodec ElementRecord :=
     (fun wire =>
       ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
         wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
+    (by intro record; rfl)
+
+def runRecordStream : StreamCodec RunRecord :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .document)
+      (StreamCodec.product (StreamCodec.list (identifierStream .v1 .atom))
+        (StreamCodec.product principalRefStream
+          (StreamCodec.product (identifierStream .v1 .operationIntent)
+            (StreamCodec.option (identifierStream .v1 .operationIntent))))))
+    (fun record => (record.document, record.atoms, record.createdBy,
+      record.createdAt, record.tombstonedAt))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2⟩)
     (by intro record; rfl)
 
 /-! ## Explicit cross-page forward targets -/
@@ -213,17 +231,23 @@ inductive Entry where
   | document (documentId : DocumentId) (record : DocumentRecord)
   | element (elementId : ElementId) (record : ElementRecord)
   | link (linkId : LinkId) (record : ForwardLink)
+  | atom (atomId : AtomId) (record : AtomRecord)
+  | run (runId : RunId) (record : RunRecord)
   deriving DecidableEq, Repr
 
 def Entry.address : Entry -> Hyperdocument.Address
   | .document documentId _ => ⟨.documents, documentId⟩
   | .element elementId _ => ⟨.elements, elementId⟩
   | .link linkId _ => ⟨.links, linkId⟩
+  | .atom atomId _ => ⟨.atoms, atomId⟩
+  | .run runId _ => ⟨.runs, runId⟩
 
 def Entry.LocalTo (documentId : DocumentId) : Entry -> Prop
   | .document storedDocument _ => storedDocument = documentId
   | .element _ record => record.document = documentId
   | .link _ record => record.sourceDocument = documentId
+  | .atom _ record => record.document = documentId
+  | .run _ record => record.document = documentId
 
 instance entryLocalToDecidable (documentId : DocumentId) (entry : Entry) :
     Decidable (entry.LocalTo documentId) := by
@@ -240,6 +264,12 @@ def entryStream : StreamCodec Entry where
     | .link linkId record =>
         2 :: (identifierStream .v1 .link).encode linkId ++
           forwardLinkStream.encode record
+    | .atom atomId record =>
+        3 :: (identifierStream .v1 .atom).encode atomId ++
+          atomRecordStream.encode record
+    | .run runId record =>
+        4 :: (identifierStream .v1 .run).encode runId ++
+          runRecordStream.encode record
   decodePrefix
     | 0 :: bytes => do
         let (documentId, afterId) <-
@@ -256,6 +286,16 @@ def entryStream : StreamCodec Entry where
           (identifierStream .v1 .link).decodePrefix bytes
         let (record, suffix) <- forwardLinkStream.decodePrefix afterId
         some (.link linkId record, suffix)
+    | 3 :: bytes => do
+        let (atomId, afterId) <-
+          (identifierStream .v1 .atom).decodePrefix bytes
+        let (record, suffix) <- atomRecordStream.decodePrefix afterId
+        some (.atom atomId record, suffix)
+    | 4 :: bytes => do
+        let (runId, afterId) <-
+          (identifierStream .v1 .run).decodePrefix bytes
+        let (record, suffix) <- runRecordStream.decodePrefix afterId
+        some (.run runId record, suffix)
     | _ => none
   decodePrefix_encode := by
     intro entry suffix
@@ -272,14 +312,24 @@ def entryStream : StreamCodec Entry where
         simp [List.append_assoc,
           (identifierStream .v1 .link).decodePrefix_encode,
           forwardLinkStream.decodePrefix_encode]
+    | atom atomId record =>
+        simp [List.append_assoc,
+          (identifierStream .v1 .atom).decodePrefix_encode,
+          atomRecordStream.decodePrefix_encode]
+    | run runId record =>
+        simp [List.append_assoc,
+          (identifierStream .v1 .run).decodePrefix_encode,
+          runRecordStream.decodePrefix_encode]
 
 def Entry.install (fields : FieldStore Hyperdocument.cellSchema.{0, 0}) :
     Entry -> FieldStore Hyperdocument.cellSchema.{0, 0}
   | .document documentId record => fields.write ⟨.documents, documentId⟩ record
   | .element elementId record => fields.write ⟨.elements, elementId⟩ record
   | .link linkId record => fields.write ⟨.links, linkId⟩ record.toCanonical
+  | .atom atomId record => fields.write ⟨.atoms, atomId⟩ record
+  | .run runId record => fields.write ⟨.runs, runId⟩ record
 
-/-! ## Four-slot content pages and admission -/
+/-! ## Sixteen-entry content pages and admission -/
 
 structure Page where
   contentDomain : Digest
@@ -289,11 +339,12 @@ structure Page where
   slot1 : Option Entry
   slot2 : Option Entry
   slot3 : Option Entry
+  overflow : List Entry := []
   deriving DecidableEq, Repr
 
 abbrev PageTuple :=
   Digest × DocumentId × Nat × Option Entry × Option Entry × Option Entry ×
-    Option Entry
+    Option Entry × List Entry
 
 def pageTupleStream : StreamCodec PageTuple :=
   StreamCodec.product digestStream
@@ -302,11 +353,12 @@ def pageTupleStream : StreamCodec PageTuple :=
         (StreamCodec.product (StreamCodec.option entryStream)
           (StreamCodec.product (StreamCodec.option entryStream)
             (StreamCodec.product (StreamCodec.option entryStream)
-              (StreamCodec.option entryStream))))))
+              (StreamCodec.product (StreamCodec.option entryStream)
+                (StreamCodec.list entryStream)))))))
 
 def pageTuple (page : Page) : PageTuple :=
   ⟨page.contentDomain, page.document, page.pageNumber, page.slot0, page.slot1,
-    page.slot2, page.slot3⟩
+    page.slot2, page.slot3, page.overflow⟩
 
 def pageOfTuple (wire : PageTuple) : Page where
   contentDomain := wire.1
@@ -315,7 +367,8 @@ def pageOfTuple (wire : PageTuple) : Page where
   slot0 := wire.2.2.2.1
   slot1 := wire.2.2.2.2.1
   slot2 := wire.2.2.2.2.2.1
-  slot3 := wire.2.2.2.2.2.2
+  slot3 := wire.2.2.2.2.2.2.1
+  overflow := wire.2.2.2.2.2.2.2
 
 @[simp] theorem pageOfTuple_tuple (page : Page) :
     pageOfTuple (pageTuple page) = page :=
@@ -325,13 +378,14 @@ def pageStream : StreamCodec Page :=
   StreamCodec.xmap pageTupleStream pageTuple pageOfTuple pageOfTuple_tuple
 
 def Page.entries (page : Page) : List Entry :=
-  [page.slot0, page.slot1, page.slot2, page.slot3].filterMap _root_.id
+  [page.slot0, page.slot1, page.slot2, page.slot3].filterMap _root_.id ++ page.overflow
 
 def Page.addresses (page : Page) : List Hyperdocument.Address :=
   page.entries.map Entry.address
 
 def Page.Valid (page : Page) : Prop :=
-  page.addresses.Nodup /\ page.entries.Forall (Entry.LocalTo page.document)
+  page.addresses.Nodup /\ page.entries.Forall (Entry.LocalTo page.document) /\
+    page.overflow.length ≤ 12
 
 instance pageValidDecidable (page : Page) : Decidable page.Valid := by
   unfold Page.Valid
@@ -345,16 +399,19 @@ instance pageContainsDecidable (page : Page) (entry : Entry) :
   unfold Page.Contains
   infer_instance
 
-@[simp] theorem Page.entries_length_le_four (page : Page) :
-    page.entries.length ≤ 4 := by
+theorem Page.entries_length_le_sixteen (page : Page) (valid : page.Valid) :
+    page.entries.length ≤ 16 := by
   rcases page with
-    ⟨contentDomain, document, pageNumber, slot0, slot1, slot2, slot3⟩
+    ⟨contentDomain, document, pageNumber, slot0, slot1, slot2, slot3, overflow⟩
+  have bounded := valid.2.2
+  change overflow.length ≤ 12 at bounded
   cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
-    simp [Page.entries]
+    simp [Page.entries] <;> omega
 
 def Page.Full (page : Page) : Prop :=
   page.slot0.isSome = true /\ page.slot1.isSome = true /\
-    page.slot2.isSome = true /\ page.slot3.isSome = true
+    page.slot2.isSome = true /\ page.slot3.isSome = true /\
+    12 ≤ page.overflow.length
 
 instance pageFullDecidable (page : Page) : Decidable page.Full := by
   unfold Page.Full
@@ -372,12 +429,15 @@ def Page.insert? (page : Page) (entry : Entry) : Option Page :=
           | some _ =>
               match page.slot3 with
               | none => some { page with slot3 := some entry }
-              | some _ => none
+              | some _ =>
+                  if page.overflow.length < 12 then
+                    some { page with overflow := page.overflow ++ [entry] }
+                  else none
 
 theorem Page.insert_none_iff_full (page : Page) (entry : Entry) :
     page.insert? entry = none <-> page.Full := by
   rcases page with
-    ⟨contentDomain, document, pageNumber, slot0, slot1, slot2, slot3⟩
+    ⟨contentDomain, document, pageNumber, slot0, slot1, slot2, slot3, overflow⟩
   cases slot0 <;> cases slot1 <;> cases slot2 <;> cases slot3 <;>
     simp [Page.insert?, Page.Full]
 
@@ -487,14 +547,14 @@ def stateStream : StreamCodec (LogicalState schema) :=
   StreamCodec.xmap (StreamCodec.option pageStream) pageAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
-/-- Stable marker: `LOOM/HDOC/CONTENTPAGE`, wire version 1, capacity 4. -/
+/-- Stable marker: `LOOM/HDOC/CONTENTPAGE`, wire version 2, capacity 16. -/
 def wireFrame : List UInt8 :=
   [76, 79, 79, 77, 47, 72, 68, 79, 67, 47, 67, 79, 78, 84, 69, 78, 84, 80,
-    65, 71, 69, 1, 4]
+    65, 71, 69, 2, 16]
 
 def decodeState : List UInt8 -> Option (LogicalState schema)
   | 76 :: 79 :: 79 :: 77 :: 47 :: 72 :: 68 :: 79 :: 67 :: 47 :: 67 :: 79 ::
-      78 :: 84 :: 69 :: 78 :: 84 :: 80 :: 65 :: 71 :: 69 :: 1 :: 4 :: payload =>
+      78 :: 84 :: 69 :: 78 :: 84 :: 80 :: 65 :: 71 :: 69 :: 2 :: 16 :: payload =>
       stateStream.toLawful.decode payload
   | _ => none
 
@@ -508,7 +568,7 @@ def stateCodec : LawfulCodec (LogicalState schema) where
 
 def rootCustomization : List UInt8 :=
   [76, 79, 79, 77, 46, 72, 68, 79, 67, 46, 67, 79, 78, 84, 69, 78, 84, 80,
-    65, 71, 69, 46, 82, 79, 79, 84, 47, 118, 49]
+    65, 71, 69, 46, 82, 79, 79, 84, 47, 118, 50]
 
 theorem wire_and_root_domains_distinct : wireFrame ≠ rootCustomization := by
   decide
@@ -532,13 +592,13 @@ def materializer : CellState.Materializer schema Digest where
 @[simp] theorem reject_wrong_version (payload : List UInt8) :
     decodeState
       ([76, 79, 79, 77, 47, 72, 68, 79, 67, 47, 67, 79, 78, 84, 69, 78,
-        84, 80, 65, 71, 69, 2, 4] ++ payload) = none := by
+        84, 80, 65, 71, 69, 1, 16] ++ payload) = none := by
   simp [decodeState]
 
 @[simp] theorem reject_wrong_capacity (payload : List UInt8) :
     decodeState
       ([76, 79, 79, 77, 47, 72, 68, 79, 67, 47, 67, 79, 78, 84, 69, 78,
-        84, 80, 65, 71, 69, 1, 5] ++ payload) = none := by
+        84, 80, 65, 71, 69, 2, 15] ++ payload) = none := by
   simp [decodeState]
 
 /-! ## Pair-scoped collision-resistance boundary -/
@@ -709,6 +769,8 @@ def fullPage : Page where
   slot2 := linkPage.slot2
   slot3 := some (.element ⟨⟨103⟩⟩
     { elementRecord with parent := some rootElement })
+  overflow := (List.range 12).map fun index =>
+    .element ⟨⟨1000 + index⟩⟩ { elementRecord with parent := some rootElement }
 
 theorem fullPage_valid : fullPage.Valid := by
   decide

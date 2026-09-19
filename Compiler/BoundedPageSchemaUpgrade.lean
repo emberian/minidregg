@@ -44,7 +44,7 @@ set_option autoImplicit false
 /-! ## Exact next-generation codecs over the current typed state carriers -/
 
 /-- Page wire versions advance from their own deployed pins, independently of
-catalog generations. In this catalogue: content 1→2, events 1→2, authority 4→5. -/
+catalog generations. In this catalogue: content 2→3, events 1→2, authority 4→5. -/
 def nextWireVersion (kind : PageKind) : Nat := (controller kind).wireVersion + 1
 
 theorem nextWireVersion_fits (kind : PageKind) : nextWireVersion kind < 256 := by
@@ -66,9 +66,13 @@ def stateStreamNext : (kind : PageKind) → StreamCodec kind.State
   | .authorityPolicy => CredentialAuthorityPageMaterializer.stateStream
 
 /-- Retain the source-owned kind prefix and capacity, advance only its version. -/
+theorem capacity_fits (kind : PageKind) : (controller kind).capacity < 256 := by
+  cases kind <;> decide
+
 def wireFrameNext (kind : PageKind) : List UInt8 :=
   let old := (controller kind).wireFrame
-  old.take (old.length - 2) ++ [nextWireVersionByte kind, 4]
+  old.take (old.length - 2) ++ [nextWireVersionByte kind,
+    UInt8.ofNatLT (controller kind).capacity (capacity_fits kind)]
 
 def encodeNext (kind : PageKind) (state : kind.State) : List UInt8 :=
   wireFrameNext kind ++ (stateStreamNext kind).encode state

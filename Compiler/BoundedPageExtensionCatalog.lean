@@ -91,8 +91,8 @@ def contentController : Controller .content where
   pageCodecId := ⟨92001⟩
   controllerId := ⟨94001⟩
   rootAlgorithmId := ⟨93001⟩
-  wireVersion := 1
-  capacity := 4
+  wireVersion := 2
+  capacity := 16
   wireFrame :=
     Minidregg.Compiler.HyperdocumentContentPageMaterializer.wireFrame
   rootCustomization :=

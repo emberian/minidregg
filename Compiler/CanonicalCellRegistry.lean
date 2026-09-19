@@ -84,7 +84,7 @@ def kindAtTag : UInt8 → Option Kind
   cases kind <;> rfl
 
 def schemaRef : Kind → SchemaRef
-  | .content => ⟨⟨91001⟩, 1⟩
+  | .content => ⟨⟨91001⟩, 2⟩
   | .eventHistory => ⟨⟨91002⟩, 1⟩
   | .authorityShard => ⟨⟨91003⟩, 4⟩
   | .declaredObject => ⟨⟨91004⟩, 1⟩

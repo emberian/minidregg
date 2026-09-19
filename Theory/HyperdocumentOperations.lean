@@ -144,18 +144,21 @@ def createWrites (operation : OperationId) (author : PrincipalRef)
             createdAt := operation
             tombstonedAt := none } }⟩ ]
 
-def editAtomWrites (operation : OperationId)
-    (payload : EditAtomPayload) : List PackedWrite :=
-  [ ⟨.atoms,
-      { key := payload.atomId
-        expected := some payload.before
-        replacement :=
+def editAtomRecord (operation : OperationId)
+    (payload : EditAtomPayload) : AtomRecord :=
           { payload.before with
             kind := payload.kind
             payload := payload.payload
             tombstonedAt :=
               if payload.tombstone then some operation
-              else payload.before.tombstonedAt } }⟩ ]
+              else payload.before.tombstonedAt }
+
+def editAtomWrites (operation : OperationId)
+    (payload : EditAtomPayload) : List PackedWrite :=
+  [ ⟨.atoms,
+      { key := payload.atomId
+        expected := some payload.before
+        replacement := editAtomRecord operation payload }⟩ ]
 
 def linkRecord (operation : OperationId) (author : PrincipalRef)
     (payload : LinkPayload) : LinkRecord :=
