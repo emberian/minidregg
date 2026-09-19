@@ -319,7 +319,8 @@ def context : RequestContext where
   subjectKeyEpoch := 0
   height := 9
   policyId := ⟨10⟩
-  policyEpoch := 0
+  policyEpoch := authState.policyEpoch ⟨10⟩
+  policyRevision := authState.policyRevision ⟨10⟩
 
 /-! ### Separately authorized object and account batches -/
 
@@ -351,6 +352,7 @@ def multiAuthorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -418,6 +420,7 @@ def authorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -465,6 +468,7 @@ def jointObjectAuthorization : Authorized permissivePortal authState
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

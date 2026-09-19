@@ -8,8 +8,8 @@ fi
 
 HOST=$1
 EVIDENCE=$2
-HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-REPO=$(CDPATH= cd -- "$HERE/../.." && pwd)
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -29,7 +29,7 @@ if [ -e "$EVIDENCE" ]; then
   exit 2
 fi
 mkdir "$EVIDENCE"
-EVIDENCE=$(CDPATH= cd -- "$EVIDENCE" && pwd)
+EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 
 "$MINI" keygen --secret "$EVIDENCE/alice.key" --public "$EVIDENCE/alice.pub" \
   >"$EVIDENCE/public-key.txt"

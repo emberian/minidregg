@@ -54,8 +54,12 @@ noncomputable def totalAuthorityStateOf (marked : Nat -> Bool) :
     | .capability kind _ => ⟨emptyCapability kind, []⟩
     | .issuerEpoch _ => show Epoch from 0
     | .policyEpoch _ => show Epoch from 0
+    | .policyRevision _ => show PolicyRevision from 0
     | .policyAddress _ _ => show Digest from ⟨0⟩
     | .subjectKeyEpoch _ => show Epoch from 0
+    | .subjectKey subject epoch =>
+        { keyId := 0, keyEpoch := epoch, algorithm := 0, subject := subject.value,
+          publicKey := [], activeFrom := 0, activeUntil := 0, revoked := false }
     | .revoked (.capability ⟨identifier⟩) => marked identifier
     | .revoked (.channel _) => false
     | .nullifier _ => false

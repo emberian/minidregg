@@ -192,6 +192,7 @@ structure QueryEnvelope where
   expectedPreRoot : Digest
   policyId : PolicyId
   policyEpoch : Epoch
+  policyRevision : PolicyRevision
   cost : Nat
   deriving DecidableEq, Repr
 
@@ -229,6 +230,7 @@ def QueryDeclaration.toRequest (config : QueryConfig)
   preStateRoot := declaration.request.expectedPreRoot
   policyId := declaration.request.policyId
   policyEpoch := declaration.request.policyEpoch
+  policyRevision := declaration.request.policyRevision
   cost := declaration.request.cost
 
 @[simp] theorem QueryDeclaration.request_target
@@ -252,6 +254,11 @@ def QueryDeclaration.toRequest (config : QueryConfig)
     (config : QueryConfig) (declaration : QueryDeclaration) :
     (declaration.toRequest config).preStateRoot =
       declaration.request.expectedPreRoot :=
+  rfl
+
+@[simp] theorem QueryDeclaration.request_policyRevision
+    (config : QueryConfig) (declaration : QueryDeclaration) :
+    (declaration.toRequest config).policyRevision = declaration.request.policyRevision :=
   rfl
 
 @[simp] theorem QueryConfig.decode_encode_argument
@@ -399,6 +406,14 @@ variable
   simpa [QueryDeclaration.toRequest] using
     congrArg (fun candidate : Request .object => candidate.argsDigest)
       success.requestExact
+
+/-- A query carries its actual declared revision, and successful authorization
+requires that revision to be current in the same authority state. -/
+theorem policy_revision_current
+    (success : QuerySuccess config portal authState pre declaration request capability) :
+    declaration.request.policyRevision = authState.policyRevision declaration.request.policyId := by
+  have current := success.authorization.policyRevisionExact
+  simpa only [success.requestExact, QueryDeclaration.toRequest] using current
 
 /-- Direct reads expose only the pure canonical projection. -/
 def contentView

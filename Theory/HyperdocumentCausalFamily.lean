@@ -214,7 +214,7 @@ instance : Nonempty OperationIntent :=
      nonce := 0
      actionBytes := [] }⟩
 instance : Nonempty HyperdocumentOperations.RequestEnvelope :=
-  ⟨⟨⟨0⟩, 0, 0, ⟨0⟩, 0, 0⟩⟩
+  ⟨⟨⟨0⟩, 0, 0, ⟨0⟩, 0, 0, 0⟩⟩
 instance : Nonempty HyperdocumentOperations.Declaration :=
   ⟨⟨Classical.choice inferInstance, Classical.choice inferInstance,
     Classical.choice inferInstance⟩⟩
@@ -246,6 +246,7 @@ instance : Nonempty (Request .object) :=
      preStateRoot := ⟨0⟩
      policyId := ⟨0⟩
      policyEpoch := 0
+     policyRevision := 0
      cost := 0 }⟩
 
 def derivation : DigestDerivation where
@@ -305,6 +306,9 @@ def requestEnvelope : HyperdocumentOperations.RequestEnvelope where
   height := 20
   policyId := ⟨21⟩
   policyEpoch := 0
+  -- This closed genesis witness has no stored policy-revision entry. Its
+  -- authority projection's current revision is consequently the initial zero.
+  policyRevision := 0
   cost := 1
 
 def declaration : HyperdocumentOperations.Declaration where
@@ -410,6 +414,7 @@ def authorization : Authorized permissivePortal
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
