@@ -7,7 +7,7 @@ stable v1 query-argument frame, lawful codecs for every query constructor, and
 Lean cSHAKE256 addressing of the exact framed argument bytes.
 
 The positive content pole reads the exact link reopened by
-`HyperdocumentLinkReopenWitness` from a valid four-slot content page.  The
+`HyperdocumentLinkReopenWitness` from a valid sixteen-entry content page.  The
 positive history pole reads one content-addressed, causally well-formed version
 event from a valid four-slot event page.  Both retain one current
 request-indexed authorization and the same semantically admissible capability.
@@ -295,6 +295,8 @@ def authState : AuthState where
   revoked := ∅
   issuerEpoch := fun _ => 0
   policyEpoch := fun _ => 0
+  -- Both positive reads select the initial revision of this closed authority fixture.
+  policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
 
 def issuer : IssuerId := ⟨91004⟩
@@ -331,7 +333,7 @@ def page : ContentPage.Page where
   slot3 := none
 
 theorem page_valid : page.Valid := by
-  constructor
+  refine ⟨?_, ?_, ?_⟩
   · simp [page,
       Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.addresses,
       Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries,
@@ -342,6 +344,7 @@ theorem page_valid : page.Valid := by
       _root_.id,
       Minidregg.Compiler.HyperdocumentContentPageMaterializer.Entry.LocalTo,
       boundedLink]
+  · decide
 
 def pageCell : Materialized ContentPage.materializer :=
   CellState.materialize ContentPage.materializer
@@ -375,6 +378,7 @@ def envelope : QueryEnvelope where
   expectedPreRoot := pre.root
   policyId := policyId
   policyEpoch := 0
+  policyRevision := authState.policyRevision policyId
   cost := 1
 
 def declaration : QueryDeclaration := ⟨argument, envelope⟩
@@ -422,8 +426,8 @@ theorem capability_admissible : capability.Admissible authState request where
     simp [capability] at member
 
 def evidence : Evidence portal authState request :=
-  .capability capability ⟨92012⟩ () () () () capability_admissible
-    rfl rfl rfl rfl
+  .capability capability ⟨92012⟩ () () () () () capability_admissible
+    rfl rfl rfl rfl rfl
     (by intro ancestor member; simp [capability] at member)
     (by intro channel member; simp [capability] at member)
 
@@ -432,6 +436,7 @@ def authorization : Authorized portal authState request where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -521,7 +526,7 @@ def anchorPage : ContentPage.Page where
   slot3 := none
 
 theorem anchorPage_valid : anchorPage.Valid := by
-  constructor <;> simp [anchorPage,
+  refine ⟨?_, ?_, ?_⟩ <;> simp [anchorPage,
     Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.addresses,
     Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries]
 
@@ -543,6 +548,7 @@ def envelope : QueryEnvelope where
   expectedPreRoot := pre.root
   policyId := policyId
   policyEpoch := 0
+  policyRevision := authState.policyRevision policyId
   cost := 1
 
 def declaration : QueryDeclaration := ⟨argument, envelope⟩
@@ -589,8 +595,8 @@ theorem capability_admissible : capability.Admissible authState request where
     simp [capability] at member
 
 def evidence : Evidence portal authState request :=
-  .capability capability ⟨93012⟩ () () () () capability_admissible
-    rfl rfl rfl rfl
+  .capability capability ⟨93012⟩ () () () () () capability_admissible
+    rfl rfl rfl rfl rfl
     (by intro ancestor member; simp [capability] at member)
     (by intro channel member; simp [capability] at member)
 
@@ -599,6 +605,7 @@ def authorization : Authorized portal authState request where
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

@@ -92,6 +92,7 @@ def requestWireBytes (wire : AuthorizationDeclaration.RequestWire) : List UInt8 
   StreamCodec.nat.encode wire.preStateRoot ++
   StreamCodec.nat.encode wire.policyId ++
   StreamCodec.nat.encode wire.policyEpoch ++
+  StreamCodec.nat.encode wire.policyRevision ++
   StreamCodec.nat.encode wire.cost
 
 def canonicalRequestWire : AuthorizationDeclaration.RequestWire :=
@@ -299,9 +300,13 @@ def signedAuthorization :
   policyWitness := ⟨2200⟩
   policyMembershipWitness := ()
   policyEpochExact := by simp [useRequest, adminRequest]
+  policyRevisionExact := rfl
   policyAddressExact := by
     change ⟨2200⟩ = policyAddressAt attenuatedCell
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy 2
+      Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy
+      (policyRevisionAt attenuatedCell
+        Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy)
+    rw [attenuated_policy_revision_two]
     exact attenuated_policy_address_two.symm
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -400,7 +405,7 @@ def staleAuthorityEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, staleAuthorityEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, staleAuthorityEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion,
@@ -422,7 +427,7 @@ def wrongCommitmentEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, wrongCommitmentEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, wrongCommitmentEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion,
@@ -442,7 +447,7 @@ def unknownKeyEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, unknownKeyEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, unknownKeyEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
@@ -459,7 +464,7 @@ def wrongDomainEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, wrongDomainEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, wrongDomainEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
@@ -476,7 +481,7 @@ def wrongMessageEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, wrongMessageEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, wrongMessageEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
@@ -493,7 +498,7 @@ def wrongAlgorithmEnvelope : SignedEnvelope :=
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalState, canonicalRegistry, wrongAlgorithmEnvelope,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, wrongAlgorithmEnvelope,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
@@ -596,7 +601,7 @@ def staleEnvelope : SignedEnvelope := envelopeForCommitment staleCommitment
   rw [stateCodec.decode_encode, canonical_registry_decodes,
     canonical_envelope_decodes]
   simp [canonicalNextState, Prepared.nextState, canonicalPrepared,
-    canonicalState, canonicalRegistry, canonicalEnvelope, canonicalHeader,
+    canonicalState, canonicalRegistry, canonicalEnvelopeBytes, canonicalEnvelope, canonicalHeader,
     canonicalKey, canonicalRegistryCommitment, canonicalRegistryBytes,
     stateCodecVersion, registryCodecVersion, envelopeCodecVersion,
     credentialDomain, KeyRegistryProjection.findKey]
