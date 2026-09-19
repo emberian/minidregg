@@ -254,26 +254,28 @@ def signedOwnerInvocation (signer : System.FilePath) (durable : PolicyInstallRec
   let object ← requireSome "actual persisted object"
     (ResourceBirthController.Concrete.observeCell deployment directory.directory policyId.value .declaredObject)
   let command : DeclaredResourceController.Command :=
-    { kind := .object
-      target := policyId.value
-      subject := ⟨7⟩
-      capability := ownerId
+    { subject := ⟨7⟩
       expectedAuthorityRoot := authority.snapshot.cell.root
-      schemaVersion := 1
-      expectedTargetRoot := object.payload.root
       nonce := nonce
-      actions := [.write (.objectField ⟨policyId.value⟩ ⟨1⟩) (some oldValue) newValue] }
+      targets :=
+        [{ kind := .object
+           target := policyId.value
+           capability := ownerId
+           schemaVersion := 1
+           expectedTargetRoot := object.payload.root
+           payload := .scalar [.write (.objectField ⟨policyId.value⟩ ⟨1⟩) (some oldValue) newValue] }] }
   let marker := DeclaredResourceController.operationMarker deployment.domain profile.semantics command
   let signed : Digest → IO (List UInt8) := fun root => do
     let wanted := DeclaredResourceController.request authority.snapshot profile.semantics
       ⟨federation, height⟩ command root
     let header ← requireOk "new-revision complete owner request"
-      (CredentialSignatureAdmission.signingHeader authority.snapshot marker ⟨.object, wanted⟩)
+      (CredentialSignatureAdmission.signingHeader authority.snapshot marker ⟨command.first.kind, wanted⟩)
     let (_, signature) ← sign signer 7 (CredentialSignedEnvelopeController.headerCodec.encode header)
     pure (CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩)
   pure
     { commandBytes := DeclaredResourceController.commandCodec.encode command
-      targetEnvelope := ← signed object.payload.root
+      targetEnvelopes := [← signed object.payload.root]
+      observeEnvelopes := []
       authorityEnvelope := ← signed authority.snapshot.cell.root }
 
 def confirmOwnerInvocation (label : String) (native : CredentialSignatureIO.NativeConfig)

@@ -121,15 +121,16 @@ def seed (alice bob : KeyRecord) : IO DurableReceiver.Seed := do
       available := fun _ => 10000000 }
 
 def command (snapshot : CredentialAuthorityDomain.Snapshot) : DeclaredResourceController.Command :=
-  { kind := .object
-    target := targetId
-    subject := ⟨7⟩
-    capability := capId
+  { subject := ⟨7⟩
     expectedAuthorityRoot := snapshot.cell.root
-    schemaVersion := 1
-    expectedTargetRoot := targetCell.payload.root
     nonce := 991
-    actions := [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 1] }
+    targets :=
+      [{ kind := .object
+         target := targetId
+         capability := capId
+         schemaVersion := 1
+         expectedTargetRoot := targetCell.payload.root
+         payload := .scalar [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 1] }] }
 
 def signed (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snapshot)
     (command : DeclaredResourceController.Command) (seed : Nat := 7) : IO DeclaredResourceController.SignedCommand := do
@@ -137,12 +138,13 @@ def signed (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snap
   let makeEnvelope := fun root => do
     let wanted := DeclaredResourceController.request snapshot profile.semantics ambient command root
     let header ← requireOk "source-owned exact request signing header"
-      (CredentialSignatureAdmission.signingHeader snapshot marker ⟨command.kind, wanted⟩)
+      (CredentialSignatureAdmission.signingHeader snapshot marker ⟨command.first.kind, wanted⟩)
     let (_, signature) ← sign signer seed (CredentialSignedEnvelopeController.headerCodec.encode header)
     pure (CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩)
   pure
     { commandBytes := DeclaredResourceController.commandCodec.encode command
-      targetEnvelope := ← makeEnvelope command.expectedTargetRoot
+      targetEnvelopes := [← makeEnvelope command.first.expectedTargetRoot]
+      observeEnvelopes := []
       authorityEnvelope := ← makeEnvelope snapshot.cell.root }
 
 def rejected : DeclaredResourceController.ReceiveResult → Bool
@@ -168,7 +170,8 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let input ← signed signer authority.snapshot cmd
     let before ← requireOk "read original physical bytes" (← transport.read)
     let call := DeclaredResourceController.receive deployment profile ambient native transport
-    let altered := { cmd with actions := [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 2] }
+    let altered := { cmd with targets := [{ cmd.first with
+      payload := .scalar [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 2] }] }
     require "same logical nonce retains marker after action tamper"
       (DeclaredResourceController.operationMarker deployment.domain profile.semantics cmd ==
         DeclaredResourceController.operationMarker deployment.domain profile.semantics altered)
@@ -177,13 +180,16 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let bob := { cmd with subject := ⟨8⟩ }
     require "unrelated valid enrolled signer cannot use Alice capability"
       (rejected (← call (← signed signer authority.snapshot bob 8)))
-    let stale := { cmd with expectedTargetRoot := ⟨cmd.expectedTargetRoot.value + 1⟩ }
+    let stale := { cmd with targets := [{ cmd.first with
+      expectedTargetRoot := ⟨cmd.first.expectedTargetRoot.value + 1⟩ }] }
     require "stale target root refuses"
       (rejected (← call { input with commandBytes := DeclaredResourceController.commandCodec.encode stale }))
-    let overbroad := { cmd with actions := [.write (.objectField ⟨targetId + 1⟩ ⟨1⟩) (some 0) 1] }
+    let overbroad := { cmd with targets := [{ cmd.first with
+      payload := .scalar [.write (.objectField ⟨targetId + 1⟩ ⟨1⟩) (some 0) 1] }] }
     require "out-of-target edit refuses"
       (rejected (← call { input with commandBytes := DeclaredResourceController.commandCodec.encode overbroad }))
-    let policyAttempt := { cmd with actions := [.write (.programCode ⟨targetId⟩) none 1] }
+    let policyAttempt := { cmd with targets := [{ cmd.first with
+      payload := .scalar [.write (.programCode ⟨targetId⟩) none 1] }] }
     require "ordinary object editing cannot replace program or law"
       (rejected (← call { input with commandBytes := DeclaredResourceController.commandCodec.encode policyAttempt }))
     require "refusals preserve exact physical image" (decide ((← requireOk "read after refusals" (← transport.read)) = before))
@@ -194,9 +200,9 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let finalDirectory ← requireSome "reopened complete directory"
       (CredentialAuthorityDomainReceiver.loadDirectory reopened)
     let target ← requireSome "actual persisted target"
-      (DeclaredResourceController.observeTarget deployment finalDirectory.directory cmd)
+      (ResourceBirthController.Concrete.observeCell deployment finalDirectory.directory targetId .declaredObject)
     let page ← requireSome "actual persisted target page"
-      (DeclaredEffectPageMaterializer.pageAt target.pre.logical)
+      (DeclaredEffectPageMaterializer.pageAt target.payload.logical)
     require "reopened target has exact action result"
       (decide (page.lookup (.objectField ⟨targetId⟩ ⟨1⟩) = some 1))
     let afterAuthority ← requireSome "reopened complete authority"

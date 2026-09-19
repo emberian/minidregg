@@ -11,6 +11,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
 import Kernel.NativeHostGenesis
+import Host.Json
 import Lean.Data.Json
 
 open Lean
@@ -56,20 +57,47 @@ def Settings.config (settings : Settings) : NativeHost.Config where
 
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
-  let json ← IO.ofExcept (Json.parse text)
+  let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
   pure settings
 
-def description (config : NativeHost.Config) : IO Json := do
-  discard <| IO.ofExcept (← NativeHost.openExisting config)
-  pure <| Json.mkObj
+/-- Immutable operator-selected protocol metadata. Available before bootstrap;
+this reads neither storage nor protected resource values. Full-width integers
+are decimal strings so clients cannot silently round a digest. -/
+def profileDescription (config : NativeHost.Config) : Lean.Json :=
+  let n := fun value : Nat => toJson (toString value)
+  Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
-     ("semantics", toJson config.profile.semantics.value),
-     ("domain", toJson config.deployment.domain.value),
-     ("fieldModulus", toJson Minidregg.Compiler.babyBearP),
-     ("orderDifferenceWidth", toJson NativeHostProfile.orderWidth),
+     ("semantics", n config.profile.semantics.value),
+     ("domain", n config.deployment.domain.value),
+     ("federation", n config.federation.value),
+     ("factoryId", n config.deployment.factoryId),
+     ("resourceBookId", n config.deployment.resourceBookId),
+     ("authorityCatalogueId", n config.deployment.authorityCatalogueId),
+     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
+     ("genesisHeight", n config.genesisHeight),
+     ("template", Lean.Json.mkObj [("issuer", n config.template.issuer.value),
+       ("ownerBudget", n config.template.ownerBudget), ("lifetime", n config.template.lifetime)]),
+     ("tariff", Lean.Json.mkObj [("base", n config.tariff.base),
+       ("perBirth", n config.tariff.perBirth), ("perGrant", n config.tariff.perGrant),
+       ("perInitialPayloadByte", n config.tariff.perInitialPayloadByte),
+       ("collector", n config.tariff.collector), ("asset", n config.tariff.asset)]),
+     ("runtimeParameters", toJson (Minidregg.Host.Json.encodeHex config.runtimeParameters)),
+     ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
+
+def description (config : NativeHost.Config) : IO Lean.Json := do
+  discard <| IO.ofExcept (← NativeHost.openExisting config)
+  let n := fun value : Nat => toJson (toString value)
+  pure <| Lean.Json.mkObj
+    [("runtime", toJson "minidregg-native"),
+     ("semantics", n config.profile.semantics.value),
+     ("domain", n config.deployment.domain.value),
+     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
-     ("operations", toJson (["birth", "invoke", "install", "delegate"] : List String)),
+     ("operations", toJson (["birth", "invoke", "install", "delegate", "revoke"] : List String)),
+     ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
 def failure (phase detail : String) : List UInt8 :=
@@ -135,8 +163,14 @@ def readBytes (path : String) : IO (List UInt8) :=
 def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
   IO.FS.writeBinFile path bytes.toByteArray
 
+def readJson (path : String) : IO Lean.Json :=
+  return ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile path))
+
+def writeJson (path : String) (value : Lean.Json) : IO Unit :=
+  IO.FS.writeFile path value.pretty
+
 def usage : String :=
-  "minidregg-host CONFIG.json describe|stdio|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -144,8 +178,25 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
+      | "profile", [] => IO.println (profileDescription config).pretty; pure 0
+      | "author", [kind, input, output] =>
+          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind (← readJson input))
+          writeBytes output bytes
+          pure 0
+      | "inspect", [kind, input, output] =>
+          let value ← IO.ofExcept (Minidregg.Host.Json.inspect kind (← readBytes input))
+          writeJson output value
+          pure 0
+      | "derive", [kind, input, output] =>
+          let value ← IO.ofExcept (Minidregg.Host.Json.derive kind (← readJson input))
+          writeJson output value
+          pure 0
+      | "signatures", [input, output] =>
+          let bytes ← IO.ofExcept (Minidregg.Host.Json.signatures (← readJson input))
+          writeBytes output bytes
+          pure 0
       | "genesis", [input, imageOutput, configOutput] =>
-          let (source, built) ← IO.ofExcept <|
+          let ⟨source, built⟩ ← IO.ofExcept <|
             (NativeHostGenesis.buildBytes config.profile (← readBytes input)).mapError (fun error => s!"{repr error}")
           unless source.deployment == config.deployment && source.federation == config.federation &&
               source.tariff == config.tariff && source.genesisHeight == config.genesisHeight do

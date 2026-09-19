@@ -59,3 +59,11 @@ import Kernel.FinalityGate  -- ATLAS §3 item 11, the finality gate as a DECIDER
 import Kernel.HyperedgeTier  -- Law 2 on the ONE turn model: commitTier tierOf := Finset.univ.sup over the incidences, leg_le_commitTier, commitTier_eq_causal_iff (coordination-free iff EVERY written cell is tier 1), hyperedge_commit_at_join (+ leg canonicity from the one apex); Law 1 ⟂ Law 2 on the shared conservation aggregate (conservedAtTier := Σ halfEdge = 0, conservation_tier_independent := rfl, the Σ = 1 cone refused at every tier). On Kernel.Turn only — no KernelState. Residuals [TIER-of-cell] [TIER-gate]
 import Kernel.HyperedgeKnowledge  -- the epistemic reading of legs_agree: in the observation frame the apex H.tid is DISTRIBUTED KNOWLEDGE among the honest legs for ANY hyperedge and ANY faulty set (agreement_is_distributed_knowledge; distKnows_apex_iff_honest_agree the iff), and a fork — two honest legs reading different ids — is the absence of any distributed apex (fork_has_no_distributed_apex; splitTuple_no_hyperedge). Residual [HYPEREDGE-operational]
 import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bundles the replicated layer's three premises (available quorum, fair delivery, responsive replicas) as a realizer slot; progress reuses finalized_of_available_fair_responsive and the decider accepts it (checked_of_progress); the constitution's sentence as two theorems kept apart — cannot_forge (no liveness premise anywhere) and no_progress_without_quorum (IsEmpty PostGSTProgress); closed Fin 3 realizer built, dead quorum system / partition / never-delivering schedule each refuted at its own leg. Residuals [LIVENESS-gst] [LIVENESS-authenticated]
+import Kernel.NativeHost
+import Kernel.NativeHostGenesis
+import Kernel.ContentResource
+import Kernel.ContentResourceAudit
+import Kernel.AgentGrain
+import Kernel.AgentGrainAudit
+import Kernel.CapabilityRevocationReceiver
+import Kernel.ResourceTransactionAudit

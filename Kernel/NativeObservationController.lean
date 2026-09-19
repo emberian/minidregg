@@ -12,6 +12,7 @@ neither the policy projection nor the returned value contains the shared Book.
 This is a snapshot read, not a timing-noninterference or malicious-host claim.
 -/
 import Compiler.NativeObservationCodec
+import Kernel.ResourceObservationAdmission
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -29,16 +30,18 @@ set_option autoImplicit false
 
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
-abbrev PageCell := DeclaredResourceController.PageCell
+abbrev Registry := CanonicalCellRegistry.registry
 
-/-- Both source loaders retain their provenance from precisely this image. -/
-structure Context (deployment : Deployment) (durable : Durable) where
-  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
+abbrev Context := ResourceObservationAdmission.Context
 
 variable {deployment : Deployment} {durable : Durable}
 
 private def refused : String := "observation refused"
+
+/-- Source contract named by the deployed profile: exact role selection,
+schema-native unchanged views, explicit observation grants for the entire
+joint target list, and the one loaded image throughout authorization. -/
+abbrev observationProjectionVersion := CanonicalRuntimeProfile.observationProjectionVersion
 
 private def need {α : Type} : Option α → Except String α
   | none => .error refused
@@ -47,57 +50,29 @@ private def need {α : Type} : Option α → Except String α
 private def require (condition : Bool) : Except String Unit :=
   if condition then .ok () else .error refused
 
-def observeVerb : (kind : ResourceKind) → Verb kind
-  | .object => .observeObject
-  | .account => .observeAccount
-  | .program => .observeProgram
-
-def book (context : Context deployment durable) : Option CanonicalResourceKernel.Book := do
-  let observed ← ResourceBirthController.Concrete.observeCell deployment
-    context.directory.directory deployment.resourceBookId .resourceBook
-  CanonicalResourcePageMaterializer.bookAt observed.payload.logical
-
-/-- A computable restriction whose value at each asset is definitionally the
-selected account's balance, with no dependence on any other account's value. -/
-def accountBalanceMap (value : CanonicalResourceKernel.Book) (account : Nat) : Π₀ _ : Nat, Int :=
-  DFinsupp.comapDomain' (fun asset => (account, asset))
-    (h' := Prod.snd) (fun _ => rfl) value.balances
-
-/-- Canonical sparse entries sorted by asset. Zero has the Book's ordinary
-sparse meaning; the tuple contains no other account identifier. -/
-def accountCut (value : CanonicalResourceKernel.Book) (account : Nat) : List (Nat × Int) :=
-  CanonicalResourcePageMaterializer.entries (accountBalanceMap value account)
+abbrev observeVerb := ResourceObservationAdmission.observeVerb
+abbrev book (context : Context deployment durable) := ResourceObservationAdmission.book context
+abbrev accountBalanceMap := CanonicalAccountView.accountBalanceMap
+abbrev accountCut := CanonicalAccountView.accountCut
+abbrev balanceStream := CanonicalAccountView.balanceStream
 
 theorem accountBalanceMap_exact (value : CanonicalResourceKernel.Book) (account asset : Nat) :
-    accountBalanceMap value account asset = value.balance account asset := rfl
+    accountBalanceMap value account asset = value.balance account asset :=
+  CanonicalAccountView.accountBalanceMap_exact value account asset
 
-/-- Arbitrary changes to every other balance, account list and lease record
-cannot change the selected private account view. -/
 theorem accountCut_noninterference (left right : CanonicalResourceKernel.Book) (account : Nat)
     (same : ∀ asset, left.balance account asset = right.balance account asset) :
-    accountCut left account = accountCut right account := by
-  have equal : accountBalanceMap left account = accountBalanceMap right account := by
-    ext asset
-    exact same asset
-  unfold accountCut
-  rw [equal]
-
-def balanceStream : StreamCodec (List (Nat × Int)) :=
-  StreamCodec.list (StreamCodec.product StreamCodec.nat CanonicalResourcePageMaterializer.intStream)
+    accountCut left account = accountCut right account :=
+  CanonicalAccountView.accountCut_noninterference left right account same
 
 def balances (context : Context deployment durable) (grant : GrantRef) : Option (List (Nat × Int)) :=
-  if grant.kind = .account then do
-    let value ← book context
-    some (accountCut value grant.target)
-  else some []
+  ResourceObservationAdmission.balances context grant.kind grant.target
 
 abbrev Target := ResourceKind × Nat
 
 def declaredKind (context : Context deployment durable) (target : Nat) : Option ResourceKind :=
   match context.directory.directory.slots target with
-  | .present ⟨.declaredObject, _⟩ => some .object
-  | .present ⟨.accountMetadata, _⟩ => some .account
-  | .present ⟨.declaredProgram, _⟩ => some .program
+  | .present packed => ResourceTargetAdmission.externalKind packed.kind
   | _ => none
 
 /-- This analysis never runs a mutating preparation. Existing Book account
@@ -113,13 +88,20 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
   | .prepare (.invoke bytes) =>
       let command ← need (DeclaredResourceController.commandCodec.decode bytes)
       require (command.subject == intent.subject)
-      pure [(command.kind, command.target)]
+      require command.targetsWellFormed
+      pure (command.targets.map fun target => (target.kind, target.target))
   | .prepare (.delegate bytes) =>
       let command ← need (CapabilityDelegationController.commandCodec.decode bytes)
       require (command.2.subject == intent.subject)
       -- Observing another grant must not expose this named parent's lineage.
       require (intent.grants.all fun grant => grant.capability == command.2.declaration.parentId)
       pure [(command.1, command.2.declaration.target.value)]
+  | .prepare (.revoke bytes) =>
+      let command ← need (CapabilityRevocationController.commandCodec.decode bytes)
+      require (command.2.subject == intent.subject)
+      -- Observing the resource is separate from exercising its management
+      -- grant. The signing plan exposes no stored victim/lineage payload.
+      pure [(command.1, command.2.target.value)]
   | .prepare (.install subject _ bytes) =>
       require (subject == intent.subject)
       let declaration ← need (PolicyInstallController.decodeDeclaration bytes)
@@ -134,11 +116,30 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
           some (.account, operation.posting.source) else none
       pure ((.object, descriptor.factory.value) :: sources).eraseDups
 
-def footprintExact (context : Context deployment durable) (intent : Intent) : Except String Unit := do
-  let required ← requiredTargets context intent
-  require (intent.grants.map (fun grant => (grant.kind, grant.target)) == required)
+def footprintExact (context : Context deployment durable) (intent : Intent) : Except String Unit :=
+  match requiredTargets context intent with
+  | .error reason => .error reason
+  | .ok required =>
+      if intent.grants.map (fun grant => (grant.kind, grant.target)) = required then .ok ()
+      else .error refused
 
-def bindingBytes (context : Context deployment durable) (semantics : Digest)
+/-- Missing, additional, reordered or wrong-kind read selections are all
+refused before any selected values can be returned. -/
+theorem footprint_mismatch_refused (context : Context deployment durable) (intent : Intent)
+    (required : List Target) (derived : requiredTargets context intent = .ok required)
+    (different : intent.grants.map (fun grant => (grant.kind, grant.target)) ≠ required) :
+    footprintExact context intent = .error refused := by
+  simp [footprintExact, derived, different]
+
+theorem footprint_success_exact (context : Context deployment durable) (intent : Intent)
+    (required : List Target) (derived : requiredTargets context intent = .ok required)
+    (accepted : footprintExact context intent = .ok ()) :
+    intent.grants.map (fun grant => (grant.kind, grant.target)) = required := by
+  by_contra different
+  rw [footprint_mismatch_refused context intent required derived different] at accepted
+  cases accepted
+
+def bindingBytes (_context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product digestStream grantStream)))).encode
@@ -148,17 +149,17 @@ def bindingBytes (context : Context deployment durable) (semantics : Digest)
 
 def effectIdentity (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v3".toUTF8.toList
     (bindingBytes context semantics intent grant)).digest
 
 def marker (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v3".toUTF8.toList
     (bindingBytes context semantics intent grant)).digest.value
 
 def request (context : Context deployment durable) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (pre : PageCell) : Request grant.kind where
+    (grant : GrantRef) (preRoot : Digest) : Request grant.kind where
   domain := deployment.domain
   semantics := semantics
   federation := federation
@@ -170,54 +171,59 @@ def request (context : Context deployment durable) (semantics : Digest)
   effectsDigest := effectIdentity context semantics intent grant
   nonce := intent.nonce
   height := genesisHeight + durable.image.accepted.length
-  preStateRoot := pre.root
+  preStateRoot := preRoot
   policyId := ⟨grant.target⟩
   policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨grant.target⟩
   policyRevision := context.authority.snapshot.authState.policyRevision ⟨grant.target⟩
   cost := (intentCodec.encode intent).length
 
+abbrev readPatch := ResourceObservationAdmission.readPatch
+
 def readFamily (context : Context deployment durable) (semantics : Digest)
-    (federation : FederationId) (genesisHeight : Nat) (grant : GrantRef) (pre : PageCell) :
-    SemanticEffectFamily DeclaredEffectPageMaterializer.schema
-      DeclaredEffectPageMaterializer.materializer Unit where
-  Declaration := Intent
-  declarationCodec := intentCodec
-  pre := pre
-  request := fun intent => ⟨grant.kind, request context semantics federation genesisHeight intent grant pre⟩
-  Outcome := fun _ => Unit
-  outcomeCodec := fun _ => CredentialAuthorityEffects.unitCodec
-  ModeEvidence := fun _ _ => Unit
-  Postcondition := fun _ _ logical => logical = pre.logical
-  effectDigest := fun intent => effectIdentity context semantics intent grant
-  patch := fun _ _ => ResourceBirthPolicyController.factoryPatch pre
-  nullifier := fun _ _ => none
-  Release := fun _ _ => Empty
-  DeclassificationAuthority := fun _ _ => Empty
-  ReleaseAuthorization := fun _ _ _ => Empty
-  DisclosureAllowed := fun _ _ _ => True
+    (federation : FederationId) (genesisHeight : Nat) (grant : GrantRef)
+    (kind : CanonicalCellRegistry.Kind)
+    (pre : Materialized (CanonicalCellRegistry.materializer kind)) (intent : Intent) :=
+  ResourceObservationAdmission.readFamily
+    (request context semantics federation genesisHeight intent grant pre.root) kind pre
 
 def readCandidate (context : Context deployment durable) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (pre : PageCell) :
-    PolicyInstall.Candidate (readFamily context semantics federation genesisHeight grant pre) pre intent () :=
-  match checked : validate DeclaredEffectPageMaterializer.materializer pre
-      (ResourceBirthPolicyController.factoryPatch pre) with
-  | .accepted validated =>
-      { preStateBound := rfl, modeEvidence := (), validated := validated
-        postcondition := by
-          change ({ fields := pre.logical.fields, resources := pre.logical.resources } :
-            LogicalState DeclaredEffectPageMaterializer.schema) = pre.logical
-          rfl }
-  | .rejected _ => False.elim (by
-      simp [validate, ResourceBirthPolicyController.factoryPatch, Patch.namedFields,
-        Patch.namedResources] at checked)
+    (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
+    (pre : Materialized (CanonicalCellRegistry.materializer kind)) :=
+  ResourceObservationAdmission.readCandidate
+    (request context semantics federation genesisHeight intent grant pre.root) kind pre rfl
+
+/-- Authority kinds select concrete resource roles, never another role sharing
+the same representation. Content is an object; the shared Book and authority
+planes are never observation targets through this protocol. -/
+def observableKind (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) : Bool :=
+  decide (ResourceTargetAdmission.externalKind physical = some kind)
+
+theorem observable_roles_exact (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) :
+    observableKind kind physical = true ↔
+      (kind = .object ∧ (physical = .declaredObject ∨ physical = .content)) ∨
+      (kind = .account ∧ physical = .accountMetadata) ∨
+      (kind = .program ∧ physical = .declaredProgram) := by
+  cases kind <;> cases physical <;> simp [observableKind, ResourceTargetAdmission.externalKind]
+
+theorem content_observation_is_object (kind : ResourceKind) :
+    observableKind kind .content = true ↔ kind = .object := by
+  cases kind <;> simp [observableKind, ResourceTargetAdmission.externalKind]
+
+theorem shared_book_is_not_observable (kind : ResourceKind) :
+    observableKind kind .resourceBook = false := by
+  cases kind <;> rfl
+
+theorem authority_shard_is_not_observable (kind : ResourceKind) :
+    observableKind kind .authorityShard = false := by
+  cases kind <;> rfl
 
 structure Selected (context : Context deployment durable) (grant : GrantRef) where
   private mk ::
-  packed : PackedCell CanonicalCellRegistry.registry
+  packed : PackedCell Registry
   present : context.directory.directory.slots grant.target = .present packed
-  page : PageCell
-  selected : CanonicalCellRegistry.selectDeclared deployment grant.target grant.kind packed = some page
+  law : CanonicalCellRegistry.CellLaw deployment grant.target packed
+  role : observableKind grant.kind packed.kind = true
   accountBalances : List (Nat × Int)
   balancesExact : balances context grant = some accountBalances
 
@@ -225,79 +231,34 @@ def select (context : Context deployment durable) (grant : GrantRef) : Option (S
   match present : context.directory.directory.slots grant.target with
   | .absent => none
   | .present packed =>
-      match selected : CanonicalCellRegistry.selectDeclared deployment grant.target grant.kind packed with
-      | none => none
-      | some page =>
+      if law : CanonicalCellRegistry.CellLaw deployment grant.target packed then
+        if role : observableKind grant.kind packed.kind = true then
           match exact : balances context grant with
           | none => none
-          | some values => some ⟨packed, present, page, selected, values, exact⟩
-
-def project (context : Context deployment durable) (semantics : Digest)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant)
-    (logical : LogicalState DeclaredEffectPageMaterializer.schema) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots
-      (request context semantics federation genesisHeight intent grant selected.page) ++
-    DeclaredResourceController.bytesSlots "intent/bytes" 0 (intentCodec.encode intent) ++
-    DeclaredResourceController.bytesSlots "resource/bytes" 0
-      (DeclaredEffectPageMaterializer.materializer.codec.encode logical) ++
-    DeclaredResourceController.bytesSlots "account/bytes" 0 (balanceStream.encode selected.accountBalances) ++
-    selected.accountBalances.map (fun pair => (s!"account/balance/{pair.1}", pair.2))⟩
-
-def step (context : Context deployment durable) (semantics : Digest)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant) : PolicyStepContext :=
-  PolicyStepContext.ofCandidate
-    (project context semantics federation genesisHeight intent grant selected) semantics
-    (readCandidate context semantics federation genesisHeight intent grant selected.page)
+          | some values => some ⟨packed, present, law, role, values, exact⟩
+        else none
+      else none
 
 variable {F : Type} [Field F] [DecidableEq F]
 
-def policyConfig (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+abbrev ReadPreparation (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant) : CanonicalPolicyConfig F :=
-  CredentialAuthorityPolicyRegistry.config profile.compilerProfile context.authority.snapshot
-    (DeclaredResourceController.sourceStore deployment.domain context.directory.directory)
-    (sourceCapabilityPortal context.authority.snapshot (marker context profile.semantics intent grant))
-    (step context profile.semantics federation genesisHeight intent grant selected)
+    (grant : GrantRef) (selected : Selected context grant) :=
+  ResourceObservationAdmission.Prepared context profile
+    (request context profile.semantics federation genesisHeight intent grant selected.packed.payload.root)
+    (marker context profile.semantics intent grant) grant.capability (intentCodec.encode intent)
 
-def portal (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant) : Portal :=
-  (policyConfig context profile federation genesisHeight intent grant selected).portal
-
-def authorizeSelected (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant)
-    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Except String (Authorized (portal context profile federation genesisHeight intent grant selected)
-      context.authority.snapshot.authState
-      (request context profile.semantics federation genesisHeight intent grant selected.page)) := do
-  let wanted := request context profile.semantics federation genesisHeight intent grant selected.page
-  let config := policyConfig context profile federation genesisHeight intent grant selected
-  let evidence ← need (sourceCapabilityOnlyEvidence profile.compilerProfile context.authority.snapshot
-    (DeclaredResourceController.sourceStore deployment.domain context.directory.directory)
-    (marker context profile.semantics intent grant)
-    (step context profile.semantics federation genesisHeight intent grant selected)
-    wanted grant.capability signature)
-  let committed ← need (config.registry.resolve wanted.policyId wanted.policyRevision)
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step context profile.semantics federation genesisHeight intent grant selected).oldState
-    (step context profile.semantics federation genesisHeight intent grant selected).newState
-  need (CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
-    evidence witness (.policy wanted.policyId wanted.policyRevision) rfl rfl)
-
-attribute [irreducible] portal
-
+/-- The retained lower admission is the same resource-local no-op policy gate
+used before exposing participants to foreign policies in joint submission. -/
 structure CheckedGrant (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) where
   private mk ::
   selected : Selected context grant
-  signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot
-  authorization : Authorized (portal context profile federation genesisHeight intent grant selected)
-    context.authority.snapshot.authState
-    (request context profile.semantics federation genesisHeight intent grant selected.page)
-  authorized : authorizeSelected context profile federation genesisHeight intent grant selected signature = .ok authorization
+  preparation : ReadPreparation context profile federation genesisHeight intent grant selected
+  selectedExact : preparation.observed.before = selected.packed
+  balancesExact : preparation.accountBalances = selected.accountBalances
+  envelope : List UInt8
+  checked : ResourceObservationAdmission.Checked preparation envelope
 
 def header (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
@@ -305,7 +266,7 @@ def header (context : Context deployment durable) (profile : CanonicalRuntimePro
   let selected ← need (select context grant)
   (CredentialSignatureAdmission.signingHeader context.authority.snapshot
     (marker context profile.semantics intent grant)
-    ⟨grant.kind, request context profile.semantics federation genesisHeight intent grant selected.page⟩).mapError
+    ⟨grant.kind, request context profile.semantics federation genesisHeight intent grant selected.packed.payload.root⟩).mapError
       (fun _ => refused)
 
 /-- The success payload contains no field values, balances or policy source.
@@ -327,16 +288,21 @@ def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (grant : GrantRef) (signature : List UInt8) :
     IO (Except String (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error refused
+  let wanted := request context profile.semantics federation genesisHeight intent grant selected.packed.payload.root
+  let .ok prepared := ResourceObservationAdmission.prepare context profile wanted
+      (marker context profile.semantics intent grant) grant.capability (intentCodec.encode intent)
+    | return .error refused
   let .ok actualHeader := header context profile federation genesisHeight intent grant | return .error refused
   let envelope := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨actualHeader, signature⟩
-  match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot
-      (marker context profile.semantics intent grant)
-      (request context profile.semantics federation genesisHeight intent grant selected.page) envelope with
+  match ← ResourceObservationAdmission.check native prepared envelope with
   | .error _ => return .error refused
-  | .ok receipt =>
-      match exact : authorizeSelected context profile federation genesisHeight intent grant selected receipt with
-      | .error _ => return .error refused
-      | .ok authorization => return .ok ⟨selected, receipt, authorization, exact⟩
+  | .ok checked =>
+      have selectedExact : prepared.observed.before = selected.packed := by
+        have same := prepared.observed.present.symm.trans selected.present
+        injection same
+      have balancesExact : prepared.accountBalances = selected.accountBalances := by
+        exact Option.some.inj (prepared.balancesExact.symm.trans selected.balancesExact)
+      return .ok ⟨selected, prepared, selectedExact, balancesExact, envelope, checked⟩
 
 structure AuthorizedIntent (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) where
@@ -346,6 +312,18 @@ structure AuthorizedIntent (context : Context deployment durable) (profile : Can
   footprint : footprintExact context intent = .ok ()
   grants : (index : Fin intent.grants.length) →
     CheckedGrant context profile federation genesisHeight intent (intent.grants.get index)
+
+/-- A successful query has exactly one observation incidence, for precisely
+the requested resource and authority kind. Additional granted resources cannot
+be smuggled into the response selection. -/
+theorem AuthorizedIntent.query_footprint
+    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {height : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation height intent)
+    (query : Query) (purpose : intent.purpose = .query query) :
+    intent.grants.map (fun grant => (grant.kind, grant.target)) = [(query.kind, query.target)] :=
+  footprint_success_exact context intent [(query.kind, query.target)]
+    (by simp only [requiredTargets, purpose]; rfl) accepted.footprint
 
 private def checkGrants (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
@@ -387,7 +365,7 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
 def resourceViewStream : StreamCodec (List UInt8 × List (Nat × Int)) :=
   StreamCodec.product bytesStream balanceStream
 
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v1".toUTF8.toList
+def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v2".toUTF8.toList
 
 def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
@@ -416,33 +394,34 @@ def AuthorizedIntent.queryResult
 
 theorem observation_request_actual_root (context : Context deployment durable)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)
-    (grant : GrantRef) (pre : PageCell) :
-    (request context semantics federation height intent grant pre).preStateRoot = pre.root := rfl
+    (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
+    (pre : Materialized (CanonicalCellRegistry.materializer kind)) :
+    (request context semantics federation height intent grant pre.root).preStateRoot = pre.root := rfl
 
 theorem observation_preserves_resource (context : Context deployment durable)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)
-    (grant : GrantRef) (pre : PageCell) :
-    (readCandidate context semantics federation height intent grant pre).post.logical = pre.logical :=
-  (readCandidate context semantics federation height intent grant pre).postcondition
+    (grant : GrantRef) (kind : CanonicalCellRegistry.Kind)
+    (pre : Materialized (CanonicalCellRegistry.materializer kind)) :
+    (readCandidate context semantics federation height intent grant kind pre).post.logical = pre.logical :=
+  (readCandidate context semantics federation height intent grant kind pre).postcondition
 
+omit [DecidableEq F] in
 theorem observation_policy_views_equal (context : Context deployment durable)
-    (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)
-    (grant : GrantRef) (selected : Selected context grant) :
-    (step context semantics federation height intent grant selected).oldState =
-      (step context semantics federation height intent grant selected).newState := by
-  change project context semantics federation height intent grant selected selected.page.logical =
-    project context semantics federation height intent grant selected
-      (readCandidate context semantics federation height intent grant selected.page).post.logical
-  rw [observation_preserves_resource]
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId) (height : Nat)
+    (intent : Intent) (grant : GrantRef) (selected : Selected context grant)
+    (prepared : ReadPreparation context profile federation height intent grant selected) :
+    (ResourceObservationAdmission.step prepared).oldState =
+      (ResourceObservationAdmission.step prepared).newState :=
+  ResourceObservationAdmission.policy_views_equal prepared
 
 theorem CheckedGrant.current_generation_and_source
     {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {height : Nat} {intent : Intent} {grant : GrantRef}
     (checked : CheckedGrant context profile federation height intent grant) :
-    let wanted := request context profile.semantics federation height intent grant checked.selected.page
+    let wanted := request context profile.semantics federation height intent grant checked.selected.packed.payload.root
     wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId ∧
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
-  ⟨checked.authorization.policyEpochExact, checked.authorization.policyRevisionExact⟩
+  ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
 theorem resourceView_roundtrip (view : List UInt8 × List (Nat × Int)) :
     resourceViewCodec.decode (resourceViewCodec.encode view) = some view :=

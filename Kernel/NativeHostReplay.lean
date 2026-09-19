@@ -26,7 +26,7 @@ open Minidregg.Kernel.NativeHost
 set_option autoImplicit false
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
-/-- Evidence is one of the actual four privately admitted receiving objects,
+/-- Evidence is one of the actual privately admitted receiving objects,
 not a supplied policy decision, signature Boolean, or arbitrary DataIntent. -/
 inductive NativeAdmission (config : Config) (opened : Opened config) : DataIntent rootBytes → Prop
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
@@ -47,6 +47,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : CapabilityDelegationReceiver.AcceptedDelegation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (CapabilityDelegationReceiver.intent accepted)
+  | revoke {ingress : CapabilityRevocationReceiver.DecodedIngress}
+      (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
 
 structure Derived (config : Config) (opened : Opened config) where
   intent : DataIntent rootBytes
@@ -58,6 +62,11 @@ verified prefix, and the original signed request is checked at its old height. -
 def derive (config : Config) (opened : Opened config) (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
+    match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"revocation refused: {repr reason}"
+    | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted⟩
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment

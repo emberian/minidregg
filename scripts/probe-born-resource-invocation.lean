@@ -121,7 +121,7 @@ def ownerCapability : Capability .object :=
     (ResourceBirthPolicyController.Concrete.ownerVerbs .object) height
 
 def controlCapability : Capability .program :=
-  rootCapability .program controlCapId targetId {.installPolicy} height
+  rootCapability .program controlCapId targetId {.installPolicy, .revokeCapability} height
 
 def objectCell (identifier : Nat) (value : Int) : PackedCell CanonicalCellRegistry.registry :=
   ⟨.declaredObject, materialize DeclaredEffectPageMaterializer.materializer
@@ -234,15 +234,16 @@ def invocation (durable : ResourceBirthController.Concrete.Durable)
   let object ← requireSome "actual born declared object"
     (ResourceBirthController.Concrete.observeCell deployment directory.directory targetId .declaredObject)
   pure
-    { kind := .object
-      target := targetId
-      subject := ⟨7⟩
-      capability := ownerCapId
+    { subject := ⟨7⟩
       expectedAuthorityRoot := snapshot.cell.root
-      schemaVersion := 1
-      expectedTargetRoot := object.payload.root
       nonce := 991
-      actions := [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 1] }
+      targets :=
+        [{ kind := .object
+           target := targetId
+           capability := ownerCapId
+           schemaVersion := 1
+           expectedTargetRoot := object.payload.root
+           payload := .scalar [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 0) 1] }] }
 
 def invocationAmbient : DeclaredResourceController.Ambient := ⟨pins.federation, height + 1⟩
 
@@ -253,8 +254,10 @@ def signedInvocationAt (ambient : DeclaredResourceController.Ambient) (signer : 
     DeclaredResourceController.request snapshot profile.semantics ambient command root
   pure
     { commandBytes := DeclaredResourceController.commandCodec.encode command
-      targetEnvelope := ← envelope signer snapshot marker ⟨command.kind, wanted command.expectedTargetRoot⟩ seed
-      authorityEnvelope := ← envelope signer snapshot marker ⟨command.kind, wanted snapshot.cell.root⟩ seed }
+      targetEnvelopes := [← envelope signer snapshot marker
+        ⟨command.first.kind, wanted command.first.expectedTargetRoot⟩ seed]
+      observeEnvelopes := []
+      authorityEnvelope := ← envelope signer snapshot marker ⟨command.first.kind, wanted snapshot.cell.root⟩ seed }
 
 def signedInvocation (signer : System.FilePath) (snapshot : CredentialAuthorityDomain.Snapshot)
     (command : DeclaredResourceController.Command) (seed : Nat := 7) : IO DeclaredResourceController.SignedCommand :=
@@ -440,9 +443,9 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let finalDirectory ← requireSome "invoked directory"
       (CredentialAuthorityDomainReceiver.loadDirectory invoked)
     let target ← requireSome "persisted born object"
-      (DeclaredResourceController.observeTarget deployment finalDirectory.directory command)
+      (ResourceBirthController.Concrete.observeCell deployment finalDirectory.directory targetId .declaredObject)
     let page ← requireSome "persisted born object page"
-      (DeclaredEffectPageMaterializer.pageAt target.pre.logical)
+      (DeclaredEffectPageMaterializer.pageAt target.payload.logical)
     require "actual born owner changed the actual object"
       (decide (page.lookup (.objectField ⟨targetId⟩ ⟨1⟩) = some 1))
     let finalBook ← actualBook invoked
@@ -478,9 +481,10 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let denied : DeclaredResourceController.Command :=
       { command with
         expectedAuthorityRoot := onceAuthority.snapshot.cell.root
-        expectedTargetRoot := onceObject.payload.root
         nonce := 1202
-        actions := [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 1) 2] }
+        targets := [{ command.first with
+          expectedTargetRoot := onceObject.payload.root
+          payload := .scalar [.write (.objectField ⟨targetId⟩ ⟨1⟩) (some 1) 2] }] }
     let deniedAmbient : DeclaredResourceController.Ambient := ⟨pins.federation, height + 2⟩
     let onceBytes ← requireOk "first rule bytes" (← transport.read)
     match ← DeclaredResourceController.receiveLoaded deployment profile deniedAmbient native transport once
@@ -556,7 +560,7 @@ def run (verifier signer nativeStore : System.FilePath) : IO Unit :=
     let recipient : DeclaredResourceController.Command :=
       { denied with
         subject := ⟨8⟩
-        capability := bobCapability.id
+        targets := [{ denied.first with capability := bobCapability.id }]
         nonce := 1302
         expectedAuthorityRoot := delegatedAuthority.snapshot.cell.root }
     let delegatedBytes ← requireOk "delegated bytes" (← transport.read)

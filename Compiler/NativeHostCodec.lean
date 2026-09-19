@@ -9,6 +9,7 @@ import Kernel.DeclaredResourceController
 import Kernel.PolicyInstallReceiver
 import Kernel.ResourceBirthReceiver
 import Kernel.CapabilityDelegationReceiver
+import Kernel.CapabilityRevocationReceiver
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -47,9 +48,12 @@ theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec 
   ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
 
 def signedInvocationStream : StreamCodec DeclaredResourceController.SignedCommand :=
-  StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))
-    (fun value => (value.commandBytes, value.targetEnvelope, value.authorityEnvelope))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+  StreamCodec.xmap (StreamCodec.product bytesStream
+    (StreamCodec.product (StreamCodec.list bytesStream)
+      (StreamCodec.product (StreamCodec.list bytesStream) bytesStream)))
+    (fun value => (value.commandBytes, value.targetEnvelopes,
+      value.observeEnvelopes, value.authorityEnvelope))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 inductive SignedCall where
@@ -57,29 +61,34 @@ inductive SignedCall where
   | invoke (ingress : DeclaredResourceController.SignedCommand)
   | install (ingress : List UInt8)
   | delegate (ingress : List UInt8)
+  | revoke (ingress : List UInt8)
 
 abbrev CallWire := Sum (List UInt8)
-  (Sum DeclaredResourceController.SignedCommand (Sum (List UInt8) (List UInt8)))
+  (Sum DeclaredResourceController.SignedCommand
+    (Sum (List UInt8) (Sum (List UInt8) (List UInt8))))
 
 def SignedCall.toWire : SignedCall → CallWire
   | .birth bytes => .inl bytes
   | .invoke signed => .inr (.inl signed)
   | .install bytes => .inr (.inr (.inl bytes))
-  | .delegate bytes => .inr (.inr (.inr bytes))
+  | .delegate bytes => .inr (.inr (.inr (.inl bytes)))
+  | .revoke bytes => .inr (.inr (.inr (.inr bytes)))
 
 def SignedCall.ofWire : CallWire → SignedCall
   | .inl bytes => .birth bytes
   | .inr (.inl signed) => .invoke signed
   | .inr (.inr (.inl bytes)) => .install bytes
-  | .inr (.inr (.inr bytes)) => .delegate bytes
+  | .inr (.inr (.inr (.inl bytes))) => .delegate bytes
+  | .inr (.inr (.inr (.inr bytes))) => .revoke bytes
 
 def callStream : StreamCodec SignedCall :=
   StreamCodec.xmap (StreamCodec.sum bytesStream
-    (StreamCodec.sum signedInvocationStream (StreamCodec.sum bytesStream bytesStream)))
+    (StreamCodec.sum signedInvocationStream
+      (StreamCodec.sum bytesStream (StreamCodec.sum bytesStream bytesStream))))
     SignedCall.toWire SignedCall.ofWire (by intro value; cases value <;> rfl)
 
 def callCodec : LawfulCodec SignedCall :=
-  framed "DREGG/NATIVE-HOST/SIGNED-CALL/v1".toUTF8.toList callStream
+  framed "DREGG/NATIVE-HOST/SIGNED-CALL/v3".toUTF8.toList callStream
 
 /-- The capability choices are supplied for the ordered conserved debit legs;
 all request coordinates and physical auxiliary allocations are source-derived. -/
@@ -88,22 +97,26 @@ inductive Draft where
   | invoke (command : List UInt8)
   | install (subject : SubjectId) (control : CapabilityId) (declaration : List UInt8)
   | delegate (command : List UInt8)
+  | revoke (command : List UInt8)
   deriving DecidableEq, Repr
 
 abbrev DraftWire := Sum (List UInt8 × List CapabilityId)
-  (Sum (List UInt8) (Sum (SubjectId × CapabilityId × List UInt8) (List UInt8)))
+  (Sum (List UInt8)
+    (Sum (SubjectId × CapabilityId × List UInt8) (Sum (List UInt8) (List UInt8))))
 
 def Draft.toWire : Draft → DraftWire
   | .birth bytes capabilities => .inl (bytes, capabilities)
   | .invoke bytes => .inr (.inl bytes)
   | .install subject control bytes => .inr (.inr (.inl (subject, control, bytes)))
-  | .delegate bytes => .inr (.inr (.inr bytes))
+  | .delegate bytes => .inr (.inr (.inr (.inl bytes)))
+  | .revoke bytes => .inr (.inr (.inr (.inr bytes)))
 
 def Draft.ofWire : DraftWire → Draft
   | .inl (bytes, capabilities) => .birth bytes capabilities
   | .inr (.inl bytes) => .invoke bytes
   | .inr (.inr (.inl (subject, control, bytes))) => .install subject control bytes
-  | .inr (.inr (.inr bytes)) => .delegate bytes
+  | .inr (.inr (.inr (.inl bytes))) => .delegate bytes
+  | .inr (.inr (.inr (.inr bytes))) => .revoke bytes
 
 def draftStream : StreamCodec Draft :=
   StreamCodec.xmap
@@ -111,11 +124,12 @@ def draftStream : StreamCodec Draft :=
       (StreamCodec.list CredentialAuthorityEntryCodec.capabilityIdStream))
       (StreamCodec.sum bytesStream
         (StreamCodec.sum (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-          (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream bytesStream)) bytesStream)))
+          (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream bytesStream))
+          (StreamCodec.sum bytesStream bytesStream))))
     Draft.toWire Draft.ofWire (by intro value; cases value <;> rfl)
 
 def draftCodec : LawfulCodec Draft :=
-  framed "DREGG/NATIVE-HOST/DRAFT/v1".toUTF8.toList draftStream
+  framed "DREGG/NATIVE-HOST/DRAFT/v3".toUTF8.toList draftStream
 
 /-- `role,index` is an ordered incidence label, not a user-selected authority.
 The exact canonical header names the chosen key and full typed request. -/
@@ -150,7 +164,7 @@ def signingPlanStream : StreamCodec SigningPlan :=
       wire.2.2.2.2.1, wire.2.2.2.2.2⟩) (by intro value; cases value; rfl)
 
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  framed "DREGG/NATIVE-HOST/SIGNING-PLAN/v1".toUTF8.toList signingPlanStream
+  framed "DREGG/NATIVE-HOST/SIGNING-PLAN/v3".toUTF8.toList signingPlanStream
 
 structure Receipt where
   transactionId : Digest

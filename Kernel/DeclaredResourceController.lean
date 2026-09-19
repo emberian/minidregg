@@ -1,557 +1,85 @@
-/-
-# Kernel.DeclaredResourceController -- source-bound ordinary resource invocation
-
-The command transports the existing declared action syntax with the shared
-compact codecs. It does not evaluate `Declaration.code` or use its historical
-unary exhibit codec. The receiving path selects an actual declared resource,
-the complete old authority domain, and that resource's current installed
-policy. Its page mutation reuses `Page.applyWrites` and the existing checked
-write semantics; no proposed post-state or policy view arrives on the wire.
-
-Ordinary resource editing and replacing its governing policy are distinct
-verbs. Account money belongs to the canonical Book family, never to a declared
-metadata page. Every incidence authenticates its exact request against one old
-authority snapshot and one command-derived operation marker.
--/
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.CredentialAuthorityReplay
-import Compiler.DeclaredEffectPageMaterializer
-import Compiler.CanonicalRuntimeProfile
-import Kernel.MultiCellHyperedge
-import Kernel.ResourceBirthController
+/- The sole signed resource invocation receiver. A one-target transaction is
+an ordinary finite transaction, not a separate admission or persistence path.
+Every target and the shared replay marker form one actual MultiCellHyperedge
+PreparedTuple; all signatures and current policies precede its single CAS. -/
+import Kernel.ResourceTransaction
+import Kernel.ResourceObservationAdmission
+import Compiler.ResourceAuthorityProjection
 
 namespace Minidregg.Kernel.DeclaredResourceController
-
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.CredentialAuthorityDomain
 open Minidregg.Compiler.CredentialAuthorityDomainReceiver
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
-open Minidregg.Theory.DeclaredActionLowering
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
-
 set_option autoImplicit false
-
-abbrev Registry := CanonicalCellRegistry.registry
-abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
-abbrev PageCell := Materialized DeclaredEffectPageMaterializer.materializer
-abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
-
-/-! ## One compact transport for the existing action syntax -/
-
-abbrev CreateWire := EffectDeclaration.StateKey × Int
-abbrev WriteWire := EffectDeclaration.StateKey × Option Int × Int
-abbrev MoveWire := ResourceId .account × ResourceId .account × Digest ×
-  Option Int × Option Int × Int
-abbrev ActionWire := Sum CreateWire (Sum WriteWire MoveWire)
-
-def actionWireStream : StreamCodec ActionWire :=
-  StreamCodec.sum
-    (StreamCodec.product stateKeyStream intStream)
-    (StreamCodec.sum
-      (StreamCodec.product stateKeyStream
-        (StreamCodec.product (StreamCodec.option intStream) intStream))
-      (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream .account)
-        (StreamCodec.product (TypedAuthorizationRequestCodec.resourceIdStream .account)
-          (StreamCodec.product digestStream
-            (StreamCodec.product (StreamCodec.option intStream)
-              (StreamCodec.product (StreamCodec.option intStream) intStream))))))
-
-def actionWire : Action → ActionWire
-  | .create key initial => .inl (key, initial)
-  | .write key expected replacement => .inr (.inl (key, expected, replacement))
-  | .move source destination resource expectedSource expectedDestination amount =>
-      .inr (.inr (source, destination, resource, expectedSource, expectedDestination, amount))
-
-def actionOfWire : ActionWire → Action
-  | .inl (key, initial) => .create key initial
-  | .inr (.inl (key, expected, replacement)) => .write key expected replacement
-  | .inr (.inr (source, destination, resource, expectedSource, expectedDestination, amount)) =>
-      .move source destination resource expectedSource expectedDestination amount
-
-@[simp] theorem actionOfWire_wire (action : Action) : actionOfWire (actionWire action) = action := by
-  cases action <;> rfl
-
-def actionStream : StreamCodec Action :=
-  StreamCodec.xmap actionWireStream actionWire actionOfWire actionOfWire_wire
-
-/-- The caller chooses an operation and expected versions, never its policy,
-authority projection, proposed post, or independently supplied effect digest.
-The native signing envelopes are separate proofs over source-derived requests.
-`kind` and `target` are literal command coordinates, retained in its digest. -/
-structure Command where
-  kind : ResourceKind
-  target : Nat
-  subject : SubjectId
-  capability : CapabilityId
-  expectedAuthorityRoot : Digest
-  schemaVersion : Nat
-  expectedTargetRoot : Digest
-  nonce : Nat
-  actions : List Action
-  deriving DecidableEq, Repr
-
-abbrev CommandWire := ResourceKind × Nat × SubjectId × CapabilityId × Digest ×
-  Nat × Digest × Nat × List Action
-
-def commandWireStream : StreamCodec CommandWire :=
-  StreamCodec.product ResourceBirthCodec.resourceKindStream
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-        (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-          (StreamCodec.product digestStream
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product digestStream
-                (StreamCodec.product StreamCodec.nat (StreamCodec.list actionStream))))))))
-
-def Command.toWire (command : Command) : CommandWire :=
-  (command.kind, command.target, command.subject, command.capability,
-    command.expectedAuthorityRoot, command.schemaVersion, command.expectedTargetRoot,
-    command.nonce, command.actions)
-
-def Command.ofWire : CommandWire → Command
-  | (kind, target, subject, capability, authorityRoot, version, targetRoot, nonce, actions) =>
-      ⟨kind, target, subject, capability, authorityRoot, version, targetRoot, nonce, actions⟩
-
-@[simp] theorem Command.ofWire_toWire (command : Command) :
-    Command.ofWire command.toWire = command := by cases command; rfl
-
-def commandStream : StreamCodec Command :=
-  StreamCodec.xmap commandWireStream Command.toWire Command.ofWire Command.ofWire_toWire
-
-def commandFrame : List UInt8 := "DREGG/RESOURCE/INVOKE".toUTF8.toList ++ [1]
-
-def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes :=
-    if bytes.take commandFrame.length = commandFrame then
-      commandStream.toLawful.decode (bytes.drop commandFrame.length)
-    else none
-  decode_encode := by
-    intro command
-    have decoded := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
-
-@[simp] theorem command_decode_encode (command : Command) :
-    commandCodec.decode (commandCodec.encode command) = some command :=
-  commandCodec.decode_encode command
-
-theorem command_decode_canonical {bytes : List UInt8} {command : Command}
-    (decoded : commandCodec.decode bytes = some command) :
-    commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
-
-def Command.declaration (command : Command) :
-    DeclaredActionLowering.Declaration (⟨command.target⟩ : ResourceId command.kind) :=
-  ⟨command.schemaVersion, command.expectedTargetRoot, command.nonce, command.actions⟩
-
-/-- The full command is included in every incidence's source commitment.
-Domain and receiver semantics are source-owned deployment coordinates. -/
-def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
-  (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-    (domain, semantics, commandCodec.encode command)
-
-def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.INVOKE.ARGS/v1".toUTF8.toList
-    (commandBytes domain semantics command)).digest
-
-def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.INVOKE.EFFECT/v1".toUTF8.toList
-    (commandBytes domain semantics command)).digest
-
-def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.INVOKE.NULLIFIER/v1".toUTF8.toList
-    ((StreamCodec.product digestStream
-      (StreamCodec.product digestStream
-        (StreamCodec.product ResourceBirthCodec.resourceKindStream
-          (StreamCodec.product StreamCodec.nat
-            (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))))).encode
-      (domain, semantics, command.kind, command.target, command.subject, command.nonce))).digest.value
-
-def ordinaryVerb : (kind : ResourceKind) → Verb kind
-  | .object => .mutateObject
-  | .account => .transfer
-  | .program => .installProgram
-
-/-- Trusted ambient inputs are not read from an incoming command. The shared
-runtime compiler profile supplies `semantics`; no per-operation policy profile
-is invented by this controller. The caller's height is the receiver clock. -/
-structure Ambient where
-  federation : FederationId
-  height : Height
-
-def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (preRoot : Digest) : Request command.kind where
-  domain := snapshot.domain
-  semantics := semantics
-  federation := ambient.federation
-  subject := command.subject
-  subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
-  target := ⟨command.target⟩
-  verb := ordinaryVerb command.kind
-  argsDigest := argsDigest snapshot.domain semantics command
-  effectsDigest := effectsDigest snapshot.domain semantics command
-  nonce := command.nonce
-  height := ambient.height
-  preStateRoot := preRoot
-  policyId := ⟨command.target⟩
-  policyEpoch := snapshot.authState.policyEpoch ⟨command.target⟩
-  policyRevision := snapshot.authState.policyRevision ⟨command.target⟩
-  cost := (commandCodec.encode command).length
-
-theorem request_policy_is_target (snapshot : AuthoritySnapshot) (semantics : Digest)
-    (ambient : Ambient) (command : Command) (preRoot : Digest) :
-    (request snapshot semantics ambient command preRoot).policyId = ⟨command.target⟩ := rfl
-
-theorem ordinary_program_verb_distinct : ordinaryVerb .program ≠ .installPolicy := by decide
-
-/-! ## Source-owned page preparation, before portals or authorization -/
-
-inductive Reject where
-  | malformedCommand
-  | unsupportedVersion
-  | accountRequiresBook
-  | emptyActions
-  | wrongRole
-  | missingTarget
-  | invalidPage
-  | staleTarget
-  | staleAuthority
-  | inadmissibleAction
-  | pageMutation (reason : DeclaredEffectPageMaterializer.RejectReason)
-  | pageValidation
-  | invalidPost
-  | authorityUnavailable
-  | directoryUnavailable
-  | nullifierUsed
-  | authorityPreparation
-  | physicalPreparation
-  | policyUnavailable
-  | signature (reason : CredentialSignatureAdmission.Reject)
-  | capabilityRejected
-  | policyRejected
-  | policyInputRange
-  | policyCastAlias
-  | conflictingIncidences
-  deriving Repr
-
-def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
-  | none => .error reason
-  | some value => .ok value
-
-def packDeclared (kind : ResourceKind) (payload : PageCell) : PackedCell Registry :=
-  match kind with
-  | .object => ⟨.declaredObject, payload⟩
-  | .account => ⟨.accountMetadata, payload⟩
-  | .program => ⟨.declaredProgram, payload⟩
-
-def pagePatch (pre : PageCell) (post : Page) :
-    Patch DeclaredEffectPageMaterializer.schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [⟨(), some post⟩]
-  resourceWrites := []
-
-theorem pagePatch_apply (pre : PageCell) (post : Page)
-    (validated : ValidatedPatch DeclaredEffectPageMaterializer.materializer pre
-      (pagePatch pre post)) :
-    validated.apply.logical = stateOfOption (some post) := by
-  have page : pageAt validated.apply.logical = some post := by
-    change (applyFieldWrites (pagePatch pre post).fieldWrites pre.logical.fields) () = some post
-    simp [pagePatch, applyFieldWrites, FieldStore.assign]
-    rfl
-  exact (state_ext validated.apply.logical).trans (congrArg stateOfOption page)
-
-/-- The guard relation is the existing sequential action semantics, with
-exact sparse presence. It says nothing about an unrelated host proposal. -/
-def CanonicalActionResult (pre : PageCell) (command : Command) (post : Page) : Prop :=
-  ∃ before, pageAt pre.logical = some before ∧
-    command.declaration.run before.toCanonicalState.fields = some post.toCanonicalState.fields
-
-structure PageMode (deployment : Deployment) (pre : PageCell)
-    (command : Command) (post : Page) where
-  before : Page
-  beforeExact : pageAt pre.logical = some before
-  beforeLaw : CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target before
-  rootExact : command.expectedTargetRoot = pre.root
-  versionExact : command.schemaVersion = 1
-  ordinary : command.kind ≠ .account
-  actionsPresent : command.actions ≠ []
-  admitted : command.declaration.Admitted
-  computed : before.applyWrites command.declaration.checkedWrites = .ok post
-  postLaw : CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target post
-  semanticsExact :
-    command.declaration.run before.toCanonicalState.fields = some post.toCanonicalState.fields
-
-def pageFamily (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) :
-    SemanticEffectFamily DeclaredEffectPageMaterializer.schema
-      DeclaredEffectPageMaterializer.materializer Nat where
-  Declaration := Command
-  declarationCodec := commandCodec
-  pre := pre
-  request := fun command => ⟨command.kind, request snapshot semantics ambient command pre.root⟩
-  Outcome := fun _ => Page
-  outcomeCodec := fun _ => ResourceBirthCodec.strictCodec pageStream.toLawful
-  ModeEvidence := fun command post => PageMode deployment pre command post
-  Postcondition := fun command post logical =>
-    logical = stateOfOption (some post) ∧ CanonicalActionResult pre command post ∧
-      CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target post
-  effectDigest := effectsDigest snapshot.domain semantics
-  patch := fun _ post => pagePatch pre post
-  nullifier := fun _ _ => none
-  Release := fun _ _ => Empty
-  DeclassificationAuthority := fun _ _ => Empty
-  ReleaseAuthorization := fun _ _ _ => Empty
-  DisclosureAllowed := fun _ _ decision => decision = .sealed
-
-/-- Computation precedes policy admission. The retained candidate has no
-authorization token; a requester cannot construct it by supplying a post. -/
-structure PreparedPage (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) (command : Command) where
-  private mk ::
-  post : Page
-  candidate : PolicyInstall.Candidate (pageFamily deployment snapshot semantics ambient pre)
-    pre command post
-
-def preparePage (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) (command : Command) :
-    Except Reject (PreparedPage deployment snapshot semantics ambient pre command) := do
-  if ordinary : command.kind ≠ .account then
-    if version : command.schemaVersion = 1 then
-      if nonempty : command.actions ≠ [] then
-        if root : command.expectedTargetRoot = pre.root then
-          match present : pageAt pre.logical with
-          | none => .error .invalidPage
-          | some before =>
-              if preLaw : CanonicalCellRegistry.DeclaredPageLaw deployment
-                  command.kind command.target before then
-                if admitted : command.declaration.admissionCheck = true then
-                  match computed : before.applyWrites command.declaration.checkedWrites with
-                  | .error reason => .error (.pageMutation reason)
-                  | .ok post =>
-                      if postLaw : CanonicalCellRegistry.DeclaredPageLaw deployment
-                          command.kind command.target post then
-                        match validate DeclaredEffectPageMaterializer.materializer pre (pagePatch pre post) with
-                        | .rejected _ => .error .pageValidation
-                        | .accepted validated =>
-                            let semantic : command.declaration.run before.toCanonicalState.fields =
-                                some post.toCanonicalState.fields := by
-                              simpa [Declaration.run, admitted] using
-                                Page.applyWrites_checked computed
-                            .ok ⟨post,
-                              { preStateBound := rfl
-                                modeEvidence :=
-                                  ⟨before, present, preLaw, root, version, ordinary,
-                                    nonempty, admitted, computed, postLaw, semantic⟩
-                                validated := validated
-                                postcondition :=
-                                  ⟨pagePatch_apply pre post validated,
-                                    ⟨before, present, semantic⟩, postLaw⟩ }⟩
-                      else .error .invalidPost
-                else .error .inadmissibleAction
-              else .error .wrongRole
-        else .error .staleTarget
-      else .error .emptyActions
-    else .error .unsupportedVersion
-  else .error .accountRequiresBook
-
-theorem PreparedPage.action_semantics_exact {deployment : Deployment}
-    {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
-    {pre : PageCell} {command : Command}
-    (prepared : PreparedPage deployment snapshot semantics ambient pre command) :
-    CanonicalActionResult pre command prepared.post :=
-  prepared.candidate.postcondition.2.1
-
-/-! ## One old physical snapshot and its command-derived marker update -/
-
-structure ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
-    (command : Command) where
-  private mk ::
-  before : PackedCell Registry
-  present : directory.slots command.target = .present before
-  pre : PageCell
-  selected : CanonicalCellRegistry.selectDeclared deployment command.target command.kind before = some pre
-
-def observeTarget (deployment : Deployment) (directory : Directory Nat Registry)
-    (command : Command) : Option (ObservedTarget deployment directory command) :=
-  match present : directory.slots command.target with
-  | .absent => none
-  | .present before =>
-      match selected : CanonicalCellRegistry.selectDeclared deployment command.target command.kind before with
-      | none => none
-      | some pre => some ⟨before, present, pre, selected⟩
-
-def markerEdits (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    List CredentialAuthorityDomain.Edit :=
-  [CredentialAuthorityDomain.nullifierEdit snapshot (operationMarker snapshot.domain semantics command)]
-
-def markerPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    Patch CredentialAuthorityState.schema.{0, 0} Digest :=
-  CredentialAuthorityDomain.editPatch snapshot (markerEdits snapshot semantics command)
-
-structure MarkerMode (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) where
-  rootExact : command.expectedAuthorityRoot = snapshot.cell.root
-  unused : CredentialAuthorityState.isNullified snapshot.cell
-    (operationMarker snapshot.domain semantics command) = false
-  prepared : CredentialAuthorityDomain.Prepared snapshot (markerEdits snapshot semantics command)
-
-def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) :
-    SemanticEffectFamily CredentialAuthorityState.schema.{0, 0}
-      CredentialAuthorityStateCodec.materializer Nat where
-  Declaration := Command
-  declarationCodec := commandCodec
-  pre := snapshot.cell
-  request := fun command =>
-    ⟨command.kind, request snapshot semantics ambient command snapshot.cell.root⟩
-  Outcome := fun _ => Unit
-  outcomeCodec := fun _ => DeclaredActionLowering.unitCodec
-  ModeEvidence := fun command _ => MarkerMode snapshot semantics command
-  Postcondition := fun command _ logical =>
-    (markerPatch snapshot semantics command).ResultAt snapshot.logical logical
-  effectDigest := effectsDigest snapshot.domain semantics
-  patch := fun command _ => markerPatch snapshot semantics command
-  nullifier := fun command _ => some (operationMarker snapshot.domain semantics command)
-  Release := fun _ _ => Empty
-  DeclassificationAuthority := fun _ _ => Empty
-  ReleaseAuthorization := fun _ _ _ => Empty
-  DisclosureAllowed := fun _ _ decision => decision = .sealed
-
-def prepareMarker (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    Except Reject (MarkerMode snapshot semantics command) :=
-  if root : command.expectedAuthorityRoot = snapshot.cell.root then
-    if unused : CredentialAuthorityState.isNullified snapshot.cell
-        (operationMarker snapshot.domain semantics command) = false then
-      match CredentialAuthorityDomain.prepare snapshot (markerEdits snapshot semantics command) with
-      | none => .error .authorityPreparation
-      | some prepared => .ok ⟨root, unused, prepared⟩
-    else .error .nullifierUsed
-  else .error .staleAuthority
-
-def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
-    CanonicalPolicyRegistry.PayloadStore where
-  fetch := CanonicalCellRegistry.fetchPolicySource domain directory
-
-/-- Every dependency comes from the same durable image. The physical lowering
-retains the old catalogue/shard guards and allocates only the marker's new
-internal shards, using the complete permanently-used identity directory. -/
-structure PreparedInvocation {F : Type} [Field F]
-    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) (command : Command) where
-  private mk ::
-  directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
-  target : ObservedTarget deployment directory.directory command
-  page : PreparedPage deployment authority.snapshot profile.semantics ambient target.pre command
-  marker : MarkerMode authority.snapshot profile.semantics command
-  physical : Lowered directory authority (markerEdits authority.snapshot profile.semantics command)
-    marker.prepared []
-  source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
-    (authority.snapshot.authState.policyAddress ⟨command.target⟩
-      (authority.snapshot.authState.policyRevision ⟨command.target⟩))
-  postLaw : CanonicalCellRegistry.FinalPostLaw deployment command.target target.before
-    (packDeclared command.kind page.candidate.post)
-
-def prepare {F : Type} [Field F] (deployment : Deployment)
-    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
-    (durable : Durable) (command : Command) :
-    Except Reject (PreparedInvocation deployment profile ambient durable command) := do
-  let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
-  let target ← requireSome .missingTarget (observeTarget deployment directory.directory command)
-  let page ← preparePage deployment authority.snapshot profile.semantics ambient target.pre command
-  let marker ← prepareMarker authority.snapshot profile.semantics command
-  let physical ← requireSome .physicalPreparation (lower directory authority marker.prepared [])
-  let address := authority.snapshot.authState.policyAddress ⟨command.target⟩
-    (authority.snapshot.authState.policyRevision ⟨command.target⟩)
-  let source ← requireSome .policyUnavailable
-    (CanonicalCellRegistry.loadPolicySource authority.snapshot.domain directory.directory address)
-  if postLaw : CanonicalCellRegistry.FinalPostLaw deployment command.target target.before
-      (packDeclared command.kind page.candidate.post) then
-    .ok ⟨directory, authority, target, page, marker, physical, source, postLaw⟩
-  else .error .invalidPost
-
-/-! ## The raw joint tuple is the one policy later evaluates and accepts -/
-
-inductive Incidence where
-  | target
-  | authority
-  deriving DecidableEq, Fintype
+set_option maxHeartbeats 800000
 
 abbrev Source (command : Command) := { actual : Command // actual = command }
-
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
   {durable : Durable} {command : Command}
 
 def layout (prepared : PreparedInvocation deployment profile ambient durable command) :
-    CellLayout Incidence where
-  schema
-    | .target => DeclaredEffectPageMaterializer.schema
-    | .authority => CredentialAuthorityState.schema.{0, 0}
+    CellLayout (Incidence command) where
+  schema | some i => command.targets[i].schema | none => CredentialAuthorityState.schema.{0,0}
   fieldDecidableEq incidence := by cases incidence <;> dsimp <;> infer_instance
   resourceDecidableEq incidence := by cases incidence <;> dsimp <;> infer_instance
-  materializer
-    | .target => DeclaredEffectPageMaterializer.materializer
-    | .authority => CredentialAuthorityStateCodec.materializer
+  materializer | some i => command.targets[i].materializer | none => CredentialAuthorityStateCodec.materializer
   projectAuthority := fun _ _ => prepared.authority.snapshot.authState
-  cellId
-    | .target => ⟨command.target⟩
-    | .authority => deployment.authorityAnchor.catalogueCellId
+  cellId | some i => ⟨command.targets[i].target⟩ | none => deployment.authorityAnchor.catalogueCellId
 
 local instance fieldEq (prepared : PreparedInvocation deployment profile ambient durable command)
-    (incidence : Incidence) : DecidableEq ((layout prepared).schema incidence).Field :=
+    (incidence : Incidence command) : DecidableEq ((layout prepared).schema incidence).Field :=
   (layout prepared).fieldDecidableEq incidence
-
 local instance resourceEq (prepared : PreparedInvocation deployment profile ambient durable command)
-    (incidence : Incidence) : DecidableEq ((layout prepared).schema incidence).Resource :=
+    (incidence : Incidence command) : DecidableEq ((layout prepared).schema incidence).Resource :=
   (layout prepared).resourceDecidableEq incidence
 
 def rawLeg (prepared : PreparedInvocation deployment profile ambient durable command)
-    (source : Source command) : (incidence : Incidence) → CandidateLegData (layout prepared) incidence
-  | .target =>
-      { pre := prepared.target.pre
-        patch := pagePatch prepared.target.pre prepared.page.post
-        request := ⟨source.val.kind, request prepared.authority.snapshot profile.semantics
-          ambient source.val prepared.target.pre.root⟩
+    (source : Source command) : (incidence : Incidence command) → CandidateLegData (layout prepared) incidence
+  | some i =>
+      { pre := (prepared.targets i).pre
+        patch := targetPatch command.targets[i] (prepared.targets i).pre (prepared.targets i).post
+        request := ⟨command.targets[i].kind, requestFor prepared.authority.snapshot profile.semantics
+          ambient command command.targets[i] (prepared.targets i).pre.root⟩
         Postcondition := fun logical =>
-          logical = stateOfOption (some prepared.page.post) ∧
-            CanonicalActionResult prepared.target.pre source.val prepared.page.post ∧
-            CanonicalCellRegistry.DeclaredPageLaw deployment source.val.kind source.val.target prepared.page.post }
-  | .authority =>
+          (targetPatch command.targets[i] (prepared.targets i).pre (prepared.targets i).post).ResultAt
+            (prepared.targets i).pre.logical logical }
+  | none =>
       { pre := prepared.authority.snapshot.cell
         patch := markerPatch prepared.authority.snapshot profile.semantics source.val
-        request := ⟨source.val.kind, request prepared.authority.snapshot profile.semantics
+        request := ⟨source.val.first.kind, request prepared.authority.snapshot profile.semantics
           ambient source.val prepared.authority.snapshot.cell.root⟩
         Postcondition := fun logical =>
           (markerPatch prepared.authority.snapshot profile.semantics source.val).ResultAt
             prepared.authority.snapshot.logical logical }
 
 def bindFamily (prepared : PreparedInvocation deployment profile ambient durable command)
-    (source : Source command) (_portals : Incidence → Portal) :
-    (incidence : Incidence) → SemanticLegBinding (rawLeg prepared source incidence)
-  | .target =>
+    (source : Source command) (_portals : Incidence command → Portal) :
+    (incidence : Incidence command) → SemanticLegBinding.{0,0,0,0,0,0} (rawLeg prepared source incidence)
+  | some i =>
       { Nullifier := Nat
-        family := pageFamily deployment prepared.authority.snapshot profile.semantics ambient prepared.target.pre
-        declaration := source.val
-        outcome := prepared.page.post
-        preExact := rfl, requestExact := rfl, effectsExact := rfl, patchExact := rfl
+        family := by
+          change SemanticEffectFamily command.targets[i].schema command.targets[i].materializer Nat
+          exact targetFamily deployment prepared.authority.snapshot profile.semantics ambient command
+            command.targets[i] (prepared.targets i).pre
+        declaration := ()
+        outcome := (prepared.targets i).post
+        preExact := rfl
+        requestExact := rfl
+        effectsExact := by simp only [rawLeg, targetFamily, requestFor, id_eq]
+        patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
-  | .authority =>
+  | none =>
       { Nullifier := Nat
         family := markerFamily prepared.authority.snapshot profile.semantics ambient
         declaration := source.val
@@ -560,34 +88,33 @@ def bindFamily (prepared : PreparedInvocation deployment profile ambient durable
         postconditionExact := fun _ => Iff.rfl }
 
 def plan (prepared : PreparedInvocation deployment profile ambient durable command) :
-    PreparationPlan (layout prepared) (Source command) where
+    PreparationPlan.{0,0,0,0,0,0} (layout prepared) (Source command) where
   leg := rawLeg prepared
   jointDigest := fun source => effectsDigest prepared.authority.snapshot.domain profile.semantics source.val
-  legEffectsDigest := fun source _ =>
-    effectsDigest prepared.authority.snapshot.domain profile.semantics source.val
+  legEffectsDigest := fun source _ => effectsDigest prepared.authority.snapshot.domain profile.semantics source.val
   bindFamily := bindFamily prepared
 
 def validated (prepared : PreparedInvocation deployment profile ambient durable command) :
-    (incidence : Incidence) → ValidatedPatch ((layout prepared).materializer incidence)
+    (incidence : Incidence command) → ValidatedPatch ((layout prepared).materializer incidence)
       (rawLeg prepared ⟨command, rfl⟩ incidence).pre
       (rawLeg prepared ⟨command, rfl⟩ incidence).patch
-  | .target => prepared.page.candidate.validated
-  | .authority => prepared.marker.prepared.validated
+  | some i => (prepared.targets i).candidate.validated
+  | none => prepared.marker.prepared.validated
 
 theorem postconditions (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ incidence, (rawLeg prepared ⟨command, rfl⟩ incidence).Postcondition
       (validated prepared incidence).apply.logical := by
   intro incidence
   cases incidence with
-  | target => exact prepared.page.candidate.postcondition
-  | authority => exact prepared.marker.prepared.validated.resultAt
+  | some i => exact (prepared.targets i).candidate.postcondition
+  | none => exact prepared.marker.prepared.validated.resultAt
 
 def prepareTuple (prepared : PreparedInvocation deployment profile ambient durable command) :
     Option (PreparedTuple (plan prepared)) :=
   if distinct : Function.Injective (layout prepared).cellId then
     some
       { source := ⟨command, rfl⟩
-        primary := .target
+        primary := none
         validated := validated prepared
         postconditions := postconditions prepared
         cellIdsDistinct := distinct
@@ -595,34 +122,77 @@ def prepareTuple (prepared : PreparedInvocation deployment profile ambient durab
         requestEffects := by intro incidence; cases incidence <;> rfl }
   else none
 
-def bytesSlots (stem : String) : Nat → List UInt8 → List (String × Int)
-  | _, [] => []
-  | offset, byte :: rest =>
-      (s!"{stem}/{offset}", Int.ofNat byte.toNat) :: bytesSlots stem (offset + 1) rest
+abbrev bytesSlots := ResourceAuthorityProjection.bytesSlots
 
-/-- Source-owned request labels and exact canonical cell bytes cover both
-incidences. A policy cannot evaluate a host-selected post beside another patch.
-Presence/zero distinctions are retained by the native cell codecs. -/
+/-- Exact scalar/content projection from the committed old and candidate final
+states. Local names remain convenient; joint names expose every declared
+participant without granting a view of unrelated cells. -/
+def targetProjection (target : Target) (before after : LogicalState target.schema) : List (String × Int) := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact
+        match DeclaredEffectPageMaterializer.pageAt before, DeclaredEffectPageMaterializer.pageAt after with
+        | some old, some post => DeclaredResourceProjection.project id old post
+        | _, _ => []
+    | content content => exact
+        match HyperdocumentContentPageMaterializer.pageAt before, HyperdocumentContentPageMaterializer.pageAt after with
+        | some old, some post => ContentResource.project old post content
+        | _, _ => []
+
+def incidenceTarget (command : Command) : Incidence command → Target
+  | some i => command.targets[i]
+  | none => command.first
+
+def observeVerb : (kind : ResourceKind) → Verb kind
+  | .object => .observeObject
+  | .account => .observeAccount
+  | .program => .observeProgram
+
+/-- This signature is specific to the exact proposed joint command, one
+participant's real loaded pre-state and the current authority snapshot. -/
+def readRequest (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : Request command.targets[i].kind :=
+  { requestFor prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+      (prepared.targets i).before.payload.root with
+    verb := observeVerb command.targets[i].kind
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v3".toUTF8.toList
+      ((StreamCodec.product bytesStream StreamCodec.nat).encode
+        (commandBytes prepared.authority.snapshot.domain profile.semantics command,
+          command.targets[i].target))).digest }
+
+def firstIndex (prepared : PreparedInvocation deployment profile ambient durable command) : TargetIndex command :=
+  ⟨0, List.length_pos_iff.mpr prepared.nonempty⟩
+
 def project (prepared : PreparedInvocation deployment profile ambient durable command)
-    (source : Source command)
-    (logical : (incidence : Incidence) → LogicalState ((layout prepared).schema incidence)) :
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
     Minidregg.Pred.State :=
+  let selected := incidenceTarget command primary
+  let preRoot := match primary with
+    | some i => (prepared.targets i).pre.root
+    | none => prepared.authority.snapshot.cell.root
+  let localIndex := primary.getD (firstIndex prepared)
+  let localSlots :=
+    bytesSlots "resource/bytes" 0 (command.targets[localIndex].materializer.codec.encode (logical (some localIndex))) ++
+    targetProjection command.targets[localIndex] (prepared.targets localIndex).pre.logical (logical (some localIndex))
+  let joint := (List.finRange command.targets.length).flatMap fun i =>
+    (bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
+      targetProjection command.targets[i] (prepared.targets i).pre.logical (logical (some i))).map fun slot =>
+        (s!"joint/target/{command.targets[i].target}/{slot.1}", slot.2)
   ⟨CanonicalRuntimeProfile.requestSlots
-      (request prepared.authority.snapshot profile.semantics ambient source.val prepared.target.pre.root) ++
+      (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
-    bytesSlots "resource/bytes" 0
-      (DeclaredEffectPageMaterializer.materializer.codec.encode (logical .target)) ++
-    bytesSlots "authority/bytes" 0
-      (CredentialAuthorityStateCodec.materializer.codec.encode (logical .authority))⟩
+    localSlots ++ joint⟩
 
 def step (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) : PolicyStepContext :=
-  PolicyStepContext.ofPreparedTuple (project prepared) profile.semantics
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : PolicyStepContext :=
+  PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
     { tuple with primary := incidence }
 
 def policyConfig [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) : CanonicalPolicyConfig F :=
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : CanonicalPolicyConfig F :=
   CredentialAuthorityPolicyRegistry.config profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (sourceCapabilityPortal prepared.authority.snapshot
@@ -631,35 +201,36 @@ def policyConfig [DecidableEq F]
 
 def portals [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) : Incidence → Portal :=
+    (tuple : PreparedTuple (plan prepared)) : Incidence command → Portal :=
   fun incidence => (policyConfig prepared tuple incidence).portal
 
 theorem source_request_epoch_current
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) :
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     (tuple.request incidence).2.policyEpoch =
       prepared.authority.snapshot.authState.policyEpoch (tuple.request incidence).2.policyId := by
   cases incidence <;> rfl
 
 theorem source_request_revision_current
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) :
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     (tuple.request incidence).2.policyRevision =
       prepared.authority.snapshot.authState.policyRevision (tuple.request incidence).2.policyId := by
   cases incidence <;> rfl
 
 def authorizeLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
     (signature : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
     Except Reject (Authorized (portals prepared tuple incidence)
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let config := policyConfig prepared tuple incidence
+  let capability := (incidenceTarget command incidence).capability
   let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (operationMarker prepared.authority.snapshot.domain profile.semantics command)
-    (step prepared tuple incidence) wanted command.capability signature)
+    (step prepared tuple incidence) wanted capability signature)
   let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
   let witness := canonicalWitness profile.compilerProfile.compiler committed
     (step prepared tuple incidence).oldState (step prepared tuple incidence).newState
@@ -672,38 +243,70 @@ def authorizeLeg [DecidableEq F]
     (source_request_epoch_current prepared tuple incidence)
     (source_request_revision_current prepared tuple incidence))
 
-/-- Exact per-incidence envelopes share a command marker; neither can be
-retargeted to the other's root or replaced by an unrelated valid signer. -/
 structure SignedCommand where
   commandBytes : List UInt8
-  targetEnvelope : List UInt8
+  targetEnvelopes : List (List UInt8)
+  observeEnvelopes : List (List UInt8)
   authorityEnvelope : List UInt8
+  deriving DecidableEq, Repr
 
-def SignedCommand.envelope (signed : SignedCommand) : Incidence → List UInt8
-  | .target => signed.targetEnvelope
-  | .authority => signed.authorityEnvelope
+def SignedCommand.envelope (signed : SignedCommand) (command : Command) : Incidence command → List UInt8
+  | some i => signed.targetEnvelopes[i.val]?.getD []
+  | none => signed.authorityEnvelope
 
--- Retain this already-constructed portal as the indexed witness type. Expanding
--- it while elaborating dependent records unnecessarily normalizes the shared
--- semantic cSHAKE commitment; the executable source gate is unchanged.
+def readContext (prepared : PreparedInvocation deployment profile ambient durable command) :
+    ResourceObservationAdmission.Context deployment durable :=
+  ⟨prepared.directory, prepared.authority⟩
+
+def readCapability (i : TargetIndex command) : CapabilityId :=
+  command.targets[i].observeCapability.getD ⟨0⟩
+
+def readPreparation [DecidableEq F] (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) :=
+  ResourceObservationAdmission.prepare (readContext prepared) profile (readRequest prepared i)
+    (operationMarker prepared.authority.snapshot.domain profile.semantics command)
+    (readCapability i) (commandCodec.encode command)
+
+/-- A foreign-policy view requires an actual current read capability, a
+native signature bound to this exact joint request, and the resource's current
+observe policy. A mutation grant or the outer preparation flow is insufficient. -/
+structure ReadLeg [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) (envelope : List UInt8) where
+  capabilityPresent : command.targets[i].observeCapability.isSome = true
+  selected : ResourceObservationAdmission.Prepared (readContext prepared) profile (readRequest prepared i)
+    (operationMarker prepared.authority.snapshot.domain profile.semantics command)
+    (readCapability i) (commandCodec.encode command)
+  preparedExact : readPreparation prepared i = .ok selected
+  checked : ResourceObservationAdmission.Checked selected envelope
+
+def verifyRead [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) (envelope : List UInt8) :
+    IO (Except Reject (ReadLeg prepared i envelope)) := do
+  if present : command.targets[i].observeCapability.isSome = true then
+    match selected : readPreparation prepared i with
+    | .error _ => return .error .observationRejected
+    | .ok ready =>
+        match ← ResourceObservationAdmission.check native ready envelope with
+        | .error _ => return .error .observationRejected
+        | .ok checked => return .ok ⟨present, ready, selected, checked⟩
+  else return .error .observationRequired
+
 attribute [irreducible] portals
 
-/-- The admitted leg retains the actual private native receipt and its exact
-input wire, together with the literal result of source capability/policy
-admission. Journaled signatures cannot be replaced after this check. -/
 structure CheckedLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) (envelope : List UInt8) where
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) where
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = envelope
   authorization : Authorized (portals prepared tuple incidence)
     prepared.authority.snapshot.authState (tuple.request incidence).2
   authorized : authorizeLeg prepared tuple incidence receipt = .ok authorization
 
-def verifyAndAuthorizeLeg [DecidableEq F]
-    (native : CredentialSignatureIO.NativeConfig)
+def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) (envelope : List UInt8) :
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) :
     IO (Except Reject (CheckedLeg prepared tuple incidence envelope)) := do
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (operationMarker prepared.authority.snapshot.domain profile.semantics command)
@@ -723,7 +326,7 @@ theorem tuple_source_exact
 
 theorem tuple_post_exact
     (prepared : PreparedInvocation deployment profile ambient durable command)
-    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence) :
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     tuple.post incidence = (validated prepared incidence).apply := by
   apply Materialized.ext
   simp only [PreparedTuple.post, ValidatedPatch.apply]
@@ -738,11 +341,8 @@ def admissionEvidence [DecidableEq F]
     tuple.AdmissionEvidence (portals prepared tuple) where
   modes incidence := by
     cases incidence with
-    | target =>
-        change PageMode deployment prepared.target.pre tuple.source.val prepared.page.post
-        rw [tuple.source.property]
-        exact prepared.page.candidate.modeEvidence
-    | authority =>
+    | some i => exact (prepared.targets i).candidate.modeEvidence
+    | none =>
         change MarkerMode prepared.authority.snapshot profile.semantics tuple.source.val
         rw [tuple.source.property]
         exact prepared.marker
@@ -750,47 +350,84 @@ def admissionEvidence [DecidableEq F]
   disclosure := fun _ => .sealed
   disclosureAllowed incidence := by cases incidence <;> rfl
 
-/-- No decoder or public constructor produces an accepted invocation. Both
-native exact-request capabilities and both old-policy evaluations must pass.
-This is semantic admission; physical publication still requires durable CAS. -/
+/-- A dependent traversal of native verification. Every index must return a
+checked receipt before any accepted transaction value is constructed. -/
+def collectIO {n : Nat} {E : Type} {P : Fin n → Type}
+    (run : (i : Fin n) → IO (Except E (P i))) : IO (Except E ((i : Fin n) → P i)) := do
+  let rec loop : (count : Nat) → (bound : count ≤ n) →
+      IO (Except E ((i : Fin count) → P ⟨i.val, Nat.lt_of_lt_of_le i.isLt bound⟩))
+    | 0, _ => pure (.ok (fun i => nomatch i))
+    | count + 1, bound => do
+      match ← loop count (Nat.le_trans (Nat.le_succ count) bound) with
+      | .error reason => pure (.error reason)
+      | .ok previous =>
+          let index : Fin n := ⟨count, Nat.lt_of_lt_of_le (Nat.lt_succ_self count) bound⟩
+          match ← run index with
+          | .error reason => pure (.error reason)
+          | .ok current =>
+              pure (.ok (fun i => if below : i.val < count then previous ⟨i.val, below⟩
+                else by have equal : i.val = count := by omega
+                        simpa only [equal] using current))
+  loop n (Nat.le_refl n)
+
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) where
   private mk ::
   ingressExact : commandCodec.encode command = signed.commandBytes
+  envelopeCount : signed.targetEnvelopes.length = command.targets.length
+  observeCount : signed.observeEnvelopes.length =
+    (if command.requiresObservation then command.targets.length else 0)
+  observations : command.requiresObservation = true → (i : TargetIndex command) →
+    ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD [])
   tuple : PreparedTuple (plan prepared)
-  target : CheckedLeg prepared tuple .target signed.targetEnvelope
-  authority : CheckedLeg prepared tuple .authority signed.authorityEnvelope
+  checked : (incidence : Incidence command) → CheckedLeg prepared tuple incidence (signed.envelope command incidence)
 
 def AcceptedInvocation.evidence [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) :
     accepted.tuple.AdmissionEvidence (portals prepared accepted.tuple) :=
-  admissionEvidence prepared accepted.tuple fun incidence =>
-    match incidence with
-    | .target => accepted.target.authorization
-    | .authority => accepted.authority.authorization
+  admissionEvidence prepared accepted.tuple fun incidence => (accepted.checked incidence).authorization
 
 theorem AcceptedInvocation.native_ingress_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) :
-    accepted.target.receipt.envelopeBytes = signed.targetEnvelope ∧
-      accepted.authority.receipt.envelopeBytes = signed.authorityEnvelope :=
-  ⟨accepted.target.envelopeExact, accepted.authority.envelopeExact⟩
+    (accepted : AcceptedInvocation prepared signed) (incidence : Incidence command) :
+    (accepted.checked incidence).receipt.envelopeBytes = signed.envelope command incidence :=
+  (accepted.checked incidence).envelopeExact
+
+def verifyReads [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
+    (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
+    IO (Except Reject (command.requiresObservation = true → (i : TargetIndex command) →
+      ReadLeg prepared i (signed.observeEnvelopes[i.val]?.getD []))) := do
+  if needed : command.requiresObservation = true then
+    match ← collectIO (fun i : TargetIndex command =>
+        verifyRead native prepared i (signed.observeEnvelopes[i.val]?.getD [])) with
+    | .error reason => return .error reason
+    | .ok checked => return .ok (fun _ => checked)
+  else return .ok (fun contradiction => False.elim (needed contradiction))
 
 def admit [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command) (signed : SignedCommand) :
     IO (Except Reject (AcceptedInvocation prepared signed)) := do
   if ingress : commandCodec.encode command = signed.commandBytes then
-    match prepareTuple prepared with
-    | none => return .error .conflictingIncidences
-    | some tuple =>
-        match ← verifyAndAuthorizeLeg native prepared tuple .target signed.targetEnvelope with
+    if count : signed.targetEnvelopes.length = command.targets.length then
+      if readCount : signed.observeEnvelopes.length =
+          (if command.requiresObservation then command.targets.length else 0) then
+        match ← verifyReads native prepared signed with
         | .error reason => return .error reason
-        | .ok target =>
-            match ← verifyAndAuthorizeLeg native prepared tuple .authority signed.authorityEnvelope with
-            | .error reason => return .error reason
-            | .ok authority =>
-                return .ok ⟨ingress, tuple, target, authority⟩
+        | .ok observations =>
+          match prepareTuple prepared with
+          | none => return .error .conflictingIncidences
+          | some tuple =>
+              match ← collectIO (fun i : TargetIndex command =>
+                  verifyAndAuthorizeLeg native prepared tuple (some i) (signed.envelope command (some i))) with
+              | .error reason => return .error reason
+              | .ok targets =>
+                  match ← verifyAndAuthorizeLeg native prepared tuple none signed.authorityEnvelope with
+                  | .error reason => return .error reason
+                  | .ok authority => return .ok ⟨ingress, count, readCount, observations, tuple,
+                      fun incidence => match incidence with | some i => targets i | none => authority⟩
+      else return .error .wrongEnvelopeCount
+    else return .error .wrongEnvelopeCount
   else return .error .malformedCommand
 
 def AcceptedInvocation.apex [DecidableEq F]
@@ -810,100 +447,91 @@ def AcceptedInvocation.legs [DecidableEq F]
 
 theorem AcceptedInvocation.post_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) (incidence : Incidence) :
+    (accepted : AcceptedInvocation prepared signed) (incidence : Incidence command) :
     accepted.declaration.post accepted.legs incidence = (validated prepared incidence).apply :=
   (accepted.tuple.accepted_posts_exact (portals prepared accepted.tuple)
-    accepted.apex accepted.evidence incidence).trans
-      (tuple_post_exact prepared accepted.tuple incidence)
+    accepted.apex accepted.evidence incidence).trans (tuple_post_exact prepared accepted.tuple incidence)
 
 theorem AcceptedInvocation.authority_post_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) :
-    accepted.declaration.post accepted.legs .authority = prepared.physical.post.cell := by
-  rw [accepted.post_exact .authority]
+    accepted.declaration.post accepted.legs none = prepared.physical.post.cell := by
+  rw [accepted.post_exact none]
   apply Materialized.ext
   exact prepared.physical.projection_exact.symm
 
 theorem AcceptedInvocation.policy_view_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) :
-    project prepared accepted.tuple.source
+    (accepted : AcceptedInvocation prepared signed) (primary : Incidence command) :
+    project prepared primary accepted.tuple.source
         (fun incidence => (accepted.declaration.post accepted.legs incidence).logical) =
-      project prepared accepted.tuple.source accepted.tuple.logicalPost := by
+      project prepared primary accepted.tuple.source accepted.tuple.logicalPost := by
   congr 1
   funext incidence
   exact congrArg Materialized.logical
     (accepted.tuple.accepted_posts_exact (portals prepared accepted.tuple)
       accepted.apex accepted.evidence incidence)
 
-/-! ## Exact physical posts, complete read guards, and stable replay -/
-
-def targetWrite (prepared : PreparedInvocation deployment profile ambient durable command) : DataWrite :=
-  ResourceBirthController.Concrete.packedWrite command.target prepared.target.before
-    (packDeclared command.kind prepared.page.candidate.post)
+/-! One physical plan and one exact replay identity. -/
+def targetWrite (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : DataWrite :=
+  ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
+    (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  targetWrite prepared :: prepared.physical.writes ++
+  (List.finRange command.targets.length).map (targetWrite prepared) ++ prepared.physical.writes ++
     prepared.physical.placement.auxiliaryCreates.map ResourceBirthController.birthWrite
 
-def sourceGuard (prepared : PreparedInvocation deployment profile ambient durable command) : ReadGuard :=
-  ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
+def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  (List.finRange command.targets.length).map fun i =>
+    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  sourceGuard prepared :: readonlyGuards prepared.authority.readGuards (writes prepared)
+  sourceGuards prepared ++ readonlyGuards prepared.authority.readGuards (writes prepared)
 
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-    (∀ write ∈ writes prepared,
-      ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
-    (sourceGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
+    (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+    (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
-instance physicalShapeDecidable
-    (prepared : PreparedInvocation deployment profile ambient durable command) :
-    Decidable (PhysicalShape prepared) := by
-  unfold PhysicalShape
-  infer_instance
+instance physicalShapeDecidable (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Decidable (PhysicalShape prepared) := by unfold PhysicalShape; infer_instance
 
-theorem writes_roots_bound
-    (prepared : PreparedInvocation deployment profile ambient durable command) :
+theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  rcases List.mem_cons.mp member with rfl | other
-  · rfl
-  · rcases List.mem_append.mp other with authority | allocation
+  rcases List.mem_append.mp member with ordinary | allocation
+  · rcases List.mem_append.mp ordinary with target | authority
+    · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
+      rfl
     · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound
         deployment.authorityAnchor durable.snapshot prepared.authority.snapshot.catalogue
         prepared.marker.prepared.postPages prepared.physical.placement write authority
-    · obtain ⟨creation, _, rfl⟩ := List.mem_map.mp allocation
-      exact ResourceBirthController.birthWrite_root_bound creation
+  · obtain ⟨creation, _, rfl⟩ := List.mem_map.mp allocation
+    exact ResourceBirthController.birthWrite_root_bound creation
 
-theorem readGuards_readonly
-    (prepared : PreparedInvocation deployment profile ambient durable command)
+theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
     ∀ guard ∈ readGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   intro guard member
-  rcases List.mem_cons.mp member with rfl | authority
-  · exact shape.2.2.2.1
+  rcases List.mem_append.mp member with source | authority
+  · exact shape.2.2.2.1 guard source
   · exact of_decide_eq_true (List.mem_filter.mp authority).2
 
-/-- The retained invocation ingress has one source codec for encoding and
-historical decoding. The wire below is byte-for-byte the original frame. -/
-def signedIngressFrame : List UInt8 :=
-  "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [1]
-
+def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
 abbrev SignedIngress := Digest × Digest × SignedCommand
 
 def signedIngressStream : StreamCodec SignedIngress :=
   StreamCodec.xmap
-    (StreamCodec.product digestStream
-      (StreamCodec.product digestStream
-        (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list bytesStream)
+        (StreamCodec.product (StreamCodec.list bytesStream) bytesStream)))))
     (fun (domain, semantics, signed) =>
-      (domain, semantics, signed.commandBytes, signed.targetEnvelope, signed.authorityEnvelope))
-    (fun (domain, semantics, command, target, authority) =>
-      (domain, semantics, ⟨command, target, authority⟩))
+      (domain, semantics, signed.commandBytes, signed.targetEnvelopes, signed.observeEnvelopes, signed.authorityEnvelope))
+    (fun (domain, semantics, command, targets, observe, authority) =>
+      (domain, semantics, ⟨command, targets, observe, authority⟩))
     (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
 
 def signedIngressRawCodec : LawfulCodec SignedIngress where
@@ -912,40 +540,27 @@ def signedIngressRawCodec : LawfulCodec SignedIngress where
     signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
   decode_encode := by
     intro ingress
-    have decoded := signedIngressStream.toLawful.decode_encode ingress
-    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
+    have exact := signedIngressStream.toLawful.decode_encode ingress
+    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at exact
+    simp [exact]
 
-def signedIngressCodec : LawfulCodec SignedIngress :=
-  ResourceBirthCodec.strictCodec signedIngressRawCodec
+def signedIngressCodec : LawfulCodec SignedIngress := ResourceBirthCodec.strictCodec signedIngressRawCodec
 
 def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
   signedIngressCodec.encode (domain, semantics, signed)
-
-/-- This factoring changes no retained event byte. -/
-theorem signedBytes_wire_unchanged (domain semantics : Digest) (signed : SignedCommand) :
-    signedBytes domain semantics signed =
-      "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [1] ++
-        (StreamCodec.product digestStream
-          (StreamCodec.product digestStream
-            (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream)))).encode
-          (domain, semantics, signed.commandBytes, signed.targetEnvelope, signed.authorityEnvelope) := rfl
-
-def decodeSignedBytes := signedIngressCodec.decode
+abbrev decodeSignedBytes := signedIngressCodec.decode
 
 theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCommand) :
     decodeSignedBytes (signedBytes domain semantics signed) = some (domain, semantics, signed) :=
   signedIngressCodec.decode_encode _
-
 theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
-    (decoded : decodeSignedBytes bytes = some ingress) :
-    signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
+    (decoded : decodeSignedBytes bytes = some ingress) : signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
   ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
 
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
 def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
-  codecVersion := 1
+  codecVersion := 3
   domain := domain
   eventId := effectsDigest domain semantics command
   canonicalBytes := signedBytes domain semantics signed
@@ -953,19 +568,14 @@ def invocationEvent (domain semantics : Digest) (command : Command) (signed : Si
 def transactionId (domain semantics : Digest) (command : Command) : Digest :=
   ⟨operationMarker domain semantics command⟩
 
-/-- Admission units, computed from the actual complete physical plan. No
-monetary fee is invented for these ordinary metadata/code mutations. -/
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) : ResourceCost.Charge
-  | .incidences => 2
+  | .incidences => command.targets.length + 1
   | .turnBytes => (signedBytes prepared.authority.snapshot.domain profile.semantics signed).length
   | .memoryTouches => (writes prepared).length + (readGuards prepared).length
   | .storageBytes => ((writes prepared).map fun write => write.canonicalPostBytes.length).sum
   | .feeDebit | .witnessBytes | .proofWork | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-/-- The emitter requires the complete privately constructed semantic admission
-and the actual physical refinement checks. It does not forge handler evidence
-or claim that a candidate intent is already a physically committed hyperedge. -/
 def AcceptedInvocation.dataIntent [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
@@ -980,12 +590,8 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
   postRootsBound := writes_roots_bound prepared
   guardsReadOnly := readGuards_readonly prepared shape
 
-/-- Journal lookup is exact full signed ingress, never a spent-marker success
-shortcut. The returned record is the prior complete receipt, not fresh authority.
-The durable image has already replayed through the shared canonical executor. -/
 def recordedInvocation (domain semantics : Digest) (command : Command) (signed : SignedCommand)
-    (durable : Durable) : Except Unit (Option (DurableCommitProtocol.Intent Digest Digest
-      StableNullifier ReplayEnvelope)) :=
+    (durable : Durable) : Except Unit (Option (DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope)) :=
   match DurableCommitProtocol.Snapshot.lookupRecorded (transactionId domain semantics command)
       durable.snapshot.model.journal with
   | none => .ok none
@@ -1003,15 +609,10 @@ inductive ReceiveResult where
   | unavailable (detail : String)
   | settlement (result : DurableReceiverIO.Result ResourceBirthCodec.rootBytes)
 
-/-- The only outer invocation receiver: bytes and exact signatures in; either
-refusal, the previously recorded exact result, or shared durable publication
-outcome out. All preparation is after replay lookup and before the only CAS.
-No new authority, resource mutation or input consumption occurs on refusal. -/
 def receiveLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable) (signed : SignedCommand) :
-    IO ReceiveResult := do
+    (transport : DurableReceiverIO.Transport) (durable : Durable) (signed : SignedCommand) : IO ReceiveResult := do
   match commandCodec.decode signed.commandBytes with
   | none => return .rejected .malformedCommand
   | some command =>
@@ -1025,18 +626,14 @@ def receiveLoaded {F : Type} [Field F] [DecidableEq F]
               if shape : PhysicalShape prepared then
                 match ← admit native prepared signed with
                 | .error reason => return .rejected reason
-                | .ok accepted =>
-                    return .settlement (← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes
-                      durable (accepted.dataIntent shape))
+                | .ok accepted => return .settlement (← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes
+                    durable (accepted.dataIntent shape))
               else return .rejected .physicalPreparation
 
-/-- One load supplies both admission and the exact-image CAS. Contention is
-returned to the caller, which must construct fresh authority and clock inputs. -/
 def receive {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (signed : SignedCommand) (_attempts : Nat := 3) :
-    IO ReceiveResult := do
+    (transport : DurableReceiverIO.Transport) (signed : SignedCommand) (_attempts : Nat := 3) : IO ReceiveResult := do
   match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
   | .error detail => return .unavailable detail
   | .ok durable => receiveLoaded deployment profile ambient native transport durable signed

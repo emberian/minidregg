@@ -104,12 +104,14 @@ def intentStream : StreamCodec Intent :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro intent; cases intent; rfl)
 
-def intentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v1".toUTF8.toList
+/-- v3 embeds the v3 host draft and binds the complete ordered joint read
+footprint. Old observation transcripts cannot be interpreted as joint intent. -/
+def intentFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v3".toUTF8.toList
 
 def intentCodec : LawfulCodec Intent := NativeHostCodec.framed intentFrame intentStream
 
 def intentIdentity (intent : Intent) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-INTENT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-INTENT/v3".toUTF8.toList
     (intentCodec.encode intent)).digest
 
 def federationStream : StreamCodec FederationId :=
@@ -127,7 +129,7 @@ def challengeStream : StreamCodec Challenge :=
       wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v1".toUTF8.toList
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v3".toUTF8.toList
 
 def challengeCodec : LawfulCodec Challenge := NativeHostCodec.framed challengeFrame challengeStream
 
@@ -136,7 +138,7 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v1".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v3".toUTF8.toList
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed signedFrame signedStream
 

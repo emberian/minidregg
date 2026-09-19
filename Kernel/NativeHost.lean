@@ -43,8 +43,9 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
       if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
       match validateLoaded config durable with
       | .error detail => return .error detail
-      | .ok _ => return ← DurableReceiverIO.bootstrap config.storage.transport
-          ResourceBirthCodec.rootBytes durable.image.seed
+      | .ok _ =>
+          return ← DurableReceiverIO.bootstrap config.storage.transport
+            ResourceBirthCodec.rootBytes durable.image.seed
 
 private def refused (phase detail : String) : Outcome :=
   .refused phase.toUTF8.toList detail.toUTF8.toList
@@ -94,9 +95,15 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
             (fun reason => s!"invocation preparation: {repr reason}")
         let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
         let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
-        let target ← slot prepared.authority.snapshot marker 4 0 (tuple.request .target)
-        let authority ← slot prepared.authority.snapshot marker 1 0 (tuple.request .authority)
-        pure (.invoke bytes, [target, authority])
+        let targets ← (List.finRange command.targets.length).mapM fun index =>
+          slot prepared.authority.snapshot marker 4 index.val (tuple.request (some index))
+        let observations ← if command.requiresObservation then
+          (List.finRange command.targets.length).mapM fun index =>
+            slot prepared.authority.snapshot marker 8 index.val
+              ⟨command.targets[index].kind, DeclaredResourceController.readRequest prepared index⟩
+          else pure []
+        let authority ← slot prepared.authority.snapshot marker 1 0 (tuple.request none)
+        pure (.invoke bytes, targets ++ observations ++ [authority])
     | .install subject control bytes => do
         let declaration ← need "noncanonical install declaration" (PolicyInstallController.decodeDeclaration bytes)
         let context : PolicyInstallController.RequestContext :=
@@ -120,6 +127,15 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityDelegationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 6 0 ⟨packed.1, wanted⟩
         pure (.delegate bytes, [signature])
+    | .revoke bytes => do
+        let packed ← need "noncanonical revocation command" (CapabilityRevocationController.commandCodec.decode bytes)
+        let ambient : CapabilityRevocationController.Ambient := ⟨config.federation, height⟩
+        let prepared ← (CapabilityRevocationController.prepare config.deployment profile ambient
+          opened.durable packed.2).mapError (fun reason => s!"revocation preparation: {repr reason}")
+        let wanted := CapabilityRevocationController.request prepared.authority.snapshot profile.semantics ambient packed.2
+        let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
+        let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
+        pure (.revoke bytes, [signature])
   pure ⟨config.deployment.domain, profile.semantics, imageBoundary config opened.durable.image,
     height, finalized, slots⟩
 
@@ -190,10 +206,15 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       (CredentialSignedEnvelopeController.headerCodec.decode selected.header)
     pure (CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩)
   match plan.finalizedDraft with
-  | .invoke bytes =>
-      match envelopes with
-      | [target, authority] => pure (.invoke ⟨bytes, target, authority⟩)
-      | _ => .error "invocation signing slots mismatch"
+  | .invoke bytes => do
+      let command ← need "noncanonical finalized invocation" (DeclaredResourceController.commandCodec.decode bytes)
+      let targetCount := command.targets.length
+      let observeCount := if command.requiresObservation then targetCount else 0
+      check (!command.targets.isEmpty && envelopes.length == targetCount + observeCount + 1)
+        "invocation signing slots mismatch"
+      let authority ← need "missing invocation authority envelope" envelopes[targetCount + observeCount]?
+      pure (.invoke ⟨bytes, envelopes.take targetCount,
+        envelopes.drop targetCount |>.take observeCount, authority⟩)
   | .install subject control bytes =>
       match envelopes with
       | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope⟩))
@@ -216,6 +237,10 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       match envelopes with
       | [envelope] => pure (.delegate (CapabilityDelegationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))
       | _ => .error "delegation signing slots mismatch"
+  | .revoke bytes =>
+      match envelopes with
+      | [envelope] => pure (.revoke (CapabilityRevocationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))
+      | _ => .error "revocation signing slots mismatch"
 
 /-- Seal the ORIGINAL accepted prefix, even when a later transaction was
 published before physical confirmation/readback completed. -/
@@ -224,8 +249,8 @@ def historicalReceipt (config : Config) (durable : Durable) (transactionId event
   let index ← durable.image.accepted.findIdx? (fun record => record.transactionId == transactionId)
   let record ← durable.image.accepted[index]?
   if record.event.eventId != eventId then none else
-    let prefix : DurableReceiver.Image := ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
-    some ⟨transactionId, eventId, index + 1, imageBoundary config prefix⟩
+    let acceptedPrefix : DurableReceiver.Image := ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+    some ⟨transactionId, eventId, index + 1, imageBoundary config acceptedPrefix⟩
 
 private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
@@ -239,6 +264,16 @@ private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
 def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
+  | .revoke bytes =>
+      match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
+          ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
+      | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      | .rejected reason => return refused "revoke" s!"{repr reason}"
+      | .transactionConflict => return refused "replay" "transaction identity conflict"
+      | .durableRejected reason => return refused "durable" s!"{repr reason}"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail.toUTF8.toList
+      | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .delegate bytes =>
       match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
@@ -278,9 +313,10 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
           | .unavailable detail => return .unavailable detail.toUTF8.toList
           | .settlement result =>
               match result with
-              | .confirmed kind _ => confirmed config kind
-                  (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
-                  (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
+              | .confirmed kind _ =>
+                  confirmed config kind
+                    (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
+                    (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
               | .rejected reason => return refused "durable" s!"{repr reason}"
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -313,6 +349,14 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
     | none => .uncertain "historical receipt prefix unavailable".toUTF8.toList
     | some receipt => .confirmed .replayed receipt
   match call with
+  | .revoke bytes =>
+      match CapabilityRevocationReceiver.decodeIngress bytes with
+      | none => refused "revoke" "noncanonical ingress"
+      | some ingress =>
+          match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
+          | none => .absent
+          | some (.error _) => refused "replay" "transaction identity conflict"
+          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .delegate bytes =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | none => refused "delegate" "noncanonical ingress"

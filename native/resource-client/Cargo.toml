@@ -1,0 +1,16 @@
+[package]
+name = "minidregg-resource-client"
+version = "0.1.0"
+edition = "2021"
+description = "Physical custody and exact-retry client for the Lean-owned Mini host."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "mini"
+path = "src/main.rs"
+
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
+serde_json = "=1.0.151"
+
