@@ -53,6 +53,34 @@ def binaryDigits : (width : Nat) → Nat → Fin width → Nat
   | 0, _, i => i.elim0
   | width + 1, n, i => Fin.cases (n % 2) (binaryDigits width (n / 2)) i
 
+/-- Direct bit selection avoids executable `Fin.cases`: its induction recursor
+evaluates predecessor results even though the case handler discards them. -/
+def binaryDigitsDirect (width n : Nat) (i : Fin width) : Nat :=
+  (n / 2 ^ i.val) % 2
+
+/-- Every width, source natural and in-range bit has the original value. -/
+theorem binaryDigits_eq_direct_value (width n : Nat) (i : Fin width) :
+    binaryDigits width n i = binaryDigitsDirect width n i := by
+  induction width generalizing n with
+  | zero => exact i.elim0
+  | succ width ih =>
+    refine Fin.cases ?_ ?_ i
+    · simp [binaryDigits, binaryDigitsDirect]
+    · intro j
+      simp only [binaryDigits, Fin.cases_succ, ih, binaryDigitsDirect,
+        Fin.val_succ, Nat.div_div_eq_div_mul, pow_succ, Nat.mul_comm]
+
+/-- Compiler replacement only; the order system and its witness/soundness
+statements continue to use the original definition. -/
+@[csimp] theorem binaryDigits_eq_binaryDigitsDirect :
+    binaryDigits = binaryDigitsDirect := by
+  funext width n i
+  exact binaryDigits_eq_direct_value width n i
+
+/-- info: 'Minidregg.Compiler.PredOrder.binaryDigits_eq_binaryDigitsDirect' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms binaryDigits_eq_binaryDigitsDirect
+
 /-- Source-owned shifted difference, normalized to `2^k` when absent. -/
 def shiftedTerm (k : Nat) (present left right : Term (AirSig F Idx)) :
     Term (AirSig F Idx) :=
