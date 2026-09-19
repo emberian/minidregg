@@ -9,6 +9,28 @@ Implementation status and measured checks belong in the sprint evidence, not
 this interface document. Adding a target does not establish that its linked
 executable or complete user journey has passed.
 
+## Building and exercising the native interface
+
+In an independent snapshot, `scripts/build-native-host.sh --umbrella --output
+BUILD-DIR` checks the full Lean umbrella and links the host with bounded compiler
+concurrency. Its manifest records the source and object closure. Compile the
+public acceptance driver against that same closure:
+
+```sh
+scripts/build-native-acceptance-runner.sh \
+  --host-response BUILD-DIR/minidregg-host.rsp --output RUNNER-DIR
+RUNNER-DIR/native-acceptance-runner --new-world \
+  .lake/build/bin/minidregg-host VERIFIER SQLITE-STORE OPENSSL ARTIFACT-DIRECTORY
+RUNNER-DIR/native-acceptance-runner \
+  .lake/build/bin/minidregg-host VERIFIER SQLITE-STORE OPENSSL
+```
+
+Use fresh output directories. The second invocation exercises the earlier
+owner/delegation and history-integrity journey. The runner builder matches
+Lake's package namespace to the host's actual objects. The large signing-plan
+fixture exceeds the interpreted `lean --run` recursion depth; use the compiled
+runner. Building or usage-smoking it is not an acceptance result.
+
 Preparation requires a signed observation challenge covering its actual resource
 read set. Internal preparation reads state, so exposing its success/errors
 before authorization would be a balance or existence oracle. The public command
