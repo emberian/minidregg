@@ -56,24 +56,43 @@ def factoryTemplateStream : StreamCodec FactoryTemplate :=
 def FactoryTemplate.encode (template : FactoryTemplate) : List UInt8 :=
   factoryTemplateStream.encode template
 
-/-- Complete-authority old/candidate views for policy replacement. -/
+/-- Policy replacement checks complete authority privately and projects only
+the selected policy's old/candidate metadata. -/
 def installProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.POLICY-INSTALL.PRESERVE-GRANTS-ADVANCE-REVISION/v2".toUTF8.toList
 
-/-- The same source declaration produces request fields, old/post views and effects. -/
+/-- The same source declaration produces request fields, old/post views and
+effects. Generic scalar views retain complete field identifiers and expose
+before/after/delta plus pair-total deltas only where the actual reads exist. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.DECLARED-INVOCATION.SOURCE-BOUND/v1".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS/v4".toUTF8.toList
+
+/-- Typed content edits are source-derived canonical patches; atom payloads
+and exact old records belong to the command, not a host-side blob table. -/
+def contentProjectionVersion : List UInt8 :=
+  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.EXACT-BYTES-PAGE16/v2".toUTF8.toList
 
 /-- Factory, initial policy, authority grants and resource post-state share one tuple. -/
 def birthProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.RESOURCE-BIRTH.JOINT-FACTORY-ROLES/v1".toUTF8.toList
+  "DREGG.RUNTIME.RESOURCE-BIRTH.SCOPED-ACCOUNT-FACTORY-USER-COMMAND/v2".toUTF8.toList
 
 def delegationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CAPABILITY-DELEGATION.AUTHORIZED-PARENT-FULL-REQUEST/v1".toUTF8.toList
+  "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY/v2".toUTF8.toList
+
+/-- Revocation is its own management verb, checked by the current resource
+law and exact stored control grant against the same complete old authority. -/
+def revocationProjectionVersion : List UInt8 :=
+  "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY/v2".toUTF8.toList
+
+/-- Signed snapshot observation uses the actual resource page and only the
+selected account's sparse balance cut. Preparation must cover every private
+read with an exact observe-grant footprint from the same loaded image. -/
+def observationProjectionVersion : List UInt8 :=
+  "observe/v3:exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
 
 /-- Exact request fields and request-bound capability possession are part of this epoch. -/
 def authorizationVersion : List UInt8 :=
-  "DREGG.RUNTIME.AUTHORIZATION.REVISION-AND-GRANT-GENERATION/v2".toUTF8.toList
+  "DREGG.RUNTIME.AUTHORIZATION.REVISION-GRANT-GENERATION-DISTINCT-REVOCATION/v3".toUTF8.toList
 
 /-- Native logical time is derived from the very image admitted and CASed.
 Its genesis offset belongs to the source-owned receiver parameters below. -/
@@ -81,7 +100,7 @@ def nativeClockVersion : List UInt8 :=
   "DREGG.RUNTIME.CLOCK.GENESIS-PLUS-ACCEPTED-COUNT.EXACT-IMAGE/v1".toUTF8.toList
 
 def nativeHostWireVersion : List UInt8 :=
-  "DREGG.NATIVE.HOST.STRICT-OPERATIONS-AND-SIGNING-PLAN/v1".toUTF8.toList
+  "DREGG.NATIVE.HOST.JOINT-TYPED-OPERATIONS-REVOCATION-SIGNED-READS/v3".toUTF8.toList
 
 /-- Reuse the canonical kind encoder; there is no second ordinal table in the views. -/
 def requestKindTag (kind : ResourceKind) : Nat :=
@@ -129,6 +148,7 @@ role. Codec/root epochs are read from their actual exported identities, without
 a separately maintained blanket version label. -/
 def sourceComponents : List (List UInt8) :=
   [authorizationVersion, nativeClockVersion, nativeHostWireVersion,
+   CanonicalCellRegistry.logicalLawVersion, observationProjectionVersion,
    CredentialSignatureAdmission.signatureDomain,
    CredentialSignatureAdmission.requestFrame,
    (StreamCodec.list StreamCodec.nat).encode
@@ -170,7 +190,7 @@ def sourceComponents : List (List UInt8) :=
         requestKindTag (CanonicalCellRegistry.resourceKindOf kind)]),
    StreamCodec.nat.encode CanonicalCellRegistry.factoryKind.tag.toNat,
    installProjectionVersion, invocationProjectionVersion, birthProjectionVersion,
-   delegationProjectionVersion,
+   delegationProjectionVersion, revocationProjectionVersion, contentProjectionVersion,
    (StreamCodec.list (StreamCodec.list StreamCodec.nat)).encode
      [[requestKindTag .object,
        CredentialAuthorityEntryCodec.verbTag (.observeObject),
@@ -184,7 +204,8 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.observeProgram),
        CredentialAuthorityEntryCodec.verbTag (.installProgram),
        CredentialAuthorityEntryCodec.verbTag (.delegateProgram),
-       CredentialAuthorityEntryCodec.verbTag (.installPolicy)]]]
+       CredentialAuthorityEntryCodec.verbTag (.installPolicy),
+       CredentialAuthorityEntryCodec.verbTag (.revokeCapability)]]]
 
 def runtimeStream : StreamCodec (List (List UInt8) × FactoryTemplate) :=
   StreamCodec.product (StreamCodec.list bytesStream) factoryTemplateStream

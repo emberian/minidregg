@@ -294,13 +294,13 @@ def accountCapability {F : Type} [Field F]
 def controlCapability {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : Capability .program :=
   rootCapability profile config .program config.factoryController.capabilityId
-    config.factoryController.subject config.deployment.factoryId {.installPolicy}
+    config.factoryController.subject config.deployment.factoryId {.installPolicy, .revokeCapability}
 
 def accountControlCapability {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
     (enrollment : Enrollment) : Capability .program :=
   rootCapability profile config .program enrollment.controlCapabilityId
-    ⟨enrollment.key.subject⟩ enrollment.accountId {.installPolicy}
+    ⟨enrollment.key.subject⟩ enrollment.accountId {.installPolicy, .revokeCapability}
 
 def factoryObserveCapability {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)

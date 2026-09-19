@@ -461,7 +461,7 @@ def AuthorityGrant.PolicyControlForBirth {registry : TypeRegistry Digest}
   match grant with
   | ⟨.program, capability⟩ =>
       capability.head.scope.targets = {⟨item.create.cellId⟩} ∧
-        capability.head.scope.verbs = {Verb.installPolicy} ∧
+        capability.head.scope.verbs = {Verb.installPolicy, Verb.revokeCapability} ∧
         capability.head.policyId.value = item.create.cellId ∧
         capability.head.policyEpoch = 0
   | _ => False

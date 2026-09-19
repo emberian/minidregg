@@ -11,6 +11,8 @@ the ordinary declared-resource controller with their own current signature.
 -/
 import Kernel.DeclaredResourceController
 import Theory.CredentialAuthorityEffects
+import Compiler.ResourceTargetAdmission
+import Compiler.ResourceAuthorityProjection
 
 namespace Minidregg.Kernel.CapabilityDelegationController
 
@@ -205,23 +207,13 @@ def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Comma
   exact ⟨root, lookup, parentId, valid, anchored, fresh, marker, issuer, generation,
     selfRegistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
 
-structure ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
-    {kind : ResourceKind} (command : Command kind) where
-  before : PackedCell Registry
-  present : directory.slots command.declaration.target.value = .present before
-  page : Materialized DeclaredEffectPageMaterializer.materializer
-  selected : CanonicalCellRegistry.selectDeclared deployment command.declaration.target.value kind before = some page
-  rootExact : command.expectedTargetRoot = page.root
+abbrev ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
+    {kind : ResourceKind} (command : Command kind) :=
+  ResourceTargetAdmission.Observed deployment directory kind command.declaration.target.value command.expectedTargetRoot
 
 def observeTarget (deployment : Deployment) (directory : Directory Nat Registry)
     {kind : ResourceKind} (command : Command kind) : Option (ObservedTarget deployment directory command) :=
-  match present : directory.slots command.declaration.target.value with
-  | .absent => none
-  | .present before =>
-    match selected : CanonicalCellRegistry.selectDeclared deployment command.declaration.target.value kind before with
-    | none => none
-    | some page => if exactRoot : command.expectedTargetRoot = page.root then
-        some ⟨before, present, page, selected, exactRoot⟩ else none
+  ResourceTargetAdmission.observe deployment directory kind command.declaration.target.value command.expectedTargetRoot
 
 structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -352,7 +344,25 @@ def project (prepared : Prepared deployment profile ambient durable command) (_ 
   ⟨CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0 (PackedCell.bytes Registry prepared.target.before) ++
-    DeclaredResourceController.bytesSlots "authority/bytes" 0 (CredentialAuthorityStateCodec.encode (logical ()))⟩
+    ResourceAuthorityProjection.grantSlots "authority/parent" kind command.declaration.parentId (logical ()) ++
+    ResourceAuthorityProjection.grantSlots "authority/child" kind command.declaration.child.id (logical ())⟩
+
+/-- A delegation law can inspect the selected parent and proposed child;
+unrelated authority records cannot affect its source-owned predicate view. -/
+theorem project_noninterference (prepared : Prepared deployment profile ambient durable command)
+    (left right : (incidence : Unit) → LogicalState ((layout prepared).schema incidence))
+    (parent : (left ()).fields (.capability kind command.declaration.parentId) =
+      (right ()).fields (.capability kind command.declaration.parentId))
+    (parentRevoked : (left ()).fields (.revoked (.capability command.declaration.parentId)) =
+      (right ()).fields (.revoked (.capability command.declaration.parentId)))
+    (child : (left ()).fields (.capability kind command.declaration.child.id) =
+      (right ()).fields (.capability kind command.declaration.child.id))
+    (childRevoked : (left ()).fields (.revoked (.capability command.declaration.child.id)) =
+      (right ()).fields (.revoked (.capability command.declaration.child.id))) :
+    project prepared () left = project prepared () right := by
+  unfold project
+  rw [ResourceAuthorityProjection.grantSlots_noninterference _ _ _ (left ()) (right ()) parent parentRevoked,
+    ResourceAuthorityProjection.grantSlots_noninterference _ _ _ (left ()) (right ()) child childRevoked]
 
 def step (prepared : Prepared deployment profile ambient durable command) : PolicyStepContext :=
   PolicyStepContext.ofPreparedTuple (project prepared) profile.semantics (tuple prepared)
@@ -504,8 +514,8 @@ theorem Accepted.parent_authorized [DecidableEq F]
       some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent) :=
   accepted.parentNamed
 
-/-- The selected current policy evaluated the actual old and source-computed
-complete authority states. The physical receiver proves this same post image
+/-- The selected current policy evaluated the scoped view of the actual old
+and source-computed authority states. The physical receiver proves this same post image
 is installed; no caller-selected predicate state appears in either statement. -/
 theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
@@ -533,5 +543,8 @@ theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
     (project prepared () (fun _ => prepared.validated.apply.logical)) = true at evaluated
   rw [← prepared.postExact] at evaluated
   exact evaluated
+
+/-- info: 'Minidregg.Kernel.CapabilityDelegationController.project_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms project_noninterference
 
 end Minidregg.Kernel.CapabilityDelegationController

@@ -12,6 +12,7 @@ import Theory.PolicyInstall
 import Kernel.ResourceBirthController
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CanonicalRuntimeProfile
+import Compiler.CanonicalAccountView
 
 namespace Minidregg.Kernel.ResourceBirthPolicyController
 
@@ -603,29 +604,44 @@ def prepareTuple (prepared : PreparedBirth profile.compilerProfile deployment pi
         requestEffects := by intro incidence; cases incidence <;> rfl }
   else none
 
-/-- All contexts observe the same actual command and pre/post tuple; only
-the exact primary request root changes for separately authorized incidences. -/
+/-- The shared byte-slot encoding is used only on explicitly selected source
+data. Selecting a complete canonical cell is a disclosure decision. -/
 def bytesSlots (stem : String) : Nat → List UInt8 → List (String × Int)
   | _, [] => []
   | offset, byte :: rest =>
       (s!"{stem}/{offset}", Int.ofNat byte.toNat) :: bytesSlots stem (offset + 1) rest
 
-def incidenceName : Legs descriptor → String
-  | .factory => "factory"
-  | .book => "book"
-  | .authority => "authority"
-  | .allocation index => s!"allocation/{index.val}"
+/-- The reviewable user command excludes source-generated authority shards.
+All remaining fields are the exact user-authored draft, not old world state. -/
+def userCommandBytes (source : Descriptor Registry) : List UInt8 :=
+  CanonicalCellRegistry.sourceEncoding.codec.encode { source with auxiliaryCreates := [] }
 
-def lifecycleCode : LifecycleImage Registry → Int
-  | .fresh => 0
-  | .retired => 1
-  | .live _ => 2
+theorem userCommandBytes_auxiliary_independent (source : Descriptor Registry)
+    (allocations : List (CreateRequest (CellId := Nat) Registry)) :
+    userCommandBytes { source with auxiliaryCreates := allocations } = userCommandBytes source := rfl
 
-/-- This versioned schema projects canonical bytes for every complete cell,
-plus source coordinates and actual lifecycle observations. No free predicate
-state, root, digest, field-name map or evaluator is accepted from a request.
-Byte slots are distinct by fixed incidence name and numeric offset; actual
-absence survives the underlying canonical codecs. -/
+/-- Account laws see their own balance cut. The complete Book still enters
+conservation and exact candidate validation, but is not an oracle accessible to
+user predicates. Factory laws see only their own resource; authority and
+physical allocation state never enter this programmable projection. -/
+def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (wanted : PackedEffectRequest)
+    (logical : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)) :
+    List (String × Int) :=
+  match wanted with
+  | ⟨.account, request⟩ =>
+      CanonicalAccountView.slots
+        (CanonicalResourceKernel.logicalBook (logical .book)) request.target.value
+  | ⟨.object, request⟩ =>
+      if request.policyId.value = deployment.factoryId then
+        bytesSlots "cell/factory/bytes" 0
+          (DeclaredEffectPageMaterializer.materializer.codec.encode (logical .factory))
+      else []
+  | ⟨.program, _⟩ => []
+
+/-- State-dependent input is restricted to the governing resource's cut.
+The source descriptor still binds all proposed effects, while no account law
+can inspect another balance via the observable accept/refuse result. -/
 def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (_height : Height)
     (wanted : PackedEffectRequest) (source : Source descriptor)
     (logical : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)) :
@@ -634,17 +650,54 @@ def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployme
     [ ("request/creator", Int.ofNat source.val.creator.value)
 
     , ("birth/count", Int.ofNat source.val.births.length)
-    , ("birth/auxiliaryCount", Int.ofNat source.val.auxiliaryCreates.length)
     , ("fee/amount", Int.ofNat source.val.fee.amount) ]
-  let native := ([.factory, .book, .authority] : List (Legs descriptor)).flatMap fun incidence =>
-    bytesSlots (s!"cell/{incidenceName incidence}/bytes") 0
-      (((layout prepared).materializer incidence).codec.encode (logical incidence))
-  let allocations := (List.finRange descriptor.createRequests.length).flatMap fun index =>
-    (s!"cell/allocation/{index.val}/lifecycle",
-      lifecycleCode (LifecycleSlot.image Registry (logical (.allocation index)))) ::
-      bytesSlots (s!"cell/allocation/{index.val}/bytes") 0
-        ((LifecycleSlot.materializer Registry).codec.encode (logical (.allocation index)))
-  ⟨header ++ native ++ allocations⟩
+  ⟨header ++ bytesSlots "command/bytes" 0 (userCommandBytes source.val) ++
+    policyResourceSlots prepared wanted logical⟩
+
+/-- Holding the signed request and user command fixed, arbitrary changes to
+every other account, authority entry, factory field, or allocation cannot
+change a source account's policy view. Roots in the signed request remain
+explicit public commitments, not a hiding claim. -/
+theorem account_projection_noninterference
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (wanted : Request .account) (source : Source descriptor)
+    (left right : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence))
+    (same : ∀ asset,
+      (CanonicalResourceKernel.logicalBook (left .book)).balance wanted.target.value asset =
+      (CanonicalResourceKernel.logicalBook (right .book)).balance wanted.target.value asset) :
+    projectForRequest prepared height ⟨.account, wanted⟩ source left =
+      projectForRequest prepared height ⟨.account, wanted⟩ source right := by
+  have cut := CanonicalAccountView.slots_noninterference
+    (CanonicalResourceKernel.logicalBook (left .book))
+    (CanonicalResourceKernel.logicalBook (right .book)) wanted.target.value same
+  simp only [projectForRequest, policyResourceSlots, cut]
+
+theorem account_policy_verdict_noninterference
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (wanted : Request .account) (source : Source descriptor)
+    (leftOld rightOld leftNew rightNew :
+      (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence))
+    (oldSame : ∀ asset,
+      (CanonicalResourceKernel.logicalBook (leftOld .book)).balance wanted.target.value asset =
+      (CanonicalResourceKernel.logicalBook (rightOld .book)).balance wanted.target.value asset)
+    (newSame : ∀ asset,
+      (CanonicalResourceKernel.logicalBook (leftNew .book)).balance wanted.target.value asset =
+      (CanonicalResourceKernel.logicalBook (rightNew .book)).balance wanted.target.value asset)
+    (predicate : Minidregg.Pred.Pred) :
+    Minidregg.Pred.eval predicate
+      (projectForRequest prepared height ⟨.account, wanted⟩ source leftOld)
+      (projectForRequest prepared height ⟨.account, wanted⟩ source leftNew) =
+    Minidregg.Pred.eval predicate
+      (projectForRequest prepared height ⟨.account, wanted⟩ source rightOld)
+      (projectForRequest prepared height ⟨.account, wanted⟩ source rightNew) := by
+  rw [account_projection_noninterference prepared height wanted source leftOld rightOld oldSame,
+    account_projection_noninterference prepared height wanted source leftNew rightNew newSame]
+
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.account_projection_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms account_projection_noninterference
+
+/-- info: 'Minidregg.Kernel.ResourceBirthPolicyController.Concrete.account_policy_verdict_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms account_policy_verdict_noninterference
 
 def project (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (primary : Legs descriptor) (source : Source descriptor)
@@ -663,7 +716,7 @@ theorem step_actual_states (prepared : PreparedBirth profile.compilerProfile dep
   ⟨rfl, rfl⟩
 
 /-- Every accepting compiled witness names a selected OLD policy and forces
-that policy on this entire source-derived pre/post tuple. This rules out
+that policy on its source-selected view of the actual pre/post tuple. This rules out
 supplying a convenient witness state beside a different allocation or Book. -/
 theorem selected_policy_evaluates_actual_tuple [DecidableEq F]
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
@@ -680,7 +733,7 @@ theorem selected_policy_evaluates_actual_tuple [DecidableEq F]
   (canonical_context_verifies_sound (step prepared height tuple) binding accepted).2.2.2
 
 /-- Final family construction and full mode authorization cannot alter a
-single predicate byte slot or lifecycle observation evaluated beforehand. -/
+single selected predicate slot evaluated beforehand. -/
 theorem accepted_policy_view_exact
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
     (tuple : PreparedTuple (plan prepared height)) (portals : Legs descriptor → Portal)

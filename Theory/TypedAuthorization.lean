@@ -86,6 +86,8 @@ inductive Verb : ResourceKind → Type
   /-- Replacing a program resource's acceptance policy is distinct from
   editing its code. Ordinary installProgram authority cannot change its law. -/
   | installPolicy : Verb .program
+  /-- Revoking a resource grant is independently scoped management authority. -/
+  | revokeCapability : Verb .program
   deriving DecidableEq, Repr
 
 /-- The complete semantic authorization request.  Verifiers receive this value
@@ -503,6 +505,16 @@ theorem program_edit_capability_cannot_install_policy
   intro admitted
   have allowed := admitted.scope.verb
   simp [codeOnly, policyChange] at allowed
+
+/-- Policy replacement authority does not silently acquire revocation authority. -/
+theorem policy_install_only_cannot_revoke
+    (cap : Capability .program) (state : AuthState) (request : Request .program)
+    (installOnly : cap.scope.verbs = {.installPolicy})
+    (revocation : request.verb = .revokeCapability) :
+    ¬ cap.Admissible state request := by
+  intro admitted
+  have allowed := admitted.scope.verb
+  simp [installOnly, revocation] at allowed
 
 /-- A caller cannot pre-load a capability with a future issuer epoch.  Exact
 equality to current state rejects every strictly forward epoch. -/

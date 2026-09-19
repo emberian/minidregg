@@ -351,6 +351,7 @@ def verbName : SomeVerb → String
   | ⟨.program, .installProgram⟩ => "install_program"
   | ⟨.program, .delegateProgram⟩ => "delegate_program"
   | ⟨.program, .installPolicy⟩ => "install_policy"
+  | ⟨.program, .revokeCapability⟩ => "revoke_capability"
 
 def someVerbKind : SomeVerb → ResourceKind
   | ⟨kind, _⟩ => kind
@@ -374,7 +375,8 @@ def allVerbs : List SomeVerb :=
     ⟨.object, .delegateObject⟩, ⟨.account, .observeAccount⟩,
     ⟨.account, .transfer⟩, ⟨.account, .delegateAccount⟩,
     ⟨.program, .observeProgram⟩, ⟨.program, .installProgram⟩,
-    ⟨.program, .delegateProgram⟩, ⟨.program, .installPolicy⟩ ]
+    ⟨.program, .delegateProgram⟩, ⟨.program, .installPolicy⟩,
+    ⟨.program, .revokeCapability⟩ ]
 
 /-- The artifact catalogue covers the entire dependent source vocabulary. -/
 theorem allVerbs_complete (verb : SomeVerb) : verb ∈ allVerbs := by
