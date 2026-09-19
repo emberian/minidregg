@@ -90,9 +90,11 @@ mini query --host .lake/build/bin/minidregg-host \
   --dir attempts/query-1
 ```
 
-New source families use the generic author bridge, including `birth`,
-`policy-install`, `delegation`, `joint`, `content`, and `revocation` as their
-corresponding host author kinds land. Rust passes the JSON to Lean unchanged:
+The implemented `mini author --kind` values are `predicate`, `grain-caveat`,
+`policy`, `policy-install`, `policy-install-draft`, `delegation`,
+`delegation-draft`, `revocation`, `revocation-draft`, `birth`, `birth-intent`,
+`content`, `resource`, `joint`, `joint-draft`, `grain`, `draft`, `intent`, and
+`genesis`. Rust passes each JSON source to Lean unchanged:
 
 ```sh
 mini author --host .lake/build/bin/minidregg-host \
@@ -127,12 +129,19 @@ hex; identifiers and unbounded integers are canonical decimal strings. Atom
 edits carry the complete observed old record, so the source receiver can reject
 a stale replacement without trusting a Rust-side reconstruction.
 
-The bounded acceptance journey creates a new signer and deployment, authors a
-canonical content birth, submits a typed singleton content mutation, performs
-authorized queries, and checks byte-identical submit and receipt retries. It
-requires `jq` plus the already-built native storage and signature helpers, and
-refuses to reuse its evidence directory:
+The bounded local acceptance journey creates a new signer and deployment,
+births content and declared objects, submits a typed singleton content mutation
+with a deliberately lost outcome, recovers it from exact retained call bytes,
+then submits a mixed content/scalar joint transaction with current read grants.
+Authorized queries check both final states, and exact retries check receipt
+identity. It requires `jq` plus the already-built native storage and signature
+helpers, and refuses to reuse its evidence directory:
 
 ```sh
 native/resource-client/acceptance.sh .lake/build/bin/minidregg-host /tmp/mini-acceptance
 ```
+
+The directory retains the generated `birth-intent.json`, `content-intent.json`,
+`joint-intent.json`, query sources, canonical binary artifacts, signatures,
+receipts, and `acceptance.json`. These are concrete examples for the local
+process client; `mini` does not provide a network server or SSH interface.

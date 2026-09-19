@@ -128,15 +128,26 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
     "template": {"issuer": "5", "ownerBudget": "100000", "lifetime": "10000"},
     "creator": "7",
     "nonce": "22000",
-    "resources": [{
-      "kind": "object",
-      "storage": "content",
-      "target": "600",
-      "owner": "7",
-      "ownerCapability": "61",
-      "controlCapability": "62",
-      "predicate": {"type": "all", "predicates": []}
-    }],
+    "resources": [
+      {
+        "kind": "object",
+        "storage": "content",
+        "target": "600",
+        "owner": "7",
+        "ownerCapability": "61",
+        "controlCapability": "62",
+        "predicate": {"type": "all", "predicates": []}
+      },
+      {
+        "kind": "object",
+        "storage": "declared",
+        "target": "601",
+        "owner": "7",
+        "ownerCapability": "63",
+        "controlCapability": "64",
+        "predicate": {"type": "all", "predicates": []}
+      }
+    ],
     "sourceCapabilities": ["41"],
     "funding": [],
     "feePayer": "7"
@@ -261,14 +272,139 @@ jq -e '[.page.entries[].type] | sort == ["document", "element"]' \
   "$EVIDENCE/query-after/view.json" >/dev/null
 test "$TARGET_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-after/view.json")"
 
+cat >"$EVIDENCE/query-scalar-before.json" <<'EOF'
+{
+  "subject": "7",
+  "nonce": "30005",
+  "purpose": {"type": "query", "kind": "object", "target": "601", "view": "resource"},
+  "grants": [{"kind": "object", "target": "601", "capability": "63"}]
+}
+EOF
+"$MINI" query --host "$HOST" --config "$CONFIG" \
+  --intent "$EVIDENCE/query-scalar-before.json" --key "$EVIDENCE/alice.key" --view resource \
+  --dir "$EVIDENCE/query-scalar-before" >"$EVIDENCE/query-scalar-before.stdout"
+CONTENT_ROOT=$(jq -er '.page.root' "$EVIDENCE/query-after/view.json")
+SCALAR_ROOT=$(jq -er '.page.root' "$EVIDENCE/query-scalar-before/view.json")
+JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/query-scalar-before/challenge.json")
+jq -e '.page.entries == []' "$EVIDENCE/query-scalar-before/view.json" >/dev/null
+
+cat >"$EVIDENCE/joint-intent.json" <<EOF
+{
+  "subject": "7",
+  "nonce": "30006",
+  "purpose": {
+    "type": "prepare",
+    "draft": {
+      "type": "invoke",
+      "command": {
+        "subject": "7",
+        "expectedAuthorityRoot": "$JOINT_AUTHORITY_ROOT",
+        "nonce": "30007",
+        "targets": [
+          {
+            "kind": "object",
+            "target": "600",
+            "capability": "61",
+            "observeCapability": "61",
+            "schemaVersion": "1",
+            "expectedTargetRoot": "$CONTENT_ROOT",
+            "payload": {
+              "type": "content",
+              "actions": [{
+                "type": "createAtom",
+                "atom": "7001",
+                "kind": {"type": "text"},
+                "payload": "68656c6c6f"
+              }]
+            }
+          },
+          {
+            "kind": "object",
+            "target": "601",
+            "capability": "63",
+            "observeCapability": "63",
+            "schemaVersion": "1",
+            "expectedTargetRoot": "$SCALAR_ROOT",
+            "payload": {
+              "type": "scalar",
+              "actions": [{
+                "type": "create",
+                "key": {"type": "object", "resource": "601", "field": "0"},
+                "value": "1"
+              }]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "grants": [
+    {"kind": "object", "target": "600", "capability": "61"},
+    {"kind": "object", "target": "601", "capability": "63"}
+  ]
+}
+EOF
+
+"$MINI" submit --host "$HOST" --config "$CONFIG" \
+  --intent "$EVIDENCE/joint-intent.json" --key "$EVIDENCE/alice.key" \
+  --dir "$EVIDENCE/joint-attempt" >"$EVIDENCE/joint.stdout"
+jq -e '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == "3"' \
+  "$EVIDENCE/joint-attempt/outcome.json" >/dev/null
+jq -e '[.slots[].role] | index("8") != null' "$EVIDENCE/joint-attempt/plan.json" >/dev/null
+JOINT_CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+"$MINI" retry --attempt "$EVIDENCE/joint-attempt" --mode submit \
+  >"$EVIDENCE/joint-retry-submit.stdout"
+JOINT_CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+test "$JOINT_CALL_HASH_BEFORE" = "$JOINT_CALL_HASH_AFTER"
+jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "3"' \
+  "$EVIDENCE/joint-attempt/retry-0001.json" >/dev/null
+for field in transactionId eventId acceptedCount imageBoundary; do
+  test "$(jq -r ".$field" "$EVIDENCE/joint-attempt/outcome.json")" = \
+    "$(jq -r ".$field" "$EVIDENCE/joint-attempt/retry-0001.json")"
+done
+
+cat >"$EVIDENCE/query-content-final.json" <<'EOF'
+{
+  "subject": "7",
+  "nonce": "30008",
+  "purpose": {"type": "query", "kind": "object", "target": "600", "view": "resource"},
+  "grants": [{"kind": "object", "target": "600", "capability": "61"}]
+}
+EOF
+"$MINI" query --host "$HOST" --config "$CONFIG" \
+  --intent "$EVIDENCE/query-content-final.json" --key "$EVIDENCE/alice.key" --view resource \
+  --dir "$EVIDENCE/query-content-final" >"$EVIDENCE/query-content-final.stdout"
+jq -e '[.page.entries[].type] | sort == ["atom", "document", "element"]' \
+  "$EVIDENCE/query-content-final/view.json" >/dev/null
+jq -e '[.page.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
+  "$EVIDENCE/query-content-final/view.json" >/dev/null
+test "$CONTENT_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-content-final/view.json")"
+
+cat >"$EVIDENCE/query-scalar-final.json" <<'EOF'
+{
+  "subject": "7",
+  "nonce": "30009",
+  "purpose": {"type": "query", "kind": "object", "target": "601", "view": "resource"},
+  "grants": [{"kind": "object", "target": "601", "capability": "63"}]
+}
+EOF
+"$MINI" query --host "$HOST" --config "$CONFIG" \
+  --intent "$EVIDENCE/query-scalar-final.json" --key "$EVIDENCE/alice.key" --view resource \
+  --dir "$EVIDENCE/query-scalar-final" >"$EVIDENCE/query-scalar-final.stdout"
+jq -e '[.page.entries[] | select(.key.type == "object" and .key.resource == "601" and .key.field == "0" and .value == "1")] | length == 1' \
+  "$EVIDENCE/query-scalar-final/view.json" >/dev/null
+test "$SCALAR_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-scalar-final/view.json")"
+
 cat >"$EVIDENCE/acceptance.json" <<EOF
 {
   "status": "pass",
   "host": "$HOST",
   "semantics": "$SEMANTICS",
   "contentCallSha256": "$CALL_HASH_AFTER",
+  "jointCallSha256": "$JOINT_CALL_HASH_AFTER",
   "birthTransaction": $(jq '.transactionId' "$EVIDENCE/birth-attempt/outcome.json"),
   "contentTransaction": $(jq '.transactionId' "$EVIDENCE/content-attempt/retry-0001.json"),
+  "jointTransaction": $(jq '.transactionId' "$EVIDENCE/joint-attempt/outcome.json"),
   "lostOutcomeRecoveredByExactRetry": true
 }
 EOF
