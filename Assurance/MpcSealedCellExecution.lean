@@ -378,6 +378,7 @@ def requestContext : EffectRequestContext where
   height := 9
   policyId := ⟨10⟩
   policyEpoch := 0
+  policyRevision := Minidregg.Theory.TypedAuthorizationWitness.authState.policyRevision ⟨10⟩
   cost := 11
 
 noncomputable def adapter :
@@ -513,6 +514,7 @@ noncomputable def authorization :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

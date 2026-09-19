@@ -240,9 +240,8 @@ private theorem resourceKindTag_of_decoded {tag : Nat} {kind : ResourceKind}
 private theorem verbTag_of_decoded {kind : ResourceKind} {tag : Nat} {verb : Verb kind}
     (decoded : decodeVerb kind tag = some verb) :
     Minidregg.Theory.AuthorizationDeclaration.verbTag verb = tag := by
-  cases verb <;>
-    rcases tag with _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | tag <;>
-      simp_all [decodeVerb, Minidregg.Theory.AuthorizationDeclaration.verbTag]
+  fun_cases decodeVerb kind tag <;>
+    grind +lax [decodeVerb, Minidregg.Theory.AuthorizationDeclaration.verbTag]
 
 theorem encodeRequest_of_decodeRequest {wire : RequestWire} {request : SomeRequest}
     (decoded : decodeRequest wire = some request) : encodeRequest request = wire := by

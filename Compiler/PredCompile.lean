@@ -47,6 +47,7 @@ be lowered here rather than added through a second policy verifier.
 -/
 import Pred.Core
 import Compiler.PredOrderGadget
+import Mathlib.Data.List.Dedup
 
 namespace Minidregg.Compiler
 
@@ -157,8 +158,43 @@ theorem castInjOn_mono {I J : List ℤ} (hIJ : I ⊆ J) (h : castInjOn F J) :
     castInjOn F I :=
   fun a ha b hb => h a (hIJ ha) b (hIJ hb)
 
+/-- Repetition carries no additional cast-injectivity obligation. In particular,
+byte-expanded old/new projections need not compare every repeated byte pair. -/
+theorem castInjOn_dedup (I : List ℤ) : castInjOn F I.dedup ↔ castInjOn F I := by
+  constructor
+  · exact castInjOn_mono (List.subset_dedup I)
+  · exact castInjOn_mono (List.dedup_subset I)
+
+/-- Compute each distinct integer's field image once. The executable decision
+below compares stored images rather than reconstructing generic field casts
+inside every pairwise comparison. -/
+def castEntries (F : Type) [Field F] (I : List ℤ) : List (ℤ × F) :=
+  I.dedup.map fun a => (a, (a : F))
+
+/-- Exact refinement of the original all-integer obligation, including genuine
+field collisions. Deduplication is by source integer, never by field image. -/
+theorem castInjOn_iff_castEntries (I : List ℤ) :
+    castInjOn F I ↔
+      ∀ a ∈ castEntries F I, ∀ b ∈ castEntries F I, a.2 = b.2 → a.1 = b.1 := by
+  constructor
+  · intro h a ha b hb
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ha
+    obtain ⟨y, hy, rfl⟩ := List.mem_map.mp hb
+    exact h x (List.mem_dedup.mp hx) y (List.mem_dedup.mp hy)
+  · intro h x hx y hy
+    exact h (x, (x : F)) (List.mem_map.mpr ⟨x, List.mem_dedup.mpr hx, rfl⟩)
+      (y, (y : F)) (List.mem_map.mpr ⟨y, List.mem_dedup.mpr hy, rfl⟩)
+
 instance [DecidableEq F] (I : List ℤ) : Decidable (castInjOn F I) :=
-  inferInstanceAs (Decidable (∀ a ∈ I, ∀ b ∈ I, (a : F) = (b : F) → a = b))
+  let entries := castEntries F I
+  decidable_of_iff (∀ a ∈ entries, ∀ b ∈ entries, a.2 = b.2 → a.1 = b.1)
+    (castInjOn_iff_castEntries I).symm
+
+/-- info: 'Minidregg.Compiler.castInjOn_dedup' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms castInjOn_dedup
+
+/-- info: 'Minidregg.Compiler.castInjOn_iff_castEntries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms castInjOn_iff_castEntries
 
 /-! ## §2. Wire renaming — a fold-level operation, so child aux namespaces compose. -/
 
@@ -1039,6 +1075,25 @@ def kBad : State := ⟨[("x", 6), ("y", 2), ("z", 4)]⟩
 -- The instance's cast label holds in both keystone fields (kernel-decided):
 example : castInjOn (ZMod 7) (intsOf kPol kOld kNew) := by decide
 example : castInjOn (ZMod 13) (intsOf kPol kOld kNew) := by decide
+
+/-- Repeated source values remain admissible through the executable instance. -/
+theorem repeated_cast_values_accept :
+    castInjOn (ZMod 7) [0, 6, 0, 6, 1, 1] := by decide
+
+/-- Deduplicating source integers must never deduplicate a field collision. -/
+theorem repeated_cast_collision_refuses :
+    ¬ castInjOn (ZMod 7) [0, 7, 0, 7] := by decide
+
+/-- Negative integers are checked by their actual field casts as before. -/
+theorem repeated_negative_cast_collision_refuses :
+    ¬ castInjOn (ZMod 7) [-1, 6, -1, 6] := by decide
+
+/-- info: 'Minidregg.Compiler.repeated_cast_values_accept' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms repeated_cast_values_accept
+/-- info: 'Minidregg.Compiler.repeated_cast_collision_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms repeated_cast_collision_refuses
+/-- info: 'Minidregg.Compiler.repeated_negative_cast_collision_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms repeated_negative_cast_collision_refuses
 
 -- The fragment check and the source-level evaluations (kernel-decided):
 example : supported CompilerProfile.disabled kPol = true := by decide

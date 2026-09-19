@@ -11,9 +11,8 @@ usage() {
   cat <<'EOF'
 usage: scripts/build-native-host.sh [--umbrella] [--output DIR]
 
-  --umbrella  sequentially elaborate the full Minidregg source closure, then
-              run the literal `lake build Minidregg` gate through a serialized
-              Lean wrapper before linking the native host
+  --umbrella  run the literal `lake build Minidregg` gate through a serialized
+              Lean wrapper, build Host.Main leanArts, then link the native host
 
 Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker

@@ -322,7 +322,9 @@ def hiddenBookRefused (client : Client) (image : DurableReceiver.Image)
   scratchImageRefused client ⟨seed, []⟩ "hidden-unregistered-balance" (NativeHost.seedIdentity seed)
 
 def installed (label : String) : Outcome → IO Receipt
-  | .confirmed .installed receipt => pure receipt
+  | .confirmed .installed receipt => do
+      IO.println s!"PASS installed event {receipt.acceptedCount}: {label}"
+      pure receipt
   | .refused phase detail => throw (IO.userError s!"FAIL {label}: {phase} {detail}")
   | _ => throw (IO.userError s!"FAIL {label}: not installed")
 
@@ -330,8 +332,33 @@ def replayed (label : String) (original : Receipt) : Outcome → IO Unit
   | .confirmed .replayed receipt => require label (receipt == original)
   | _ => throw (IO.userError s!"FAIL {label}: did not return original replay receipt")
 
+/-- Fail delivery after the real host commits, then recover solely from the
+retained signed call. The missing output parent is local test scaffolding;
+neither the receiver nor storage is modified. -/
+def committedWithoutReply (client : Client) (call : System.FilePath) : IO Receipt := do
+  let missingParent := client.directory / "missing-reply-parent"
+  require "lost-reply fixture output parent is absent" (!(← missingParent.pathExists))
+  let output := missingParent / "outcome.bin"
+  let before ← client.physicalBytes
+  let sent ← runProcess client.host
+    #[client.settings.toString, "submit", call.toString, output.toString]
+  require "caller receives failure and no outcome after submission"
+    (sent.exitCode != 0 && !(← output.pathExists))
+  let committed ← client.physicalBytes
+  require "actual durable commit occurred before reply delivery failed" (before != committed)
+  let receipt ← match ← client.outcome "lookup" call with
+    | .confirmed .replayed receipt => pure receipt
+    | _ => throw (IO.userError "FAIL lost reply: exact lookup did not recover committed receipt")
+  replayed "retry after undelivered reply returns recovered original receipt" receipt
+    (← client.outcome "submit" call)
+  require "lost-reply recovery never republishes or recharges"
+    ((← client.physicalBytes) == committed)
+  IO.println s!"PASS committed event {receipt.acceptedCount}: recovered after undelivered reply"
+  pure receipt
+
 def rejected (label : String) : Outcome → IO Unit
-  | .refused _ _ => pure ()
+  | .refused phase detail =>
+      IO.println s!"PASS refusal: {label}; canonical outcome {repr (outcomeCodec.encode (.refused phase detail))}"
   | _ => throw (IO.userError s!"FAIL {label}: did not refuse")
 
 def invocation (client : Client) (custody : Custody) (capability : CapabilityId)
@@ -871,8 +898,7 @@ def run (host verifier store openssl directory : System.FilePath) : IO Unit := d
     (← client.outcome "submit" wrongReadCall)
   require "both direct read-authority attacks preserve complete physical image"
     ((← client.physicalBytes) == beforeReadAttacks)
-  let reserveReceipt ← installed "participant atomically reserves task and publishes content"
-    (← client.outcome "submit" reserveCall)
+  let reserveReceipt ← committedWithoutReply client reserveCall
   let beforeRefusal ← client.physicalBytes
   let (badCall, _) ← client.signedWith "cycle-invalid-leg"
     (← joint client bob "invalid" 30007 (.settle (-1)) "THIS MUST NOT APPEAR" false true) bob (grants bob).reverse
@@ -961,7 +987,26 @@ def run (host verifier store openssl directory : System.FilePath) : IO Unit := d
     (← installTask client alice 30011 taskPolicy) alice [⟨.object, taskId, taskOwner⟩]
   rejected "owner cannot bypass deliberately locked management" (← client.outcome "submit" repairCall)
   require "denied owner repair preserves exact durable image" ((← client.physicalBytes) == locked)
+  let final ← client.open
+  require "eleven accepted events; no refusal or retry adds history"
+    (final.durable.image.accepted.length == 11)
   IO.FS.writeBinFile (directory / "final-image.bin") locked.toByteArray
+  IO.FS.writeFile (directory / "summary.json") (Json.mkObj [
+    ("result", toJson "PASS"), ("acceptedEvents", toJson final.durable.image.accepted.length),
+    ("committedWithoutReplyRecovered", toJson true),
+    ("semantics", toJson config.profile.semantics.value),
+    ("fieldCharacteristic", toJson config.profile.characteristic),
+    ("scalarOrderWidth", toJson NativeHostProfile.orderWidth),
+    ("resourceCommandFrame", toJson (DeclaredResourceController.commandFrame.map UInt8.toNat)),
+    ("domain", toJson config.deployment.domain.value),
+    ("federation", toJson config.federation.value),
+    ("genesisHeight", toJson config.genesisHeight),
+    ("taskGeneration", toJson finalTask.generation), ("taskStatus", toJson finalTask.status),
+    ("remainingPermissionUnits", toJson finalTask.remaining),
+    ("reservedPermissionUnits", toJson finalTask.reserved),
+    ("workerRestriction", toJson "Current per-subject resource law; no native Pred grant caveat"),
+    ("privacyScope", toJson "Public refusal bytes; no timing noninterference claim"),
+    ("assuranceScope", toJson "Native execution, fresh fixture keys and synthetic local genesis; no provider dispatch, physical interruption, succinct proof or real asset claim")]).pretty
   IO.println "PASS NEW WORLD CYCLE: fresh keys, BabyBear/scalar29, compiled public host, SQLite; task+typed content birth; atomic task/content mutation; participant grants survive rule revision; invalid leg rollback; exact result; hard-disconnect generation fence; real revocation; restarted historical retries; deliberate management lockout. Worker generation is an authored per-subject resource law, not a native Pred grant caveat. No provider dispatch, physical interruption, succinct proof, or real asset claim."
 
 end NewWorld

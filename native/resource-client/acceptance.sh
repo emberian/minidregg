@@ -206,11 +206,29 @@ cat >"$EVIDENCE/content-intent.json" <<EOF
 }
 EOF
 
-"$MINI" submit --host "$HOST" --config "$CONFIG" \
+printf '%s\n' "$HOST" >"$EVIDENCE/real-host-path"
+cat >"$EVIDENCE/drop-first-submit.sh" <<'EOF'
+#!/bin/sh
+set -eu
+SELF=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+REAL_HOST=$(cat "$SELF/real-host-path")
+if [ "$2" = submit ] && mkdir "$SELF/submit-output-dropped.once" 2>/dev/null; then
+  exec "$REAL_HOST" "$1" "$2" "$3" "$SELF/nonexistent-output-parent/outcome.bin"
+fi
+exec "$REAL_HOST" "$@"
+EOF
+chmod 755 "$EVIDENCE/drop-first-submit.sh"
+
+if "$MINI" submit --host "$EVIDENCE/drop-first-submit.sh" --config "$CONFIG" \
   --intent "$EVIDENCE/content-intent.json" --key "$EVIDENCE/alice.key" \
-  --dir "$EVIDENCE/content-attempt" >"$EVIDENCE/content.stdout"
-jq -e '.type == "confirmed" and .confirmation == "installed"' \
-  "$EVIDENCE/content-attempt/outcome.json" >/dev/null
+  --dir "$EVIDENCE/content-attempt" >"$EVIDENCE/content-lost.stdout" \
+  2>"$EVIDENCE/content-lost.stderr"; then
+  echo "expected first content submission to lose its outcome" >&2
+  exit 1
+fi
+test -f "$EVIDENCE/content-attempt/call.bin"
+test ! -e "$EVIDENCE/content-attempt/outcome.bin"
+test ! -e "$EVIDENCE/content-attempt/outcome.json"
 
 CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/content-attempt" --mode submit \
@@ -223,10 +241,10 @@ jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0001.json" >/dev/null
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0002.json" >/dev/null
-test "$(jq -r '.transactionId' "$EVIDENCE/content-attempt/outcome.json")" = \
-  "$(jq -r '.transactionId' "$EVIDENCE/content-attempt/retry-0001.json")"
-test "$(jq -r '.transactionId' "$EVIDENCE/content-attempt/outcome.json")" = \
-  "$(jq -r '.transactionId' "$EVIDENCE/content-attempt/retry-0002.json")"
+for field in transactionId eventId acceptedCount imageBoundary; do
+  test "$(jq -r ".$field" "$EVIDENCE/content-attempt/retry-0001.json")" = \
+    "$(jq -r ".$field" "$EVIDENCE/content-attempt/retry-0002.json")"
+done
 
 cat >"$EVIDENCE/query-after.json" <<'EOF'
 {
@@ -250,7 +268,8 @@ cat >"$EVIDENCE/acceptance.json" <<EOF
   "semantics": "$SEMANTICS",
   "contentCallSha256": "$CALL_HASH_AFTER",
   "birthTransaction": $(jq '.transactionId' "$EVIDENCE/birth-attempt/outcome.json"),
-  "contentTransaction": $(jq '.transactionId' "$EVIDENCE/content-attempt/outcome.json")
+  "contentTransaction": $(jq '.transactionId' "$EVIDENCE/content-attempt/retry-0001.json"),
+  "lostOutcomeRecoveredByExactRetry": true
 }
 EOF
 cat "$EVIDENCE/acceptance.json"

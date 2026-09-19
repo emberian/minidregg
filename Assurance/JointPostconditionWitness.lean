@@ -87,6 +87,7 @@ def authorization (rule : Rule) (side : Bool) :
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
