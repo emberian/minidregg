@@ -131,6 +131,48 @@ def PolicyStepContext.ofPreparedTuple
     project prepared.source prepared.logicalPre,
     project prepared.source prepared.logicalPost⟩
 
+/-- A receiving source may select the prepared payloads directly, avoiding
+construction of unrelated request fields. Both selectors must equal the
+original tuple at every incidence; neither may choose independent policy data. -/
+def PolicyStepContext.ofPreparedTupleExact
+    {Incidence : Type z}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z} layout Source}
+    (project : Source →
+      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) → State)
+    (semantics : Digest)
+    (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan)
+    (pre : (incidence : Incidence) → Minidregg.Theory.CellState.Materialized (layout.materializer incidence))
+    (post : (incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence))
+    (_preExact : ∀ incidence, pre incidence = prepared.pre incidence)
+    (_postExact : ∀ incidence, post incidence = prepared.logicalPost incidence) : PolicyStepContext :=
+  ⟨(pre prepared.primary).root, plan.legEffectsDigest prepared.source prepared.primary, semantics,
+    project prepared.source (fun incidence => (pre incidence).logical), project prepared.source post⟩
+
+/-- This constructor has exactly the same complete context as the original
+one. Its equality premises are erased only after the kernel checks them. -/
+theorem PolicyStepContext.ofPreparedTupleExact_eq
+    {Incidence : Type z}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {Source : Type z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z} layout Source}
+    (project : Source →
+      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) → State)
+    (semantics : Digest)
+    (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan)
+    (pre : (incidence : Incidence) → Minidregg.Theory.CellState.Materialized (layout.materializer incidence))
+    (post : (incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence))
+    (preExact : ∀ incidence, pre incidence = prepared.pre incidence)
+    (postExact : ∀ incidence, post incidence = prepared.logicalPost incidence) :
+    ofPreparedTupleExact project semantics prepared pre post preExact postExact =
+      ofPreparedTuple project semantics prepared := by
+  simp only [ofPreparedTupleExact, ofPreparedTuple, funext preExact, funext postExact]
+  rfl
+
+/-- info: 'Minidregg.Compiler.CanonicalPolicyAdmission.PolicyStepContext.ofPreparedTupleExact_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PolicyStepContext.ofPreparedTupleExact_eq
+
 theorem PolicyStepContext.prepared_tuple_exact
     {Incidence : Type z}
     {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
