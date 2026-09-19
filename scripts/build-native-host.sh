@@ -9,10 +9,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--output DIR]
+usage: scripts/build-native-host.sh [--umbrella] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
+  --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
@@ -23,6 +24,7 @@ EOF
 }
 
 output_dir=""
+binary_path=""
 build_umbrella=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +35,11 @@ while [[ $# -gt 0 ]]; do
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
       output_dir=$2
+      shift 2
+      ;;
+    --binary)
+      [[ $# -ge 2 ]] || { usage >&2; exit 64; }
+      binary_path=$2
       shift 2
       ;;
     -h|--help)
@@ -56,6 +63,12 @@ done
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+
+binary=${binary_path:-.lake/build/bin/minidregg-host}
+if [[ -e "$binary" || -L "$binary" ]]; then
+  printf 'build-native-host: refusing to replace existing binary: %s\n' "$binary" >&2
+  exit 73
+fi
 
 snapshot_marker="$root/.minidregg-native-snapshot"
 if [[ ! -f "$snapshot_marker" && "${MINIDREGG_NATIVE_ALLOW_SHARED:-0}" != 1 ]]; then
@@ -481,8 +494,13 @@ while IFS= read -r module; do
 done < "$source_modules"
 cat "$output_dir/package-objects.txt" >> "$response"
 
-binary=.lake/build/bin/minidregg-host
-mkdir -p .lake/build/bin
+# Recheck immediately before linking in case another process created the path.
+if [[ -e "$binary" || -L "$binary" ]]; then
+  printf 'build-native-host: refusing to replace existing binary: %s\n' "$binary" >&2
+  exit 73
+fi
+mkdir -p "$(dirname "$binary")"
+binary="$(cd "$(dirname "$binary")" && pwd -P)/$(basename "$binary")"
 /usr/bin/time -lp "$leanc" -o "$binary" "@$response" > "$output_dir/link.log" 2>&1
 
 set +e
@@ -521,7 +539,7 @@ git status --short > "$output_dir/git-status.txt"
   printf 'package_modules=%s\n' "$(wc -l < "$package_required" | tr -d ' ')"
   printf 'response_objects=%s\n' "$(wc -l < "$response" | tr -d ' ')"
   printf 'usage_exit=%s\n' "$usage_exit"
-  printf 'binary=%s/%s\n' "$root" "$binary"
+  printf 'binary=%s\n' "$binary"
   printf 'binary_sha256=%s\n' "$(shasum -a 256 "$binary" | awk '{print $1}')"
 } > "$output_dir/manifest.txt"
 cat "$output_dir/manifest.txt" | tee -a "$output_dir/build.log"

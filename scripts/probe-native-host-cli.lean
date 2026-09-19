@@ -42,7 +42,10 @@ def need {α : Type} (label : String) : Option α → IO α
   | none => throw (IO.userError s!"FAIL native host CLI: {label}")
   | some value => pure value
 
-def runProcess (binary : System.FilePath) (arguments : Array String) : IO IO.Process.Output :=
+def runProcess (binary : System.FilePath) (arguments : Array String) : IO IO.Process.Output := do
+  -- Keep completed assertions visible while a subsequent native operation runs.
+  -- Redirected stdout is otherwise buffered until this long journey terminates.
+  (← IO.getStdout).flush
   IO.Process.output { cmd := binary.toString, args := arguments }
 
 def processOk (binary : System.FilePath) (arguments : Array String) : IO Unit := do

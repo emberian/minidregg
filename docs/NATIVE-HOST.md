@@ -12,17 +12,20 @@ executable or complete user journey has passed.
 ## Building and exercising the native interface
 
 In an independent snapshot, `scripts/build-native-host.sh --umbrella --output
-BUILD-DIR` checks the full Lean umbrella and links the host with bounded compiler
-concurrency. Its manifest records the source and object closure. Compile the
-public acceptance driver against that same closure:
+BUILD-DIR --binary BUILD-DIR/minidregg-host` checks the full Lean umbrella and
+links the host with bounded compiler concurrency. Its manifest records the source
+and object closure. Give each build a fresh binary path so an earlier host remains
+available to tests already running against it. Without `--binary`, the default is
+`.lake/build/bin/minidregg-host`; the builder refuses to replace an existing binary.
+Compile the public acceptance driver against that same closure:
 
 ```sh
 scripts/build-native-acceptance-runner.sh \
   --host-response BUILD-DIR/minidregg-host.rsp --output RUNNER-DIR
 RUNNER-DIR/native-acceptance-runner --new-world \
-  .lake/build/bin/minidregg-host VERIFIER SQLITE-STORE OPENSSL ARTIFACT-DIRECTORY
+  BUILD-DIR/minidregg-host VERIFIER SQLITE-STORE OPENSSL ARTIFACT-DIRECTORY
 RUNNER-DIR/native-acceptance-runner \
-  .lake/build/bin/minidregg-host VERIFIER SQLITE-STORE OPENSSL
+  BUILD-DIR/minidregg-host VERIFIER SQLITE-STORE OPENSSL
 ```
 
 Use fresh output directories. The second invocation exercises the earlier

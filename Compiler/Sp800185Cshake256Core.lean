@@ -78,6 +78,36 @@ def theta (state : State) : State :=
     lane state x y ^^^ xorColumn state (x + 4) ^^^
       (xorColumn state (x + 1)).rotateLeft 1
 
+/-- Executable sharing for theta: each of the five column parities and
+rotation deltas is computed once, before producing the twenty-five lanes. -/
+def thetaCached (state : State) : State :=
+  let columns := Array.ofFn fun x : Fin 5 => xorColumn state x.val
+  let deltas := Array.ofFn fun x : Fin 5 =>
+    columns[(x.val + 4) % 5]'(by simp [columns]; exact Nat.mod_lt _ (by decide)) ^^^
+      (columns[(x.val + 1) % 5]'(by simp [columns]; exact Nat.mod_lt _ (by decide))).rotateLeft 1
+  Array.ofFn fun index : Fin 25 =>
+    lane state (index.val % 5) (index.val / 5) ^^^
+      deltas[index.val % 5]'(by simp [deltas]; exact Nat.mod_lt _ (by decide))
+
+theorem xorColumn_mod (state : State) (x : Nat) :
+    xorColumn state (x % 5) = xorColumn state x := by
+  simp only [xorColumn, lane, Nat.mod_mod]
+
+/-- The compiler substitution is proved for every array, including short
+arrays using the original default-lane convention. Hash framing, rounds and
+the cryptographic trust boundary are unchanged. -/
+@[csimp] theorem theta_eq_thetaCached : theta = thetaCached := by
+  funext state
+  unfold theta thetaCached
+  congr 1
+  funext index
+  simp only [Array.getElem_ofFn, xorColumn_mod]
+  exact BitVec.xor_assoc _ _ _
+
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.theta_eq_thetaCached' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms theta_eq_thetaCached
+
 /-- FIPS 202 rotation offsets, indexed by `x + 5*y`. -/
 def rotationOffsets : Array Nat := #[
    0,  1, 62, 28, 27,
