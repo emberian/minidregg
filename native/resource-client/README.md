@@ -145,3 +145,16 @@ The directory retains the generated `birth-intent.json`, `content-intent.json`,
 `joint-intent.json`, query sources, canonical binary artifacts, signatures,
 receipts, and `acceptance.json`. These are concrete examples for the local
 process client; `mini` does not provide a network server or SSH interface.
+
+The separate authority journey uses two fresh enrolled signers and the same
+ordinary `mini` JSON interface. Alice installs a source-authored policy,
+delegates a narrower observe/mutate grant to Bob, and later revokes it. Bob's
+write is confirmed under his own key; policy and grant refusals are checked
+against the current image boundary, and his retained call replays its original
+receipt after revocation without a new event. Both the initial and installed
+policy records are reconstructed from authorized `view-policy` JSON and
+reauthored to the exact same canonical bytes:
+
+```sh
+native/resource-client/authority-acceptance.sh .lake/build/bin/minidregg-host /tmp/mini-authority-acceptance
+```
