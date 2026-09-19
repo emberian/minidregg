@@ -307,6 +307,12 @@ local instance eventPageDecidable (page : HyperdocumentEventPageMaterializer.Pag
       (page.entries.map HyperdocumentEventPageMaterializer.Entry.key).Nodup)
     ⟨fun valid => ⟨valid.1, valid.2⟩, fun valid => ⟨valid.entriesValid, valid.keysNodup⟩⟩
 
+/-- Semantic identity of the source-owned loaded/final law. The Book codec is
+lossless on unsupported balances; refusing them is a receiving-law change,
+so it changes runtime compatibility without changing the wire representation. -/
+def logicalLawVersion : List UInt8 :=
+  "DREGG.REGISTRY.LOADED-AND-FINAL.BOOK-ACCOUNT-SUPPORT/v2".toUTF8.toList
+
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
 def LogicalLaw (deployment : Deployment) (cellId : Nat) :

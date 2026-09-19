@@ -19,6 +19,7 @@ namespace Minidregg.Kernel.NativeHostGenesis
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialSigningKey
 open Minidregg.Theory.ResourceBirth
@@ -28,6 +29,8 @@ open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.Tower256ConcreteBackend
 
 set_option autoImplicit false
+
+attribute [local irreducible] CanonicalRuntimeProfile.Profile.compilerProfile
 
 /-- A supplied public subject and its initial, explicitly budgeted account.
 The account may differ from the subject; neither is inferred from key bytes. -/
@@ -229,7 +232,9 @@ theorem fund_conserves (asset : Nat) (book : Book) (enrollments : List Enrollmen
   | cons enrollment rest ih =>
       change (fund asset (book.applyPosting
         ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩) rest).totalAsset _ = _
-      rw [ih _ issuerPresent (fun selected member =>
+      rw [ih (book.applyPosting
+        ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩)
+        issuerPresent (fun selected member =>
         recipientsPresent selected (List.mem_cons_of_mem _ member))]
       exact Book.applyPosting_conserves book _ issuerPresent
         (recipientsPresent enrollment (List.mem_cons_self)) selectedAsset
@@ -369,6 +374,9 @@ instance cellListValidDecidable (config : Config)
   unfold CellListValid
   infer_instance
 
+attribute [local irreducible] ResourceBirthCodec.rootBytes
+
+set_option genSizeOf false in
 /-- A checked bootstrap product. The private constructor prevents arbitrary
 seeds from being presented as this source's genesis. No accepted turns exist. -/
 structure Built {F : Type} [Field F]

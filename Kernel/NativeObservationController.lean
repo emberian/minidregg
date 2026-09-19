@@ -378,7 +378,8 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
         if footprint : footprintExact context intent = .ok () then
           match ← checkGrants native context profile federation genesisHeight intent intent.grants signed.signatures with
           | .error _ => return .error refused
-          | .ok grants => return .ok ⟨signed.challenge, same ▸ derived, footprint, grants⟩
+          | .ok grants => return .ok ⟨signed.challenge,
+                derived.trans (congrArg Except.ok same), footprint, grants⟩
         else return .error refused
       else return .error refused
 

@@ -58,8 +58,10 @@ def run (alice bob : List UInt8) : IO Unit := do
   require "all supplied keys in actual loaded authority"
     (built.authority.snapshot.authState.subjectKeyEpoch ⟨7⟩ == 2 &&
      built.authority.snapshot.authState.subjectKeyEpoch ⟨8⟩ == 2 &&
-     decide (built.authority.snapshot.logical.fields (.subjectKey ⟨7⟩ 2) = some (key 7 alice)) &&
-     decide (built.authority.snapshot.logical.fields (.subjectKey ⟨8⟩ 2) = some (key 8 bob)))
+     decide ((show Option KeyRecord from
+       built.authority.snapshot.logical.fields (.subjectKey ⟨7⟩ 2)) = some (key 7 alice)) &&
+     decide ((show Option KeyRecord from
+       built.authority.snapshot.logical.fields (.subjectKey ⟨8⟩ 2)) = some (key 8 bob)))
   require "explicit conserved allocations"
     (cfg.initialBook.balance 7 0 == 100 && cfg.initialBook.balance 8 0 == 200 &&
      cfg.initialBook.balance 0 0 == -300 && cfg.initialBook.balance 99 0 == 0 &&

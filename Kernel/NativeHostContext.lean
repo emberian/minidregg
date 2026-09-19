@@ -93,7 +93,7 @@ def validateLoaded (config : Config) (durable : Durable) : Except String (Opened
             source.record.version = revision ∧ source.record.semantics = config.profile.semantics)
     | _ => true) "selected policy source/profile mismatch"
   let factoryHead ← need "factory policy head unavailable"
-    (CredentialAuthorityDomain.headAt authority.snapshot ⟨config.deployment.factoryId⟩)
+    (CredentialAuthorityDomain.headAt authority.snapshot.logical ⟨config.deployment.factoryId⟩)
   let pins : FactoryPins :=
     { factory := ⟨config.deployment.factoryId⟩
       domain := config.deployment.domain
