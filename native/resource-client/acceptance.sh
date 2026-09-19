@@ -31,6 +31,20 @@ fi
 mkdir "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 
+receipt_field() {
+  jq -er --arg field "$2" \
+    '.[$field] | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1"
+}
+
+page_root() {
+  jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1"
+}
+
+challenge_field() {
+  jq -er --arg field "$2" \
+    '.[$field] | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1"
+}
+
 "$MINI" keygen --secret "$EVIDENCE/alice.key" --public "$EVIDENCE/alice.pub" \
   >"$EVIDENCE/public-key.txt"
 PUBLIC_KEY=$(od -An -tx1 -v "$EVIDENCE/alice.pub" | tr -d ' \n')
@@ -177,8 +191,10 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-before.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-before" >"$EVIDENCE/query-before.stdout"
-TARGET_ROOT=$(jq -er '.page.root' "$EVIDENCE/query-before/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/query-before/challenge.json")
+TARGET_ROOT=$(page_root "$EVIDENCE/query-before/view.json")
+AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+  select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+  "$EVIDENCE/query-before/challenge.json")
 jq -e '.page.entries == []' "$EVIDENCE/query-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/content-intent.json" <<EOF
@@ -253,8 +269,9 @@ jq -e '.type == "confirmed" and .confirmation == "replayed"' \
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0002.json" >/dev/null
 for field in transactionId eventId acceptedCount imageBoundary; do
-  test "$(jq -r ".$field" "$EVIDENCE/content-attempt/retry-0001.json")" = \
-    "$(jq -r ".$field" "$EVIDENCE/content-attempt/retry-0002.json")"
+  first_value=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" "$field")
+  second_value=$(receipt_field "$EVIDENCE/content-attempt/retry-0002.json" "$field")
+  test "$first_value" = "$second_value"
 done
 
 cat >"$EVIDENCE/query-after.json" <<'EOF'
@@ -270,7 +287,13 @@ EOF
   --dir "$EVIDENCE/query-after" >"$EVIDENCE/query-after.stdout"
 jq -e '[.page.entries[].type] | sort == ["document", "element"]' \
   "$EVIDENCE/query-after/view.json" >/dev/null
-test "$TARGET_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-after/view.json")"
+CONTENT_ROOT=$(page_root "$EVIDENCE/query-after/view.json")
+test "$TARGET_ROOT" != "$CONTENT_ROOT"
+CONTENT_HEIGHT=$(challenge_field "$EVIDENCE/query-after/challenge.json" height)
+CONTENT_BOUNDARY=$(challenge_field "$EVIDENCE/query-after/challenge.json" imageBoundary)
+CONTENT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" imageBoundary)
+test "$CONTENT_HEIGHT" = "12"
+test "$CONTENT_BOUNDARY" = "$CONTENT_RECEIPT_BOUNDARY"
 
 cat >"$EVIDENCE/query-scalar-before.json" <<'EOF'
 {
@@ -283,9 +306,10 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-scalar-before.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-scalar-before" >"$EVIDENCE/query-scalar-before.stdout"
-CONTENT_ROOT=$(jq -er '.page.root' "$EVIDENCE/query-after/view.json")
-SCALAR_ROOT=$(jq -er '.page.root' "$EVIDENCE/query-scalar-before/view.json")
-JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/query-scalar-before/challenge.json")
+SCALAR_ROOT=$(page_root "$EVIDENCE/query-scalar-before/view.json")
+JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+  select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+  "$EVIDENCE/query-scalar-before/challenge.json")
 jq -e '.page.entries == []' "$EVIDENCE/query-scalar-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/joint-intent.json" <<EOF
@@ -351,6 +375,26 @@ EOF
 jq -e '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == "3"' \
   "$EVIDENCE/joint-attempt/outcome.json" >/dev/null
 jq -e '[.slots[].role] | index("8") != null' "$EVIDENCE/joint-attempt/plan.json" >/dev/null
+
+cat >"$EVIDENCE/query-joint-before-retry.json" <<'EOF'
+{
+  "subject": "7",
+  "nonce": "30010",
+  "purpose": {"type": "query", "kind": "object", "target": "600", "view": "resource"},
+  "grants": [{"kind": "object", "target": "600", "capability": "61"}]
+}
+EOF
+"$MINI" query --host "$HOST" --config "$CONFIG" \
+  --intent "$EVIDENCE/query-joint-before-retry.json" --key "$EVIDENCE/alice.key" --view resource \
+  --dir "$EVIDENCE/query-joint-before-retry" >"$EVIDENCE/query-joint-before-retry.stdout"
+JOINT_BEFORE_RETRY_BOUNDARY=$(challenge_field \
+  "$EVIDENCE/query-joint-before-retry/challenge.json" imageBoundary)
+JOINT_BEFORE_RETRY_HEIGHT=$(challenge_field \
+  "$EVIDENCE/query-joint-before-retry/challenge.json" height)
+JOINT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" imageBoundary)
+test "$JOINT_BEFORE_RETRY_HEIGHT" = "13"
+test "$JOINT_BEFORE_RETRY_BOUNDARY" = "$JOINT_RECEIPT_BOUNDARY"
+
 JOINT_CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/joint-attempt" --mode submit \
   >"$EVIDENCE/joint-retry-submit.stdout"
@@ -359,8 +403,9 @@ test "$JOINT_CALL_HASH_BEFORE" = "$JOINT_CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "3"' \
   "$EVIDENCE/joint-attempt/retry-0001.json" >/dev/null
 for field in transactionId eventId acceptedCount imageBoundary; do
-  test "$(jq -r ".$field" "$EVIDENCE/joint-attempt/outcome.json")" = \
-    "$(jq -r ".$field" "$EVIDENCE/joint-attempt/retry-0001.json")"
+  first_value=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" "$field")
+  second_value=$(receipt_field "$EVIDENCE/joint-attempt/retry-0001.json" "$field")
+  test "$first_value" = "$second_value"
 done
 
 cat >"$EVIDENCE/query-content-final.json" <<'EOF'
@@ -378,7 +423,12 @@ jq -e '[.page.entries[].type] | sort == ["atom", "document", "element"]' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
 jq -e '[.page.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
-test "$CONTENT_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-content-final/view.json")"
+CONTENT_FINAL_ROOT=$(page_root "$EVIDENCE/query-content-final/view.json")
+test "$CONTENT_ROOT" != "$CONTENT_FINAL_ROOT"
+CONTENT_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-content-final/challenge.json" imageBoundary)
+CONTENT_FINAL_HEIGHT=$(challenge_field "$EVIDENCE/query-content-final/challenge.json" height)
+test "$CONTENT_FINAL_BOUNDARY" = "$JOINT_BEFORE_RETRY_BOUNDARY"
+test "$CONTENT_FINAL_HEIGHT" = "$JOINT_BEFORE_RETRY_HEIGHT"
 
 cat >"$EVIDENCE/query-scalar-final.json" <<'EOF'
 {
@@ -393,7 +443,16 @@ EOF
   --dir "$EVIDENCE/query-scalar-final" >"$EVIDENCE/query-scalar-final.stdout"
 jq -e '[.page.entries[] | select(.key.type == "object" and .key.resource == "601" and .key.field == "0" and .value == "1")] | length == 1' \
   "$EVIDENCE/query-scalar-final/view.json" >/dev/null
-test "$SCALAR_ROOT" != "$(jq -r '.page.root' "$EVIDENCE/query-scalar-final/view.json")"
+SCALAR_FINAL_ROOT=$(page_root "$EVIDENCE/query-scalar-final/view.json")
+test "$SCALAR_ROOT" != "$SCALAR_FINAL_ROOT"
+SCALAR_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-scalar-final/challenge.json" imageBoundary)
+SCALAR_FINAL_HEIGHT=$(challenge_field "$EVIDENCE/query-scalar-final/challenge.json" height)
+test "$SCALAR_FINAL_BOUNDARY" = "$JOINT_BEFORE_RETRY_BOUNDARY"
+test "$SCALAR_FINAL_HEIGHT" = "$JOINT_BEFORE_RETRY_HEIGHT"
+
+birth_transaction=$(receipt_field "$EVIDENCE/birth-attempt/outcome.json" transactionId)
+content_transaction=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" transactionId)
+joint_transaction=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" transactionId)
 
 cat >"$EVIDENCE/acceptance.json" <<EOF
 {
@@ -402,9 +461,9 @@ cat >"$EVIDENCE/acceptance.json" <<EOF
   "semantics": "$SEMANTICS",
   "contentCallSha256": "$CALL_HASH_AFTER",
   "jointCallSha256": "$JOINT_CALL_HASH_AFTER",
-  "birthTransaction": $(jq '.transactionId' "$EVIDENCE/birth-attempt/outcome.json"),
-  "contentTransaction": $(jq '.transactionId' "$EVIDENCE/content-attempt/retry-0001.json"),
-  "jointTransaction": $(jq '.transactionId' "$EVIDENCE/joint-attempt/outcome.json"),
+  "birthTransaction": "$birth_transaction",
+  "contentTransaction": "$content_transaction",
+  "jointTransaction": "$joint_transaction",
   "lostOutcomeRecoveredByExactRetry": true
 }
 EOF
