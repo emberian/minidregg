@@ -72,6 +72,54 @@ abbrev Charge := Lane -> Nat
 
 namespace Charge
 
+/-- First-order values keep the original charge-producing computation out of
+the retained executable representation. -/
+structure Values where
+  incidences : Nat
+  turnBytes : Nat
+  memoryTouches : Nat
+  witnessBytes : Nat
+  proofWork : Nat
+  storageBytes : Nat
+  networkBytes : Nat
+  sideEffectCount : Nat
+  feeDebit : Nat
+  leaseByteBlocks : Nat
+
+/-- This first-order boundary is intentional: a function-returning helper can
+be eta-expanded by the compiler and defer its lets until every lane query. -/
+@[noinline] def materialize (charge : Charge) : Values where
+  incidences := charge .incidences
+  turnBytes := charge .turnBytes
+  memoryTouches := charge .memoryTouches
+  witnessBytes := charge .witnessBytes
+  proofWork := charge .proofWork
+  storageBytes := charge .storageBytes
+  networkBytes := charge .networkBytes
+  sideEffectCount := charge .sideEffectCount
+  feeDebit := charge .feeDebit
+  leaseByteBlocks := charge .leaseByteBlocks
+
+def Values.toCharge (values : Values) : Charge
+  | .incidences => values.incidences
+  | .turnBytes => values.turnBytes
+  | .memoryTouches => values.memoryTouches
+  | .witnessBytes => values.witnessBytes
+  | .proofWork => values.proofWork
+  | .storageBytes => values.storageBytes
+  | .networkBytes => values.networkBytes
+  | .sideEffectCount => values.sideEffectCount
+  | .feeDebit => values.feeDebit
+  | .leaseByteBlocks => values.leaseByteBlocks
+
+/-- Materialization preserves every lane of every source charge. -/
+@[simp] theorem materialize_eq (charge : Charge) : (materialize charge).toCharge = charge := by
+  funext lane
+  cases lane <;> rfl
+
+/-- info: 'Minidregg.Theory.ResourceCost.Charge.materialize_eq' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms materialize_eq
+
 /-- Pointwise order, exposed as a theorem so budget obligations never depend
 on an opaque comparison routine. -/
 theorem le_iff (left right : Charge) :

@@ -281,6 +281,52 @@ def intent {height : Height}
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := readGuards_readonly accepted
 
+/-- The admitted constructor with its finite charge evaluated once. No
+receiver or encoder needs to retain and rerun charge-producing source work. -/
+def materializedIntent {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) : DataIntent rootBytes where
+  transactionId := accepted.descriptor.transactionId
+  writes := accepted.prepared.writes
+  readGuards := readGuards accepted
+  nullifiers := [birthNullifier deployment.domain accepted.descriptor.authorityNullifier]
+  exactCharge := (Charge.materialize (charge accepted)).toCharge
+  event := event deployment.domain accepted.ingress
+  postRootsBound := accepted.prepared.write_roots_bound
+  guardsReadOnly := readGuards_readonly accepted
+
+/-- Exact complete intent equality, including all roots, guards and charges. -/
+theorem materializedIntent_eq {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    materializedIntent accepted = intent accepted := by
+  simp only [materializedIntent, intent, Charge.materialize_eq]
+
+/-- The actual receiving and semantic-replay constructor uses finite values;
+the source definition remains the specification for all existing consumers. -/
+@[csimp] theorem intent_eq_materializedIntent : @intent = @materializedIntent := by
+  funext F instF profile deployment pins durable instEq height accepted
+  exact (materializedIntent_eq accepted).symm
+
+theorem materializedIntent_record_exact {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    DurableReceiver.IntentRecord.ofIntent (materializedIntent accepted) =
+      DurableReceiver.IntentRecord.ofIntent (intent accepted) := by
+  rw [materializedIntent_eq]
+
+/-- The original canonical record codec emits exactly the same bytes. -/
+theorem materializedIntent_record_bytes_exact {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    DurableReceiverCodec.intentStream.encode
+        (DurableReceiver.IntentRecord.ofIntent (materializedIntent accepted)) =
+      DurableReceiverCodec.intentStream.encode
+        (DurableReceiver.IntentRecord.ofIntent (intent accepted)) := by
+  rw [materializedIntent_record_exact]
+
+/-- info: 'Minidregg.Kernel.ResourceBirthReceiver.intent_eq_materializedIntent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms intent_eq_materializedIntent
+
+/-- info: 'Minidregg.Kernel.ResourceBirthReceiver.materializedIntent_record_bytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms materializedIntent_record_bytes_exact
+
 theorem intent_exact_source {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :
     (intent accepted).writes = accepted.prepared.writes ∧
