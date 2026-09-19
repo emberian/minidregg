@@ -238,8 +238,14 @@ def CanonicalProjectionEffective : Kind -> Prop
           Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleEntry.key =
         some Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleRecord
   | .authorityPolicy =>
+      Minidregg.Compiler.CredentialAuthorityPageMaterializer.prePage.policyRevisionAt
+          Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy = 2 ∧
+      Minidregg.Compiler.CredentialAuthorityPageMaterializer.postPage.policyRevisionAt
+          Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy = 3 ∧
       Minidregg.Compiler.CredentialAuthorityPageMaterializer.postPage.policyEpochAt
-          Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy = 3
+          Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy =
+        Minidregg.Compiler.CredentialAuthorityPageMaterializer.prePage.policyEpochAt
+          Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy
 
 theorem canonicalProjectionEffective (kind : Kind) :
     CanonicalProjectionEffective kind := by
@@ -251,8 +257,10 @@ theorem canonicalProjectionEffective (kind : Kind) :
       exact
         Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleSparseStore_contains
   | authorityPolicy =>
-      exact
-        Minidregg.Compiler.CredentialAuthorityPageMaterializer.post_policy_epoch_exact
+      -- Ordinary policy replacement advances its content revision while
+      -- retaining the grant epoch; explicit epoch rotation is a different effect.
+      unfold CanonicalProjectionEffective
+      decide
 
 /-! ## Executable heterogeneous lifecycle for every catalog row -/
 

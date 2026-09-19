@@ -639,6 +639,7 @@ noncomputable def mergeAuthorization : Authorized TypedAuthorizationWitness.perm
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -762,6 +763,7 @@ noncomputable def eventAuthorization : Authorized TypedAuthorizationWitness.perm
   policyWitness := ()
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl

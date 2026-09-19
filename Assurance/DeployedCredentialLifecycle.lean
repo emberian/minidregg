@@ -7,8 +7,8 @@ transport, and guarded durable data installation in one closed witness.
 
 The logical story is complete: a root capability is issued, strictly
 attenuated, used as a token, revoked, and made stale by a policy-epoch
-rotation.  The public bounded page independently pins the exact policy
-addresses for epochs two and three.  The durable use intent carries its
+rotation. The public bounded page independently pins generation three while
+preserving current policy revision two. The durable use intent carries its
 payload and observes the exact canonical authority-cell root read-only.
 
 Three deployment ceilings remain deliberately visible.  The full sparse
@@ -49,9 +49,9 @@ noncomputable abbrev AuthorityMaterializer : Materializer :=
   Compiler.DeployedCellRegistry.materializer
     Compiler.DeployedCellRegistry.Kind.credentialAuthority
 
-/-- The next policy address may be staged before it becomes current.  Epoch
-two still selects exactly the address published by `prePage`; epoch three is
-unreachable until the canonical epoch field rotates. -/
+/-- A future policy revision may be staged before it becomes current. Grant
+generation rotation does not select it: revision two remains current until an
+explicit policy installation changes the revision field. -/
 def initialLogical : LogicalState CredentialAuthorityState.schema.{0, 0} where
   fields := prePage.toCanonicalState.fields.write
     (.policyAddress examplePolicy 3) ⟨3300⟩
@@ -67,6 +67,11 @@ noncomputable def initialCell : Cell AuthorityMaterializer :=
   simp [initialCell_logical, initialLogical, policyEpochAt, prePage,
     Page.toCanonicalState, Page.entries, oldPolicy, Entry.install]
 
+@[simp] theorem initial_policy_revision :
+    policyRevisionAt initialCell examplePolicy = 2 := by
+  simp [initialCell_logical, initialLogical, policyRevisionAt, prePage,
+    Page.toCanonicalState, Page.entries, oldPolicy, Entry.install]
+
 @[simp] theorem initial_policy_address :
     policyAddressAt initialCell examplePolicy 2 = ⟨2200⟩ := by
   simp [initialCell_logical, initialLogical, policyAddressAt, prePage,
@@ -78,7 +83,7 @@ noncomputable def initialCell : Cell AuthorityMaterializer :=
   simp [initialCell_logical, initialLogical, policyAddressAt]
 
 /-- The bounded production page and the full semantic cell agree on the
-currently selected `(policy,epoch,address)` tuple. -/
+grant generation and the address at current revision two. -/
 theorem bounded_page_agrees_with_initial_selection :
     prePage.policyEpochAt examplePolicy =
         policyEpochAt initialCell examplePolicy /\
@@ -146,6 +151,7 @@ noncomputable def adminRequest (pre : Cell AuthorityMaterializer) (effects : Dig
   preStateRoot := pre.root
   policyId := examplePolicy
   policyEpoch := policyEpochAt pre examplePolicy
+  policyRevision := policyRevisionAt pre examplePolicy
   cost := 1
 
 /-- Non-cryptographic argument addressing for this inhabitation fixture only.
@@ -168,6 +174,7 @@ noncomputable def adminContext (pre : Cell AuthorityMaterializer) :
       height := 20
       policyId := examplePolicy
       policyEpoch := policyEpochAt pre examplePolicy
+      policyRevision := policyRevisionAt pre examplePolicy
       cost := 1 }
   argsDigestBytes := adminArgsDigest
 
@@ -180,9 +187,10 @@ noncomputable def adminAuthorization (pre : Cell AuthorityMaterializer) (effects
       (adminRequest pre effects nonce args) where
   evidence := .proof () rfl
   policyWitness := policyAddressAt pre examplePolicy
-    (policyEpochAt pre examplePolicy)
+    (policyRevisionAt pre examplePolicy)
   policyMembershipWitness := ()
   policyEpochExact := rfl
+  policyRevisionExact := rfl
   policyAddressExact := rfl
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -284,6 +292,7 @@ noncomputable def issueCodec : LawfulCodec (IssueDeclaration .object) := by
 def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration where
   preRootExact := rfl
   slotFresh := by
+    intro kind
     simp [readCapability, initialCell_logical, initialLogical, prePage,
       Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
       issueDeclaration, rootCapability]
@@ -367,16 +376,18 @@ def attenuateEvidence :
   parentExact := by simpa [parentStored] using issued_root_exact
   parentIdExact := rfl
   parentLineageValid := .root rootCapability rfl rfl rfl
+  parentLineageAnchored := True.intro
   strict := strict_edge
   childSlotFresh := by
+    intro kind
     change issuedCell.logical.fields
-      (.capability .object childCapability.id) = none
-    rw [issued_frame (.capability .object childCapability.id) (by
-      change AuthorityField.capability .object ⟨101⟩ ∉
+      (.capability kind childCapability.id) = none
+    rw [issued_frame (.capability kind childCapability.id) (by
+      change AuthorityField.capability kind ⟨101⟩ ∉
         (show Finset AuthorityField from
           {AuthorityField.capability .object ⟨100⟩,
             AuthorityField.nullifier 1001})
-      decide)]
+      cases kind <;> decide)]
     simp [initialCell_logical, initialLogical, prePage,
       Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
       childCapability]
@@ -517,6 +528,23 @@ theorem attenuated_frame
     decide)]
   exact initial_policy_epoch
 
+@[simp] theorem attenuated_policy_revision_two :
+    policyRevisionAt attenuatedCell examplePolicy = 2 := by
+  unfold policyRevisionAt
+  rw [attenuated_frame (.policyRevision examplePolicy) (by
+    change AuthorityField.policyRevision examplePolicy ∉
+      (show Finset AuthorityField from
+        {AuthorityField.capability .object ⟨101⟩,
+          AuthorityField.nullifier 1002})
+    decide)]
+  rw [issued_frame (.policyRevision examplePolicy) (by
+    change AuthorityField.policyRevision examplePolicy ∉
+      (show Finset AuthorityField from
+        {AuthorityField.capability .object ⟨100⟩,
+          AuthorityField.nullifier 1001})
+    decide)]
+  exact initial_policy_revision
+
 @[simp] theorem attenuated_policy_address_two :
     policyAddressAt attenuatedCell examplePolicy 2 = ⟨2200⟩ := by
   unfold policyAddressAt
@@ -633,8 +661,11 @@ def tokenAuthorization :
   policyWitness := ⟨2200⟩
   policyMembershipWitness := ()
   policyEpochExact := by simp [useRequest, adminRequest]
+  policyRevisionExact := rfl
   policyAddressExact := by
-    change ⟨2200⟩ = policyAddressAt attenuatedCell examplePolicy 2
+    change ⟨2200⟩ = policyAddressAt attenuatedCell examplePolicy
+      (policyRevisionAt attenuatedCell examplePolicy)
+    rw [attenuated_policy_revision_two]
     exact attenuated_policy_address_two.symm
   policyMembershipVerified := rfl
   policyVerified := rfl
@@ -662,7 +693,8 @@ noncomputable def acceptedToken :
 theorem token_selects_exact_policy_address :
     lifecyclePortal.policyAddress acceptedToken.authorization.policyWitness =
       policyAddressAt attenuatedCell examplePolicy 2 := by
-  exact acceptedToken.authorization.policyAddressExact
+  simpa only [useRequest, adminRequest, authState, attenuated_policy_revision_two] using
+    acceptedToken.authorization.policyAddressExact
 
 /-! ## Revocation and epoch rotation -/
 
@@ -808,6 +840,37 @@ theorem rotated_frame
     finalCell.logical.fields field = revokedCell.logical.fields field :=
   rotated.field_frame field outside
 
+/-- Grant generation changes independently of the current resource law. -/
+@[simp] theorem final_policy_revision_two :
+    policyRevisionAt finalCell examplePolicy = 2 := by
+  unfold policyRevisionAt
+  rw [rotated_frame (.policyRevision examplePolicy) (by
+    change AuthorityField.policyRevision examplePolicy ∉
+      (show Finset AuthorityField from
+        {AuthorityField.policyEpoch examplePolicy, AuthorityField.nullifier 1004})
+    decide)]
+  rw [revoked_frame (.policyRevision examplePolicy) (by
+    change AuthorityField.policyRevision examplePolicy ∉
+      (show Finset AuthorityField from
+        {AuthorityField.revoked (.channel ⟨9⟩), AuthorityField.nullifier 1003})
+    decide)]
+  exact attenuated_policy_revision_two
+
+@[simp] theorem final_policy_address_two :
+    policyAddressAt finalCell examplePolicy 2 = ⟨2200⟩ := by
+  unfold policyAddressAt
+  rw [rotated_frame (.policyAddress examplePolicy 2) (by
+    change AuthorityField.policyAddress examplePolicy 2 ∉
+      (show Finset AuthorityField from
+        {AuthorityField.policyEpoch examplePolicy, AuthorityField.nullifier 1004})
+    decide)]
+  rw [revoked_frame (.policyAddress examplePolicy 2) (by
+    change AuthorityField.policyAddress examplePolicy 2 ∉
+      (show Finset AuthorityField from
+        {AuthorityField.revoked (.channel ⟨9⟩), AuthorityField.nullifier 1003})
+    decide)]
+  exact attenuated_policy_address_two
+
 @[simp] theorem final_policy_address_three :
     policyAddressAt finalCell examplePolicy 3 = ⟨3300⟩ := by
   unfold policyAddressAt
@@ -900,16 +963,26 @@ theorem stale_root_rejected :
   have values := congrArg Digest.value equal
   simp [staleIssueDeclaration] at values
 
-/-! The bounded page publishes the same final selection/revocation facts. -/
+/-! The bounded page publishes the same final selection/revocation facts.
+The imported `postPage` demonstrates a revision update, so this generation
+rotation has its own witness instead of conflating those two operations. -/
+
+def rotatedPage : Page :=
+  { postPage with slot0 := some (.policy examplePolicy 3 2 ⟨2200⟩) }
+
+theorem rotatedPage_valid : rotatedPage.Valid := by decide
+
+def rotatedPageCell : Materialized materializer :=
+  CellState.materialize materializer (stateOfOption (some rotatedPage))
 
 theorem bounded_page_agrees_with_final_selection :
-    postPage.policyEpochAt examplePolicy = policyEpochAt finalCell examplePolicy /\
-      postPage.policyAddressAt examplePolicy 3 =
-        policyAddressAt finalCell examplePolicy 3 /\
-      .channel ⟨9⟩ ∈ postPage.revoked := by
-  exact ⟨post_policy_epoch_exact.trans final_policy_epoch_three.symm,
-    post_policy_address_exact.trans final_policy_address_three.symm,
-    post_revocation_member⟩
+    rotatedPage.policyEpochAt examplePolicy = policyEpochAt finalCell examplePolicy /\
+      rotatedPage.policyRevisionAt examplePolicy = policyRevisionAt finalCell examplePolicy /\
+      rotatedPage.policyAddressAt examplePolicy 2 =
+        policyAddressAt finalCell examplePolicy 2 /\
+      .channel ⟨9⟩ ∈ rotatedPage.revoked := by
+  rw [final_policy_epoch_three, final_policy_revision_two, final_policy_address_two]
+  decide
 
 /-! ## Payload-bearing durable use with an exact authority read guard -/
 
@@ -1092,18 +1165,18 @@ theorem authority_update_rejects_old_use
 pair-scoped cSHAKE binding premise rather than from a global injectivity lie. -/
 theorem bounded_page_update_moves_root
     (binding : PairBindingPremise
-      (stateOfOption (some prePage)) (stateOfOption (some postPage))) :
-    preCell.root ≠ postCell.root := by
+      (stateOfOption (some prePage)) (stateOfOption (some rotatedPage))) :
+    preCell.root ≠ rotatedPageCell.root := by
   intro sameRoot
   have statesEqual : stateOfOption (some prePage) =
-      stateOfOption (some postPage) :=
+      stateOfOption (some rotatedPage) :=
     state_eq_of_root_eq binding sameRoot
-  have pagesEqual : prePage = postPage := by
+  have pagesEqual : prePage = rotatedPage := by
     have fieldsEqual := congrArg
       (fun state : LogicalState
         CredentialAuthorityPageMaterializer.schema => state.fields ()) statesEqual
     simpa [stateOfOption] using fieldsEqual
-  have different : prePage ≠ postPage := by decide
+  have different : prePage ≠ rotatedPage := by decide
   exact different pagesEqual
 
 /-- No filesystem, database, RPC stack, or physical transport is claimed here.
