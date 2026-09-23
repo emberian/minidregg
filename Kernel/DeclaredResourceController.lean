@@ -632,27 +632,57 @@ def invocationEvent (domain semantics : Digest) (command : Command) (signed : Si
 def transactionId (domain semantics : Digest) (command : Command) : Digest :=
   ⟨operationMarker domain semantics command⟩
 
-def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
-    (signed : SignedCommand) : ResourceCost.Charge
+def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient durable command)
+    (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
+    ResourceCost.Charge
   | .incidences => command.targets.length + 1
   | .turnBytes => (signedBytes prepared.authority.snapshot.domain profile.semantics signed).length
-  | .memoryTouches => (writes prepared).length + (readGuards prepared).length
-  | .storageBytes => ((writes prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .memoryTouches => ws.length + guards.length
+  | .storageBytes => (ws.map fun write => write.canonicalPostBytes.length).sum
   | .feeDebit | .witnessBytes | .proofWork | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
+
+def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
+    (signed : SignedCommand) : ResourceCost.Charge :=
+  sourceChargeFrom prepared signed (writes prepared) (readGuards prepared)
 
 def AcceptedInvocation.dataIntent [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
-    DataIntent ResourceBirthCodec.rootBytes where
-  transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
-  writes := writes prepared
-  readGuards := readGuards prepared
-  nullifiers := [invocationNullifier prepared.authority.snapshot.domain
-    (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
-  exactCharge := sourceCharge prepared signed
-  event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
-  postRootsBound := writes_roots_bound prepared
-  guardsReadOnly := readGuards_readonly prepared shape
+    DataIntent ResourceBirthCodec.rootBytes :=
+  let ws := writes prepared
+  let guards := sourceGuards prepared ++ readonlyGuards prepared.authority.readGuards ws
+  { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
+    writes := ws
+    readGuards := guards
+    nullifiers := [invocationNullifier prepared.authority.snapshot.domain
+      (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
+    exactCharge := sourceChargeFrom prepared signed ws guards
+    event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
+    postRootsBound := writes_roots_bound prepared
+    guardsReadOnly := readGuards_readonly prepared shape }
+
+theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    (accepted.dataIntent shape).exactCharge = sourceCharge prepared signed := by
+  rfl
+
+/-- Sharing the runtime write and guard values leaves the complete original
+receiver intent, including every write, charge, event and proof field, exact. -/
+theorem AcceptedInvocation.dataIntent_original_exact [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    accepted.dataIntent shape =
+      { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
+        writes := writes prepared
+        readGuards := readGuards prepared
+        nullifiers := [invocationNullifier prepared.authority.snapshot.domain
+          (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
+        exactCharge := sourceCharge prepared signed
+        event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
+        postRootsBound := writes_roots_bound prepared
+        guardsReadOnly := readGuards_readonly prepared shape } := by
+  rfl
 
 def recordedInvocation (domain semantics : Digest) (command : Command) (signed : SignedCommand)
     (durable : Durable) : Except Unit (Option (DurableCommitProtocol.Intent Digest Digest StableNullifier ReplayEnvelope)) :=

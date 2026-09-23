@@ -91,8 +91,11 @@ the policy step now uses the existing exact-selector constructor with a proved
 equality to the original prepared tuple, avoiding reconstruction of unused
 large request hashes for a pre-cell lookup. Physical-shape admission also
 constructs its full write list once and uses a proved Boolean iff for the
-original `PhysicalShape` proposition; it does not skip any clause. The remaining full history replay
-and cryptographic cost are measured in the fn evidence note. No Mini commit
+original `PhysicalShape` proposition; it does not skip any clause. The
+admitted invocation reuses those exact writes and guards for its durable
+intent and charge lanes; `dataIntent_original_exact` proves equality of the
+complete result with the original construction. The remaining full history
+replay and cryptographic cost are measured in the fn evidence note. No Mini commit
 implies fn Store acceptance, consumer cursor progress, or a posted reply.
 
 The public synthetic fixture and exact native results are in fn
