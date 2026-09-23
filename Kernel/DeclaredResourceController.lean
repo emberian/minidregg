@@ -185,10 +185,52 @@ def project (prepared : PreparedInvocation deployment profile ambient durable co
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
     localSlots ++ joint⟩
 
+/- The tuple's generic `pre` selector constructs a complete raw leg, including
+the hash of the entire signed command's request. These projections select the
+same prepared cells without rebuilding that unused request for every policy
+read. The exact-context constructor below checks both equalities. -/
+def policyPreCell (prepared : PreparedInvocation deployment profile ambient durable command) :
+    (incidence : Incidence command) →
+      CellState.Materialized ((layout prepared).materializer incidence)
+  | some i => (prepared.targets i).pre
+  | none => prepared.authority.snapshot.cell
+
+theorem policyPreCell_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    policyPreCell prepared incidence = tuple.pre incidence := by
+  have sourceExact : tuple.source = ⟨command, rfl⟩ := Subtype.ext tuple.source.property
+  unfold PreparedTuple.pre
+  rw [sourceExact]
+  cases incidence <;> rfl
+
+def policyPostState (prepared : PreparedInvocation deployment profile ambient durable command) :
+    (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence) :=
+  fun incidence => ((validated prepared incidence).apply).logical
+
+theorem policyPostState_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    policyPostState prepared incidence = tuple.logicalPost incidence := by
+  apply congrArg Materialized.logical
+  apply Materialized.ext
+  simp only [PreparedTuple.post, ValidatedPatch.apply]
+  have sourceExact : tuple.source = ⟨command, rfl⟩ := Subtype.ext tuple.source.property
+  rw [sourceExact]
+  rfl
+
 def step (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : PolicyStepContext :=
-  PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+  PolicyStepContext.ofPreparedTupleExact (project prepared incidence) profile.semantics
     { tuple with primary := incidence }
+    (policyPreCell prepared) (policyPostState prepared)
+    (policyPreCell_exact prepared tuple) (policyPostState_exact prepared tuple)
+
+theorem step_prepared_exact
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
+    step prepared tuple incidence =
+      PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+        { tuple with primary := incidence } := by
+  exact PolicyStepContext.ofPreparedTupleExact_eq _ _ _ _ _ _ _
 
 def policyConfig [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -496,8 +538,30 @@ def PhysicalShape (prepared : PreparedInvocation deployment profile ambient dura
     (∀ guard ∈ sourceGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
+/- Construct the full target writes once for the five physical-shape clauses.
+The ordinary proposition below remains the receiver's authority condition;
+this Boolean is only an implementation of its decision procedure. -/
+def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient durable command) : Bool :=
+  let ws := writes prepared
+  let ids := ws.map DataWrite.cellId
+  let source := sourceGuards prepared
+  let guards := source ++ readonlyGuards prepared.authority.readGuards ws
+  decide ids.Nodup &&
+  decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
+  decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
+  decide (∀ guard ∈ source, guard.cellId ∉ ids) &&
+  decide (∀ guard ∈ guards, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+
+theorem physicalShapeCheck_iff
+    (prepared : PreparedInvocation deployment profile ambient durable command) :
+    physicalShapeCheck prepared = true ↔ PhysicalShape prepared := by
+  simp [physicalShapeCheck, PhysicalShape, readGuards, Bool.and_eq_true]
+  tauto
+
 instance physicalShapeDecidable (prepared : PreparedInvocation deployment profile ambient durable command) :
-    Decidable (PhysicalShape prepared) := by unfold PhysicalShape; infer_instance
+    Decidable (PhysicalShape prepared) :=
+  decidable_of_iff (physicalShapeCheck prepared = true)
+    (physicalShapeCheck_iff prepared)
 
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by

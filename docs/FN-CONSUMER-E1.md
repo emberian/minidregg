@@ -67,7 +67,33 @@ operation nonce. `evaluate` also scans bounded accepted history for an
 existing application/operation binding under another local subject, target
 or capability and refuses policy drift before proposing another intent.
 The portable binding explicitly records Store admission as unestablished;
-it is not a native fn Store fetched report or durable full-carrier inbox.
+it is not a native fn Store fetched report. The portable route also adds a
+third atom in the same signed operation transaction: a separately bounded
+36,864-byte typed inbox containing the exact fn carrier, authenticated
+source identity, principal, and both full public keys. Its carrier is bounded
+at 32,768 bytes before decoding an accepted historical atom. The unchanged
+18,432-byte binding cap does not absorb this full article. The original
+accepted event, not a mutable page view, is the source for read-only
+`consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json` and
+`consumer-export-reply TRANSACTION-ID REPLY.bin`. Exact repetition recovers
+Q; a different relay projection with the same signed source preserves another
+carrier in a separate evidence transaction and recovers the same Q; a changed
+authenticated source preserves conflict evidence without a second effect.
+The added inbox atoms use residue 3 of the existing operation/conflict nonce
+layout; existing binding, Q, and conflict atom IDs are unchanged.
+
+The native portable command checks the fn signature, Mini origin, and local
+consumer history once each before deriving the operation intent. Its JSON
+`timingNs` records bounded stage measurements, not an assurance claim. The
+same native signed receiver still performs current grant admission and atomic
+SQLite CAS. On reopen, `NativeHostReplay` re-admits the original signed calls;
+the policy step now uses the existing exact-selector constructor with a proved
+equality to the original prepared tuple, avoiding reconstruction of unused
+large request hashes for a pre-cell lookup. Physical-shape admission also
+constructs its full write list once and uses a proved Boolean iff for the
+original `PhysicalShape` proposition; it does not skip any clause. The remaining full history replay
+and cryptographic cost are measured in the fn evidence note. No Mini commit
+implies fn Store acceptance, consumer cursor progress, or a posted reply.
 
 The public synthetic fixture and exact native results are in fn
 `tests/fixtures/dregg-e1/consumer-p1/` and

@@ -311,7 +311,7 @@ def ConsumerReportSource.report (source : ConsumerReportSource) (package : List 
     ⟨source.history.toUTF8.toList, source.incarnation.toUTF8.toList,
       source.sourceIdentity.toUTF8.toList, source.fnVerdictRef.toUTF8.toList⟩,
     package, ⟨source.subject⟩, source.target, ⟨source.capability⟩,
-    ⟨source.expectedAuthorityRoot⟩, ⟨source.expectedTargetRoot⟩⟩
+    ⟨source.expectedAuthorityRoot⟩, ⟨source.expectedTargetRoot⟩, none⟩
 
 /-- Portable authorship has no fn Store history, incarnation or T10 verdict.
 The reserved literal fields make that absence explicit in the v1 P1 binding
@@ -320,7 +320,7 @@ transaction, never the fn source identity. -/
 def portableConsumerReport (policy : FnConsumerOperation.Policy)
     (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
     (verified : FnPortableVerified)
-    (package : List UInt8) (origin : FnEvidenceCodec.Package) :
+    (carrier package : List UInt8) (origin : FnEvidenceCodec.Package) :
     FnConsumerOperation.Report :=
   let originKey := (StreamCodec.product digestStream
     (StreamCodec.product digestStream
@@ -336,7 +336,9 @@ def portableConsumerReport (policy : FnConsumerOperation.Policy)
       verified.sourceIdentity,
       "fn-portable-authorship-v1".toUTF8.toList⟩,
     package, policy.subject, policy.target, policy.capability,
-    authorityRoot, targetRoot⟩
+    authorityRoot, targetRoot,
+    some ⟨carrier, verified.sourceIdentity, verified.principal,
+      verified.edPublicKey, verified.mlPublicKey⟩⟩
 
 def consumerDecisionJson (decision : FnConsumerOperation.Decision) : Lean.Json :=
   match decision with
@@ -348,9 +350,56 @@ def consumerDecisionJson (decision : FnConsumerOperation.Decision) : Lean.Json :
       [("type", "historical-repeat"),
        ("reply", toJson (Minidregg.Host.Json.encodeHex
          (FnConsumerOperation.replyCodec.encode reply)))]
+  | .carrierVariation _ reply => .mkObj
+      [("type", "proposed-carrier-variation-evidence"),
+       ("reply", toJson (Minidregg.Host.Json.encodeHex
+         (FnConsumerOperation.replyCodec.encode reply)))]
+  | .carrierVariationRecorded reply => .mkObj
+      [("type", "historical-carrier-variation-evidence"),
+       ("reply", toJson (Minidregg.Host.Json.encodeHex
+         (FnConsumerOperation.replyCodec.encode reply)))]
   | .conflict _ => .mkObj [("type", "proposed-conflict-evidence")]
   | .conflictRecorded => .mkObj [("type", "historical-conflict-evidence")]
   | .refused detail => .mkObj [("type", "refused"), ("detail", toJson detail)]
+
+def exactDecimal (name value : String) : Except String Nat := do
+  let some parsed := value.toNat? | throw s!"{name} is not a decimal number"
+  unless toString parsed == value do throw s!"{name} is not canonical decimal"
+  pure parsed
+
+/-- Export only from a source-owned, re-admitted accepted event. The typed
+inbox keeps exact carrier octets; this asserts Mini retention, not an fn Store
+receipt or current fn authorship policy. -/
+def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
+    IO (Except String (FnConsumerOperation.PortableInbox × String × Nat)) := do
+  let opened ← match ← NativeHost.openExisting config with
+    | .ok opened => pure opened
+    | .error detail => return .error detail
+  unless opened.durable.image.accepted.length ≤ 16 do
+    return .error "bounded E1 consumer history exceeds 16 accepted events"
+  let some record := opened.durable.image.accepted.find?
+      (fun entry => entry.transactionId.value == transactionId)
+    | return .error "exact Mini consumer transaction is absent"
+  match FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+      config.profile.semantics record with
+  | some (binding, some inbox) =>
+      return .ok (inbox, "operation",
+        (FnConsumerOperation.operationInboxAtom config.deployment.domain
+          config.profile.semantics binding.application binding.operation).digest.value)
+  | _ =>
+      match FnConsumerOperation.originalConflictWithInbox config.deployment.domain
+          config.profile.semantics record with
+      | some (conflict, some inbox) =>
+          let report : FnConsumerOperation.Report :=
+            { application := conflict.application, operation := conflict.operation,
+              provenance := conflict.provenance, package := conflict.package,
+              subject := ⟨0⟩, target := 0, capability := ⟨0⟩,
+              expectedAuthorityRoot := ⟨0⟩, expectedTargetRoot := ⟨0⟩,
+              portableInbox := some inbox }
+          return .ok (inbox, "conflict",
+            (FnConsumerOperation.conflictInboxAtom config.deployment.domain
+              config.profile.semantics report).digest.value)
+      | _ => return .error "transaction has no canonical portable inbox"
 
 def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
   IO.FS.writeBinFile path bytes.toByteArray
@@ -362,7 +411,7 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -495,13 +544,17 @@ def run (arguments : List String) : IO UInt32 := do
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
-          let (_, verified, extracted) ← verifyFnPortable pin claim carrierPath
+          let started : Nat ← IO.monoNanosNow
+          let (carrier, verified, extracted) ← verifyFnPortable pin claim carrierPath
+          let afterFn : Nat ← IO.monoNanosNow
           let receipt ← IO.ofExcept (← FnEvidence.verify origin extracted.package)
           let originPackage ← IO.ofExcept (FnEvidenceCodec.decodeChecked extracted.package)
           unless originPackage.originalReceipt == receipt do
             throw (IO.userError "portable origin receipt differs from re-admitted package")
+          let afterOrigin : Nat ← IO.monoNanosNow
           let policy := policySource.policy
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let afterConsumer : Nat ← IO.monoNanosNow
           let probeTarget : DeclaredResourceController.Target :=
             ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
               .content ⟨[]⟩, none⟩
@@ -514,10 +567,14 @@ def run (arguments : List String) : IO UInt32 := do
             pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
           let report := portableConsumerReport policy
             opened.authority.snapshot.cell.root
-            targetRoot verified
+            targetRoot verified carrier
             extracted.package originPackage
-          let decision ← IO.ofExcept (← FnConsumerOperation.evaluate origin config
-            policy report)
+          let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
+            policy report receipt opened)
+          let afterDecision : Nat ← IO.monoNanosNow
+          let intent := decision.intent report
+          let intentBytes := intent.map NativeObservationCodec.intentCodec.encode
+          let afterEncoding : Nat ← IO.monoNanosNow
           writeJson resultPath <| Lean.Json.mkObj
             [("type", toJson "fn-portable-consumer-decision-v1"),
              ("portableAuthorship", toJson "verified"),
@@ -526,15 +583,49 @@ def run (arguments : List String) : IO UInt32 := do
              ("application", toJson policySource.application),
              ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
              ("miniOrigin", evidenceReceiptJson receipt),
+             ("timingNs", Lean.Json.mkObj
+               [("fnPortableAndExtraction", toJson (toString (afterFn - started))),
+                ("miniOriginReplay", toJson (toString (afterOrigin - afterFn))),
+                ("miniConsumerReplay", toJson (toString (afterConsumer - afterOrigin))),
+                ("grantAndDecision", toJson (toString (afterDecision - afterConsumer))),
+                ("intentEncoding", toJson (toString (afterEncoding - afterDecision)))]),
              ("decision", consumerDecisionJson decision)]
-          match decision.intent report with
-          | some intent =>
-              writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+          match intentBytes with
+          | some bytes =>
+              writeBytes intentPath bytes
               pure 0
           | none =>
               match decision with
               | .refused _ => pure 1
               | _ => pure 0
+      | "consumer-export-inbox", [transaction, inboxPath, carrierPath, resultPath] =>
+          let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
+          let (inbox, kind, atomId) ← IO.ofExcept
+            (← exportConsumerInbox config transactionId)
+          writeBytes inboxPath (FnConsumerOperation.portableInboxCodec.encode inbox)
+          writeBytes carrierPath inbox.carrier
+          writeJson resultPath <| Lean.Json.mkObj
+            [("type", toJson "retained-mini-portable-inbox-v1"),
+             ("miniTransactionId", toJson transaction),
+             ("kind", toJson kind),
+             ("atomId", toJson (toString atomId)),
+             ("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex inbox.sourceIdentity)),
+             ("storeAdmission", toJson "unestablished")]
+          pure 0
+      | "consumer-export-reply", [transaction, replyPath] =>
+          let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          unless opened.durable.image.accepted.length ≤ 16 do
+            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
+          let some record := opened.durable.image.accepted.find?
+              (fun entry => entry.transactionId.value == transactionId)
+            | throw (IO.userError "exact Mini consumer transaction is absent")
+          let some (binding, some _) :=
+              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+                config.profile.semantics record
+            | throw (IO.userError "transaction has no canonical portable Q")
+          writeBytes replyPath (FnConsumerOperation.replyCodec.encode binding.reply)
+          pure 0
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))

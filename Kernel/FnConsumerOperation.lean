@@ -33,6 +33,17 @@ structure Provenance where
   fnVerdictRef : List UInt8
   deriving DecidableEq, Repr
 
+/-- Exact portable article and independently verified public key context.
+The fn Store receipt is absent; this record retains the input needed for a
+later exact fetch join without treating the signature as Store admission. -/
+structure PortableInbox where
+  carrier : List UInt8
+  sourceIdentity : List UInt8
+  principal : List UInt8
+  edPublicKey : List UInt8
+  mlPublicKey : List UInt8
+  deriving DecidableEq, Repr
+
 structure Report where
   application : List UInt8
   operation : List UInt8
@@ -43,6 +54,7 @@ structure Report where
   capability : CapabilityId
   expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
+  portableInbox : Option PortableInbox := none
   deriving Repr
 
 /-- Local operator selection. It is not accepted from the fetched fn article. -/
@@ -84,6 +96,19 @@ def provenanceStream : StreamCodec Provenance :=
     (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2⟩)
     (by intro value; cases value; rfl)
 
+def portableInboxStream : StreamCodec PortableInbox :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
+    (fun value => (value.carrier, value.sourceIdentity, value.principal,
+      value.edPublicKey, value.mlPublicKey))
+    (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2.1,
+      value.2.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def portableInboxCodec : LawfulCodec PortableInbox :=
+  NativeHostCodec.framed "DREGG/FN/PORTABLE-INBOX/v1".toUTF8.toList portableInboxStream
+
 def replyStream : StreamCodec Reply :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream
@@ -123,6 +148,16 @@ def conflictCodec : LawfulCodec ConflictEvidence :=
 def maxNameBytes : Nat := 64
 def maxVerdictRefBytes : Nat := 256
 def maxBindingBytes : Nat := 18432
+def maxInboxBytes : Nat := 36864
+
+def PortableInbox.valid (inbox : PortableInbox)
+    (expectedSource : List UInt8) : Bool :=
+  !inbox.carrier.isEmpty && inbox.carrier.length ≤ 32768 &&
+  inbox.sourceIdentity.length == 48 &&
+  inbox.sourceIdentity == expectedSource &&
+  inbox.principal.length == 32 && inbox.edPublicKey.length == 32 &&
+  inbox.mlPublicKey.length == 1952 &&
+  (portableInboxCodec.encode inbox).length ≤ maxInboxBytes
 
 def validName (value : List UInt8) : Bool :=
   !value.isEmpty && value.length ≤ maxNameBytes
@@ -137,6 +172,11 @@ def checkReport (report : Report) : Except String Unit := do
     throw "missing or oversized fn verdict reference"
   unless report.package.length ≤ FnEvidenceCodec.maxPackageBytes do
     throw "Mini report package exceeds P0 bound"
+  match report.portableInbox with
+  | none => pure ()
+  | some inbox =>
+      unless inbox.valid report.provenance.sourceIdentity do
+        throw "portable inbox is absent, mismatched, or oversized"
 
 def checkPolicy (policy : Policy) (report : Report) : Except String Unit := do
   unless report.application == policy.application &&
@@ -159,7 +199,10 @@ def operationNonce (domain semantics : Digest) (application operation : List UIn
 def conflictNonce (domain semantics : Digest) (report : Report) : Nat :=
   2 * (Sp800185Cshake256.hash "DREGG.FN.CONFLICT/v1".toUTF8.toList
     (operationPreimage domain semantics report.application report.operation ++
-      provenanceStream.encode report.provenance)).digest.value + 1
+      provenanceStream.encode report.provenance ++
+      (match report.portableInbox with
+       | none => []
+       | some inbox => portableInboxCodec.encode inbox))).digest.value + 1
 
 theorem operationNonce_ne_conflictNonce (domain semantics : Digest)
     (report : Report) :
@@ -176,6 +219,15 @@ def replyAtom (domain semantics : Digest) (application operation : List UInt8) :
 
 def conflictAtom (domain semantics : Digest) (report : Report) : AtomId :=
   ⟨⟨2 * conflictNonce domain semantics report⟩⟩
+
+/-- Residue 3 is reserved for exact portable input. Its domain-separated
+nonce distinguishes operation and conflict records up to hash collision. -/
+def operationInboxAtom (domain semantics : Digest)
+    (application operation : List UInt8) : AtomId :=
+  ⟨⟨2 * operationNonce domain semantics application operation + 3⟩⟩
+
+def conflictInboxAtom (domain semantics : Digest) (report : Report) : AtomId :=
+  ⟨⟨2 * conflictNonce domain semantics report + 1⟩⟩
 
 theorem operationAtom_ne_replyAtom (domain semantics : Digest)
     (application operation : List UInt8) :
@@ -201,11 +253,16 @@ def bindingCommand (domain semantics : Digest) (report : Report)
     report.provenance, report.package, reply⟩
   let bytes := bindingCodec.encode binding
   unless bytes.length ≤ maxBindingBytes do throw "consumer binding exceeds bound"
-  let actions : List ContentResource.Action :=
+  let base : List ContentResource.Action :=
     [.createAtom (operationAtom domain semantics report.application report.operation)
       (.inlineObject ⟨1⟩) bytes,
      .createAtom (replyAtom domain semantics report.application report.operation)
       (.inlineObject ⟨2⟩) (replyCodec.encode reply)]
+  let actions := base ++ match report.portableInbox with
+    | none => []
+    | some inbox =>
+        [.createAtom (operationInboxAtom domain semantics report.application report.operation)
+          (.inlineObject ⟨4⟩) (portableInboxCodec.encode inbox)]
   pure ⟨report.subject, report.expectedAuthorityRoot,
     operationNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
@@ -213,16 +270,25 @@ def bindingCommand (domain semantics : Digest) (report : Report)
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
+  let base : List ContentResource.Action :=
+    [.createAtom (conflictAtom domain semantics report)
+      (.inlineObject ⟨3⟩) (conflictCodec.encode
+        ⟨report.application, report.operation, report.provenance, report.package⟩)]
+  let actions := base ++ match report.portableInbox with
+    | none => []
+    | some inbox =>
+        [.createAtom (conflictInboxAtom domain semantics report)
+          (.inlineObject ⟨4⟩) (portableInboxCodec.encode inbox)]
   ⟨report.subject, report.expectedAuthorityRoot,
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-     .content ⟨[.createAtom (conflictAtom domain semantics report)
-       (.inlineObject ⟨3⟩) (conflictCodec.encode
-         ⟨report.application, report.operation, report.provenance, report.package⟩)]⟩, none⟩]⟩
+     .content ⟨actions⟩, none⟩]⟩
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (reply : Reply)
   | repeated (reply : Reply)
+  | carrierVariation (command : DeclaredResourceController.Command) (reply : Reply)
+  | carrierVariationRecorded (reply : Reply)
   | conflict (command : DeclaredResourceController.Command)
   | conflictRecorded
   | refused (detail : String)
@@ -230,8 +296,8 @@ inductive Decision where
 
 /-- Inspect the original accepted call, rather than a mutable current atom.
 The prior reply remains recoverable from the durable accepted event history. -/
-def originalBinding (domain semantics : Digest)
-    (record : DurableReceiver.IntentRecord) : Option Binding := do
+def originalBindingWithInbox (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option (Binding × Option PortableInbox) := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   if recordDomain != domain || recordSemantics != semantics then none else
@@ -240,24 +306,44 @@ def originalBinding (domain semantics : Digest)
   | [target] =>
       match target.payload with
       | .content content =>
-          match content.actions with
-          | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
-             .createAtom outbox (.inlineObject ⟨2⟩) replyBytes] => do
-              let binding ← bindingCodec.decode bytes
-              let reply ← replyCodec.decode replyBytes
-              if atom == operationAtom domain semantics binding.application binding.operation &&
-                  outbox == replyAtom domain semantics binding.application binding.operation &&
-                  reply == binding.reply &&
-                  reply.application == binding.application &&
-                  reply.operation == binding.operation &&
-                  reply.sourceIdentity == binding.provenance.sourceIdentity &&
-                  command.nonce == operationNonce domain semantics
-                    binding.application binding.operation then
-                some binding
-              else none
-          | _ => none
+          let (atom, bytes, outbox, replyBytes, inboxAction) ←
+            match content.actions with
+            | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
+               .createAtom outbox (.inlineObject ⟨2⟩) replyBytes] =>
+                some (atom, bytes, outbox, replyBytes, none)
+            | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
+               .createAtom outbox (.inlineObject ⟨2⟩) replyBytes,
+               .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes] =>
+                some (atom, bytes, outbox, replyBytes, some (inboxAtom, inboxBytes))
+            | _ => none
+          let binding ← bindingCodec.decode bytes
+          let reply ← replyCodec.decode replyBytes
+          let inbox ← match inboxAction with
+            | none => some none
+            | some (inboxAtom, inboxBytes) => do
+                if inboxBytes.length > maxInboxBytes then none else
+                let inbox ← portableInboxCodec.decode inboxBytes
+                if inboxAtom == operationInboxAtom domain semantics
+                    binding.application binding.operation &&
+                    inbox.valid binding.provenance.sourceIdentity then
+                  some (some inbox)
+                else none
+          if atom == operationAtom domain semantics binding.application binding.operation &&
+              outbox == replyAtom domain semantics binding.application binding.operation &&
+              reply == binding.reply &&
+              reply.application == binding.application &&
+              reply.operation == binding.operation &&
+              reply.sourceIdentity == binding.provenance.sourceIdentity &&
+              command.nonce == operationNonce domain semantics
+                binding.application binding.operation then
+            some (binding, inbox)
+          else none
       | _ => none
   | _ => none
+
+def originalBinding (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option Binding :=
+  (originalBindingWithInbox domain semantics record).map Prod.fst
 
 /-- A later operator policy cannot silently move an already bound operation
 to another local subject, target, or capability. The original accepted
@@ -285,8 +371,9 @@ def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
             throw "consumer operation already bound under another local grant"
     | none => pure ()
 
-def originalConflict (domain semantics : Digest)
-    (record : DurableReceiver.IntentRecord) : Option ConflictEvidence := do
+def originalConflictWithInbox (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) :
+    Option (ConflictEvidence × Option PortableInbox) := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   if recordDomain != domain || recordSemantics != semantics then none else
@@ -295,28 +382,43 @@ def originalConflict (domain semantics : Digest)
   | [target] =>
       match target.payload with
       | .content content =>
-          match content.actions with
-          | [.createAtom atom (.inlineObject ⟨3⟩) bytes] => do
-              let evidence ← conflictCodec.decode bytes
-              if atom == conflictAtom domain semantics
-                    { application := evidence.application, operation := evidence.operation,
-                      provenance := evidence.provenance, package := evidence.package,
-                      subject := command.subject, target := target.target,
-                      capability := target.capability,
-                      expectedAuthorityRoot := command.expectedAuthorityRoot,
-                      expectedTargetRoot := target.expectedTargetRoot } &&
-                  command.nonce == conflictNonce domain semantics
-                    { application := evidence.application, operation := evidence.operation,
-                      provenance := evidence.provenance, package := evidence.package,
-                      subject := command.subject, target := target.target,
-                      capability := target.capability,
-                      expectedAuthorityRoot := command.expectedAuthorityRoot,
-                      expectedTargetRoot := target.expectedTargetRoot } then
-                some evidence
-              else none
-          | _ => none
+          let (atom, bytes, inboxAction) ← match content.actions with
+            | [.createAtom atom (.inlineObject ⟨3⟩) bytes] =>
+                some (atom, bytes, none)
+            | [.createAtom atom (.inlineObject ⟨3⟩) bytes,
+               .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes] =>
+                some (atom, bytes, some (inboxAtom, inboxBytes))
+            | _ => none
+          let evidence ← conflictCodec.decode bytes
+          let inbox ← match inboxAction with
+            | none => some none
+            | some (_, inboxBytes) => do
+                if inboxBytes.length > maxInboxBytes then none else
+                let inbox ← portableInboxCodec.decode inboxBytes
+                if inbox.valid evidence.provenance.sourceIdentity then
+                  some (some inbox)
+                else none
+          let report : Report :=
+            { application := evidence.application, operation := evidence.operation,
+              provenance := evidence.provenance, package := evidence.package,
+              subject := command.subject, target := target.target,
+              capability := target.capability,
+              expectedAuthorityRoot := command.expectedAuthorityRoot,
+              expectedTargetRoot := target.expectedTargetRoot,
+              portableInbox := inbox }
+          if atom == conflictAtom domain semantics report &&
+              (inboxAction.isNone ||
+                inboxAction.any (fun pair =>
+                  pair.1 == conflictInboxAtom domain semantics report)) &&
+              command.nonce == conflictNonce domain semantics report then
+            some (evidence, inbox)
+          else none
       | _ => none
   | _ => none
+
+def originalConflict (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option ConflictEvidence :=
+  (originalConflictWithInbox domain semantics record).map Prod.fst
 
 def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
     (accepted : List DurableReceiver.IntentRecord) : Decision :=
@@ -329,37 +431,56 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
           ⟨report.application, report.operation, report.provenance.sourceIdentity, receipt⟩
       | .error detail => .refused detail
   | some original =>
-      match originalBinding domain semantics original with
+      match originalBindingWithInbox domain semantics original with
       | none => .refused "operation marker occupied by nonconsumer transaction"
-      | some binding =>
+      | some (binding, originalInbox) =>
           if binding.application != report.application ||
               binding.operation != report.operation then
             .refused "operation marker collision or foreign binding"
           else if binding.provenance == report.provenance &&
-              binding.package == report.package then
+              binding.package == report.package &&
+              originalInbox == report.portableInbox then
             .repeated binding.reply
           else
+            let sameSource := binding.provenance == report.provenance &&
+              binding.package == report.package
             let conflictTransaction := marker domain semantics report.subject
               (conflictNonce domain semantics report)
             match accepted.find? (fun entry => entry.transactionId == conflictTransaction) with
-            | none => .conflict (conflictCommand domain semantics report)
+            | none =>
+                if sameSource then .carrierVariation
+                  (conflictCommand domain semantics report) binding.reply
+                else .conflict (conflictCommand domain semantics report)
             | some conflict =>
-                if originalConflict domain semantics conflict ==
-                    some ⟨report.application, report.operation,
-                      report.provenance, report.package⟩ then
-                  .conflictRecorded
+                if originalConflictWithInbox domain semantics conflict ==
+                    some (⟨report.application, report.operation,
+                      report.provenance, report.package⟩, report.portableInbox) then
+                  if sameSource then .carrierVariationRecorded binding.reply
+                  else .conflictRecorded
                 else .refused "conflict marker occupied by different evidence"
 
 def Decision.intent (report : Report) : Decision → Option NativeObservationCodec.Intent
-  | .fresh command _ | .conflict command =>
+  | .fresh command _ | .conflict command | .carrierVariation command _ =>
       some ⟨report.subject, command.nonce + 1,
         .prepare (.invoke (DeclaredResourceController.commandCodec.encode command)),
         [⟨.object, report.target, report.capability⟩]⟩
   | _ => none
 
-/-- This local test adapter does not claim a fn authorship verdict. The caller
-must supply a separately selected origin pin; the verified Mini receipt is
-recomputed here before any operation command is authored. -/
+def evaluateVerified (consumer : NativeHost.Config) (policy : Policy)
+    (report : Report) (receipt : Receipt) (opened : NativeHost.Opened consumer) :
+    Except String Decision := do
+  checkReport report
+  checkPolicy policy report
+  unless opened.durable.image.accepted.length ≤ 16 do
+    throw "bounded E1 consumer history exceeds 16 accepted events"
+  checkHistoricalPolicy consumer.deployment.domain consumer.profile.semantics
+    policy report opened.durable.image.accepted
+  pure (decide consumer.deployment.domain consumer.profile.semantics
+    report receipt opened.durable.image.accepted)
+
+/-- The synthetic adapter independently verifies the origin and reopens
+current consumer history. The portable native route passes those already
+verified values to evaluateVerified without replaying either twice. -/
 def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : Report) :
     IO (Except String Decision) := do
   match checkReport report with
@@ -374,13 +495,6 @@ def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : R
   let opened ← match ← NativeHost.openExisting consumer with
     | .error detail => return .error s!"consumer history: {detail}"
     | .ok opened => pure opened
-  unless opened.durable.image.accepted.length ≤ 16 do
-    return .error "bounded E1 consumer history exceeds 16 accepted events"
-  match checkHistoricalPolicy consumer.deployment.domain consumer.profile.semantics
-      policy report opened.durable.image.accepted with
-  | .error detail => return .error detail
-  | .ok () => pure ()
-  return .ok (decide consumer.deployment.domain consumer.profile.semantics
-    report receipt opened.durable.image.accepted)
+  return evaluateVerified consumer policy report receipt opened
 
 end Minidregg.Kernel.FnConsumerOperation

@@ -65,8 +65,14 @@ refused before a second intent. The v1 binding uses explicit
 `fn-store-unestablished` sentinels for the absent Store history/incarnation
 and `fn-portable-authorship-v1` for the verifier class; these are not
 historical T10 verdict references. The binding retains the verified fn
-source identity and exact Mini package, but its 18,432-byte bound cannot
-contain this fixture's 22,393-byte source or 29,918-byte carrier. The
-carrier therefore remains an external input, and this offline route does
-not create a complete durable fn inbox, fn application reply carrier, or
-E2 consumer ack.
+source identity and exact Mini package within its unchanged 18,432-byte
+bound. A separate `DREGG/FN/PORTABLE-INBOX/v1` atom retains the exact carrier,
+source identity and full verified public key context in the **same** signed
+operation/binding/Q transaction. The original accepted event is the recovery
+source. `consumer-export-inbox` writes the canonical typed inbox and exact
+carrier after historical re-admission; `consumer-export-reply` writes the
+original immutable Q. A changed relay projection of the same signed source
+gets its own evidence atom and the same Q, without a second application
+effect. A changed authenticated source gets separate conflict evidence.
+Neither case proves fn Store admission or advances an E2 cursor; signed fn
+reply publication and E2 ack remain separate operations.
