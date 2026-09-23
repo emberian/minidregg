@@ -35,6 +35,24 @@ codec repeats these checks before nested re-admission. Larger histories refuse
 until a separately designed bounded witness format exists. The package contains
 public authority history and must not be exported from a private live store.
 
+## Local E1 consumer experiment
+
+The [bounded E1 consumer contract](../../docs/FN-CONSUMER-E1.md) uses the
+native host's `consumer-decide-test` command to verify a public origin package,
+select a stable application/operation binding, and write a canonical Mini
+observation intent. For a proposed operation or conflict, sign and submit the
+intent through the ordinary receiver:
+
+```sh
+mini submit --host HOST --config CONSUMER-CONFIG.json \
+  --intent INTENT.bin --intent-kind binary --key CONSUMER.key --dir ATTEMPT
+```
+
+For a deterministic stale-prestate test, append `--prepare-only true` to
+retain `ATTEMPT/call.bin` before publication, then use `mini retry --attempt
+ATTEMPT --mode submit`. The proposed decision is not an accepted Mini receipt;
+the final `outcome.json` and historical lookup settle that distinction.
+
 Build it with:
 
 ```sh

@@ -36,7 +36,11 @@ theorem occupied_never_proposes_fresh (domain semantics : Digest)
       simp only [decide, occupied, h]
       split
       · simp
-      · split <;> simp
+      · split
+        · simp
+        · split
+          · simp
+          · split <;> simp
 
 theorem exact_repeat_returns_original_reply (domain semantics : Digest)
     (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
@@ -64,12 +68,15 @@ theorem changed_source_records_conflict_without_second_effect
     (decoded : originalBinding domain semantics original = some binding)
     (application : binding.application = report.application)
     (operation : binding.operation = report.operation)
-    (source : binding.provenance.sourceIdentity ≠ report.provenance.sourceIdentity) :
+    (source : binding.provenance.sourceIdentity ≠ report.provenance.sourceIdentity)
+    (unrecorded : accepted.find? (fun entry =>
+      entry.transactionId == marker domain semantics report.subject
+        (conflictNonce domain semantics report)) = none) :
     decide domain semantics report receipt accepted =
       .conflict (conflictCommand domain semantics report) := by
   have provenance : binding.provenance ≠ report.provenance := by
     intro same
     exact source (congrArg Provenance.sourceIdentity same)
-  simp [decide, occupied, decoded, application, operation, provenance]
+  simp [decide, occupied, decoded, application, operation, provenance, unrecorded]
 
 end Minidregg.Kernel.FnConsumerOperation

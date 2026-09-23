@@ -44,6 +44,14 @@ structure Report where
   expectedTargetRoot : Digest
   deriving Repr
 
+/-- Local operator selection. It is not accepted from the fetched fn article. -/
+structure Policy where
+  application : List UInt8
+  subject : SubjectId
+  target : Nat
+  capability : CapabilityId
+  deriving DecidableEq, Repr
+
 structure Reply where
   application : List UInt8
   operation : List UInt8
@@ -57,6 +65,13 @@ structure Binding where
   provenance : Provenance
   package : List UInt8
   reply : Reply
+  deriving DecidableEq, Repr
+
+structure ConflictEvidence where
+  application : List UInt8
+  operation : List UInt8
+  provenance : Provenance
+  package : List UInt8
   deriving DecidableEq, Repr
 
 def provenanceStream : StreamCodec Provenance :=
@@ -93,6 +108,17 @@ def bindingStream : StreamCodec Binding :=
 def bindingCodec : LawfulCodec Binding :=
   NativeHostCodec.framed "DREGG/FN/OPERATION-BINDING/v1".toUTF8.toList bindingStream
 
+def conflictStream : StreamCodec ConflictEvidence :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product provenanceStream bytesStream)))
+    (fun value => (value.application, value.operation, value.provenance, value.package))
+    (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def conflictCodec : LawfulCodec ConflictEvidence :=
+  NativeHostCodec.framed "DREGG/FN/CONFLICT-EVIDENCE/v1".toUTF8.toList conflictStream
+
 def maxNameBytes : Nat := 64
 def maxVerdictRefBytes : Nat := 256
 def maxBindingBytes : Nat := 18432
@@ -110,6 +136,12 @@ def checkReport (report : Report) : Except String Unit := do
     throw "missing or oversized fn verdict reference"
   unless report.package.length ≤ FnEvidenceCodec.maxPackageBytes do
     throw "Mini report package exceeds P0 bound"
+
+def checkPolicy (policy : Policy) (report : Report) : Except String Unit := do
+  unless report.application == policy.application &&
+      report.subject == policy.subject && report.target == policy.target &&
+      report.capability == policy.capability do
+    throw "report differs from operator-selected consumer namespace and grant"
 
 def operationPreimage (domain semantics : Digest) (application operation : List UInt8) :
     List UInt8 :=
@@ -136,21 +168,21 @@ theorem operationNonce_ne_conflictNonce (domain semantics : Digest)
   omega
 
 def operationAtom (domain semantics : Digest) (application operation : List UInt8) : AtomId :=
-  ⟨⟨operationNonce domain semantics application operation⟩⟩
+  ⟨⟨2 * operationNonce domain semantics application operation⟩⟩
 
 def replyAtom (domain semantics : Digest) (application operation : List UInt8) : AtomId :=
-  ⟨⟨operationNonce domain semantics application operation + 1⟩⟩
+  ⟨⟨2 * operationNonce domain semantics application operation + 1⟩⟩
 
 def conflictAtom (domain semantics : Digest) (report : Report) : AtomId :=
-  ⟨⟨conflictNonce domain semantics report⟩⟩
+  ⟨⟨2 * conflictNonce domain semantics report⟩⟩
 
 theorem operationAtom_ne_replyAtom (domain semantics : Digest)
     (application operation : List UInt8) :
     operationAtom domain semantics application operation ≠
       replyAtom domain semantics application operation := by
   intro equal
-  have n : operationNonce domain semantics application operation =
-    operationNonce domain semantics application operation + 1 := by
+  have n : 2 * operationNonce domain semantics application operation =
+    2 * operationNonce domain semantics application operation + 1 := by
     exact congrArg (fun id => id.digest.value) equal
   omega
 
@@ -184,12 +216,14 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
      .content ⟨[.createAtom (conflictAtom domain semantics report)
-       (.inlineObject ⟨3⟩) (provenanceStream.encode report.provenance)]⟩, none⟩]⟩
+       (.inlineObject ⟨3⟩) (conflictCodec.encode
+         ⟨report.application, report.operation, report.provenance, report.package⟩)]⟩, none⟩]⟩
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (reply : Reply)
   | repeated (reply : Reply)
   | conflict (command : DeclaredResourceController.Command)
+  | conflictRecorded
   | refused (detail : String)
   deriving Repr
 
@@ -224,6 +258,39 @@ def originalBinding (domain semantics : Digest)
       | _ => none
   | _ => none
 
+def originalConflict (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option ConflictEvidence := do
+  let (recordDomain, recordSemantics, signed) ←
+    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
+  if recordDomain != domain || recordSemantics != semantics then none else
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  match command.targets with
+  | [target] =>
+      match target.payload with
+      | .content content =>
+          match content.actions with
+          | [.createAtom atom (.inlineObject ⟨3⟩) bytes] => do
+              let evidence ← conflictCodec.decode bytes
+              if atom == conflictAtom domain semantics
+                    { application := evidence.application, operation := evidence.operation,
+                      provenance := evidence.provenance, package := evidence.package,
+                      subject := command.subject, target := target.target,
+                      capability := target.capability,
+                      expectedAuthorityRoot := command.expectedAuthorityRoot,
+                      expectedTargetRoot := target.expectedTargetRoot } &&
+                  command.nonce == conflictNonce domain semantics
+                    { application := evidence.application, operation := evidence.operation,
+                      provenance := evidence.provenance, package := evidence.package,
+                      subject := command.subject, target := target.target,
+                      capability := target.capability,
+                      expectedAuthorityRoot := command.expectedAuthorityRoot,
+                      expectedTargetRoot := target.expectedTargetRoot } then
+                some evidence
+              else none
+          | _ => none
+      | _ => none
+  | _ => none
+
 def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
     (accepted : List DurableReceiver.IntentRecord) : Decision :=
   let transaction := marker domain semantics report.subject
@@ -244,7 +311,17 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
           else if binding.provenance == report.provenance &&
               binding.package == report.package then
             .repeated binding.reply
-          else .conflict (conflictCommand domain semantics report)
+          else
+            let conflictTransaction := marker domain semantics report.subject
+              (conflictNonce domain semantics report)
+            match accepted.find? (fun entry => entry.transactionId == conflictTransaction) with
+            | none => .conflict (conflictCommand domain semantics report)
+            | some conflict =>
+                if originalConflict domain semantics conflict ==
+                    some ⟨report.application, report.operation,
+                      report.provenance, report.package⟩ then
+                  .conflictRecorded
+                else .refused "conflict marker occupied by different evidence"
 
 def Decision.intent (report : Report) : Decision → Option NativeObservationCodec.Intent
   | .fresh command _ | .conflict command =>
@@ -256,9 +333,12 @@ def Decision.intent (report : Report) : Decision → Option NativeObservationCod
 /-- This local test adapter does not claim a fn authorship verdict. The caller
 must supply a separately selected origin pin; the verified Mini receipt is
 recomputed here before any operation command is authored. -/
-def evaluate (origin consumer : NativeHost.Config) (report : Report) :
+def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : Report) :
     IO (Except String Decision) := do
   match checkReport report with
+  | .error detail => return .error detail
+  | .ok () => pure ()
+  match checkPolicy policy report with
   | .error detail => return .error detail
   | .ok () => pure ()
   let receipt ← match ← FnEvidence.verify origin report.package with
