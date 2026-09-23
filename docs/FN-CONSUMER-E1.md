@@ -95,7 +95,10 @@ original `PhysicalShape` proposition; it does not skip any clause. The
 admitted invocation reuses those exact writes and guards for its durable
 intent and charge lanes; `dataIntent_original_exact` proves equality of the
 complete result with the original construction. The remaining full history
-replay and cryptographic cost are measured in the fn evidence note. No Mini commit
+replay now also shares one exact policy-step context per signed incidence
+across capability evidence, committed policy resolution and witness
+construction. The remaining replay and cryptographic cost are measured in
+the fn evidence note. No Mini commit
 implies fn Store acceptance, consumer cursor progress, or a posted reply.
 
 The public synthetic fixture and exact native results are in fn

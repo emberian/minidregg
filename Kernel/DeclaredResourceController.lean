@@ -267,15 +267,21 @@ def authorizeLeg [DecidableEq F]
     Except Reject (Authorized (portals prepared tuple incidence)
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
-  let config := policyConfig prepared tuple incidence
+  let context := step prepared tuple incidence
+  let config := CredentialAuthorityPolicyRegistry.config profile.compilerProfile
+    prepared.authority.snapshot
+    (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
+    (sourceCapabilityPortal prepared.authority.snapshot
+      (operationMarker prepared.authority.snapshot.domain profile.semantics command))
+    context
   let capability := (incidenceTarget command incidence).capability
   let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
     (operationMarker prepared.authority.snapshot.domain profile.semantics command)
-    (step prepared tuple incidence) wanted capability signature)
+    context wanted capability signature)
   let committed ← requireSome .policyUnavailable (config.registry.resolve wanted.policyId wanted.policyRevision)
   let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared tuple incidence).oldState (step prepared tuple incidence).newState
+    context.oldState context.newState
   if inputsInRange profile.compilerProfile.compiler committed.record.predicate witness.oldState witness.newState != true then
     throw .policyInputRange
   if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
