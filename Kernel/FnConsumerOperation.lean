@@ -5,8 +5,9 @@ resource receiver remains the admission and atomic CAS owner. This module only
 authors its command and interprets its historical signed event.
 
 The first profile has one local consumer subject and one pre-birthed content
-resource. The trusted fn verdict reference is an input from an explicit test
-adapter until fn's native historical verdict connector is available.
+resource. The original synthetic route uses a trusted test adapter. The
+portable fn route records a verified source identity with explicit absent-
+Store sentinels until fn's native historical verdict connector is available.
 -/
 import Kernel.FnEvidence
 import Kernel.NativeHost
@@ -258,6 +259,32 @@ def originalBinding (domain semantics : Digest)
       | _ => none
   | _ => none
 
+/-- A later operator policy cannot silently move an already bound operation
+to another local subject, target, or capability. The original accepted
+signed call, not caller metadata, supplies this historical grant context. -/
+def originalBindingGrant (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) :
+    Option (Binding × SubjectId × Nat × CapabilityId) := do
+  let binding ← originalBinding domain semantics record
+  let (_, _, signed) ←
+    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  let [target] := command.targets | none
+  some (binding, command.subject, target.target, target.capability)
+
+def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
+    (report : Report) (accepted : List DurableReceiver.IntentRecord) :
+    Except String Unit := do
+  for record in accepted do
+    match originalBindingGrant domain semantics record with
+    | some (binding, subject, target, capability) =>
+        if binding.application == report.application &&
+            binding.operation == report.operation then
+          unless subject == policy.subject && target == policy.target &&
+              capability == policy.capability do
+            throw "consumer operation already bound under another local grant"
+    | none => pure ()
+
 def originalConflict (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) : Option ConflictEvidence := do
   let (recordDomain, recordSemantics, signed) ←
@@ -349,6 +376,10 @@ def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : R
     | .ok opened => pure opened
   unless opened.durable.image.accepted.length ≤ 16 do
     return .error "bounded E1 consumer history exceeds 16 accepted events"
+  match checkHistoricalPolicy consumer.deployment.domain consumer.profile.semantics
+      policy report opened.durable.image.accepted with
+  | .error detail => return .error detail
+  | .ok () => pure ()
   return .ok (decide consumer.deployment.domain consumer.profile.semantics
     report receipt opened.durable.image.accepted)
 

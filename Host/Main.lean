@@ -313,6 +313,31 @@ def ConsumerReportSource.report (source : ConsumerReportSource) (package : List 
     package, ⟨source.subject⟩, source.target, ⟨source.capability⟩,
     ⟨source.expectedAuthorityRoot⟩, ⟨source.expectedTargetRoot⟩⟩
 
+/-- Portable authorship has no fn Store history, incarnation or T10 verdict.
+The reserved literal fields make that absence explicit in the v1 P1 binding
+codec. The operation selects the pinned Mini origin and re-admitted origin
+transaction, never the fn source identity. -/
+def portableConsumerReport (policy : FnConsumerOperation.Policy)
+    (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
+    (verified : FnPortableVerified)
+    (package : List UInt8) (origin : FnEvidenceCodec.Package) :
+    FnConsumerOperation.Report :=
+  let originKey := (StreamCodec.product digestStream
+    (StreamCodec.product digestStream
+      (StreamCodec.product digestStream digestStream))).encode
+        (origin.domain, origin.semantics, origin.genesisPin,
+          origin.originalReceipt.transactionId)
+  let operationDigest := Sp800185Cshake256.hash
+    "DREGG.FN.MINI-ORIGIN-OPERATION/v1".toUTF8.toList originKey
+  let operation := String.ofList (Nat.toDigits 16 operationDigest.digest.value)
+  ⟨policy.application, operation.toUTF8.toList,
+    ⟨"fn-store-unestablished".toUTF8.toList,
+      "fn-store-unestablished".toUTF8.toList,
+      verified.sourceIdentity,
+      "fn-portable-authorship-v1".toUTF8.toList⟩,
+    package, policy.subject, policy.target, policy.capability,
+    authorityRoot, targetRoot⟩
+
 def consumerDecisionJson (decision : FnConsumerOperation.Decision) : Lean.Json :=
   match decision with
   | .fresh _ reply => .mkObj
@@ -337,7 +362,7 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -454,6 +479,62 @@ def run (arguments : List String) : IO UInt32 := do
              ("storeAdmission", toJson "unestablished"),
              ("miniOrigin", evidenceReceiptJson receipt)]
           pure 0
+      | "portable-consumer-decide",
+          [originPath, pinPath, claimPath, policyPath,
+           carrierPath, intentPath, resultPath] =>
+          let origin := (← loadSettings originPath).config
+          let pinJson ← readJson pinPath
+          let claimJson ← readJson claimPath
+          let policyJson ← readJson policyPath
+          IO.ofExcept (requireExactFields "fn pin"
+            ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+          IO.ofExcept (requireExactFields "fn claim"
+            ["sourceIdentity", "messageId", "groups"] claimJson)
+          IO.ofExcept (requireExactFields "consumer policy"
+            ["application", "subject", "target", "capability"] policyJson)
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+          let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
+          let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+          let (_, verified, extracted) ← verifyFnPortable pin claim carrierPath
+          let receipt ← IO.ofExcept (← FnEvidence.verify origin extracted.package)
+          let originPackage ← IO.ofExcept (FnEvidenceCodec.decodeChecked extracted.package)
+          unless originPackage.originalReceipt == receipt do
+            throw (IO.userError "portable origin receipt differs from re-admitted package")
+          let policy := policySource.policy
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let probeTarget : DeclaredResourceController.Target :=
+            ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
+              .content ⟨[]⟩, none⟩
+          let targetRoot ← IO.ofExcept <| (do
+            let .present cell := opened.directory.directory.slots policy.target
+              | throw "portable consumer target is absent"
+            let some pre := DeclaredResourceController.selectTarget
+              config.deployment probeTarget cell
+              | throw "portable consumer target is not a valid content resource"
+            pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
+          let report := portableConsumerReport policy
+            opened.authority.snapshot.cell.root
+            targetRoot verified
+            extracted.package originPackage
+          let decision ← IO.ofExcept (← FnConsumerOperation.evaluate origin config
+            policy report)
+          writeJson resultPath <| Lean.Json.mkObj
+            [("type", toJson "fn-portable-consumer-decision-v1"),
+             ("portableAuthorship", toJson "verified"),
+             ("storeAdmission", toJson "unestablished"),
+             ("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex verified.sourceIdentity)),
+             ("application", toJson policySource.application),
+             ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
+             ("miniOrigin", evidenceReceiptJson receipt),
+             ("decision", consumerDecisionJson decision)]
+          match decision.intent report with
+          | some intent =>
+              writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+              pure 0
+          | none =>
+              match decision with
+              | .refused _ => pure 1
+              | _ => pure 0
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))

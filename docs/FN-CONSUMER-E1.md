@@ -56,6 +56,19 @@ allowed only after the Mini operation/conflict transaction is durably settled.
 The separate signed fn posting artifact for Q belongs to the later publication
 step and must be persisted before any post or retry.
 
+The later [portable authorship join](FN-PORTABLE-E1.md) adds
+`portable-consumer-decide`. It replaces the synthetic source/verdict input
+for a scoped offline experiment with the real fn hybrid verifier's exact
+source identity, an E1 package decoded only from those source bytes, and
+the P0 origin re-admission. Its operation identifier commits to the origin
+domain, semantics, genesis pin and original transaction ID, so a changed
+fn source carrying the same origin operation selects the same stable
+operation nonce. `evaluate` also scans bounded accepted history for an
+existing application/operation binding under another local subject, target
+or capability and refuses policy drift before proposing another intent.
+The portable binding explicitly records Store admission as unestablished;
+it is not a native fn Store fetched report or durable full-carrier inbox.
+
 The public synthetic fixture and exact native results are in fn
 `tests/fixtures/dregg-e1/consumer-p1/` and
 `planning/evidence/dregg-e1-consumer-p1.md`. Two reports with different fn
