@@ -6,6 +6,35 @@ receiver that decides admission. The Rust process generates and holds raw
 Ed25519 keys, signs the host's exact inspected headers, and retains every byte
 needed to recover from an uncertain response.
 
+## Portable native prefix evidence (P0)
+
+`mini export-evidence --host HOST --config PINNED.json --call CALL.bin --output PACKAGE.bin`
+reads a previously accepted exact call from the local native history. The Lean
+host checks the original signed call with its historical lookup and exports
+the exact first accepted prefix, original receipt, claimed domain, semantics
+profile and genesis identity. Rust only invokes Lean. An absent call or later
+event refuses; export does not publish an event.
+
+`mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package
+PACKAGE.bin --output RESULT.json` verifies without opening or writing a local
+store. The verifier's config must independently select the peer domain,
+profile parameters, genesis identity and native signature helper. The package
+pin is only a claim to compare with that config. Lean calls
+`NativeHostReplay.verifyBytes` to re-admit the retained original signed ingress
+from the pinned genesis, compares the reconstructed original receipt, and
+requires exact historical lookup of the supplied call in that one-event prefix.
+Successful output identifies a verified historical Mini operation. It does not
+authorize a new local action, prove an external side effect, or replace fn's
+authorship and retention decisions.
+
+`DREGG/FN/NATIVE-PREFIX/v1` is the canonical binary codec in
+`Compiler/FnEvidenceCodec.lean`. P0 caps the complete package at 20,480 bytes,
+the signed call at 6,144 bytes, the retained prefix at 12,288 bytes, and the
+accepted count at exactly one. The CLI caps file reads before decoding; the
+codec repeats these checks before nested re-admission. Larger histories refuse
+until a separately designed bounded witness format exists. The package contains
+public authority history and must not be exported from a private live store.
+
 Build it with:
 
 ```sh

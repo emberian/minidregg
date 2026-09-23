@@ -16,6 +16,8 @@ usage:
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup]
+  mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
+  mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
 
 The Lean host authors and decodes every semantic value. This client owns only
 private-key custody, process transport, retained attempts, and exact retries.
@@ -684,6 +686,28 @@ fn run(mut args: Args) -> Result<()> {
                 .to_str()
                 .ok_or_else(|| "--mode must be UTF-8".to_owned())?;
             retry(&directory, mode)
+        }
+        "export-evidence" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let call = path(args.required("call")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            if output.exists() {
+                return Err(format!("refusing to replace {}", output.display()));
+            }
+            host_files(&host, &config, &[Path::new("export-evidence"), &call, &output])
+        }
+        "verify-evidence" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let package = path(args.required("package")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            if output.exists() {
+                return Err(format!("refusing to replace {}", output.display()));
+            }
+            host_files(&host, &config, &[Path::new("verify-evidence"), &package, &output])
         }
         other => Err(format!("unknown command {other}\n\n{USAGE}")),
     }

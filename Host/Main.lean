@@ -11,6 +11,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
 import Kernel.NativeHostGenesis
+import Kernel.FnEvidence
 import Host.Json
 import Lean.Data.Json
 
@@ -160,6 +161,27 @@ partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : I
 def readBytes (path : String) : IO (List UInt8) :=
   return (← IO.FS.readBinFile path).toList
 
+/-- Evidence files are capped while reading, before any source-owned decoder. -/
+partial def readBoundedLoop (input : IO.FS.Handle) (limit : Nat)
+    (acc : ByteArray := ByteArray.empty) : IO (List UInt8) := do
+  if acc.size > limit then throw (IO.userError "Mini evidence input exceeds byte bound")
+  let chunk ← input.read (min 4096 (limit + 1 - acc.size)).toUSize
+  if chunk.isEmpty then return acc.toList
+  readBoundedLoop input limit (acc ++ chunk)
+
+def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
+  let input ← IO.FS.Handle.mk path .read
+  readBoundedLoop input limit
+
+def evidenceReceiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
+  let n := fun value : Nat => toJson (toString value)
+  Lean.Json.mkObj
+    [("type", toJson "verified-mini-native-prefix-v1"),
+     ("transactionId", n receipt.transactionId.value),
+     ("eventId", n receipt.eventId.value),
+     ("acceptedCount", n receipt.acceptedCount),
+     ("imageBoundary", n receipt.imageBoundary.value)]
+
 def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
   IO.FS.writeBinFile path bytes.toByteArray
 
@@ -170,7 +192,7 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -251,6 +273,16 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "lookup", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
+          pure 0
+      | "export-evidence", [input, output] =>
+          let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
+          let package ← IO.ofExcept (← FnEvidence.exportPackage config call)
+          writeBytes output package
+          pure 0
+      | "verify-evidence", [input, output] =>
+          let package ← readBoundedBytes input FnEvidenceCodec.maxPackageBytes
+          let receipt ← IO.ofExcept (← FnEvidence.verify config package)
+          writeJson output (evidenceReceiptJson receipt)
           pure 0
       | _, _ => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
