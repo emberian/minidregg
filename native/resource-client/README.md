@@ -28,7 +28,7 @@ authorize a new local action, prove an external side effect, or replace fn's
 authorship and retention decisions.
 
 `DREGG/FN/NATIVE-PREFIX/v1` is the canonical binary codec in
-`Compiler/FnEvidenceCodec.lean`. P0 caps the complete package at 20,480 bytes,
+`Compiler/FnEvidenceCodec.lean`. P0 caps the complete package at 17,408 bytes,
 the signed call at 6,144 bytes, the retained prefix at 12,288 bytes, and the
 accepted count at exactly one. The CLI caps file reads before decoding; the
 codec repeats these checks before nested re-admission. Larger histories refuse

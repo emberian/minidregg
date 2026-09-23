@@ -44,7 +44,7 @@ def packageStream : StreamCodec Package :=
 def packageCodec : LawfulCodec Package :=
   framed "DREGG/FN/NATIVE-PREFIX/v1".toUTF8.toList packageStream
 
-def maxPackageBytes : Nat := 20480
+def maxPackageBytes : Nat := 17408
 def maxCallBytes : Nat := 6144
 def maxPrefixBytes : Nat := 12288
 
