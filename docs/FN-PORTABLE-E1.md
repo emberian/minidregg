@@ -14,6 +14,8 @@ carrier at 32,768 bytes, checks the verifier exit and exact six-token line
 with no trailing junk, and compares all identity fields to the independent
 pin and claim. A different PEM file cannot silently select a different ML
 key: the full verified raw key is compared after the native check.
+The pin and claim JSON objects require exactly their documented fields;
+unknown Store admission or cursor assertions are refused rather than ignored.
 
 `Kernel/FnPortableSource.lean` then decodes Mini's **application-specific**
 one-part E1 source. It requires the fixed MIME headers and order, CRLF,

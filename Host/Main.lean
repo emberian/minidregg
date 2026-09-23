@@ -219,6 +219,15 @@ structure FnPortableClaim where
   groups : String
   deriving FromJson
 
+def requireExactFields (name : String) (expected : List String)
+    (json : Lean.Json) : Except String Unit := do
+  let object ← json.getObj? |>.mapError (fun e => s!"{name}: {e}")
+  let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+  for key in expected do
+    unless actual.contains key do throw s!"{name}: missing field {key}"
+  for key in actual do
+    unless expected.contains key do throw s!"{name}: unknown field {key}"
+
 structure FnPortableVerified where
   principal : List UInt8
   sourceIdentity : List UInt8
@@ -412,8 +421,14 @@ def run (arguments : List String) : IO UInt32 := do
           writeJson output (evidenceReceiptJson receipt)
           pure 0
       | "portable-verify-fn", [pinPath, claimPath, carrierPath, sourcePath, packagePath, resultPath] =>
-          let pin : FnPortablePin ← IO.ofExcept (fromJson? (← readJson pinPath))
-          let claim : FnPortableClaim ← IO.ofExcept (fromJson? (← readJson claimPath))
+          let pinJson ← readJson pinPath
+          let claimJson ← readJson claimPath
+          IO.ofExcept (requireExactFields "fn pin"
+            ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+          IO.ofExcept (requireExactFields "fn claim"
+            ["sourceIdentity", "messageId", "groups"] claimJson)
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+          let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
           let (_, verified, extracted) ← verifyFnPortable pin claim carrierPath
           let receipt ← IO.ofExcept (← FnEvidence.verify config extracted.package)
           writeBytes sourcePath verified.source
