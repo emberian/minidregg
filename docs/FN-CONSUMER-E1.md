@@ -121,9 +121,15 @@ later submitting it exercises the process-reopen retry path without claiming
 an injected process-death or power-loss cut.
 
 The E2 handoff adds a fourth atom to the same Mini operation or conflict
-transaction. `DREGG/FN/STORE-POLL-INBOX/v1` retains the exact fncu cursor and
+transaction. `DREGG/FN/STORE-POLL-INBOX/v3` retains the exact fncu cursor and
 fn-e report, ACL2-projected Store sequence/transaction ID, authored source ID,
-Message-ID, and historical verdict bytes. Its high atom namespace preserves
+Message-ID, historical verdict bytes, and a typed host observation of the
+actual control poll. The observation is false for offline file imports and
+is not a portable cryptographic proof of fn Store history. An observed poll
+also binds the chosen control endpoint and fn executable or transport path
+under Mini's cSHAKE domain; the exact paths and transport hash belong in the
+run evidence. Its high atom
+namespace preserves
 the earlier binding, reply, and carrier atom IDs. `originalBindingWithInbox`
 and `originalConflictWithInbox` recover all atoms from the original accepted
 signed event on reopen. `decide` compares the retained Store poll object on
@@ -146,8 +152,20 @@ alone does not prove that an fn Store accepted it; these commands report
 calls the local same-UID fn `consumer poll` route with an operator-selected
 absolute control path and the pinned consumer ID. It requires new output
 paths, holds their exact bytes through the decision, and labels the returned
-Store attribution `authenticated-local-poll` only on a successful unchanged
-local call. Neither route declares fn cursor progress or acknowledges it.
+Store attribution `observed-control-poll` only on a successful unchanged
+control call. The signed Mini operation retains that distinction. Neither
+decision route declares fn cursor progress or acknowledges it.
+
+After a normal signed Mini operation is accepted and reopened,
+`consumer-ack-poll` compares the original retained fncu/fn-e to the exact
+files, re-runs ACL2 projection against the independently pinned consumer
+scope, and requires the durable observed-poll bit. It then calls fn's
+separate `consumer ack CONTROL_ABS CURSOR_FILE` route. Exit 0 with fn's exact
+`consumer accepted` status means fn durably accepted or already held that
+position; exit 2 is refusal, exit 3 is uncertain and requires a later
+`consumer position`, and exit 4 is a transport fault. An offline file import
+cannot invoke this ACK route even after a Mini accepted operation. ACK is
+not inferred from the Mini receipt or a transport attempt.
 
 `consumer-export-poll` reads the original re-admitted Mini event and writes
 its exact retained fncu/fn-e bytes. The export does not independently prove
@@ -157,6 +175,8 @@ fn native projection and hybrid verification, Mini origin verification,
 current Mini grant, signed NativeHost admission, and physical CAS are distinct
 trust steps. Mini's current proof file covers the called decision and atom
 namespace disjointness; it does not prove fn's historical Store admission,
-cryptographic soundness, process death durability, or fn ack. A native
-cross-process positive and hostile fixture remains pending the source-matched
-shared fn image and its exact E1 poll output.
+cryptographic soundness, process death durability, or an independently
+auditable fn Store admission certificate. The live control caller and its
+same-UID or remote-transport assumptions must be recorded with each native
+test; the retained observation bit alone cannot establish them to a third
+party.

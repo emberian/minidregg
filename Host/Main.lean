@@ -533,13 +533,18 @@ def pollConsumerReport (policy : FnConsumerOperation.Policy)
     (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
     (verified : FnPortableVerified) (carrier package : List UInt8)
     (origin : FnEvidenceCodec.Package) (cursor event : List UInt8)
-    (projection : FnPollProjection) : FnConsumerOperation.Report :=
+    (projection : FnPollProjection) (controlBinding : Option (String × String)) :
+    FnConsumerOperation.Report :=
   let base := portableConsumerReport policy authorityRoot targetRoot
     verified carrier package origin
   let storeInbox : FnConsumerOperation.StorePollInbox :=
-    ⟨cursor, event, projection.sourceIdentity, projection.sequence,
-      projection.transactionId, projection.messageId,
-      projection.verdictPrincipal, projection.verdictEvent⟩
+    ⟨cursor, event, controlBinding.isSome, projection.sourceIdentity,
+      projection.sequence, projection.transactionId, projection.messageId,
+      projection.verdictPrincipal, projection.verdictEvent,
+      match controlBinding with
+      | none => []
+      | some (fnBinary, controlPath) =>
+          FnConsumerOperation.pollControlBinding fnBinary controlPath⟩
   { base with
     provenance := ⟨projection.history, projection.incarnation,
       projection.sourceIdentity,
@@ -590,13 +595,13 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
   | _ =>
       match FnConsumerOperation.originalConflictWithInbox config.deployment.domain
           config.profile.semantics record with
-      | some (conflict, some inbox, _) =>
+      | some (conflict, some inbox, store) =>
           let report : FnConsumerOperation.Report :=
             { application := conflict.application, operation := conflict.operation,
               provenance := conflict.provenance, package := conflict.package,
               subject := ⟨0⟩, target := 0, capability := ⟨0⟩,
               expectedAuthorityRoot := ⟨0⟩, expectedTargetRoot := ⟨0⟩,
-              portableInbox := some inbox, storePoll := none }
+              portableInbox := some inbox, storePoll := store }
           return .ok (inbox, "conflict",
             (FnConsumerOperation.conflictInboxAtom config.deployment.domain
               config.profile.semantics report).digest.value)
@@ -644,8 +649,80 @@ def readJson (path : String) : IO Lean.Json :=
 def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
+/-- This is the only Mini decision body for both file-only and observed
+polls. Only the caller that actually invokes fn's control route can set the
+local observation bit retained in the signed inbox atom. -/
+def runPollConsumerDecision (config : NativeHost.Config)
+    (controlBinding : Option (String × String))
+    (originPath pinPath scopePath claimPath policyPath cursorPath reportPath
+     carrierPath intentPath resultPath : String) : IO UInt32 := do
+  let origin := (← loadSettings originPath).config
+  let pinJson ← readJson pinPath
+  let scopeJson ← readJson scopePath
+  let claimJson ← readJson claimPath
+  let policyJson ← readJson policyPath
+  IO.ofExcept (requireExactFields "fn pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  IO.ofExcept (requireExactFields "fn poll scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+  IO.ofExcept (requireExactFields "fn claim"
+    ["sourceIdentity", "messageId", "groups"] claimJson)
+  IO.ofExcept (requireExactFields "consumer policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+  let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let (cursor, event, projection, carrier, verified, extracted) ←
+    verifyFnPollFiles pin scope claim cursorPath reportPath carrierPath
+  unless event.length ≤ FnConsumerOperation.maxStoreEventBytes do
+    throw (IO.userError "fn report exceeds Mini's first bounded Store inbox profile")
+  let receipt ← IO.ofExcept (← FnEvidence.verify origin extracted.package)
+  let originPackage ← IO.ofExcept (FnEvidenceCodec.decodeChecked extracted.package)
+  unless originPackage.originalReceipt == receipt do
+    throw (IO.userError "poll source Mini receipt differs from re-admitted package")
+  let policy := policySource.policy
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  let probeTarget : DeclaredResourceController.Target :=
+    ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
+      .content ⟨[]⟩, none⟩
+  let targetRoot ← IO.ofExcept <| (do
+    let .present cell := opened.directory.directory.slots policy.target
+      | throw "poll consumer target is absent"
+    let some pre := DeclaredResourceController.selectTarget
+      config.deployment probeTarget cell
+      | throw "poll consumer target is not a valid content resource"
+    pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
+  let report := pollConsumerReport policy opened.authority.snapshot.cell.root
+    targetRoot verified carrier extracted.package originPackage
+    cursor event projection controlBinding
+  let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
+    policy report receipt opened)
+  writeJson resultPath <| Lean.Json.mkObj
+    [("type", toJson "fn-poll-consumer-decision-v1"),
+     ("portableAuthorship", toJson "verified"),
+     ("storeAdmission", toJson (if controlBinding.isSome then
+      "observed-control-poll" else "unestablished-from-files")),
+     ("sourceIdentity", toJson
+       (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
+     ("storeSequence", toJson (toString projection.sequence)),
+     ("storeTransactionId", toJson (toString projection.transactionId)),
+     ("application", toJson policySource.application),
+     ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
+     ("miniOrigin", evidenceReceiptJson receipt),
+     ("decision", consumerDecisionJson decision)]
+  match decision.intent report with
+  | some intent =>
+      writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+      pure 0
+  | none =>
+      match decision with
+      | .refused _ => pure 1
+      | _ => pure 0
+
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -866,69 +943,8 @@ def run (arguments : List String) : IO UInt32 := do
       | "poll-consumer-decide",
           [originPath, pinPath, scopePath, claimPath, policyPath,
            cursorPath, reportPath, carrierPath, intentPath, resultPath] =>
-          let origin := (← loadSettings originPath).config
-          let pinJson ← readJson pinPath
-          let scopeJson ← readJson scopePath
-          let claimJson ← readJson claimPath
-          let policyJson ← readJson policyPath
-          IO.ofExcept (requireExactFields "fn pin"
-            ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
-          IO.ofExcept (requireExactFields "fn poll scope"
-            ["history", "incarnation", "consumer", "principal", "query",
-             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-          IO.ofExcept (requireExactFields "fn claim"
-            ["sourceIdentity", "messageId", "groups"] claimJson)
-          IO.ofExcept (requireExactFields "consumer policy"
-            ["application", "subject", "target", "capability"] policyJson)
-          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
-          let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
-          let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
-          let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
-          let (cursor, event, projection, carrier, verified, extracted) ←
-            verifyFnPollFiles pin scope claim cursorPath reportPath carrierPath
-          unless event.length ≤ FnConsumerOperation.maxStoreEventBytes do
-            throw (IO.userError "fn report exceeds Mini's first bounded Store inbox profile")
-          let receipt ← IO.ofExcept (← FnEvidence.verify origin extracted.package)
-          let originPackage ← IO.ofExcept (FnEvidenceCodec.decodeChecked extracted.package)
-          unless originPackage.originalReceipt == receipt do
-            throw (IO.userError "poll source Mini receipt differs from re-admitted package")
-          let policy := policySource.policy
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let probeTarget : DeclaredResourceController.Target :=
-            ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
-              .content ⟨[]⟩, none⟩
-          let targetRoot ← IO.ofExcept <| (do
-            let .present cell := opened.directory.directory.slots policy.target
-              | throw "poll consumer target is absent"
-            let some pre := DeclaredResourceController.selectTarget
-              config.deployment probeTarget cell
-              | throw "poll consumer target is not a valid content resource"
-            pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
-          let report := pollConsumerReport policy opened.authority.snapshot.cell.root
-            targetRoot verified carrier extracted.package originPackage
-            cursor event projection
-          let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
-            policy report receipt opened)
-          writeJson resultPath <| Lean.Json.mkObj
-            [("type", toJson "fn-poll-consumer-decision-v1"),
-             ("portableAuthorship", toJson "verified"),
-             ("storeAdmission", toJson "unestablished-from-files"),
-             ("sourceIdentity", toJson
-               (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
-             ("storeSequence", toJson (toString projection.sequence)),
-             ("storeTransactionId", toJson (toString projection.transactionId)),
-             ("application", toJson policySource.application),
-             ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
-             ("miniOrigin", evidenceReceiptJson receipt),
-             ("decision", consumerDecisionJson decision)]
-          match decision.intent report with
-          | some intent =>
-              writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
-              pure 0
-          | none =>
-              match decision with
-              | .refused _ => pure 1
-              | _ => pure 0
+          runPollConsumerDecision config none originPath pinPath scopePath
+            claimPath policyPath cursorPath reportPath carrierPath intentPath resultPath
       | "consumer-poll-decide",
           [originPath, pinPath, scopePath, claimPath, policyPath,
            controlPath, cursorPath, reportPath, carrierPath,
@@ -944,23 +960,15 @@ def run (arguments : List String) : IO UInt32 := do
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
           let (polledCursor, polledEvent, polledCarrier) ←
             invokeFnConsumerPoll pin.fnBinary scope controlPath
-            cursorPath reportPath carrierPath
-          let self ← IO.appPath
-          let child ← IO.Process.spawn
-            { cmd := self.toString,
-              args := #[configPath, "poll-consumer-decide", originPath,
-                pinPath, scopePath, claimPath, policyPath,
-                cursorPath, reportPath, carrierPath, intentPath, resultPath],
-              stdin := .null, stdout := .null, stderr := .null }
-          let exitCode ← child.wait
+              cursorPath reportPath carrierPath
+          let exitCode ← runPollConsumerDecision config
+            (some (pin.fnBinary, controlPath)) originPath pinPath
+            scopePath claimPath policyPath cursorPath reportPath carrierPath
+            intentPath resultPath
           unless polledCursor == (← readBoundedBytes cursorPath 346) &&
               polledEvent == (← readBoundedBytes reportPath 196608) &&
               polledCarrier == (← readBoundedBytes carrierPath 32768) do
             throw (IO.userError "fn poll output changed before Mini decision completed")
-          if exitCode == 0 then
-            let result ← readJson resultPath
-            writeJson resultPath <| result.setObjVal! "storeAdmission"
-              (toJson "authenticated-local-poll")
           pure exitCode
       | "consumer-export-inbox", [transaction, inboxPath, carrierPath, resultPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
@@ -991,8 +999,72 @@ def run (arguments : List String) : IO UInt32 := do
                (Minidregg.Host.Json.encodeHex poll.sourceIdentity)),
              ("fnStoreSequence", toJson (toString poll.sequence)),
              ("fnStoreTransactionId", toJson (toString poll.transactionId)),
+             ("pollCallObserved", toJson poll.pollCallObserved),
+             ("controlBinding", toJson
+               (Minidregg.Host.Json.encodeHex poll.controlBinding)),
              ("fnStoreAttribution", toJson "unestablished-from-files")]
           pure 0
+      | "consumer-ack-poll",
+          [pinPath, scopePath, controlPath, transaction,
+           cursorPath, eventPath, resultPath] =>
+          let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+          unless controlPath.startsWith "/" && cursorPath.startsWith "/" &&
+              eventPath.startsWith "/" do
+            throw (IO.userError "fn control and poll paths must be absolute")
+          let pinJson ← readJson pinPath
+          let scopeJson ← readJson scopePath
+          IO.ofExcept (requireExactFields "fn pin"
+            ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+          IO.ofExcept (requireExactFields "fn poll scope"
+            ["history", "incarnation", "consumer", "principal", "query",
+             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+          let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+          let (stored, kind, _) ← IO.ofExcept (← exportConsumerPoll config transactionId)
+          unless kind == "operation" && stored.pollCallObserved do
+            throw (IO.userError "Mini has no durable operation from observed fn poll")
+          unless stored.controlBinding ==
+              FnConsumerOperation.pollControlBinding pin.fnBinary controlPath do
+            throw (IO.userError "fn ack control endpoint differs from observed poll")
+          let (cursor, event, projected) ←
+            projectFnPoll pin.fnBinary scope cursorPath eventPath
+          unless cursor == stored.cursor && event == stored.event &&
+              projected.sourceIdentity == stored.sourceIdentity &&
+              projected.sequence == stored.sequence &&
+              projected.transactionId == stored.transactionId &&
+              projected.messageId == stored.messageId &&
+              projected.verdictPrincipal == stored.verdictPrincipal &&
+              projected.verdictEvent == stored.verdictEvent do
+            throw (IO.userError "fn ack cursor/report differ from durable Mini inbox")
+          let child ← IO.Process.spawn
+            { cmd := pin.fnBinary,
+              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              stdin := .null, stdout := .piped, stderr := .null }
+          let output ← try readBoundedLoop child.stdout 128
+            catch error =>
+              child.kill
+              discard <| child.wait
+              throw error
+          let exitCode ← child.wait
+          unless cursor == (← readBoundedBytes cursorPath 346) &&
+              event == (← readBoundedBytes eventPath 196608) do
+            throw (IO.userError "fn ack inputs changed during local control call")
+          let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+              "durable-accepted"
+            else if exitCode == 2 then "refused"
+            else if exitCode == 3 then "uncertain"
+            else "transport-fault"
+          writeJson resultPath <| Lean.Json.mkObj
+            [("type", toJson "fn-consumer-ack-after-mini-v1"),
+             ("miniTransactionId", toJson transaction),
+             ("miniOperation", toJson "reopened-accepted"),
+             ("fnStoreSequence", toJson (toString stored.sequence)),
+             ("fnStoreTransactionId", toJson (toString stored.transactionId)),
+             ("fnAck", toJson status)]
+          if status == "durable-accepted" then pure 0
+          else if status == "refused" then pure 2
+          else if status == "uncertain" then pure 3
+          else pure 4
       | "consumer-export-reply", [transaction, replyPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)

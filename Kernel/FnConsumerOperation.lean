@@ -51,12 +51,19 @@ only the authenticated local poll transport can establish Store provenance. -/
 structure StorePollInbox where
   cursor : List UInt8
   event : List UInt8
+  /-- Host observation of the actual trusted local-control poll route. This
+  is not a portable cryptographic attestation of fn Store history. -/
+  pollCallObserved : Bool
   sourceIdentity : List UInt8
   sequence : Nat
   transactionId : Nat
   messageId : List UInt8
   verdictPrincipal : List UInt8
   verdictEvent : List UInt8
+  /-- Mini-owned binding to the operator-selected fn executable/transport and
+  exact control endpoint observed by this process. Exact paths are retained
+  separately in the run evidence; their hash is not remote authentication. -/
+  controlBinding : List UInt8
   deriving DecidableEq, Repr
 
 structure Report where
@@ -128,19 +135,23 @@ def portableInboxCodec : LawfulCodec PortableInbox :=
 def storePollStream : StreamCodec StorePollInbox :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-      (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
-          (StreamCodec.product bytesStream bytesStream)))))))
-    (fun value => (value.cursor, value.event, value.sourceIdentity,
-      value.sequence, value.transactionId, value.messageId,
-      value.verdictPrincipal, value.verdictEvent))
+      (StreamCodec.product StreamCodec.bool (StreamCodec.product bytesStream
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product bytesStream
+            (StreamCodec.product bytesStream
+              (StreamCodec.product bytesStream bytesStream)))))))))
+    (fun value => (value.cursor, value.event, value.pollCallObserved,
+      value.sourceIdentity, value.sequence, value.transactionId,
+      value.messageId, value.verdictPrincipal, value.verdictEvent,
+      value.controlBinding))
     (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2.1,
       value.2.2.2.2.1, value.2.2.2.2.2.1, value.2.2.2.2.2.2.1,
-      value.2.2.2.2.2.2.2⟩)
+      value.2.2.2.2.2.2.2.1, value.2.2.2.2.2.2.2.2.1,
+      value.2.2.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def storePollCodec : LawfulCodec StorePollInbox :=
-  NativeHostCodec.framed "DREGG/FN/STORE-POLL-INBOX/v1".toUTF8.toList storePollStream
+  NativeHostCodec.framed "DREGG/FN/STORE-POLL-INBOX/v3".toUTF8.toList storePollStream
 
 def replyStream : StreamCodec Reply :=
   StreamCodec.xmap
@@ -195,6 +206,15 @@ def storePollVerdictRef (inbox : StorePollInbox) : List UInt8 :=
         (inbox.sequence, inbox.transactionId, inbox.verdictEvent))
   digestStream.encode digest.digest
 
+/-- Bind the exact chosen control endpoint to the executable or transport
+selection before writing Mini's accepted poll atom. -/
+def pollControlBinding (fnBinary controlPath : String) : List UInt8 :=
+  let digest := Sp800185Cshake256.hash
+    "DREGG.FN.POLL-CONTROL/v1".toUTF8.toList
+    ((StreamCodec.product bytesStream bytesStream).encode
+      (fnBinary.toUTF8.toList, controlPath.toUTF8.toList))
+  digestStream.encode digest.digest
+
 def PortableInbox.valid (inbox : PortableInbox)
     (expectedSource : List UInt8) : Bool :=
   !inbox.carrier.isEmpty && inbox.carrier.length ≤ 32768 &&
@@ -212,6 +232,9 @@ def StorePollInbox.valid (inbox : StorePollInbox)
   !inbox.messageId.isEmpty && inbox.messageId.length ≤ 256 &&
   inbox.verdictPrincipal.length == 32 &&
   !inbox.verdictEvent.isEmpty && inbox.verdictEvent.length ≤ 65538 &&
+  (if inbox.pollCallObserved then
+    !inbox.controlBinding.isEmpty && inbox.controlBinding.length ≤ 64
+   else inbox.controlBinding.isEmpty) &&
   storePollVerdictRef inbox == expectedVerdictRef &&
   inbox.sequence ≤ 4294967295 && inbox.transactionId ≤ 4294967295 &&
   (storePollCodec.encode inbox).length ≤ maxStoreInboxBytes
