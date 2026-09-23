@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-acceptance-runner.sh --host-response FILE --output DIR [--driver-source FILE]
+usage: scripts/build-native-acceptance-runner.sh --host-response FILE --output DIR [--driver-source FILE] [--usage-pattern TEXT]
 
 The response file must come from scripts/build-native-host.sh in this snapshot.
 The driver defaults to scripts/probe-native-host-cli.lean in this snapshot.
@@ -17,6 +17,7 @@ EOF
 host_response=""
 output_dir=""
 driver_source=""
+usage_pattern='usage: lean --run scripts/probe-native-host-cli.lean'
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host-response)
@@ -32,6 +33,11 @@ while [[ $# -gt 0 ]]; do
     --driver-source)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
       driver_source=$2
+      shift 2
+      ;;
+    --usage-pattern)
+      [[ $# -ge 2 ]] || { usage >&2; exit 64; }
+      usage_pattern=$2
       shift 2
       ;;
     -h|--help)
@@ -176,7 +182,7 @@ set +e
 "$binary" > "$output_dir/usage.txt" 2>&1
 usage_exit=$?
 set -e
-grep -q 'usage: lean --run scripts/probe-native-host-cli.lean' "$output_dir/usage.txt" || {
+grep -qF "$usage_pattern" "$output_dir/usage.txt" || {
   printf 'linked driver did not print its usage contract\n' >&2
   exit 70
 }
@@ -194,6 +200,7 @@ fi
   cat "$output_dir/driver-abi.txt"
   printf 'response_objects=%s\n' "$(wc -l < "$response" | tr -d ' ')"
   printf 'usage_exit=%s\n' "$usage_exit"
+  printf 'usage_pattern=%s\n' "$usage_pattern"
   printf 'binary=%s\n' "$binary"
   printf 'binary_sha256=%s\n' "$(shasum -a 256 "$binary" | awk '{print $1}')"
 } | tee "$output_dir/manifest.txt"
