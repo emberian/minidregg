@@ -13,7 +13,7 @@ usage:
   mini keygen --secret KEY --public PUBLIC
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
-  mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --dir ATTEMPT
+  mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
@@ -472,6 +472,7 @@ fn submit(
     intent_kind: &OsStr,
     key: &Path,
     directory: &Path,
+    prepare_only: bool,
 ) -> Result<()> {
     create_dir(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
@@ -516,6 +517,9 @@ fn submit(
         &retained_config,
         &[Path::new("assemble"), &plan_bin, &signatures_bin, &call],
     )?;
+    if prepare_only {
+        return Ok(());
+    }
     let outcome_bin = directory.join("outcome.bin");
     let outcome_json = directory.join("outcome.json");
     host_files(
@@ -661,10 +665,16 @@ fn run(mut args: Args) -> Result<()> {
             let intent_kind = args
                 .optional("intent-kind")
                 .unwrap_or_else(|| OsString::from("intent"));
+            let prepare_only = match args.optional("prepare-only").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--prepare-only must be true or false".to_owned()),
+            };
             let key = path(args.required("key")?);
             let directory = path(args.required("dir")?);
             args.finish()?;
-            submit(&host, &config, &intent, &intent_kind, &key, &directory)
+            submit(&host, &config, &intent, &intent_kind, &key, &directory, prepare_only)
         }
         "query" => {
             let host = path(args.required("host")?);

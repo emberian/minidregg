@@ -7,6 +7,20 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
+theorem bindingCommand_uses_operation_nonce (domain semantics : Digest)
+    (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
+    (command : DeclaredResourceController.Command)
+    (built : bindingCommand domain semantics report receipt = .ok command) :
+    command.nonce = operationNonce domain semantics report.application report.operation := by
+  by_cases size : (bindingCodec.encode
+      ⟨report.application, report.operation, report.provenance, report.package,
+        ⟨report.application, report.operation, report.provenance.sourceIdentity, receipt⟩⟩).length ≤
+      maxBindingBytes
+  · simp [bindingCommand, size] at built
+    cases built
+    rfl
+  · simp [bindingCommand, size, Functor.map, Except.map] at built
+
 theorem occupied_never_proposes_fresh (domain semantics : Digest)
     (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
     (accepted : List DurableReceiver.IntentRecord)
