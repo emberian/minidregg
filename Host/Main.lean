@@ -13,6 +13,7 @@ import Kernel.NativeHost
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
+import Kernel.FnPortableSource
 import Host.Json
 import Lean.Data.Json
 
@@ -204,6 +205,83 @@ structure ConsumerPolicySource where
   capability : Nat
   deriving FromJson
 
+structure FnPortablePin where
+  fnBinary : String
+  mlPublicKey : String
+  principal : String
+  edPublicKey : String
+  mlPublicKeyHex : String
+  deriving FromJson
+
+structure FnPortableClaim where
+  sourceIdentity : String
+  messageId : String
+  groups : String
+  deriving FromJson
+
+structure FnPortableVerified where
+  principal : List UInt8
+  sourceIdentity : List UInt8
+  edPublicKey : List UInt8
+  mlPublicKey : List UInt8
+  source : List UInt8
+
+def decodeCanonicalHex (label value : String) : Except String (List UInt8) := do
+  let bytes ← Minidregg.Host.Json.decodeHex label (.str value)
+  unless Minidregg.Host.Json.encodeHex bytes == value do
+    throw s!"{label} is not canonical lowercase hexadecimal"
+  pure bytes
+
+def parseFnPortableLine (output : String) : Except String FnPortableVerified := do
+  unless output.length ≤ 70000 do throw "fn portable verifier output exceeds bound"
+  let line ← match output.splitOn "\n" with
+    | [line, ""] => pure line
+    | _ => throw "fn portable verifier output has unexpected framing"
+  let (principalHex, idHex, edHex, mlHex, sourceHex) ← match line.splitOn " " with
+    | [tag, principal, identifier, ed, ml, source] =>
+        if tag == "fn-portable-v1" then pure (principal, identifier, ed, ml, source)
+        else throw "fn portable verifier output has unexpected version"
+    | _ => throw "fn portable verifier output has unexpected fields"
+  let principal ← decodeCanonicalHex "principal" principalHex
+  let sourceIdentity ← decodeCanonicalHex "source identity" idHex
+  let edPublicKey ← decodeCanonicalHex "Ed25519 key" edHex
+  let mlPublicKey ← decodeCanonicalHex "ML-DSA-65 key" mlHex
+  let source ← decodeCanonicalHex "exact source" sourceHex
+  unless principal.length == 32 && sourceIdentity.length == 48 &&
+      edPublicKey.length == 32 && mlPublicKey.length == 1952 &&
+      source.length ≤ 32768 do
+    throw "fn portable verifier output has invalid field width"
+  pure ⟨principal, sourceIdentity, edPublicKey, mlPublicKey, source⟩
+
+def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
+    (carrierPath : String) : IO (List UInt8 × FnPortableVerified × FnPortableSource.Extracted) := do
+  let carrier ← readBoundedBytes carrierPath 32768
+  unless !carrier.isEmpty do throw (IO.userError "empty fn carrier")
+  let expectedPrincipal ← IO.ofExcept (decodeCanonicalHex "pinned principal" pin.principal)
+  let expectedEd ← IO.ofExcept (decodeCanonicalHex "pinned Ed25519 key" pin.edPublicKey)
+  let expectedMl ← IO.ofExcept (decodeCanonicalHex "pinned ML-DSA-65 key" pin.mlPublicKeyHex)
+  let expectedId ← IO.ofExcept (decodeCanonicalHex "claimed source identity" claim.sourceIdentity)
+  unless expectedPrincipal.length == 32 && expectedEd.length == 32 &&
+      expectedMl.length == 1952 && expectedId.length == 48 do
+    throw (IO.userError "fn pin or claim has invalid field width")
+  let result ← IO.Process.output
+    { cmd := pin.fnBinary, args := #["--fn", "hybrid-verify-source", carrierPath,
+      pin.mlPublicKey] }
+  unless result.exitCode == 0 do
+    throw (IO.userError "fn native portable carrier verifier refused")
+  unless carrier == (← readBoundedBytes carrierPath 32768) do
+    throw (IO.userError "fn carrier changed during native verification")
+  let verified ← IO.ofExcept (parseFnPortableLine result.stdout)
+  unless verified.principal == expectedPrincipal &&
+      verified.edPublicKey == expectedEd &&
+      verified.mlPublicKey == expectedMl &&
+      verified.sourceIdentity == expectedId do
+    throw (IO.userError "fn portable identity differs from independent pin or claim")
+  let extracted ← IO.ofExcept (FnPortableSource.extract verified.source)
+  unless extracted.messageId == claim.messageId && extracted.groups == claim.groups do
+    throw (IO.userError "fn source metadata differs from claimed exact report")
+  pure (carrier, verified, extracted)
+
 def ConsumerPolicySource.policy (source : ConsumerPolicySource) :
     FnConsumerOperation.Policy :=
   ⟨source.application.toUTF8.toList, ⟨source.subject⟩, source.target,
@@ -241,7 +319,7 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -332,6 +410,25 @@ def run (arguments : List String) : IO UInt32 := do
           let package ← readBoundedBytes input FnEvidenceCodec.maxPackageBytes
           let receipt ← IO.ofExcept (← FnEvidence.verify config package)
           writeJson output (evidenceReceiptJson receipt)
+          pure 0
+      | "portable-verify-fn", [pinPath, claimPath, carrierPath, sourcePath, packagePath, resultPath] =>
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? (← readJson pinPath))
+          let claim : FnPortableClaim ← IO.ofExcept (fromJson? (← readJson claimPath))
+          let (_, verified, extracted) ← verifyFnPortable pin claim carrierPath
+          let receipt ← IO.ofExcept (← FnEvidence.verify config extracted.package)
+          writeBytes sourcePath verified.source
+          writeBytes packagePath extracted.package
+          writeJson resultPath <| Lean.Json.mkObj
+            [("type", toJson "verified-fn-portable-mini-e1-v1"),
+             ("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex verified.sourceIdentity)),
+             ("principal", toJson (Minidregg.Host.Json.encodeHex verified.principal)),
+             ("edPublicKey", toJson (Minidregg.Host.Json.encodeHex verified.edPublicKey)),
+             ("mlPublicKey", toJson (Minidregg.Host.Json.encodeHex verified.mlPublicKey)),
+             ("messageId", toJson extracted.messageId),
+             ("groups", toJson extracted.groups),
+             ("portableAuthorship", toJson "verified"),
+             ("storeAdmission", toJson "unestablished"),
+             ("miniOrigin", evidenceReceiptJson receipt)]
           pure 0
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config

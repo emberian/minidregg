@@ -63,6 +63,7 @@ import Kernel.NativeHost
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
+import Kernel.FnPortableSource
 import Kernel.ContentResource
 import Kernel.ContentResourceAudit
 import Kernel.AgentGrain
