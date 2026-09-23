@@ -12,6 +12,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 import Kernel.NativeHost
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
+import Kernel.FnConsumerOperation
 import Host.Json
 import Lean.Data.Json
 
@@ -182,6 +183,41 @@ def evidenceReceiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
      ("acceptedCount", n receipt.acceptedCount),
      ("imageBoundary", n receipt.imageBoundary.value)]
 
+structure ConsumerReportSource where
+  application : String
+  operation : String
+  history : String
+  incarnation : String
+  sourceIdentity : String
+  fnVerdictRef : String
+  subject : Nat
+  target : Nat
+  capability : Nat
+  expectedAuthorityRoot : Nat
+  expectedTargetRoot : Nat
+  deriving FromJson
+
+def ConsumerReportSource.report (source : ConsumerReportSource) (package : List UInt8) :
+    FnConsumerOperation.Report :=
+  ⟨source.application.toUTF8.toList, source.operation.toUTF8.toList,
+    ⟨source.history.toUTF8.toList, source.incarnation.toUTF8.toList,
+      source.sourceIdentity.toUTF8.toList, source.fnVerdictRef.toUTF8.toList⟩,
+    package, ⟨source.subject⟩, source.target, ⟨source.capability⟩,
+    ⟨source.expectedAuthorityRoot⟩, ⟨source.expectedTargetRoot⟩⟩
+
+def consumerDecisionJson (decision : FnConsumerOperation.Decision) : Lean.Json :=
+  match decision with
+  | .fresh _ reply => .mkObj
+      [("type", "proposed-fresh"),
+       ("reply", toJson (Minidregg.Host.Json.encodeHex
+         (FnConsumerOperation.replyCodec.encode reply)))]
+  | .repeated reply => .mkObj
+      [("type", "historical-repeat"),
+       ("reply", toJson (Minidregg.Host.Json.encodeHex
+         (FnConsumerOperation.replyCodec.encode reply)))]
+  | .conflict _ => .mkObj [("type", "proposed-conflict-evidence")]
+  | .refused detail => .mkObj [("type", "refused"), ("detail", toJson detail)]
+
 def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
   IO.FS.writeBinFile path bytes.toByteArray
 
@@ -192,7 +228,7 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -284,6 +320,21 @@ def run (arguments : List String) : IO UInt32 := do
           let receipt ← IO.ofExcept (← FnEvidence.verify config package)
           writeJson output (evidenceReceiptJson receipt)
           pure 0
+      | "consumer-decide-test", [originPath, reportPath, packagePath, intentPath, resultPath] =>
+          let origin := (← loadSettings originPath).config
+          let source : ConsumerReportSource ← IO.ofExcept (fromJson? (← readJson reportPath))
+          let report := source.report
+            (← readBoundedBytes packagePath FnEvidenceCodec.maxPackageBytes)
+          let decision ← IO.ofExcept (← FnConsumerOperation.evaluate origin config report)
+          writeJson resultPath (consumerDecisionJson decision)
+          match decision.intent report with
+          | some intent =>
+              writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+              pure 0
+          | none =>
+              match decision with
+              | .refused _ => pure 1
+              | _ => pure 0
       | _, _ => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
 

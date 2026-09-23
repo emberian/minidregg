@@ -62,6 +62,7 @@ import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bund
 import Kernel.NativeHost
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
+import Kernel.FnConsumerOperation
 import Kernel.ContentResource
 import Kernel.ContentResourceAudit
 import Kernel.AgentGrain

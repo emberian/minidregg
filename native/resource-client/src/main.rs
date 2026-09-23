@@ -433,7 +433,11 @@ fn authorize_observation(
     let signatures_json = directory.join("observation-signatures.json");
     let signatures_bin = directory.join("observation-signatures.bin");
     let signed = directory.join("signed-observation.bin");
-    author(host, config, intent_kind, intent, &intent_bin)?;
+    if intent_kind == OsStr::new("binary") {
+        copy_new(intent, &intent_bin)?;
+    } else {
+        author(host, config, intent_kind, intent, &intent_bin)?;
+    }
     host_files(
         host,
         config,
@@ -470,7 +474,12 @@ fn submit(
     directory: &Path,
 ) -> Result<()> {
     create_dir(directory)?;
-    copy_new(intent, &directory.join("intent.json"))?;
+    let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
+        "intent-source.bin"
+    } else {
+        "intent.json"
+    });
+    copy_new(intent, &retained_intent)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "submit")?;
@@ -478,7 +487,7 @@ fn submit(
     let observed = authorize_observation(
         host,
         &retained_config,
-        &directory.join("intent.json"),
+        &retained_intent,
         intent_kind,
         &signing,
         directory,
@@ -537,7 +546,12 @@ fn query(
         return Err("--view must be resource, policy, or capability".to_owned());
     }
     create_dir(directory)?;
-    copy_new(intent, &directory.join("intent.json"))?;
+    let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
+        "intent-source.bin"
+    } else {
+        "intent.json"
+    });
+    copy_new(intent, &retained_intent)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "query")?;
@@ -545,7 +559,7 @@ fn query(
     let observed = authorize_observation(
         host,
         &retained_config,
-        &directory.join("intent.json"),
+        &retained_intent,
         intent_kind,
         &signing,
         directory,

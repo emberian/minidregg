@@ -246,4 +246,30 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
             .repeated binding.reply
           else .conflict (conflictCommand domain semantics report)
 
+def Decision.intent (report : Report) : Decision → Option NativeObservationCodec.Intent
+  | .fresh command _ | .conflict command =>
+      some ⟨report.subject, command.nonce + 1,
+        .prepare (.invoke (DeclaredResourceController.commandCodec.encode command)),
+        [⟨.object, report.target, report.capability⟩]⟩
+  | _ => none
+
+/-- This local test adapter does not claim a fn authorship verdict. The caller
+must supply a separately selected origin pin; the verified Mini receipt is
+recomputed here before any operation command is authored. -/
+def evaluate (origin consumer : NativeHost.Config) (report : Report) :
+    IO (Except String Decision) := do
+  match checkReport report with
+  | .error detail => return .error detail
+  | .ok () => pure ()
+  let receipt ← match ← FnEvidence.verify origin report.package with
+    | .error detail => return .error s!"Mini evidence: {detail}"
+    | .ok receipt => pure receipt
+  let opened ← match ← NativeHost.openExisting consumer with
+    | .error detail => return .error s!"consumer history: {detail}"
+    | .ok opened => pure opened
+  unless opened.durable.image.accepted.length ≤ 16 do
+    return .error "bounded E1 consumer history exceeds 16 accepted events"
+  return .ok (decide consumer.deployment.domain consumer.profile.semantics
+    report receipt opened.durable.image.accepted)
+
 end Minidregg.Kernel.FnConsumerOperation
