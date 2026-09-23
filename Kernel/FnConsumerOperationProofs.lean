@@ -79,4 +79,26 @@ theorem changed_source_records_conflict_without_second_effect
     exact source (congrArg Provenance.sourceIdentity same)
   simp [decide, occupied, decoded, application, operation, provenance, unrecorded]
 
+/-- The three atom namespaces used by the atomic operation and a later
+conflict cannot overlap for any source identity. -/
+theorem operationAtom_ne_conflictAtom (domain semantics : Digest)
+    (report : Report) :
+    operationAtom domain semantics report.application report.operation ≠
+      conflictAtom domain semantics report := by
+  intro equal
+  have n := congrArg (fun id => id.digest.value) equal
+  simp only [operationAtom, conflictAtom] at n
+  unfold operationNonce conflictNonce at n
+  omega
+
+theorem replyAtom_ne_conflictAtom (domain semantics : Digest)
+    (report : Report) :
+    replyAtom domain semantics report.application report.operation ≠
+      conflictAtom domain semantics report := by
+  intro equal
+  have n := congrArg (fun id => id.digest.value) equal
+  simp only [replyAtom, conflictAtom] at n
+  unfold operationNonce conflictNonce at n
+  omega
+
 end Minidregg.Kernel.FnConsumerOperation

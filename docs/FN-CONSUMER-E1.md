@@ -55,3 +55,22 @@ fn-to-Mini connector. The fn consumer cursor and ack remain in fn; ack is
 allowed only after the Mini operation/conflict transaction is durably settled.
 The separate signed fn posting artifact for Q belongs to the later publication
 step and must be persisted before any post or retry.
+
+The public synthetic fixture and exact native results are in fn
+`tests/fixtures/dregg-e1/consumer-p1/` and
+`planning/evidence/dregg-e1-consumer-p1.md`. Two reports with different fn
+source identities and the same application/operation were decided and signed
+against one pre-state. The first call installed the binding and Q; the second
+call was refused by the ordinary receiver and produced no second effect.
+After reopen, the first source recovered byte-identical Q. The changed source
+then installed one conflict atom with a separate nonce; after another reopen,
+both historical results were recovered without proposed writes. The public
+native refusal is generic, so this run does not distinguish a stale-root
+failure from a duplicate transaction marker or other guarded admission rule.
+The two simultaneously prepared calls and resulting accepted-event count are
+the relevant atomic admission observation. A policy/report grant mismatch was
+refused before an intent existed; a separately selected but unavailable grant
+was refused in the native observation stage. These tests do not prove SQLite
+or filesystem crash durability. Preparing an exact signed call, exiting, and
+later submitting it exercises the process-reopen retry path without claiming
+an injected process-death or power-loss cut.
