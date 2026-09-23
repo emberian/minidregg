@@ -119,3 +119,44 @@ was refused in the native observation stage. These tests do not prove SQLite
 or filesystem crash durability. Preparing an exact signed call, exiting, and
 later submitting it exercises the process-reopen retry path without claiming
 an injected process-death or power-loss cut.
+
+The E2 handoff adds a fourth atom to the same Mini operation or conflict
+transaction. `DREGG/FN/STORE-POLL-INBOX/v1` retains the exact fncu cursor and
+fn-e report, ACL2-projected Store sequence/transaction ID, authored source ID,
+Message-ID, and historical verdict bytes. Its high atom namespace preserves
+the earlier binding, reply, and carrier atom IDs. `originalBindingWithInbox`
+and `originalConflictWithInbox` recover all atoms from the original accepted
+signed event on reopen. `decide` compares the retained Store poll object on
+exact repeat, returns the original immutable Q, and puts a changed poll or
+source in separate evidence without another operation effect. The Store poll
+object requires a portable carrier object in the same transaction. The raw
+fn-e has a 61,440-byte Mini application limit and the encoded Store poll atom
+has a 65,536-byte limit. fn may retain larger valid reports; Mini refuses
+them before preparing a signed intent and sends no consumer ack.
+
+`consumer-verify-poll-files` and `poll-consumer-decide` call fn's native ACL2
+`consumer-project` on exact raw fncu/fn-e files, require schema-1 report and
+scope equality to independently supplied history, incarnation, consumer,
+principal, query, versions and registration epoch, and join its exact received
+article/source ID to fn's native hybrid verifier under independently pinned
+full Ed25519 and ML-DSA-65 public keys. Mini then extracts the E1 package
+from verified exact source bytes and re-admits the pinned origin. A file pair
+alone does not prove that an fn Store accepted it; these commands report
+`storeAdmission=unestablished-from-files`. `consumer-poll-decide` additionally
+calls the local same-UID fn `consumer poll` route with an operator-selected
+absolute control path and the pinned consumer ID. It requires new output
+paths, holds their exact bytes through the decision, and labels the returned
+Store attribution `authenticated-local-poll` only on a successful unchanged
+local call. Neither route declares fn cursor progress or acknowledges it.
+
+`consumer-export-poll` reads the original re-admitted Mini event and writes
+its exact retained fncu/fn-e bytes. The export does not independently prove
+the original same-UID poll call, so its Store attribution label stays
+`unestablished-from-files`. The actual fn poll result and its local transport,
+fn native projection and hybrid verification, Mini origin verification,
+current Mini grant, signed NativeHost admission, and physical CAS are distinct
+trust steps. Mini's current proof file covers the called decision and atom
+namespace disjointness; it does not prove fn's historical Store admission,
+cryptographic soundness, process death durability, or fn ack. A native
+cross-process positive and hostile fixture remains pending the source-matched
+shared fn image and its exact E1 poll output.

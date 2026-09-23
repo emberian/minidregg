@@ -44,6 +44,21 @@ structure PortableInbox where
   mlPublicKey : List UInt8
   deriving DecidableEq, Repr
 
+/-- Exact bytes returned by one local fn consumer poll, plus the ACL2-owned
+projection that was joined to the independently verified carrier. These bytes
+are retained as evidence in Mini's atomic operation or variation transaction;
+only the authenticated local poll transport can establish Store provenance. -/
+structure StorePollInbox where
+  cursor : List UInt8
+  event : List UInt8
+  sourceIdentity : List UInt8
+  sequence : Nat
+  transactionId : Nat
+  messageId : List UInt8
+  verdictPrincipal : List UInt8
+  verdictEvent : List UInt8
+  deriving DecidableEq, Repr
+
 structure Report where
   application : List UInt8
   operation : List UInt8
@@ -55,6 +70,7 @@ structure Report where
   expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   portableInbox : Option PortableInbox := none
+  storePoll : Option StorePollInbox := none
   deriving Repr
 
 /-- Local operator selection. It is not accepted from the fetched fn article. -/
@@ -109,6 +125,23 @@ def portableInboxStream : StreamCodec PortableInbox :=
 def portableInboxCodec : LawfulCodec PortableInbox :=
   NativeHostCodec.framed "DREGG/FN/PORTABLE-INBOX/v1".toUTF8.toList portableInboxStream
 
+def storePollStream : StreamCodec StorePollInbox :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream
+          (StreamCodec.product bytesStream bytesStream)))))))
+    (fun value => (value.cursor, value.event, value.sourceIdentity,
+      value.sequence, value.transactionId, value.messageId,
+      value.verdictPrincipal, value.verdictEvent))
+    (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2.1,
+      value.2.2.2.2.1, value.2.2.2.2.2.1, value.2.2.2.2.2.2.1,
+      value.2.2.2.2.2.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def storePollCodec : LawfulCodec StorePollInbox :=
+  NativeHostCodec.framed "DREGG/FN/STORE-POLL-INBOX/v1".toUTF8.toList storePollStream
+
 def replyStream : StreamCodec Reply :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream
@@ -149,6 +182,18 @@ def maxNameBytes : Nat := 64
 def maxVerdictRefBytes : Nat := 256
 def maxBindingBytes : Nat := 18432
 def maxInboxBytes : Nat := 36864
+def maxStoreEventBytes : Nat := 61440
+def maxStoreInboxBytes : Nat := 65536
+
+/-- Mini's local reference to the exact retained fn verdict bytes and Store
+coordinates. This is a content binding, not an fn-issued Store identifier. -/
+def storePollVerdictRef (inbox : StorePollInbox) : List UInt8 :=
+  let digest := Sp800185Cshake256.hash
+    "DREGG.FN.STORE-VERDICT-REF/v1".toUTF8.toList
+    ((StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat bytesStream)).encode
+        (inbox.sequence, inbox.transactionId, inbox.verdictEvent))
+  digestStream.encode digest.digest
 
 def PortableInbox.valid (inbox : PortableInbox)
     (expectedSource : List UInt8) : Bool :=
@@ -158,6 +203,18 @@ def PortableInbox.valid (inbox : PortableInbox)
   inbox.principal.length == 32 && inbox.edPublicKey.length == 32 &&
   inbox.mlPublicKey.length == 1952 &&
   (portableInboxCodec.encode inbox).length ≤ maxInboxBytes
+
+def StorePollInbox.valid (inbox : StorePollInbox)
+    (expectedSource expectedVerdictRef : List UInt8) : Bool :=
+  !inbox.cursor.isEmpty && inbox.cursor.length ≤ 346 &&
+  !inbox.event.isEmpty && inbox.event.length ≤ maxStoreEventBytes &&
+  inbox.sourceIdentity == expectedSource && inbox.sourceIdentity.length == 48 &&
+  !inbox.messageId.isEmpty && inbox.messageId.length ≤ 256 &&
+  inbox.verdictPrincipal.length == 32 &&
+  !inbox.verdictEvent.isEmpty && inbox.verdictEvent.length ≤ 65538 &&
+  storePollVerdictRef inbox == expectedVerdictRef &&
+  inbox.sequence ≤ 4294967295 && inbox.transactionId ≤ 4294967295 &&
+  (storePollCodec.encode inbox).length ≤ maxStoreInboxBytes
 
 def validName (value : List UInt8) : Bool :=
   !value.isEmpty && value.length ≤ maxNameBytes
@@ -177,6 +234,13 @@ def checkReport (report : Report) : Except String Unit := do
   | some inbox =>
       unless inbox.valid report.provenance.sourceIdentity do
         throw "portable inbox is absent, mismatched, or oversized"
+  match report.storePoll with
+  | none => pure ()
+  | some inbox =>
+      unless report.portableInbox.isSome &&
+          inbox.valid report.provenance.sourceIdentity
+            report.provenance.fnVerdictRef do
+        throw "fn Store poll inbox is mismatched or outside Mini's bounded profile"
 
 def checkPolicy (policy : Policy) (report : Report) : Except String Unit := do
   unless report.application == policy.application &&
@@ -196,13 +260,19 @@ def operationNonce (domain semantics : Digest) (application operation : List UIn
   2 * (Sp800185Cshake256.hash "DREGG.FN.OPERATION/v1".toUTF8.toList
     (operationPreimage domain semantics application operation)).digest.value
 
+def conflictPreimage (domain semantics : Digest) (report : Report) : List UInt8 :=
+  operationPreimage domain semantics report.application report.operation ++
+    provenanceStream.encode report.provenance ++
+    (match report.portableInbox with
+     | none => []
+     | some inbox => portableInboxCodec.encode inbox) ++
+    (match report.storePoll with
+     | none => []
+     | some inbox => storePollCodec.encode inbox)
+
 def conflictNonce (domain semantics : Digest) (report : Report) : Nat :=
   2 * (Sp800185Cshake256.hash "DREGG.FN.CONFLICT/v1".toUTF8.toList
-    (operationPreimage domain semantics report.application report.operation ++
-      provenanceStream.encode report.provenance ++
-      (match report.portableInbox with
-       | none => []
-       | some inbox => portableInboxCodec.encode inbox))).digest.value + 1
+    (conflictPreimage domain semantics report)).digest.value + 1
 
 theorem operationNonce_ne_conflictNonce (domain semantics : Digest)
     (report : Report) :
@@ -228,6 +298,23 @@ def operationInboxAtom (domain semantics : Digest)
 
 def conflictInboxAtom (domain semantics : Digest) (report : Report) : AtomId :=
   ⟨⟨2 * conflictNonce domain semantics report + 1⟩⟩
+
+/-- cSHAKE emits less than 2^256, so every older atom is below 2^259.
+These high atom IDs preserve all previous operation/reply/inbox identities. -/
+def storeOperationAtom (domain semantics : Digest)
+    (application operation : List UInt8) : AtomId :=
+  ⟨⟨2 ^ 259 + 4 *
+    (Sp800185Cshake256.hash "DREGG.FN.STORE-POLL-OP/v1".toUTF8.toList
+      (operationPreimage domain semantics application operation)).digest.value⟩⟩
+
+def storeConflictAtom (domain semantics : Digest) (report : Report) : AtomId :=
+  ⟨⟨2 ^ 259 + 4 *
+    (Sp800185Cshake256.hash "DREGG.FN.STORE-POLL-CONFLICT/v1".toUTF8.toList
+      (operationPreimage domain semantics report.application report.operation ++
+        provenanceStream.encode report.provenance ++
+        (match report.storePoll with
+         | none => []
+         | some inbox => storePollCodec.encode inbox))).digest.value + 1⟩⟩
 
 theorem operationAtom_ne_replyAtom (domain semantics : Digest)
     (application operation : List UInt8) :
@@ -263,6 +350,11 @@ def bindingCommand (domain semantics : Digest) (report : Report)
     | some inbox =>
         [.createAtom (operationInboxAtom domain semantics report.application report.operation)
           (.inlineObject ⟨4⟩) (portableInboxCodec.encode inbox)]
+  let actions := actions ++ match report.storePoll with
+    | none => []
+    | some inbox =>
+        [.createAtom (storeOperationAtom domain semantics report.application report.operation)
+          (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
   pure ⟨report.subject, report.expectedAuthorityRoot,
     operationNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
@@ -279,6 +371,11 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
     | some inbox =>
         [.createAtom (conflictInboxAtom domain semantics report)
           (.inlineObject ⟨4⟩) (portableInboxCodec.encode inbox)]
+  let actions := actions ++ match report.storePoll with
+    | none => []
+    | some inbox =>
+        [.createAtom (storeConflictAtom domain semantics report)
+          (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
   ⟨report.subject, report.expectedAuthorityRoot,
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
@@ -297,7 +394,8 @@ inductive Decision where
 /-- Inspect the original accepted call, rather than a mutable current atom.
 The prior reply remains recoverable from the durable accepted event history. -/
 def originalBindingWithInbox (domain semantics : Digest)
-    (record : DurableReceiver.IntentRecord) : Option (Binding × Option PortableInbox) := do
+    (record : DurableReceiver.IntentRecord) :
+    Option (Binding × Option PortableInbox × Option StorePollInbox) := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   if recordDomain != domain || recordSemantics != semantics then none else
@@ -306,15 +404,22 @@ def originalBindingWithInbox (domain semantics : Digest)
   | [target] =>
       match target.payload with
       | .content content =>
-          let (atom, bytes, outbox, replyBytes, inboxAction) ←
+          let (atom, bytes, outbox, replyBytes, inboxAction, storeAction) ←
             match content.actions with
             | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
                .createAtom outbox (.inlineObject ⟨2⟩) replyBytes] =>
-                some (atom, bytes, outbox, replyBytes, none)
+                some (atom, bytes, outbox, replyBytes, none, none)
             | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
                .createAtom outbox (.inlineObject ⟨2⟩) replyBytes,
                .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes] =>
-                some (atom, bytes, outbox, replyBytes, some (inboxAtom, inboxBytes))
+                some (atom, bytes, outbox, replyBytes,
+                  some (inboxAtom, inboxBytes), none)
+            | [.createAtom atom (.inlineObject ⟨1⟩) bytes,
+               .createAtom outbox (.inlineObject ⟨2⟩) replyBytes,
+               .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes,
+               .createAtom storeAtom (.inlineObject ⟨5⟩) storeBytes] =>
+                some (atom, bytes, outbox, replyBytes,
+                  some (inboxAtom, inboxBytes), some (storeAtom, storeBytes))
             | _ => none
           let binding ← bindingCodec.decode bytes
           let reply ← replyCodec.decode replyBytes
@@ -328,6 +433,17 @@ def originalBindingWithInbox (domain semantics : Digest)
                     inbox.valid binding.provenance.sourceIdentity then
                   some (some inbox)
                 else none
+          let storeInbox ← match storeAction with
+            | none => some none
+            | some (storeAtom, storeBytes) => do
+                if storeBytes.length > maxStoreInboxBytes || inbox.isNone then none else
+                let storeInbox ← storePollCodec.decode storeBytes
+                if storeAtom == storeOperationAtom domain semantics
+                    binding.application binding.operation &&
+                    storeInbox.valid binding.provenance.sourceIdentity
+                      binding.provenance.fnVerdictRef then
+                  some (some storeInbox)
+                else none
           if atom == operationAtom domain semantics binding.application binding.operation &&
               outbox == replyAtom domain semantics binding.application binding.operation &&
               reply == binding.reply &&
@@ -336,7 +452,7 @@ def originalBindingWithInbox (domain semantics : Digest)
               reply.sourceIdentity == binding.provenance.sourceIdentity &&
               command.nonce == operationNonce domain semantics
                 binding.application binding.operation then
-            some (binding, inbox)
+            some (binding, inbox, storeInbox)
           else none
       | _ => none
   | _ => none
@@ -373,7 +489,7 @@ def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
 
 def originalConflictWithInbox (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) :
-    Option (ConflictEvidence × Option PortableInbox) := do
+    Option (ConflictEvidence × Option PortableInbox × Option StorePollInbox) := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   if recordDomain != domain || recordSemantics != semantics then none else
@@ -382,12 +498,17 @@ def originalConflictWithInbox (domain semantics : Digest)
   | [target] =>
       match target.payload with
       | .content content =>
-          let (atom, bytes, inboxAction) ← match content.actions with
+          let (atom, bytes, inboxAction, storeAction) ← match content.actions with
             | [.createAtom atom (.inlineObject ⟨3⟩) bytes] =>
-                some (atom, bytes, none)
+                some (atom, bytes, none, none)
             | [.createAtom atom (.inlineObject ⟨3⟩) bytes,
                .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes] =>
-                some (atom, bytes, some (inboxAtom, inboxBytes))
+                some (atom, bytes, some (inboxAtom, inboxBytes), none)
+            | [.createAtom atom (.inlineObject ⟨3⟩) bytes,
+               .createAtom inboxAtom (.inlineObject ⟨4⟩) inboxBytes,
+               .createAtom storeAtom (.inlineObject ⟨5⟩) storeBytes] =>
+                some (atom, bytes, some (inboxAtom, inboxBytes),
+                  some (storeAtom, storeBytes))
             | _ => none
           let evidence ← conflictCodec.decode bytes
           let inbox ← match inboxAction with
@@ -398,6 +519,15 @@ def originalConflictWithInbox (domain semantics : Digest)
                 if inbox.valid evidence.provenance.sourceIdentity then
                   some (some inbox)
                 else none
+          let storeInbox ← match storeAction with
+            | none => some none
+            | some (_, storeBytes) => do
+                if storeBytes.length > maxStoreInboxBytes || inbox.isNone then none else
+                let storeInbox ← storePollCodec.decode storeBytes
+                if storeInbox.valid evidence.provenance.sourceIdentity
+                    evidence.provenance.fnVerdictRef then
+                  some (some storeInbox)
+                else none
           let report : Report :=
             { application := evidence.application, operation := evidence.operation,
               provenance := evidence.provenance, package := evidence.package,
@@ -405,13 +535,16 @@ def originalConflictWithInbox (domain semantics : Digest)
               capability := target.capability,
               expectedAuthorityRoot := command.expectedAuthorityRoot,
               expectedTargetRoot := target.expectedTargetRoot,
-              portableInbox := inbox }
+              portableInbox := inbox, storePoll := storeInbox }
           if atom == conflictAtom domain semantics report &&
               (inboxAction.isNone ||
                 inboxAction.any (fun pair =>
                   pair.1 == conflictInboxAtom domain semantics report)) &&
+              (storeAction.isNone ||
+                storeAction.any (fun pair =>
+                  pair.1 == storeConflictAtom domain semantics report)) &&
               command.nonce == conflictNonce domain semantics report then
-            some (evidence, inbox)
+            some (evidence, inbox, storeInbox)
           else none
       | _ => none
   | _ => none
@@ -433,16 +566,18 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
   | some original =>
       match originalBindingWithInbox domain semantics original with
       | none => .refused "operation marker occupied by nonconsumer transaction"
-      | some (binding, originalInbox) =>
+      | some (binding, originalInbox, originalStore) =>
           if binding.application != report.application ||
               binding.operation != report.operation then
             .refused "operation marker collision or foreign binding"
           else if binding.provenance == report.provenance &&
               binding.package == report.package &&
-              originalInbox == report.portableInbox then
+              originalInbox == report.portableInbox &&
+              originalStore == report.storePoll then
             .repeated binding.reply
           else
-            let sameSource := binding.provenance == report.provenance &&
+            let sameSource :=
+              binding.provenance.sourceIdentity == report.provenance.sourceIdentity &&
               binding.package == report.package
             let conflictTransaction := marker domain semantics report.subject
               (conflictNonce domain semantics report)
@@ -454,7 +589,8 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
             | some conflict =>
                 if originalConflictWithInbox domain semantics conflict ==
                     some (⟨report.application, report.operation,
-                      report.provenance, report.package⟩, report.portableInbox) then
+                      report.provenance, report.package⟩,
+                      report.portableInbox, report.storePoll) then
                   if sameSource then .carrierVariationRecorded binding.reply
                   else .conflictRecorded
                 else .refused "conflict marker occupied by different evidence"
