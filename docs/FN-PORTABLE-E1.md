@@ -11,7 +11,8 @@ verb decodes the exact carrier in ACL2, checks both native signature suites,
 and returns a versioned, bounded line with the verified principal, ACL2-
 derived source identity, full keyset and exact authored source. Mini caps the
 carrier at 32,768 bytes, checks the verifier exit and exact six-token line
-with no trailing junk, and compares all identity fields to the independent
+with no trailing junk, reading at most 70,001 stdout bytes and terminating
+the verifier on overflow. It compares all identity fields to the independent
 pin and claim. A different PEM file cannot silently select a different ML
 key: the full verified raw key is compared after the native check.
 The pin and claim JSON objects require exactly their documented fields;

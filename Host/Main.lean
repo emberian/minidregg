@@ -273,14 +273,23 @@ def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
   unless expectedPrincipal.length == 32 && expectedEd.length == 32 &&
       expectedMl.length == 1952 && expectedId.length == 48 do
     throw (IO.userError "fn pin or claim has invalid field width")
-  let result ← IO.Process.output
+  let child ← IO.Process.spawn
     { cmd := pin.fnBinary, args := #["--fn", "hybrid-verify-source", carrierPath,
-      pin.mlPublicKey] }
-  unless result.exitCode == 0 do
+      pin.mlPublicKey], stdin := .null, stdout := .piped, stderr := .null }
+  let lineBytes ← try readBoundedLoop child.stdout 70000
+    catch error =>
+      child.kill
+      discard <| child.wait
+      throw error
+  let exitCode ← child.wait
+  unless exitCode == 0 do
     throw (IO.userError "fn native portable carrier verifier refused")
   unless carrier == (← readBoundedBytes carrierPath 32768) do
     throw (IO.userError "fn carrier changed during native verification")
-  let verified ← IO.ofExcept (parseFnPortableLine result.stdout)
+  unless lineBytes.all (fun byte => byte.toNat < 128) do
+    throw (IO.userError "fn portable verifier output is not ASCII")
+  let verified ← IO.ofExcept (parseFnPortableLine
+    (String.fromUTF8! lineBytes.toByteArray))
   unless verified.principal == expectedPrincipal &&
       verified.edPublicKey == expectedEd &&
       verified.mlPublicKey == expectedMl &&
