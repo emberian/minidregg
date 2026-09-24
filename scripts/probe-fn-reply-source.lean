@@ -1,0 +1,37 @@
+import Kernel.FnReplyPublication
+
+open Minidregg.Kernel.FnConsumerOperation
+open Minidregg.Kernel.FnReplyPublication
+
+def require (ok : Bool) (detail : String) : IO Unit :=
+  unless ok do throw (IO.userError detail)
+
+def main (args : List String) : IO Unit := do
+  let [replyPath] := args
+    | throw (IO.userError "usage: lean --run scripts/probe-fn-reply-source.lean REPLY.bin")
+  let replyBytes := (← IO.FS.readBinFile replyPath).toList
+  let some reply := replyCodec.decode replyBytes
+    | throw (IO.userError "Q is not a canonical Mini reply")
+  let selected : Selection :=
+    { domain := ⟨8501⟩, semantics := ⟨1⟩,
+      miniTransaction := ⟨101⟩, miniEvent := ⟨102⟩,
+      reply := reply, parentSourceIdentity := reply.sourceIdentity,
+      parentMessageId := "<parent@example.invalid>".toUTF8.toList,
+      principal := List.replicate 32 0,
+      edPublicKey := List.replicate 32 1,
+      mlPublicKey := List.replicate 1952 2 }
+  let source ← IO.ofExcept selected.source
+  require (source == (← IO.ofExcept selected.source)) "source changed on repeat"
+  let text := String.fromUTF8! source.toByteArray
+  require ((text.splitOn ("Message-ID: " ++ selected.messageId ++ "\r\n")).length == 2)
+    "source lacks its selected Message-ID"
+  require (text.endsWith (hexBytes replyBytes ++ "\r\n"))
+    "source does not carry exact canonical Q bytes"
+  let changed : Selection := { selected with miniEvent := ⟨103⟩ }
+  require (changed.messageId != selected.messageId)
+    "different accepted Mini event reused reply Message-ID"
+  let injected : Selection := { selected with
+    parentMessageId := "<parent@example.invalid>\r\nX-Evil: yes".toUTF8.toList }
+  require (match injected.source with | .error _ => true | .ok _ => false)
+    "parent Message-ID injected a header"
+  IO.println s!"PASS fn reply source: {source.length} bytes, {selected.messageId}"
