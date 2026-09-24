@@ -1,0 +1,58 @@
+{
+  "baseline_binary_sha256": "11f451f7c14d55efcb16ee16f99bfffc20f551a7ebf173d5090966e1434f68f9",
+  "baseline_real_median_seconds": 29.72,
+  "baseline_revision": "1eb84a9a46e08aa423a99e39ad74a9be538b5385",
+  "baseline_samples": [
+    {
+      "real": 29.86,
+      "sys": 0.35,
+      "user": 28.86
+    },
+    {
+      "real": 29.53,
+      "sys": 0.31,
+      "user": 28.9
+    },
+    {
+      "real": 29.72,
+      "sys": 0.27,
+      "user": 29.1
+    }
+  ],
+  "candidate_binary_sha256": "568bbbeaaf71eab3bd9d35e55d0f62e2282b211aed48db900fbc7f294da5181a",
+  "candidate_real_median_seconds": 26.65,
+  "candidate_revision": "6f2faa17d3a4a00965db5521da43aba052118510",
+  "candidate_samples": [
+    {
+      "real": 26.65,
+      "sys": 0.28,
+      "user": 26.15
+    },
+    {
+      "real": 26.23,
+      "sys": 0.24,
+      "user": 25.87
+    },
+    {
+      "real": 27.14,
+      "sys": 0.29,
+      "user": 26.53
+    }
+  ],
+  "command": "/usr/bin/time -p <binary> <config> describe",
+  "date": "2026-09-24",
+  "fixture": "two-accepted-event E2 native SQLite image; read-only describe",
+  "fixture_config": "/tmp/mini-fn-e2-native-20260923/live-deployment/pinned-config.json",
+  "order": [
+    "b1",
+    "c1",
+    "c2",
+    "b2",
+    "b3",
+    "c3"
+  ],
+  "output_sha256": "300eb8adbaad66d7901a0d0832dde316682e173a1fc15caa0c2a48eb778c3bbd",
+  "scope": "one local two-event image; not a throughput bound or general speedup claim",
+  "toolchain": "Lean 4.30.0 arm64-apple-darwin24.6.0 commit d024af099ca4bf2c86f649261ebf59565dc8c622",
+  "type": "mini-b3-exact-policy-projection-performance-v1"
+}

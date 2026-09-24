@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/mini-b3-build-1eb84a9/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/mini-b3-build-1eb84a9/.lake/packages/batteries' has local changes
+PASS declared resource: real native signatures + stored capability + selected physical policy source + exact page/authority tuple + durable publication/reopen/replay; tamper, unrelated signer, stale root, overbroad edit and object-to-program edit refuse. Bootstrap fixture only; no birth/delegation admission claimed.

@@ -41,6 +41,15 @@ The `8c61c098` combined topic/index gate exposed proof regressions before an
 image was built. This B3 fixture uses the earlier qualified `e160442f` image;
 its result carries no topic/index claim.
 
+`forge_history.lean` is a separate scratch-only negative replay tooth for a
+later Mini host change. Set `MINI_B3_FORGE_CONFIG` to an existing pinned Mini
+config and `MINI_B3_FORGE_OUTPUT` to a fresh absolute file, then run
+`lake env lean scripts/fn-b3/forge_history.lean` against compiled current
+modules. It writes a physically restorable copy with the first original
+ingress changed to `[255]`; install only into a scratch SQLite root and run
+the candidate host's `describe` against a config selecting that scratch root.
+The expected result is a semantic-history refusal with no Store mutation.
+
 This fixture does not exercise a lost fn post reply, an uncertain post lookup,
 a second administered Store, or power loss. Do not extend its claim to those
 boundaries. The Mini executable's code is at `1eb84a9`; the prior `9c1bb384`
