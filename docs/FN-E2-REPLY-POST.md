@@ -60,6 +60,13 @@ This sidecar is a separate physical SQLite root; its durability relies on
 the same Rust/SQLite/OS assumptions as Mini's main image. No signer or fn
 post was invoked in this trial.
 
+The next typed packet adds `Signed`, a canonical record containing that
+prepared plan and exact detached 64-byte Ed25519 and 3,309-byte ML-DSA-65
+signatures. Its Lean validation binds the original plan and signature widths
+under a 12,288-byte bound; the live-Q probe checked a codec round trip and
+short-signature refusals. Cryptographic verification and sidecar installation
+of this record still require the native signer/verifier and physical CAS path.
+
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation
    is uncertain, it reopens that slot. Equal bytes are idempotent; any

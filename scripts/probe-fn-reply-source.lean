@@ -30,6 +30,15 @@ def main (args : List String) : IO Unit := do
     "different staged Message-ID validated"
   require (!(Prepared.valid { prepared with source := [1, 2, 3] }))
     "different staged source validated"
+  let signed : Signed := ⟨prepared, List.replicate 64 3,
+    List.replicate 3309 4⟩
+  require signed.valid "bounded signed artifact did not validate"
+  require (signedCodec.decode (signedCodec.encode signed) == some signed)
+    "signed artifact codec did not round trip"
+  require (!(Signed.valid { signed with edSignature := [3] }))
+    "short Ed25519 signature validated"
+  require (!(Signed.valid { signed with mlSignature := [4] }))
+    "short ML-DSA signature validated"
   require (source == (← IO.ofExcept selected.source)) "source changed on repeat"
   let text := String.fromUTF8! source.toByteArray
   require ((text.splitOn ("Message-ID: " ++ selected.messageId ++ "\r\n")).length == 2)
