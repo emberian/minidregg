@@ -1,0 +1,54 @@
+{
+  "fetch-ed-public.bin": {
+    "exit_code": 0,
+    "seconds": 0.259
+  },
+  "fetch-ml-public.pem": {
+    "exit_code": 0,
+    "seconds": 0.329
+  },
+  "fetch-ml-public.raw": {
+    "exit_code": 0,
+    "seconds": 0.349
+  },
+  "fetch-principal.bin": {
+    "exit_code": 0,
+    "seconds": 0.375
+  },
+  "fn-author": {
+    "exit_code": 0,
+    "seconds": 2.869
+  },
+  "post-marker": {
+    "exit_code": 0,
+    "seconds": 0.433
+  },
+  "post-marker-temp": {
+    "exit_code": 0,
+    "seconds": 0.414
+  },
+  "post-source": {
+    "exit_code": 0,
+    "seconds": 0.427
+  },
+  "prepare": {
+    "exit_code": 0,
+    "seconds": 31.191
+  },
+  "ready": {
+    "exit_code": 0,
+    "seconds": 0.285
+  },
+  "sign-repeat": {
+    "exit_code": 0,
+    "seconds": 35.049
+  },
+  "sign-stage": {
+    "exit_code": 0,
+    "seconds": 38.661
+  },
+  "wait-ready": {
+    "exit_code": 0,
+    "seconds": 0.301
+  }
+}

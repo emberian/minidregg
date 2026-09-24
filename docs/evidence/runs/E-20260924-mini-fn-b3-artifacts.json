@@ -1,0 +1,14 @@
+{
+  "ed_signature_sha256": "9bf3b1b77b73d1711db169e1fe7d19da7a1514ed08f94231372134dc3642982c",
+  "fn_image": "/tank/fn/gates/luna-feature-e160442f/build/fn-host",
+  "fn_source_revision": "e160442f2a5401328f5e76c99216f0d11d5755cf",
+  "message_id": "<mini-e2-8c3ada5a95cf0e6f829e2daf7e47ab7e6e1514447600712cc52f220600e3e928ff@example.invalid>",
+  "mini_binary_sha256": "11f451f7c14d55efcb16ee16f99bfffc20f551a7ebf173d5090966e1434f68f9",
+  "mini_source_revision": "1eb84a9a46e08aa423a99e39ad74a9be538b5385",
+  "ml_signature_sha256": "7abb74f4222b7d8d294dd467bf495c74291b71f03b4e5ea216bb43b4834106b7",
+  "preflight_carrier_sha256": "462cb6dbe2fee78b7afffecd133a329c6a9a2e7629c0c0790f88db92d5b4b621",
+  "prepared_sha256": "da0cc218b1a19427dd16cee5f1104b9879effa3a54fd40b1e1802b00ba572a68",
+  "signed_sha256": "be5c14ff33102ebeb5c222274e8a3e014bb863faccdab32a3c3675d0ff367a69",
+  "source_identity": "666e2f7375626a6563742f7631000101838a0b9c3d9dbfb77115974b093dc86d7d74cb823426e6c770c5a64d174571c0",
+  "source_sha256": "b8783ccbdcf21fdaf403ad24a1b6461b5a5f131781de24ade972668ebc7a28f6"
+}

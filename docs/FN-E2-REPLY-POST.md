@@ -79,8 +79,10 @@ public keyset and exact source from that native verifier, then installs the
 detached tuple by absent-only opaque SQLite CAS and reads it back before
 exporting signatures for `hybrid-author`. An already installed signed slot
 is read first; retries reuse its exact bytes without calling the signer.
-This host path typechecked and built, but the selected combined fn image and
-isolated native post/reopen witness are pending. The rendered carrier used
+This host path built and completed an isolated native sign/post/cold-reopen
+witness against the previously qualified fn e160 image, recorded in
+[FN-E2-B3-NATIVE-2026-09-24.md](FN-E2-B3-NATIVE-2026-09-24.md). The later
+combined topic/index image remains unqualified. The rendered carrier used
 for keyset/source preflight and the detached signatures are separate signer
 outputs. The preflight carrier is transient: the confirmed signed slot retains
 the exact source, Message-ID, source identity and detached signatures that
@@ -133,11 +135,13 @@ Recovery reopens that Q and resumes from the absent stage; fn's consumer ACK
 does not gate outbox delivery. Death after a prepared plan but before signing
 resumes that exact plan. Death after signing but before a clear CAS response
 queries the signed slot before making another signature. Death during post
-uses fn lookup and never creates a new Message-ID. The first native fixture
-must exercise these cuts and compare the exact source, detached signatures,
-Message-ID and source identity across retry. After owner reopen it must
-verify the admitted carrier through fn's native verifier and compare its
-authored source, identity and keyset with Mini's persisted selection.
+uses fn lookup and never creates a new Message-ID. The isolated native fixture
+exercised separate-process replay of the durable signed slot with unavailable
+private keys, compared its exact source, detached signatures, Message-ID and
+source identity, and verified the cold reopened carrier through fn's native
+verifier against the persisted source, identity and keyset. It did not exercise
+a lost post reply, uncertain-post lookup or process-death cut; those remain
+required for a complete B3 recovery claim.
 
 The local fn `hybrid-sign`/`hybrid-author` path and full-keyset verifier remain
 cryptographic and I/O trust boundaries. SQLite's CAS, fsync and recovery are
