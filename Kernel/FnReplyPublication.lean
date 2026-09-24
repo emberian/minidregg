@@ -82,7 +82,7 @@ def Selection.identityPreimage (value : Selection) : List UInt8 :=
 
 def Selection.messageId (value : Selection) : String :=
   let digest := Sp800185Cshake256.hash
-    "DREGG.FN.REPLY-MSGID/v1".toUTF8.toList value.identityPreimage
+    "DREGG.FN.REPLY-MSGID/v2".toUTF8.toList value.identityPreimage
   "<mini-e2-" ++ hexBytes (digestStream.encode digest.digest) ++ "@example.invalid>"
 
 /-- Fixed local fn.test experiment profile. The application Q is encoded as

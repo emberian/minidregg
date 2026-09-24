@@ -29,12 +29,16 @@ The first implemented construction packet is
 `Kernel/FnReplyPublication.lean`. Its `Selection` carries the exact Mini
 accepted event and signer keyset; it rejects a source/parent mismatch,
 nonprinting parent Message-ID, wrong key widths and an oversized Q. A framed
-cSHAKE preimage selects the reply Message-ID, and Lean builds the exact source
+cSHAKE preimage under the reply-profile v2 domain selects the reply Message-ID,
+and Lean builds the exact source
 for the live Q under a fixed local `fn.test` experiment profile. That profile
 now includes a fixed, signed Date, because fn's portable author path requires
 Date in the source. It is a synthetic fixture choice, not a general
 publication clock: a production profile must select Date once at plan creation
-and persist that selection in the prepared record. The reply body is
+and persist that selection, plus an explicit source-profile version, in the
+prepared record and Message-ID preimage. The v2 domain bump here separates
+this synthetic Date repair from the retained v1 refusal; it is not a general
+profile migration protocol. The reply body is
 lowercase hexadecimal of the exact canonical Q bytes. The probe on the live
 254-byte Q checked byte-identical repeat, a different Mini event selecting a
 different Message-ID, and CRLF parent-header injection refusal. Its framed
@@ -91,8 +95,9 @@ creating a source or signed slot, so no signer call was reachable.
 The first native sign/post fixture later installed a prepared plan, then fn's
 `hybrid-sign-carrier` refused its Date-less source under
 `fn-hc-required-sourcep`. It created no signed slot or post. The corrected
-synthetic source adds the fixed Date before a fresh plan is staged; the old
-SQLite slot is retained as refusal evidence.
+synthetic source adds the fixed Date before a fresh plan is staged and bumps
+the Message-ID domain from v1 to v2, so the changed source cannot reuse the
+old prepared identity. The old SQLite slot is retained as refusal evidence.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation
