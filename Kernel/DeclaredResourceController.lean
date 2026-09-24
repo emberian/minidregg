@@ -164,14 +164,23 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient durabl
 def firstIndex (prepared : PreparedInvocation deployment profile ambient durable command) : TargetIndex command :=
   ⟨0, List.length_pos_iff.mpr prepared.nonempty⟩
 
-def project (prepared : PreparedInvocation deployment profile ambient durable command)
-    (primary : Incidence command) (source : Source command)
-    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
-    Minidregg.Pred.State :=
+/- These slots depend on the admitted tuple and incidence, but not on which
+old/new logical state the policy examines. Derive them here once per step;
+the caller cannot inject an independent request or command projection. -/
+def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command) : List (String × Int) :=
   let selected := incidenceTarget command primary
   let preRoot := match primary with
     | some i => (prepared.targets i).pre.root
     | none => prepared.authority.snapshot.cell.root
+  CanonicalRuntimeProfile.requestSlots
+      (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
+    bytesSlots "command/bytes" 0 (commandCodec.encode source.val)
+
+def projectWithCommon (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    Minidregg.Pred.State :=
   let localIndex := primary.getD (firstIndex prepared)
   let localSlots :=
     bytesSlots "resource/bytes" 0 (command.targets[localIndex].materializer.codec.encode (logical (some localIndex))) ++
@@ -180,10 +189,19 @@ def project (prepared : PreparedInvocation deployment profile ambient durable co
     (bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
       targetProjection command.targets[i] (prepared.targets i).pre.logical (logical (some i))).map fun slot =>
         (s!"joint/target/{command.targets[i].target}/{slot.1}", slot.2)
-  ⟨CanonicalRuntimeProfile.requestSlots
-      (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
-    bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
-    localSlots ++ joint⟩
+  ⟨common ++ localSlots ++ joint⟩
+
+def project (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    Minidregg.Pred.State :=
+  projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical
+
+theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical =
+      project prepared primary source logical := rfl
 
 /- The tuple's generic `pre` selector constructs a complete raw leg, including
 the hash of the entire signed command's request. These projections select the
@@ -219,7 +237,9 @@ theorem policyPostState_exact (prepared : PreparedInvocation deployment profile 
 
 def step (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : PolicyStepContext :=
-  PolicyStepContext.ofPreparedTupleExact (project prepared incidence) profile.semantics
+  let common := projectCommonSlots prepared incidence tuple.source
+  PolicyStepContext.ofPreparedTupleExact
+    (fun _ logical => projectWithCommon prepared incidence common logical) profile.semantics
     { tuple with primary := incidence }
     (policyPreCell prepared) (policyPostState prepared)
     (policyPreCell_exact prepared tuple) (policyPostState_exact prepared tuple)
@@ -230,7 +250,9 @@ theorem step_prepared_exact
     step prepared tuple incidence =
       PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
         { tuple with primary := incidence } := by
-  exact PolicyStepContext.ofPreparedTupleExact_eq _ _ _ _ _ _ _
+  unfold step
+  rw [PolicyStepContext.ofPreparedTupleExact_eq]
+  rfl
 
 def policyConfig [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
