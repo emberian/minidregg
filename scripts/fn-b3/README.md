@@ -21,10 +21,10 @@ handoff is under the same qualified gate with a distinct `retry-1` name:
 cd /Users/ember/dev/minidregg-wt/fn-evidence
 FN_B3_OUTPUT=/tmp/mini-fn-reply-plan-20260924/live-b3-retry-1 \
 FN_B3_HANDOFF=/tank/fn/gates/luna-feature-e160442f/build/mini-b3-handoff-retry-1 \
-FN_B3_MINI_HOST=/tmp/mini-b3-build-4526585/build/minidregg-host-b3 \
+FN_B3_MINI_HOST=/tmp/mini-b3-build-22e8440/build/minidregg-host-b3 \
 FN_B3_MINI_CONFIG=/tmp/mini-fn-e2-native-20260923/live-deployment/pinned-config.json \
 FN_B3_MINI_TRANSACTION=22678727908680307285286663340486134448208253926548865573615580900981947362607 \
-FN_B3_MINI_REVISION=45265854f9b86164ef5bb97112fa2c3e1ea80dd3 \
+FN_B3_MINI_REVISION=22e8440e68ee11d903926742e508193e1b125e99 \
 FN_B3_FN_REVISION=e160442f2a5401328f5e76c99216f0d11d5755cf \
 python3 scripts/fn-b3/mini_driver.py
 ```
@@ -43,5 +43,6 @@ its result carries no topic/index claim.
 
 This fixture does not exercise a lost fn post reply, an uncertain post lookup,
 a second administered Store, or power loss. Do not extend its claim to those
-boundaries. The Mini executable's code is at `4526585`; the prior `9c1bb384`
-executable lacks Date and was refused before signing.
+boundaries. The Mini executable's code is at `22e8440`; the prior `9c1bb384`
+executable lacks Date and was refused before signing. The Date repair also
+changed the Message-ID domain to v2, so the fresh slot cannot reuse v1 bytes.
