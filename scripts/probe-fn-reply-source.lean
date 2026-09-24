@@ -41,6 +41,8 @@ def main (args : List String) : IO Unit := do
     "short ML-DSA signature validated"
   require (source == (← IO.ofExcept selected.source)) "source changed on repeat"
   let text := String.fromUTF8! source.toByteArray
+  require ((text.splitOn "Date: Wed, 23 Sep 2026 12:00:00 +0000\r\n").length == 2)
+    "source lacks the fixed signed Date required by fn's portable profile"
   require ((text.splitOn ("Message-ID: " ++ selected.messageId ++ "\r\n")).length == 2)
     "source lacks its selected Message-ID"
   require (text.endsWith (hexBytes replyBytes ++ "\r\n"))

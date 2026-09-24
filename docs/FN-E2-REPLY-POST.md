@@ -29,8 +29,12 @@ The first implemented construction packet is
 `Kernel/FnReplyPublication.lean`. Its `Selection` carries the exact Mini
 accepted event and signer keyset; it rejects a source/parent mismatch,
 nonprinting parent Message-ID, wrong key widths and an oversized Q. A framed
-cSHAKE preimage selects the reply Message-ID, and Lean builds the 790-byte
-source for the live Q under the fixed local group policy. The reply body is
+cSHAKE preimage selects the reply Message-ID, and Lean builds the exact source
+for the live Q under a fixed local `fn.test` experiment profile. That profile
+now includes a fixed, signed Date, because fn's portable author path requires
+Date in the source. It is a synthetic fixture choice, not a general
+publication clock: a production profile must select Date once at plan creation
+and persist that selection in the prepared record. The reply body is
 lowercase hexadecimal of the exact canonical Q bytes. The probe on the live
 254-byte Q checked byte-identical repeat, a different Mini event selecting a
 different Message-ID, and CRLF parent-header injection refusal. Its framed
@@ -47,10 +51,10 @@ root. It always reads the stored bytes back and decodes and validates the
 Lean `Prepared` record before reporting `durable-accepted`; an unreadable or
 malformed readback is `uncertain`, and a valid different record is `conflict`.
 The 2026-09-24 local trial used the accepted Mini transaction from the live
-poll run. It installed a 3,391-byte plan, exported an 816-byte exact reply
-source, recovered the same plan on an equal retry, and returned exit 2 for a
-different Ed25519 public-key pin without exporting a source. The candidate
-and readback SHA-256 were both
+poll run. Before the Date repair it installed a 3,391-byte plan, exported an
+816-byte exact reply source, recovered the same plan on an equal retry, and
+returned exit 2 for a different Ed25519 public-key pin without exporting a
+source. The candidate and readback SHA-256 were both
 `38c99d542952297d84880584fbc60e66a68aca0c3de022a5790f29e546286521`.
 An occupied sidecar containing malformed bytes returned exit 3 (`uncertain`)
 and exported no source; it did not overwrite those bytes.
@@ -84,6 +88,11 @@ from the preflight carrier. This packet does not claim a cryptographic proof.
 The first native refusal probe pointed it at an absent prepared sidecar and
 nonexistent private-key paths: it returned exit 2 (`unprepared`) before
 creating a source or signed slot, so no signer call was reachable.
+The first native sign/post fixture later installed a prepared plan, then fn's
+`hybrid-sign-carrier` refused its Date-less source under
+`fn-hc-required-sourcep`. It created no signed slot or post. The corrected
+synthetic source adds the fixed Date before a fresh plan is staged; the old
+SQLite slot is retained as refusal evidence.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation

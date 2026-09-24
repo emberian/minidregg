@@ -87,10 +87,17 @@ def Selection.messageId (value : Selection) : String :=
 
 /-- Fixed local fn.test experiment profile. The application Q is encoded as
 ASCII hexadecimal, so its arbitrary binary bytes cannot inject headers or
-article terminators. The exact source and ID are stable for a Selection. -/
+article terminators. The exact source and ID are stable for a Selection.
+The fixed Date below is only this synthetic profile's signed source Date;
+a general publication profile must select its creation Date once and retain
+that choice in the durable prepared plan. -/
+private def experimentDateLine : String :=
+  "Date: Wed, 23 Sep 2026 12:00:00 +0000\r\n"
+
 def Selection.source (value : Selection) : Except String (List UInt8) := do
   unless value.valid do throw "reply publication selection is outside bounded profile"
   let article := "From: mini-e2@example.invalid\r\n" ++
+    experimentDateLine ++
     "Newsgroups: fn.test\r\n" ++
     "Subject: Mini E2 reply\r\n" ++
     "Message-ID: " ++ value.messageId ++ "\r\n" ++
