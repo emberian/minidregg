@@ -107,3 +107,34 @@ with `mini submit --intent-kind birth-intent`; require `confirmed` with
 `acceptedCount=1`. Do not clone an already processed Mini R/Q operation into
 the experiment. The first run's isolated root and confirmed birth evidence
 are retained at `/tmp/mini-fn-e1e2-two-store-20260924/`.
+
+The exact first-run preparation was:
+
+```sh
+python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path('/tmp/mini-fn-e1e2-two-store-20260924')
+root.mkdir(exist_ok=False)
+source = Path('/tmp/mini-fn-e2-native-20260923/live-deployment/pinned-config.json')
+config = json.loads(source.read_text())
+config['storageRoot'] = str(root / 'mini-store')
+(root / 'mini-config.json').write_text(json.dumps(config, sort_keys=True, indent=2) + '\n')
+PY
+/tmp/mini-b3-build-1eb84a9/build/minidregg-host-b3 \
+  /tmp/mini-fn-e1e2-two-store-20260924/mini-config.json bootstrap \
+  /tmp/mini-fn-e2-native-20260923/live-deployment/genesis.bin
+/Users/ember/dev/minidregg-wt/fn-evidence/native/resource-client/target/debug/mini \
+  submit --host /tmp/mini-b3-build-1eb84a9/build/minidregg-host-b3 \
+  --config /tmp/mini-fn-e1e2-two-store-20260924/mini-config.json \
+  --intent /tmp/mini-fn-e2-native-20260923/live-birth-attempt/intent.json \
+  --intent-kind birth-intent \
+  --key /tmp/mini-fn-portable-inbox-native-20260923/consumer.key \
+  --dir /tmp/mini-fn-e1e2-two-store-20260924/birth-attempt-2
+```
+
+The first failed birth invocation omitted `--intent-kind birth-intent` and
+was rejected before submission (`missing field purpose`). It left no accepted
+event. The corrected attempt reported `confirmed`, `acceptedCount=1` and
+transaction ID
+`30574338302698088804635708227956052706316029374670952451210790093397252577964`.
