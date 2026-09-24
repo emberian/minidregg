@@ -33,8 +33,12 @@ cSHAKE preimage selects the reply Message-ID, and Lean builds the 790-byte
 source for the live Q under the fixed local group policy. The reply body is
 lowercase hexadecimal of the exact canonical Q bytes. The probe on the live
 254-byte Q checked byte-identical repeat, a different Mini event selecting a
-different Message-ID, and CRLF parent-header injection refusal. This
-construction alone does not stage a plan, sign, post or settle a fn result.
+different Message-ID, and CRLF parent-header injection refusal. Its framed
+`Prepared` codec stores the exact source and Message-ID alongside the full
+selection; re-admission checks both derived equalities and the 8,192-byte
+record bound. The probe also rejected altered staged source and Message-ID.
+This construction alone does not install the plan, sign, post or settle a fn
+result.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation

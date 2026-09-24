@@ -10,7 +10,9 @@ import Kernel.FnConsumerOperation
 namespace Minidregg.Kernel.FnReplyPublication
 
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.IndexedProgram
 open Minidregg.Compiler
+open Minidregg.Compiler.NativeHostCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.FnConsumerOperation
 
@@ -28,6 +30,23 @@ structure Selection where
   edPublicKey : List UInt8
   mlPublicKey : List UInt8
   deriving DecidableEq, Repr
+
+def selectionStream : StreamCodec Selection :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product digestStream (StreamCodec.product digestStream
+        (StreamCodec.product replyStream (StreamCodec.product bytesStream
+          (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+            (StreamCodec.product bytesStream bytesStream)))))))))
+    (fun value => (value.domain, value.semantics, value.miniTransaction,
+      value.miniEvent, value.reply, value.parentSourceIdentity,
+      value.parentMessageId, value.principal, value.edPublicKey,
+      value.mlPublicKey))
+    (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2.1,
+      value.2.2.2.2.1, value.2.2.2.2.2.1, value.2.2.2.2.2.2.1,
+      value.2.2.2.2.2.2.2.1, value.2.2.2.2.2.2.2.2.1,
+      value.2.2.2.2.2.2.2.2.2⟩)
+    (by intro value; cases value; rfl)
 
 private def hexDigit (n : Nat) : Char :=
   Char.ofNat (if n < 10 then '0'.toNat + n else 'a'.toNat + n - 10)
@@ -82,5 +101,39 @@ def Selection.source (value : Selection) : Except String (List UInt8) := do
   let bytes := article.toUTF8.toList
   unless bytes.length ≤ 32768 do throw "fn reply source exceeds bound"
   pure bytes
+
+/-- The absent-only sidecar's first durable value. The source and Message-ID
+are stored explicitly and checked against their Lean derivation on reopen. -/
+structure Prepared where
+  selection : Selection
+  source : List UInt8
+  messageId : List UInt8
+  deriving DecidableEq, Repr
+
+def preparedStream : StreamCodec Prepared :=
+  StreamCodec.xmap
+    (StreamCodec.product selectionStream
+      (StreamCodec.product bytesStream bytesStream))
+    (fun value => (value.selection, value.source, value.messageId))
+    (fun value => ⟨value.1, value.2.1, value.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def preparedCodec : LawfulCodec Prepared :=
+  NativeHostCodec.framed "DREGG/FN/REPLY-PREPARED/v1".toUTF8.toList
+    preparedStream
+
+def Selection.prepare (value : Selection) : Except String Prepared := do
+  let source ← value.source
+  let prepared : Prepared := ⟨value, source, value.messageId.toUTF8.toList⟩
+  unless (preparedCodec.encode prepared).length ≤ 8192 do
+    throw "fn reply prepared record exceeds bound"
+  pure prepared
+
+def Prepared.valid (value : Prepared) : Bool :=
+  (preparedCodec.encode value).length ≤ 8192 &&
+  value.messageId == value.selection.messageId.toUTF8.toList &&
+  match value.selection.source with
+  | .ok source => source == value.source
+  | .error _ => false
 
 end Minidregg.Kernel.FnReplyPublication

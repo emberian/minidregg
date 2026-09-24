@@ -21,6 +21,15 @@ def main (args : List String) : IO Unit := do
       edPublicKey := List.replicate 32 1,
       mlPublicKey := List.replicate 1952 2 }
   let source ← IO.ofExcept selected.source
+  let prepared ← IO.ofExcept selected.prepare
+  let encoded := preparedCodec.encode prepared
+  require (preparedCodec.decode encoded == some prepared)
+    "prepared codec did not round trip"
+  require prepared.valid "prepared source did not validate"
+  require (!(Prepared.valid { prepared with messageId := "<other@example.invalid>".toUTF8.toList }))
+    "different staged Message-ID validated"
+  require (!(Prepared.valid { prepared with source := [1, 2, 3] }))
+    "different staged source validated"
   require (source == (← IO.ofExcept selected.source)) "source changed on repeat"
   let text := String.fromUTF8! source.toByteArray
   require ((text.splitOn ("Message-ID: " ++ selected.messageId ++ "\r\n")).length == 2)
