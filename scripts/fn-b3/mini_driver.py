@@ -13,18 +13,24 @@ mini_host = Path(os.environ['FN_B3_MINI_HOST'])
 mini_config = Path(os.environ['FN_B3_MINI_CONFIG'])
 mini_transaction = os.environ['FN_B3_MINI_TRANSACTION']
 shim = Path(__file__).with_name('fn_bridge.sh')
+timings = {}
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def run(label, argv, expected=0):
     print(label, flush=True)
+    started = time.monotonic()
     with (base / (label + '.stdout')).open('wb') as out, (base / (label + '.stderr')).open('wb') as err:
         result = subprocess.run([str(a) for a in argv], stdout=out, stderr=err)
+    timings[label] = {'seconds': round(time.monotonic() - started, 3),
+                      'exit_code': result.returncode}
+    (base / 'timings.json').write_text(json.dumps(timings, sort_keys=True, indent=2) + '\n')
     if result.returncode != expected:
         raise RuntimeError(f'{label} exited {result.returncode}; expected {expected}: ' +
             (base / (label + '.stderr')).read_text(errors='replace')[-500:])
 
+ready_started = time.monotonic()
 for _ in range(240):
     if subprocess.run(['ssh', 'hbox', f'test -f {handoff}/ready.json'],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -32,6 +38,8 @@ for _ in range(240):
     time.sleep(1)
 else:
     raise RuntimeError('B3 native handoff did not become ready')
+timings['wait-ready'] = {'seconds': round(time.monotonic() - ready_started, 3),
+                         'exit_code': 0}
 run('ready', ['scp', '-q', f'hbox:{handoff}/ready.json', base/'ready.json'])
 ready = json.loads((base/'ready.json').read_text())
 assert ready['generation'] == 1

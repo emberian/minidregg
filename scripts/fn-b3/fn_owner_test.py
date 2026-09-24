@@ -52,12 +52,14 @@ class NativeB3Handoff(NativeHybridAuthorTest):
                              encoding="ascii")
         temporary.replace(handoff / "ready.json")
 
+        ready_at = time.monotonic()
         deadline = time.monotonic() + 900
         marker = handoff / "mini-finished.json"
         while not marker.is_file() and time.monotonic() < deadline:
             self.assertIsNone(owner.poll(), "synthetic owner died during Mini post")
             time.sleep(0.1)
         self.assertTrue(marker.is_file(), "Mini B3 handoff timed out")
+        marker_at = time.monotonic()
         outcome = json.loads(marker.read_text(encoding="ascii"))
         self.assertEqual(outcome["result"], "accepted")
         msgid = outcome["message_id"]
@@ -65,7 +67,9 @@ class NativeB3Handoff(NativeHybridAuthorTest):
         exact_source = (handoff / "posted.source").read_bytes()
 
         self.stop_owner(owner)
+        stopped_at = time.monotonic()
         reopened = self.start_owner()
+        reopened_at = time.monotonic()
         try:
             with socket.create_connection(("127.0.0.1", self.port), timeout=30) as conn:
                 with conn.makefile("rwb", buffering=0) as stream:
@@ -106,3 +110,9 @@ class NativeB3Handoff(NativeHybridAuthorTest):
                     self.assertEqual(stream.readline(), b".\r\n")
         finally:
             self.stop_owner(reopened)
+        (handoff / "owner-timings.json").write_text(json.dumps({
+            "ready_to_marker_seconds": round(marker_at - ready_at, 3),
+            "stop_seconds": round(stopped_at - marker_at, 3),
+            "reopen_seconds": round(reopened_at - stopped_at, 3),
+            "native_readback_seconds": round(time.monotonic() - reopened_at, 3),
+        }, sort_keys=True, indent=2) + "\n", encoding="ascii")
