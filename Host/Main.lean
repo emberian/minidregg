@@ -13,6 +13,7 @@ import Kernel.NativeHost
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
+import Kernel.FnReplyPublication
 import Kernel.FnPortableSource
 import Host.Json
 import Lean.Data.Json
@@ -208,6 +209,12 @@ structure ConsumerPolicySource where
 structure FnPortablePin where
   fnBinary : String
   mlPublicKey : String
+  principal : String
+  edPublicKey : String
+  mlPublicKeyHex : String
+  deriving FromJson
+
+structure FnReplySignerPin where
   principal : String
   edPublicKey : String
   mlPublicKeyHex : String
@@ -722,7 +729,7 @@ def runPollConsumerDecision (config : NativeHost.Config)
       | _ => pure 0
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -1079,6 +1086,94 @@ def run (arguments : List String) : IO UInt32 := do
             | throw (IO.userError "transaction has no canonical portable Q")
           writeBytes replyPath (FnConsumerOperation.replyCodec.encode binding.reply)
           pure 0
+      | "consumer-stage-reply-plan",
+          [signerPath, transaction, outboxRoot, candidatePath,
+           readbackPath, sourcePath, resultPath] =>
+          unless [outboxRoot, candidatePath, readbackPath, sourcePath,
+              resultPath].all (·.startsWith "/") &&
+              ([(candidatePath, readbackPath), (candidatePath, sourcePath),
+                (readbackPath, sourcePath)].all (fun pair => pair.1 != pair.2)) do
+            throw (IO.userError "reply plan paths must be absolute and distinct")
+          for path in [candidatePath, readbackPath, sourcePath, resultPath] do
+            if ← (System.FilePath.mk path).pathExists then
+              throw (IO.userError "reply plan output path already exists")
+          let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+          let signerJson ← readJson signerPath
+          IO.ofExcept (requireExactFields "fn reply signer"
+            ["principal", "edPublicKey", "mlPublicKeyHex"] signerJson)
+          let signer : FnReplySignerPin ← IO.ofExcept (fromJson? signerJson)
+          let principal ← IO.ofExcept (decodeCanonicalHex "fn reply principal" signer.principal)
+          let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" signer.edPublicKey)
+          let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" signer.mlPublicKeyHex)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          unless opened.durable.image.accepted.length ≤ 16 do
+            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
+          let some record := opened.durable.image.accepted.find?
+              (fun entry => entry.transactionId.value == transactionId)
+            | throw (IO.userError "exact Mini consumer transaction is absent")
+          let some (binding, some _, some store) :=
+              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+                config.profile.semantics record
+            | throw (IO.userError "transaction has no canonical observed fn poll and Q")
+          unless store.pollCallObserved do
+            throw (IO.userError "reply plan requires durable observed fn poll")
+          let selection : FnReplyPublication.Selection :=
+            { domain := config.deployment.domain,
+              semantics := config.profile.semantics,
+              miniTransaction := record.transactionId,
+              miniEvent := record.event.eventId,
+              reply := binding.reply,
+              parentSourceIdentity := store.sourceIdentity,
+              parentMessageId := store.messageId,
+              principal := principal, edPublicKey := edPublicKey,
+              mlPublicKey := mlPublicKey }
+          let prepared ← IO.ofExcept selection.prepare
+          writeBytes candidatePath (FnReplyPublication.preparedCodec.encode prepared)
+          let publish ← IO.Process.spawn
+            { cmd := settings.storageBinary,
+              args := #["publish", outboxRoot, candidatePath],
+              stdin := .null, stdout := .piped, stderr := .null }
+          let _ ← readBoundedLoop publish.stdout 128
+          let _ ← publish.wait
+          let readback ← IO.Process.spawn
+            { cmd := settings.storageBinary,
+              args := #["read-to", outboxRoot, readbackPath],
+              stdin := .null, stdout := .piped, stderr := .null }
+          let _ ← readBoundedLoop readback.stdout 128
+          let readbackExit ← readback.wait
+          if readbackExit != 0 then
+            writeJson resultPath <| Lean.Json.mkObj
+              [("type", toJson "fn-reply-plan-stage-v1"),
+               ("stage", toJson "uncertain")]
+            pure 3
+          else
+            let bytes? ← try pure (some (← readBoundedBytes readbackPath 8192))
+              catch _ => pure none
+            let some bytes := bytes?
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-plan-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            let some retained := FnReplyPublication.preparedCodec.decode bytes
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-plan-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            unless retained.valid do
+              writeJson resultPath <| Lean.Json.mkObj
+                [("type", toJson "fn-reply-plan-stage-v1"),
+                 ("stage", toJson "uncertain")]
+              return 3
+            let accepted := retained == prepared
+            if accepted then writeBytes sourcePath retained.source
+            writeJson resultPath <| Lean.Json.mkObj
+              [("type", toJson "fn-reply-plan-stage-v1"),
+               ("stage", toJson (if accepted then "durable-accepted" else "conflict")),
+               ("miniTransactionId", toJson transaction),
+               ("messageId", toJson retained.selection.messageId)]
+            pure (if accepted then 0 else 2)
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))

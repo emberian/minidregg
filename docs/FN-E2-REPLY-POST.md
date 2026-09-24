@@ -40,6 +40,26 @@ record bound. The probe also rejected altered staged source and Message-ID.
 This construction alone does not install the plan, sign, post or settle a fn
 result.
 
+`consumer-stage-reply-plan` now reopens the original Mini event, requires its
+observed fn poll and Q, checks the independently selected reply signer pin,
+then calls the existing opaque Rust SQLite `publish` for a selected sidecar
+root. It always reads the stored bytes back and decodes and validates the
+Lean `Prepared` record before reporting `durable-accepted`; an unreadable or
+malformed readback is `uncertain`, and a valid different record is `conflict`.
+The 2026-09-24 local trial used the accepted Mini transaction from the live
+poll run. It installed a 3,391-byte plan, exported an 816-byte exact reply
+source, recovered the same plan on an equal retry, and returned exit 2 for a
+different Ed25519 public-key pin without exporting a source. The candidate
+and readback SHA-256 were both
+`38c99d542952297d84880584fbc60e66a68aca0c3de022a5790f29e546286521`.
+An occupied sidecar containing malformed bytes returned exit 3 (`uncertain`)
+and exported no source; it did not overwrite those bytes.
+The non-secret trial files and SQLite byte images are preserved at
+`/tank/fn/gates/mini-live-join-1d26-20260924/build/mini-evidence/b3-plan/`.
+This sidecar is a separate physical SQLite root; its durability relies on
+the same Rust/SQLite/OS assumptions as Mini's main image. No signer or fn
+post was invoked in this trial.
+
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation
    is uncertain, it reopens that slot. Equal bytes are idempotent; any
