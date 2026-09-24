@@ -2,7 +2,9 @@ import Kernel.FnReplyPublication
 
 open Minidregg.Kernel.FnConsumerOperation
 open Minidregg.Kernel.FnReplyPublication
+open Minidregg.Compiler
 open Minidregg.Compiler.NativeHostCodec
+open Minidregg.Compiler.Tower256ConcreteBackend
 
 def require (ok : Bool) (detail : String) : IO Unit :=
   unless ok do throw (IO.userError detail)
