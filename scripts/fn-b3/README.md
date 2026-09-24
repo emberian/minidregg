@@ -11,7 +11,7 @@ only transports files and invokes the selected frozen fn image. None of these
 scripts makes an application or Store semantic decision.
 
 Run only against an isolated frozen fn gate. The fn owner fixture must be
-started first; it atomically publishes `ready.json` and waits up to 600 seconds
+started first; it atomically publishes `ready.json` and waits up to 900 seconds
 for Mini's `mini-finished.json`. Both sides must use the same handoff directory.
 For the 2026-09-24 retry, the qualified fn source is `e160442f`; the first
 handoff was refused before signing because its source lacked Date. The fresh

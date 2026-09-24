@@ -52,7 +52,7 @@ class NativeB3Handoff(NativeHybridAuthorTest):
                              encoding="ascii")
         temporary.replace(handoff / "ready.json")
 
-        deadline = time.monotonic() + 600
+        deadline = time.monotonic() + 900
         marker = handoff / "mini-finished.json"
         while not marker.is_file() and time.monotonic() < deadline:
             self.assertIsNone(owner.poll(), "synthetic owner died during Mini post")
