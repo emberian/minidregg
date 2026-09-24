@@ -34,7 +34,8 @@ def article(ready, message_id):
                 if not line(stream).startswith(b"381 "):
                     raise RuntimeError("AUTHINFO USER refused")
                 password = Path(ready["b_password_file"]).read_bytes().rstrip(b"\r\n")
-                if not password or len(password) > 256:
+                if not password or len(password) > 256 or not all(
+                        33 <= octet <= 126 for octet in password):
                     raise RuntimeError("invalid observer password length")
                 stream.write(b"AUTHINFO PASS " + password + b"\r\n")
                 if not line(stream).startswith(b"281 "):
