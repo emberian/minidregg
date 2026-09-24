@@ -13,19 +13,19 @@ scripts makes an application or Store semantic decision.
 Run only against an isolated frozen fn gate. The fn owner fixture must be
 started first; it atomically publishes `ready.json` and waits up to 600 seconds
 for Mini's `mini-finished.json`. Both sides must use the same handoff directory.
-For the 2026-09-24 campaign, set `FN_B3_GATE` to the actual qualified fn
-gate path and `FN_B3_QUALIFIED_FN_REVISION` to its exact source revision.
-The handoff is `<qualified-fn-gate>/build/mini-b3-handoff`. The Mini side is:
+For the 2026-09-24 retry, the qualified fn source is `e160442f`; the first
+handoff was refused before signing because its source lacked Date. The fresh
+handoff is under the same qualified gate with a distinct `retry-1` name:
 
 ```sh
 cd /Users/ember/dev/minidregg-wt/fn-evidence
-FN_B3_OUTPUT=/tmp/mini-fn-reply-plan-20260924/live-b3 \
-FN_B3_HANDOFF="$FN_B3_GATE/build/mini-b3-handoff" \
-FN_B3_MINI_HOST=/tmp/mini-b3-build-9c1bb384/build/minidregg-host-b3 \
+FN_B3_OUTPUT=/tmp/mini-fn-reply-plan-20260924/live-b3-retry-1 \
+FN_B3_HANDOFF=/tank/fn/gates/luna-feature-e160442f/build/mini-b3-handoff-retry-1 \
+FN_B3_MINI_HOST=/tmp/mini-b3-build-4526585/build/minidregg-host-b3 \
 FN_B3_MINI_CONFIG=/tmp/mini-fn-e2-native-20260923/live-deployment/pinned-config.json \
 FN_B3_MINI_TRANSACTION=22678727908680307285286663340486134448208253926548865573615580900981947362607 \
-FN_B3_MINI_REVISION=9c1bb384c562826733388b6ac0ce55950c070a88 \
-FN_B3_FN_REVISION="$FN_B3_QUALIFIED_FN_REVISION" \
+FN_B3_MINI_REVISION=45265854f9b86164ef5bb97112fa2c3e1ea80dd3 \
+FN_B3_FN_REVISION=e160442f2a5401328f5e76c99216f0d11d5755cf \
 python3 scripts/fn-b3/mini_driver.py
 ```
 
@@ -38,11 +38,10 @@ driver's `evidence.json` records source and artifact hashes; the prepared and
 signed SQLite roots and readback files remain under `FN_B3_OUTPUT`.
 
 The `8c61c098` combined topic/index gate exposed proof regressions before an
-image was built. The B3 reply fixture can use the earlier fully qualified
-`e160442f` image if its hybrid sign/post/readback interface matches; record
-that older image's exact source and limit the claim to B3 behavior on it.
+image was built. This B3 fixture uses the earlier qualified `e160442f` image;
+its result carries no topic/index claim.
 
 This fixture does not exercise a lost fn post reply, an uncertain post lookup,
 a second administered Store, or power loss. Do not extend its claim to those
-boundaries. The Mini executable's code is at `9c1bb384`; the subsequent
-`29ffea5` commit corrected only this protocol's documentation.
+boundaries. The Mini executable's code is at `4526585`; the prior `9c1bb384`
+executable lacks Date and was refused before signing.
