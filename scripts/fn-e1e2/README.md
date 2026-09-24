@@ -13,8 +13,11 @@ certificates and administration credentials; configures reciprocal pinned
 STARTTLS+AUTHINFO peers; signs R's existing exact synthetic source with a new
 A author keyset through native `hybrid-sign`/`hybrid-author`; enrolls A's
 public keyset on B; observes B's protected peer receipt, exact source and
-historical native verdict; and registers B's local consumer `worker`. A and B
-also enroll B's distinct Q author keyset before the reply. The fixture
+historical native verdict; and registers B's local consumer `worker`. Each
+keyring snapshot contains one principal/keyset. B accepts R under generation
+1 before A and B enroll Q's distinct author keyset at generation 2. B's
+preview poll follows those enrollments, so Mini's later live poll sees the
+same committed frontier. The fixture
 atomically publishes `ready.json` and holds for Mini. These are isolated test
 credentials, not the deployed node's keys.
 
