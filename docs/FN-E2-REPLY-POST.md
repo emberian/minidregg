@@ -74,8 +74,13 @@ is read first; retries reuse its exact bytes without calling the signer.
 This host path typechecked and built, but the selected combined fn image and
 isolated native post/reopen witness are pending. The rendered carrier used
 for keyset/source preflight and the detached signatures are separate signer
-outputs; fn's author command must still verify the detached signatures at
-Store admission. This packet does not claim a cryptographic proof.
+outputs. The preflight carrier is transient: the confirmed signed slot retains
+the exact source, Message-ID, source identity and detached signatures that
+`hybrid-author` consumes. Fn's author command verifies those signatures and
+renders the admitted carrier under its own injection observation. The reopened
+native carrier must be independently verified against the stored source,
+identity and full keyset; its Path and Injection-Date projection may differ
+from the preflight carrier. This packet does not claim a cryptographic proof.
 The first native refusal probe pointed it at an absent prepared sidecar and
 nonexistent private-key paths: it returned exit 2 (`unprepared`) before
 creating a source or signed slot, so no signer call was reachable.
@@ -88,7 +93,7 @@ creating a source or signed slot, so no signer call was reachable.
 2. **Signed:** Mini first reads the signed slot. If absent, it asks fn's native
    signer to sign the prepared exact source under the selected keys, checks
    the result against the plan and full public keyset, then installs the
-   exact source, signatures and rendered carrier into a second absent-only
+   exact source, source identity and detached signatures into a second absent-only
    slot. A lost CAS reply is resolved by reopening that slot. A retry uses
    its existing bytes and does not sign again. A conflicting signed slot
    refuses; a second concurrent candidate never replaces the first.
@@ -109,8 +114,10 @@ does not gate outbox delivery. Death after a prepared plan but before signing
 resumes that exact plan. Death after signing but before a clear CAS response
 queries the signed slot before making another signature. Death during post
 uses fn lookup and never creates a new Message-ID. The first native fixture
-must exercise these cuts and compare the exact source, signatures, carrier,
-Message-ID and source identity across retry and owner reopen.
+must exercise these cuts and compare the exact source, detached signatures,
+Message-ID and source identity across retry. After owner reopen it must
+verify the admitted carrier through fn's native verifier and compare its
+authored source, identity and keyset with Mini's persisted selection.
 
 The local fn `hybrid-sign`/`hybrid-author` path and full-keyset verifier remain
 cryptographic and I/O trust boundaries. SQLite's CAS, fsync and recovery are
