@@ -1291,8 +1291,13 @@ def run (arguments : List String) : IO UInt32 := do
                   stdin := .null, stdout := .piped, stderr := .null }
               let _ ← readBoundedLoop carrier.stdout 128
               let carrierExit ← carrier.wait
-              unless carrierExit == 0 do
-                throw (IO.userError "fn native reply carrier signer refused")
+              if carrierExit != 0 then
+                let stage := if carrierExit == 1 then "refused"
+                  else if carrierExit == 3 then "uncertain" else "transport-fault"
+                writeJson resultPath <| Lean.Json.mkObj
+                  [("type", toJson "fn-reply-sign-stage-v1"),
+                   ("stage", toJson stage)]
+                return if carrierExit == 1 then 2 else if carrierExit == 3 then 3 else 4
               let verified ← IO.Process.spawn
                 { cmd := pin.fnBinary,
                   args := #["--fn", "hybrid-verify-source", carrierPath,
@@ -1300,8 +1305,13 @@ def run (arguments : List String) : IO UInt32 := do
                   stdin := .null, stdout := .piped, stderr := .null }
               let verifiedOutput ← readBoundedLoop verified.stdout 70000
               let verifiedExit ← verified.wait
-              unless verifiedExit == 0 do
-                throw (IO.userError "fn native reply carrier verifier refused")
+              if verifiedExit != 0 then
+                let stage := if verifiedExit == 1 then "refused"
+                  else if verifiedExit == 3 then "uncertain" else "transport-fault"
+                writeJson resultPath <| Lean.Json.mkObj
+                  [("type", toJson "fn-reply-sign-stage-v1"),
+                   ("stage", toJson stage)]
+                return if verifiedExit == 1 then 2 else if verifiedExit == 3 then 3 else 4
               let verifiedSource ← IO.ofExcept (parseFnPortableLine
                 (String.fromUTF8! verifiedOutput.toByteArray))
               unless verifiedSource.source == prepared.source &&
@@ -1317,8 +1327,13 @@ def run (arguments : List String) : IO UInt32 := do
                   stdin := .null, stdout := .piped, stderr := .null }
               let signatureOutput ← readBoundedLoop signer.stdout 7000
               let signerExit ← signer.wait
-              unless signerExit == 0 do
-                throw (IO.userError "fn native detached reply signer refused")
+              if signerExit != 0 then
+                let stage := if signerExit == 1 then "refused"
+                  else if signerExit == 3 then "uncertain" else "transport-fault"
+                writeJson resultPath <| Lean.Json.mkObj
+                  [("type", toJson "fn-reply-sign-stage-v1"),
+                   ("stage", toJson stage)]
+                return if signerExit == 1 then 2 else if signerExit == 3 then 3 else 4
               let (edSignature, mlSignature) ← IO.ofExcept (parseFnHybridSignLine
                 (String.fromUTF8! signatureOutput.toByteArray))
               let candidate : FnReplyPublication.Signed :=

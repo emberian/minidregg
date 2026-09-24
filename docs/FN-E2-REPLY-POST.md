@@ -98,6 +98,12 @@ The first native sign/post fixture later installed a prepared plan, then fn's
 synthetic source adds the fixed Date before a fresh plan is staged and bumps
 the Message-ID domain from v1 to v2, so the changed source cannot reuse the
 old prepared identity. The old SQLite slot is retained as refusal evidence.
+The first Mini host surfaced that definite fn refusal only as a generic exit 1.
+The repaired sign stage maps native exit 1 to structured `refused`/exit 2,
+native exit 3 to `uncertain`/exit 3 and other nonzero native exits to
+`transport-fault`/exit 4 before any signed record or post is exported.
+Unexpected spawn, output-read and parse exceptions still need a separate
+boundary audit.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation
