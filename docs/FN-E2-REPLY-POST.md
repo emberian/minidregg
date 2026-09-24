@@ -76,6 +76,9 @@ isolated native post/reopen witness are pending. The rendered carrier used
 for keyset/source preflight and the detached signatures are separate signer
 outputs; fn's author command must still verify the detached signatures at
 Store admission. This packet does not claim a cryptographic proof.
+The first native refusal probe pointed it at an absent prepared sidecar and
+nonexistent private-key paths: it returned exit 2 (`unprepared`) before
+creating a source or signed slot, so no signer call was reachable.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation
