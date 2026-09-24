@@ -60,8 +60,10 @@ Mini's driver:
    `mini-finished.json` only after that
    readback. The fn fixture then cold-reopens its Stores, observes protected
    B→A delivery, verifies the reopened carrier and historical verdict, and
-   polls Q with A's original consumer. The fn-side fixture records whether A
-   durably acknowledges its own consumer cursor after independent checks.
+   polls Q with A's original consumer. A's Q cursor stays unacknowledged:
+   this fixture has no durable A-side Mini application result transaction.
+   Its final consumer observation is a read and verification, not a claim
+   that A completed application work.
    It atomically publishes `owner-finished.json` and retains A's carrier,
    native verified source/verifier tuple and poll cursor/event. Mini's driver
    independently calls the native verifier and `consumer-project` on A's

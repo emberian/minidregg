@@ -305,6 +305,7 @@ owner = json.loads((OUT / "owner-finished.json").read_text("ascii"))
 assert owner["result"] == "accepted"
 assert owner["message_id"] == signed["messageId"]
 assert owner["source_identity"] == signed["sourceIdentity"]
+assert owner["a_q_position_unchanged"] is True
 for remote_name, local_name in (("a-q-carrier.eml", "q-at-a.eml"),
                                 ("a-q-verified-source.bin", "q-verified-at-a.source"),
                                 ("a-q-verifier.txt", "a-q-verifier.txt"),
