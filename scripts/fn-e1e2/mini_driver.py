@@ -22,6 +22,9 @@ HANDOFF = os.environ["FN_E1E2_HANDOFF"]
 HOST = Path(os.environ["FN_E1E2_MINI_HOST"])
 CONFIG = Path(os.environ["FN_E1E2_MINI_CONFIG"])
 MINI = Path(os.environ["FN_E1E2_MINI_CLIENT"])
+EXPECTED_FN_IMAGE = os.environ["FN_E1E2_EXPECTED_FN_IMAGE"]
+EXPECTED_FN_LAUNCHER_SHA256 = os.environ["FN_E1E2_EXPECTED_FN_LAUNCHER_SHA256"]
+EXPECTED_FN_CORE_SHA256 = os.environ["FN_E1E2_EXPECTED_FN_CORE_SHA256"]
 BRIDGE = HERE / "fn_bridge.sh"
 OUT.mkdir(exist_ok=False)
 TIMINGS = {}
@@ -101,8 +104,16 @@ TIMINGS["wait-ready"] = {"seconds": round(time.monotonic() - started, 3),
 run("ready", ["scp", "-q", "hbox:" + HANDOFF + "/ready.json", OUT / "ready.json"])
 READY = json.loads((OUT / "ready.json").read_text("ascii"))
 assert READY["version"] == 1 and READY["consumer_b"] == "worker"
-assert READY["image"] == "/tank/fn/gates/luna-feature-e160442f/build/fn-host"
+assert READY["image"] == remote_path(EXPECTED_FN_IMAGE)
+assert READY["image"].startswith("/tank/fn/gates/")
 assert READY["q_generation"] == 2
+for digest in (EXPECTED_FN_LAUNCHER_SHA256, EXPECTED_FN_CORE_SHA256):
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+run("hash-fn-image", remote("sha256sum", READY["image"], READY["image"] + ".core"))
+image_hashes = (OUT / "hash-fn-image.stdout").read_text("ascii").strip().splitlines()
+assert len(image_hashes) == 2
+assert image_hashes[0].split() == [EXPECTED_FN_LAUNCHER_SHA256, READY["image"]]
+assert image_hashes[1].split() == [EXPECTED_FN_CORE_SHA256, READY["image"] + ".core"]
 os.environ["FN_B3_IMAGE"] = READY["image"]
 
 # R's exact source is old experimental content, but the fn publication and

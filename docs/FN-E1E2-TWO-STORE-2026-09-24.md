@@ -1,7 +1,7 @@
 # Isolated A→B→A exchange, qualification record
 
-Status: **harness prepared; composed owner not yet run**. This record will be
-extended only after the timed native fixture produces an exact result. It
+Status: **harness prepared; composed owner not yet run**. This record keeps
+the exact untimed preflight result separate from any later timed result. It
 follows fn `planning/experiments/e1-e2-agent-exchange.md` and
 `specs/consumer-progress.md`. The earlier native E2 poll/transaction/ACK and
 single-Store B3 sign/post/cold-reopen are separate observations in
@@ -85,3 +85,50 @@ refused and uncertain as distinct outcomes. A's Q consumer cursor remains
 unacknowledged without a durable A-side application transaction. No fn ACK
 or post claims exactly-once external effects. No `/tank/fn/node` service,
 Mini main branch, remote publication or deployment was changed.
+
+## Untimed two-Store composition refusal
+
+An untimed e160 owner preflight did perform fresh native `hybrid-sign` and
+`hybrid-author` of that exact R source at A, protected STARTTLS+AUTHINFO
+A→B transit, B ARTICLE retrieval, and B native `hybrid-verify-source` on
+the received carrier. B's local-owner consumer poll then returned a
+30,338-byte legacy `fn-r` Store article record (sequence 3, transaction 3),
+not a kind-4 `fn-stxa` composite. The native ACL2 `consumer-project` returned
+`fn-consumer-project-refused-v1 codec`. More decisively, protected B
+`HDR :fn-verified <R>` returned `0 absent no-field` both at keyring
+generation 1 before rotation and generation 2 after. The independent
+cryptographic verification of current carrier bytes cannot be recast as an
+acceptance-time Store verdict.
+
+The e160 owner fixture was **not** launched for a timed Mini handoff and no
+`ready.json` was published. Fn's `fn-owner-consumer-local-poll` emits raw
+`fn-r` when the accepted event is not `fn-stxa`; `fn-cpj-project` requires
+`fn-stxa-decode-exact`, authenticated authored-source binding and a retained
+verified verdict. Mini's `FnPollProjection` and `StorePollInbox.valid` require
+that same nonempty historical verdict and the exact observed poll/control
+binding. A Python conversion of the legacy record, or a later standalone
+`hybrid-verify-source` call, cannot fill the missing Store event. The next
+qualified fn image must verify peer ingress under B's acceptance-time
+keyring and durably retain a bound kind-4 composite/verdict before this
+driver can claim B2. This is a new native behavior/proof/host obligation,
+not a test waiver.
+
+Untimed exact e160 artifacts are under
+`/tank/fn/gates/luna-feature-e160442f/build/freeze/`:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `e160-two-store-preflight-v3.log` | `b311c4e0e68a06551bd4e1c850898add46e56f4cb5051fa4f469587e999eff6f` |
+| `e1e2-preflight-artifacts/b-preview.fn-e` (raw `fn-r`) | `11efb2f90173390718192d0efbf7cd5c488592f9425ddf71baf9420c1d0d7d5f` |
+| `e1e2-preflight-artifacts/b-preview.fncu` | `b0f4e0b505f48ae7d24395b20af23428d1fe1cc44ad9089bba480b02a706f606` |
+| `e1e2-preflight-artifacts/r-at-b.eml` | `cb7042042f52e6e10a4ec4956a691c6fd9cdc342245a2563e0b9c4a30530422f` |
+| `e1e2-preflight-artifacts/b-r-header-gen1.txt` | `8e630bb5ac2c0a6f7cb5d970fc946e60b204cd7b6a18a3c9bcdaa943c591d2f3` |
+| `e1e2-preflight-artifacts/b-r-header-gen2.txt` | `8e630bb5ac2c0a6f7cb5d970fc946e60b204cd7b6a18a3c9bcdaa943c591d2f3` |
+| ACL2 record diagnostic log | `99bce8f282b4dcf37af7dce0bef4ce5979726fa61a25a6fc70b47028ae5c6609` |
+
+The staged test-only owner fixture SHA-256 was
+`daf37a1f94f249344f204489210d3715018ae671869377ebf716c0c0bf9d503c`;
+it did not change the qualified e160 source/image. Fn's separate gap record
+is commit `564d0e6a`. The retained Mini driver is parameterized to require
+the future qualified image path and exact launcher/core hashes at invocation,
+so it will not silently reuse e160 for the missing capability.

@@ -81,16 +81,24 @@ The exact Mini executable for the first composed run is the clean B3
 functional baseline built from source `1eb84a9a46e08aa423a99e39ad74a9be538b5385`,
 SHA-256 `11f451f7c14d55efcb16ee16f99bfffc20f551a7ebf173d5090966e1434f68f9`.
 The later policy-projection candidate `568bbbea...` has not repeated the
-native B3 sign/post path and is excluded from this run. Fn uses qualified
-e160 production image; its source/image/manifest hashes are in the run
-evidence. `fn_bridge.sh` transports commands and opaque files, not an
-independent consumer, signing or Store model.
+native B3 sign/post path and is excluded from this run. The qualified e160
+production image passed reciprocal protected peering but its B peer ingress
+produced only a raw `fn-r` poll record and no historical verified verdict;
+it cannot complete this composed trace. A later qualified image must make
+the B poll return a bound kind-4 composite with an acceptance-time verdict.
+The driver requires that image's exact path and launcher/core hashes.
+`fn_bridge.sh` transports commands and opaque files, not an independent
+consumer, signing or Store model.
 
-With the fn owner fixture launched separately and holding at the atomic
-handoff, invoke on the Mini host:
+Once that native feature has a source-matched qualified image and the fn
+owner fixture is launched separately at its atomic handoff, invoke on the
+Mini host after filling in the image/gate placeholders:
 
 ```sh
-FN_E1E2_HANDOFF=/tank/fn/gates/luna-feature-e160442f/build/mini-e1e2-two-store-1 \
+FN_E1E2_HANDOFF=/tank/fn/gates/<qualified-fn-gate>/build/mini-e1e2-two-store-1 \
+FN_E1E2_EXPECTED_FN_IMAGE=/tank/fn/gates/<qualified-fn-gate>/build/fn-host \
+FN_E1E2_EXPECTED_FN_LAUNCHER_SHA256=<64-hex-launcher-sha256> \
+FN_E1E2_EXPECTED_FN_CORE_SHA256=<64-hex-core-sha256> \
 FN_E1E2_OUTPUT=/tmp/mini-fn-e1e2-two-store-20260924/run-1 \
 FN_E1E2_MINI_HOST=/tmp/mini-b3-build-1eb84a9/build/minidregg-host-b3 \
 FN_E1E2_MINI_CONFIG=/tmp/mini-fn-e1e2-two-store-20260924/mini-config.json \
