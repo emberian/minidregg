@@ -277,6 +277,18 @@ def operationPreimage (domain semantics : Digest) (application operation : List 
     (StreamCodec.product bytesStream bytesStream))).encode
     (domain, semantics, application, operation)
 
+/-- Stable application operation derived once from the independently verified
+Mini origin. Both the B request and A reply consumer use this same owner. -/
+def originOperation (origin : FnEvidenceCodec.Package) : List UInt8 :=
+  let originKey := (StreamCodec.product digestStream
+    (StreamCodec.product digestStream
+      (StreamCodec.product digestStream digestStream))).encode
+        (origin.domain, origin.semantics, origin.genesisPin,
+          origin.originalReceipt.transactionId)
+  let operationDigest := Sp800185Cshake256.hash
+    "DREGG.FN.MINI-ORIGIN-OPERATION/v1".toUTF8.toList originKey
+  (String.ofList (Nat.toDigits 16 operationDigest.digest.value)).toUTF8.toList
+
 /-- Source identity is deliberately absent. The even tag is reserved for a
 unique application effect; odd nonces are for distinct conflict evidence. -/
 def operationNonce (domain semantics : Digest) (application operation : List UInt8) : Nat :=

@@ -132,3 +132,32 @@ it did not change the qualified e160 source/image. Fn's separate gap record
 is commit `564d0e6a`. The retained Mini driver is parameterized to require
 the future qualified image path and exact launcher/core hashes at invocation,
 so it will not silently reuse e160 for the missing capability.
+
+## A-side durable reply consumer prepared after the refusal
+
+Mini now has a strict Lean parser for the fixed synthetic Q profile and a
+separate A-side reply-consumption decision. The host calls A's observed local
+fn poll, ACL2 consumer projection and native hybrid source verifier; it also
+re-admits R's exact original Mini package before constructing the report.
+The result command retains the exact Q carrier, fn cursor/report, native
+historical verdict, R receipt and parsed Q correlation in one accepted Mini
+transaction. A source-independent `(application, operation)` marker permits
+one result; a distinct observed Q for that operation is conflict evidence.
+The export command cold-reopens the accepted event, and the ACK command
+requires its exact retained cursor/report and control binding. The A result
+means that Mini durably observed and correlated Q, not that an external effect
+ran exactly once.
+
+`lake build Kernel.FnReplyConsumption Host.Main` passed. The retained
+`scripts/fn-e1e2/check_reply_consumption.lean` passed against the exact
+previous B3 Q source at
+`/tmp/mini-fn-reply-plan-20260924/live-b3-retry-1/reply.source`; it checked
+canonical inbox codec and fresh operation command, and refused absent local
+poll observation, changed R source identity, changed operation and a modified
+Date. This is source-level testing only. No A Mini result was submitted and
+the previously qualified e160 image still cannot provide a B or A historical
+peer-ingress verdict. The current two-Store driver ends with native A
+observation; a future source-matched fn owner must keep A control live for a
+second atomic `a-ready.json`/`a-mini-finished.json` handoff and a separate
+fresh A Mini deployment. The new Mini host source has not repeated the full
+B3 native sign/post run and does not replace that qualified baseline.

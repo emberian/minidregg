@@ -70,12 +70,37 @@ Mini's driver:
    artifacts, then runs `check_a_reply.lean` against its durable prepared
    and signed slots, canonical Q, R source/identity and A's verified source.
 
+The A-side Mini reply consumer is implemented separately in
+`Kernel/FnReplySource.lean`, `Kernel/FnReplyConsumption.lean` and
+`Host/Main.lean`. `reply-consumer-poll-decide` independently re-admits R's
+Mini origin package, calls A's actual local `consumer poll`, projects its
+native historical verdict, verifies Q's exact carrier with fn native
+`hybrid-verify-source`, and checks Q's application, operation, R source
+identity, parent Message-ID and original Mini receipt. One atomic local
+transaction creates the result and exact Q/poll inbox under an operation
+marker independent of Q's source identity. A changed Q for that operation
+records conflict evidence instead of creating a second result.
+`reply-consumer-export-result` reopens the accepted event before exporting
+the result and inbox. `reply-consumer-ack-poll` requires that reopened result
+and exact native cursor/report before fn ACK. A lost ACK response must be
+settled against native `consumer position`; the local result does not assert
+exactly-once external execution.
+
+The future fn owner must atomically publish `a-ready.json` after Q reaches
+reopened A, with live A control, A's registered consumer scope and Q key pin,
+then hold until Mini writes `a-mini-finished.json` after its accepted result
+and ACK. The staged e160 owner currently polls A itself and exits. The A
+Mini source has a pure negative test against the exact earlier B3 Q, but no
+composed A runtime claim. Both B and A native polls require the receiver-side
+kind-4 historical verdict missing from e160. A's Mini deployment must use
+its own fresh configuration and admin/custody identity, separate from B.
+
 The result distinguishes exact authored source from Path/Xref and other
 mutable native projections. `mini-finished.json` reports an accepted B post
-only after lookup settlement. It does not claim that A has acted until the fn
-fixture's own final record passes. An A-side application inbox transaction is
-not implemented by this driver; the final A consumer observation is a bounded
-native read/verifier witness, not a general Mini reply-handling feature.
+only after lookup settlement. The current driver does not yet invoke the new
+A Mini result path; its final A observation remains a bounded native
+read/verifier witness. A later qualified fn image and second live handoff
+are needed for that composed trace.
 
 The exact Mini executable for the first composed run is the clean B3
 functional baseline built from source `1eb84a9a46e08aa423a99e39ad74a9be538b5385`,

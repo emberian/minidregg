@@ -14,6 +14,7 @@ import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnReplyPublication
+import Kernel.FnReplyConsumption
 import Kernel.FnPortableSource
 import Host.Json
 import Lean.Data.Json
@@ -451,8 +452,8 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   IO.FS.writeBinFile carrierPath projected.received.toByteArray
   pure (cursor, event, projected.received)
 
-def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
-    (carrierPath : String) : IO (List UInt8 × FnPortableVerified × FnPortableSource.Extracted) := do
+def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
+    (carrierPath : String) : IO (List UInt8 × FnPortableVerified) := do
   let carrier ← readBoundedBytes carrierPath 32768
   unless !carrier.isEmpty do throw (IO.userError "empty fn carrier")
   let expectedPrincipal ← IO.ofExcept (decodeCanonicalHex "pinned principal" pin.principal)
@@ -484,6 +485,11 @@ def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
       verified.mlPublicKey == expectedMl &&
       verified.sourceIdentity == expectedId do
     throw (IO.userError "fn portable identity differs from independent pin or claim")
+  pure (carrier, verified)
+
+def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
+    (carrierPath : String) : IO (List UInt8 × FnPortableVerified × FnPortableSource.Extracted) := do
+  let (carrier, verified) ← verifyFnCarrier pin claim carrierPath
   let extracted ← IO.ofExcept (FnPortableSource.extract verified.source)
   unless extracted.messageId == claim.messageId && extracted.groups == claim.groups do
     throw (IO.userError "fn source metadata differs from claimed exact report")
@@ -529,15 +535,7 @@ def portableConsumerReport (policy : FnConsumerOperation.Policy)
     (verified : FnPortableVerified)
     (carrier package : List UInt8) (origin : FnEvidenceCodec.Package) :
     FnConsumerOperation.Report :=
-  let originKey := (StreamCodec.product digestStream
-    (StreamCodec.product digestStream
-      (StreamCodec.product digestStream digestStream))).encode
-        (origin.domain, origin.semantics, origin.genesisPin,
-          origin.originalReceipt.transactionId)
-  let operationDigest := Sp800185Cshake256.hash
-    "DREGG.FN.MINI-ORIGIN-OPERATION/v1".toUTF8.toList originKey
-  let operation := String.ofList (Nat.toDigits 16 operationDigest.digest.value)
-  ⟨policy.application, operation.toUTF8.toList,
+  ⟨policy.application, FnConsumerOperation.originOperation origin,
     ⟨"fn-store-unestablished".toUTF8.toList,
       "fn-store-unestablished".toUTF8.toList,
       verified.sourceIdentity,
@@ -742,8 +740,110 @@ def runPollConsumerDecision (config : NativeHost.Config)
       | .refused _ => pure 1
       | _ => pure 0
 
+/-- A's observed local Q poll is admitted only after independently reopening
+the original R Mini package. The fn projection supplies Store history; the
+native hybrid verifier supplies exact portable authorship. -/
+def runReplyConsumerPollDecision (config : NativeHost.Config)
+    (originPath rPinPath rClaimPath rCarrierPath qPinPath scopePath qClaimPath
+     policyPath controlPath cursorPath reportPath carrierPath intentPath
+     resultPath : String) : IO UInt32 := do
+  let origin := (← loadSettings originPath).config
+  let rPinJson ← readJson rPinPath
+  let rClaimJson ← readJson rClaimPath
+  let qPinJson ← readJson qPinPath
+  let scopeJson ← readJson scopePath
+  let qClaimJson ← readJson qClaimPath
+  let policyJson ← readJson policyPath
+  for (label, value) in [("R fn pin", rPinJson), ("Q fn pin", qPinJson)] do
+    IO.ofExcept (requireExactFields label
+      ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] value)
+  for (label, value) in [("R fn claim", rClaimJson), ("Q fn claim", qClaimJson)] do
+    IO.ofExcept (requireExactFields label ["sourceIdentity", "messageId", "groups"] value)
+  IO.ofExcept (requireExactFields "A fn scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+  IO.ofExcept (requireExactFields "A reply policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let rPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
+  let rClaim : FnPortableClaim ← IO.ofExcept (fromJson? rClaimJson)
+  let qPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+  let qClaim : FnPortableClaim ← IO.ofExcept (fromJson? qClaimJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let (_, rVerified, rExtracted) ← verifyFnPortable rPin rClaim rCarrierPath
+  let originReceipt ← IO.ofExcept (← FnEvidence.verify origin rExtracted.package)
+  let originPackage ← IO.ofExcept (FnEvidenceCodec.decodeChecked rExtracted.package)
+  unless originPackage.originalReceipt == originReceipt do
+    throw (IO.userError "R package receipt differs from Mini's re-admitted origin")
+  let (cursor, event, _) ←
+    invokeFnConsumerPoll qPin.fnBinary scope controlPath cursorPath reportPath carrierPath
+  let (projectedCursor, projectedEvent, projection) ←
+    projectFnPoll qPin.fnBinary scope cursorPath reportPath
+  unless cursor == projectedCursor && event == projectedEvent do
+    throw (IO.userError "A fn poll changed before Mini projection")
+  let (carrier, verified) ← verifyFnCarrier qPin qClaim carrierPath
+  let extracted ← IO.ofExcept (FnReplySource.extract verified.source)
+  unless projection.received == carrier && projection.source == verified.source &&
+      projection.sourceIdentity == verified.sourceIdentity &&
+      projection.verdictPrincipal == verified.principal &&
+      projection.messageId == extracted.messageId.toUTF8.toList &&
+      qClaim.messageId == extracted.messageId && qClaim.groups == "fn.test" do
+    throw (IO.userError "A historical verdict differs from exact native Q carrier")
+  let policy := policySource.policy
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  let probeTarget : DeclaredResourceController.Target :=
+    ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
+      .content ⟨[]⟩, none⟩
+  let targetRoot ← IO.ofExcept <| (do
+    let .present cell := opened.directory.directory.slots policy.target
+      | throw "A reply consumer target is absent"
+    let some pre := DeclaredResourceController.selectTarget
+      config.deployment probeTarget cell
+      | throw "A reply consumer target is not a valid content resource"
+    pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
+  let storePoll : FnConsumerOperation.StorePollInbox :=
+    ⟨cursor, event, true, projection.sourceIdentity, projection.sequence,
+      projection.transactionId, projection.messageId,
+      projection.verdictPrincipal, projection.verdictEvent,
+      FnConsumerOperation.pollControlBinding qPin.fnBinary controlPath⟩
+  let report : FnReplyConsumption.Report :=
+    ⟨policy.application, FnConsumerOperation.originOperation originPackage,
+      rVerified.sourceIdentity, rExtracted.messageId.toUTF8.toList,
+      originReceipt, verified.source, verified.sourceIdentity,
+      extracted.messageId.toUTF8.toList,
+      ⟨carrier, verified.sourceIdentity, verified.principal,
+        verified.edPublicKey, verified.mlPublicKey⟩, storePoll,
+      policy.subject, policy.target, policy.capability,
+      opened.authority.snapshot.cell.root, targetRoot⟩
+  let decision := FnReplyConsumption.evaluate config.deployment.domain
+    config.profile.semantics ⟨policy.application, policy.subject,
+      policy.target, policy.capability⟩ report opened.durable.image.accepted
+  let verdict := match decision with
+    | .fresh _ _ => "proposed-fresh"
+    | .repeated _ => "repeated"
+    | .conflict _ => "proposed-conflict"
+    | .conflictRecorded => "conflict-recorded"
+    | .refused _ => "refused"
+  writeJson resultPath <| Lean.Json.mkObj
+    [("type", toJson "fn-a-reply-consumer-decision-v1"),
+     ("decision", toJson verdict),
+     ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
+     ("qSourceIdentity", toJson
+       (Minidregg.Host.Json.encodeHex verified.sourceIdentity)),
+     ("fnStoreSequence", toJson (toString projection.sequence)),
+     ("fnStoreTransactionId", toJson (toString projection.transactionId)),
+     ("miniOrigin", evidenceReceiptJson originReceipt)]
+  match decision.intent report with
+  | some intent =>
+      writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+      pure 0
+  | none =>
+      match decision with
+      | .refused _ => pure 1
+      | _ => pure 0
+
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -991,6 +1091,97 @@ def run (arguments : List String) : IO UInt32 := do
               polledCarrier == (← readBoundedBytes carrierPath 32768) do
             throw (IO.userError "fn poll output changed before Mini decision completed")
           pure exitCode
+      | "reply-consumer-poll-decide",
+          [originPath, rPinPath, rClaimPath, rCarrierPath,
+           qPinPath, scopePath, qClaimPath, policyPath, controlPath,
+           cursorPath, reportPath, carrierPath, intentPath, resultPath] =>
+          runReplyConsumerPollDecision config originPath rPinPath rClaimPath
+            rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath
+            cursorPath reportPath carrierPath intentPath resultPath
+      | "reply-consumer-export-result",
+          [transaction, resultPath, inboxPath, cursorPath, reportPath] =>
+          let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let some record := opened.durable.image.accepted.find?
+              (fun entry => entry.transactionId.value == transactionId)
+            | throw (IO.userError "A reply result transaction is absent")
+          let some (result, inbox) :=
+              FnReplyConsumption.originalResult config.deployment.domain
+                config.profile.semantics record
+            | throw (IO.userError "A reply result is not a canonical accepted operation")
+          unless inbox.storePoll.pollCallObserved do
+            throw (IO.userError "A reply result lacks an observed fn poll")
+          writeBytes resultPath (FnReplyConsumption.resultCodec.encode result)
+          writeBytes inboxPath (FnReplyConsumption.reportCodec.encode inbox)
+          writeBytes cursorPath inbox.storePoll.cursor
+          writeBytes reportPath inbox.storePoll.event
+          pure 0
+      | "reply-consumer-ack-poll",
+          [pinPath, scopePath, controlPath, transaction,
+           cursorPath, eventPath, resultPath] =>
+          let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+          unless controlPath.startsWith "/" && cursorPath.startsWith "/" &&
+              eventPath.startsWith "/" do
+            throw (IO.userError "A reply ack paths must be absolute")
+          let pinJson ← readJson pinPath
+          let scopeJson ← readJson scopePath
+          IO.ofExcept (requireExactFields "Q fn pin"
+            ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+          IO.ofExcept (requireExactFields "A fn scope"
+            ["history", "incarnation", "consumer", "principal", "query",
+             "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+          let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let some record := opened.durable.image.accepted.find?
+              (fun entry => entry.transactionId.value == transactionId)
+            | throw (IO.userError "A reply result transaction is absent")
+          let some (_, inbox) := FnReplyConsumption.originalResult
+              config.deployment.domain config.profile.semantics record
+            | throw (IO.userError "A reply result is not a reopened accepted operation")
+          let stored := inbox.storePoll
+          unless stored.pollCallObserved && stored.controlBinding ==
+              FnConsumerOperation.pollControlBinding pin.fnBinary controlPath do
+            throw (IO.userError "A reply ack control differs from durable observed poll")
+          let (cursor, event, projected) ←
+            projectFnPoll pin.fnBinary scope cursorPath eventPath
+          unless cursor == stored.cursor && event == stored.event &&
+              projected.sourceIdentity == stored.sourceIdentity &&
+              projected.sequence == stored.sequence &&
+              projected.transactionId == stored.transactionId &&
+              projected.messageId == stored.messageId &&
+              projected.verdictPrincipal == stored.verdictPrincipal &&
+              projected.verdictEvent == stored.verdictEvent do
+            throw (IO.userError "A reply ack pair differs from durable Mini inbox")
+          let child ← IO.Process.spawn
+            { cmd := pin.fnBinary,
+              args := #["--fn", "consumer", "ack", controlPath, cursorPath],
+              stdin := .null, stdout := .piped, stderr := .null }
+          let output ← try readBoundedLoop child.stdout 128
+            catch error =>
+              child.kill
+              discard <| child.wait
+              throw error
+          let exitCode ← child.wait
+          unless cursor == (← readBoundedBytes cursorPath 346) &&
+              event == (← readBoundedBytes eventPath 196608) do
+            throw (IO.userError "A reply ack inputs changed during local call")
+          let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+              "durable-accepted"
+            else if exitCode == 2 then "refused"
+            else if exitCode == 3 then "uncertain"
+            else "transport-fault"
+          writeJson resultPath <| Lean.Json.mkObj
+            [("type", toJson "fn-a-reply-ack-after-mini-v1"),
+             ("miniTransactionId", toJson transaction),
+             ("miniResult", toJson "reopened-accepted"),
+             ("fnStoreSequence", toJson (toString stored.sequence)),
+             ("fnStoreTransactionId", toJson (toString stored.transactionId)),
+             ("fnAck", toJson status)]
+          if status == "durable-accepted" then pure 0
+          else if status == "refused" then pure 2
+          else if status == "uncertain" then pure 3
+          else pure 4
       | "consumer-export-inbox", [transaction, inboxPath, carrierPath, resultPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let (inbox, kind, atomId) ← IO.ofExcept
