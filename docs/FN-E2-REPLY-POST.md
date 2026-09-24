@@ -62,10 +62,20 @@ post was invoked in this trial.
 
 The next typed packet adds `Signed`, a canonical record containing that
 prepared plan and exact detached 64-byte Ed25519 and 3,309-byte ML-DSA-65
-signatures. Its Lean validation binds the original plan and signature widths
+signatures plus fn's 48-byte source identity. Its Lean validation binds the original plan and signature widths
 under a 12,288-byte bound; the live-Q probe checked a codec round trip and
 short-signature refusals. Cryptographic verification and sidecar installation
-of this record still require the native signer/verifier and physical CAS path.
+of this record use fn's native `hybrid-sign-carrier`,
+`hybrid-verify-source` and `hybrid-sign` commands. The host checks the full
+public keyset and exact source from that native verifier, then installs the
+detached tuple by absent-only opaque SQLite CAS and reads it back before
+exporting signatures for `hybrid-author`. An already installed signed slot
+is read first; retries reuse its exact bytes without calling the signer.
+This host path typechecked and built, but the selected combined fn image and
+isolated native post/reopen witness are pending. The rendered carrier used
+for keyset/source preflight and the detached signatures are separate signer
+outputs; fn's author command must still verify the detached signatures at
+Store admission. This packet does not claim a cryptographic proof.
 
 1. **Prepared:** Mini installs an absent-only unsigned plan containing the
    exact source, Message-ID, Q and parent/source/key bindings. If installation

@@ -307,6 +307,20 @@ def parseFnPortableLine (output : String) : Except String FnPortableVerified := 
     throw "fn portable verifier output has invalid field width"
   pure ⟨principal, sourceIdentity, edPublicKey, mlPublicKey, source⟩
 
+def parseFnHybridSignLine (output : String) : Except String (List UInt8 × List UInt8) := do
+  unless output.length ≤ 7000 do throw "fn hybrid signer output exceeds bound"
+  let (edHex, mlHex) ← match output.splitOn "\n" with
+    | [edLine, mlLine, ""] =>
+        match edLine.splitOn " ", mlLine.splitOn " " with
+        | ["ed25519", ed], ["ml-dsa-65", ml] => pure (ed, ml)
+        | _, _ => throw "fn hybrid signer output has unexpected fields"
+    | _ => throw "fn hybrid signer output has unexpected framing"
+  let ed ← decodeCanonicalHex "fn Ed25519 signature" edHex
+  let ml ← decodeCanonicalHex "fn ML-DSA-65 signature" mlHex
+  unless ed.length == 64 && ml.length == 3309 do
+    throw "fn hybrid signer output has invalid signature width"
+  pure (ed, ml)
+
 def parseFnPollProjectLine (output : String) : Except String FnPollProjection := do
   unless output.length ≤ 400000 do throw "fn consumer projection output exceeds bound"
   let line ← match output.splitOn "\n" with
@@ -729,7 +743,7 @@ def runPollConsumerDecision (config : NativeHost.Config)
       | _ => pure 0
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -1174,6 +1188,196 @@ def run (arguments : List String) : IO UInt32 := do
                ("miniTransactionId", toJson transaction),
                ("messageId", toJson retained.selection.messageId)]
             pure (if accepted then 0 else 2)
+      | "consumer-stage-reply-sign",
+          [fnPinPath, principalPath, edPublicPath, edSecretPath,
+           mlSecretPath, transaction, preparedRoot, signedRoot,
+           planPath, sourcePath, carrierPath, signedCandidatePath,
+           signedReadbackPath, edSignaturePath, mlSignaturePath, resultPath] =>
+          unless [principalPath, edPublicPath, edSecretPath, mlSecretPath,
+              preparedRoot, signedRoot, planPath, sourcePath, carrierPath,
+              signedCandidatePath, signedReadbackPath, edSignaturePath,
+              mlSignaturePath, resultPath].all (·.startsWith "/") do
+            throw (IO.userError "reply signer paths must be absolute")
+          for path in [planPath, sourcePath, carrierPath, signedCandidatePath,
+              signedReadbackPath, edSignaturePath, mlSignaturePath, resultPath] do
+            if ← (System.FilePath.mk path).pathExists then
+              throw (IO.userError "reply signer output path already exists")
+          let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+          let pinJson ← readJson fnPinPath
+          IO.ofExcept (requireExactFields "fn reply signing pin"
+            ["fnBinary", "mlPublicKey", "principal", "edPublicKey",
+             "mlPublicKeyHex"] pinJson)
+          let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+          unless pin.fnBinary.startsWith "/" && pin.mlPublicKey.startsWith "/" do
+            throw (IO.userError "fn reply signer and public key paths must be absolute")
+          let principal ← IO.ofExcept (decodeCanonicalHex "fn reply principal" pin.principal)
+          let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" pin.edPublicKey)
+          let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" pin.mlPublicKeyHex)
+          unless principal == (← readBoundedBytes principalPath 32) &&
+              edPublicKey == (← readBoundedBytes edPublicPath 32) do
+            throw (IO.userError "fn reply signer public files differ from pin")
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          unless opened.durable.image.accepted.length ≤ 16 do
+            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
+          let some record := opened.durable.image.accepted.find?
+              (fun entry => entry.transactionId.value == transactionId)
+            | throw (IO.userError "exact Mini consumer transaction is absent")
+          let some (binding, some _, some store) :=
+              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+                config.profile.semantics record
+            | throw (IO.userError "transaction has no canonical observed fn poll and Q")
+          unless store.pollCallObserved do
+            throw (IO.userError "reply signing requires durable observed fn poll")
+          let selection : FnReplyPublication.Selection :=
+            { domain := config.deployment.domain,
+              semantics := config.profile.semantics,
+              miniTransaction := record.transactionId,
+              miniEvent := record.event.eventId,
+              reply := binding.reply,
+              parentSourceIdentity := store.sourceIdentity,
+              parentMessageId := store.messageId,
+              principal := principal, edPublicKey := edPublicKey,
+              mlPublicKey := mlPublicKey }
+          let expected ← IO.ofExcept selection.prepare
+          let planRead ← IO.Process.spawn
+            { cmd := settings.storageBinary,
+              args := #["read-to", preparedRoot, planPath],
+              stdin := .null, stdout := .piped, stderr := .null }
+          let _ ← readBoundedLoop planRead.stdout 128
+          let planExit ← planRead.wait
+          if planExit != 0 then
+            writeJson resultPath <| Lean.Json.mkObj
+              [("type", toJson "fn-reply-sign-stage-v1"),
+               ("stage", toJson (if planExit == 3 then "unprepared" else "uncertain"))]
+            pure (if planExit == 3 then 2 else 3)
+          else
+            let preparedBytes? ← try pure (some (← readBoundedBytes planPath 8192))
+              catch _ => pure none
+            let some preparedBytes := preparedBytes?
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-sign-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            let some prepared := FnReplyPublication.preparedCodec.decode preparedBytes
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-sign-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            unless prepared.valid && prepared == expected do
+              writeJson resultPath <| Lean.Json.mkObj
+                [("type", toJson "fn-reply-sign-stage-v1"),
+                 ("stage", toJson "conflict")]
+              return 2
+            let prior ← IO.Process.spawn
+              { cmd := settings.storageBinary,
+                args := #["read-to", signedRoot, signedReadbackPath],
+                stdin := .null, stdout := .piped, stderr := .null }
+            let _ ← readBoundedLoop prior.stdout 128
+            let priorExit ← prior.wait
+            if priorExit != 0 && priorExit != 3 then
+              writeJson resultPath <| Lean.Json.mkObj
+                [("type", toJson "fn-reply-sign-stage-v1"),
+                 ("stage", toJson "uncertain")]
+              return 3
+            if priorExit == 3 then
+              writeBytes sourcePath prepared.source
+              let carrier ← IO.Process.spawn
+                { cmd := pin.fnBinary,
+                  args := #["--fn", "hybrid-sign-carrier", principalPath,
+                    edPublicPath, edSecretPath, pin.mlPublicKey, mlSecretPath,
+                    sourcePath, carrierPath],
+                  stdin := .null, stdout := .piped, stderr := .null }
+              let _ ← readBoundedLoop carrier.stdout 128
+              let carrierExit ← carrier.wait
+              unless carrierExit == 0 do
+                throw (IO.userError "fn native reply carrier signer refused")
+              let verified ← IO.Process.spawn
+                { cmd := pin.fnBinary,
+                  args := #["--fn", "hybrid-verify-source", carrierPath,
+                    pin.mlPublicKey],
+                  stdin := .null, stdout := .piped, stderr := .null }
+              let verifiedOutput ← readBoundedLoop verified.stdout 70000
+              let verifiedExit ← verified.wait
+              unless verifiedExit == 0 do
+                throw (IO.userError "fn native reply carrier verifier refused")
+              let verifiedSource ← IO.ofExcept (parseFnPortableLine
+                (String.fromUTF8! verifiedOutput.toByteArray))
+              unless verifiedSource.source == prepared.source &&
+                  verifiedSource.principal == principal &&
+                  verifiedSource.edPublicKey == edPublicKey &&
+                  verifiedSource.mlPublicKey == mlPublicKey do
+                throw (IO.userError "fn reply signed carrier differs from prepared key/source")
+              let signer ← IO.Process.spawn
+                { cmd := pin.fnBinary,
+                  args := #["--fn", "hybrid-sign", principalPath,
+                    edPublicPath, edSecretPath, pin.mlPublicKey, mlSecretPath,
+                    sourcePath],
+                  stdin := .null, stdout := .piped, stderr := .null }
+              let signatureOutput ← readBoundedLoop signer.stdout 7000
+              let signerExit ← signer.wait
+              unless signerExit == 0 do
+                throw (IO.userError "fn native detached reply signer refused")
+              let (edSignature, mlSignature) ← IO.ofExcept (parseFnHybridSignLine
+                (String.fromUTF8! signatureOutput.toByteArray))
+              let candidate : FnReplyPublication.Signed :=
+                ⟨prepared, verifiedSource.sourceIdentity, edSignature, mlSignature⟩
+              unless candidate.valid do
+                throw (IO.userError "fn reply signed artifact exceeds bound")
+              writeBytes signedCandidatePath (FnReplyPublication.signedCodec.encode candidate)
+              let publisher ← IO.Process.spawn
+                { cmd := settings.storageBinary,
+                  args := #["publish", signedRoot, signedCandidatePath],
+                  stdin := .null, stdout := .piped, stderr := .null }
+              let _ ← readBoundedLoop publisher.stdout 128
+              let _ ← publisher.wait
+              let reopened ← IO.Process.spawn
+                { cmd := settings.storageBinary,
+                  args := #["read-to", signedRoot, signedReadbackPath],
+                  stdin := .null, stdout := .piped, stderr := .null }
+              let _ ← readBoundedLoop reopened.stdout 128
+              let reopenedExit ← reopened.wait
+              unless reopenedExit == 0 do
+                writeJson resultPath <| Lean.Json.mkObj
+                  [("type", toJson "fn-reply-sign-stage-v1"),
+                   ("stage", toJson "uncertain")]
+                return 3
+            let signedBytes? ← try pure (some (← readBoundedBytes signedReadbackPath 12288))
+              catch _ => pure none
+            let some signedBytes := signedBytes?
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-sign-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            let some retained := FnReplyPublication.signedCodec.decode signedBytes
+              | do
+                  writeJson resultPath <| Lean.Json.mkObj
+                    [("type", toJson "fn-reply-sign-stage-v1"),
+                     ("stage", toJson "uncertain")]
+                  return 3
+            unless retained.valid do
+              writeJson resultPath <| Lean.Json.mkObj
+                [("type", toJson "fn-reply-sign-stage-v1"),
+                 ("stage", toJson "uncertain")]
+              return 3
+            unless retained.prepared == prepared do
+              writeJson resultPath <| Lean.Json.mkObj
+                [("type", toJson "fn-reply-sign-stage-v1"),
+                 ("stage", toJson "conflict")]
+              return 2
+            if priorExit == 0 then writeBytes sourcePath retained.prepared.source
+            writeBytes edSignaturePath retained.edSignature
+            writeBytes mlSignaturePath retained.mlSignature
+            writeJson resultPath <| Lean.Json.mkObj
+              [("type", toJson "fn-reply-sign-stage-v1"),
+               ("stage", toJson "durable-accepted"),
+               ("miniTransactionId", toJson transaction),
+               ("messageId", toJson retained.prepared.selection.messageId),
+               ("sourceIdentity", toJson
+                 (Minidregg.Host.Json.encodeHex retained.sourceIdentity))]
+            pure 0
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))

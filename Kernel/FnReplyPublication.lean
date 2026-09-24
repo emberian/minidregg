@@ -141,16 +141,18 @@ retained here before any post attempt. Signature validity is established by
 fn's native profile; Lean checks byte widths and the durable prepared plan. -/
 structure Signed where
   prepared : Prepared
+  sourceIdentity : List UInt8
   edSignature : List UInt8
   mlSignature : List UInt8
   deriving DecidableEq, Repr
 
 def signedStream : StreamCodec Signed :=
   StreamCodec.xmap
-    (StreamCodec.product preparedStream
-      (StreamCodec.product bytesStream bytesStream))
-    (fun value => (value.prepared, value.edSignature, value.mlSignature))
-    (fun value => ⟨value.1, value.2.1, value.2.2⟩)
+    (StreamCodec.product preparedStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream bytesStream)))
+    (fun value => (value.prepared, value.sourceIdentity,
+      value.edSignature, value.mlSignature))
+    (fun value => ⟨value.1, value.2.1, value.2.2.1, value.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def signedCodec : LawfulCodec Signed :=
@@ -158,7 +160,8 @@ def signedCodec : LawfulCodec Signed :=
     signedStream
 
 def Signed.valid (value : Signed) : Bool :=
-  value.prepared.valid && value.edSignature.length == 64 &&
+  value.prepared.valid && value.sourceIdentity.length == 48 &&
+  value.edSignature.length == 64 &&
   value.mlSignature.length == 3309 &&
   (signedCodec.encode value).length ≤ 12288
 
