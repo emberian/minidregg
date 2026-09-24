@@ -53,7 +53,8 @@ Mini's driver:
    native `hybrid-verify-source` establish exact presence, keyset and source
    identity before any retry. A definitive absence would require a separate
    same-tuple retry; the accepted trace never re-signs or invents a new ID.
-5. Publishes `posted.source` and atomic `mini-finished.json` only after that
+5. Publishes `posted.source`, `posted.reply.bin` and atomic
+   `mini-finished.json` only after that
    readback. The fn fixture then cold-reopens its Stores, observes protected
    B→A delivery, verifies the reopened carrier and historical verdict, and
    polls Q with A's original consumer. The fn-side fixture records whether A

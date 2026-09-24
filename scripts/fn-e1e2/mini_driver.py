@@ -263,11 +263,14 @@ assert bytes.fromhex(q_verified[5]) == (OUT / "q.source").read_bytes()
 
 run("post-q-source", ["scp", "-q", OUT / "q.source",
                       "hbox:" + HANDOFF + "/posted.source"])
+run("post-q-reply", ["scp", "-q", OUT / "reply.bin",
+                     "hbox:" + HANDOFF + "/posted.reply.bin"])
 marker = {"result": "accepted", "message_id": signed["messageId"],
           "source_identity": signed["sourceIdentity"],
           "mini_transaction": tx, "r_message_id": READY["r_message_id"],
           "r_source_identity": r_verified[2],
-          "source_sha256": sha(OUT / "q.source")}
+          "source_sha256": sha(OUT / "q.source"),
+          "reply_sha256": sha(OUT / "reply.bin")}
 (OUT / "mini-finished.json").write_text(json.dumps(marker, sort_keys=True) + "\n")
 run("post-marker-temp", ["scp", "-q", OUT / "mini-finished.json",
                          "hbox:" + HANDOFF + "/mini-finished.json.tmp"])
