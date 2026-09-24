@@ -59,6 +59,11 @@ Mini's driver:
    B→A delivery, verifies the reopened carrier and historical verdict, and
    polls Q with A's original consumer. The fn-side fixture records whether A
    durably acknowledges its own consumer cursor after independent checks.
+   It atomically publishes `owner-finished.json` and retains A's carrier,
+   native verified source/verifier tuple and poll cursor/event. Mini's driver
+   independently calls the native verifier and `consumer-project` on A's
+   artifacts, then runs `check_a_reply.lean` against its durable prepared
+   and signed slots, canonical Q, R source/identity and A's verified source.
 
 The result distinguishes exact authored source from Path/Xref and other
 mutable native projections. `mini-finished.json` reports an accepted B post

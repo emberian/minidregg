@@ -285,3 +285,58 @@ run("post-marker-atomic", remote("mv", HANDOFF + "/mini-finished.json.tmp",
     "q_carrier_b_sha256": sha(OUT / "q-settled-at-b.eml")},
     sort_keys=True, indent=2) + "\n")
 print("MINI A/B HANDOFF ACCEPTED", tx, flush=True)
+
+# The fn owner now cold-reopens both Stores and observes protected B→A Q.
+# Keep its result separate from the already settled B post above.
+started = time.monotonic()
+for _ in range(240):
+    if subprocess.run(remote("test", "-f", HANDOFF + "/owner-finished.json"),
+                      stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode == 0:
+        break
+    time.sleep(1)
+else:
+    raise RuntimeError("B post settled, but A owner did not finish")
+TIMINGS["wait-a-owner"] = {"seconds": round(time.monotonic() - started, 3),
+                            "exit_code": 0}
+run("fetch-owner-finished", ["scp", "-q", "hbox:" + HANDOFF + "/owner-finished.json",
+                             OUT / "owner-finished.json"])
+owner = json.loads((OUT / "owner-finished.json").read_text("ascii"))
+assert owner["result"] == "accepted"
+assert owner["message_id"] == signed["messageId"]
+assert owner["source_identity"] == signed["sourceIdentity"]
+for remote_name, local_name in (("a-q-carrier.eml", "q-at-a.eml"),
+                                ("a-q-verified-source.bin", "q-verified-at-a.source"),
+                                ("a-q-verifier.txt", "a-q-verifier.txt"),
+                                ("a-q-poll.fncu", "a-q-poll.fncu"),
+                                ("a-q-poll.fn-e", "a-q-poll.fn-e")):
+    run("fetch-" + local_name, ["scp", "-q", "hbox:" + HANDOFF + "/" + remote_name,
+                                OUT / local_name])
+a_verified = native_source("verify-q-at-a", OUT / "q-at-a.eml", q_ml)
+assert a_verified[1:5] == q_verified[1:5]
+assert bytes.fromhex(a_verified[5]) == (OUT / "q.source").read_bytes()
+assert (OUT / "q-verified-at-a.source").read_bytes() == bytes.fromhex(a_verified[5])
+assert (OUT / "a-q-verifier.txt").read_text("ascii").strip().split() == a_verified
+run("project-a-q", [BRIDGE, "--fn", "consumer-project",
+                    OUT / "a-q-poll.fncu", OUT / "a-q-poll.fn-e"])
+a_projected = (OUT / "project-a-q.stdout").read_text("ascii").strip().split(" ")
+assert len(a_projected) == 18 and a_projected[0] == "fn-consumer-project-v1"
+assert a_projected[12] == signed["sourceIdentity"]
+assert bytes.fromhex(a_projected[13]).decode("ascii") == signed["messageId"]
+assert bytes.fromhex(a_projected[14]) == (OUT / "q.source").read_bytes()
+assert bytes.fromhex(a_projected[15]) == (OUT / "q-at-a.eml").read_bytes()
+
+(OUT / "r-source-identity.bin").write_bytes(bytes.fromhex(r_verified[2]))
+run("build-a-check", ["lake", "build", "Kernel.FnReplyPublication"])
+run("check-a-correlation", ["lake", "env", "lean", "--run",
+    HERE / "check_a_reply.lean", OUT / "q-prepared-readback.bin",
+    OUT / "q-signed-readback.bin", OUT / "reply.bin", r_source,
+    OUT / "r-source-identity.bin", OUT / "q-verified-at-a.source"])
+summary = json.loads((OUT / "summary.json").read_text())
+summary["a_owner"] = owner
+summary["a_q_carrier_sha256"] = sha(OUT / "q-at-a.eml")
+summary["a_q_poll_sha256"] = sha(OUT / "a-q-poll.fn-e")
+summary["a_q_source_sha256"] = sha(OUT / "q-verified-at-a.source")
+(OUT / "summary.json").write_text(json.dumps(summary, sort_keys=True,
+                                             indent=2) + "\n")
+print("TWO-STORE A/B/A TRACE PASS", tx, flush=True)
