@@ -19,7 +19,8 @@ class NativeB3Handoff(NativeHybridAuthorTest):
         raw_ml = self.root / "ml-public.raw"
         exported = subprocess.run(
             [OPENSSL, "asn1parse", "-inform", "PEM", "-in",
-             str(self.ml_public), "-strparse", "17", "-out", str(raw_ml)],
+             str(self.ml_public), "-strparse", "17", "-noout",
+             "-out", str(raw_ml)],
             capture_output=True, timeout=30, check=False,
         )
         self.assertEqual(exported.returncode, 0, exported.stderr)
