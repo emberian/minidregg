@@ -54,7 +54,15 @@ theorem controller_input_accepted : accepts running (Operation.input.after runni
 theorem paused_input_refused :
     accepts ⟨8,0,100,0⟩ (Operation.input.after ⟨8,0,100,0⟩) = false := by decide
 
-theorem hard_pending_input_refused : accepts pending (Operation.input.after pending) = false := by decide
+theorem hard_pending_input_accepted : accepts pending (Operation.input.after pending) = true := by decide
+
+theorem witness_cannot_reserve :
+    eval (witnessCaveat 8) ⟨[]⟩
+      ⟨("request/verb",2) :: slots pending (reserve pending 1)⟩ = false := by decide
+
+theorem witness_cannot_settle :
+    eval (witnessCaveat 8) ⟨[]⟩
+      ⟨("request/verb",2) :: slots pending (settle pending 30)⟩ = false := by decide
 
 theorem worker_cannot_submit_input :
     eval (executionCaveat 8) ⟨[]⟩
