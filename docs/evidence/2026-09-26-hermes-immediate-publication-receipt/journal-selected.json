@@ -1,0 +1,34 @@
+{
+  "type": "private-8801-journal-selection-v1",
+  "connection": "soft",
+  "pending": null,
+  "child": null,
+  "toolPending": null,
+  "toolHold": null,
+  "settlementDue": null,
+  "hermesSession": {
+    "id": "e46f2e5f-7265-4899-9b91-9627993a3a9d",
+    "pendingPrompt": false,
+    "retentionIssue": null
+  },
+  "publicationReceipts": [
+    {
+      "promptOperationId": 11,
+      "sessionId": "e46f2e5f-7265-4899-9b91-9627993a3a9d",
+      "operationId": 20,
+      "attempt": "/tmp/mga-publish-receipt-6776154-20260926-corrected/provision/runtime-state/attempt-0000000000000020",
+      "sourceSha256": "d43582189f54c6fcd90f9db781c2bcf282036f943f3ffb1fdb6598b586706341",
+      "callSha256": "de90084177812f1aba9a80d9ff0d7ad5a51fdc67490ba8e2f5c6d65a22822878",
+      "outcomePath": "/tmp/mga-publish-receipt-6776154-20260926-corrected/provision/runtime-state/attempt-0000000000000020/outcome.json",
+      "outcomeSha256": "0a39047c15ddab7d7a117b5dca9a95533f61b19c93089adbc783246e785b1af3",
+      "targets": [
+        "8001"
+      ],
+      "transactionId": "102880997551007654483402307768314486722647903662184607915090640480056943725114",
+      "eventId": "38770132673697865743295794546759905550821464911361871694484504234482815630793",
+      "acceptedCount": "12",
+      "imageBoundary": "41332048024710016913794190886402784449693596895887189859673404093129015808252",
+      "reported": false
+    }
+  ]
+}

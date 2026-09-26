@@ -1,0 +1,4 @@
+completion bytes=36718 stream=true stage=8801 read empty room
+reject bytes=1411 reason=mini_read_resource absent
+completion bytes=37803 stream=true stage=8801 create root=97349327118568466779609446662939988221287696762075284738918673226692685974561
+completion bytes=39908 stream=true stage=8801 receipt observed

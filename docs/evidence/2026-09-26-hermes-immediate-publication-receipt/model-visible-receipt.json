@@ -1,0 +1,18 @@
+{
+  "grainTask": "8802",
+  "publicationReceipt": {
+    "acceptedCount": "12",
+    "eventId": "38770132673697865743295794546759905550821464911361871694484504234482815630793",
+    "imageBoundary": "41332048024710016913794190886402784449693596895887189859673404093129015808252",
+    "promptOperationId": 11,
+    "publicationTargetIds": [
+      "8001"
+    ],
+    "scope": "historical-accepted-transition",
+    "toolOperationId": 20,
+    "transactionId": "102880997551007654483402307768314486722647903662184607915090640480056943725114",
+    "type": "confirmed-mini-publication-v1"
+  },
+  "targetRoot": "94808405000069610732105644647889100238335434573128093048416452608111095070138",
+  "type": "model-visible-mini-publication-receipt-projection-v1"
+}
