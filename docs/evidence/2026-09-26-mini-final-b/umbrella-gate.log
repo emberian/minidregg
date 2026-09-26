@@ -1,0 +1,9 @@
+source_scope=commit 591a5a91252846d1ffca51e8bf87524d7027a20d build-relevant Lean plus Kernel/AgentGrainAudit.lean SHA256 8459613dabe6d395fc1de4bab1cbd3f3fea344ddf62576ec462948b21fac01cc
+command=lake build Minidregg
+exit=0
+jobs=9068
+elapsed_seconds=971
+max_concurrent_real_lean=1
+wrapper_invocations=120
+full_log_sha256=fd1f20680a9f88fb4583efdb61ac9a1b897ae78838e8bbb3b0ba1b7f188be8c4
+full_log_path=/tmp/minidregg-overnight-20260926/build-local-final-b-umbrella/lake-build-Minidregg.log
