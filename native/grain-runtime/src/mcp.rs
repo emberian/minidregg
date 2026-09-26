@@ -249,7 +249,7 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
                  "inputSchema":{"type":"object","properties":{}}},
                 {"name":"mini_read_resource","description":"Read one operator-allowlisted Mini resource with signed delegated observe authority",
                  "inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}},
-                {"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets",
+                {"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns the current signed tool grain view plus a publicationReceipt for this historical accepted transition (transaction/event IDs, accepted count, image boundary, target IDs). MCP delivery is not acknowledged; recovery may repeat the receipt. This does not prove current target content.",
                  "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}
             ]}),
             "tools/call" => {

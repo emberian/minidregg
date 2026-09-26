@@ -194,6 +194,18 @@ that task with allowlisted resource publications and a pinned parent-grain
 no-op witness. The parent witness is authored by Lean and checked in the same
 native transaction; a later generation cannot authorize the old prompt's
 publication.
+On success, `mini_publish` retains the signed current tool-grain query fields
+(`grain`, `targetRoot`, `authorityRoot`, `imageBoundary`) and adds
+`publicationReceipt`. The nested receipt contains the exact confirmed
+`transactionId`, `eventId`, `acceptedCount`, `imageBoundary`, and
+`publicationTargetIds`, with `promptOperationId` and `toolOperationId` for the
+current tool call. Its scope is `historical-accepted-transition`: those IDs
+identify the accepted publication, not the current contents of its targets.
+The controller selects the new journaled receipt for this prompt and Hermes
+session; it does not select a prior matching target. Sending an MCP result does
+not prove Hermes retained it or mark the journal receipt `reported`. If delivery
+is lost, a later prompt may receive the same receipt again in the labeled
+recovery data after exact read-only lookup.
 If Mini definitively refuses a publication, the controller submits a signed
 zero-charge settlement and disconnect for the delegated tool task. A confirmed
 cleanup clears the held allowance, so Hermes may make another allowlisted read
