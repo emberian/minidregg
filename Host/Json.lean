@@ -143,26 +143,30 @@ private def hexNibble (c : Char) : Option Nat :=
   else if 'A' ≤ c ∧ c ≤ 'F' then some (10 + c.toNat - 'A'.toNat)
   else none
 
-private def decodeHexChars : List Char → Option (List UInt8)
-  | [] => some []
-  | high :: low :: rest => do
-      let h ← hexNibble high
-      let l ← hexNibble low
-      return UInt8.ofNat (16 * h + l) :: (← decodeHexChars rest)
-  | _ => none
-
 def decodeHex (path : String) (json : Lean.Json) : Result (List UInt8) := do
   let source ← string path json
-  match decodeHexChars source.toList with
-  | some bytes => pure bytes
-  | none => failAt path "even-length hexadecimal string expected"
+  let input := source.toUTF8
+  unless input.size % 2 = 0 do
+    failAt path "even-length hexadecimal string expected"
+  let mut output := ByteArray.empty
+  for i in [:input.size / 2] do
+    let high := hexNibble (Char.ofNat (input[2 * i]!.toNat))
+    let low := hexNibble (Char.ofNat (input[2 * i + 1]!.toNat))
+    match high, low with
+    | some h, some l => output := output.push (UInt8.ofNat (16 * h + l))
+    | _, _ => failAt path "even-length hexadecimal string expected"
+  pure output.toList
 
 private def hexDigit (n : Nat) : Char :=
   Char.ofNat (if n < 10 then '0'.toNat + n else 'a'.toNat + n - 10)
 
 def encodeHex (bytes : List UInt8) : String :=
-  String.ofList <| bytes.flatMap fun byte =>
-    [hexDigit (byte.toNat / 16), hexDigit (byte.toNat % 16)]
+  Id.run do
+    let mut output := ByteArray.empty
+    for byte in bytes do
+      output := output.push (UInt8.ofNat ((hexDigit (byte.toNat / 16)).toNat))
+      output := output.push (UInt8.ofNat ((hexDigit (byte.toNat % 16)).toNat))
+    return String.fromUTF8! output
 
 private def decimal (value : Nat) : Lean.Json := .str (toString value)
 private def signedDecimal (value : Int) : Lean.Json := .str (toString value)
@@ -726,32 +730,67 @@ private structure BirthParts where
   controlGrant : ResourceBirth.AuthorityGrant
   policy : ResourceBirth.InitialPolicy
 
+/-- The worker clause is tied to one execution generation. Grant caveats
+cannot currently carry arbitrary Pred, so the native resource policy itself
+must constrain a delegated worker. -/
+private def grainPolicy (owner : Nat) (worker : Option (Nat × Int)) : Minidregg.Pred.Pred :=
+  let base := AgentGrain.policy (.eq "request/subject" (Int.ofNat owner))
+  match worker with
+  | none => base
+  | some (subject, generation) => .all [base, .any [
+      .eq "request/subject" (Int.ofNat owner),
+      .memberOf "request/verb" [1, 3],
+      .all [.eq "request/subject" (Int.ofNat subject),
+        AgentGrain.witnessCaveat generation]]]
+
+private def grainWorker (path : String)
+    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (Nat × Int)) := do
+  match obj.get? "workerSubject", obj.get? "workerGeneration" with
+  | none, none => pure none
+  | some subject, some generation =>
+      pure (some (← nat (path ++ ".workerSubject") subject,
+        ← int (path ++ ".workerGeneration") generation))
+  | _, _ => failAt path "workerSubject and workerGeneration must be supplied together"
+
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (json : Lean.Json) : Result BirthParts := do
+  let raw ← object path json
+  let storage ← string (path ++ ".storage") (← field path "storage" raw)
+  let worker ← if storage = "grain" then grainWorker path raw else pure none
   let obj ← exactObject path
-    ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"] json
+    (if storage = "grain" then
+      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
+        (if worker.isSome then ["workerSubject", "workerGeneration"] else [])
+    else
+      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) json
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
-  let storage ← string (path ++ ".storage") (← field path "storage" obj)
-  unless storage = "declared" ∨ storage = "content" do
-    throw s!"{path}.storage: expected declared or content"
+  unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" do
+    throw s!"{path}.storage: expected declared, content or grain"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
-      (storage = "content" ∧ kind = .object) do
-    throw s!"{path}: declared storage is object/account; content storage is object"
+      ((storage = "content" ∨ storage = "grain") ∧ kind = .object) do
+    throw s!"{path}: declared storage is object/account; content and grain storage are object"
   let target ← nat (path ++ ".target") (← field path "target" obj)
   let owner := SubjectId.mk (← nat (path ++ ".owner") (← field path "owner" obj))
   let ownerId := CapabilityId.mk
     (← nat (path ++ ".ownerCapability") (← field path "ownerCapability" obj))
   let controlId := CapabilityId.mk
     (← nat (path ++ ".controlCapability") (← field path "controlCapability" obj))
-  let rule := NativeHostGenesis.policy profile source target
-    (← predicate (path ++ ".predicate") (← field path "predicate" obj))
-  let cell : PackedCell CanonicalCellRegistry.registry :=
+  let rulePredicate ← if storage = "grain" then
+      pure (grainPolicy owner.value worker)
+    else predicate (path ++ ".predicate") (← field path "predicate" obj)
+  let rule := NativeHostGenesis.policy profile source target rulePredicate
+  let cell : PackedCell CanonicalCellRegistry.registry ←
     if storage = "content" then
-      ⟨.content, CellState.materialize HyperdocumentContentPageMaterializer.materializer
+      pure ⟨.content, CellState.materialize HyperdocumentContentPageMaterializer.materializer
         (HyperdocumentContentPageMaterializer.stateOfOption
           (some (ContentResource.initialPage source.deployment.domain target)))⟩
-    else NativeHostGenesis.declaredCell source target (kind = .account)
+    else if storage = "grain" then
+      let budget ← nat (path ++ ".budget") (← field path "budget" obj)
+      pure ⟨.declaredObject, CellState.materialize DeclaredEffectPageMaterializer.materializer
+        (DeclaredEffectPageMaterializer.stateOfOption
+          (some (AgentGrain.initialPage source.deployment.domain target budget)))⟩
+    else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner⟩
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
@@ -820,7 +859,7 @@ private def grainSource (path : String) (json : Lean.Json) :
   for key in obj.foldl (init := []) (fun names key _ => key :: names) do
     unless ["task", "subject", "capability", "expectedAuthorityRoot",
       "schemaVersion", "expectedTargetRoot", "context", "before", "operation",
-      "publications"].contains key do
+      "publications", "observeCapability", "parentWitness"].contains key do
       throw s!"{path}: unknown field {key}"
   let stateObj ← exactObject (path ++ ".before") ["generation", "status", "remaining", "reserved"]
     (← field path "before" obj)
@@ -864,8 +903,44 @@ private def grainSource (path : String) (json : Lean.Json) :
   let publications ← match obj.get? "publications" with
     | some value => list (path ++ ".publications") commandTarget value
     | none => pure []
+  let observeCapability ← match obj.get? "observeCapability" with
+    | some selected => do
+        let capability ← optional (path ++ ".observeCapability")
+          (fun p j => CapabilityId.mk <$> nat p j) selected
+        pure capability
+    | none => pure none
+  let publications ← match obj.get? "parentWitness" with
+    | none => pure publications
+    | some value => do
+        let witnessPath := path ++ ".parentWitness"
+        let witness ← exactObject witnessPath
+          ["task", "capability", "observeCapability", "expectedTargetRoot", "before"] value
+        let parentTask ← nat (witnessPath ++ ".task") (← field witnessPath "task" witness)
+        let parentCapability := CapabilityId.mk
+          (← nat (witnessPath ++ ".capability") (← field witnessPath "capability" witness))
+        let parentObserve := CapabilityId.mk
+          (← nat (witnessPath ++ ".observeCapability")
+            (← field witnessPath "observeCapability" witness))
+        let parentRoot := Digest.mk
+          (← nat (witnessPath ++ ".expectedTargetRoot")
+            (← field witnessPath "expectedTargetRoot" witness))
+        let parentBeforePath := witnessPath ++ ".before"
+        let parentBeforeObj ← exactObject parentBeforePath
+          ["generation", "status", "remaining", "reserved"]
+          (← field witnessPath "before" witness)
+        let parentBefore : AgentGrain.State :=
+          ⟨← int (parentBeforePath ++ ".generation")
+              (← field parentBeforePath "generation" parentBeforeObj),
+           ← int (parentBeforePath ++ ".status")
+              (← field parentBeforePath "status" parentBeforeObj),
+           ← int (parentBeforePath ++ ".remaining")
+              (← field parentBeforePath "remaining" parentBeforeObj),
+           ← int (parentBeforePath ++ ".reserved")
+              (← field parentBeforePath "reserved" parentBeforeObj)⟩
+        pure <| (AgentGrain.Operation.input).target parentTask parentCapability
+          parentRoot parentBefore (some parentObserve) :: publications
   let command := operation.command subject authorityRoot (AgentGrain.contextNonce contextBytes)
-    task capability targetRoot state publications
+    task capability targetRoot state publications observeCapability
   pure (command, operation.after state)
 
 /-- Wrap a source-authored grain transition in the ordinary prepare intent. -/
@@ -877,10 +952,48 @@ private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
   pure ⟨source.1.subject, nonce,
     .prepare (.invoke (DeclaredResourceController.commandCodec.encode source.1)), grants⟩
 
+/-- Re-pin a worker's no-op witness to a newly attached generation through
+the ordinary signed policy-install receiver. The caller supplies the observed
+current head and authority root; neither is trusted without native checks. -/
+private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result Intent := do
+  let obj ← exactObject path ["subject", "intentNonce", "declarationNonce", "task",
+    "owner", "workerSubject", "workerGeneration", "control", "domain", "semantics",
+    "expectedPreRoot", "expectedVersion", "expectedAddress", "grants"] json
+  let subject := SubjectId.mk (← nat (path ++ ".subject") (← field path "subject" obj))
+  let owner ← nat (path ++ ".owner") (← field path "owner" obj)
+  let worker ← nat (path ++ ".workerSubject") (← field path "workerSubject" obj)
+  let generation ← int (path ++ ".workerGeneration") (← field path "workerGeneration" obj)
+  let task ← nat (path ++ ".task") (← field path "task" obj)
+  let version ← nat (path ++ ".expectedVersion") (← field path "expectedVersion" obj)
+  let address := Digest.mk (← nat (path ++ ".expectedAddress")
+    (← field path "expectedAddress" obj))
+  let source : PolicyRecord :=
+    ⟨⟨task⟩, version + 1,
+      ⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
+      ⟨← nat (path ++ ".semantics") (← field path "semantics" obj)⟩,
+      some address, grainPolicy owner (some (worker, generation))⟩
+  let declaration : PolicyInstallController.Declaration :=
+    ⟨⟨← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj)⟩,
+      some ⟨version, address⟩,
+      ← nat (path ++ ".declarationNonce") (← field path "declarationNonce" obj), source⟩
+  let control := CapabilityId.mk (← nat (path ++ ".control") (← field path "control" obj))
+  let grants ← list (path ++ ".grants") grant (← field path "grants" obj)
+  let nonce ← nat (path ++ ".intentNonce") (← field path "intentNonce" obj)
+  pure ⟨subject, nonce,
+    .prepare (.install subject control (PolicyInstallController.declarationCodec.encode declaration)),
+    grants⟩
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
+  | "grain-policy" => do
+      let raw ← object "$" json
+      let worker ← grainWorker "$" raw
+      let obj ← exactObject "$" (["owner"] ++
+        if worker.isSome then ["workerSubject", "workerGeneration"] else []) json
+      let owner ← nat "$.owner" (← field "$" "owner" obj)
+      pure (NativeHostGenesis.predicateStream.encode (grainPolicy owner worker))
   | "grain-caveat" => do
       let obj ← exactObject "$" ["generation"] json
       let generation ← int "$.generation" (← field "$" "generation" obj)
@@ -907,11 +1020,12 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
       let source ← grainSource "$" json
       pure (DeclaredResourceController.commandCodec.encode source.1)
   | "grain-intent" => intentCodec.encode <$> grainIntent "$" json
+  | "grain-policy-install-intent" => intentCodec.encode <$> grainPolicyInstallIntent "$" json
   | "draft" => draftCodec.encode <$> draft "$" json
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
-      "expected predicate, grain-caveat, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
+      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
 
 /-- Source-derived, non-authoritative presentation data. This lets clients
 display the resulting grain generation/state without duplicating the state

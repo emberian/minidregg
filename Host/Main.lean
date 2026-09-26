@@ -34,7 +34,32 @@ structure GatewayPinSettings where
   target : Nat
   capability : Nat
   policyAddress : Nat
-  deriving FromJson, ToJson
+
+instance : FromJson GatewayPinSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["application", "subject", "target", "capability", "policyAddress"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "fn gateway pin has missing or unknown fields"
+    let application ← json.getObjValAs? String "application"
+    let subject ← json.getObjValAs? Nat "subject"
+    let target ← json.getObjValAs? Nat "target"
+    let capability ← json.getObjValAs? Nat "capability"
+    let address ← json.getObjValAs? String "policyAddress"
+    let some policyAddress := address.toNat?
+      | throw "fn gateway policyAddress must be canonical decimal string"
+    unless toString policyAddress == address do
+      throw "fn gateway policyAddress must be canonical decimal string"
+    return ⟨application, subject, target, capability, policyAddress⟩
+
+instance : ToJson GatewayPinSettings where
+  toJson source := Lean.Json.mkObj
+    [("application", toJson source.application),
+     ("subject", toJson source.subject),
+     ("target", toJson source.target),
+     ("capability", toJson source.capability),
+     ("policyAddress", toJson (toString source.policyAddress))]
 
 def GatewayPinSettings.pin (source : GatewayPinSettings) : NativeHost.FnGatewayPin :=
   ⟨source.application.toUTF8.toList, ⟨source.subject⟩, source.target,
@@ -289,7 +314,7 @@ def dispatchSession (config : NativeHost.Config)
       return (11, callCodec.encode call)
   | _ => fnDispatch operation payload
 
-def maxFrame : Nat := 1048576
+def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 
 partial def readExactly (input : IO.FS.Stream) (count : Nat) (acc : ByteArray := ByteArray.empty) :
     IO ByteArray := do
@@ -360,6 +385,27 @@ def withPinnedSignature {α : Type} (config : NativeHost.Config)
     discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
     body { config with signature := ⟨pinned⟩ }
 
+def withFnPollService {α : Type} (settings : Settings)
+    (body : Option FnPollService → IO α) : IO α := do
+  let some source := settings.fnPoll | return ← body none
+  unless [source.originConfigPath, source.fnPinPath, source.scopePath,
+      source.policyPath, source.controlPath].all (·.startsWith "/") do
+    throw (IO.userError "fn poll service paths must be operator-selected absolute paths")
+  IO.FS.withTempDir fun directory => do
+    let copyManifest := fun (name sourcePath : String) (bound : Nat) => do
+      let bytes ← IO.FS.readBinFile sourcePath
+      unless bytes.size > 0 && bytes.size ≤ bound do
+        throw (IO.userError s!"fn poll service manifest {name} exceeds bound")
+      let destination := directory / name
+      IO.FS.writeBinFile destination bytes
+      pure destination.toString
+    let originConfigPath ← copyManifest "origin-config.json" source.originConfigPath 65536
+    let fnPinPath ← copyManifest "fn-pin.json" source.fnPinPath 8192
+    let scopePath ← copyManifest "scope.json" source.scopePath 8192
+    let policyPath ← copyManifest "policy.json" source.policyPath 8192
+    body (some ⟨originConfigPath, fnPinPath, scopePath, policyPath,
+      source.controlPath⟩)
+
 def readBytes (path : String) : IO (List UInt8) :=
   return (← IO.FS.readBinFile path).toList
 
@@ -374,6 +420,11 @@ partial def readBoundedLoop (input : IO.FS.Handle) (limit : Nat)
 def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
   let input ← IO.FS.Handle.mk path .read
   readBoundedLoop input limit
+
+/-- Large source and carrier comparisons use the array primitive after the
+bounded read; recursive list equality is unsuitable for the full V2 profile. -/
+def sameBytes (left right : List UInt8) : Bool :=
+  left.toByteArray == right.toByteArray
 
 def evidenceReceiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
@@ -498,7 +549,8 @@ def exactDecimal (name value : String) : Except String Nat := do
   pure parsed
 
 def parseFnPortableLine (output : String) : Except String FnPortableVerified := do
-  unless output.length ≤ 70000 do throw "fn portable verifier output exceeds bound"
+  unless output.length ≤ FnEvidenceCodec.maxPortableVerifyLineBytes do
+    throw "fn portable verifier output exceeds bound"
   let line ← match output.splitOn "\n" with
     | [line, ""] => pure line
     | _ => throw "fn portable verifier output has unexpected framing"
@@ -514,7 +566,7 @@ def parseFnPortableLine (output : String) : Except String FnPortableVerified := 
   let source ← decodeCanonicalHex "exact source" sourceHex
   unless principal.length == 32 && sourceIdentity.length == 48 &&
       edPublicKey.length == 32 && mlPublicKey.length == 1952 &&
-      source.length ≤ 32768 do
+      source.length ≤ FnEvidenceCodec.maxSourceBytes do
     throw "fn portable verifier output has invalid field width"
   pure ⟨principal, sourceIdentity, edPublicKey, mlPublicKey, source⟩
 
@@ -533,7 +585,8 @@ def parseFnHybridSignLine (output : String) : Except String (List UInt8 × List 
   pure (ed, ml)
 
 def parseFnPollProjectLine (output : String) : Except String FnPollProjection := do
-  unless output.length ≤ 400000 do throw "fn consumer projection output exceeds bound"
+  unless output.length ≤ FnEvidenceCodec.maxPollProjectionLineBytes do
+    throw "fn consumer projection output exceeds bound"
   let line ← match output.splitOn "\n" with
     | [line, ""] => pure line
     | _ => throw "fn consumer projection has unexpected framing"
@@ -570,10 +623,12 @@ def parseFnPollProjectLine (output : String) : Except String FnPollProjection :=
   unless [history, incarnation, consumer, principal, query].all
       (fun value => !value.isEmpty && value.length ≤ 64) &&
       sourceIdentity.length == 48 && !messageId.isEmpty &&
-      messageId.length ≤ 256 && !source.isEmpty && source.length ≤ 32768 &&
-      !received.isEmpty && received.length ≤ 32768 &&
+      messageId.length ≤ 256 && !source.isEmpty &&
+      source.length ≤ FnEvidenceCodec.maxSourceBytes &&
+      !received.isEmpty && received.length ≤ FnEvidenceCodec.maxCarrierBytes &&
       verdictPrincipal.length == 32 &&
-      !verdictEvent.isEmpty && verdictEvent.length ≤ 65538 &&
+      !verdictEvent.isEmpty &&
+      verdictEvent.length ≤ FnEvidenceCodec.maxHistoricalVerdictEventBytes &&
       [queryVersion, viewVersion, registrationEpoch, position,
        sequence, transactionId].all (· ≤ 4294967295) &&
       registrationEpoch > 0 && position == sequence + 1 do
@@ -602,13 +657,13 @@ def FnPollScopePin.check (pin : FnPollScopePin)
 def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (cursorPath reportPath : String) : IO (List UInt8 × List UInt8 × FnPollProjection) := do
   let cursor ← readBoundedBytes cursorPath 346
-  let report ← readBoundedBytes reportPath 196608
+  let report ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
   unless !cursor.isEmpty && !report.isEmpty do
     throw (IO.userError "fn poll has no schema-1 report and cursor")
   let child ← IO.Process.spawn
     { cmd := fnBinary, args := #["--fn", "consumer-project", cursorPath,
       reportPath], stdin := .null, stdout := .piped, stderr := .null }
-  let lineBytes ← try readBoundedLoop child.stdout 400000
+  let lineBytes ← try readBoundedLoop child.stdout FnEvidenceCodec.maxPollProjectionLineBytes
     catch error =>
       child.kill
       discard <| child.wait
@@ -617,7 +672,7 @@ def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
   unless exitCode == 0 do
     throw (IO.userError "fn native consumer projection refused")
   unless cursor == (← readBoundedBytes cursorPath 346) &&
-      report == (← readBoundedBytes reportPath 196608) do
+      sameBytes report (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
     throw (IO.userError "fn poll files changed during native projection")
   unless lineBytes.all (fun byte => byte.toNat < 128) do
     throw (IO.userError "fn consumer projection is not ASCII")
@@ -664,7 +719,7 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
 
 def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
     (carrierPath : String) : IO (List UInt8 × FnPortableVerified) := do
-  let carrier ← readBoundedBytes carrierPath 32768
+  let carrier ← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes
   unless !carrier.isEmpty do throw (IO.userError "empty fn carrier")
   let expectedPrincipal ← IO.ofExcept (decodeCanonicalHex "pinned principal" pin.principal)
   let expectedEd ← IO.ofExcept (decodeCanonicalHex "pinned Ed25519 key" pin.edPublicKey)
@@ -676,7 +731,7 @@ def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
   let child ← IO.Process.spawn
     { cmd := pin.fnBinary, args := #["--fn", "hybrid-verify-source", carrierPath,
       pin.mlPublicKey], stdin := .null, stdout := .piped, stderr := .null }
-  let lineBytes ← try readBoundedLoop child.stdout 70000
+  let lineBytes ← try readBoundedLoop child.stdout FnEvidenceCodec.maxPortableVerifyLineBytes
     catch error =>
       child.kill
       discard <| child.wait
@@ -684,7 +739,7 @@ def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
   let exitCode ← child.wait
   unless exitCode == 0 do
     throw (IO.userError "fn native portable carrier verifier refused")
-  unless carrier == (← readBoundedBytes carrierPath 32768) do
+  unless sameBytes carrier (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
     throw (IO.userError "fn carrier changed during native verification")
   unless lineBytes.all (fun byte => byte.toNat < 128) do
     throw (IO.userError "fn portable verifier output is not ASCII")
@@ -710,7 +765,7 @@ inside the accepted Mini operation, even after its mutation grant is revoked.
 The current fn projection must match that source byte for byte. -/
 def verifyAckSource (pin : FnPortablePin) (projection : FnPollProjection)
     (retainedCarrier retainedSource : List UInt8) : IO FnPortableVerified := do
-  unless projection.received == retainedCarrier do
+  unless sameBytes projection.received retainedCarrier do
     throw (IO.userError "fn ack carrier differs from accepted Mini inbox")
   let extracted ← IO.ofExcept (FnPortableSource.extract retainedSource)
   let claim : FnPortableClaim :=
@@ -721,7 +776,8 @@ def verifyAckSource (pin : FnPortablePin) (projection : FnPollProjection)
     let path := directory / "retained-carrier.eml"
     IO.FS.writeBinFile path retainedCarrier.toByteArray
     let (_, verified, _) ← verifyFnPortable pin claim path.toString
-    unless verified.source == retainedSource && projection.source == retainedSource &&
+    unless sameBytes verified.source retainedSource &&
+        sameBytes projection.source retainedSource &&
         verified.sourceIdentity == projection.sourceIdentity do
       throw (IO.userError "fn ack source differs from accepted Mini inbox")
     return verified
@@ -736,8 +792,8 @@ def verifyFnPollFiles (pin : FnPortablePin) (scope : FnPollScopePin)
   let (cursor, report, projection) ←
     projectFnPoll pin.fnBinary scope cursorPath reportPath
   let (carrier, verified, extracted) ← verifyFnPortable pin claim carrierPath
-  unless projection.received == carrier &&
-      projection.source == verified.source &&
+  unless sameBytes projection.received carrier &&
+      sameBytes projection.source verified.source &&
       projection.sourceIdentity == verified.sourceIdentity &&
       projection.verdictPrincipal == verified.principal &&
       projection.messageId == extracted.messageId.toUTF8.toList do
@@ -1026,15 +1082,17 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
     invokeFnConsumerPoll qPin.fnBinary scope controlPath cursorPath reportPath carrierPath
   let (projectedCursor, projectedEvent, projection) ←
     projectFnPoll qPin.fnBinary scope cursorPath reportPath
-  unless cursor == projectedCursor && event == projectedEvent do
+  unless cursor == projectedCursor && sameBytes event projectedEvent do
     throw (IO.userError "A fn poll changed before Mini projection")
   let (carrier, verified) ← verifyFnCarrier qPin qClaim carrierPath
   let extracted ← IO.ofExcept (FnReplySource.extract verified.source)
-  unless projection.received == carrier && projection.source == verified.source &&
+  unless sameBytes projection.received carrier &&
+      sameBytes projection.source verified.source &&
       projection.sourceIdentity == verified.sourceIdentity &&
       projection.verdictPrincipal == verified.principal &&
       projection.messageId == extracted.messageId.toUTF8.toList &&
-      qClaim.messageId == extracted.messageId && qClaim.groups == "fn.test" do
+      qClaim.messageId == extracted.messageId &&
+      qClaim.groups == extracted.creation.newsgroup do
     throw (IO.userError "A historical verdict differs from exact native Q carrier")
   let policy := policySource.policy
   let probeTarget : DeclaredResourceController.Target :=
@@ -1097,6 +1155,136 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
     rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath cursorPath
     reportPath carrierPath intentPath resultPath
 
+/-- A typed live fn poll. All paths come from the operator manifest or a
+private temporary directory. The frame has no path, fn helper, policy or
+claim fields; the claim is derived from the exact ACL2-projected source. -/
+def runFnPollSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnPollService) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  unless payload.isEmpty do throw (IO.userError "fn consumer poll does not accept a payload")
+  IO.FS.withTempDir fun directory => do
+    let pinJson ← readJson service.fnPinPath
+    let scopeJson ← readJson service.scopePath
+    IO.ofExcept (requireExactFields "fn service pin"
+      ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+    IO.ofExcept (requireExactFields "fn service scope"
+      ["history", "incarnation", "consumer", "principal", "query",
+       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+    let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+    let cursorPath := (directory / "cursor.fncu").toString
+    let reportPath := (directory / "report.fn-e").toString
+    let carrierPath := (directory / "carrier.eml").toString
+    let claimPath := (directory / "claim.json").toString
+    let intentPath := (directory / "intent.bin").toString
+    let resultPath := (directory / "decision.json").toString
+    let (polledCursor, polledEvent, polledCarrier) ←
+      invokeFnConsumerPoll pin.fnBinary scope service.controlPath
+        cursorPath reportPath carrierPath
+    let (_, _, projection) ← projectFnPoll pin.fnBinary scope cursorPath reportPath
+    let extracted ← IO.ofExcept (FnPortableSource.extract projection.source)
+    let claim := Lean.Json.mkObj
+      [("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
+       ("messageId", toJson extracted.messageId),
+       ("groups", toJson extracted.groups)]
+    writeJson claimPath claim
+    let opened ← sessionOpened config state
+    let exitCode ← runPollConsumerDecisionLoaded config opened
+      (some (pin.fnBinary, service.controlPath)) service.originConfigPath
+      service.fnPinPath service.scopePath claimPath service.policyPath
+      cursorPath reportPath carrierPath intentPath resultPath
+    unless polledCursor == (← readBoundedBytes cursorPath 346) &&
+        sameBytes polledEvent (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
+        sameBytes polledCarrier (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
+      throw (IO.userError "fn poll output changed before Mini decision completed")
+    let decision ← readJson resultPath
+    let intent ← if ← (System.FilePath.mk intentPath).pathExists then do
+        pure (Minidregg.Host.Json.encodeHex (← readBoundedBytes intentPath maxFrame))
+      else pure ""
+    return (12, (Lean.Json.mkObj
+      [("type", toJson "fn-consumer-poll-session-v1"),
+       ("status", toJson (if exitCode == 0 then "accepted-decision" else "refused")),
+       ("decision", decision), ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
+/-- A typed acknowledgement only for an original accepted Mini operation.
+The request names that transaction, never a cursor or fn pathname. An
+uncertain fn reply leaves the exact retained operation available for retry. -/
+def runFnAckSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnPollService) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  unless !payload.isEmpty && payload.length ≤ 80 &&
+      payload.all (fun byte => 48 ≤ byte.toNat && byte.toNat ≤ 57) do
+    throw (IO.userError "fn ack transaction ID must be bounded decimal ASCII")
+  let transaction ← pure (String.fromUTF8! payload.toByteArray)
+  let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+  let pinJson ← readJson service.fnPinPath
+  let scopeJson ← readJson service.scopePath
+  IO.ofExcept (requireExactFields "fn service pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  IO.ofExcept (requireExactFields "fn service scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+  let gateway ← requireGateway config
+  let opened ← sessionOpened config state
+  let some record := opened.durable.image.accepted.find?
+      (fun entry => entry.transactionId.value == transactionId)
+    | throw (IO.userError "fn ack Mini transaction is absent")
+  let some (_, some portable, some stored) :=
+      FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
+        config.profile.semantics record
+    | throw (IO.userError "fn ack Mini transaction has no canonical accepted inbox")
+  unless stored.pollCallObserved && stored.controlBinding ==
+      FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath do
+    throw (IO.userError "fn ack control endpoint differs from observed poll")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "retained-cursor.fncu").toString
+    let eventPath := (directory / "retained-report.fn-e").toString
+    writeBytes cursorPath stored.cursor
+    writeBytes eventPath stored.event
+    let (cursor, event, projected) ←
+      projectFnPoll pin.fnBinary scope cursorPath eventPath
+    unless cursor == stored.cursor && sameBytes event stored.event &&
+        projected.sourceIdentity == stored.sourceIdentity &&
+        projected.sequence == stored.sequence &&
+        projected.transactionId == stored.transactionId &&
+        projected.messageId == stored.messageId &&
+        projected.verdictPrincipal == stored.verdictPrincipal &&
+        projected.verdictEvent == stored.verdictEvent do
+      throw (IO.userError "fn ack cursor/report differ from accepted Mini inbox")
+    let verified ← verifyAckSource pin projected portable.carrier projected.source
+    unless verified.principal == portable.principal &&
+        verified.sourceIdentity == portable.sourceIdentity &&
+        verified.edPublicKey == portable.edPublicKey &&
+        verified.mlPublicKey == portable.mlPublicKey &&
+        projected.verdictPrincipal == portable.principal do
+      throw (IO.userError "fn ack source differs from accepted Mini inbox")
+    let child ← IO.Process.spawn
+      { cmd := pin.fnBinary,
+        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        stdin := .null, stdout := .piped, stderr := .null }
+    let output ← try readBoundedLoop child.stdout 128
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    unless cursor == (← readBoundedBytes cursorPath 346) &&
+        sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
+      throw (IO.userError "fn ack inputs changed during local control call")
+    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+        "durable-accepted"
+      else if exitCode == 2 then "refused"
+      else if exitCode == 3 then "uncertain"
+      else "transport-fault"
+    return (13, (Lean.Json.mkObj
+      [("type", toJson "fn-consumer-ack-session-v1"),
+       ("miniTransactionId", toJson transaction),
+       ("fnStoreSequence", toJson (toString stored.sequence)),
+       ("fnStoreTransactionId", toJson (toString stored.transactionId)),
+       ("fnAck", toJson status)]).compress.toUTF8.toList)
+
 def usage : String :=
   "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
@@ -1140,9 +1328,21 @@ def run (arguments : List String) : IO UInt32 := do
       | "describe", [] => IO.println (← description config).pretty; pure 0
       | "stdio", [] =>
           withPinnedSignature config fun pinnedConfig => do
-            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
-            let state ← IO.mkRef (some session)
-            serveSession pinnedConfig state (← IO.getStdin) (← IO.getStdout)
+            withFnPollService settings fun service => do
+              let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+              let state ← IO.mkRef (some session)
+              let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) := fun operation payload => do
+                if operation != 12 && operation != 13 then
+                  throw (IO.userError "unsupported native host operation")
+                let some selected := service
+                  | return ((255 : UInt8), failure "fn-poll" "fn consumer poll service is not configured")
+                try
+                  if operation == 12 then
+                    runFnPollSession pinnedConfig state selected payload
+                  else
+                    runFnAckSession pinnedConfig state selected payload
+                catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
+              serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
@@ -1345,8 +1545,8 @@ def run (arguments : List String) : IO UInt32 := do
             scopePath claimPath policyPath cursorPath reportPath carrierPath
             intentPath resultPath
           unless polledCursor == (← readBoundedBytes cursorPath 346) &&
-              polledEvent == (← readBoundedBytes reportPath 196608) &&
-              polledCarrier == (← readBoundedBytes carrierPath 32768) do
+              sameBytes polledEvent (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
+              sameBytes polledCarrier (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
             throw (IO.userError "fn poll output changed before Mini decision completed")
           pure exitCode
       | "reply-consumer-poll-decide",
@@ -1405,7 +1605,7 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "A reply ack control differs from durable observed poll")
           let (cursor, event, projected) ←
             projectFnPoll pin.fnBinary scope cursorPath eventPath
-          unless cursor == stored.cursor && event == stored.event &&
+          unless cursor == stored.cursor && sameBytes event stored.event &&
               projected.sourceIdentity == stored.sourceIdentity &&
               projected.sequence == stored.sequence &&
               projected.transactionId == stored.transactionId &&
@@ -1430,7 +1630,7 @@ def run (arguments : List String) : IO UInt32 := do
               throw error
           let exitCode ← child.wait
           unless cursor == (← readBoundedBytes cursorPath 346) &&
-              event == (← readBoundedBytes eventPath 196608) do
+              sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
             throw (IO.userError "A reply ack inputs changed during local call")
           let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
               "durable-accepted"
@@ -1506,7 +1706,7 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "fn ack control endpoint differs from observed poll")
           let (cursor, event, projected) ←
             projectFnPoll pin.fnBinary scope cursorPath eventPath
-          unless cursor == stored.cursor && event == stored.event &&
+          unless cursor == stored.cursor && sameBytes event stored.event &&
               projected.sourceIdentity == stored.sourceIdentity &&
               projected.sequence == stored.sequence &&
               projected.transactionId == stored.transactionId &&
@@ -1538,7 +1738,7 @@ def run (arguments : List String) : IO UInt32 := do
               throw error
           let exitCode ← child.wait
           unless cursor == (← readBoundedBytes cursorPath 346) &&
-              event == (← readBoundedBytes eventPath 196608) do
+              sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
             throw (IO.userError "fn ack inputs changed during local control call")
           let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
               "durable-accepted"
@@ -1777,7 +1977,8 @@ def run (arguments : List String) : IO UInt32 := do
                   args := #["--fn", "hybrid-verify-source", carrierPath,
                     pin.mlPublicKey],
                   stdin := .null, stdout := .piped, stderr := .null }
-              let verifiedOutput ← readBoundedLoop verified.stdout 70000
+              let verifiedOutput ← readBoundedLoop verified.stdout
+                FnEvidenceCodec.maxPortableVerifyLineBytes
               let verifiedExit ← verified.wait
               if verifiedExit != 0 then
                 let stage := if verifiedExit == 1 then "refused"
@@ -1788,7 +1989,7 @@ def run (arguments : List String) : IO UInt32 := do
                 return if verifiedExit == 1 then 2 else if verifiedExit == 3 then 3 else 4
               let verifiedSource ← IO.ofExcept (parseFnPortableLine
                 (String.fromUTF8! verifiedOutput.toByteArray))
-              unless verifiedSource.source == prepared.source &&
+              unless sameBytes verifiedSource.source prepared.source &&
                   verifiedSource.principal == principal &&
                   verifiedSource.edPublicKey == edPublicKey &&
                   verifiedSource.mlPublicKey == mlPublicKey do

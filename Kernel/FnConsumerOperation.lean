@@ -232,10 +232,16 @@ def conflictCodec : LawfulCodec ConflictEvidence :=
 
 def maxNameBytes : Nat := 64
 def maxVerdictRefBytes : Nat := 256
-def maxBindingBytes : Nat := 18432
-def maxInboxBytes : Nat := 36864
-def maxStoreEventBytes : Nat := 61440
-def maxStoreInboxBytes : Nat := 65536
+-- The native V2 binding retains the verified package; the portable inbox
+-- retains the exact fn carrier. These ceilings derive from the same envelope
+-- used by the host reader and are checked before historical atom decoding.
+def maxBindingBytes : Nat := FnEvidenceCodec.maxPackageBytes + 16384
+def maxInboxBytes : Nat := FnEvidenceCodec.maxPortableInboxBytes
+-- This is Mini's selected qualified poll-reader profile. Current fn HEAD has
+-- wider potential Store/operator limits; that does not silently enlarge this
+-- Mini reader without a matching selected qualification.
+def maxStoreEventBytes : Nat := FnEvidenceCodec.maxStorePollEventBytes
+def maxStoreInboxBytes : Nat := FnEvidenceCodec.maxStorePollInboxBytes
 
 /-- Mini's local reference to the exact retained fn verdict bytes and Store
 coordinates. This is a content binding, not an fn-issued Store identifier. -/
@@ -258,7 +264,8 @@ def pollControlBinding (fnBinary controlPath : String) : List UInt8 :=
 
 def PortableInbox.valid (inbox : PortableInbox)
     (expectedSource : List UInt8) : Bool :=
-  !inbox.carrier.isEmpty && inbox.carrier.length ≤ 32768 &&
+  !inbox.carrier.isEmpty &&
+  inbox.carrier.length ≤ FnEvidenceCodec.maxCarrierBytes &&
   inbox.sourceIdentity.length == 48 &&
   inbox.sourceIdentity == expectedSource &&
   inbox.principal.length == 32 && inbox.edPublicKey.length == 32 &&
@@ -272,7 +279,8 @@ def StorePollInbox.valid (inbox : StorePollInbox)
   inbox.sourceIdentity == expectedSource && inbox.sourceIdentity.length == 48 &&
   !inbox.messageId.isEmpty && inbox.messageId.length ≤ 256 &&
   inbox.verdictPrincipal.length == 32 &&
-  !inbox.verdictEvent.isEmpty && inbox.verdictEvent.length ≤ 65538 &&
+  !inbox.verdictEvent.isEmpty &&
+  inbox.verdictEvent.length ≤ FnEvidenceCodec.maxHistoricalVerdictEventBytes &&
   (if inbox.pollCallObserved then
     !inbox.controlBinding.isEmpty && inbox.controlBinding.length ≤ 64
    else inbox.controlBinding.isEmpty) &&
@@ -505,6 +513,7 @@ private def originalBindingWithInboxRaw (domain semantics : Digest)
                 some (atom, bytes, outbox, replyBytes,
                   some (inboxAtom, inboxBytes), some (storeAtom, storeBytes))
             | _ => none
+          if bytes.length > maxBindingBytes then none else
           let binding ← bindingCodec.decode bytes
           let reply ← replyCodec.decode replyBytes
           let inbox ← match inboxAction with
@@ -611,6 +620,7 @@ private def originalConflictWithInboxRaw (domain semantics : Digest)
                 some (atom, bytes, some (inboxAtom, inboxBytes),
                   some (storeAtom, storeBytes))
             | _ => none
+          if bytes.length > maxBindingBytes then none else
           let evidence ← conflictCodec.decode bytes
           let inbox ← match inboxAction with
             | none => some none

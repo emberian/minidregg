@@ -51,8 +51,11 @@ def headerValue (label line : String) : Option String :=
 
 /-- Strict one-part CRLF/base64 profile. Header order, MIME type, line widths,
 alphabet and padding are checked before a package is returned. -/
-def extract (source : List UInt8) : Except String Extracted := do
-  unless source.length ≤ 32768 && source.all (fun b => b.toNat < 128) do
+def extract (source : List UInt8)
+    (limits : Minidregg.Compiler.FnEvidenceCodec.Limits :=
+      Minidregg.Compiler.FnEvidenceCodec.Limits.portable) : Except String Extracted := do
+  unless limits.valid do throw "invalid operator evidence limits"
+  unless source.length ≤ limits.sourceBytes && source.all (fun b => b.toNat < 128) do
     throw "fn authored source is oversized or non-ASCII for E1"
   let text := String.fromUTF8! source.toByteArray
   let (headers, body) ← match text.splitOn "\r\n\r\n" with
@@ -78,14 +81,14 @@ def extract (source : List UInt8) : Except String Extracted := do
   let lines ← match (body.splitOn "\r\n").reverse with
     | "" :: rest => pure rest.reverse
     | _ => throw "fn E1 base64 body is not CRLF terminated"
-  unless !lines.isEmpty && lines.length ≤ 288 &&
+  unless !lines.isEmpty && lines.length ≤ limits.sourceBytes / 76 + 1 &&
       lines.all (fun line => !line.isEmpty && line.length ≤ 76) &&
       (lines.reverse.drop 1).all (fun line => line.length == 76) do
     throw "fn E1 base64 line width exceeds profile"
   let base64 := String.intercalate "" lines
   let some bytes := decodeGroups base64.toList #[]
     | throw "fn E1 base64 body is noncanonical"
-  unless bytes.size ≤ Minidregg.Compiler.FnEvidenceCodec.maxPackageBytes do
+  unless bytes.size ≤ limits.packageBytes do
     throw "fn E1 package exceeds native prefix bound"
   pure ⟨messageId, groups, bytes.toList⟩
 

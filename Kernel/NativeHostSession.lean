@@ -41,7 +41,7 @@ def refresh (config : Config) (session : Session config) :
   match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok target =>
-      if target.bytes == session.target.bytes then
+      if target.bytes.toByteArray == session.target.bytes.toByteArray then
         return .ok session
       match ← NativeHostReplay.extendVerified config session.verified target with
       | .error failure =>

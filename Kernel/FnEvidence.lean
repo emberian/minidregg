@@ -15,9 +15,18 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-def exportPackage (config : Config) (signedCall : List UInt8) : IO (Except String (List UInt8)) := do
-  unless signedCall.length ≤ maxCallBytes do
-    return .error "signed call exceeds P0 evidence bound"
+/-- Selecting an original receipt at acceptedCount seals exactly that many
+accepted records, even if the source history has advanced since confirmation. -/
+theorem originalPrefix_length {α : Type} (accepted : List α) (acceptedCount : Nat)
+    (within : acceptedCount ≤ accepted.length) :
+    (accepted.take acceptedCount).length = acceptedCount := by
+  simp [List.length_take, Nat.min_eq_left within]
+
+def exportPackage (config : Config) (signedCall : List UInt8)
+    (limits : Limits := Limits.portable) : IO (Except String (List UInt8)) := do
+  unless limits.valid do return .error "invalid operator evidence limits"
+  unless signedCall.length ≤ limits.callBytes do
+    return .error "signed call exceeds evidence bound"
   let some call := callCodec.decode signedCall
     | return .error "noncanonical native signed call"
   let opened ← match ← NativeHost.openExisting config with
@@ -25,15 +34,17 @@ def exportPackage (config : Config) (signedCall : List UInt8) : IO (Except Strin
     | .error detail => return .error s!"source native history: {detail}"
   let .confirmed .replayed receipt := NativeHost.lookupLoaded config opened call
     | return .error "exact signed call is absent or conflicts with source history"
-  unless receipt.acceptedCount == 1 do
-    return .error "P0 export requires the first accepted event"
+  unless 1 ≤ receipt.acceptedCount &&
+      receipt.acceptedCount ≤ opened.durable.image.accepted.length do
+    return .error "original receipt is outside accepted history"
   let image : DurableReceiver.Image :=
     ⟨opened.durable.image.seed, opened.durable.image.accepted.take receipt.acceptedCount⟩
-  return encodeChecked ⟨config.deployment.domain, config.profile.semantics,
+  return encodeCheckedWith limits ⟨config.deployment.domain, config.profile.semantics,
     config.expectedSeed, signedCall, receipt, DurableReceiverCodec.encode image⟩
 
-def verify (config : Config) (bytes : List UInt8) : IO (Except String Receipt) := do
-  let package ← match decodeChecked bytes with
+def verify (config : Config) (bytes : List UInt8)
+    (limits : Limits := Limits.portable) : IO (Except String Receipt) := do
+  let package ← match decodeCheckedWith limits bytes with
     | .ok package => pure package
     | .error detail => return .error detail
   unless package.domain == config.deployment.domain &&
@@ -47,7 +58,7 @@ def verify (config : Config) (bytes : List UInt8) : IO (Except String Receipt) :
   | .ok ⟨target, verified⟩ =>
       unless target.image.accepted.length == package.originalReceipt.acceptedCount do
         return .error "package carries a later or shorter accepted prefix"
-      unless verified.receipts == [package.originalReceipt] do
+      unless verified.receipts.getLast? == some package.originalReceipt do
         return .error "original accepted-prefix receipt mismatch"
       match NativeHost.lookupLoaded config verified.opened call with
       | .confirmed .replayed receipt =>
