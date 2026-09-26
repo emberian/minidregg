@@ -1,0 +1,13 @@
+Running as unit: mini-hermes-provider-strict-8801-build.service; invocation ID: 88d012352be542b1b111cbf19ecc2601
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling mini-hermes-test-provider v0.1.0 (/tmp/mini-hermes-provider-strict-8801-8d88b9e/src)
+    Finished `release` profile [optimized] target(s) in 3.33s
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 3.378s
+CPU time consumed: 5.726s
+Memory peak: 225.5M (swap: 0B)
