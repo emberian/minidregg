@@ -733,24 +733,68 @@ private structure BirthParts where
 /-- The worker clause is tied to one execution generation. Grant caveats
 cannot currently carry arbitrary Pred, so the native resource policy itself
 must constrain a delegated worker. -/
-private def grainPolicy (owner : Nat) (worker : Option (Nat × Int)) : Minidregg.Pred.Pred :=
+private def grainWorkerClause (subject : Nat) (generation : Int) : Minidregg.Pred.Pred :=
+  .all [.eq "request/subject" (Int.ofNat subject), AgentGrain.witnessCaveat generation]
+
+private def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Minidregg.Pred.Pred :=
   let base := AgentGrain.policy (.eq "request/subject" (Int.ofNat owner))
   match worker with
   | none => base
-  | some (subject, generation) => .all [base, .any [
+  | some ([subject], generation) => .all [base, .any [
       .eq "request/subject" (Int.ofNat owner),
       .memberOf "request/verb" [1, 3],
-      .all [.eq "request/subject" (Int.ofNat subject),
-        AgentGrain.witnessCaveat generation]]]
+      grainWorkerClause subject generation]]
+  | some (subjects, generation) => .all [base, .any <|
+      [.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3]] ++
+        subjects.map (fun subject => grainWorkerClause subject generation)]
+
+/-- Every named worker in a plural policy gets the same pinned-generation,
+no-op witness clause. This is a construction fact, not an IO admission claim. -/
+theorem grainPolicy_plural_worker_clause (owner : Nat) (subjects : List Nat)
+    (generation : Int) (subject : Nat) (named : subject ∈ subjects) :
+    grainWorkerClause subject generation ∈
+      ([.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3]] ++
+        subjects.map (fun worker => grainWorkerClause worker generation)) := by
+  apply List.mem_append.mpr
+  right
+  exact List.mem_map.mpr ⟨subject, named, rfl⟩
+
+#print axioms grainPolicy_plural_worker_clause
+
+/-- Plural authoring with one subject retains the exact historical policy
+bytes, so adding a provider cannot silently alter the existing tool rule. -/
+theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
+    NativeHostGenesis.predicateStream.encode
+      (grainPolicy owner (some ([subject], generation))) =
+    NativeHostGenesis.predicateStream.encode
+      (.all [AgentGrain.policy (.eq "request/subject" (Int.ofNat owner)), .any [
+        .eq "request/subject" (Int.ofNat owner),
+        .memberOf "request/verb" [1, 3],
+        .all [.eq "request/subject" (Int.ofNat subject),
+          AgentGrain.witnessCaveat generation]]]) := rfl
+
+#print axioms grainPolicy_singleton_bytes
 
 private def grainWorker (path : String)
-    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (Nat × Int)) := do
-  match obj.get? "workerSubject", obj.get? "workerGeneration" with
-  | none, none => pure none
-  | some subject, some generation =>
-      pure (some (← nat (path ++ ".workerSubject") subject,
+    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
+  match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration" with
+  | none, none, none => pure none
+  | some subject, none, some generation =>
+      pure (some ([← nat (path ++ ".workerSubject") subject],
         ← int (path ++ ".workerGeneration") generation))
-  | _, _ => failAt path "workerSubject and workerGeneration must be supplied together"
+  | none, some subjects, some generation =>
+      let values ← list (path ++ ".workerSubjects") nat subjects
+      unless 1 ≤ values.length ∧ values.length ≤ 4 do
+        failAt (path ++ ".workerSubjects") "expected 1 through 4 subjects"
+      unless values.Nodup do
+        failAt (path ++ ".workerSubjects") "subjects must be distinct"
+      pure (some (values, ← int (path ++ ".workerGeneration") generation))
+  | _, _, _ => failAt path "workerSubject or workerSubjects and workerGeneration must be supplied exclusively"
+
+private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) : List String :=
+  if (obj.get? "workerSubject").isSome then ["workerSubject", "workerGeneration"]
+  else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
+  else []
 
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
@@ -761,7 +805,7 @@ private def birthParts (path : String)
   let obj ← exactObject path
     (if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
-        (if worker.isSome then ["workerSubject", "workerGeneration"] else [])
+        (if worker.isSome then grainWorkerFields raw else [])
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) json
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
@@ -956,13 +1000,14 @@ private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
 the ordinary signed policy-install receiver. The caller supplies the observed
 current head and authority root; neither is trusted without native checks. -/
 private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result Intent := do
-  let obj ← exactObject path ["subject", "intentNonce", "declarationNonce", "task",
-    "owner", "workerSubject", "workerGeneration", "control", "domain", "semantics",
-    "expectedPreRoot", "expectedVersion", "expectedAddress", "grants"] json
+  let raw ← object path json
+  let some worker ← grainWorker path raw
+    | failAt path "worker subject and generation required"
+  let obj ← exactObject path (["subject", "intentNonce", "declarationNonce", "task",
+    "owner", "control", "domain", "semantics", "expectedPreRoot", "expectedVersion",
+    "expectedAddress", "grants"] ++ grainWorkerFields raw) json
   let subject := SubjectId.mk (← nat (path ++ ".subject") (← field path "subject" obj))
   let owner ← nat (path ++ ".owner") (← field path "owner" obj)
-  let worker ← nat (path ++ ".workerSubject") (← field path "workerSubject" obj)
-  let generation ← int (path ++ ".workerGeneration") (← field path "workerGeneration" obj)
   let task ← nat (path ++ ".task") (← field path "task" obj)
   let version ← nat (path ++ ".expectedVersion") (← field path "expectedVersion" obj)
   let address := Digest.mk (← nat (path ++ ".expectedAddress")
@@ -971,7 +1016,7 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result
     ⟨⟨task⟩, version + 1,
       ⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ⟨← nat (path ++ ".semantics") (← field path "semantics" obj)⟩,
-      some address, grainPolicy owner (some (worker, generation))⟩
+      some address, grainPolicy owner (some worker)⟩
   let declaration : PolicyInstallController.Declaration :=
     ⟨⟨← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj)⟩,
       some ⟨version, address⟩,
@@ -991,7 +1036,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
       let raw ← object "$" json
       let worker ← grainWorker "$" raw
       let obj ← exactObject "$" (["owner"] ++
-        if worker.isSome then ["workerSubject", "workerGeneration"] else []) json
+        if worker.isSome then grainWorkerFields raw else []) json
       let owner ← nat "$.owner" (← field "$" "owner" obj)
       pure (NativeHostGenesis.predicateStream.encode (grainPolicy owner worker))
   | "grain-caveat" => do
