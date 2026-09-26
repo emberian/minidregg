@@ -921,17 +921,15 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRo
             print_json(&value)
         }
         "idle"
-            if !route.reply
-                && intent.is_empty()
+            if intent.is_empty()
                 && value.pointer("/decision/type").and_then(Value::as_str)
                     == Some("fn-empty-page-idle-v1") =>
         {
             print_json(&value)
         }
         "skip-decision"
-            if !route.reply
-                && value.pointer("/decision/type").and_then(Value::as_str)
-                    == Some("fn-empty-page-progress-decision-v1") =>
+            if value.pointer("/decision/type").and_then(Value::as_str)
+                == Some("fn-empty-page-progress-decision-v1") =>
         {
             match value.pointer("/decision/decision").and_then(Value::as_str) {
                 Some("proposed-fresh") if !intent.is_empty() => {

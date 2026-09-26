@@ -101,6 +101,8 @@ The A reply consumer uses the same custody sequence with its own operator
 submit A's returned `intent.bin` through that A socket. The A poll and ACK
 attempts retain the same filenames. A historical repeat can return an
 accepted decision without a new intent; in that case no Mini submit is due.
+The A service also uses the `idle` and `skip-decision` empty-page statuses
+described above.
 
 ## Portable native prefix evidence (P0)
 
