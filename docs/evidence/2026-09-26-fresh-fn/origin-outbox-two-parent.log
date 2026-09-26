@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-fn-review/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-fn-review/.lake/packages/batteries' has local changes
+PASS prepared R exact reopen, two-parent selection, retry/conflict, altered shape

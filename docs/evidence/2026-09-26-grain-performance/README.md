@@ -36,3 +36,34 @@ valid rollback closed the session at entry 1; replacing it with a valid
 same-height fork closed it at entry 2. A subsequent frame remained closed in
 both cases. The local run is
 `/tmp/minidregg-overnight-20260926/poison-next`.
+
+## Exact next-call submit on isolated Store copies
+
+Two more SQLite `backup` copies of the same pre-call Store had identical
+SHA-256 `0fcb85ad703099e533ab8dee14a7deb5d1360985d06897c4de4c37e63d9becf2`.
+Each host received the exact signed call from private grain attempt 22 (SHA-256
+`b7c58d0d9e414a8f227323774126880066cd98bf018b9b8b2c2b650f00dff2ff`)
+after a cold describe and a warm describe. Only the isolated copies were
+mutated. The [submit driver](bench-grain-submit.py) records framed response
+hashes and checks the complete response bytes against the original recorded
+accepted outcome.
+
+| Host | Cold describe | Warm describe | Submit | Outcome |
+| --- | ---: | ---: | ---: | --- |
+| Observation/session image `b9ff9832b13ad67124e753ab52122732bfe9b795653e2ba64c1e0f35b051ee8a` | 116.506 s | 0.025 s | 16.810 s | Exact recorded bytes |
+| Catalog image with durable readback change `9a42dca4e181ad67c3de469fdb1f14d5649fb9cddc80fc6e88b4dd386cbb9dbe` | 120.085 s | 0.026 s | 17.090 s | Exact recorded bytes |
+
+Both runs returned opcode 2, the same 133-byte response (SHA-256
+`fa75519ba1a9d7f167a6a4f27962719528fceee5d92290e5deaf96e8d2285d84`),
+and the same resulting Store image bytes (SHA-256
+`0bd3841527b51225fce8c594f53161fcbb0e816bdfc760ba67af351e54237803`).
+The [observation-only](submit-observation-only.jsonl) and
+[combined](submit-durable-combined.jsonl) JSONL records capture each phase.
+
+The 0.28-second submit difference is too small, and in the wrong direction,
+to establish a performance gain from durable readback. The combined image
+also includes later catalog/host additions, so this pair establishes exact
+behavioral equivalence for the real accepted call, not isolated cost of the
+durable branch. The significant measured warm query improvement above is
+attributable to the earlier observation/session image. Cold replay and
+per-submit semantic work remain material costs at this history size.

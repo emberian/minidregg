@@ -1,0 +1,4 @@
+{"phase": "cold-describe", "seconds": 116.506, "opcode": 0, "size": 395, "sha256": "b11baac8b3ce4f4bfb2f54ea65493fa5403d6b6b3ddda0abe223c0d309327979", "matches_recorded": null}
+{"phase": "warm-describe", "seconds": 0.025, "opcode": 0, "size": 395, "sha256": "b11baac8b3ce4f4bfb2f54ea65493fa5403d6b6b3ddda0abe223c0d309327979", "matches_recorded": null}
+{"phase": "submit", "seconds": 16.81, "opcode": 2, "size": 133, "sha256": "fa75519ba1a9d7f167a6a4f27962719528fceee5d92290e5deaf96e8d2285d84", "matches_recorded": true}
+{"host": "/tmp/minidregg-overnight-20260926/minidregg-host-next", "exit": 0}

@@ -50,6 +50,35 @@ def originOutboxProbe : IO Unit := do
     | throw (IO.userError "unique R parent lookup failed")
   require (FnConsumerOperation.sameBytes (preparedCodec.encode selected)
       (preparedCodec.encode prepared)) "unique parent lookup changed prepared R"
+  let secondPackage : FnEvidenceCodec.Package :=
+    { package with signedCall := [3] }
+  let secondPackageBytes ← IO.ofExcept (FnEvidenceCodec.encodeChecked secondPackage)
+  let secondOperation := FnConsumerOperation.originOperation secondPackage
+  let secondPackageIdentity := packageIdentity secondPackageBytes
+  let secondCallIdentity := callIdentity secondPackage.signedCall
+  let secondPrepared : Prepared :=
+    ⟨prepared.application, secondOperation, "<r2@x>".toUTF8.toList,
+      prepared.sourceIdentity, [8], secondPackageIdentity,
+      secondCallIdentity, prepared.originReceipt, prepared.principal,
+      prepared.edPublicKey, prepared.mlPublicKey⟩
+  let secondReport : Report :=
+    { report with prepared := secondPrepared, package := secondPackageBytes }
+  let .ok () := checkReport pin policy secondReport
+    | throw (IO.userError "second prepared R report was refused")
+  let secondCommand := outboxCommand domain semantics secondReport
+  let secondSigned : DeclaredResourceController.SignedCommand :=
+    ⟨DeclaredResourceController.commandCodec.encode secondCommand, [], [], []⟩
+  let secondRecord : DurableReceiver.IntentRecord :=
+    ⟨marker domain semantics secondReport.subject secondPrepared, [], [], [], fun _ => 0,
+      DeclaredResourceController.invocationEvent domain semantics secondCommand secondSigned⟩
+  let .ok (firstOfTwo, _) := selectUniqueParent pin domain semantics
+      prepared.messageId [record, secondRecord]
+    | throw (IO.userError "two-R catalog did not select first parent")
+  let .ok (secondOfTwo, _) := selectUniqueParent pin domain semantics
+      secondPrepared.messageId [record, secondRecord]
+    | throw (IO.userError "two-R catalog did not select second parent")
+  require (firstOfTwo == prepared && secondOfTwo == secondPrepared)
+    "two-R catalog selected the wrong prepared origin"
   require (match decide pin domain semantics report [record] with
     | .repeated => true | _ => false)
     "exact prepared R retry proposed a second outbox write"
@@ -70,6 +99,6 @@ def originOutboxProbe : IO Unit := do
       [record, record] with
     | .error _ => true | .ok _ => false)
     "ambiguous parent lookup was accepted"
-  IO.println "PASS prepared R exact reopen, parent selection, retry/conflict, altered shape"
+  IO.println "PASS prepared R exact reopen, two-parent selection, retry/conflict, altered shape"
 
 #eval originOutboxProbe
