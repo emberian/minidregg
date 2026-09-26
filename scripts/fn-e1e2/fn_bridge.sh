@@ -2,12 +2,21 @@
 set -eu
 [ "$1" = "--fn" ] || exit 64
 verb=$2
-remote_dir=$(ssh hbox 'mktemp -d /tmp/fn-mini-e2.XXXXXX')
-case "$remote_dir" in /tmp/fn-mini-e2.*) ;; *) exit 70;; esac
-trap 'ssh hbox "rm -rf $remote_dir" >/dev/null 2>&1 || true' EXIT HUP INT TERM
 image=${FN_B3_IMAGE:?FN_B3_IMAGE must name the frozen fn image}
 case "$image" in /tank/fn/gates/*) ;; *) exit 64;; esac
 case "$image" in *[!A-Za-z0-9_./-]*) exit 64;; esac
+remote_dir=$(ssh hbox 'mktemp -d /tmp/fn-mini-e2.XXXXXX')
+case "$remote_dir" in /tmp/fn-mini-e2.*) ;; *) exit 70;; esac
+cleanup() {
+  status=$?
+  trap - EXIT
+  ssh hbox "rm -rf $remote_dir" >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 case "$verb" in
   hybrid-author)
     [ "$#" -eq 8 ] || exit 64
