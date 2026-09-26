@@ -1,0 +1,60 @@
+{
+  "publicationReceipts": [
+    {
+      "promptOperationId": 10,
+      "sessionId": "recovery-fixture",
+      "operationId": 18,
+      "attempt": "/tmp/mga-recovery-native-r2-20260926/runtime-state/attempt-0000000000000018",
+      "sourceSha256": "30f71395017b75404fdb9e7f22da3981af38a612d8e70d2641dc05bf10844262",
+      "callSha256": "89db7bf868f975648979690f35e6b9c89e0bd2224f3f952418645b6f7bcddcfb",
+      "outcomePath": "/tmp/mga-recovery-native-r2-20260926/runtime-state/attempt-0000000000000018/outcome.json",
+      "outcomeSha256": "b10a8e324922d73a169ac1ae1fe611a67217ae5e939b4465bd914853a795300c",
+      "targets": [
+        "7003"
+      ],
+      "transactionId": "19526216180070654227344773536921999043481843979840982416980026682766563858018",
+      "eventId": "70328155181371073553685115914588094508760135443558366995703272374436649393443",
+      "acceptedCount": "10",
+      "imageBoundary": "95240706337848437083674758228220770794399826702577450299695709223189177477399",
+      "reported": false
+    }
+  ],
+  "hermesSession": {
+    "id": "recovery-fixture",
+    "workspace": "/tmp/mga-recovery-native-r2-20260926/worker-work",
+    "loadVerified": false,
+    "stateFingerprint": null,
+    "retentionIssue": "first prompt has not yet been retained",
+    "pendingPrompt": true
+  },
+  "reconciliationLog": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "27",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "/tmp/mga-recovery-native-r2-20260926/runtime-state/attempt-0000000000000008",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "27",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "33",
+      "details": [
+        "Hermes prompt 10: Hermes ACP stream closed",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ],
+  "connection": "fenced",
+  "unresolvedExternal": []
+}
