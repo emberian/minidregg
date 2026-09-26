@@ -237,6 +237,43 @@ fn same_publication_confirmation(a: &PublicationReceipt, b: &PublicationReceipt)
         && a.image_boundary == b.image_boundary
 }
 
+fn current_publication_receipt<'a>(
+    records: &'a [PublicationReceipt],
+    prior_operation_ids: &[u64],
+    prompt_operation_id: u64,
+    session_id: &str,
+    targets: &[String],
+) -> Result<&'a PublicationReceipt> {
+    let mut matching = records.iter().filter(|record| {
+        !prior_operation_ids.contains(&record.operation_id)
+            && record.prompt_operation_id == prompt_operation_id
+            && record.session_id == session_id
+            && record.targets == targets
+            && !record.reported
+    });
+    let record = matching
+        .next()
+        .ok_or("current publication has no journaled confirmed receipt")?;
+    if matching.next().is_some() {
+        return Err("current publication has ambiguous journaled receipts".into());
+    }
+    Ok(record)
+}
+
+fn publication_receipt_json(record: &PublicationReceipt) -> Value {
+    json!({
+        "type":"confirmed-mini-publication-v1",
+        "scope":"historical-accepted-transition",
+        "promptOperationId":record.prompt_operation_id,
+        "toolOperationId":record.operation_id,
+        "transactionId":record.transaction_id,
+        "eventId":record.event_id,
+        "acceptedCount":record.accepted_count,
+        "imageBoundary":record.image_boundary,
+        "publicationTargetIds":record.targets,
+    })
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ChildRecord {
@@ -2690,6 +2727,37 @@ impl Runtime {
                         "expectedTargetRoot":root,"payload":payload}),
                     );
                 }
+                // The settle transition journals one verified receipt before
+                // returning. Bind the tool response to that new record and the
+                // active prompt, never to a previous publication on this task.
+                let prompt_operation_id = self
+                    .journal
+                    .child
+                    .as_ref()
+                    .ok_or("publication has no active worker")?
+                    .operation_id;
+                let session_id = self
+                    .journal
+                    .hermes_session
+                    .as_ref()
+                    .ok_or("publication has no retained Hermes session")?
+                    .id
+                    .clone();
+                let target_ids: Vec<String> = publications
+                    .iter()
+                    .map(|publication| {
+                        publication["target"]
+                            .as_str()
+                            .ok_or_else(|| "validated publication target absent".to_owned())
+                            .map(str::to_owned)
+                    })
+                    .collect::<Result<_>>()?;
+                let prior_receipt_ids: Vec<u64> = self
+                    .journal
+                    .publication_receipts
+                    .iter()
+                    .map(|record| record.operation_id)
+                    .collect();
                 let status = self
                     .query_as(&authority)?
                     .pointer("/grain/status")
@@ -2786,7 +2854,16 @@ impl Runtime {
                     "Hermes delegated tool detach",
                     vec![],
                 )?;
-                self.query_as(&authority)
+                let mut tool_view = self.query_as(&authority)?;
+                let receipt = current_publication_receipt(
+                    &self.journal.publication_receipts,
+                    &prior_receipt_ids,
+                    prompt_operation_id,
+                    &session_id,
+                    &target_ids,
+                )?;
+                tool_view["publicationReceipt"] = publication_receipt_json(receipt);
+                Ok(tool_view)
             }
             _ => Err("tool is not delegated".into()),
         }
@@ -5320,6 +5397,193 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publish_returns_only_its_own_confirmed_receipt_without_reporting_it() {
+        let root = std::env::temp_dir().join(format!(
+            "grain-current-publication-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let state = root.join("state");
+        fs::create_dir(&state).unwrap();
+        fs::write(state.join("status"), b"1").unwrap();
+        let mini = root.join("controlled-mini");
+        let script = r#"#!/bin/sh
+set -eu
+state='__STATE__'
+command=$1
+shift
+dir=
+intent=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    --intent) intent=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$dir"
+if [ "$command" = query ]; then
+  status=$(cat "$state/status")
+  printf '{"page":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  exit 0
+fi
+[ "$command" = submit ] || exit 40
+printf call > "$dir/call.bin"
+printf outcome > "$dir/outcome.bin"
+if grep -q '"type": "reserve"' "$intent"; then
+  printf 3 > "$state/status"
+elif grep -q '"type": "settle"' "$intent"; then
+  printf 1 > "$state/status"
+elif grep -q '"type": "disconnect"' "$intent"; then
+  printf 0 > "$state/status"
+fi
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+"#
+        .replace("__STATE__", state.to_str().unwrap());
+        fs::write(&mini, script).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = Config {
+            mini,
+            host: root.join("host"),
+            host_config: root.join("host-config.json"),
+            host_socket: None,
+            control_socket: state.join("control.sock"),
+            custody_key: root.join("parent.key"),
+            state_dir: state.clone(),
+            cwd: root.clone(),
+            task: "7101".into(),
+            subject: "7".into(),
+            capability: "71".into(),
+            query_capability: "74".into(),
+            policy_control_capability: Some("72".into()),
+            tool_task: Some(ToolTask {
+                task: "7102".into(),
+                subject: "8".into(),
+                capability: "81".into(),
+                query_capability: "82".into(),
+                custody_key: root.join("tool.key"),
+                parent_capability: "73".into(),
+                parent_observe_capability: "75".into(),
+                reserve: "3".into(),
+                charge: "1".into(),
+                allowed_publications: vec![PublicationGrant {
+                    kind: "object".into(),
+                    target: "7003".into(),
+                    capability: "93".into(),
+                    observe_capability: "94".into(),
+                }],
+                allowed_reads: vec![],
+            }),
+            provider_task: None,
+            commands: vec![],
+        };
+        let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
+        runtime.journal.connection = Connection::Hard;
+        runtime.journal.child = Some(ChildRecord {
+            operation_id: 41,
+            pid: 1,
+            program: root.join("hermes-acp"),
+            pgid: 1,
+            unit: None,
+            launch_gate_protocol: None,
+        });
+        runtime.journal.prompt_witness = Some(json!({"task":"7101","before":{"generation":"1"}}));
+        runtime.journal.hermes_session = Some(HermesSession {
+            id: "current-session".into(),
+            workspace: root.clone(),
+            load_verified: true,
+            state_fingerprint: None,
+            retention_issue: None,
+            pending_prompt: true,
+        });
+        runtime.prompt_active = true;
+        runtime.save().unwrap();
+        let mut stale = PublicationReceipt {
+            prompt_operation_id: 40,
+            session_id: "prior-session".into(),
+            operation_id: 2,
+            attempt: root.join("old-attempt"),
+            source_sha256: String::new(),
+            call_sha256: String::new(),
+            outcome_path: root.join("old-outcome"),
+            outcome_sha256: String::new(),
+            targets: vec!["7003".into()],
+            transaction_id: "91".into(),
+            event_id: "92".into(),
+            accepted_count: "93".into(),
+            image_boundary: "94".into(),
+            reported: false,
+        };
+        runtime.journal.publication_receipts.push(stale.clone());
+        runtime.save().unwrap();
+
+        let response = runtime
+            .tool_call(
+                "mini_publish",
+                &json!({"publications":[{"kind":"object","target":"7003",
+                    "expectedTargetRoot":"700","payload":{"type":"scalar","actions":[]}}]}),
+            )
+            .unwrap();
+        assert_eq!(response["grain"]["status"], "0");
+        assert_eq!(response["targetRoot"], "100");
+        let receipt = &response["publicationReceipt"];
+        assert_eq!(receipt["type"], "confirmed-mini-publication-v1");
+        assert_eq!(receipt["scope"], "historical-accepted-transition");
+        assert_eq!(receipt["promptOperationId"], 41);
+        assert_eq!(receipt["transactionId"], "11");
+        assert_eq!(receipt["eventId"], "12");
+        assert_eq!(receipt["acceptedCount"], "13");
+        assert_eq!(receipt["imageBoundary"], "300");
+        assert_eq!(receipt["publicationTargetIds"], json!(["7003"]));
+        assert_eq!(runtime.journal.publication_receipts.len(), 2);
+        assert_eq!(
+            receipt["toolOperationId"],
+            runtime.journal.publication_receipts[1].operation_id
+        );
+        assert!(!runtime.journal.publication_receipts[1].reported);
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(state.join("journal.json")).unwrap()).unwrap();
+        assert_eq!(persisted["publicationReceipts"][1]["reported"], false);
+
+        let prior = vec![2];
+        let ids = vec!["7003".to_owned()];
+        assert!(current_publication_receipt(
+            &runtime.journal.publication_receipts,
+            &prior,
+            42,
+            "current-session",
+            &ids
+        )
+        .is_err());
+        assert!(current_publication_receipt(
+            &runtime.journal.publication_receipts,
+            &prior,
+            41,
+            "wrong-session",
+            &ids
+        )
+        .is_err());
+        stale.operation_id = runtime.journal.publication_receipts[1].operation_id + 1;
+        stale.prompt_operation_id = 41;
+        stale.session_id = "current-session".into();
+        runtime.journal.publication_receipts.push(stale);
+        assert!(current_publication_receipt(
+            &runtime.journal.publication_receipts,
+            &prior,
+            41,
+            "current-session",
+            &ids
+        )
+        .is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn joint_grants_match_native_observation_footprint() {
