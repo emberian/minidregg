@@ -1032,6 +1032,7 @@ private def grainSource (path : String) (json : Lean.Json) :
         let value ← int (path ++ ".operation." ++ name) (← field (path ++ ".operation") name op)
         pure <| if tag = "reserve" then .reserve value else .settle value
     | "disconnect" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .disconnect
+    | "interrupt" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .interrupt
     | "cancel" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .cancel
     | _ => failAt (path ++ ".operation.type") "unknown grain operation"
   let task ← nat (path ++ ".task") (← field path "task" obj)

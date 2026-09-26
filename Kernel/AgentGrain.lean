@@ -108,8 +108,9 @@ def transitionPolicy : Pred := .all [
     ([ (3,1), (4,2), (5,0), (7,6) ].map fun p => edge p.1 p.2 0
       [.eq "resource/field/3/after" 0, .le "resource/pair/2/3/delta" 0,
        nonnegative "resource/field/2/delta"]) ++
-    -- Break/cancel fences old execution even when remote effects are unresolved.
-    ([ (1,0), (3,5), (0,6), (1,6), (2,6), (3,7), (4,7), (5,7) ].map
+    -- Controller interruption fences either attachment mode without cancelling
+    -- the task. A reserved attempt remains held until audited settlement.
+    ([ (1,0), (2,0), (3,5), (4,5), (0,6), (1,6), (2,6), (3,7), (4,7), (5,7) ].map
       fun p => edge p.1 p.2 1 [unchangedBudget]))]
 
 /-- Management is deliberately lockable. The caller may supply an explicit
@@ -159,6 +160,11 @@ def settle (s : State) (charge : Int) : State :=
 def trip (s : State) : State :=
   { s with generation := s.generation + 1, status := if s.status = 3 then 5 else 0 }
 
+/-- Abnormal interruption of either attachment mode. An unresolved reservation
+remains held; settlement can return the task to paused status for reattachment. -/
+def interrupt (s : State) : State :=
+  { s with generation := s.generation + 1, status := if s.status = 3 ∨ s.status = 4 then 5 else 0 }
+
 /-- Authoring vocabulary; receiver admission still comes exclusively from
 ordinary declared writes plus the installed source predicate. No request can
 select an alternative transition evaluator. -/
@@ -169,6 +175,7 @@ inductive Operation where
   | reserve (amount : Int)
   | settle (charge : Int)
   | disconnect
+  | interrupt
   | cancel
   deriving DecidableEq, Repr
 
@@ -180,6 +187,7 @@ def Operation.after (operation : Operation) (s : State) : State :=
   | .reserve amount => AgentGrain.reserve s amount
   | .settle charge => AgentGrain.settle s charge
   | .disconnect => if s.status = 2 ∨ s.status = 4 then s else trip s
+  | .interrupt => AgentGrain.interrupt s
   | .cancel => { s with
       generation := s.generation + 1
       status := (if s.status = 3 ∨ s.status = 4 ∨ s.status = 5 then 7 else 6) }
@@ -296,6 +304,22 @@ theorem trip_generation (s : State) : (trip s).generation = s.generation + 1 := 
 theorem trip_preserves_unresolved (s : State) :
     (trip s).remaining = s.remaining ∧ (trip s).reserved = s.reserved := ⟨rfl, rfl⟩
 
+theorem interrupt_generation (s : State) :
+    (interrupt s).generation = s.generation + 1 := rfl
+
+theorem interrupt_preserves_unresolved (s : State) :
+    (interrupt s).remaining = s.remaining ∧ (interrupt s).reserved = s.reserved := ⟨rfl, rfl⟩
+
+theorem interrupt_invalidates_generation (s : State) :
+    (interrupt s).generation ≠ s.generation := by simp [interrupt]
+
+theorem interrupted_worker_refused (before after : State) :
+    eval (executionCaveat before.generation) ⟨[]⟩
+      ⟨("request/verb",2) :: slots (interrupt before) after⟩ ≠ true := by
+  intro admitted
+  exact interrupt_invalidates_generation before
+    (worker_generation_exact (interrupt before) after before.generation admitted).1
+
 theorem hard_trip_invalidates_generation (s : State) :
     (trip s).generation ≠ s.generation := by simp [trip]
 
@@ -305,5 +329,75 @@ theorem tripped_worker_refused (before after : State) :
   intro admitted
   exact hard_trip_invalidates_generation before
     (worker_generation_exact (trip before) after before.generation admitted).1
+
+theorem witness_generation_before_exact (before after : State) (generation : Int)
+    (accepted : eval (witnessCaveat generation) ⟨[]⟩
+      ⟨("request/verb",2) :: slots before after⟩ = true) :
+    before.generation = generation := by
+  unfold witnessCaveat at accepted
+  rw [eval_all] at accepted
+  have bound := (List.all_eq_true.mp accepted)
+    (.eq "resource/field/0/before" generation) (by simp)
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString]
+    at bound
+  exact bound
+
+theorem interrupted_parent_witness_refused (before after : State) :
+    eval (witnessCaveat before.generation) ⟨[]⟩
+      ⟨("request/verb",2) :: slots (interrupt before) after⟩ ≠ true := by
+  intro admitted
+  exact interrupt_invalidates_generation before
+    (witness_generation_before_exact (interrupt before) after before.generation admitted)
+
+theorem soft_reserved_interrupt_general (g r h : Int)
+    (hg : 0 ≤ g) (hr : 0 ≤ r) (hh : 0 ≤ h) :
+    accepts ⟨g,4,r,h⟩ (interrupt ⟨g,4,r,h⟩) = true := by
+  simp [accepts, transitionPolicy, interrupt, edge, unchangedBudget, nonnegative,
+    slots, State.coordinates, DeclaredResourceProjection.scalarSlots,
+    DeclaredResourceProjection.get, DeclaredResourceProjection.fieldName,
+    DeclaredResourceProjection.pairName, eval, evalWith, Pred.all, Pred.any,
+    PredList.ofList, evalWithAll, evalWithAny, Minidregg.Pred.State.get,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString]
+  omega
+
+
+theorem interrupt_general (s : State)
+    (hg : 0 ≤ s.generation) (hr : 0 ≤ s.remaining) (hh : 0 ≤ s.reserved)
+    (hs : s.status = 1 ∨ s.status = 2 ∨ s.status = 3 ∨ s.status = 4) :
+    accepts s (interrupt s) = true := by
+  rcases s with ⟨g, status, r, h⟩
+  dsimp at hg hr hh hs
+  rcases hs with hs | hs | hs | hs <;> subst status <;>
+    simp [accepts, transitionPolicy, interrupt, edge, unchangedBudget, nonnegative,
+      slots, State.coordinates, DeclaredResourceProjection.scalarSlots,
+      DeclaredResourceProjection.get, DeclaredResourceProjection.fieldName,
+      DeclaredResourceProjection.pairName, eval, evalWith, Pred.all, Pred.any,
+      PredList.ofList, evalWithAll, evalWithAny, Minidregg.Pred.State.get,
+      Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] <;>
+    omega
+
+theorem interrupted_reserved_settlement_general (g r h charge : Int)
+    (hg : 0 ≤ g) (hr : 0 ≤ r) (hh : 0 ≤ h)
+    (hc0 : 0 ≤ charge) (hch : charge ≤ h) :
+    accepts (interrupt ⟨g,4,r,h⟩)
+      (settle (interrupt ⟨g,4,r,h⟩) charge) = true := by
+  simp [accepts, transitionPolicy, interrupt, settle, edge, unchangedBudget, nonnegative,
+    slots, State.coordinates, DeclaredResourceProjection.scalarSlots,
+    DeclaredResourceProjection.get, DeclaredResourceProjection.fieldName,
+    DeclaredResourceProjection.pairName, eval, evalWith, Pred.all, Pred.any,
+    PredList.ofList, evalWithAll, evalWithAny, Minidregg.Pred.State.get,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString]
+  omega
+
+theorem hard_reserved_settlement_general (g r h charge : Int)
+    (hg : 0 ≤ g) (hr : 0 ≤ r) (hh : 0 ≤ h)
+    (hc0 : 0 ≤ charge) (hch : charge ≤ h) :
+    accepts (interrupt ⟨g,3,r,h⟩)
+      (settle (interrupt ⟨g,3,r,h⟩) charge) = true := by
+  simpa [interrupt] using
+    interrupted_reserved_settlement_general g r h charge hg hr hh hc0 hch
 
 end Minidregg.Kernel.AgentGrain

@@ -30,6 +30,19 @@ theorem stale_generation_after_trip_refused :
 theorem soft_detach_preserves_authority : accepts ⟨8,2,100,0⟩ ⟨8,2,100,0⟩ = true := by decide
 theorem soft_detach_does_not_reset_budget : accepts ⟨8,2,60,0⟩ ⟨8,2,100,0⟩ = false := by decide
 theorem soft_pending_detach_accepted : accepts ⟨8,4,60,40⟩ ⟨8,4,60,40⟩ = true := by decide
+theorem soft_running_interrupt_accepted :
+    accepts ⟨8,2,100,0⟩ (Operation.interrupt.after ⟨8,2,100,0⟩) = true := by decide
+theorem soft_pending_interrupt_accepted :
+    accepts ⟨8,4,60,40⟩ (Operation.interrupt.after ⟨8,4,60,40⟩) = true := by decide
+theorem interrupt_without_generation_refused :
+    accepts ⟨8,4,60,40⟩ ⟨8,5,60,40⟩ = false := by decide
+theorem interrupted_settlement_accepted :
+    accepts (Operation.interrupt.after ⟨8,4,60,40⟩)
+      (settle (Operation.interrupt.after ⟨8,4,60,40⟩) 30) = true := by decide
+theorem interrupted_reattach_before_settlement_refused :
+    accepts (Operation.interrupt.after ⟨8,4,60,40⟩) ⟨10,2,60,40⟩ = false := by decide
+theorem interrupted_reattach_after_settlement_accepted :
+    accepts (settle (Operation.interrupt.after ⟨8,4,60,40⟩) 30) ⟨10,2,70,0⟩ = true := by decide
 theorem cancellation_accepted : accepts pending ⟨9,7,60,40⟩ = true := by decide
 theorem cancelled_revival_refused : accepts ⟨9,6,60,0⟩ ⟨10,1,60,0⟩ = false := by decide
 theorem management_locked :
@@ -97,4 +110,16 @@ theorem worker_cannot_submit_input :
 /-- info: 'Minidregg.Kernel.AgentGrain.operation_command_retains_publications' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in
 #print axioms operation_command_retains_publications
+/-- info: 'Minidregg.Kernel.AgentGrain.interrupted_worker_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms interrupted_worker_refused
+/-- info: 'Minidregg.Kernel.AgentGrain.interrupt_general' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms interrupt_general
+/-- info: 'Minidregg.Kernel.AgentGrain.interrupted_reserved_settlement_general' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms interrupted_reserved_settlement_general
+/-- info: 'Minidregg.Kernel.AgentGrain.interrupted_parent_witness_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms interrupted_parent_witness_refused
 end Minidregg.Kernel.AgentGrain
