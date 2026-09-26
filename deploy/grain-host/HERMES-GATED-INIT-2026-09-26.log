@@ -1,0 +1,15 @@
+host=persvati upstream_pyproject_sha256=eb0b8daac75c0c0e655282a1a836cb4c8a0bdc266e435a4d77e3295544ccf488 upstream_lock_sha256=811a21647251a3fd024a3e2f49c90ac0600c678e500cc08ed51db38c452a6c65 wrapper_sha256=d9b2b31dcce207f8397a7e1606a6d8586a25e661744b610340d83b2c0c25b7ee keyless_runtime_sha256=023be6b425b47312777b1e23855aab7478a1b992d18256c43de9990e06aee18f
+Running as unit: mini-grain-controller@61193.service; invocation ID: cf9ce177e3d245c7b5c611431467990a
+PASS upstream hermes-acp --check in no-network worker unit
+Running as unit: mini-grain-t61193-o2.service
+2026-09-26 10:04:13 [INFO] __main__: No .env found at /workspace/.hermes/.env, using system env
+2026-09-26 10:04:13 [INFO] __main__: Starting hermes-agent ACP adapter
+2026-09-26 10:04:14 [INFO] acp_adapter.server: ACP client connected
+2026-09-26 10:04:14 [INFO] acp_adapter.server: Initialize from mini-linux-probe (protocol v1)
+PASS upstream ACP initialize protocol v1; setup-only auth
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 1.818s
+CPU time consumed: 1.784s
+Memory peak: 57M (swap: 0B)
+PASS worker unit inactive after connector stop

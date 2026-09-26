@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Render one task-scoped OpenSSH authorized_keys entry; do not install it.
+set -euo pipefail
+
+if [[ $# != 5 ]]; then
+  echo 'usage: render-friend-key ABS_GRAIN_SSH ABS_RUNTIME ABS_CONTROL_SOCKET hard|soft FRIEND_PUBKEY' >&2
+  exit 64
+fi
+wrapper=$1
+runtime=$2
+socket=$3
+mode=$4
+public_key=$5
+for path in "$wrapper" "$runtime" "$socket"; do
+  [[ $path =~ ^/[A-Za-z0-9_./-]+$ && $path != */../* ]] || {
+    echo 'paths must be simple absolute paths without traversal or shell syntax' >&2
+    exit 64
+  }
+done
+[[ -x $wrapper && -x $runtime && -S $socket ]] || {
+  echo 'wrapper, runtime and live control socket are required' >&2
+  exit 66
+}
+[[ $mode == hard || $mode == soft ]] || exit 64
+[[ -f $public_key ]] || exit 66
+read -r key_type key_data _ < "$public_key"
+[[ $key_type == ssh-ed25519 && $key_data =~ ^[A-Za-z0-9+/=]+$ ]] || {
+  echo 'one Ed25519 public key is required' >&2
+  exit 65
+}
+ssh-keygen -lf "$public_key" >/dev/null
+printf 'restrict,command="%s %s %s %s" %s %s\n' \
+  "$wrapper" "$runtime" "$socket" "$mode" "$key_type" "$key_data"

@@ -9,8 +9,10 @@ if [[ $# != 2 ]]; then
   exit 64
 fi
 launcher=$(realpath -e -- "$1")
+gate=$(realpath -e -- "$(dirname -- "$launcher")/launch-gate")
 runtime_root=$(realpath -e -- "$2")
-[[ -x $launcher && -x $runtime_root/hermes-acp && -x $runtime_root/grain-runtime ]] || exit 66
+[[ -x $launcher && -x $gate && -x $runtime_root/hermes-acp && -x $runtime_root/grain-runtime ]] || exit 66
+[[ $($launcher --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] || exit 66
 scratch=$(mktemp -d /tmp/mini-hermes-acp-probe.XXXXXX)
 task=$$
 controller="mini-grain-controller@$task.service"
@@ -42,6 +44,7 @@ printf 'host=%s upstream_pyproject_sha256=%s upstream_lock_sha256=%s wrapper_sha
 systemd-run --user --unit="mini-grain-controller@$task" \
   --property=RuntimeMaxSec=30s /bin/sleep 30 >/dev/null
 
+"$gate" init "$scratch/controller" "$check_unit" >/dev/null
 MINI_GRAIN_UNIT="$check_unit" timeout 20 "$launcher" \
   --workspace "$scratch/workspace" --runtime-root "$runtime_root" \
   --network none -- /agent/hermes-acp --check > "$scratch/check.log" 2>&1
@@ -49,6 +52,7 @@ rg -q 'Hermes ACP check OK' "$scratch/check.log"
 echo 'PASS upstream hermes-acp --check in no-network worker unit'
 
 export MINI_GRAIN_UNIT="$init_unit"
+"$gate" init "$scratch/controller" "$init_unit" >/dev/null
 coproc ACP {
   timeout 25 "$launcher" --workspace "$scratch/workspace" \
     --runtime-root "$runtime_root" --network none -- /agent/hermes-acp
