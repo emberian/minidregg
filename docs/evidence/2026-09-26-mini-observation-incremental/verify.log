@@ -1,0 +1,7 @@
+source-manifest-PASS-166/166
+artifact-manifest-PASS-4/4
+reused-artifact-manifest-PASS
+e926b655aa6e1b3207cd59b63232ab3e8288c71aac4b472f8f123e0bf74d3d0d  scripts/build-native-host.sh
+5ec4519df86610592ea4d473a428152fe4c69b62c7d2468bbe5a1594dcd791a9  Kernel/NativeObservationController.lean
+eddffd827496eb2a005af45158089957bacf63b019c8c3441b01b76b71db33b1  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-observation
+/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-observation: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.32, with debug_info, not stripped

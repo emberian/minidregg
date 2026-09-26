@@ -1,0 +1,8 @@
+baseline_snapshot=/home/ember/build/minidregg-overnight-20260926/source-next
+baseline_output=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-next
+baseline_binary_sha256=41647562c7dd1fe6cdf41836aa62c61fd7b24314f883b2bb14cb38779707c49a
+changed_module=Kernel.NativeObservationController
+unchanged_imported_modules=146
+unchanged_later_sources=19
+unchanged_package_objects=2933
+changed_source_sha256=5ec4519df86610592ea4d473a428152fe4c69b62c7d2468bbe5a1594dcd791a9
