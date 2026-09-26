@@ -198,13 +198,50 @@ def padForRate (bytes : List UInt8) (suffix : UInt8) : List UInt8 :=
   else
     bytes ++ [suffix] ++ List.replicate (count - 2) 0 ++ [128]
 
-/-- Every padded block is absorbed by xor followed by Keccak-f.  The padded
-input is a multiple of the rate; division therefore gives the exact block
-count. -/
-def absorbPadded (padded : List UInt8) : State :=
+/-- The original indexed specification of block absorption. Retained as the
+equivalence target for the linear executable below. -/
+def absorbPaddedIndexed (padded : List UInt8) : State :=
   (List.range (padded.length / rateBytes)).foldl (fun state blockIndex =>
     let block := (padded.drop (blockIndex * rateBytes)).take rateBytes
     keccakF1600 (xorRateBlock state block)) zeroState
+
+/-- Carry the unconsumed suffix forward, so each block is visited once. -/
+def absorbFrom : Nat → State → List UInt8 → State
+  | 0, state, _ => state
+  | count + 1, state, rest =>
+      absorbFrom count (keccakF1600 (xorRateBlock state (rest.take rateBytes)))
+        (rest.drop rateBytes)
+
+theorem absorbFrom_eq_indexed (padded : List UInt8) (count start : Nat)
+    (state : State) :
+    absorbFrom count state (padded.drop (start * rateBytes)) =
+      (List.range' start count).foldl (fun state blockIndex =>
+        keccakF1600 (xorRateBlock state
+          ((padded.drop (blockIndex * rateBytes)).take rateBytes))) state := by
+  induction count generalizing start state with
+  | zero => simp [absorbFrom]
+  | succ count ih =>
+      rw [absorbFrom, List.range'_succ, List.foldl_cons]
+      have hdrop :
+          (padded.drop (start * rateBytes)).drop rateBytes =
+            padded.drop ((start + 1) * rateBytes) := by
+        rw [List.drop_drop]
+        congr 1
+        simp [Nat.add_mul, rateBytes]
+      rw [hdrop]
+      exact ih (start + 1) _
+
+/-- Every padded block is absorbed by xor followed by Keccak-f. The input
+is normally a multiple of the rate; both implementations also agree for every
+short or malformed byte list. -/
+def absorbPadded (padded : List UInt8) : State :=
+  absorbFrom (padded.length / rateBytes) zeroState padded
+
+theorem absorbPadded_eq_indexed (padded : List UInt8) :
+    absorbPadded padded = absorbPaddedIndexed padded := by
+  simpa only [absorbPadded, absorbPaddedIndexed, List.range'_zero,
+    Nat.zero_mul, List.drop_zero, List.range_eq_range'] using
+    absorbFrom_eq_indexed padded (padded.length / rateBytes) 0 zeroState
 
 def stateByte (state : State) (index : Nat) : UInt8 :=
   UInt8.ofNat
@@ -225,5 +262,15 @@ def cshake256Bytes (customization input : List UInt8) : List UInt8 :=
   let framed := if shakeCompatible then input else customizationPrefix customization ++ input
   let suffix : UInt8 := if shakeCompatible then 0x1f else 0x04
   squeeze32 (absorbPadded (padForRate framed suffix))
+
+/-- The linear absorber leaves every cSHAKE output identical to the original
+indexed definition, for every customization and input byte list. -/
+theorem cshake256Bytes_eq_indexed (customization input : List UInt8) :
+    cshake256Bytes customization input =
+      let shakeCompatible := customization = []
+      let framed := if shakeCompatible then input else customizationPrefix customization ++ input
+      let suffix : UInt8 := if shakeCompatible then 0x1f else 0x04
+      squeeze32 (absorbPaddedIndexed (padForRate framed suffix)) := by
+  simp only [cshake256Bytes, absorbPadded_eq_indexed]
 
 end Minidregg.Compiler.Sp800185Cshake256
