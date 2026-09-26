@@ -1,0 +1,4 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-fn-review/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-fn-review/.lake/packages/batteries' has local changes
+PASS native receiver refused valid-grant ordinary subject at gateway policy
+probe-artifacts=/tmp/mini-fn-setup-probe-parent/gateway-pinned-b/gateway-direct-submit-probe.M0FAUR

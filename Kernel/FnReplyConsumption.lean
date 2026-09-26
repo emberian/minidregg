@@ -280,7 +280,8 @@ def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
               if original.application != report.application ||
                   original.operation != report.operation then
                 .refused "A reply operation marker collision"
-              else if oldReport.evidenceBytes == report.evidenceBytes then
+              else if oldReport.evidenceBytes.toByteArray =
+                  report.evidenceBytes.toByteArray then
                 .repeated original
               else
                 let conflictTx := marker domain semantics report.subject
@@ -290,7 +291,8 @@ def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
                 | some conflict =>
                     match originalConflict pin domain semantics conflict with
                     | some recorded =>
-                        if recorded.evidenceBytes == report.evidenceBytes then
+                        if recorded.evidenceBytes.toByteArray =
+                            report.evidenceBytes.toByteArray then
                           .conflictRecorded
                         else .refused "A reply conflict marker occupied by other evidence"
                     | none => .refused "A reply conflict marker occupied by foreign transaction"

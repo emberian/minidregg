@@ -9,6 +9,29 @@ open Minidregg.Compiler
 
 set_option autoImplicit false
 
+/-- The iterative byte-array check is exactly the old list equality. -/
+theorem sameBytes_iff (left right : List UInt8) :
+    sameBytes left right = true ↔ left = right := by
+  simp [sameBytes, List.toByteArray_inj]
+
+private theorem sameBytes_self (bytes : List UInt8) :
+    sameBytes bytes bytes = true :=
+  (sameBytes_iff bytes bytes).2 rfl
+
+private theorem samePortableInbox_self (inbox : Option PortableInbox) :
+    samePortableInbox inbox inbox = true := by
+  cases inbox with
+  | none => rfl
+  | some value =>
+      simp [samePortableInbox, PortableInbox.same, sameBytes_self]
+
+private theorem sameStorePollInbox_self (inbox : Option StorePollInbox) :
+    sameStorePollInbox inbox inbox = true := by
+  cases inbox with
+  | none => rfl
+  | some value =>
+      simp [sameStorePollInbox, StorePollInbox.same, sameBytes_self]
+
 theorem bindingCommand_uses_operation_nonce (domain semantics : Digest)
     (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
     (command : DeclaredResourceController.Command)
@@ -55,7 +78,8 @@ theorem exact_repeat_returns_original_reply (domain semantics : Digest)
     (sameStore : storeInbox = report.storePoll) :
     decide pin domain semantics report receipt accepted = .repeated binding.reply := by
   simp [decide, occupied, decoded, application, operation, provenance, package,
-    sameInbox, sameStore]
+    sameInbox, sameStore, sameBytes_self, samePortableInbox_self,
+    sameStorePollInbox_self]
 
 theorem changed_source_records_conflict_without_second_effect
     (domain semantics : Digest) (pin : FnGatewayPolicy.Pin) (report : Report)

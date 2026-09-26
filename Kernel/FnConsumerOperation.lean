@@ -115,6 +115,42 @@ structure ConflictEvidence where
   package : List UInt8
   deriving DecidableEq, Repr
 
+/-- Large retained package and carrier bytes are compared iteratively. The
+ordinary list equality over a full portable article exhausts Lean's stack. -/
+def sameBytes (left right : List UInt8) : Bool :=
+  decide (left.toByteArray = right.toByteArray)
+
+def PortableInbox.same (left right : PortableInbox) : Bool :=
+  sameBytes left.carrier right.carrier &&
+  left.sourceIdentity == right.sourceIdentity &&
+  left.principal == right.principal &&
+  left.edPublicKey == right.edPublicKey &&
+  left.mlPublicKey == right.mlPublicKey
+
+def samePortableInbox : Option PortableInbox → Option PortableInbox → Bool
+  | none, none => true
+  | some left, some right => left.same right
+  | _, _ => false
+
+def StorePollInbox.same (left right : StorePollInbox) : Bool :=
+  left.cursor == right.cursor && sameBytes left.event right.event &&
+  left.pollCallObserved == right.pollCallObserved &&
+  left.sourceIdentity == right.sourceIdentity &&
+  left.sequence == right.sequence && left.transactionId == right.transactionId &&
+  left.messageId == right.messageId &&
+  left.verdictPrincipal == right.verdictPrincipal &&
+  sameBytes left.verdictEvent right.verdictEvent &&
+  left.controlBinding == right.controlBinding
+
+def sameStorePollInbox : Option StorePollInbox → Option StorePollInbox → Bool
+  | none, none => true
+  | some left, some right => left.same right
+  | _, _ => false
+
+def ConflictEvidence.same (left right : ConflictEvidence) : Bool :=
+  left.application == right.application && left.operation == right.operation &&
+  left.provenance == right.provenance && sameBytes left.package right.package
+
 def provenanceStream : StreamCodec Provenance :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream
@@ -650,14 +686,14 @@ def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
               binding.operation != report.operation then
             .refused "operation marker collision or foreign binding"
           else if binding.provenance == report.provenance &&
-              binding.package == report.package &&
-              originalInbox == report.portableInbox &&
-              originalStore == report.storePoll then
+              sameBytes binding.package report.package &&
+              samePortableInbox originalInbox report.portableInbox &&
+              sameStorePollInbox originalStore report.storePoll then
             .repeated binding.reply
           else
             let sameSource :=
               binding.provenance.sourceIdentity == report.provenance.sourceIdentity &&
-              binding.package == report.package
+              sameBytes binding.package report.package
             let conflictTransaction := marker domain semantics report.subject
               (conflictNonce domain semantics report)
             match accepted.find? (fun entry => entry.transactionId == conflictTransaction) with
@@ -666,10 +702,13 @@ def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
                   (conflictCommand domain semantics report) binding.reply
                 else .conflict (conflictCommand domain semantics report)
             | some conflict =>
-                if originalConflictWithInbox pin domain semantics conflict ==
-                    some (⟨report.application, report.operation,
-                      report.provenance, report.package⟩,
-                      report.portableInbox, report.storePoll) then
+                if (match originalConflictWithInbox pin domain semantics conflict with
+                    | some (evidence, inbox, store) =>
+                        evidence.same ⟨report.application, report.operation,
+                          report.provenance, report.package⟩ &&
+                        samePortableInbox inbox report.portableInbox &&
+                        sameStorePollInbox store report.storePoll
+                    | none => false) then
                   if sameSource then .carrierVariationRecorded binding.reply
                   else .conflictRecorded
                 else .refused "conflict marker occupied by different evidence"
