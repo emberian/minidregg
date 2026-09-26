@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# Install one pre-provisioned Mini grain controller as an owned systemd user unit.
+# This is an artifact/path preflight, not a substitute for grain-runtime's
+# journal binding or Mini's signed authority checks.
+set -euo pipefail
+umask 077
+
+usage() {
+  echo 'usage: install-controller --config ABS_JSON --runtime ABS_BIN --unit-dir ABS_DIR --pins ABS_JSON [--render-only]' >&2
+  exit 64
+}
+
+config='' runtime='' unit_dir='' pins='' render_only=0
+while (($#)); do
+  case $1 in
+    --config|--runtime|--unit-dir|--pins)
+      (($# >= 2)) || usage
+      case $1 in
+        --config) [[ -z $config ]] || usage; config=$2 ;;
+        --runtime) [[ -z $runtime ]] || usage; runtime=$2 ;;
+        --unit-dir) [[ -z $unit_dir ]] || usage; unit_dir=$2 ;;
+        --pins) [[ -z $pins ]] || usage; pins=$2 ;;
+      esac
+      shift 2 ;;
+    --render-only) [[ $render_only == 0 ]] || usage; render_only=1; shift ;;
+    *) usage ;;
+  esac
+done
+[[ -n $config && -n $runtime && -n $unit_dir && -n $pins ]] || usage
+[[ $(uname -s) == Linux ]] || { echo 'Linux user systemd is required' >&2; exit 69; }
+for tool in jq realpath stat sha256sum systemctl cmp mktemp ln; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+
+fail() { echo "install-controller: $*" >&2; exit 65; }
+safe_path() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsupported path (use absolute paths without spaces, %, quotes, backslashes or traversal): $1"
+}
+existing_path() {
+  safe_path "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail "path must exist without symlinks: $1"
+}
+owned_by_current_user() {
+  [[ $(stat -c %u -- "$1") == "$(id -u)" ]] || fail "not owned by this user: $1"
+}
+private_file() {
+  existing_path "$1"
+  [[ -f $1 ]] || fail "not a regular file: $1"
+  owned_by_current_user "$1"
+  [[ $(stat -c %a -- "$1") == 600 ]] || fail "file must have mode 0600: $1"
+}
+
+private_file "$config"
+existing_path "$runtime"
+[[ -f $runtime && -x $runtime ]] || fail "runtime is not executable: $runtime"
+existing_path "$unit_dir"
+[[ -d $unit_dir && -w $unit_dir ]] || fail "unit directory is not writable: $unit_dir"
+owned_by_current_user "$unit_dir"
+[[ $(stat -c %a -- "$unit_dir") =~ ^(700|750|755)$ ]] ||
+  fail "unit directory must be mode 0700, 0750 or 0755"
+existing_path "$pins"
+[[ -f $pins && -r $pins ]] || fail "pins must be a readable regular file"
+pin_owner=$(stat -c %u -- "$pins")
+[[ $pin_owner == 0 || $pin_owner == "$(id -u)" ]] || fail 'pins are owned by another user'
+case $(stat -c %a -- "$pins") in
+  400|440|444|600|640|644) ;;
+  *) fail 'pins must not be group- or world-writable' ;;
+esac
+
+jq -e '
+  (.task | type == "string" and test("^[1-9][0-9]*$")) and
+  ([.mini,.host,.hostConfig,.hostSocket,.controlSocket,.custodyKey,.stateDir,.cwd]
+    | all(type == "string" and startswith("/"))) and
+  (.commands | type == "array" and length > 0 and
+    all(.[]; .systemdScope == true and (.program | type == "string")))
+' "$config" >/dev/null || fail 'runtime config lacks a task, required paths or scoped commands'
+task=$(jq -r .task "$config")
+state_dir=$(jq -r .stateDir "$config")
+control_socket=$(jq -r .controlSocket "$config")
+host_socket=$(jq -r .hostSocket "$config")
+cwd=$(jq -r .cwd "$config")
+host_config=$(jq -r .hostConfig "$config")
+for path in "$state_dir" "$control_socket" "$host_socket" "$cwd" "$host_config"; do
+  safe_path "$path"
+done
+existing_path "$state_dir"
+[[ -d $state_dir && $(stat -c %a -- "$state_dir") == 700 ]] ||
+  fail 'stateDir must be an existing mode-0700 directory'
+owned_by_current_user "$state_dir"
+[[ $(dirname -- "$control_socket") == "$state_dir" ]] ||
+  fail 'controlSocket must be directly inside stateDir'
+[[ ! -e $control_socket || -S $control_socket ]] ||
+  fail 'controlSocket exists but is not a socket'
+[[ ! -L $control_socket ]] || fail 'controlSocket must not be a symlink'
+existing_path "$cwd"
+[[ -d $cwd ]] || fail 'cwd is not a directory'
+owned_by_current_user "$cwd"
+existing_path "$host_config"
+[[ -f $host_config && -r $host_config ]] || fail 'hostConfig is not readable'
+while IFS= read -r key; do
+  private_file "$key"
+done < <(jq -r '[.custodyKey,.toolTask.custodyKey?,.providerTask.custodyKey?,
+                  .providerTask.providerKeyFile?] | map(select(. != null)) | .[]' "$config")
+if [[ -e $state_dir/journal.json ]]; then
+  private_file "$state_dir/journal.json"
+  journal_task=$(jq -er '.binding.config.task' "$state_dir/journal.json") ||
+    fail 'existing journal has no bound task'
+  [[ $journal_task == "$task" ]] || fail 'stateDir belongs to a different grain task'
+fi
+
+jq -e '
+  .artifacts | type == "array" and length > 0 and
+  all(.[]; (.path | type == "string" and startswith("/")) and
+            (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
+  ([.[].path] | length == (unique | length))
+' "$pins" >/dev/null || fail 'pins must contain unique {path,sha256} executable artifacts'
+
+declare -A approved=()
+while IFS=$'\t' read -r path expected; do
+  existing_path "$path"
+  [[ -f $path && -x $path ]] || fail "pinned artifact is not executable: $path"
+  actual=$(sha256sum -- "$path")
+  [[ ${actual%% *} == "$expected" ]] || fail "SHA-256 pin mismatch: $path"
+  approved[$path]=1
+done < <(jq -r '.artifacts[] | [.path,.sha256] | @tsv' "$pins")
+
+require_pin() { [[ ${approved[$1]:-} == 1 ]] || fail "missing executable pin: $1"; }
+require_pin "$runtime"
+mini=$(jq -r .mini "$config")
+host=$(jq -r .host "$config")
+safe_path "$mini"
+safe_path "$host"
+require_pin "$mini"
+require_pin "$host"
+while IFS= read -r program; do
+  safe_path "$program"
+  [[ ${program##*/} == bwrap ]] || fail "scoped command must use the bwrap launcher: $program"
+  require_pin "$program"
+  gate=${program%/*}/launch-gate
+  require_pin "$gate"
+  [[ $($program --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] ||
+    fail "launcher/gate protocol mismatch: $program"
+done < <(jq -r '.commands[].program' "$config" | sort -u)
+
+unit="mini-grain-controller@$task.service"
+target=$unit_dir/$unit
+systemctl --user show-environment >/dev/null || fail 'user systemd manager is unavailable'
+if (( !render_only )); then
+  unit_paths=$(systemctl --user show -p UnitPath --value) ||
+    fail 'cannot read the user manager unit load paths'
+  found_path=0
+  read -r -a manager_paths <<< "$unit_paths"
+  for load_path in "${manager_paths[@]}"; do
+    [[ $load_path == "$unit_dir" ]] && found_path=1
+  done
+  ((found_path)) || fail "unit directory is not in the user manager's unit load paths: $unit_dir"
+fi
+active=$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || :)
+pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || :)
+case $active in active|activating|deactivating|reloading) fail "unit is running or changing state: $unit" ;; esac
+[[ -z $pid || $pid == 0 ]] || fail "unit has a MainPID: $unit"
+fragment=$(systemctl --user show "$unit" -p FragmentPath --value 2>/dev/null || :)
+[[ -z $fragment || $fragment == "$target" ]] ||
+  fail "unit name already belongs to another fragment: $fragment"
+
+unit_text=$(cat <<EOF
+[Unit]
+Description=Mini agent grain controller $task
+After=network-online.target
+StartLimitIntervalSec=30s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+Environment=MINI_GRAIN_CONTROLLER_UNIT=$unit
+ExecStart=$runtime serve $config
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=yes
+LimitCORE=0
+TasksMax=64
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target
+EOF
+)
+if ((render_only)); then
+  printf '%s\n' "$unit_text"
+  exit 0
+fi
+if [[ -e $target || -L $target ]]; then
+  existing_path "$target"
+  [[ -f $target ]] || fail "unit path is not a regular file: $target"
+  owned_by_current_user "$target"
+  [[ $(stat -c %a -- "$target") == 644 ]] || fail 'existing unit has unexpected mode'
+  if cmp -s "$target" <(printf '%s\n' "$unit_text"); then
+    printf 'already installed: %s\n' "$target"
+    exit 0
+  fi
+  fail "conflicting unit exists: $target"
+fi
+tmp=$(mktemp "$target.tmp.XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+printf '%s\n' "$unit_text" > "$tmp"
+chmod 644 "$tmp"
+ln -T -- "$tmp" "$target" || fail "unit appeared during install: $target"
+rm -f -- "$tmp"
+trap - EXIT
+systemctl --user daemon-reload
+printf 'installed: %s\n' "$target"

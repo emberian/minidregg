@@ -45,24 +45,69 @@ The wrapper also kills the unit when it receives TERM, INT or HUP. Gate
 tombstones must remain while an operation ID might be reused. An old journal
 entry alone must never trigger an automatic kill of a possibly reused unit.
 
-`mini-grain-controller@.service` is a user-systemd template for a persistent
-`grain-runtime serve` process. Its `%i` is the decimal task ID and its JSON
-file must configure `controlSocket` directly inside its durable private
-`stateDir` (for example,
-`/var/lib/mini/grains/task-7001/control.sock`). The account must own that
-directory and keep it at mode 0700. The service
+## Controller unit installation
+
+`install-controller` creates a direct `mini-grain-controller@TASK.service`
+user unit for a persistent `grain-runtime serve` process. The historical
+`mini-grain-controller@.service` template shows the same service limits, but
+the installer writes the exact task, executable and config paths so the
+operator need not edit a template. The runtime JSON must configure
+`controlSocket` directly inside its durable private `stateDir` (for example,
+`/var/lib/mini/grains/task-7001/control.sock`). The task account must own
+that directory and keep it at mode 0700. The service
 sets `MINI_GRAIN_CONTROLLER_UNIT` for the launcher, which adds a `BindsTo=`
 dependency: stopping the controller service also stops its worker units.
-The operator must install the runtime and per-task config at the template's
-paths or adjust those paths before using the unit. `grain-ssh` is an SSH
+
+Run the installer as the task account after placing the runtime JSON and
+executables. The pins file is JSON with one entry per executable, including
+the runtime, `mini`, Mini host, every scoped `bwrap` command, and each
+`bwrap` sibling `launch-gate`:
+
+```json
+{"artifacts":[
+  {"path":"/opt/mini/bin/grain-runtime","sha256":"REPLACE_WITH_64_LOWERCASE_HEX"},
+  {"path":"/opt/mini/bin/mini","sha256":"REPLACE_WITH_64_LOWERCASE_HEX"},
+  {"path":"/opt/mini/bin/minidregg-host","sha256":"REPLACE_WITH_64_LOWERCASE_HEX"},
+  {"path":"/opt/mini/bin/bwrap","sha256":"REPLACE_WITH_64_LOWERCASE_HEX"},
+  {"path":"/opt/mini/bin/launch-gate","sha256":"REPLACE_WITH_64_LOWERCASE_HEX"}
+]}
+```
+
+```sh
+install-controller --config /opt/mini/grains/7001.json \
+  --runtime /opt/mini/bin/grain-runtime \
+  --pins /opt/mini/grains/7001-pins.json \
+  --unit-dir "$HOME/.config/systemd/user" --render-only
+install-controller --config /opt/mini/grains/7001.json \
+  --runtime /opt/mini/bin/grain-runtime \
+  --pins /opt/mini/grains/7001-pins.json \
+  --unit-dir "$HOME/.config/systemd/user"
+systemd-analyze --user verify "$HOME/.config/systemd/user/mini-grain-controller@7001.service"
+# After inspecting the unit and signed Mini task state:
+systemctl --user enable --now mini-grain-controller@7001.service
+```
+
+The installer never enables or starts a unit. The unit directory must already
+exist, be owned by the task account, and be in its user systemd load path.
+Installation is atomic and refuses an active unit, a conflicting unit file,
+a journal bound to another task, unpinned or changed executable bytes, or
+paths requiring systemd escaping (spaces, `%`, quotes, backslashes). The
+private JSON, keys and state remain outside worker mounts. Pins identify
+operator-selected artifact bytes **at installer time**; an artifact writable
+by the same Unix account can change later. Their provenance and compatibility
+still need the separately retained source/build evidence. Deploy executable
+artifacts in immutable, administrator-owned locations before starting a
+friend's controller.
+
+`grain-ssh` is an SSH
 forced-command front end for the runtime's `connect ABS_CONTROL_SOCKET
 hard|soft` mode. A per-task `authorized_keys` entry fixes the absolute
 runtime and socket paths and uses OpenSSH's `restrict` option. For example,
 after installing the persistent service and task configuration:
 
 ```text
-restrict,pty,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock" ssh-ed25519 AAAA... hard-key
-restrict,pty,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock soft" ssh-ed25519 AAAA... soft-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock" ssh-ed25519 AAAA... hard-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock soft" ssh-ed25519 AAAA... soft-key
 ```
 
 The two-argument entry defaults to **hard**: SSH EOF interrupts an active
