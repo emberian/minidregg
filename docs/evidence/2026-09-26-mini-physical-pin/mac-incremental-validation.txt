@@ -1,0 +1,6 @@
+baseline_snapshot=/private/tmp/minidregg-overnight-20260926-catalog-ack
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-catalog-ack
+baseline_binary_sha256=d3fef24a44530ed289e13cd8f30b32d5f61f72f0497907ea408cd7adc470f97f
+unchanged_imported_modules=164
+unchanged_package_objects=2933
+changed_host_source_sha256=82c7f9d1bc5ddd64c8ed354a3e0ee1fce5aed3b1fd634e446eef418e7bf3e900

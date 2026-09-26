@@ -1,0 +1,6 @@
+baseline_snapshot=/home/ember/build/minidregg-overnight-20260926/source-combined
+baseline_output=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-combined
+baseline_binary_sha256=31a00492594a9abbde4541fef687f4d6a2fd2cac06c1645e604178a3e7f18179
+unchanged_imported_modules=164
+unchanged_package_objects=2933
+changed_host_source_sha256=82c7f9d1bc5ddd64c8ed354a3e0ee1fce5aed3b1fd634e446eef418e7bf3e900
