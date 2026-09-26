@@ -6,7 +6,7 @@ private signing keys. `assemble` combines detached custody signatures only.
 stdio framing: four-byte little-endian length, then one operation byte and
 payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 5=authorized query. Reply operation byte matches; failures use 255 plus a
-strict Outcome. Max frame is 1 MiB. EOF at a
+strict Outcome. The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
@@ -836,6 +836,29 @@ def verifyAckSource (pin : FnPortablePin) (projection : FnPollProjection)
       throw (IO.userError "fn ack source differs from accepted Mini inbox")
     return verified
 
+/-- A reply ACK verifies the Q reply-source profile. It cannot use the B
+native-prefix parser: the accepted A inbox retains a seven-header reply source
+with a different exact Message-ID construction. -/
+def verifyReplyAckSource (pin : FnPortablePin) (projection : FnPollProjection)
+    (retainedCarrier retainedSource : List UInt8) : IO FnPortableVerified := do
+  unless sameBytes projection.received retainedCarrier do
+    throw (IO.userError "A reply ack carrier differs from accepted Mini inbox")
+  let extracted ← IO.ofExcept (FnReplySource.extract retainedSource)
+  let claim : FnPortableClaim :=
+    { sourceIdentity := Minidregg.Host.Json.encodeHex projection.sourceIdentity,
+      messageId := extracted.messageId,
+      groups := extracted.creation.newsgroup }
+  IO.FS.withTempDir fun directory => do
+    let path := directory / "retained-q-carrier.eml"
+    IO.FS.writeBinFile path retainedCarrier.toByteArray
+    let (_, verified) ← verifyFnCarrier pin claim path.toString
+    unless sameBytes verified.source retainedSource &&
+        sameBytes projection.source retainedSource &&
+        verified.sourceIdentity == projection.sourceIdentity &&
+        projection.messageId == extracted.messageId.toUTF8.toList do
+      throw (IO.userError "A reply ack signed source differs from accepted Mini inbox")
+    return verified
+
 /-- Join ACL2's exact fn-e/fncu projection to the independent native hybrid
 verifier. The caller must separately establish that these files were returned
 by an authenticated consumer poll; file possession alone is not Store proof. -/
@@ -1415,7 +1438,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
         projected.verdictPrincipal == stored.verdictPrincipal &&
         projected.verdictEvent == stored.verdictEvent do
       throw (IO.userError "A reply ack pair differs from durable Mini inbox")
-    let verified ← verifyAckSource pin projected inbox.portableInbox.carrier
+    let verified ← verifyReplyAckSource pin projected inbox.portableInbox.carrier
       inbox.replySource
     unless projected.verdictPrincipal == inbox.portableInbox.principal &&
         verified.principal == inbox.portableInbox.principal &&
@@ -1787,7 +1810,7 @@ def run (arguments : List String) : IO UInt32 := do
               projected.verdictPrincipal == stored.verdictPrincipal &&
               projected.verdictEvent == stored.verdictEvent do
             throw (IO.userError "A reply ack pair differs from durable Mini inbox")
-          let verified ← verifyAckSource pin projected inbox.portableInbox.carrier inbox.replySource
+          let verified ← verifyReplyAckSource pin projected inbox.portableInbox.carrier inbox.replySource
           unless projected.verdictPrincipal == inbox.portableInbox.principal &&
               verified.principal == inbox.portableInbox.principal &&
               verified.edPublicKey == inbox.portableInbox.edPublicKey &&
