@@ -1,0 +1,23 @@
+{
+  "tariffPerInitialPayloadByte": 0,
+  "tariffPerGrant": 1,
+  "tariffPerBirth": 2,
+  "tariffBase": 3,
+  "storageRoot": "/tmp/mini-grain-origin-r5/independent-store",
+  "storageBinary": "/Users/ember/dev/minidregg/native/hyperdocument-link-sqlite-store/target/release/minidregg-link-sqlite-store",
+  "signatureBinary": "/Users/ember/dev/minidregg/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier",
+  "resourceBookId": 11,
+  "ownerBudget": 100000,
+  "lifetime": 10000,
+  "issuer": 5,
+  "genesisHeight": 10,
+  "fnPoll": null,
+  "fnGateway": null,
+  "federation": 9,
+  "factoryId": 10,
+  "expectedSeed": 52634490415914190397401970064478897369657169208744841045273191087245443136680,
+  "domain": 8501,
+  "collector": 99,
+  "authorityCatalogueId": 12,
+  "asset": 0
+}
