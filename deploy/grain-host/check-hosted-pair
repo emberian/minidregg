@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Read-only Linux deployment preflight for two hosted controller configurations.
+# Native Mini authority and each runtime config's full semantics remain with Mini
+# and grain-runtime. This only checks cross-controller filesystem isolation.
+set -euo pipefail
+
+if (($# != 2)); then
+  echo 'usage: check-hosted-pair ABS_CONFIG_A ABS_CONFIG_B' >&2
+  exit 64
+fi
+for tool in jq realpath stat sort; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "check-hosted-pair: $*" >&2; exit 65; }
+safe_path() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail 'unsupported absolute path in hosted config'
+}
+canonical_existing() {
+  safe_path "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail 'hosted path is missing, a symlink, or noncanonical'
+}
+overlaps() {
+  [[ $1 == "$2" || $1 == "$2"/* || $2 == "$1"/* ]]
+}
+under() {
+  [[ $1 == "$2" || $1 == "$2"/* ]]
+}
+
+config_a=$1 config_b=$2
+canonical_existing "$config_a"
+canonical_existing "$config_b"
+[[ $config_a != "$config_b" ]] || fail 'both members use one runtime config'
+for config in "$config_a" "$config_b"; do
+  [[ -f $config && $(stat -c %a -- "$config") == 600 &&
+     $(stat -c %u -- "$config") == "$(id -u)" ]] ||
+    fail 'runtime config must be an owned mode-0600 file'
+  jq -e '
+    (.task | type == "string" and test("^[1-9][0-9]*$")) and
+    (.subject | type == "string" and test("^[1-9][0-9]*$")) and
+    (.toolTask.task | type == "string" and test("^[1-9][0-9]*$")) and
+    (.toolTask.subject | type == "string" and test("^[1-9][0-9]*$")) and
+    ([.stateDir,.controlSocket,.custodyKey,.toolTask.custodyKey,.cwd,.hostConfig]
+      | all(type == "string" and startswith("/"))) and
+    (.commands | type == "array" and length > 0 and all(.[];
+      .systemdScope == true and (.program | type == "string") and
+      (.args | type == "array" and length >= 8 and
+        .[0] == "--workspace" and (.[1] | type == "string") and
+        .[2] == "--runtime-root" and (.[3] | type == "string") and
+        .[4] == "--network" and (.[5] == "none" or .[5] == "host") and
+        .[6] == "--")))
+  ' "$config" >/dev/null || fail 'config lacks the fixed hosted task and launcher shape'
+done
+
+mapfile -t identities < <(jq -r '.task,.subject,.toolTask.task,.toolTask.subject' "$config_a" "$config_b")
+for ((i=0; i<${#identities[@]}; i++)); do
+  for ((j=i+1; j<${#identities[@]}; j++)); do
+    [[ ${identities[i]} != "${identities[j]}" ]] ||
+      fail 'parent/tool task IDs or signing subjects overlap'
+  done
+done
+
+state_a=$(jq -r .stateDir "$config_a")
+state_b=$(jq -r .stateDir "$config_b")
+cwd_a=$(jq -r .cwd "$config_a")
+cwd_b=$(jq -r .cwd "$config_b")
+for path in "$state_a" "$state_b" "$cwd_a" "$cwd_b"; do
+  canonical_existing "$path"
+  [[ -d $path ]] || fail 'stateDir or cwd is not a directory'
+done
+overlaps "$state_a" "$state_b" && fail 'member state directories overlap'
+overlaps "$cwd_a" "$cwd_b" && fail 'member controller working directories overlap'
+
+mapfile -t secrets < <(
+  for config in "$config_a" "$config_b"; do
+    printf '%s\n' "$config"
+    jq -r '[.stateDir,.controlSocket,.custodyKey,.toolTask.custodyKey,
+            .providerTask.custodyKey?,.providerTask.providerKeyFile?,.hostConfig]
+           | map(select(. != null)) | .[]' "$config"
+  done
+)
+for secret in "${secrets[@]}"; do
+  safe_path "$secret"
+  # A control socket need not be bound until the service starts.
+  [[ $secret == "$(jq -r .controlSocket "$config_a")" ||
+     $secret == "$(jq -r .controlSocket "$config_b")" ]] || canonical_existing "$secret"
+done
+
+mapfile -t key_paths < <(jq -r '[.custodyKey,.toolTask.custodyKey,
+                             .providerTask.custodyKey?,.providerTask.providerKeyFile?]
+                            | map(select(. != null)) | .[]' "$config_a" "$config_b")
+for ((i=0; i<${#key_paths[@]}; i++)); do
+  for ((j=i+1; j<${#key_paths[@]}; j++)); do
+    [[ ${key_paths[i]} != "${key_paths[j]}" ]] || fail 'member custody paths overlap'
+  done
+done
+
+mapfile -t mounts_a < <(jq -r '.commands[].args[1],.commands[].args[3]' "$config_a" | sort -u)
+mapfile -t mounts_b < <(jq -r '.commands[].args[1],.commands[].args[3]' "$config_b" | sort -u)
+for member_a_mount in "${mounts_a[@]}"; do
+  for member_b_mount in "${mounts_b[@]}"; do
+    overlaps "$member_a_mount" "$member_b_mount" && fail 'member worker mount roots overlap'
+  done
+done
+mapfile -t mounts < <(printf '%s\n' "${mounts_a[@]}" "${mounts_b[@]}" | sort -u)
+for mount in "${mounts[@]}"; do
+  canonical_existing "$mount"
+  [[ -d $mount ]] || fail 'worker mount root is not a directory'
+done
+for ((i=0; i<${#mounts[@]}; i++)); do
+  for ((j=i+1; j<${#mounts[@]}; j++)); do
+    overlaps "${mounts[i]}" "${mounts[j]}" && fail 'worker mount roots overlap'
+  done
+done
+for state in "$state_a" "$state_b"; do
+  for mount in "${mounts[@]}"; do
+    overlaps "$state" "$mount" && fail 'controller state and a worker mount root overlap'
+  done
+done
+mounts+=("$(realpath -e /usr)")
+[[ ! -d /etc/ssl ]] || mounts+=("$(realpath -e /etc/ssl)")
+[[ ! -f /etc/resolv.conf ]] || mounts+=("$(realpath -e /etc/resolv.conf)")
+for secret in "${secrets[@]}"; do
+  for mount in "${mounts[@]}"; do
+    under "$secret" "$mount" && fail 'a controller secret, config or state path is visible in a worker mount'
+  done
+done
+
+printf 'hosted pair deployment paths disjoint: tasks %s and %s\n' \
+  "$(jq -r .task "$config_a")" "$(jq -r .task "$config_b")"

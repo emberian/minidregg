@@ -99,6 +99,21 @@ still need the separately retained source/build evidence. Deploy executable
 artifacts in immutable, administrator-owned locations before starting a
 friend's controller.
 
+For two controllers sharing one Mini content page, run
+`check-hosted-pair ABS_CONFIG_A ABS_CONFIG_B` after both JSON files and worker
+directories are staged, before installing either unit. This read-only check
+requires separate parent/tool identities, state, custody files, working
+directories, workspaces and runtime roots, and checks that neither worker
+mount exposes either controller's keys, config or state. It accepts a shared
+Mini host socket and host config. This is a path preflight for a reviewed,
+artifact-pinned `bwrap` launcher; the positional arguments alone do not prove
+what the executable will mount. Run `install-controller` separately for each
+config to check private keys, mode-0700 state, executable pins and live unit
+ownership. Distinct paths do not prove distinct key contents or inode identity,
+and this single-account test is not production account isolation. Native
+content grants, policy generations and source provenance require signed Mini
+readback and retained build/acceptance evidence.
+
 `grain-ssh` is an SSH
 forced-command front end for the runtime's `connect ABS_CONTROL_SOCKET
 hard|soft` mode. A per-task `authorized_keys` entry fixes the absolute
