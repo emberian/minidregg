@@ -1,0 +1,50 @@
+{
+  "grain": {
+    "task": "7004",
+    "subject": "9",
+    "capability": "101",
+    "observeCapability": "101",
+    "schemaVersion": "1",
+    "expectedAuthorityRoot": "69899796949921801217271961266740715774651404384279880144229085568836347032043",
+    "expectedTargetRoot": "71399039120907516191799708445510860453057251328501530186440053884579970819688",
+    "context": {
+      "operationId": "40015",
+      "payload": "provider-stale"
+    },
+    "before": {
+      "generation": "1",
+      "status": "3",
+      "remaining": "47",
+      "reserved": "3"
+    },
+    "operation": {
+      "type": "input"
+    },
+    "publications": [],
+    "parentWitness": {
+      "task": "7001",
+      "capability": "75",
+      "observeCapability": "75",
+      "expectedTargetRoot": "41951950975920030079976735670682231459701581547310961843718343691634058628209",
+      "before": {
+        "generation": "1",
+        "status": "3",
+        "remaining": "97",
+        "reserved": "3"
+      }
+    }
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "7004",
+      "capability": "101"
+    },
+    {
+      "kind": "object",
+      "target": "7001",
+      "capability": "75"
+    }
+  ],
+  "intentNonce": "40015"
+}

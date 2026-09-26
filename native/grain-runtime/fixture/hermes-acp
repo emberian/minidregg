@@ -1,0 +1,21 @@
+#!/bin/sh
+# Deterministic ACP protocol peer for acceptance. It issues no provider work.
+set -eu
+
+if [ "$#" -ne 2 ]; then exit 2; fi
+ready=$1
+release=$2
+
+IFS= read -r initialize
+case $initialize in *'"method":"initialize"'*) ;; *) exit 1 ;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+
+IFS= read -r session
+case $session in *'"method":"session/new"'*) ;; *) exit 1 ;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"acceptance"}}'
+
+IFS= read -r prompt
+case $prompt in *'"method":"session/prompt"'*) ;; *) exit 1 ;; esac
+: >"$ready"
+while [ ! -f "$release" ]; do sleep 1; done
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'

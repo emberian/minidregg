@@ -1,0 +1,193 @@
+--- acceptance-28d8.sh
++++ acceptance-a77.sh
+@@ -38,9 +38,19 @@
+ GRAIN_SERVICE_PID=
+ RUNTIME_PID=
+ CONTROLLER_UNIT=
++CONTROLLER_MARKER=
++CONTROLLER_INVOCATION=
+ cleanup() {
+   if [ -n "$RUNTIME_PID" ]; then kill "$RUNTIME_PID" 2>/dev/null || :; wait "$RUNTIME_PID" 2>/dev/null || :; fi
+-  if [ -n "$CONTROLLER_UNIT" ]; then systemctl --user stop "$CONTROLLER_UNIT" >/dev/null 2>&1 || :; fi
++  if [ -n "$CONTROLLER_UNIT" ] && [ -n "$CONTROLLER_MARKER" ]; then
++    current_description=$(systemctl --user show -p Description --value "$CONTROLLER_UNIT" 2>/dev/null || :)
++    current_invocation=$(systemctl --user show -p InvocationID --value "$CONTROLLER_UNIT" 2>/dev/null || :)
++    if [ "$current_description" = "$CONTROLLER_MARKER" ] &&
++        { [ -z "$CONTROLLER_INVOCATION" ] ||
++          [ "$current_invocation" = "$CONTROLLER_INVOCATION" ]; }; then
++      systemctl --user stop "$CONTROLLER_UNIT" >/dev/null 2>&1 || :
++    fi
++  fi
+   if [ -n "$GRAIN_SERVICE_PID" ]; then kill "$GRAIN_SERVICE_PID" 2>/dev/null || :; wait "$GRAIN_SERVICE_PID" 2>/dev/null || :; fi
+   if [ -n "$SERVICE_PID" ]; then kill "$SERVICE_PID" 2>/dev/null || :; wait "$SERVICE_PID" 2>/dev/null || :; fi
+ }
+@@ -92,6 +102,11 @@
+ 
+ "$MINI" keygen --secret "$EVIDENCE/controller.key" --public "$EVIDENCE/controller.pub" >"$EVIDENCE/controller-public.txt"
+ "$MINI" keygen --secret "$EVIDENCE/tool.key" --public "$EVIDENCE/tool.pub" >"$EVIDENCE/tool-public.txt"
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  "$MINI" keygen --secret "$EVIDENCE/provider.key" --public "$EVIDENCE/provider.pub" \
++    >"$EVIDENCE/provider-public.txt"
++  PROVIDER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/provider.pub" | tr -d ' \n')
++fi
+ CONTROLLER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/controller.pub" | tr -d ' \n')
+ TOOL_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/tool.pub" | tr -d ' \n')
+ test "$CONTROLLER_PUBLIC" != "$TOOL_PUBLIC"
+@@ -131,6 +146,16 @@
+    "networkBytes":"10000000","sideEffectCount":"10000000",
+    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
+ EOF
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  jq --arg public "$PROVIDER_PUBLIC" '.enrollments += [{
++    key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
++      publicKey:$public,activeFrom:"0",activeUntil:"1000000",revoked:false},
++    accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
++    factoryObserveCapabilityId:"57",initialBalance:"100",
++    accountPredicate:{type:"all",predicates:[]}}]' \
++    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-provider.json"
++  mv "$EVIDENCE/genesis-provider.json" "$EVIDENCE/genesis.json"
++fi
+ "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
+   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
+ CONFIG="$EVIDENCE/deployment/pinned-config.json"
+@@ -168,6 +193,14 @@
+  "grants":[{"kind":"object","target":"10","capability":"54"},
+    {"kind":"account","target":"7","capability":"41"}]}
+ EOF
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  jq '(.birth.resources[0] |= (del(.workerSubject) +
++       {workerSubjects:["8","9"]})) |
++      .birth.resources += [{kind:"object",storage:"grain",target:"7004",
++        owner:"9",ownerCapability:"101",controlCapability:"102",budget:"50"}]' \
++    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-provider-intent.json"
++  mv "$EVIDENCE/birth-provider-intent.json" "$EVIDENCE/birth-intent.json"
++fi
+ "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
+   --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/birth-attempt" >"$EVIDENCE/birth.stdout"
+@@ -175,22 +208,37 @@
+ query_task controller-born 7 7001 71 "$EVIDENCE/controller.key" 30001
+ query_task tool-born 8 7002 81 "$EVIDENCE/tool.key" 30002
+ query_task publication-born 7 7003 91 "$EVIDENCE/controller.key" 30009
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  query_task provider-born 9 7004 101 "$EVIDENCE/provider.key" 30010
++  jq -e '.page.grain == {task:"7004",generation:"0",status:"0",
++    remaining:"50",reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
++fi
+ jq -e '.page.grain == {task:"7001",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+   "$EVIDENCE/controller-born/view.json" >/dev/null
+ jq -e '.page.grain == {task:"7002",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+   "$EVIDENCE/tool-born/view.json" >/dev/null
+ 
+-for name in controller tool; do
++grain_names='controller tool'
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then grain_names="$grain_names provider"; fi
++for name in $grain_names; do
+   if [ "$name" = controller ]; then
+     owner=7 task=7001 capability=71 key=controller.key nonce=30003
+-  else
++  elif [ "$name" = tool ]; then
+     owner=8 task=7002 capability=81 key=tool.key nonce=30004
++  else
++    owner=9 task=7004 capability=101 key=provider.key nonce=30011
+   fi
+   query_policy "$name-policy" "$owner" "$task" "$capability" "$EVIDENCE/$key" "$nonce"
+   if [ "$name" = controller ]; then
+-    jq -n --arg owner "$owner" \
+-      '{owner:$owner,workerSubject:"8",workerGeneration:"1"}' \
+-      >"$EVIDENCE/$name-policy-source.json"
++    if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++      jq -n --arg owner "$owner" \
++        '{owner:$owner,workerSubjects:["8","9"],workerGeneration:"1"}' \
++        >"$EVIDENCE/$name-policy-source.json"
++    else
++      jq -n --arg owner "$owner" \
++        '{owner:$owner,workerSubject:"8",workerGeneration:"1"}' \
++        >"$EVIDENCE/$name-policy-source.json"
++    fi
+   else
+     jq -n --arg owner "$owner" '{owner:$owner}' >"$EVIDENCE/$name-policy-source.json"
+   fi
+@@ -233,9 +281,41 @@
+ confirmed "$EVIDENCE/delegation-attempt/outcome.json"
+ query_task delegated-parent 8 7001 73 "$EVIDENCE/tool.key" 31002
+ test "$(jq -er '.page.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  query_task parent-for-provider 7 7001 71 "$EVIDENCE/controller.key" 31003
++  PROVIDER_PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
++    "$EVIDENCE/parent-for-provider/challenge.json")
++  cat >"$EVIDENCE/provider-parent-delegation.json" <<EOF
++{"subject":"7","nonce":"31004","purpose":{"type":"prepare","draft":{
++ "type":"delegate-source","command":{"kind":"object","domain":"8501",
++ "semantics":"$SEMANTICS","subject":"7","nonce":"31005",
++ "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"7001",
++ "expectedPreRoot":"$PROVIDER_PARENT_AUTHORITY",
++ "child":{"id":"75","root":"71","parent":"71","issuer":"5",
++  "holder":{"type":"subject","subject":"9"},"targets":["7001"],
++  "verbs":["observe","mutate"],"maxCost":"50000",
++  "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
++  "policyId":"7001","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
++ "grants":[{"kind":"object","target":"7001","capability":"71"}]}
++EOF
++  "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
++    --intent "$EVIDENCE/provider-parent-delegation.json" \
++    --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/provider-parent-delegation-attempt" \
++    >"$EVIDENCE/provider-parent-delegation.stdout"
++  confirmed "$EVIDENCE/provider-parent-delegation-attempt/outcome.json"
++  query_task delegated-provider-parent 9 7001 75 "$EVIDENCE/provider.key" 31006
++  test "$(jq -er '.page.root' "$EVIDENCE/delegated-provider-parent/view.json")" = "$PARENT_ROOT"
++fi
+ 
+ PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/publication-born/view.json")
+-PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/delegated-parent/challenge.json")
++if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
++  query_task publication-for-delegation 7 7003 91 "$EVIDENCE/controller.key" 31007
++  PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
++    "$EVIDENCE/publication-for-delegation/challenge.json")
++else
++  PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
++    "$EVIDENCE/delegated-parent/challenge.json")
++fi
+ cat >"$EVIDENCE/publication-delegation.json" <<EOF
+ {"subject":"7","nonce":"31010","purpose":{"type":"prepare","draft":{
+  "type":"delegate-source","command":{"kind":"object","domain":"8501",
+@@ -305,6 +385,7 @@
+   Linux)
+     HERMES_PROGRAM=$(absolute_executable "$REPO/deploy/grain-host/bwrap")
+     CONTROLLER_UNIT=mini-grain-controller@7001.service
++    CONTROLLER_MARKER="mini-grain-acceptance:$EVIDENCE"
+     mkdir -m 700 "$EVIDENCE/worker-work" "$EVIDENCE/worker-runtime"
+     cp "$GRAIN" "$EVIDENCE/worker-runtime/grain-runtime"
+     cp "$HERE/fixture/hermes-acp" "$EVIDENCE/worker-runtime/hermes-acp"
+@@ -360,7 +441,14 @@
+ 
+ CONTROL_SOCKET="$EVIDENCE/runtime-state/control.sock"
+ if [ -n "$CONTROLLER_UNIT" ]; then
++  current_state=$(systemctl --user show -p ActiveState --value "$CONTROLLER_UNIT" 2>/dev/null || :)
++  case $current_state in
++    active|activating|deactivating|reloading)
++      echo "controller unit is already in use: $CONTROLLER_UNIT ($current_state)" >&2
++      exit 1 ;;
++  esac
+   systemd-run --user --wait --pipe --collect --unit="${CONTROLLER_UNIT%.service}" \
++    --description="$CONTROLLER_MARKER" \
+     --property=KillMode=control-group --property=RuntimeMaxSec=1800s \
+     "$GRAIN" serve "$EVIDENCE/runtime-config.json" \
+     >"$EVIDENCE/grain-service.stdout" 2>"$EVIDENCE/grain-service.stderr" &
+@@ -376,6 +464,16 @@
+   [ "$tick" -lt 120 ] || { echo "grain control socket timeout" >&2; exit 1; }
+   sleep 1
+ done
++if [ -n "$CONTROLLER_UNIT" ]; then
++  current_description=$(systemctl --user show -p Description --value "$CONTROLLER_UNIT")
++  [ "$current_description" = "$CONTROLLER_MARKER" ] || {
++    echo "controller unit ownership marker mismatch" >&2; exit 1;
++  }
++  CONTROLLER_INVOCATION=$(systemctl --user show -p InvocationID --value "$CONTROLLER_UNIT")
++  [ -n "$CONTROLLER_INVOCATION" ] || {
++    echo "controller unit has no invocation identity" >&2; exit 1;
++  }
++fi
+ 
+ # A soft EOF allows the allowlisted local command to finish and settle.
+ mkfifo "$EVIDENCE/soft-input.fifo"

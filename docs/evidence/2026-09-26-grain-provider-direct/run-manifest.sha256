@@ -1,0 +1,6 @@
+d62730b19f65fb52599561adfa074c69bab6acd6a240d70c95a0d8f3b03a3fcc  /tmp/mga-provider-direct-source/native/grain-runtime/acceptance.sh
+6012d4f79d3b9354bd43ac55ced647edc7f57230ddbc4c04fb3e43841a509f5f  /tmp/mga-provider-direct-source/native/grain-runtime/provider-direct.sh
+3960d33f2eb79116147179de8783d34d0ebd0dc22b238112e818bd248cb8cd91  /tmp/mga-provider-direct-source/bin/mini
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/mga-provider-direct-source/bin/minidregg-link-sqlite-store
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/mga-provider-direct-source/bin/minidregg-credential-signature-verifier
+31a00492594a9abbde4541fef687f4d6a2fd2cac06c1645e604178a3e7f18179  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-combined
