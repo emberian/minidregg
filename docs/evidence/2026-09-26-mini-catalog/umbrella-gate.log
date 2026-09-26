@@ -1,0 +1,13 @@
+command=lake build Minidregg
+verdict=PASS
+lake_jobs=9070
+lake_seconds=1142
+host_leanArts=PASS
+host_leanArts_seconds=21
+max_concurrent_real_lean=1
+wrapper_invocations=159
+source_hashes_verified=594
+artifact_hashes_verified=5
+binary=/tmp/minidregg-overnight-20260926/minidregg-host-catalog-umbrella
+binary_sha256=7b37f101736290ce15ed2e23bb91a01372e1c4ef43a929e463f2895c0d5e02da
+lake_log_sha256=6884cf4d7065a7836c910cf3723d55b349e5715d4c1f8fd09d2b45b76f619799
