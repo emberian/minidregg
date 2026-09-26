@@ -264,6 +264,45 @@ struct HeldCharge {
     reserve_confirmed: bool,
     reserve_refused: bool,
     reserve_boundary: Option<String>,
+    #[serde(default)]
+    reserve_call_sha256: Option<String>,
+    #[serde(default)]
+    reserve_outcome_path: Option<PathBuf>,
+    #[serde(default)]
+    reserve_outcome_sha256: Option<String>,
+    #[serde(default)]
+    reserve_anchor: Option<ReserveAnchor>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReserveAnchor {
+    transaction_id: String,
+    event_id: String,
+    accepted_count: String,
+    image_boundary: String,
+}
+
+impl ReserveAnchor {
+    fn from_confirmed(value: &Value) -> Result<Self> {
+        if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+            return Err("reserve has no confirmed native receipt".into());
+        }
+        let field = |name: &str| -> Result<String> {
+            let value = value
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("confirmed reserve lacks {name}"))?;
+            decimal(value, name)?;
+            Ok(value.to_owned())
+        };
+        Ok(Self {
+            transaction_id: field("transactionId")?,
+            event_id: field("eventId")?,
+            accepted_count: field("acceptedCount")?,
+            image_boundary: field("imageBoundary")?,
+        })
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -484,11 +523,8 @@ fn grain_observation_grants(
     Ok(grants)
 }
 
-fn exact_provider_reserve(state: &Value, hold: &HeldCharge) -> bool {
+fn provider_reserve_coordinates(state: &Value, hold: &HeldCharge) -> bool {
     hold.reserve_confirmed
-        && hold.reserve_boundary.as_deref().is_some_and(|boundary| {
-            state.get("imageBoundary").and_then(Value::as_str) == Some(boundary)
-        })
         && state.pointer("/grain/status").and_then(Value::as_str) == Some("3")
         && state.pointer("/grain/reserved").and_then(Value::as_str) == Some(hold.reserve.as_str())
         && state.pointer("/grain/generation").and_then(Value::as_str)
@@ -690,6 +726,9 @@ fn validate(c: &Config) -> Result<()> {
         resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
     }
     if let Some(p) = &c.provider_task {
+        if c.host_socket.is_none() {
+            return Err("providerTask continuity requires hostSocket".into());
+        }
         if p.task == c.task || c.tool_task.as_ref().is_some_and(|t| t.task == p.task) {
             return Err("providerTask must be a distinct Mini resource".into());
         }
@@ -1567,9 +1606,74 @@ impl Runtime {
             reserve_confirmed: false,
             reserve_refused: false,
             reserve_boundary: None,
+            reserve_call_sha256: None,
+            reserve_outcome_path: None,
+            reserve_outcome_sha256: None,
+            reserve_anchor: None,
         };
         *self.journal.hold_for_mut(slot) = Some(hold);
         self.save()
+    }
+    fn record_reserve_confirmation(
+        &mut self,
+        slot: AuthoritySlot,
+        attempt: &Path,
+        outcome_json: &Path,
+    ) -> Result<()> {
+        let receipt: Value = serde_json::from_slice(
+            &fs::read(outcome_json).map_err(|e| format!("reserve receipt missing: {e}"))?,
+        )
+        .map_err(|e| format!("reserve receipt invalid: {e}"))?;
+        if receipt.get("type").and_then(Value::as_str) != Some("confirmed") {
+            return Err("reserve has no confirmed native receipt".into());
+        }
+        let boundary = receipt
+            .get("imageBoundary")
+            .and_then(Value::as_str)
+            .ok_or("confirmed reserve lacks image boundary")?
+            .to_owned();
+        let provider_evidence = if slot == AuthoritySlot::Provider {
+            let anchor = ReserveAnchor::from_confirmed(&receipt)?;
+            let call = attempt.join("call.bin");
+            let outcome = outcome_json.with_extension("bin");
+            for file in [&call, &outcome] {
+                if !fs::symlink_metadata(file)
+                    .map_err(|e| format!("{}: {e}", file.display()))?
+                    .file_type()
+                    .is_file()
+                {
+                    return Err(format!(
+                        "reserve evidence is not a regular file: {}",
+                        file.display()
+                    ));
+                }
+            }
+            Some((
+                sha256_file(&call)?,
+                outcome.clone(),
+                sha256_file(&outcome)?,
+                anchor,
+            ))
+        } else {
+            None
+        };
+        let hold = self
+            .journal
+            .hold_for_mut(slot)
+            .as_mut()
+            .ok_or("reserve marker disappeared")?;
+        if hold.reserve_attempt.as_deref() != Some(attempt) {
+            return Err("confirmed reserve attempt differs from durable held origin".into());
+        }
+        hold.reserve_confirmed = true;
+        hold.reserve_boundary = Some(boundary);
+        if let Some((call_hash, outcome, outcome_hash, anchor)) = provider_evidence {
+            hold.reserve_call_sha256 = Some(call_hash);
+            hold.reserve_outcome_path = Some(outcome);
+            hold.reserve_outcome_sha256 = Some(outcome_hash);
+            hold.reserve_anchor = Some(anchor);
+        }
+        Ok(())
     }
     fn transition_as(
         &mut self,
@@ -1793,26 +1897,11 @@ impl Runtime {
                     self.journal.publication_receipts.push(record);
                 }
                 if reserving {
-                    let receipt: Value = serde_json::from_slice(
-                        &fs::read(attempt.join("outcome.json"))
-                            .map_err(|e| format!("reserve receipt missing: {e}"))?,
-                    )
-                    .map_err(|e| format!("reserve receipt invalid: {e}"))?;
-                    if receipt.get("type").and_then(Value::as_str) != Some("confirmed") {
-                        return Err("native reserve returned without confirmed receipt".into());
-                    }
-                    let boundary = receipt
-                        .get("imageBoundary")
-                        .and_then(Value::as_str)
-                        .ok_or("reserve receipt lacks image boundary")?
-                        .to_owned();
-                    let hold = self
-                        .journal
-                        .hold_for_mut(slot)
-                        .as_mut()
-                        .ok_or("reserve marker disappeared")?;
-                    hold.reserve_confirmed = true;
-                    hold.reserve_boundary = Some(boundary);
+                    self.record_reserve_confirmation(
+                        slot,
+                        &attempt,
+                        &attempt.join("outcome.json"),
+                    )?;
                 }
                 *self.journal.pending_for_mut(slot) = None;
                 if op.get("type").and_then(Value::as_str) == Some("settle") {
@@ -2162,12 +2251,29 @@ impl Runtime {
                 parent.pointer("/grain/status").and_then(Value::as_str),
                 Some("3" | "4")
             )
-            || !exact_provider_reserve(&provider_state, hold)
+            || !provider_reserve_coordinates(&provider_state, hold)
         {
             return Err(
-                "signed parent or exact provider reserve boundary changed before upstream send"
+                "signed parent or provider reserved coordinates changed before upstream send"
                     .into(),
             );
+        }
+        self.verify_provider_reserve_continuity(hold.clone())?;
+        self.provider_lease_current(lease)?;
+        let parent_after = self.query()?;
+        self.provider_lease_current(lease)?;
+        if parent_after
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            != Some(lease.parent_generation.as_str())
+            || !matches!(
+                parent_after
+                    .pointer("/grain/status")
+                    .and_then(Value::as_str),
+                Some("3" | "4")
+            )
+        {
+            return Err("parent prompt generation changed during reserve continuity check".into());
         }
         let attempt = self
             .journal
@@ -2184,6 +2290,115 @@ impl Runtime {
         }
         attempt.send_started = true;
         self.save()
+    }
+    fn verify_provider_reserve_continuity(&mut self, hold: HeldCharge) -> Result<()> {
+        let socket = self
+            .config
+            .host_socket
+            .as_ref()
+            .ok_or("provider continuity requires the pinned persistent Mini host socket")?
+            .clone();
+        let reserve_attempt = hold
+            .reserve_attempt
+            .as_ref()
+            .ok_or("provider reserve attempt absent")?;
+        let call = reserve_attempt.join("call.bin");
+        let outcome = hold
+            .reserve_outcome_path
+            .as_ref()
+            .ok_or("provider confirmed outcome path absent")?;
+        if outcome.parent() != Some(reserve_attempt.as_path()) {
+            return Err("provider confirmed outcome is outside reserve attempt".into());
+        }
+        let anchor = hold
+            .reserve_anchor
+            .ok_or("provider confirmed anchor absent")?;
+        for file in [&call, outcome] {
+            if !fs::symlink_metadata(file)
+                .map_err(|e| format!("{}: {e}", file.display()))?
+                .file_type()
+                .is_file()
+            {
+                return Err("retained provider reserve evidence is not a regular file".into());
+            }
+        }
+        if hold.reserve_boundary.as_deref() != Some(anchor.image_boundary.as_str())
+            || Some(sha256_file(&call)?.as_str()) != hold.reserve_call_sha256.as_deref()
+            || Some(sha256_file(outcome)?.as_str()) != hold.reserve_outcome_sha256.as_deref()
+        {
+            return Err("retained provider reserve evidence differs from durable anchor".into());
+        }
+        let id = self.next_id()?;
+        let attempt = self
+            .config
+            .state_dir
+            .join(format!("provider-continuity-{id:016}"));
+        let cfg = &self.config;
+        self.command_output(
+            &cfg.mini,
+            &[
+                "continuity",
+                "--host",
+                cfg.host.to_str().ok_or("host path UTF-8")?,
+                "--config",
+                cfg.host_config.to_str().ok_or("config path UTF-8")?,
+                "--socket",
+                socket.to_str().ok_or("host socket path UTF-8")?,
+                "--call",
+                call.to_str().ok_or("reserve call path UTF-8")?,
+                "--outcome",
+                outcome.to_str().ok_or("reserve outcome path UTF-8")?,
+                "--dir",
+                attempt.to_str().ok_or("continuity attempt path UTF-8")?,
+            ],
+        )
+        .map_err(|error| format!("provider continuity attempt {}: {error}", attempt.display()))?;
+        let result: Value = serde_json::from_slice(
+            &fs::read(attempt.join("continuity.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if result.get("type").and_then(Value::as_str) != Some("minidregg-provider-continuity-v1")
+            || result.get("status").and_then(Value::as_str) != Some("confirmed")
+            || result.get("continuous").and_then(Value::as_bool) != Some(true)
+            || result.get("providerResourceId").and_then(Value::as_str)
+                != self
+                    .config
+                    .provider_task
+                    .as_ref()
+                    .map(|task| task.task.as_str())
+        {
+            return Err(format!(
+                "native provider reserve continuity refused or names another cell; retained {}",
+                attempt.display()
+            ));
+        }
+        let observed = result.get("anchor").ok_or("continuity anchor absent")?;
+        if observed.get("type").and_then(Value::as_str) != Some("verified-mini-native-prefix-v1")
+            || observed.get("transactionId").and_then(Value::as_str)
+                != Some(anchor.transaction_id.as_str())
+            || observed.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
+            || observed.get("acceptedCount").and_then(Value::as_str)
+                != Some(anchor.accepted_count.as_str())
+            || observed.get("imageBoundary").and_then(Value::as_str)
+                != Some(anchor.image_boundary.as_str())
+        {
+            return Err("native continuity anchor differs from retained reserve receipt".into());
+        }
+        decimal(
+            result
+                .get("checkedImageBoundary")
+                .and_then(Value::as_str)
+                .ok_or("continuity checked boundary absent")?,
+            "continuity checked boundary",
+        )?;
+        decimal(
+            result
+                .get("checkedAcceptedCount")
+                .and_then(Value::as_str)
+                .ok_or("continuity checked count absent")?,
+            "continuity checked count",
+        )?;
+        Ok(())
     }
     fn provider_record_outcome(
         &mut self,
@@ -3417,6 +3632,8 @@ impl Runtime {
             self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
             return self.disconnect();
         }
+        let worker_deadline =
+            Instant::now() + Duration::from_secs(spec.wall_time_seconds.unwrap_or(600));
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -3580,10 +3797,13 @@ impl Runtime {
                             prompt_operation_id: id,
                             parent_generation: parent_generation.to_owned(),
                         };
-                        active.endpoint.control().activate(provider::Lease {
-                            id: lease_id.clone(),
-                            worker_token: active.token.clone(),
-                        })?;
+                        active.endpoint.control().activate(
+                            provider::Lease {
+                                id: lease_id.clone(),
+                                worker_token: active.token.clone(),
+                            },
+                            worker_deadline,
+                        )?;
                         self.provider_lease = Some(lease_id);
                     }
                     broker.activate_prompt();
@@ -4493,24 +4713,7 @@ impl Runtime {
                 p.operation.as_str(),
                 "reserve" | "tool reserve" | "provider reserve"
             ) {
-                let receipt: Value =
-                    serde_json::from_slice(&fs::read(&retry_result).map_err(|e| e.to_string())?)
-                        .map_err(|e| e.to_string())?;
-                if receipt.get("type").and_then(Value::as_str) != Some("confirmed") {
-                    return Err("reserve lookup did not confirm exact attempt".into());
-                }
-                let boundary = receipt
-                    .get("imageBoundary")
-                    .and_then(Value::as_str)
-                    .ok_or("reserve lookup lacks image boundary")?
-                    .to_owned();
-                let hold = self
-                    .journal
-                    .hold_for_mut(slot)
-                    .as_mut()
-                    .ok_or("reserve lookup has no held-charge marker")?;
-                hold.reserve_confirmed = true;
-                hold.reserve_boundary = Some(boundary);
+                self.record_reserve_confirmation(slot, &p.attempt, &retry_result)?;
             }
             *self.journal.pending_for_mut(slot) = None;
             if matches!(
@@ -5112,7 +5315,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_send_requires_exact_confirmed_reserve_boundary() {
+    fn provider_send_requires_confirmed_reserved_coordinates() {
         let hold = HeldCharge {
             reserve: "3".into(),
             charge: "1".into(),
@@ -5122,19 +5325,25 @@ mod tests {
             reserve_confirmed: true,
             reserve_refused: false,
             reserve_boundary: Some("accepted-reserve-image".into()),
+            reserve_call_sha256: None,
+            reserve_outcome_path: None,
+            reserve_outcome_sha256: None,
+            reserve_anchor: None,
         };
         let current = json!({"grain":{"status":"3","reserved":"3","generation":"4"},
             "imageBoundary":"accepted-reserve-image"});
-        assert!(exact_provider_reserve(&current, &hold));
+        assert!(provider_reserve_coordinates(&current, &hold));
         let mut replaced = current.clone();
         replaced["imageBoundary"] = json!("later-same-amount-reserve");
-        assert!(!exact_provider_reserve(&replaced, &hold));
+        // Intervening provider writes are checked by the native continuity
+        // receipt, while these signed fields still bind the held allowance.
+        assert!(provider_reserve_coordinates(&replaced, &hold));
         replaced = current.clone();
         replaced["grain"]["generation"] = json!("5");
-        assert!(!exact_provider_reserve(&replaced, &hold));
+        assert!(!provider_reserve_coordinates(&replaced, &hold));
         replaced = current.clone();
         replaced["grain"]["reserved"] = json!("2");
-        assert!(!exact_provider_reserve(&replaced, &hold));
+        assert!(!provider_reserve_coordinates(&replaced, &hold));
     }
 
     #[test]

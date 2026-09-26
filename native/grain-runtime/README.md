@@ -248,10 +248,21 @@ is retained for lookup, and external effects remain a reconciliation matter.
 
 The `reserve` and `charge` values are operator-provided allowance units, not
 measured provider bills. `fn_read` is not advertised until a fixed-config
-NNTP path is wired and tested. The provider-task controller path and local
-gateway have focused Rust tests; signed native provider reserve plus the
-plural-worker parent policy and a real Hermes prompt through that gateway
-still need end-to-end acceptance. The completed upstream Hermes publication
-used an earlier runtime without `providerTask`. The existing
+NNTP path is wired and tested. The provider gateway retains the exact native
+reserve call, confirmed outcome and four-field receipt anchor before any
+upstream send. Immediately before sending, it checks current signed parent
+and provider state and calls read-only `mini continuity` on those retained
+canonical bytes through the pinned persistent Host socket. The returned
+provider cell and full anchor must match the journal. This permits unrelated
+ordinary Mini events after reserve but refuses a later provider write; it is a
+check at send time, not an atomic lease across the external HTTP request.
+Missing or changed evidence keeps the provider allowance held for audit.
+
+The [local-provider acceptance](../../native/hermes-test-provider/evidence/2026-09-26/gateway-r1/)
+used real upstream Hermes with a deterministic local HTTP endpoint and signed
+Mini provider reserve, tool publication and fixed-charge settlement. That
+earlier runtime used the conservative whole-image boundary; the op17
+continuity consumer requires a separate source-matched native run before its
+receiving claim. The existing
 Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;
 this runtime does not reinterpret that synthetic acceptance as a hosted agent.

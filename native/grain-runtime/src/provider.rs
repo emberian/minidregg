@@ -22,7 +22,6 @@ const MAX_HEADER: usize = 16_384;
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: usize = 8_388_608;
 const MAX_TOKEN: usize = 128;
-const BRIDGE_WAIT: Duration = Duration::from_secs(300);
 
 pub struct GatewayConfig {
     pub bind: SocketAddr,
@@ -115,6 +114,7 @@ pub enum ProviderCommand {
 
 struct LeaseState {
     active: Option<Lease>,
+    worker_deadline: Option<Instant>,
     last_token: Option<String>,
 }
 
@@ -134,7 +134,13 @@ pub struct GatewayControl {
 }
 
 impl GatewayControl {
-    pub fn activate(&self, lease: Lease) -> Result<(), String> {
+    pub fn activate(&self, lease: Lease, worker_deadline: Instant) -> Result<(), String> {
+        let remaining = worker_deadline
+            .checked_duration_since(Instant::now())
+            .ok_or("worker deadline already passed")?;
+        if remaining.is_zero() || remaining > Duration::from_secs(1800) {
+            return Err("worker deadline exceeds bounded prompt lifetime".into());
+        }
         if lease.id.prompt_operation_id == 0
             || lease.id.parent_generation.is_empty()
             || lease.worker_token.len() < 32
@@ -159,6 +165,7 @@ impl GatewayControl {
         }
         state.last_token = Some(lease.worker_token.clone());
         state.active = Some(lease);
+        state.worker_deadline = Some(worker_deadline);
         self.shared.revoked.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -169,6 +176,7 @@ impl GatewayControl {
         self.shared.revoked.store(true, Ordering::SeqCst);
         if let Ok(mut state) = self.shared.lease.lock() {
             state.active = None;
+            state.worker_deadline = None;
         }
         if let Ok(mut child) = self.shared.curl.lock() {
             if let Some(child) = child.as_mut() {
@@ -194,6 +202,12 @@ impl GatewayControl {
             return None;
         }
         let state = self.shared.lease.lock().ok()?;
+        if state
+            .worker_deadline
+            .is_none_or(|deadline| Instant::now() >= deadline)
+        {
+            return None;
+        }
         let lease = state.active.as_ref()?;
         if constant_time_eq(token.as_bytes(), lease.worker_token.as_bytes()) {
             Some(lease.id.clone())
@@ -210,7 +224,13 @@ impl GatewayControl {
             .lease
             .lock()
             .ok()
-            .and_then(|s| s.active.as_ref().map(|lease| lease.id == *id))
+            .and_then(|s| {
+                s.active.as_ref().map(|lease| {
+                    lease.id == *id
+                        && s.worker_deadline
+                            .is_some_and(|deadline| Instant::now() < deadline)
+                })
+            })
             .unwrap_or(false)
     }
 }
@@ -233,6 +253,7 @@ impl GatewayEndpoint {
         let shared = Arc::new(Shared {
             lease: Mutex::new(LeaseState {
                 active: None,
+                worker_deadline: None,
                 last_token: None,
             }),
             revoked: AtomicBool::new(true),
@@ -567,7 +588,7 @@ fn serve_client(
         error_reply(stream, 503, "provider controller is busy");
         return;
     }
-    let permit = match wait_reply(&rx, &control, &lease, true) {
+    let permit = match wait_reply(&rx, &control, &lease) {
         Ok(permit) => permit,
         Err(_) => {
             error_reply(stream, 503, "provider reserve was refused or interrupted");
@@ -627,7 +648,7 @@ fn serve_client(
             reply: tx,
         })
         .is_err()
-        || wait_reply(&rx, &control, &lease, true).is_err()
+        || wait_reply(&rx, &control, &lease).is_err()
     {
         report_outcome(
             commands,
@@ -672,18 +693,18 @@ fn wait_reply<T>(
     rx: &Receiver<Result<T, String>>,
     control: &GatewayControl,
     lease: &LeaseId,
-    require_active: bool,
 ) -> Result<T, String> {
-    let started = Instant::now();
     loop {
-        if require_active && !control.still_active(lease) {
-            return Err("prompt lease revoked".into());
-        }
-        if started.elapsed() >= BRIDGE_WAIT {
-            return Err("controller reply deadline".into());
+        if !control.still_active(lease) {
+            return Err("prompt lease revoked or worker deadline passed".into());
         }
         match rx.recv_timeout(Duration::from_millis(20)) {
-            Ok(result) => return result,
+            Ok(result) => {
+                if !control.still_active(lease) {
+                    return Err("prompt lease revoked or worker deadline passed".into());
+                }
+                return result;
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("controller reply channel closed".into())
@@ -927,7 +948,11 @@ fn forward(
                 }
             }
         };
-        if guard.active.as_ref().map(|active| &active.id) != Some(lease) {
+        if guard.active.as_ref().map(|active| &active.id) != Some(lease)
+            || guard
+                .worker_deadline
+                .is_none_or(|deadline| Instant::now() >= deadline)
+        {
             return ProviderOutcome::NotSent {
                 reason: "prompt lease revoked before dispatch".into(),
             };
@@ -1192,7 +1217,10 @@ mod tests {
         );
         let (tx, rx) = mpsc::sync_channel(4);
         let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"local"}]}"#
             .to_vec();
         let expected = body.clone();
@@ -1274,7 +1302,10 @@ mod tests {
         let gateway =
             GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
                 .unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let controller =
             thread::spawn(
                 move || match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -1314,7 +1345,10 @@ mod tests {
         let gateway =
             GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
                 .unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -1376,7 +1410,10 @@ mod tests {
         let gateway =
             GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
                 .unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let body = br#"{"model":"operator-model","messages":[]}"#.to_vec();
         let expected = body.clone();
         let controller = thread::spawn(move || {
@@ -1428,7 +1465,10 @@ mod tests {
         let gateway =
             GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
                 .unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let (outcome_ready_tx, outcome_ready_rx) = mpsc::channel();
         let (client_closed_tx, client_closed_rx) = mpsc::channel();
         let controller = thread::spawn(move || {
@@ -1502,14 +1542,118 @@ mod tests {
         };
         assert_eq!(result, 0);
         drop(client);
-        thread::sleep(Duration::from_millis(50));
         client_closed_tx.send(()).unwrap();
+        let idle_deadline = Instant::now() + Duration::from_secs(5);
+        while !gateway.control().is_idle() && Instant::now() < idle_deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(gateway.control().is_idle(), "first delivery did not finish");
         let retry = post(gateway.local_addr(), TOKEN, body);
         assert!(retry.starts_with("HTTP/1.1 503"), "{retry}");
         controller.join().unwrap();
         upstream_thread.join().unwrap();
         assert_eq!(deliveries.load(Ordering::SeqCst), 1);
         upstream.set_nonblocking(true).unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn expired_worker_deadline_rejects_late_reserve_without_upstream_send() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let shared = gateway.control().shared.clone();
+        let controller = thread::spawn(move || {
+            let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { request, reply } => (request, reply),
+                _ => panic!("reserve expected"),
+            };
+            shared.lease.lock().unwrap().worker_deadline = Some(Instant::now());
+            let _ = reply.send(Ok(ForwardPermit::Fresh {
+                attempt_id: 31,
+                lease: request.lease,
+                exact_body: request.exact_body,
+            }));
+            assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        });
+        let response = post(
+            gateway.local_addr(),
+            TOKEN,
+            br#"{"model":"operator-model","messages":[]}"#,
+        );
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        controller.join().unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn expired_worker_deadline_rejects_late_send_boundary_ack() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let shared = gateway.control().shared.clone();
+        let controller = thread::spawn(move || {
+            let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { request, reply } => (request, reply),
+                _ => panic!("reserve expected"),
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 32,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            let boundary = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::BeforeSend { reply, .. } => reply,
+                _ => panic!("send boundary expected"),
+            };
+            shared.lease.lock().unwrap().worker_deadline = Some(Instant::now());
+            // The receiver can still be in scope while NotSent is being
+            // journaled. A late acknowledgement must not authorize curl.
+            let _ = boundary.send(Ok(()));
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Outcome {
+                    outcome: ProviderOutcome::NotSent { .. },
+                    reply,
+                    ..
+                } => reply.send(Ok(())).unwrap(),
+                _ => panic!("expired boundary must retain NotSent"),
+            }
+        });
+        let response = post(
+            gateway.local_addr(),
+            TOKEN,
+            br#"{"model":"operator-model","messages":[]}"#,
+        );
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        controller.join().unwrap();
         assert_eq!(
             upstream.accept().unwrap_err().kind(),
             io::ErrorKind::WouldBlock
@@ -1527,7 +1671,10 @@ mod tests {
         let upstream_thread = fake_upstream(upstream, deliveries.clone(), true, Vec::new());
         let (tx, rx) = mpsc::sync_channel(4);
         let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -1577,7 +1724,10 @@ mod tests {
         );
         let (tx, rx) = mpsc::sync_channel(4);
         let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -1638,7 +1788,10 @@ mod tests {
         });
         let (tx, rx) = mpsc::sync_channel(4);
         let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
-        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
