@@ -45,3 +45,20 @@ frame closed. Bounded logs `u64-exact-rollback.log` (SHA-256 `2299a1c4…`)
 and `u64-exact-same-height-fork.log` (`7c8e793e…`) are copied here; their
 bytes match the pre-UInt64 exact-host poison logs. The full private driver
 directory is `/tmp/minidregg-u64-exact-session-poison-20260926/`.
+
+The session's pinned verifier was checked separately with
+[`exact-helper-pinning-session.sh`](../../../scripts/overnight-tests/exact-helper-pinning-session.sh)
+(source SHA-256 `3d1039f8…`). The combined host started with a private copy
+of the real credential verifier. After its first describe, the configured
+source pathname was replaced by a failing executable; the retained signed
+content call still installed with the exact original count-two receipt.
+The source pathname was then removed; a second, independently signed joint
+call still installed with the exact original count-three receipt, and the
+physical image matched the original joint image byte-for-byte. A newly
+started host using the now-absent source path refused before serving.
+Only private copied helper files were altered. The bounded records are
+`u64-exact-helper-results.jsonl`, `u64-exact-helper-sha256.txt`, and
+`u64-exact-helper-fresh-refusal.log`; the full private case is
+`/tmp/minidregg-u64-exact-helper-pinning-20260926/`. This tests the
+configured source path's drift and disappearance, not an attacker who can
+write the running host's private verifier snapshot.
