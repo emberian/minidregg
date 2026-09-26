@@ -1,0 +1,12 @@
+source_basis=d0cc5cdd1f2bbad0d033fd8a6d01d9e1397722a3
+source_overlays=Host/Main.lean Kernel.lean Kernel/NativeHost.lean Kernel/NativeHostSession.lean scripts/build-native-host.sh scripts/build-native-acceptance-runner.sh
+source_overlay_manifest=/tmp/minidregg-overnight-20260926/integrated-overlay-sha256.txt
+source_overlay_manifest_sha256=680fae6fabf62977425748f48949fd5f653e1bbdda710a8fee3b154c99dfb9b3
+full_umbrella=lake build Minidregg PASS (1742s)
+host_leanArts=Host.Main:leanArts PASS (16s)
+native_link_and_usage=PASS
+source_sha256_verify=591/591 PASS
+binary_sha256=edad4dad46dd1f7d0084ec881f046e281c2a134ebdadb8cf28843935b5933308
+binary_target=Darwin arm64
+elapsed_seconds=1822
+scope=initial persistent 0-11 host checkpoint; predates canonical reply Message-ID parser fix, fn ops 12/13, V2 large-byte codec, later grain AgentGrain/Host.Json runtime edits

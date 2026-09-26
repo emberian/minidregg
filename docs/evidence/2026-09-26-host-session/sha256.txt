@@ -1,0 +1,8 @@
+edad4dad46dd1f7d0084ec881f046e281c2a134ebdadb8cf28843935b5933308  /tmp/minidregg-overnight-20260926/minidregg-host-initial
+db2f0a75c86152f822fd76e6e921c5ae9de1b1f7368d4ccd688b6d5b9386d73f  /tmp/minidregg-overnight-20260926/mini-client-core
+452908cb42070c57051fa7ccd65696541ec940f158c17db4f832a6355bc85e03  native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store
+dd5273f30a999dc7594018dd57605aebf2f9f15c43010f31e8674d28f14aafd9  native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier
+e782fb265912c2216b087bdaf422486edd323017ddcae522f8df2cdd2967b9d7  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-birth.bin
+3eded26c9c70ba6977225a1cc9722fb3bec189cf4c7dc8c970cee1c4a613c5eb  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-content.bin
+85ace0834ee238d490fc1cd82a084b485f7c136f0af9fc281d7650556d679121  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-joint.bin
+527194645a32d5599dfa72f1e6c038e2eda6b398db3a3a0b40302f6bd423bd9d  /tmp/minidregg-replay-poison-initial-20260926/image-fork.bin

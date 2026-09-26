@@ -1,0 +1,6 @@
+initial describe accepted: 395 reply bytes
+CAS stdout: Installed
+CAS stderr: minidregg-host: semantic history refused at entry 1: verified history rolled back
+first frame after replacement: host closed without acceptance
+next frame remains closed: Broken pipe (os error 32)
+PASS persistent host poisoned; exit exit status: 1
