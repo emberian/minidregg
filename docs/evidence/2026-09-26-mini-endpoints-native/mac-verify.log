@@ -1,0 +1,4 @@
+source-manifest PASS 166/166
+artifact-manifest PASS 4/4
+/tmp/minidregg-overnight-20260926/minidregg-host-postbbf: Mach-O 64-bit executable arm64
+919c3b7b64b7bff11d47a52993c7700b8028aa8596013cf396f41fd4f98c3038  /tmp/minidregg-overnight-20260926/minidregg-host-postbbf

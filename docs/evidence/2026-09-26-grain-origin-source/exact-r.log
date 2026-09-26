@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-grain-origin/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-grain-origin/.lake/packages/batteries' has local changes
+PASS grain origin source: 191283 exact bytes; receipt, header, and target negatives rejected
