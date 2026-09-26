@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-bbf/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-bbf/.lake/packages/batteries' has local changes
+PASS maximal fn consumer envelope: binding=1048770 portable=1518487 store=3216218 command=5783823 intent=5783909 op12Frame=11568847 conflict=5783624 frame=12102760
