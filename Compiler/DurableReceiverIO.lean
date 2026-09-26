@@ -141,6 +141,24 @@ inductive Result (rootBytes : List UInt8 → Digest) where
   /-- A CAS was attempted; durable success could not be established. -/
   | uncertain (detail : String)
 
+/-- Only the post-CAS complete-byte-equal branch may construct `exact`.
+The equality and `Ready` come from the same prepared receiving attempt;
+ordinary confirmation may denote a prior replay or concurrent later append. -/
+inductive DetailedResult (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) where
+  | exact (kind : Confirmation)
+      (ready : Ready rootBytes loaded.image loaded.snapshot intent)
+      (prepared : prepare loaded.image loaded.snapshot loaded.represented intent = .inl ready)
+      (readback : List UInt8)
+      (equal : readback = encode (loaded.image.append intent))
+  | ordinary (result : Result rootBytes)
+
+def DetailedResult.toResult {rootBytes : List UInt8 → Digest}
+    {loaded : Loaded rootBytes} {intent : DataIntent rootBytes} :
+    DetailedResult rootBytes loaded intent → Result rootBytes
+  | .exact kind ready _ _ _ => .confirmed kind ready.next
+  | .ordinary result => result
+
 def confirm (transport : Transport) (rootBytes : List UInt8 → Digest)
     (intent : DataIntent rootBytes) (kind : Confirmation) : IO (Result rootBytes) := do
   match ← load transport rootBytes with
@@ -188,27 +206,25 @@ theorem byteArray_beq_exact (left right : List UInt8) :
 /-- Read once after CAS. Equal complete bytes reuse the prepared executor's
 proved next snapshot; changed bytes follow the existing canonical reopen and
 replay check, which admits a concurrent later commit without hiding it. -/
-private def confirmPrepared (transport : Transport) (rootBytes : List UInt8 → Digest)
+private def confirmPreparedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes)
     (ready : Ready rootBytes loaded.image loaded.snapshot intent)
+    (prepared : prepare loaded.image loaded.snapshot loaded.represented intent = .inl ready)
     (proposed : List UInt8) (_canonical : proposed = encode (loaded.image.append intent))
-    (kind : Confirmation) : IO (Result rootBytes) := do
+    (kind : Confirmation) : IO (DetailedResult rootBytes loaded intent) := do
   match ← transport.read with
-  | .error message => return .uncertain s!"CAS attempted; readback unavailable: {message}"
-  | .ok none => return .uncertain "CAS attempted; readback unavailable: durable image is not initialized"
+  | .error message => return .ordinary (.uncertain s!"CAS attempted; readback unavailable: {message}")
+  | .ok none => return .ordinary (.uncertain "CAS attempted; readback unavailable: durable image is not initialized")
   | .ok (some readback) =>
       if exact : readback.toByteArray == proposed.toByteArray then
         have exactBytes : readback = proposed := (byteArray_beq_exact readback proposed).mp exact
-        have _ : ∃ reread : Loaded rootBytes,
-            reread.bytes = readback ∧ reread.snapshot = ready.next :=
-          prepared_exact_readback ready readback (exactBytes.trans _canonical)
-        return .confirmed kind ready.next
+        return .exact kind ready prepared readback (exactBytes.trans _canonical)
       match loadBytes rootBytes readback with
-      | .error message => return .uncertain s!"CAS attempted; readback unavailable: {message}"
+      | .error message => return .ordinary (.uncertain s!"CAS attempted; readback unavailable: {message}")
       | .ok reopened =>
           match DurableDataIntent.execute .complete reopened.snapshot intent with
-          | .replayed _ => return .confirmed kind reopened.snapshot
-          | _ => return .uncertain "CAS attempted; reopened journal does not confirm the exact intent"
+          | .replayed _ => return .ordinary (.confirmed kind reopened.snapshot)
+          | _ => return .ordinary (.uncertain "CAS attempted; reopened journal does not confirm the exact intent")
 
 /-- Publish against the exact image on which the controller admitted the
 operation. In particular, a logical height derived from `loaded.image` cannot
@@ -217,22 +233,29 @@ silently acquire a later journal boundary between admission and publication.
 There is one CAS attempt and no rebase. A caller wishing to retry contention
 must reconstruct admission from a fresh image. Physical success still requires
 the existing exact-intent readback; a lost response never becomes a refusal. -/
-def receiveLoaded (transport : Transport) (rootBytes : List UInt8 → Digest)
+def receiveLoadedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
-    IO (Result rootBytes) := do
-  match prepare loaded.image loaded.snapshot loaded.represented intent with
-  | .inr (.replayed _) => return .confirmed .replayed loaded.snapshot
-  | .inr (.rejected reason) => return .rejected reason
-  | .inr _ => return .unavailable "unexpected complete-schedule outcome"
+    IO (DetailedResult rootBytes loaded intent) := do
+  match prepared : prepare loaded.image loaded.snapshot loaded.represented intent with
+  | .inr (.replayed _) => return .ordinary (.confirmed .replayed loaded.snapshot)
+  | .inr (.rejected reason) => return .ordinary (.rejected reason)
+  | .inr _ => return .ordinary (.unavailable "unexpected complete-schedule outcome")
   | .inl ready =>
       let proposed := encode (loaded.image.append intent)
       match ← transport.cas (some loaded.bytes) proposed with
       | .installed | .alreadyPresent =>
-          confirmPrepared transport rootBytes loaded intent ready proposed rfl .installed
-      | .conflict => return .contention
+          confirmPreparedDetailed transport rootBytes loaded intent ready prepared proposed rfl .installed
+      | .conflict => return .ordinary .contention
       | .uncertain _ =>
-          confirmPrepared transport rootBytes loaded intent ready proposed rfl
+          confirmPreparedDetailed transport rootBytes loaded intent ready prepared proposed rfl
             .recoveredAfterUncertainResponse
+
+/-- Existing receiver surface projects the detailed branch without changing
+the semantics of birth, installation, delegation, revocation or retries. -/
+def receiveLoaded (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
+    IO (Result rootBytes) := do
+  return (← receiveLoadedDetailed transport rootBytes loaded intent).toResult
 
 /-- Bounded contention retry for an already constructed internal intent whose
 admission does not depend on a journal-wide clock. Controllers deriving authority

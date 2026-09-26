@@ -54,3 +54,23 @@ Measurement must compare the persistent-session path on private accepted-one
 Store copies with the same signed call and physical bytes. The previous
 189.68-second Linux large-call measurement used a one-shot submit, so it is
 not a baseline for this proposed session optimization.
+
+The matched before measurement was made on Persvati with certified combined
+Linux host SHA-256 `4bb72e1e984de413ee0065d7d229dbe0217bf980b4563ba26dc85ee38ed59c65`.
+A private accepted-one SQLite copy had SHA-256
+`8eff8dd1c0a424ff75456da1adcc22c06774eab29238af001916b0a398404893`;
+the retained 734,222-byte call had SHA-256
+`59b6a3ac9a12a8552547833e1922ac7d3d9086ab1c26b404e10af3a9d60b952f`.
+The host ran as one persistent stdio session through the local socket client;
+`describe` warmed/validated that session before opcode-2 `retry` of the exact
+call. The retry elapsed in **172.92 seconds**. It returned installed,
+accepted count two, with 132-byte outcome SHA-256
+`caf4009a43d3cd6f6773f971574a0b4c5597e716f4d04640b1f6b3c54d7c42ee`
+and final SQLite SHA-256
+`0066f07fcfd6d92fd95717c809fbab173b74d45be604841bb8fc3899884d82a5`.
+Both bytes match the retained source run and prior one-shot comparisons.
+The session client used essentially no CPU; the host accumulated about 2:57
+CPU and held about 1.30 GiB RSS near completion. The fixture is private at
+`/tmp/minidregg-large-b-profile-20260926/session-baseline-v1`; its service
+process was stopped after the measurement. This is one run under shared host
+load, not a general latency bound.

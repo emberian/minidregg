@@ -731,26 +731,42 @@ inductive ReceiveResult where
   | unavailable (detail : String)
   | settlement (result : DurableReceiverIO.Result ResourceBirthCodec.rootBytes)
 
-def receiveLoaded {F : Type} [Field F] [DecidableEq F]
+/-- The continuation receives the very object admitted for this signed call
+and old durable prefix. It can retain that object through physical readback;
+no second independent historical admission is substituted for it. -/
+def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable) (signed : SignedCommand) : IO ReceiveResult := do
+    (durable : Durable) (signed : SignedCommand)
+    (acceptedResult : {command : Command} →
+      (prepared : PreparedInvocation deployment profile ambient durable command) →
+      (shape : PhysicalShape prepared) →
+      AcceptedInvocation prepared signed → IO R)
+    (ordinaryResult : ReceiveResult → IO R) : IO R := do
   match commandCodec.decode signed.commandBytes with
-  | none => return .rejected .malformedCommand
+  | none => ordinaryResult (.rejected .malformedCommand)
   | some command =>
       match recordedInvocation deployment.domain profile.semantics command signed durable with
-      | .error _ => return .transactionConflict
-      | .ok (some recorded) => return .replayed recorded
+      | .error _ => ordinaryResult .transactionConflict
+      | .ok (some recorded) => ordinaryResult (.replayed recorded)
       | .ok none =>
           match prepare deployment profile ambient durable command with
-          | .error reason => return .rejected reason
+          | .error reason => ordinaryResult (.rejected reason)
           | .ok prepared =>
               if shape : PhysicalShape prepared then
                 match ← admit native prepared signed with
-                | .error reason => return .rejected reason
-                | .ok accepted => return .settlement (← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes
-                    durable (accepted.dataIntent shape))
-              else return .rejected .physicalPreparation
+                | .error reason => ordinaryResult (.rejected reason)
+                | .ok accepted => acceptedResult prepared shape accepted
+              else ordinaryResult (.rejected .physicalPreparation)
+
+def receiveLoaded {F : Type} [Field F] [DecidableEq F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (transport : DurableReceiverIO.Transport) (durable : Durable) (signed : SignedCommand) : IO ReceiveResult :=
+  withAcceptedLoaded deployment profile ambient native durable signed
+    (fun _ shape accepted => do
+      return .settlement (← DurableReceiverIO.receiveLoaded transport ResourceBirthCodec.rootBytes
+        durable (accepted.dataIntent shape))) pure
 
 def receive {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
