@@ -38,14 +38,21 @@ def start (config : Config) : IO (Except String (Session config)) := do
 
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
-  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  -- An exact physical reread of the verifier-minted tip needs no second
+  -- canonical decode or journal restoration. A changed image still passes
+  -- through the full durable loader and checked semantic suffix extension.
+  match ← config.storage.transport.read with
   | .error detail => return .error detail
-  | .ok target =>
-      if target.bytes.toByteArray == session.target.bytes.toByteArray then
+  | .ok none => return .error "durable image is not initialized"
+  | .ok (some bytes) =>
+      if bytes.toByteArray == session.target.bytes.toByteArray then
         return .ok session
-      match ← NativeHostReplay.extendVerified config session.verified target with
-      | .error failure =>
-          return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok ⟨target, verified⟩
+      match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes bytes with
+      | .error detail => return .error detail
+      | .ok target =>
+          match ← NativeHostReplay.extendVerified config session.verified target with
+          | .error failure =>
+              return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
+          | .ok verified => return .ok ⟨target, verified⟩
 
 end Minidregg.Kernel.NativeHostSession

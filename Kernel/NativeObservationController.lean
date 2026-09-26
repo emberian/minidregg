@@ -139,25 +139,44 @@ theorem footprint_success_exact (context : Context deployment durable) (intent :
   rw [footprint_mismatch_refused context intent required derived different] at accepted
   cases accepted
 
-def bindingBytes (_context : Context deployment durable) (semantics : Digest)
+private def bindingBytesAt (deployment : Deployment) (boundary semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product digestStream (StreamCodec.product digestStream grantStream)))).encode
       (deployment.domain, semantics,
-        NativeHostCodec.imageBoundary deployment.domain semantics durable.image,
-        intentIdentity intent, grant)
+        boundary, intentIdentity intent, grant)
+
+def bindingBytes (_context : Context deployment durable) (semantics : Digest)
+    (intent : Intent) (grant : GrantRef) : List UInt8 :=
+  bindingBytesAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+    semantics intent grant
+
+private def effectIdentityAt (deployment : Deployment) (boundary semantics : Digest)
+    (intent : Intent) (grant : GrantRef) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v3".toUTF8.toList
+    (bindingBytesAt deployment boundary semantics intent grant)).digest
 
 def effectIdentity (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-EFFECT/v3".toUTF8.toList
-    (bindingBytes context semantics intent grant)).digest
+  effectIdentityAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+    semantics intent grant
+
+private def markerAt (deployment : Deployment) (boundary semantics : Digest)
+    (intent : Intent) (grant : GrantRef) : Nat :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v3".toUTF8.toList
+    (bindingBytesAt deployment boundary semantics intent grant)).digest.value
 
 def marker (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.OBSERVE-SIGNATURE/v3".toUTF8.toList
-    (bindingBytes context semantics intent grant)).digest.value
+  markerAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+    semantics intent grant
 
-def request (context : Context deployment durable) (semantics : Digest)
+theorem bindingBytesAt_exact (context : Context deployment durable) (semantics : Digest)
+    (intent : Intent) (grant : GrantRef) :
+    bindingBytesAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+      semantics intent grant = bindingBytes context semantics intent grant := rfl
+
+private def requestAt (context : Context deployment durable) (boundary semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) : Request grant.kind where
   domain := deployment.domain
@@ -168,7 +187,7 @@ def request (context : Context deployment durable) (semantics : Digest)
   target := ⟨grant.target⟩
   verb := observeVerb grant.kind
   argsDigest := intentIdentity intent
-  effectsDigest := effectIdentity context semantics intent grant
+  effectsDigest := effectIdentityAt deployment boundary semantics intent grant
   nonce := intent.nonce
   height := genesisHeight + durable.image.accepted.length
   preStateRoot := preRoot
@@ -176,6 +195,19 @@ def request (context : Context deployment durable) (semantics : Digest)
   policyEpoch := context.authority.snapshot.authState.policyEpoch ⟨grant.target⟩
   policyRevision := context.authority.snapshot.authState.policyRevision ⟨grant.target⟩
   cost := (intentCodec.encode intent).length
+
+def request (context : Context deployment durable) (semantics : Digest)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
+    (grant : GrantRef) (preRoot : Digest) : Request grant.kind :=
+  requestAt context (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+    semantics federation genesisHeight intent grant preRoot
+
+theorem requestAt_exact (context : Context deployment durable) (semantics : Digest)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
+    (grant : GrantRef) (preRoot : Digest) :
+    requestAt context (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+      semantics federation genesisHeight intent grant preRoot =
+      request context semantics federation genesisHeight intent grant preRoot := rfl
 
 abbrev readPatch := ResourceObservationAdmission.readPatch
 
@@ -260,26 +292,44 @@ structure CheckedGrant (context : Context deployment durable) (profile : Canonic
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked preparation envelope
 
-def header (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+private def headerAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (boundary : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
   let selected ← need (select context grant)
   (CredentialSignatureAdmission.signingHeader context.authority.snapshot
-    (marker context profile.semantics intent grant)
-    ⟨grant.kind, request context profile.semantics federation genesisHeight intent grant selected.packed.payload.root⟩).mapError
+    (markerAt deployment boundary profile.semantics intent grant)
+    ⟨grant.kind, requestAt context boundary profile.semantics federation genesisHeight
+      intent grant selected.packed.payload.root⟩).mapError
       (fun _ => refused)
+
+def header (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
+    Except String CredentialSignedEnvelopeController.SignedHeader :=
+  headerAt context profile
+    (NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image)
+    federation genesisHeight intent grant
+
+theorem headerAt_exact (context : Context deployment durable)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
+    (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
+    headerAt context profile
+      (NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image)
+      federation genesisHeight intent grant =
+      header context profile federation genesisHeight intent grant := rfl
 
 /-- The success payload contains no field values, balances or policy source.
 The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data. -/
 def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except String Challenge := do
+  let boundary := NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
-    let value ← header context profile federation genesisHeight intent grant
+    let value ← headerAt context profile boundary federation genesisHeight intent grant
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
-    NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image,
+    boundary,
     genesisHeight + durable.image.accepted.length, headers⟩
 
 def checkGrant (native : CredentialSignatureIO.NativeConfig)
@@ -288,11 +338,15 @@ def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (grant : GrantRef) (signature : List UInt8) :
     IO (Except String (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error refused
-  let wanted := request context profile.semantics federation genesisHeight intent grant selected.packed.payload.root
+  let boundary := NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image
+  let wanted := requestAt context boundary profile.semantics federation genesisHeight
+    intent grant selected.packed.payload.root
   let .ok prepared := ResourceObservationAdmission.prepare context profile wanted
-      (marker context profile.semantics intent grant) grant.capability (intentCodec.encode intent)
+      (markerAt deployment boundary profile.semantics intent grant) grant.capability
+      (intentCodec.encode intent)
     | return .error refused
-  let .ok actualHeader := header context profile federation genesisHeight intent grant | return .error refused
+  let .ok actualHeader := headerAt context profile boundary federation genesisHeight intent grant
+    | return .error refused
   let envelope := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨actualHeader, signature⟩
   match ← ResourceObservationAdmission.check native prepared envelope with
   | .error _ => return .error refused
