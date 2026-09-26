@@ -816,8 +816,12 @@ private def birthIntent (path : String) (json : Lean.Json) : Result Intent := do
 
 private def grainSource (path : String) (json : Lean.Json) :
     Result (DeclaredResourceController.Command × AgentGrain.State) := do
-  let obj ← exactObject path ["task", "subject", "capability", "expectedAuthorityRoot",
-    "schemaVersion", "expectedTargetRoot", "context", "before", "operation"] json
+  let obj ← object path json
+  for key in obj.foldl (init := []) (fun names key _ => key :: names) do
+    unless ["task", "subject", "capability", "expectedAuthorityRoot",
+      "schemaVersion", "expectedTargetRoot", "context", "before", "operation",
+      "publications"].contains key do
+      throw s!"{path}: unknown field {key}"
   let stateObj ← exactObject (path ++ ".before") ["generation", "status", "remaining", "reserved"]
     (← field path "before" obj)
   let state : AgentGrain.State := ⟨← int (path ++ ".before.generation") (← field (path ++ ".before") "generation" stateObj),
@@ -857,9 +861,21 @@ private def grainSource (path : String) (json : Lean.Json) :
     (← nat (path ++ ".expectedTargetRoot") (← field path "expectedTargetRoot" obj))
   let schemaVersion ← nat (path ++ ".schemaVersion") (← field path "schemaVersion" obj)
   unless schemaVersion = 1 do throw s!"{path}.schemaVersion: grain schema version must be 1"
+  let publications ← match obj.get? "publications" with
+    | some value => list (path ++ ".publications") commandTarget value
+    | none => pure []
   let command := operation.command subject authorityRoot (AgentGrain.contextNonce contextBytes)
-    task capability targetRoot state
+    task capability targetRoot state publications
   pure (command, operation.after state)
+
+/-- Wrap a source-authored grain transition in the ordinary prepare intent. -/
+private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
+  let obj ← exactObject path ["grain", "grants", "intentNonce"] json
+  let source ← grainSource (path ++ ".grain") (← field path "grain" obj)
+  let grants ← list (path ++ ".grants") grant (← field path "grants" obj)
+  let nonce ← nat (path ++ ".intentNonce") (← field path "intentNonce" obj)
+  pure ⟨source.1.subject, nonce,
+    .prepare (.invoke (DeclaredResourceController.commandCodec.encode source.1)), grants⟩
 
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
@@ -890,11 +906,12 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "grain" => do
       let source ← grainSource "$" json
       pure (DeclaredResourceController.commandCodec.encode source.1)
+  | "grain-intent" => intentCodec.encode <$> grainIntent "$" json
   | "draft" => draftCodec.encode <$> draft "$" json
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
-      "expected predicate, grain-caveat, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, content, resource, joint[-draft], grain, draft, intent, or genesis"
+      "expected predicate, grain-caveat, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
 
 /-- Source-derived, non-authoritative presentation data. This lets clients
 display the resulting grain generation/state without duplicating the state

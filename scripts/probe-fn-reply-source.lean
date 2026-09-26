@@ -22,7 +22,8 @@ def main (args : List String) : IO Unit := do
       parentMessageId := "<parent@example.invalid>".toUTF8.toList,
       principal := List.replicate 32 0,
       edPublicKey := List.replicate 32 1,
-      mlPublicKey := List.replicate 1952 2 }
+      mlPublicKey := List.replicate 1952 2,
+      creation := CreationContext.synthetic }
   let source ← IO.ofExcept selected.source
   let prepared ← IO.ofExcept selected.prepare
   let encoded := preparedCodec.encode prepared
