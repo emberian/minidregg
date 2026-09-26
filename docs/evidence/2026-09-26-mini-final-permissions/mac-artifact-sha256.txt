@@ -1,0 +1,4 @@
+22954f15df67cc19e46d42d70a89a67e4c980f1e051ffb08c64386b901bc9f6a  /private/tmp/minidregg-overnight-20260926/minidregg-host-final-permissions
+585dedb4dfe754665040ffdb0df2386a6c2a1945f481d22c50f8fd1d96c490ad  /private/tmp/minidregg-overnight-20260926/build-local-final-permissions/minidregg-host.rsp
+9fb0577e8257be55b430c393dfdfb55121a77bade3801accfcf53655e234e16e  /private/tmp/minidregg-overnight-20260926/build-local-final-permissions/transitive-imports.json
+ad66616d15c8bb7f4682b38daa40aec8feaadc7dabdc5e976e7234f3f5526456  /private/tmp/minidregg-overnight-20260926/build-local-final-permissions/reusable-artifact-sha256.txt

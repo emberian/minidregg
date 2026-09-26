@@ -45,3 +45,31 @@ do not isolate those processes from each other. The request example reproduces
 this fixture's article context and
 selected signed targets; later R2 publications use the same command with
 their own independently verified package and operator-selected request.
+
+The first source-matched Mac native host
+`/tmp/minidregg-overnight-20260926/minidregg-host-final-combined`
+(SHA-256 `280654f522c382f7ebb6f801b90f960b519a3d3e622a3053ffc1a88e5c8f1566`)
+ran that command under an operator `umask 077` and exited 0. Its retained
+`source.eml` had SHA-256
+`8b2da29b05723e1f4f48f1889f84a9e8037cbfef1a23ccc0c7ece04ae0f0a488`,
+equal to the recorded R source; `scope.json` had SHA-256
+`ce780f5ead654d56757313dd4362e1e2bf999767a98ac2ec4ef80ce53eed3b92`
+and recorded the exact receipt image boundary, full package/prefix digests,
+article headers and all signed target IDs. A second invocation with the same
+output directory exited 1 with `already exists (error code: 17, file exists)`;
+both retained hashes were unchanged. Its observed `0700` directory and `0600`
+files follow the operator's umask, so this first image alone does not test
+source-enforced permissions.
+
+The permission-tail Mac native host
+`/tmp/minidregg-overnight-20260926/minidregg-host-final-permissions`
+(SHA-256 `22954f15df67cc19e46d42d70a89a67e4c980f1e051ffb08c64386b901bc9f6a`,
+Main SHA-256 `4af37a4d95f8ed77865ea8b06385b35f0f099cc27d4b99bb4ad76658cb0be9e6`)
+ran under **umask `022` with a `0755` parent**. It exited 0 and created the
+output directory at `0700`, `source.eml` at `0600`, and `scope.json` at `0600`.
+The source and scope SHA-256 values were exactly the same as the first native
+run; scope retained the expected original image boundary and exact
+package/prefix digests. Repeating the command against the existing output
+directory exited 1 with `already exists (error code: 17, file exists)`;
+source/scope hashes and modes remained unchanged. This tests local file
+custody and exact preparation only; no fn signing, admission, or relay ran.

@@ -1,0 +1,6 @@
+baseline_snapshot=/private/tmp/minidregg-overnight-20260926-combined
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-final-combined
+baseline_binary_sha256=280654f522c382f7ebb6f801b90f960b519a3d3e622a3053ffc1a88e5c8f1566
+unchanged_imported_modules=168
+unchanged_package_objects=2933
+changed_host_source_sha256=4af37a4d95f8ed77865ea8b06385b35f0f099cc27d4b99bb4ad76658cb0be9e6

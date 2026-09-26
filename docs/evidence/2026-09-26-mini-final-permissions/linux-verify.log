@@ -1,0 +1,6 @@
+source_checks=169
+artifact_checks=4
+source_failures=0
+artifact_failures=0
+186051dc37b8e1df7ae7737d5dffbc249681f66160fed328a6c5938b630bb78c  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-permissions
+/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-permissions: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.32, with debug_info, not stripped

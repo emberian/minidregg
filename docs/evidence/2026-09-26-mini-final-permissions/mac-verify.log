@@ -1,0 +1,6 @@
+source_checks=169
+artifact_checks=4
+source_failures=0
+artifact_failures=0
+22954f15df67cc19e46d42d70a89a67e4c980f1e051ffb08c64386b901bc9f6a  /tmp/minidregg-overnight-20260926/minidregg-host-final-permissions
+/tmp/minidregg-overnight-20260926/minidregg-host-final-permissions: Mach-O 64-bit executable arm64
