@@ -1,0 +1,7 @@
+capture_utc=2026-09-26T08:59:27Z
+capture_scope=postbuild verified frozen independent A snapshot
+binary_sha256=82a7a6a596b8083a08c65aee8aeb0752d54b750b249899b59612130c5d7f97bd
+source_verified=163
+reusable_artifacts=9451
+artifact_manifest_sha256=84bdd9ff28cc8de9803a866390af7215711a9d132365b1f09eeb10a62cafcf23
+objects_newer_than_binary=0
