@@ -1,0 +1,169 @@
+--- two_store_join.py
++++ two_store_join.py
+@@ -805,6 +805,8 @@
+         self.bridge = Path(args.mini_repo) / "scripts" / "fn-e1e2" / "fn_bridge.sh"
+         self.benv = dict(os.environ)
+         self.b_service = None
++        self.b_service_info = None
++        self.b_service_starts = 0
+ 
+     # -- step machinery ----------------------------------------------------
+ 
+@@ -920,6 +922,10 @@
+ 
+     def start_b_service(self, mini_b, ready):
+         """Pin B's live fn inputs outside the request frame and keep one Mini session."""
++        if self.b_service is not None:
++            if self.b_service.poll() is not None:
++                raise Stop("Mini B session exited before reuse")
++            return self.b_service_info
+         L = self.out
+         config = json.loads(Path(mini_b).read_text())
+         config["fnPoll"] = {
+@@ -930,10 +936,12 @@
+             "controlPath": ready["b_control"]}
+         service_config = L / "mini-b-service-config.json"
+         service_config.write_text(json.dumps(config, sort_keys=True, indent=2) + "\n")
+-        socket_dir = L / "mini-b-service"
++        service_number = self.b_service_starts
++        self.b_service_starts += 1
++        socket_dir = L / "mini-b-service-{:02d}".format(service_number)
+         socket_dir.mkdir(mode=0o700)
+         socket = socket_dir / "host.sock"
+-        with (L / "mini-b-service.log").open("wb") as log:
++        with (L / "mini-b-service-{:02d}.log".format(service_number)).open("wb") as log:
+             self.b_service = subprocess.Popen(
+                 [self.mini_client, "serve", "--host", self.mini_bin,
+                  "--config", service_config, "--socket", socket],
+@@ -947,7 +955,122 @@
+         else:
+             raise Stop("Mini B session socket did not become ready")
+         self.mini("mini-b-service-ready", ["/bin/test", "-S", socket])
+-        return service_config, socket
++        self.b_service_info = (service_config, socket)
++        return self.b_service_info
++
++    def fn_native(self, label, *args, check=None):
++        """Run an exact native fn command in this run's isolated hbox Store."""
++        image = self.args.image_dir.rstrip("/") + "/fn-host"
++        command = "FN_OPENSSL_PREFIX=" + shlex.quote(self.args.openssl_prefix) + " " + \
++            " ".join(shlex.quote(str(part)) for part in (image, "--fn", *args))
++        return self.mini(label, ["ssh", self.host, command], check=check)
++
++    def fn_status(self, label, control):
++        self.fn_native(label, "consumer", "status", control, CONSUMER)
++        text = (self.logs / "{:02d}-{}.log".format(self.n, label)).read_text()
++        found = re.search(r"consumer status accepted committed-ack=(\d+) "
++                          r"committed-journal-frontier=(\d+) journal-event-distance=(\d+)", text)
++        if not found:
++            raise Stop(label + " returned no native consumer status")
++        return tuple(int(value) for value in found.groups())
++
++    def b_skip_pages_before_r(self, mini_b, ready):
++        """Native neutral events and durable skips through a short fn scan page."""
++        L = self.out
++        b_root = ready["b_root"]
++        registered = b_root + "/registered.fncu"
++        self.fn_native("b-initial-inspect", "consumer-inspect", registered)
++        inspected = (self.logs / "{:02d}-b-initial-inspect.log".format(self.n)).read_text()
++        fields = dict(re.findall(r"([a-z-]+)=([^\s]+)", inspected.split("fn-consumer-inspect-v1", 1)[1]))
++        if fields.get("position") != "0":
++            raise Stop("B initial fn cursor did not begin at position zero")
++        scope = {"history": fields["history"], "incarnation": fields["incarnation"],
++                 "consumer": fields["consumer"], "principal": fields["principal"],
++                 "query": fields["query"], "queryVersion": int(fields["query-version"]),
++                 "viewVersion": int(fields["view-version"]),
++                 "registrationEpoch": int(fields["registration-epoch"])}
++        (L / "b-scope-pin.json").write_text(json.dumps(scope, sort_keys=True) + "\n")
++        r_keys = self.fetch_keys(ready["r"], "r-early")
++        (L / "r-fn-pin.json").write_text(json.dumps(self.pin(self.bridge, r_keys), sort_keys=True) + "\n")
++        for index in range(17):
++            self.fn_native("b-neutral-{:02d}".format(index), "consumer", "register",
++                           ready["b_control"], "mini-neutral-{:02d}".format(index),
++                           GROUP, b_root + "/neutral-{:02d}.fncu".format(index))
++        config, socket = self.start_b_service(mini_b, ready)
++        initial_ack, frontier, _ = self.fn_status("b-before-skip-status", ready["b_control"])
++        if initial_ack != 0 or frontier < 17:
++            raise Stop("B neutral registration did not create bounded scan backlog")
++        first = True
++        for index in range(8):
++            poll_dir = L / "b-skip-poll-{:02d}".format(index)
++            self.mini("b-skip-poll-{:02d}".format(index),
++                      [self.mini_client, "consumer-poll", "--host", self.mini_bin,
++                       "--config", config, "--socket", socket, "--dir", poll_dir])
++            answer = self.json("b-skip-poll-{:02d}/decision.json".format(index))
++            if answer.get("status") == "idle":
++                if first:
++                    raise Stop("B neutral backlog yielded idle before any skip")
++                if (answer.get("decision", {}).get("type") != "fn-empty-page-idle-v1" or
++                    int(answer["decision"]["position"]) != initial_ack or
++                    initial_ack != frontier):
++                    raise Stop("B idle answer differs from acknowledged frontier")
++                break
++            decision = answer.get("decision", {})
++            from_position = int(decision.get("fromPosition", "-1"))
++            to_position = int(decision.get("toPosition", "-1"))
++            if (answer.get("status") != "skip-decision" or
++                decision.get("type") != "fn-empty-page-progress-decision-v1" or
++                decision.get("decision") != "proposed-fresh" or
++                from_position != initial_ack or
++                not (initial_ack < to_position <= initial_ack + 16 and to_position <= frontier) or
++                not (poll_dir / "intent.bin").is_file()):
++                raise Stop("B empty page did not propose a fresh Mini skip")
++            submit_dir = L / "b-skip-submit-{:02d}".format(index)
++            self.mini("b-skip-submit-{:02d}".format(index),
++                      [self.mini_client, "submit", "--host", self.mini_bin,
++                       "--config", config, "--socket", socket,
++                       "--intent", poll_dir / "intent.bin", "--intent-kind", "binary",
++                       "--key", self.args.mini_b_custody_key or self.args.mini_custody_key,
++                       "--dir", submit_dir],
++                      check=lambda: (self.json("b-skip-submit-{:02d}/outcome.json".format(index)).get("type") == "confirmed"
++                                     and self.json("b-skip-submit-{:02d}/outcome.json".format(index)).get("confirmation") == "installed"))
++            transaction = self.json("b-skip-submit-{:02d}/outcome.json".format(index))["transactionId"]
++            if first:
++                self.b_service.terminate()
++                self.b_service.wait(timeout=10)
++                self.b_service = None
++                socket.unlink(missing_ok=True)
++                config, socket = self.start_b_service(mini_b, ready)
++                repeat_dir = L / "b-skip-repeat"
++                self.mini("b-skip-repeat", [self.mini_client, "consumer-poll",
++                          "--host", self.mini_bin, "--config", config,
++                          "--socket", socket, "--dir", repeat_dir],
++                          check=lambda: (self.json("b-skip-repeat/decision.json").get("status") == "skip-decision"
++                                         and self.json("b-skip-repeat/decision.json").get("decision", {}).get("type") == "fn-empty-page-progress-decision-v1"
++                                         and self.json("b-skip-repeat/decision.json").get("decision", {}).get("decision") == "repeated"
++                                         and int(self.json("b-skip-repeat/decision.json")["decision"]["fromPosition"]) == from_position
++                                         and int(self.json("b-skip-repeat/decision.json")["decision"]["toPosition"]) == to_position
++                                         and not (repeat_dir / "intent.bin").exists()))
++                first = False
++            ack_dir = L / "b-skip-ack-{:02d}".format(index)
++            self.mini("b-skip-ack-{:02d}".format(index),
++                      [self.mini_client, "consumer-ack", "--host", self.mini_bin,
++                       "--config", config, "--socket", socket,
++                       "--mini-transaction", transaction, "--dir", ack_dir],
++                      check=lambda: (self.json("b-skip-ack-{:02d}/ack.json".format(index)).get("kind") == "empty-page-skip"
++                                     and self.json("b-skip-ack-{:02d}/ack.json".format(index)).get("fnAck") == "durable-accepted"))
++            ack, frontier, _ = self.fn_status("b-after-skip-status-{:02d}".format(index),
++                                             ready["b_control"])
++            if ack != to_position or ack > frontier:
++                raise Stop("B fn ACK differs from the accepted Mini skip cursor")
++            initial_ack = ack
++            # fn's ACK is itself a Store event. A subsequent poll may observe
++            # that event, so demanding idle would chase our own ACK forever.
++            # The native consumer ends this wake after a short scan page.
++            if to_position - from_position < 16:
++                break
++        else:
++            raise Stop("B neutral backlog did not reach a short fn page within eight scans")
+ 
+     def bridge_verify(self, label, carrier, ml_public):
+         record = self.mini(label, [self.bridge, "--fn", "hybrid-verify-source", carrier,
+@@ -1034,6 +1157,7 @@
+         (self.out / "fn-ready.json").write_text(json.dumps(ready, indent=2) + "\n")
+         self.mini("bridge-position-a", [self.bridge, "--fn", "consumer", "position",
+                                         ready["a_control"], CONSUMER, self.out / "a-registered-via-bridge.fncu"])
++        self.b_skip_pages_before_r(mini_b, ready)
+ 
+         self.fn("r-accept-at-a", "author-r")
+         if cut == "a-accepted":

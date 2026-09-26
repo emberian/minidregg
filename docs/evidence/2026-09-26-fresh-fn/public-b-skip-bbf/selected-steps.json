@@ -1,0 +1,182 @@
+{
+  "nativeStatus": {
+    "36-b-before-skip-status": "consumer status accepted committed-ack=0 committed-journal-frontier=20 journal-event-distance=20",
+    "42-b-after-skip-status-00": "consumer status accepted committed-ack=16 committed-journal-frontier=21 journal-event-distance=5",
+    "46-b-after-skip-status-01": "consumer status accepted committed-ack=21 committed-journal-frontier=22 journal-event-distance=1"
+  },
+  "outer": {
+    "acceptedSteps": 111,
+    "outcome": "ACCEPTED",
+    "reached": "final-article-counts",
+    "stopped": "EXCHANGE COMPLETE"
+  },
+  "steps": [
+    {
+      "detail": "exit 0",
+      "n": 36,
+      "outcome": "ACCEPTED",
+      "step": "b-before-skip-status"
+    },
+    {
+      "detail": "exit 0",
+      "n": 37,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-poll-00"
+    },
+    {
+      "detail": "exit 0",
+      "n": 38,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-submit-00"
+    },
+    {
+      "detail": "exit 0",
+      "n": 40,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-repeat"
+    },
+    {
+      "detail": "exit 0",
+      "n": 41,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-ack-00"
+    },
+    {
+      "detail": "exit 0",
+      "n": 42,
+      "outcome": "ACCEPTED",
+      "step": "b-after-skip-status-00"
+    },
+    {
+      "detail": "exit 0",
+      "n": 43,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-poll-01"
+    },
+    {
+      "detail": "exit 0",
+      "n": 44,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-submit-01"
+    },
+    {
+      "detail": "exit 0",
+      "n": 45,
+      "outcome": "ACCEPTED",
+      "step": "b-skip-ack-01"
+    },
+    {
+      "detail": "exit 0",
+      "n": 46,
+      "outcome": "ACCEPTED",
+      "step": "b-after-skip-status-01"
+    },
+    {
+      "detail": "author-r",
+      "n": 47,
+      "outcome": "ACCEPTED",
+      "step": "r-accept-at-a"
+    },
+    {
+      "detail": "exit 0",
+      "n": 75,
+      "outcome": "ACCEPTED",
+      "step": "mini-b-ack-session"
+    },
+    {
+      "detail": "exit 0",
+      "n": 76,
+      "outcome": "ACCEPTED",
+      "step": "b-position-after-ack"
+    },
+    {
+      "detail": "fnAck durable-accepted",
+      "n": 106,
+      "outcome": "ACCEPTED",
+      "step": "mini-a-ack"
+    },
+    {
+      "detail": "exit 0",
+      "n": 107,
+      "outcome": "ACCEPTED",
+      "step": "a-position-after-ack"
+    },
+    {
+      "detail": "status",
+      "n": 110,
+      "outcome": "ACCEPTED",
+      "step": "final-article-counts"
+    },
+    {
+      "detail": "exit 0",
+      "n": 111,
+      "outcome": "ACCEPTED",
+      "step": "cleanup-owners"
+    }
+  ],
+  "typedReceipts": {
+    "b-skip-ack-00": {
+      "fnAck": "durable-accepted",
+      "fnCursorPosition": "16",
+      "fnStoreSequence": "",
+      "fnStoreTransactionId": "",
+      "kind": "empty-page-skip",
+      "miniTransactionId": "79616713954879534234346197367880081686899467638080882882244541221883430587951",
+      "type": "fn-consumer-ack-session-v1"
+    },
+    "b-skip-ack-01": {
+      "fnAck": "durable-accepted",
+      "fnCursorPosition": "21",
+      "fnStoreSequence": "",
+      "fnStoreTransactionId": "",
+      "kind": "empty-page-skip",
+      "miniTransactionId": "16491539979620430154972917164600092605411927223720408994416268704830413750286",
+      "type": "fn-consumer-ack-session-v1"
+    },
+    "b-skip-poll-00": {
+      "decision": {
+        "decision": "proposed-fresh",
+        "fromPosition": "0",
+        "toPosition": "16",
+        "type": "fn-empty-page-progress-decision-v1"
+      },
+      "hasIntent": true,
+      "status": "skip-decision",
+      "type": "fn-consumer-poll-session-v1"
+    },
+    "b-skip-poll-01": {
+      "decision": {
+        "decision": "proposed-fresh",
+        "fromPosition": "16",
+        "toPosition": "21",
+        "type": "fn-empty-page-progress-decision-v1"
+      },
+      "hasIntent": true,
+      "status": "skip-decision",
+      "type": "fn-consumer-poll-session-v1"
+    },
+    "b-skip-repeat": {
+      "decision": {
+        "decision": "repeated",
+        "fromPosition": "0",
+        "toPosition": "16",
+        "type": "fn-empty-page-progress-decision-v1"
+      },
+      "hasIntent": false,
+      "status": "skip-decision",
+      "type": "fn-consumer-poll-session-v1"
+    },
+    "b-skip-submit-00": {
+      "acceptedCount": "2",
+      "confirmation": "installed",
+      "transactionId": "79616713954879534234346197367880081686899467638080882882244541221883430587951",
+      "type": "confirmed"
+    },
+    "b-skip-submit-01": {
+      "acceptedCount": "3",
+      "confirmation": "installed",
+      "transactionId": "16491539979620430154972917164600092605411927223720408994416268704830413750286",
+      "type": "confirmed"
+    }
+  }
+}

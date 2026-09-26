@@ -1,0 +1,5 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-next/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-next/.lake/packages/batteries' has local changes
+accepted Mini skip tx=79616713954879534234346197367880081686899467638080882882244541221883430587951 from=0 to=16
+accepted Mini skip tx=16491539979620430154972917164600092605411927223720408994416268704830413750286 from=16 to=21
+PASS 2 accepted progress-only Mini skips, exact cursor chain through 21; no application atom in signed skip commands

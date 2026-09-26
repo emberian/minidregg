@@ -341,3 +341,25 @@ harness and Python compilation passes; it awaits a source-matched linked Mini
 host for a native exchange. The frozen combined client is
 `/tmp/minidregg-overnight-20260926/mini-client-ba-311ab01`, SHA-256
 `0523c8d2a340da315c926b1c73d25f0bb6d5be647d3492841bfc2c589fff6014`.
+
+The later qualified `bbf52159` public two-socket exchange passed both B and A
+typed poll → signed Mini submit → fn ACK; see
+`docs/evidence/2026-09-26-fresh-fn/public-ab-socket-bbf/README.md` for exact
+image, source and receipt hashes. The earlier staged statements above describe
+the pre-link state, not the final native verdict.
+
+For a separate B empty-page progress trial, use `run-skip-b.sh` with the same
+eight positional arguments as `run-distinct-mini.sh`, a fresh fn scratch and
+fresh local output, and set `MINI_SHA256` to the exact linked Host image. It
+copies the pinned fn runbook, applies the per-side, creation, B-socket and
+`two_store_join_skip_b.patch` overlays to that private copy, then inserts 17
+unrelated fn Store registration events before R. A source-matched skip client
+is required; the wrapper pins its SHA-256 to
+`d6edadd46960dd055dc1d8e88b05ccbcf2ca0363c424c5a05f8747716c32fc8e`.
+The observed accepted pages were 0→16 and 16→21, each followed by exact
+Mini transaction ACK; the first had a service restart and repeated decision
+before ACK. After a page shorter than the 16-event fn scan bound, the trial
+stops its drain wake, publishes R, and completes the normal B/A exchange.
+It does not poll until idle because fn ACK itself adds a Store event. The
+111-step native verdict and a separate red repeated-ACK probe are recorded in
+`docs/evidence/2026-09-26-fresh-fn/public-b-skip-bbf/README.md`.
