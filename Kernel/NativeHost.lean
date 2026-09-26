@@ -155,46 +155,55 @@ def observationContext (config : Config) (opened : Opened config) :
 
 /-- Only commitments and explicitly public request/key/policy coordinates
 escape this pre-authorization step; the controller derives every header. -/
+def challengeLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Except String NativeObservationCodec.Challenge := do
+  let some intent := NativeObservationCodec.intentCodec.decode bytes
+    | throw "observation refused"
+  (NativeObservationController.challenge (observationContext config opened)
+    config.profile config.federation config.genesisHeight intent).mapError
+      (fun _ => "observation refused")
+
 def challenge (config : Config) (bytes : List UInt8) :
     IO (Except String NativeObservationCodec.Challenge) := do
-  let some intent := NativeObservationCodec.intentCodec.decode bytes
-    | return .error "observation refused"
   match ← openExisting config with
   | .error _ => return .error "observation refused"
-  | .ok opened =>
-      return (NativeObservationController.challenge (observationContext config opened)
-        config.profile config.federation config.genesisHeight intent).mapError
-          (fun _ => "observation refused")
+  | .ok opened => return challengeLoaded config opened bytes
 
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
-def prepare (config : Config) (bytes : List UInt8) : IO (Except String SigningPlan) := do
+def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except String SigningPlan) := do
   let some signed := NativeObservationCodec.signedCodec.decode bytes
     | return .error "observation refused"
+  match ← NativeObservationController.authorize config.signature (observationContext config opened)
+      config.profile config.federation config.genesisHeight signed with
+  | .error _ => return .error "observation refused"
+  | .ok _ =>
+      match signed.challenge.intent.purpose with
+      | .prepare draft => return prepareLoaded config opened draft
+      | .query _ => return .error "signed observation purpose is not preparation"
+
+def prepare (config : Config) (bytes : List UInt8) : IO (Except String SigningPlan) := do
   match ← openExisting config with
   | .error _ => return .error "observation refused"
-  | .ok opened =>
-      match ← NativeObservationController.authorize config.signature (observationContext config opened)
-          config.profile config.federation config.genesisHeight signed with
-      | .error _ => return .error "observation refused"
-      | .ok _ =>
-          match signed.challenge.intent.purpose with
-          | .prepare draft => return prepareLoaded config opened draft
-          | .query _ => return .error "signed observation purpose is not preparation"
+  | .ok opened => prepareAuthorizedLoaded config opened bytes
 
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
-def query (config : Config) (bytes : List UInt8) : IO (Except String (List UInt8)) := do
+def queryLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO (Except String (List UInt8)) := do
   let some signed := NativeObservationCodec.signedCodec.decode bytes
     | return .error "observation refused"
+  match ← NativeObservationController.authorize config.signature (observationContext config opened)
+      config.profile config.federation config.genesisHeight signed with
+  | .error _ => return .error "observation refused"
+  | .ok token => return need "signed observation purpose is not a query" token.queryResult
+
+def query (config : Config) (bytes : List UInt8) : IO (Except String (List UInt8)) := do
   match ← openExisting config with
   | .error _ => return .error "observation refused"
-  | .ok opened =>
-      match ← NativeObservationController.authorize config.signature (observationContext config opened)
-          config.profile config.federation config.genesisHeight signed with
-      | .error _ => return .error "observation refused"
-      | .ok token => return need "signed observation purpose is not a query" token.queryResult
+  | .ok opened => queryLoaded config opened bytes
 
 /-- Custody signs each exact canonical header outside the host. Assembly only
 places signatures into the source-owned ingress; submission checks them anew. -/
@@ -261,13 +270,14 @@ private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some receipt => return .confirmed kind receipt
 
-def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome := do
+def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
   | .revoke bytes =>
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
-      | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "revoke" s!"{repr reason}"
       | .transactionConflict => return refused "replay" "transaction identity conflict"
       | .durableRejected reason => return refused "durable" s!"{repr reason}"
@@ -277,7 +287,7 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
   | .delegate bytes =>
       match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
-      | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "delegate" s!"{repr reason}"
       | .transactionConflict => return refused "replay" "transaction identity conflict"
       | .durableRejected reason => return refused "durable" s!"{repr reason}"
@@ -287,7 +297,7 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
   | .birth bytes =>
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
           config.signature config.storage.transport opened.durable height bytes with
-      | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "birth" (birthRejection reason)
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -295,7 +305,7 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
   | .install bytes =>
       match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
           config.storage.transport opened.durable config.federation height bytes with
-      | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "install" s!"{repr reason}"
       | .durableRejected reason => return refused "durable" s!"{repr reason}"
       | .contention => return .contention
@@ -307,20 +317,23 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
       | some command =>
           match ← DeclaredResourceController.receiveLoaded config.deployment config.profile
               ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable signed with
-          | .replayed record => confirmed config .replayed record.transactionId record.event.event.eventId
+          | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
           | .rejected reason => return refused "invoke" s!"{repr reason}"
           | .transactionConflict => return refused "replay" "transaction identity conflict"
           | .unavailable detail => return .unavailable detail.toUTF8.toList
           | .settlement result =>
               match result with
               | .confirmed kind _ =>
-                  confirmed config kind
+                  confirm kind
                     (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
                     (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
               | .rejected reason => return refused "durable" s!"{repr reason}"
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
+  submitLoadedWith config opened call (confirmed config)
 
 /-- A fresh mutation need not confer read authority (blind writes and credits
 remain possible). Its preflight/native/semantic refusal therefore exposes no

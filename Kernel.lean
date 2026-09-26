@@ -60,10 +60,15 @@ import Kernel.HyperedgeTier  -- Law 2 on the ONE turn model: commitTier tierOf :
 import Kernel.HyperedgeKnowledge  -- the epistemic reading of legs_agree: in the observation frame the apex H.tid is DISTRIBUTED KNOWLEDGE among the honest legs for ANY hyperedge and ANY faulty set (agreement_is_distributed_knowledge; distKnows_apex_iff_honest_agree the iff), and a fork — two honest legs reading different ids — is the absence of any distributed apex (fork_has_no_distributed_apex; splitTuple_no_hyperedge). Residual [HYPEREDGE-operational]
 import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bundles the replicated layer's three premises (available quorum, fair delivery, responsive replicas) as a realizer slot; progress reuses finalized_of_available_fair_responsive and the decider accepts it (checked_of_progress); the constitution's sentence as two theorems kept apart — cannot_forge (no liveness premise anywhere) and no_progress_without_quorum (IsEmpty PostGSTProgress); closed Fin 3 realizer built, dead quorum system / partition / never-delivering schedule each refuted at its own leg. Residuals [LIVENESS-gst] [LIVENESS-authenticated]
 import Kernel.NativeHost
+import Kernel.NativeHostSession
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
+import Kernel.FnConsumerOperationProofs
 import Kernel.FnPortableSource
+import Kernel.FnReplyConsumption
+import Kernel.FnReplyPublication
+import Kernel.FnReplySource
 import Kernel.ContentResource
 import Kernel.ContentResourceAudit
 import Kernel.AgentGrain

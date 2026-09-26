@@ -10,6 +10,7 @@ strict Outcome. Max frame is 1 MiB. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
+import Kernel.NativeHostSession
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
@@ -26,6 +27,36 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel
 
 namespace Minidregg.Host
+
+structure GatewayPinSettings where
+  application : String
+  subject : Nat
+  target : Nat
+  capability : Nat
+  policyAddress : Nat
+  deriving FromJson, ToJson
+
+def GatewayPinSettings.pin (source : GatewayPinSettings) : NativeHost.FnGatewayPin :=
+  ⟨source.application.toUTF8.toList, ⟨source.subject⟩, source.target,
+    ⟨source.capability⟩, ⟨source.policyAddress⟩⟩
+
+/-- Paths are operator configuration, never fields in a client frame. The
+service copies the four bounded manifests into its private lifetime directory
+before accepting frames; the fn control endpoint remains an OS custody seam. -/
+structure FnPollServiceSettings where
+  originConfigPath : String
+  fnPinPath : String
+  scopePath : String
+  policyPath : String
+  controlPath : String
+  deriving FromJson, ToJson
+
+structure FnPollService where
+  originConfigPath : String
+  fnPinPath : String
+  scopePath : String
+  policyPath : String
+  controlPath : String
 
 structure Settings where
   domain : Nat
@@ -47,6 +78,8 @@ structure Settings where
   storageBinary : String
   storageRoot : String
   signatureBinary : String
+  fnGateway : Option GatewayPinSettings := none
+  fnPoll : Option FnPollServiceSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -59,6 +92,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   expectedSeed := ⟨settings.expectedSeed⟩
   storage := ⟨settings.storageBinary, settings.storageRoot⟩
   signature := ⟨settings.signatureBinary⟩
+  fnGateway := settings.fnGateway.map GatewayPinSettings.pin
 
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
@@ -91,10 +125,9 @@ def profileDescription (config : NativeHost.Config) : Lean.Json :=
      ("runtimeParameters", toJson (Minidregg.Host.Json.encodeHex config.runtimeParameters)),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
 
-def description (config : NativeHost.Config) : IO Lean.Json := do
-  discard <| IO.ofExcept (← NativeHost.openExisting config)
+def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
   let n := fun value : Nat => toJson (toString value)
-  pure <| Lean.Json.mkObj
+  return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
@@ -104,6 +137,10 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
      ("operations", toJson (["birth", "invoke", "install", "delegate", "revoke"] : List String)),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
+
+def description (config : NativeHost.Config) : IO Lean.Json := do
+  discard <| IO.ofExcept (← NativeHost.openExisting config)
+  return descriptionLoaded config
 
 def failure (phase detail : String) : List UInt8 :=
   outcomeCodec.encode (.refused phase.toUTF8.toList detail.toUTF8.toList)
@@ -129,6 +166,128 @@ def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UI
       | .ok view => pure (5, view)
       | .error detail => pure (255, failure "observation" detail)
   | _ => throw (IO.userError "unsupported native host operation")
+
+/-- Session state is poisoned on any physical read, decode, prefix, or replay
+failure. A new process must revalidate the entire history before serving again. -/
+def sessionOpened (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO (NativeHost.Opened config) := do
+  let some prior ← state.get
+    | throw (IO.userError "native host session invalidated")
+  match ← NativeHostSession.refresh config prior with
+  | .error detail =>
+      state.set none
+      throw (IO.userError detail)
+  | .ok current =>
+      state.set (some current)
+      return current.opened
+
+def sessionConfirmed (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (kind : DurableReceiverIO.Confirmation)
+    (transactionId eventId : Minidregg.Theory.TypedAuthorization.Digest) :
+    IO NativeHostCodec.Outcome := do
+  try
+    let opened ← sessionOpened config state
+    match NativeHost.historicalReceipt config opened.durable transactionId eventId with
+    | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some receipt => return .confirmed kind receipt
+  catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
+
+def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
+  unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
+  let width := payload[0]!.toNat + 256 * payload[1]!.toNat
+  unless width > 0 && width ≤ payload.length - 2 do
+    throw (IO.userError "invalid native host kind length")
+  let some kind := String.fromUTF8? (payload.drop 2 |>.take width).toByteArray
+    | throw (IO.userError "native host kind is not UTF-8")
+  return (kind, payload.drop (2 + width))
+
+def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
+  unless payload.length ≥ 4 do throw (IO.userError "short native host pair frame")
+  let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
+    65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
+  unless width ≤ payload.length - 4 do throw (IO.userError "invalid native host pair length")
+  return ((payload.drop 4).take width, payload.drop (4 + width))
+
+def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
+  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+  let some signatures := signaturesCodec.decode bytes
+    | throw (IO.userError "noncanonical signature list")
+  return signatures
+
+/-- The live protocol keeps exact source-owned authoring and inspection in
+memory, while every state-dependent operation refreshes the verified tip. -/
+def dispatchSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 0 =>
+      unless payload.isEmpty do throw (IO.userError "describe does not accept a payload")
+      discard <| sessionOpened config state
+      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+  | 1 =>
+      let opened ← sessionOpened config state
+      match ← NativeHost.prepareAuthorizedLoaded config opened payload with
+      | .ok plan => return (1, signingPlanCodec.encode plan)
+      | .error detail => return (255, failure "prepare" detail)
+  | 2 =>
+      let opened ← sessionOpened config state
+      let result ← match callCodec.decode payload with
+        | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
+            "noncanonical or unsupported native host call".toUTF8.toList)
+        | some call => NativeHost.submitLoadedWith config opened call (sessionConfirmed config state)
+      return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
+  | 3 =>
+      let opened ← sessionOpened config state
+      let result := match callCodec.decode payload with
+        | none => NativeHostCodec.Outcome.refused "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
+        | some call => NativeHost.lookupLoaded config opened call
+      return (3, outcomeCodec.encode result)
+  | 4 =>
+      let opened ← sessionOpened config state
+      match NativeHost.challengeLoaded config opened payload with
+      | .ok challenge => return (4, NativeObservationCodec.challengeCodec.encode challenge)
+      | .error detail => return (255, failure "observation" detail)
+  | 5 =>
+      let opened ← sessionOpened config state
+      match ← NativeHost.queryLoaded config opened payload with
+      | .ok view => return (5, view)
+      | .error detail => return (255, failure "observation" detail)
+  | 6 =>
+      unless payload.isEmpty do throw (IO.userError "profile does not accept a payload")
+      return (6, (profileDescription config).compress.toUTF8.toList)
+  | 7 =>
+      let (kind, source) ← splitKind payload
+      let some text := String.fromUTF8? source.toByteArray
+        | throw (IO.userError "native host author source is not UTF-8")
+      let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
+      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value))
+  | 8 =>
+      let (kind, source) ← splitKind payload
+      let value ← IO.ofExcept (Minidregg.Host.Json.inspect kind source)
+      return (8, value.compress.toUTF8.toList)
+  | 9 =>
+      let some text := String.fromUTF8? payload.toByteArray
+        | throw (IO.userError "native host signatures source is not UTF-8")
+      let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
+      return (9, ← IO.ofExcept (Minidregg.Host.Json.signatures value))
+  | 10 =>
+      let (challengeBytes, signaturesBytes) ← splitPair payload
+      let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
+        | throw (IO.userError "noncanonical observation challenge")
+      let signatures ← decodeSignatures signaturesBytes
+      let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
+      return (10, NativeObservationCodec.signedCodec.encode signed)
+  | 11 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := signingPlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical signing plan")
+      let signatures ← decodeSignatures signaturesBytes
+      let call ← IO.ofExcept (NativeHost.assemble plan signatures)
+      return (11, callCodec.encode call)
+  | _ => fnDispatch operation payload
 
 def maxFrame : Nat := 1048576
 
@@ -161,6 +320,45 @@ partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : I
   output.write (lengthBytes response.size ++ response)
   output.flush
   serve config input output
+
+partial def serveSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (input output : IO.FS.Stream) : IO Unit := do
+  let first ← input.read 1
+  if first.isEmpty then return
+  let lengthWire ← readExactly input 4 first
+  let length := frameLength lengthWire
+  if length == 0 || length > maxFrame then throw (IO.userError "invalid native host frame length")
+  let frame ← readExactly input length
+  let (operation, payload) ← match frame.toList with
+    | [] => throw (IO.userError "empty native host frame")
+    | operation :: payload => dispatchSession config state fnDispatch operation payload
+  let response := (operation :: payload).toByteArray
+  if response.size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
+  output.write (lengthBytes response.size ++ response)
+  output.flush
+  serveSession config state fnDispatch input output
+
+/-- Execute from one private copy throughout this stdio process. The copy is
+the pinned launch artifact; the originally configured pathname may later be
+replaced or have a symlink target swapped without changing the session's
+historical verifier. The OS must protect this private directory from writes
+by other actors for the lifetime of the process. -/
+def withPinnedSignature {α : Type} (config : NativeHost.Config)
+    (body : NativeHost.Config → IO α) : IO α :=
+  IO.FS.withTempDir fun directory => do
+    let pinned := directory / "credential-verifier"
+    let bytes ← IO.FS.readBinFile config.signature.binary
+    IO.FS.writeBinFile pinned bytes
+    let permission ← IO.Process.output
+      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
+    unless permission.exitCode == 0 do
+      throw (IO.userError "cannot make pinned credential verifier executable")
+    -- A launch failure is detected before the first semantic replay. The
+    -- verifier's usage exit here is expected; it has no arguments yet.
+    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
+    body { config with signature := ⟨pinned⟩ }
 
 def readBytes (path : String) : IO (List UInt8) :=
   return (← IO.FS.readBinFile path).toList
@@ -215,10 +413,22 @@ structure FnPortablePin where
   mlPublicKeyHex : String
   deriving FromJson
 
+structure FnReplyCreationSource where
+  fromMailbox : String
+  newsgroup : String
+  messageIdDomain : String
+  date : String
+  deriving FromJson
+
+def FnReplyCreationSource.context (source : FnReplyCreationSource) :
+    FnReplyPublication.CreationContext :=
+  ⟨source.fromMailbox, source.newsgroup, source.messageIdDomain, source.date⟩
+
 structure FnReplySignerPin where
   principal : String
   edPublicKey : String
   mlPublicKeyHex : String
+  creation : FnReplyCreationSource
   deriving FromJson
 
 structure FnPortableClaim where
@@ -495,6 +705,27 @@ def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
     throw (IO.userError "fn source metadata differs from claimed exact report")
   pure (carrier, verified, extracted)
 
+/-- An acknowledgement is for the exact carrier and signed source retained
+inside the accepted Mini operation, even after its mutation grant is revoked.
+The current fn projection must match that source byte for byte. -/
+def verifyAckSource (pin : FnPortablePin) (projection : FnPollProjection)
+    (retainedCarrier retainedSource : List UInt8) : IO FnPortableVerified := do
+  unless projection.received == retainedCarrier do
+    throw (IO.userError "fn ack carrier differs from accepted Mini inbox")
+  let extracted ← IO.ofExcept (FnPortableSource.extract retainedSource)
+  let claim : FnPortableClaim :=
+    { sourceIdentity := Minidregg.Host.Json.encodeHex projection.sourceIdentity,
+      messageId := extracted.messageId,
+      groups := extracted.groups }
+  IO.FS.withTempDir fun directory => do
+    let path := directory / "retained-carrier.eml"
+    IO.FS.writeBinFile path retainedCarrier.toByteArray
+    let (_, verified, _) ← verifyFnPortable pin claim path.toString
+    unless verified.source == retainedSource && projection.source == retainedSource &&
+        verified.sourceIdentity == projection.sourceIdentity do
+      throw (IO.userError "fn ack source differs from accepted Mini inbox")
+    return verified
+
 /-- Join ACL2's exact fn-e/fncu projection to the independent native hybrid
 verifier. The caller must separately establish that these files were returned
 by an authenticated consumer poll; file possession alone is not Store proof. -/
@@ -592,27 +823,32 @@ def consumerDecisionJson (decision : FnConsumerOperation.Decision) : Lean.Json :
   | .conflictRecorded => .mkObj [("type", "historical-conflict-evidence")]
   | .refused detail => .mkObj [("type", "refused"), ("detail", toJson detail)]
 
+def requireGateway (config : NativeHost.Config) : IO NativeHost.FnGatewayPin := do
+  let some pin := config.fnGateway
+    | throw (IO.userError "fn gateway is not pinned in operator config")
+  return pin
+
 /-- Export only from a source-owned, re-admitted accepted event. The typed
 inbox keeps exact carrier octets; this asserts Mini retention, not an fn Store
 receipt or current fn authorship policy. -/
 def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
     IO (Except String (FnConsumerOperation.PortableInbox × String × Nat)) := do
+  let some gateway := config.fnGateway
+    | return .error "fn gateway is not pinned in operator config"
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  unless opened.durable.image.accepted.length ≤ 16 do
-    return .error "bounded E1 consumer history exceeds 16 accepted events"
   let some record := opened.durable.image.accepted.find?
       (fun entry => entry.transactionId.value == transactionId)
     | return .error "exact Mini consumer transaction is absent"
-  match FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+  match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
   | some (binding, some inbox, _) =>
       return .ok (inbox, "operation",
         (FnConsumerOperation.operationInboxAtom config.deployment.domain
           config.profile.semantics binding.application binding.operation).digest.value)
   | _ =>
-      match FnConsumerOperation.originalConflictWithInbox config.deployment.domain
+      match FnConsumerOperation.originalConflictWithInbox gateway config.deployment.domain
           config.profile.semantics record with
       | some (conflict, some inbox, store) =>
           let report : FnConsumerOperation.Report :=
@@ -630,22 +866,22 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
 after the ordinary native open has re-admitted its durable history. -/
 def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
     IO (Except String (FnConsumerOperation.StorePollInbox × String × Nat)) := do
+  let some gateway := config.fnGateway
+    | return .error "fn gateway is not pinned in operator config"
   let opened ← match ← NativeHost.openExisting config with
     | .ok opened => pure opened
     | .error detail => return .error detail
-  unless opened.durable.image.accepted.length ≤ 16 do
-    return .error "bounded E1 consumer history exceeds 16 accepted events"
   let some record := opened.durable.image.accepted.find?
       (fun entry => entry.transactionId.value == transactionId)
     | return .error "exact Mini consumer transaction is absent"
-  match FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+  match FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
       config.profile.semantics record with
   | some (binding, some _, some store) =>
       return .ok (store, "operation",
         (FnConsumerOperation.storeOperationAtom config.deployment.domain
           config.profile.semantics binding.application binding.operation).digest.value)
   | _ =>
-      match FnConsumerOperation.originalConflictWithInbox config.deployment.domain
+      match FnConsumerOperation.originalConflictWithInbox gateway config.deployment.domain
           config.profile.semantics record with
       | some (conflict, some portable, some store) =>
           let report : FnConsumerOperation.Report :=
@@ -671,10 +907,12 @@ def writeJson (path : String) (value : Lean.Json) : IO Unit :=
 /-- This is the only Mini decision body for both file-only and observed
 polls. Only the caller that actually invokes fn's control route can set the
 local observation bit retained in the signed inbox atom. -/
-def runPollConsumerDecision (config : NativeHost.Config)
+def runPollConsumerDecisionLoaded (config : NativeHost.Config)
+    (opened : NativeHost.Opened config)
     (controlBinding : Option (String × String))
     (originPath pinPath scopePath claimPath policyPath cursorPath reportPath
      carrierPath intentPath resultPath : String) : IO UInt32 := do
+  let gateway ← requireGateway config
   let origin := (← loadSettings originPath).config
   let pinJson ← readJson pinPath
   let scopeJson ← readJson scopePath
@@ -702,7 +940,6 @@ def runPollConsumerDecision (config : NativeHost.Config)
   unless originPackage.originalReceipt == receipt do
     throw (IO.userError "poll source Mini receipt differs from re-admitted package")
   let policy := policySource.policy
-  let opened ← IO.ofExcept (← NativeHost.openExisting config)
   let probeTarget : DeclaredResourceController.Target :=
     ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
       .content ⟨[]⟩, none⟩
@@ -717,7 +954,7 @@ def runPollConsumerDecision (config : NativeHost.Config)
     targetRoot verified carrier extracted.package originPackage
     cursor event projection controlBinding
   let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
-    policy report receipt opened)
+    gateway policy report receipt opened)
   writeJson resultPath <| Lean.Json.mkObj
     [("type", toJson "fn-poll-consumer-decision-v1"),
      ("portableAuthorship", toJson "verified"),
@@ -740,13 +977,23 @@ def runPollConsumerDecision (config : NativeHost.Config)
       | .refused _ => pure 1
       | _ => pure 0
 
+def runPollConsumerDecision (config : NativeHost.Config)
+    (controlBinding : Option (String × String))
+    (originPath pinPath scopePath claimPath policyPath cursorPath reportPath
+     carrierPath intentPath resultPath : String) : IO UInt32 := do
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  runPollConsumerDecisionLoaded config opened controlBinding originPath pinPath
+    scopePath claimPath policyPath cursorPath reportPath carrierPath intentPath resultPath
+
 /-- A's observed local Q poll is admitted only after independently reopening
 the original R Mini package. The fn projection supplies Store history; the
 native hybrid verifier supplies exact portable authorship. -/
-def runReplyConsumerPollDecision (config : NativeHost.Config)
+def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
+    (opened : NativeHost.Opened config)
     (originPath rPinPath rClaimPath rCarrierPath qPinPath scopePath qClaimPath
      policyPath controlPath cursorPath reportPath carrierPath intentPath
      resultPath : String) : IO UInt32 := do
+  let gateway ← requireGateway config
   let origin := (← loadSettings originPath).config
   let rPinJson ← readJson rPinPath
   let rClaimJson ← readJson rClaimPath
@@ -790,7 +1037,6 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
       qClaim.messageId == extracted.messageId && qClaim.groups == "fn.test" do
     throw (IO.userError "A historical verdict differs from exact native Q carrier")
   let policy := policySource.policy
-  let opened ← IO.ofExcept (← NativeHost.openExisting config)
   let probeTarget : DeclaredResourceController.Target :=
     ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
       .content ⟨[]⟩, none⟩
@@ -815,9 +1061,9 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
         verified.edPublicKey, verified.mlPublicKey⟩, storePoll,
       policy.subject, policy.target, policy.capability,
       opened.authority.snapshot.cell.root, targetRoot⟩
-  let decision := FnReplyConsumption.evaluate config.deployment.domain
-    config.profile.semantics ⟨policy.application, policy.subject,
-      policy.target, policy.capability⟩ report opened.durable.image.accepted
+  let decision ← IO.ofExcept (FnReplyConsumption.evaluateVerified config opened
+    gateway ⟨policy.application, policy.subject,
+      policy.target, policy.capability⟩ report)
   let verdict := match decision with
     | .fresh _ _ => "proposed-fresh"
     | .repeated _ => "repeated"
@@ -841,6 +1087,15 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
       match decision with
       | .refused _ => pure 1
       | _ => pure 0
+
+def runReplyConsumerPollDecision (config : NativeHost.Config)
+    (originPath rPinPath rClaimPath rCarrierPath qPinPath scopePath qClaimPath
+     policyPath controlPath cursorPath reportPath carrierPath intentPath
+     resultPath : String) : IO UInt32 := do
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  runReplyConsumerPollDecisionLoaded config opened originPath rPinPath rClaimPath
+    rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath cursorPath
+    reportPath carrierPath intentPath resultPath
 
 def usage : String :=
   "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
@@ -884,8 +1139,10 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "describe", [] => IO.println (← description config).pretty; pure 0
       | "stdio", [] =>
-          discard <| IO.ofExcept (← NativeHost.openExisting config)
-          serve config (← IO.getStdin) (← IO.getStdout)
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            serveSession pinnedConfig state (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
@@ -1032,8 +1289,9 @@ def run (arguments : List String) : IO UInt32 := do
             opened.authority.snapshot.cell.root
             targetRoot verified carrier
             extracted.package originPackage
+          let gateway ← requireGateway config
           let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
-            policy report receipt opened)
+            gateway policy report receipt opened)
           let afterDecision : Nat ← IO.monoNanosNow
           let intent := decision.intent report
           let intentBytes := intent.map NativeObservationCodec.intentCodec.encode
@@ -1100,13 +1358,14 @@ def run (arguments : List String) : IO UInt32 := do
             cursorPath reportPath carrierPath intentPath resultPath
       | "reply-consumer-export-result",
           [transaction, resultPath, inboxPath, cursorPath, reportPath] =>
+          let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           let some record := opened.durable.image.accepted.find?
               (fun entry => entry.transactionId.value == transactionId)
             | throw (IO.userError "A reply result transaction is absent")
           let some (result, inbox) :=
-              FnReplyConsumption.originalResult config.deployment.domain
+              FnReplyConsumption.originalResult gateway config.deployment.domain
                 config.profile.semantics record
             | throw (IO.userError "A reply result is not a canonical accepted operation")
           unless inbox.storePoll.pollCallObserved do
@@ -1119,6 +1378,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "reply-consumer-ack-poll",
           [pinPath, scopePath, controlPath, transaction,
            cursorPath, eventPath, resultPath] =>
+          let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           unless controlPath.startsWith "/" && cursorPath.startsWith "/" &&
               eventPath.startsWith "/" do
@@ -1136,7 +1396,7 @@ def run (arguments : List String) : IO UInt32 := do
           let some record := opened.durable.image.accepted.find?
               (fun entry => entry.transactionId.value == transactionId)
             | throw (IO.userError "A reply result transaction is absent")
-          let some (_, inbox) := FnReplyConsumption.originalResult
+          let some (_, inbox) := FnReplyConsumption.originalResult gateway
               config.deployment.domain config.profile.semantics record
             | throw (IO.userError "A reply result is not a reopened accepted operation")
           let stored := inbox.storePoll
@@ -1153,6 +1413,12 @@ def run (arguments : List String) : IO UInt32 := do
               projected.verdictPrincipal == stored.verdictPrincipal &&
               projected.verdictEvent == stored.verdictEvent do
             throw (IO.userError "A reply ack pair differs from durable Mini inbox")
+          let verified ← verifyAckSource pin projected inbox.portableInbox.carrier inbox.replySource
+          unless projected.verdictPrincipal == inbox.portableInbox.principal &&
+              verified.principal == inbox.portableInbox.principal &&
+              verified.edPublicKey == inbox.portableInbox.edPublicKey &&
+              verified.mlPublicKey == inbox.portableInbox.mlPublicKey do
+            throw (IO.userError "A reply ack principal differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
               args := #["--fn", "consumer", "ack", controlPath, cursorPath],
@@ -1248,6 +1514,19 @@ def run (arguments : List String) : IO UInt32 := do
               projected.verdictPrincipal == stored.verdictPrincipal &&
               projected.verdictEvent == stored.verdictEvent do
             throw (IO.userError "fn ack cursor/report differ from durable Mini inbox")
+          let (portable, portableKind, _) ← IO.ofExcept
+            (← exportConsumerInbox config transactionId)
+          unless portableKind == "operation" do
+            throw (IO.userError "fn ack has no accepted portable operation inbox")
+          let extracted ← IO.ofExcept (FnPortableSource.extract projected.source)
+          let verified ← verifyAckSource pin projected portable.carrier projected.source
+          unless extracted.messageId.toUTF8.toList == stored.messageId &&
+              projected.verdictPrincipal == portable.principal &&
+              portable.sourceIdentity == stored.sourceIdentity &&
+              verified.principal == portable.principal &&
+              verified.edPublicKey == portable.edPublicKey &&
+              verified.mlPublicKey == portable.mlPublicKey do
+            throw (IO.userError "fn ack source metadata differs from accepted Mini inbox")
           let child ← IO.Process.spawn
             { cmd := pin.fnBinary,
               args := #["--fn", "consumer", "ack", controlPath, cursorPath],
@@ -1278,15 +1557,14 @@ def run (arguments : List String) : IO UInt32 := do
           else if status == "uncertain" then pure 3
           else pure 4
       | "consumer-export-reply", [transaction, replyPath] =>
+          let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          unless opened.durable.image.accepted.length ≤ 16 do
-            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
           let some record := opened.durable.image.accepted.find?
               (fun entry => entry.transactionId.value == transactionId)
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, _) :=
-              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+              FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
                 config.profile.semantics record
             | throw (IO.userError "transaction has no canonical portable Q")
           writeBytes replyPath (FnConsumerOperation.replyCodec.encode binding.reply)
@@ -1294,6 +1572,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "consumer-stage-reply-plan",
           [signerPath, transaction, outboxRoot, candidatePath,
            readbackPath, sourcePath, resultPath] =>
+          let gateway ← requireGateway config
           unless [outboxRoot, candidatePath, readbackPath, sourcePath,
               resultPath].all (·.startsWith "/") &&
               ([(candidatePath, readbackPath), (candidatePath, sourcePath),
@@ -1305,19 +1584,22 @@ def run (arguments : List String) : IO UInt32 := do
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           let signerJson ← readJson signerPath
           IO.ofExcept (requireExactFields "fn reply signer"
-            ["principal", "edPublicKey", "mlPublicKeyHex"] signerJson)
+            ["principal", "edPublicKey", "mlPublicKeyHex", "creation"] signerJson)
+          let creationJson ← IO.ofExcept (signerJson.getObjVal? "creation")
+          IO.ofExcept (requireExactFields "fn reply creation"
+            ["fromMailbox", "newsgroup", "messageIdDomain", "date"] creationJson)
           let signer : FnReplySignerPin ← IO.ofExcept (fromJson? signerJson)
+          unless signer.creation.context.valid do
+            throw (IO.userError "fn reply creation context is invalid")
           let principal ← IO.ofExcept (decodeCanonicalHex "fn reply principal" signer.principal)
           let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" signer.edPublicKey)
           let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" signer.mlPublicKeyHex)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          unless opened.durable.image.accepted.length ≤ 16 do
-            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
           let some record := opened.durable.image.accepted.find?
               (fun entry => entry.transactionId.value == transactionId)
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
-              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+              FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
                 config.profile.semantics record
             | throw (IO.userError "transaction has no canonical observed fn poll and Q")
           unless store.pollCallObserved do
@@ -1331,7 +1613,8 @@ def run (arguments : List String) : IO UInt32 := do
               parentSourceIdentity := store.sourceIdentity,
               parentMessageId := store.messageId,
               principal := principal, edPublicKey := edPublicKey,
-              mlPublicKey := mlPublicKey }
+              mlPublicKey := mlPublicKey,
+              creation := signer.creation.context }
           let prepared ← IO.ofExcept selection.prepare
           writeBytes candidatePath (FnReplyPublication.preparedCodec.encode prepared)
           let publish ← IO.Process.spawn
@@ -1384,6 +1667,7 @@ def run (arguments : List String) : IO UInt32 := do
            mlSecretPath, transaction, preparedRoot, signedRoot,
            planPath, sourcePath, carrierPath, signedCandidatePath,
            signedReadbackPath, edSignaturePath, mlSignaturePath, resultPath] =>
+          let gateway ← requireGateway config
           unless [principalPath, edPublicPath, edSecretPath, mlSecretPath,
               preparedRoot, signedRoot, planPath, sourcePath, carrierPath,
               signedCandidatePath, signedReadbackPath, edSignaturePath,
@@ -1408,28 +1692,15 @@ def run (arguments : List String) : IO UInt32 := do
               edPublicKey == (← readBoundedBytes edPublicPath 32) do
             throw (IO.userError "fn reply signer public files differ from pin")
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          unless opened.durable.image.accepted.length ≤ 16 do
-            throw (IO.userError "bounded E1 consumer history exceeds 16 accepted events")
           let some record := opened.durable.image.accepted.find?
               (fun entry => entry.transactionId.value == transactionId)
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
-              FnConsumerOperation.originalBindingWithInbox config.deployment.domain
+              FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
                 config.profile.semantics record
             | throw (IO.userError "transaction has no canonical observed fn poll and Q")
           unless store.pollCallObserved do
             throw (IO.userError "reply signing requires durable observed fn poll")
-          let selection : FnReplyPublication.Selection :=
-            { domain := config.deployment.domain,
-              semantics := config.profile.semantics,
-              miniTransaction := record.transactionId,
-              miniEvent := record.event.eventId,
-              reply := binding.reply,
-              parentSourceIdentity := store.sourceIdentity,
-              parentMessageId := store.messageId,
-              principal := principal, edPublicKey := edPublicKey,
-              mlPublicKey := mlPublicKey }
-          let expected ← IO.ofExcept selection.prepare
           let planRead ← IO.Process.spawn
             { cmd := settings.storageBinary,
               args := #["read-to", preparedRoot, planPath],
@@ -1456,6 +1727,18 @@ def run (arguments : List String) : IO UInt32 := do
                     [("type", toJson "fn-reply-sign-stage-v1"),
                      ("stage", toJson "uncertain")]
                   return 3
+            let selection : FnReplyPublication.Selection :=
+              { domain := config.deployment.domain,
+                semantics := config.profile.semantics,
+                miniTransaction := record.transactionId,
+                miniEvent := record.event.eventId,
+                reply := binding.reply,
+                parentSourceIdentity := store.sourceIdentity,
+                parentMessageId := store.messageId,
+                principal := principal, edPublicKey := edPublicKey,
+                mlPublicKey := mlPublicKey,
+                creation := prepared.selection.creation }
+            let expected ← IO.ofExcept selection.prepare
             unless prepared.valid && prepared == expected do
               writeJson resultPath <| Lean.Json.mkObj
                 [("type", toJson "fn-reply-sign-stage-v1"),
@@ -1585,13 +1868,14 @@ def run (arguments : List String) : IO UInt32 := do
                  (Minidregg.Host.Json.encodeHex retained.sourceIdentity))]
             pure 0
       | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
+          let gateway ← requireGateway config
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))
           let source : ConsumerReportSource ← IO.ofExcept (fromJson? (← readJson reportPath))
           let report := source.report
             (← readBoundedBytes packagePath FnEvidenceCodec.maxPackageBytes)
           let decision ← IO.ofExcept (← FnConsumerOperation.evaluate origin config
-            policySource.policy report)
+            gateway policySource.policy report)
           writeJson resultPath (consumerDecisionJson decision)
           match decision.intent report with
           | some intent =>
