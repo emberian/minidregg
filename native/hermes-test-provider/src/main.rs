@@ -13,12 +13,29 @@ use std::time::Duration;
 const MODEL: &str = "mini-hermes-protocol-fixture";
 const READ_ID: &str = "mini-fixture-read-1";
 const PUBLISH_ID: &str = "mini-fixture-publish-1";
+const CONTENT_ORIGINAL: &str = "Workroom research note: verify the source receipt before reuse.";
+const CONTENT_REVISED: &str = "Revised workroom note: Mini accepted the receipt; fn provenance remains a separate check.";
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_HEADER_LINE: usize = 8 * 1024;
 static RESPONSE_ID: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Clone, Copy)]
+enum Mode {
+    Scalar,
+    ContentWorkroom,
+}
+
 fn decimal(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn hex_bytes(value: &str) -> String {
+    let mut hex = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }
 
 fn tool_name(request: &Value, suffix: &str) -> Option<String> {
@@ -71,6 +88,28 @@ fn find_read_publication(value: &Value, depth: usize) -> Option<(String, bool)> 
         Value::Array(items) => items.iter().find_map(|item| find_read_publication(item, depth + 1)),
         Value::Object(fields) => fields.values().find_map(|item| find_read_publication(item, depth + 1)),
         Value::String(text) => nested_json(text).and_then(|nested| find_read_publication(&nested, depth + 1)),
+        _ => None,
+    }
+}
+
+fn find_content_page(value: &Value, depth: usize) -> Option<Value> {
+    if depth > 12 {
+        return None;
+    }
+    if value.get("kind").and_then(Value::as_str) == Some("object")
+        && value.get("target").and_then(Value::as_str) == Some("8001")
+    {
+        let page = value.pointer("/view/page")?;
+        if page.get("document").and_then(Value::as_str) == Some("8001")
+            && page.get("root").and_then(Value::as_str).is_some_and(decimal)
+        {
+            return Some(page.clone());
+        }
+    }
+    match value {
+        Value::Array(items) => items.iter().find_map(|item| find_content_page(item, depth + 1)),
+        Value::Object(fields) => fields.values().find_map(|item| find_content_page(item, depth + 1)),
+        Value::String(text) => nested_json(text).and_then(|nested| find_content_page(&nested, depth + 1)),
         _ => None,
     }
 }
@@ -155,6 +194,79 @@ fn reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
         "tool_calls", "read publication".into()))
 }
 
+fn content_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
+    let model = request.get("model").and_then(Value::as_str).ok_or("model absent")?;
+    if model != MODEL {
+        return Err(format!("unexpected model {model}"));
+    }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("current user prompt absent")?;
+    let current_messages = &messages[current_prompt..];
+    if let Some(published) = tool_result(current_messages, PUBLISH_ID) {
+        published.get("content").ok_or("publish tool content absent")?;
+        if tool_failed(published, 0) || !has_publish_receipt(published, 0) {
+            return Err("Mini content publish did not return a signed tool resource receipt".into());
+        }
+        return Ok((json!({"role":"assistant","content":"Fixture observed the Mini ContentResource publication receipt."}),
+            "stop", "content receipt".into()));
+    }
+    if let Some(read) = tool_result(current_messages, READ_ID) {
+        if tool_failed(read, 0) {
+            return Err("Mini content read returned an error".into());
+        }
+        let page = find_content_page(read, 0).ok_or("signed Mini read did not expose content object 8001 page")?;
+        let root = page.get("root").and_then(Value::as_str).ok_or("content root absent")?;
+        let entries = page.get("entries").and_then(Value::as_array).ok_or("content entries absent")?;
+        let (action, stage) = if entries.is_empty() {
+            (json!({"type":"createAtom","atom":"7401","kind":{"type":"text"},
+                "payload":hex_bytes(CONTENT_ORIGINAL)}), "content create")
+        } else if entries.len() == 1 {
+            let atom = &entries[0];
+            if atom.get("type").and_then(Value::as_str) != Some("atom")
+                || atom.get("id").and_then(Value::as_str) != Some("7401")
+                || atom.get("document").and_then(Value::as_str) != Some("8001")
+                || atom.pointer("/kind/type").and_then(Value::as_str) != Some("text")
+                || atom.pointer("/createdBy/subject").and_then(Value::as_str) != Some("8")
+                || atom.pointer("/createdBy/capability").and_then(Value::as_str) != Some("95")
+            {
+                return Err("content atom is not the fixture's signed text atom".into());
+            }
+            let payload = atom.get("payload").and_then(Value::as_str).ok_or("content payload absent")?;
+            if payload == hex_bytes(CONTENT_REVISED) {
+                return Ok((json!({"role":"assistant","content":"Fixture verified the revised text atom through Mini's signed ContentResource read."}),
+                    "stop", "content verified".into()));
+            }
+            if payload != hex_bytes(CONTENT_ORIGINAL) {
+                return Err("content atom payload is neither expected fixture version".into());
+            }
+            let before = json!({
+                "document":atom.get("document").ok_or("atom document absent")?,
+                "kind":atom.get("kind").ok_or("atom kind absent")?,
+                "payload":atom.get("payload").ok_or("atom payload absent")?,
+                "createdBy":atom.get("createdBy").ok_or("atom creator absent")?,
+                "createdAt":atom.get("createdAt").ok_or("atom creation event absent")?,
+                "tombstonedAt":atom.get("tombstonedAt").ok_or("atom tombstone field absent")?
+            });
+            (json!({"type":"editAtom","atom":"7401","before":before,
+                "kind":{"type":"text"},"payload":hex_bytes(CONTENT_REVISED),"tombstone":false}),
+                "content edit")
+        } else {
+            return Err("content page has unexpected extra atoms".into());
+        };
+        let publish = tool_name(request, "__mini_publish").ok_or("mini_publish is not advertised to Hermes")?;
+        let args = json!({"publications":[{"kind":"object","target":"8001",
+            "expectedTargetRoot":root,"payload":{"type":"content","actions":[action]}}]});
+        return Ok((json!({"role":"assistant","content":null,
+            "tool_calls":[call(publish, PUBLISH_ID, args)]}), "tool_calls", format!("{stage} root={root}")));
+    }
+    let read = tool_name(request, "__mini_read_resource")
+        .ok_or("mini_read_resource is not advertised to Hermes")?;
+    Ok((json!({"role":"assistant","content":null,
+        "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
+        "tool_calls", "content read workroom".into()))
+}
+
 fn write_http(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) -> io::Result<()> {
     write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())?;
     stream.write_all(body)?;
@@ -207,7 +319,7 @@ fn read_line_bounded(reader: &mut impl BufRead) -> Result<String, String> {
     }
 }
 
-fn serve_one(mut stream: TcpStream, log: &Path) -> Result<(), String> {
+fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode) -> Result<(), String> {
     stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
@@ -256,7 +368,10 @@ fn serve_one(mut stream: TcpStream, log: &Path) -> Result<(), String> {
     let mut body = vec![0; size];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    let (message, finish, stage) = match reply_for(&request) {
+    let (message, finish, stage) = match match mode {
+        Mode::Scalar => reply_for(&request),
+        Mode::ContentWorkroom => content_reply_for(&request),
+    } {
         Ok(reply) => reply,
         Err(reason) => {
             let error = json!({"error":{"message":reason,"type":"invalid_request_error"}}).to_string();
@@ -290,16 +405,19 @@ fn main() -> Result<(), String> {
         return Err("provider fixture must bind loopback".into());
     }
     let log = args.next().ok_or("log path absent")?;
-    if args.next().is_some() {
-        return Err("unexpected arguments".into());
-    }
+    let mode = match args.next().as_deref() {
+        None => Mode::Scalar,
+        Some("--content-workroom") => Mode::ContentWorkroom,
+        Some(_) => return Err("unknown fixture mode".into()),
+    };
+    if args.next().is_some() { return Err("unexpected arguments".into()); }
     let listener = TcpListener::bind(bind).map_err(|e| e.to_string())?;
     println!("http://{}/v1", listener.local_addr().map_err(|e| e.to_string())?);
     io::stdout().flush().map_err(|e| e.to_string())?;
     for connection in listener.incoming() {
         match connection {
             Ok(stream) => {
-                if let Err(error) = serve_one(stream, Path::new(&log)) {
+                if let Err(error) = serve_one(stream, Path::new(&log), mode) {
                     let _ = log_event(Path::new(&log), &format!("transport-error {error}"));
                 }
             }
@@ -393,5 +511,45 @@ mod tests {
         assert!(read_line_bounded(&mut eof).unwrap_err().contains("line terminator"));
         let mut huge = io::Cursor::new(vec![b'a'; MAX_HEADER_LINE + 1]);
         assert!(read_line_bounded(&mut huge).unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn content_mode_uses_signed_page_for_create_edit_and_final_read() {
+        let empty = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"123","entries":[]}}});
+        let (create, _, _) = content_reply_for(&request(json!([
+            {"role":"user","content":"create note"},
+            {"role":"tool","tool_call_id":READ_ID,"content":empty.to_string()}
+        ]))).unwrap();
+        let args: Value = serde_json::from_str(create["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "123");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["type"], "createAtom");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(CONTENT_ORIGINAL));
+        let atom = json!({"type":"atom","id":"7401","document":"8001","kind":{"type":"text"},
+            "payload":hex_bytes(CONTENT_ORIGINAL),
+            "createdBy":{"subject":"8","capabilityKind":"object","capability":"95"},
+            "createdAt":"456","tombstonedAt":null,"canonical":"ignored-by-before"});
+        let created = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"789","entries":[atom]}}});
+        let (edit, _, _) = content_reply_for(&request(json!([
+            {"role":"user","content":"revise note"},
+            {"role":"tool","tool_call_id":READ_ID,"content":created.to_string()}
+        ]))).unwrap();
+        let args: Value = serde_json::from_str(edit["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        let action = &args["publications"][0]["payload"]["actions"][0];
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "789");
+        assert_eq!(action["type"], "editAtom");
+        assert_eq!(action["before"]["createdAt"], "456");
+        assert!(action["before"].get("id").is_none());
+        assert!(action["before"].get("canonical").is_none());
+        assert_eq!(action["payload"], hex_bytes(CONTENT_REVISED));
+        let mut revised = created;
+        revised["view"]["page"]["entries"][0]["payload"] = json!(hex_bytes(CONTENT_REVISED));
+        let (done, finish, _) = content_reply_for(&request(json!([
+            {"role":"user","content":"read revised note"},
+            {"role":"tool","tool_call_id":READ_ID,"content":revised.to_string()}
+        ]))).unwrap();
+        assert_eq!(finish, "stop");
+        assert!(done["content"].as_str().unwrap().contains("verified"));
     }
 }
