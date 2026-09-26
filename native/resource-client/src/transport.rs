@@ -14,6 +14,20 @@ pub(crate) const HOST_MAX_FRAME: usize = 6_194_884;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
+fn allowed_operation(request: &[u8]) -> bool {
+    match request {
+        [0..=11, ..] => true,
+        [12] => true,
+        [13, digits @ ..] => {
+            !digits.is_empty()
+                && digits.len() <= 80
+                && digits.iter().all(u8::is_ascii_digit)
+                && (digits.len() == 1 || digits[0] != b'0')
+        }
+        _ => false,
+    }
+}
+
 fn read_config(path: &Path) -> Result<Vec<u8>, String> {
     let file = fs::File::open(path)
         .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
@@ -347,7 +361,7 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
             let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
             continue;
         }
-        if request[0] > 11 {
+        if !allowed_operation(request) {
             let _ = write_frame(&mut stream, b"\xfeoperation unavailable on public socket");
             continue;
         }
@@ -485,5 +499,17 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn public_fn_operations_have_no_path_payload() {
+        assert!(allowed_operation(&[12]));
+        assert!(!allowed_operation(&[12, b'/']));
+        assert!(allowed_operation(&[13, b'0']));
+        assert!(allowed_operation(&[13, b'1', b'2', b'3']));
+        assert!(!allowed_operation(&[13]));
+        assert!(!allowed_operation(&[13, b'0', b'1']));
+        assert!(!allowed_operation(&[13, b'1', b'/']));
+        assert!(!allowed_operation(&[14]));
     }
 }

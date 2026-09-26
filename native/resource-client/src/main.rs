@@ -28,6 +28,8 @@ usage:
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
+  mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
+  mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -223,10 +225,10 @@ fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<
             .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
         let mut bytes = Vec::new();
         Read::by_ref(&mut file)
-            .take(1_048_576 + 1)
+            .take((transport::HOST_MAX_FRAME + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
-        if bytes.len() > 1_048_576 {
+        if bytes.len() > transport::HOST_MAX_FRAME {
             return Err(format!(
                 "host input {} exceeds session frame bound",
                 path.display()
@@ -794,6 +796,113 @@ fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsStri
         .map_err(|e| format!("cannot print host output: {e}"))
 }
 
+#[cfg(unix)]
+fn private_consumer_attempt(
+    host: &Path,
+    config: &Path,
+    directory: &Path,
+    operation: &str,
+) -> Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(directory)
+        .map_err(|e| {
+            format!(
+                "cannot create private consumer attempt {}: {e}",
+                directory.display()
+            )
+        })?;
+    let retained_config = directory.join("config.json");
+    copy_new(config, &retained_config)?;
+    write_manifest(directory, host, &retained_config, operation)?;
+    Ok(retained_config)
+}
+
+#[cfg(unix)]
+fn consumer_poll(host: &Path, config: &Path, directory: &Path) -> Result<()> {
+    let socket = SOCKET.get().ok_or("consumer-poll requires --socket")?;
+    let retained_config = private_consumer_attempt(host, config, directory, "consumer-poll")?;
+    let frame = transport::invoke(socket, &retained_config, 12, &[])?;
+    write_new(&directory.join("reply.frame"), &frame)?;
+    if frame[0] == 255 {
+        return Err(format!(
+            "host refused consumer-poll; complete encoded reply retained in {}",
+            directory.join("reply.frame").display()
+        ));
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|e| format!("invalid fn consumer host JSON; complete reply retained: {e}"))?;
+    write_new(&directory.join("decision.json"), &frame[1..])?;
+    if value.get("type").and_then(Value::as_str) != Some("fn-consumer-poll-session-v1") {
+        return Err("unexpected fn consumer host reply type; complete reply retained".to_owned());
+    }
+    let status = value
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or("fn consumer reply lacks status; complete reply retained")?;
+    let intent_hex = value
+        .get("intentHex")
+        .and_then(Value::as_str)
+        .ok_or("fn consumer reply lacks intentHex; complete reply retained")?;
+    let intent = decode_hex(intent_hex)?;
+    if hex(&intent) != intent_hex {
+        return Err(
+            "fn consumer intentHex is not canonical lowercase; complete reply retained".to_owned(),
+        );
+    }
+    match status {
+        "accepted-decision" if !intent.is_empty() => {
+            write_new(&directory.join("intent.bin"), &intent)?;
+            print_json(&value)
+        }
+        "refused" if intent.is_empty() => {
+            print_json(&value)?;
+            Err("fn consumer refused; complete decision retained".to_owned())
+        }
+        _ => Err("inconsistent fn consumer status and intent; complete reply retained".to_owned()),
+    }
+}
+
+#[cfg(unix)]
+fn consumer_ack(host: &Path, config: &Path, transaction: &str, directory: &Path) -> Result<()> {
+    let socket = SOCKET.get().ok_or("consumer-ack requires --socket")?;
+    let bytes = transaction.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 80
+        || bytes.iter().any(|b| !b.is_ascii_digit())
+        || (bytes.len() > 1 && bytes[0] == b'0')
+    {
+        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".to_owned());
+    }
+    let retained_config = private_consumer_attempt(host, config, directory, "consumer-ack")?;
+    write_new(&directory.join("transaction-id.txt"), bytes)?;
+    let frame = transport::invoke(socket, &retained_config, 13, bytes)?;
+    write_new(&directory.join("reply.frame"), &frame)?;
+    if frame[0] == 255 {
+        return Err(format!(
+            "host refused consumer-ack; complete encoded reply retained in {}",
+            directory.join("reply.frame").display()
+        ));
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|e| format!("invalid fn ack host JSON; complete reply retained: {e}"))?;
+    write_new(&directory.join("ack.json"), &frame[1..])?;
+    if value.get("type").and_then(Value::as_str) != Some("fn-consumer-ack-session-v1")
+        || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
+    {
+        return Err("fn ack reply identity mismatch; complete reply retained".to_owned());
+    }
+    print_json(&value)?;
+    match value.get("fnAck").and_then(Value::as_str) {
+        Some("durable-accepted") => Ok(()),
+        Some("refused" | "uncertain" | "transport-fault") => {
+            Err("fn ack incomplete; complete reply retained for reconciliation".to_owned())
+        }
+        _ => Err("fn ack reply lacks valid status; complete reply retained".to_owned()),
+    }
+}
+
 fn run(mut args: Args) -> Result<()> {
     if let Some(socket) = args.optional("socket") {
         let _ = SOCKET.set(path(socket));
@@ -820,6 +929,38 @@ fn run(mut args: Args) -> Result<()> {
             let arguments = args.repeated("arg");
             args.finish()?;
             host_command(&host, &config, &command, &arguments)
+        }
+        "consumer-poll" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                consumer_poll(&host, &config, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("persistent host sessions require Unix sockets".to_owned())
+            }
+        }
+        "consumer-ack" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let transaction = args.required("mini-transaction")?;
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let transaction = transaction
+                .to_str()
+                .ok_or("--mini-transaction must be UTF-8")?;
+            #[cfg(unix)]
+            {
+                consumer_ack(&host, &config, transaction, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("persistent host sessions require Unix sockets".to_owned())
+            }
         }
         "profile" | "describe" => {
             let command = args.command.clone();

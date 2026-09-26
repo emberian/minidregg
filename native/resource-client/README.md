@@ -33,7 +33,8 @@ current authority and decides submissions. The service accepts no shell
 command or client-supplied file path. It reads its fixed config at startup.
 The daemon passes a private launch copy of that config to the host and
 requires each client request to present identical config bytes. The local
-socket rejects unknown operation codes, including path-bearing fn commands.
+socket rejects unknown operation codes. Fn poll accepts only an empty request;
+fn ACK accepts only a canonical decimal Mini transaction ID, never paths.
 
 The transport covers profile, description, author, inspect, signatures,
 observation challenge/assembly, prepare, call assembly, submit, lookup, and
@@ -62,6 +63,31 @@ second implementation of those semantics. These commands are not yet framed
 session operations. Their multi-file outputs and external fn control socket
 need dedicated typed host operations before they can share the persistent
 session safely.
+
+For a service configured with the host's `fnPoll` pin, the typed consumer
+path uses one socket for the entire poll, Mini submission, and fn ACK:
+
+```sh
+mini consumer-poll --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock --dir attempts/fn-poll-1
+mini submit --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock \
+  --intent attempts/fn-poll-1/intent.bin --intent-kind binary \
+  --key CONSUMER.key --dir attempts/fn-submit-1
+mini consumer-ack --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock \
+  --mini-transaction MINI-TRANSACTION-ID --dir attempts/fn-ack-1
+```
+
+The operator config pins the fn control socket, origin, scope, and policy;
+the caller supplies no fn paths or policy. Each consumer attempt directory is
+private (`0700`). Poll retains `reply.frame` before decoding, `decision.json`,
+and a Lean-authored `intent.bin` only for an accepted decision. Polling does
+not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
+publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
+only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
+repeat the same transaction ID in a new attempt directory and reconcile from
+the retained reply.
 
 ## Portable native prefix evidence (P0)
 

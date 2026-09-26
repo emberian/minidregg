@@ -83,6 +83,31 @@ structure FnPollService where
   policyPath : String
   controlPath : String
 
+/-- The A reply consumer has a fixed R origin carrier and a separate live Q
+consumer. None of these paths is accepted from a stdio request. -/
+structure FnReplyPollServiceSettings where
+  originConfigPath : String
+  rPinPath : String
+  rClaimPath : String
+  rCarrierPath : String
+  qPinPath : String
+  scopePath : String
+  qClaimPath : String
+  policyPath : String
+  controlPath : String
+  deriving FromJson, ToJson
+
+structure FnReplyPollService where
+  originConfigPath : String
+  rPinPath : String
+  rClaimPath : String
+  rCarrierPath : String
+  qPinPath : String
+  scopePath : String
+  qClaimPath : String
+  policyPath : String
+  controlPath : String
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -105,6 +130,7 @@ structure Settings where
   signatureBinary : String
   fnGateway : Option GatewayPinSettings := none
   fnPoll : Option FnPollServiceSettings := none
+  fnReplyPoll : Option FnReplyPollServiceSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -420,6 +446,34 @@ partial def readBoundedLoop (input : IO.FS.Handle) (limit : Nat)
 def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
   let input ← IO.FS.Handle.mk path .read
   readBoundedLoop input limit
+
+def withFnReplyPollService {α : Type} (settings : Settings)
+    (body : Option FnReplyPollService → IO α) : IO α := do
+  let some source := settings.fnReplyPoll | return ← body none
+  unless [source.originConfigPath, source.rPinPath, source.rClaimPath,
+      source.rCarrierPath, source.qPinPath, source.scopePath,
+      source.qClaimPath, source.policyPath, source.controlPath].all
+      (·.startsWith "/") do
+    throw (IO.userError "A reply poll service paths must be operator-selected absolute paths")
+  IO.FS.withTempDir fun directory => do
+    let copyInput := fun (name sourcePath : String) (bound : Nat) => do
+      let bytes ← readBoundedBytes sourcePath bound
+      unless !bytes.isEmpty do
+        throw (IO.userError s!"A reply poll service input {name} is empty")
+      let destination := directory / name
+      IO.FS.writeBinFile destination bytes.toByteArray
+      pure destination.toString
+    let originConfigPath ← copyInput "origin-config.json" source.originConfigPath 65536
+    let rPinPath ← copyInput "r-pin.json" source.rPinPath 8192
+    let rClaimPath ← copyInput "r-claim.json" source.rClaimPath 8192
+    let rCarrierPath ← copyInput "r-carrier.eml" source.rCarrierPath
+      FnEvidenceCodec.maxCarrierBytes
+    let qPinPath ← copyInput "q-pin.json" source.qPinPath 8192
+    let scopePath ← copyInput "scope.json" source.scopePath 8192
+    let qClaimPath ← copyInput "q-claim.json" source.qClaimPath 8192
+    let policyPath ← copyInput "policy.json" source.policyPath 8192
+    body (some ⟨originConfigPath, rPinPath, rClaimPath, rCarrierPath,
+      qPinPath, scopePath, qClaimPath, policyPath, source.controlPath⟩)
 
 /-- Large source and carrier comparisons use the array primitive after the
 bounded read; recursive list equality is unsuitable for the full V2 profile. -/
@@ -1285,6 +1339,114 @@ def runFnAckSession (config : NativeHost.Config)
        ("fnStoreTransactionId", toJson (toString stored.transactionId)),
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
+/-- The A reply poll uses one operator-pinned R carrier and a live Q control
+endpoint. The request carries no paths, claims, or verifier selection. -/
+def runFnReplyPollSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnReplyPollService) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  unless payload.isEmpty do
+    throw (IO.userError "A reply poll does not accept a payload")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "cursor.fncu").toString
+    let reportPath := (directory / "report.fn-e").toString
+    let carrierPath := (directory / "q-carrier.eml").toString
+    let intentPath := (directory / "intent.bin").toString
+    let resultPath := (directory / "decision.json").toString
+    let opened ← sessionOpened config state
+    let exitCode ← runReplyConsumerPollDecisionLoaded config opened
+      service.originConfigPath service.rPinPath service.rClaimPath
+      service.rCarrierPath service.qPinPath service.scopePath
+      service.qClaimPath service.policyPath service.controlPath
+      cursorPath reportPath carrierPath intentPath resultPath
+    let decision ← readJson resultPath
+    let intent ← if ← (System.FilePath.mk intentPath).pathExists then do
+        pure (Minidregg.Host.Json.encodeHex (← readBoundedBytes intentPath maxFrame))
+      else pure ""
+    return (14, (Lean.Json.mkObj
+      [("type", toJson "fn-a-reply-poll-session-v1"),
+       ("status", toJson (if exitCode == 0 then "accepted-decision" else "refused")),
+       ("decision", decision), ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
+/-- A reply ACK is selected by the accepted A Mini transaction alone. The
+retained inbox supplies the exact cursor, event, carrier, and signed source. -/
+def runFnReplyAckSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnReplyPollService) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  unless !payload.isEmpty && payload.length ≤ 80 &&
+      payload.all (fun byte => 48 ≤ byte.toNat && byte.toNat ≤ 57) do
+    throw (IO.userError "A reply ack transaction ID must be bounded decimal ASCII")
+  let transaction := String.fromUTF8! payload.toByteArray
+  let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+  let pinJson ← readJson service.qPinPath
+  let scopeJson ← readJson service.scopePath
+  IO.ofExcept (requireExactFields "Q fn pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  IO.ofExcept (requireExactFields "A fn scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+  let gateway ← requireGateway config
+  let opened ← sessionOpened config state
+  let some record := opened.durable.image.accepted.find?
+      (fun entry => entry.transactionId.value == transactionId)
+    | throw (IO.userError "A reply result transaction is absent")
+  let some (_, inbox) := FnReplyConsumption.originalResult gateway
+      config.deployment.domain config.profile.semantics record
+    | throw (IO.userError "A reply result is not a reopened accepted operation")
+  let stored := inbox.storePoll
+  unless stored.pollCallObserved && stored.controlBinding ==
+      FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath do
+    throw (IO.userError "A reply ack control differs from durable observed poll")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "retained-cursor.fncu").toString
+    let eventPath := (directory / "retained-report.fn-e").toString
+    writeBytes cursorPath stored.cursor
+    writeBytes eventPath stored.event
+    let (cursor, event, projected) ←
+      projectFnPoll pin.fnBinary scope cursorPath eventPath
+    unless cursor == stored.cursor && sameBytes event stored.event &&
+        projected.sourceIdentity == stored.sourceIdentity &&
+        projected.sequence == stored.sequence &&
+        projected.transactionId == stored.transactionId &&
+        projected.messageId == stored.messageId &&
+        projected.verdictPrincipal == stored.verdictPrincipal &&
+        projected.verdictEvent == stored.verdictEvent do
+      throw (IO.userError "A reply ack pair differs from durable Mini inbox")
+    let verified ← verifyAckSource pin projected inbox.portableInbox.carrier
+      inbox.replySource
+    unless projected.verdictPrincipal == inbox.portableInbox.principal &&
+        verified.principal == inbox.portableInbox.principal &&
+        verified.edPublicKey == inbox.portableInbox.edPublicKey &&
+        verified.mlPublicKey == inbox.portableInbox.mlPublicKey do
+      throw (IO.userError "A reply ack source differs from accepted Mini inbox")
+    let child ← IO.Process.spawn
+      { cmd := pin.fnBinary,
+        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        stdin := .null, stdout := .piped, stderr := .null }
+    let output ← try readBoundedLoop child.stdout 128
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    unless cursor == (← readBoundedBytes cursorPath 346) &&
+        sameBytes event (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
+      throw (IO.userError "A reply ack inputs changed during local control call")
+    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+        "durable-accepted"
+      else if exitCode == 2 then "refused"
+      else if exitCode == 3 then "uncertain"
+      else "transport-fault"
+    return (15, (Lean.Json.mkObj
+      [("type", toJson "fn-a-reply-ack-session-v1"),
+       ("miniTransactionId", toJson transaction),
+       ("fnStoreSequence", toJson (toString stored.sequence)),
+       ("fnStoreTransactionId", toJson (toString stored.transactionId)),
+       ("fnAck", toJson status)]).compress.toUTF8.toList)
+
 def usage : String :=
   "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
@@ -1329,20 +1491,32 @@ def run (arguments : List String) : IO UInt32 := do
       | "stdio", [] =>
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
-              let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
-              let state ← IO.mkRef (some session)
-              let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) := fun operation payload => do
-                if operation != 12 && operation != 13 then
-                  throw (IO.userError "unsupported native host operation")
-                let some selected := service
-                  | return ((255 : UInt8), failure "fn-poll" "fn consumer poll service is not configured")
-                try
-                  if operation == 12 then
-                    runFnPollSession pinnedConfig state selected payload
-                  else
-                    runFnAckSession pinnedConfig state selected payload
-                catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
-              serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
+              withFnReplyPollService settings fun replyService => do
+                let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+                let state ← IO.mkRef (some session)
+                let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) :=
+                  fun operation payload => do
+                    try
+                      match operation with
+                      | 12 | 13 =>
+                          let some selected := service
+                            | return ((255 : UInt8), failure "fn-poll"
+                                "fn consumer poll service is not configured")
+                          if operation == 12 then
+                            runFnPollSession pinnedConfig state selected payload
+                          else
+                            runFnAckSession pinnedConfig state selected payload
+                      | 14 | 15 =>
+                          let some selected := replyService
+                            | return ((255 : UInt8), failure "fn-reply-poll"
+                                "A reply poll service is not configured")
+                          if operation == 14 then
+                            runFnReplyPollSession pinnedConfig state selected payload
+                          else
+                            runFnReplyAckSession pinnedConfig state selected payload
+                      | _ => throw (IO.userError "unsupported native host operation")
+                    catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
+                serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
