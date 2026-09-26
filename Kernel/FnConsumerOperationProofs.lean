@@ -24,6 +24,7 @@ theorem bindingCommand_uses_operation_nonce (domain semantics : Digest)
   · simp [bindingCommand, size, Functor.map, Except.map] at built
 
 theorem occupied_never_proposes_fresh (domain semantics : Digest)
+    (pin : FnGatewayPolicy.Pin)
     (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
     (accepted : List DurableReceiver.IntentRecord)
     (original : DurableReceiver.IntentRecord)
@@ -31,11 +32,12 @@ theorem occupied_never_proposes_fresh (domain semantics : Digest)
       entry.transactionId == marker domain semantics report.subject
         (operationNonce domain semantics report.application report.operation)) = some original)
     (command : DeclaredResourceController.Command) (reply : Reply) :
-    decide domain semantics report receipt accepted ≠ .fresh command reply := by
+    decide pin domain semantics report receipt accepted ≠ .fresh command reply := by
   simp only [decide, occupied]
   repeat (first | split | simp_all)
 
 theorem exact_repeat_returns_original_reply (domain semantics : Digest)
+    (pin : FnGatewayPolicy.Pin)
     (report : Report) (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
     (accepted : List DurableReceiver.IntentRecord)
     (original : DurableReceiver.IntentRecord) (binding : Binding)
@@ -43,7 +45,7 @@ theorem exact_repeat_returns_original_reply (domain semantics : Digest)
       entry.transactionId == marker domain semantics report.subject
         (operationNonce domain semantics report.application report.operation)) = some original)
     (inbox : Option PortableInbox) (storeInbox : Option StorePollInbox)
-    (decoded : originalBindingWithInbox domain semantics original =
+    (decoded : originalBindingWithInbox pin domain semantics original =
       some (binding, inbox, storeInbox))
     (application : binding.application = report.application)
     (operation : binding.operation = report.operation)
@@ -51,12 +53,12 @@ theorem exact_repeat_returns_original_reply (domain semantics : Digest)
     (package : binding.package = report.package)
     (sameInbox : inbox = report.portableInbox)
     (sameStore : storeInbox = report.storePoll) :
-    decide domain semantics report receipt accepted = .repeated binding.reply := by
+    decide pin domain semantics report receipt accepted = .repeated binding.reply := by
   simp [decide, occupied, decoded, application, operation, provenance, package,
     sameInbox, sameStore]
 
 theorem changed_source_records_conflict_without_second_effect
-    (domain semantics : Digest) (report : Report)
+    (domain semantics : Digest) (pin : FnGatewayPolicy.Pin) (report : Report)
     (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
     (accepted : List DurableReceiver.IntentRecord)
     (original : DurableReceiver.IntentRecord) (binding : Binding)
@@ -64,7 +66,7 @@ theorem changed_source_records_conflict_without_second_effect
       entry.transactionId == marker domain semantics report.subject
         (operationNonce domain semantics report.application report.operation)) = some original)
     (inbox : Option PortableInbox) (storeInbox : Option StorePollInbox)
-    (decoded : originalBindingWithInbox domain semantics original =
+    (decoded : originalBindingWithInbox pin domain semantics original =
       some (binding, inbox, storeInbox))
     (application : binding.application = report.application)
     (operation : binding.operation = report.operation)
@@ -72,7 +74,7 @@ theorem changed_source_records_conflict_without_second_effect
     (unrecorded : accepted.find? (fun entry =>
       entry.transactionId == marker domain semantics report.subject
         (conflictNonce domain semantics report)) = none) :
-    decide domain semantics report receipt accepted =
+    decide pin domain semantics report receipt accepted =
       .conflict (conflictCommand domain semantics report) := by
   have provenance : binding.provenance ≠ report.provenance := by
     intro same

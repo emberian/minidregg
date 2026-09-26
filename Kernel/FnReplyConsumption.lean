@@ -30,6 +30,10 @@ structure Policy where
   capability : CapabilityId
   deriving DecidableEq, Repr
 
+def Policy.matchesGateway (policy : Policy) (pin : FnGatewayPolicy.Pin) : Bool :=
+  policy.application == pin.application && policy.subject == pin.subject &&
+  policy.target == pin.target && policy.capability == pin.capability
+
 structure Report where
   application : List UInt8
   operation : List UInt8
@@ -191,7 +195,7 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
       .content ⟨[.createAtom (conflictAtom domain semantics report)
         (.inlineObject ⟨8⟩) (reportCodec.encode report)]⟩, none⟩]⟩
 
-def originalConflict (domain semantics : Digest)
+def originalConflict (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) : Option Report := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
@@ -204,7 +208,10 @@ def originalConflict (domain semantics : Digest)
   let .ok _ := check
       ⟨report.application, report.subject, report.target, report.capability⟩ report
     | none
-  if (reportCodec.encode report).length ≤ 110000 &&
+  if report.application == pin.application &&
+      command.subject == pin.subject && target.target == pin.target &&
+      target.capability == pin.capability &&
+      (reportCodec.encode report).length ≤ 110000 &&
       conflictId == conflictAtom domain semantics report &&
       command.nonce == conflictNonce domain semantics report &&
       command.subject == report.subject && target.target == report.target &&
@@ -213,7 +220,10 @@ def originalConflict (domain semantics : Digest)
       target.expectedTargetRoot == report.expectedTargetRoot then
     some report else none
 
-def originalResult (domain semantics : Digest)
+/-- Reopen the original accepted result under the configured gateway identity.
+Current mutation law is checked for a new result, not for reading or ACKing a
+position already atomically retained in Mini's accepted history. -/
+def originalResult (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) : Option (Result × Report) := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
@@ -228,7 +238,10 @@ def originalResult (domain semantics : Digest)
   let .ok checked := check
       ⟨report.application, report.subject, report.target, report.capability⟩ report
     | none
-  if (reportCodec.encode report).length ≤ 110000 &&
+  if report.application == pin.application &&
+      command.subject == pin.subject && target.target == pin.target &&
+      target.capability == pin.capability &&
+      (reportCodec.encode report).length ≤ 110000 &&
       resultId == resultAtom domain semantics report.application report.operation &&
       inboxId == inboxAtom domain semantics report.application report.operation &&
       command.nonce == resultNonce domain semantics report.application report.operation &&
@@ -246,9 +259,11 @@ inductive Decision where
   | refused (reason : String)
   deriving Repr
 
-def decide (domain semantics : Digest) (policy : Policy) (report : Report)
+def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (policy : Policy) (report : Report)
     (accepted : List DurableReceiver.IntentRecord) : Decision :=
-  match check policy report with
+  match (if policy.matchesGateway pin then check policy report
+    else .error "A reply policy differs from independently pinned fn gateway") with
   | .error reason => .refused reason
   | .ok result =>
       let transaction := marker domain semantics report.subject
@@ -259,7 +274,7 @@ def decide (domain semantics : Digest) (policy : Policy) (report : Report)
           | .ok command => .fresh command result
           | .error reason => .refused reason
       | some record =>
-          match originalResult domain semantics record with
+          match originalResult pin domain semantics record with
           | none => .refused "A reply marker occupied by foreign transaction"
           | some (original, oldReport) =>
               if original.application != report.application ||
@@ -273,7 +288,7 @@ def decide (domain semantics : Digest) (policy : Policy) (report : Report)
                 match accepted.find? (fun item => item.transactionId == conflictTx) with
                 | none => .conflict (conflictCommand domain semantics report)
                 | some conflict =>
-                    match originalConflict domain semantics conflict with
+                    match originalConflict pin domain semantics conflict with
                     | some recorded =>
                         if recorded.evidenceBytes == report.evidenceBytes then
                           .conflictRecorded
@@ -282,20 +297,30 @@ def decide (domain semantics : Digest) (policy : Policy) (report : Report)
 
 /-- Scan accepted history for the same application operation under any local
 grant. A policy change cannot produce a second result under a new subject. -/
-def evaluate (domain semantics : Digest) (policy : Policy) (report : Report)
+def evaluate (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (policy : Policy) (report : Report)
     (accepted : List DurableReceiver.IntentRecord) : Decision :=
-  if accepted.length > 16 then .refused "bounded A reply history exceeds 16 events"
-  else if (reportCodec.encode report).length > 110000 then
+  if (reportCodec.encode report).length > 110000 then
     .refused "A reply retained inbox exceeds bound"
   else if accepted.any (fun record =>
-      match originalResult domain semantics record with
+      match originalResult pin domain semantics record with
       | some (old, oldReport) =>
           old.application == report.application && old.operation == report.operation &&
           (oldReport.subject != policy.subject || oldReport.target != policy.target ||
             oldReport.capability != policy.capability)
       | none => false) then
     .refused "A reply operation already bound under another local grant"
-  else decide domain semantics policy report accepted
+  else decide pin domain semantics policy report accepted
+
+/-- The host must use this entry point for fresh A-side decisions. Historical
+recovery may decode an accepted event under its old law, while every new
+proposal uses the independently pinned current gateway law. -/
+def evaluateVerified (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (pin : FnGatewayPolicy.Pin) (policy : Policy) (report : Report) :
+    Except String Decision := do
+  FnGatewayPolicy.checkCurrent config opened pin
+  pure (evaluate pin config.deployment.domain config.profile.semantics
+    policy report opened.durable.image.accepted)
 
 def Decision.intent (report : Report) : Decision → Option NativeObservationCodec.Intent
   | .fresh command _ | .conflict command =>

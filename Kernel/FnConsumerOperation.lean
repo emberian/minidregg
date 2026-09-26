@@ -10,6 +10,7 @@ portable fn route records a verified source identity with explicit absent-
 Store sentinels until fn's native historical verdict connector is available.
 -/
 import Kernel.FnEvidence
+import Kernel.FnGatewayPolicy
 import Kernel.NativeHost
 import Kernel.ContentResource
 
@@ -87,6 +88,10 @@ structure Policy where
   target : Nat
   capability : CapabilityId
   deriving DecidableEq, Repr
+
+def Policy.matchesGateway (policy : Policy) (pin : FnGatewayPolicy.Pin) : Bool :=
+  policy.application == pin.application && policy.subject == pin.subject &&
+  policy.target == pin.target && policy.capability == pin.capability
 
 structure Reply where
   application : List UInt8
@@ -271,6 +276,12 @@ def checkPolicy (policy : Policy) (report : Report) : Except String Unit := do
       report.capability == policy.capability do
     throw "report differs from operator-selected consumer namespace and grant"
 
+def checkGateway (pin : FnGatewayPolicy.Pin) (policy : Policy)
+    (report : Report) : Except String Unit := do
+  unless policy.matchesGateway pin do
+    throw "consumer policy differs from independently pinned fn gateway"
+  checkPolicy policy report
+
 def operationPreimage (domain semantics : Digest) (application operation : List UInt8) :
     List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream
@@ -427,8 +438,10 @@ inductive Decision where
   deriving Repr
 
 /-- Inspect the original accepted call, rather than a mutable current atom.
-The prior reply remains recoverable from the durable accepted event history. -/
-def originalBindingWithInbox (domain semantics : Digest)
+The prior reply remains recoverable from durable history after a later Mini
+grant or policy revision. This raw decoder is private: public recovery also
+requires the independently configured gateway identity. -/
+private def originalBindingWithInboxRaw (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) :
     Option (Binding × Option PortableInbox × Option StorePollInbox) := do
   let (recordDomain, recordSemantics, signed) ←
@@ -492,24 +505,41 @@ def originalBindingWithInbox (domain semantics : Digest)
       | _ => none
   | _ => none
 
-def originalBinding (domain semantics : Digest)
+/-- Historical recovery requires the signed subject, resource and capability
+to match the configured gateway. It intentionally does not recheck the current
+mutation law: an exact previously admitted fn position may still be ACKed
+after the Mini gateway grant is revoked. -/
+def originalBindingWithInbox (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) :
+    Option (Binding × Option PortableInbox × Option StorePollInbox) := do
+  let binding ← originalBindingWithInboxRaw domain semantics record
+  let (_, _, signed) ←
+    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  let [target] := command.targets | none
+  if binding.1.application == pin.application && command.subject == pin.subject &&
+      target.target == pin.target && target.capability == pin.capability then
+    some binding
+  else none
+
+def originalBinding (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) : Option Binding :=
-  (originalBindingWithInbox domain semantics record).map Prod.fst
+  (originalBindingWithInbox pin domain semantics record).map Prod.fst
 
 /-- A later operator policy cannot silently move an already bound operation
 to another local subject, target, or capability. The original accepted
 signed call, not caller metadata, supplies this historical grant context. -/
-def originalBindingGrant (domain semantics : Digest)
+private def originalBindingGrant (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) :
     Option (Binding × SubjectId × Nat × CapabilityId) := do
-  let binding ← originalBinding domain semantics record
+  let binding ← (originalBindingWithInboxRaw domain semantics record).map Prod.fst
   let (_, _, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
   let [target] := command.targets | none
   some (binding, command.subject, target.target, target.capability)
 
-def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
+private def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
     (report : Report) (accepted : List DurableReceiver.IntentRecord) :
     Except String Unit := do
   for record in accepted do
@@ -522,7 +552,7 @@ def checkHistoricalPolicy (domain semantics : Digest) (policy : Policy)
             throw "consumer operation already bound under another local grant"
     | none => pure ()
 
-def originalConflictWithInbox (domain semantics : Digest)
+private def originalConflictWithInboxRaw (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) :
     Option (ConflictEvidence × Option PortableInbox × Option StorePollInbox) := do
   let (recordDomain, recordSemantics, signed) ←
@@ -584,11 +614,25 @@ def originalConflictWithInbox (domain semantics : Digest)
       | _ => none
   | _ => none
 
-def originalConflict (domain semantics : Digest)
-    (record : DurableReceiver.IntentRecord) : Option ConflictEvidence :=
-  (originalConflictWithInbox domain semantics record).map Prod.fst
+def originalConflictWithInbox (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) :
+    Option (ConflictEvidence × Option PortableInbox × Option StorePollInbox) := do
+  let conflict ← originalConflictWithInboxRaw domain semantics record
+  let (_, _, signed) ←
+    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  let [target] := command.targets | none
+  if conflict.1.application == pin.application && command.subject == pin.subject &&
+      target.target == pin.target && target.capability == pin.capability then
+    some conflict
+  else none
 
-def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
+def originalConflict (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option ConflictEvidence :=
+  (originalConflictWithInbox pin domain semantics record).map Prod.fst
+
+def decide (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
+    (report : Report) (receipt : Receipt)
     (accepted : List DurableReceiver.IntentRecord) : Decision :=
   let transaction := marker domain semantics report.subject
     (operationNonce domain semantics report.application report.operation)
@@ -599,7 +643,7 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
           ⟨report.application, report.operation, report.provenance.sourceIdentity, receipt⟩
       | .error detail => .refused detail
   | some original =>
-      match originalBindingWithInbox domain semantics original with
+      match originalBindingWithInbox pin domain semantics original with
       | none => .refused "operation marker occupied by nonconsumer transaction"
       | some (binding, originalInbox, originalStore) =>
           if binding.application != report.application ||
@@ -622,7 +666,7 @@ def decide (domain semantics : Digest) (report : Report) (receipt : Receipt)
                   (conflictCommand domain semantics report) binding.reply
                 else .conflict (conflictCommand domain semantics report)
             | some conflict =>
-                if originalConflictWithInbox domain semantics conflict ==
+                if originalConflictWithInbox pin domain semantics conflict ==
                     some (⟨report.application, report.operation,
                       report.provenance, report.package⟩,
                       report.portableInbox, report.storePoll) then
@@ -637,27 +681,28 @@ def Decision.intent (report : Report) : Decision → Option NativeObservationCod
         [⟨.object, report.target, report.capability⟩]⟩
   | _ => none
 
-def evaluateVerified (consumer : NativeHost.Config) (policy : Policy)
+def evaluateVerified (consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)
+    (policy : Policy)
     (report : Report) (receipt : Receipt) (opened : NativeHost.Opened consumer) :
     Except String Decision := do
   checkReport report
-  checkPolicy policy report
-  unless opened.durable.image.accepted.length ≤ 16 do
-    throw "bounded E1 consumer history exceeds 16 accepted events"
+  checkGateway pin policy report
+  FnGatewayPolicy.checkCurrent consumer opened pin
   checkHistoricalPolicy consumer.deployment.domain consumer.profile.semantics
     policy report opened.durable.image.accepted
-  pure (decide consumer.deployment.domain consumer.profile.semantics
+  pure (decide pin consumer.deployment.domain consumer.profile.semantics
     report receipt opened.durable.image.accepted)
 
 /-- The synthetic adapter independently verifies the origin and reopens
 current consumer history. The portable native route passes those already
 verified values to evaluateVerified without replaying either twice. -/
-def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : Report) :
+def evaluate (origin consumer : NativeHost.Config) (pin : FnGatewayPolicy.Pin)
+    (policy : Policy) (report : Report) :
     IO (Except String Decision) := do
   match checkReport report with
   | .error detail => return .error detail
   | .ok () => pure ()
-  match checkPolicy policy report with
+  match checkGateway pin policy report with
   | .error detail => return .error detail
   | .ok () => pure ()
   let receipt ← match ← FnEvidence.verify origin report.package with
@@ -666,6 +711,6 @@ def evaluate (origin consumer : NativeHost.Config) (policy : Policy) (report : R
   let opened ← match ← NativeHost.openExisting consumer with
     | .error detail => return .error s!"consumer history: {detail}"
     | .ok opened => pure opened
-  return evaluateVerified consumer policy report receipt opened
+  return evaluateVerified consumer pin policy report receipt opened
 
 end Minidregg.Kernel.FnConsumerOperation

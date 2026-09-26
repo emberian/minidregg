@@ -19,6 +19,16 @@ set_option autoImplicit false
 
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 
+/-- Operator-pinned identity for the local fn application gateway. The current
+resource law is checked separately against this pin before new fn work. -/
+structure FnGatewayPin where
+  application : List UInt8
+  subject : SubjectId
+  target : Nat
+  capability : CapabilityId
+  policyAddress : Digest
+  deriving DecidableEq, Repr
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -28,6 +38,7 @@ structure Config where
   expectedSeed : Digest
   storage : DurableReceiverIO.NativeConfig
   signature : CredentialSignatureIO.NativeConfig
+  fnGateway : Option FnGatewayPin := none
 
 /-- This manifest enters runtime semantics. The seed commitment is separate
 because the genesis's source policies themselves contain that semantics. -/
