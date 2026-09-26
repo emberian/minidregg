@@ -44,3 +44,39 @@ was changed. The combined linear-cSHAKE plus loaded-byte observation binary
 `eddffd827496eb2a005af45158089957bacf63b019c8c3441b01b76b71db33b1`
 has **not** been measured on this large call, so this evidence makes no latency
 claim for the loaded-byte optimization.
+
+For a read-only follow-up, GDB launched the linear host as its own inferior
+against a *third* private copy of the accepted-2 SQLite image and ran
+`describe`. Four bounded interrupts sampled the active Lean worker. One stack
+was in `DurableReceiverIO.loadBytes → DurableReceiver.replay →
+IntentRecord.bind? → ResourceBirthCodec.rootBytes → cshake256Bytes`.
+Another was in `NativeHostReplay.walk → derive →
+DeclaredResourceController.admit → projectCommonSlots → requestFor →
+cshake256Bytes`. The remaining two were inside `List.dedup`/`pwFilter`
+while deciding `castInjOn` for `intsOf` through
+`DeclaredResourceController.authorizeLeg`. The inferior completed normally.
+The copied SQLite image retained SHA-256
+`0066f07fcfd6d92fd95717c809fbab173b74d45be604841bb8fc3899884d82a5`
+after the debugger exited.
+These are stack samples, not a percentage breakdown or a benchmark under the
+debugger. Source inspection locates the latter path at
+`Compiler/PredCompile.lean`'s `castEntries`, which deduplicates all old and
+new state integers before the exact field-alias check. A separate compiler
+edit now proves a membership-preserving hashed decision and retains the
+original kernel-reducible decision through a proved `@[csimp]` equality.
+This sampling does not yet measure that new native image; the alias check
+itself remains mandatory.
+
+The compiled decision repair in `Compiler/PredCompile.lean` has source SHA-256
+`46d082cbbe605df7472a5181f90d180f172a6ef960ec1af78921a39fc5b0c052`.
+Its full module and direct `PredCompileOrderWitness` module compiled in a
+separate warm snapshot. The generated C for
+`instDecidableCastInjOnOfDecidableEq` calls `castInjOnDecidableFast`, while
+kernel evaluation retains `castInjOnDecidableSpec` and its original reducible
+`castEntries`. The general membership/alias-equivalence theorem and the
+`@[csimp]` function equality report only `[propext, Classical.choice,
+Quot.sound]` in axiom accounting, with no `sorryAx`. The focused
+`Compiler/PredCastHashProofs.lean` module (SHA-256
+`6cb647b52735c6c60b615ce5bce0090099f5367b10554536627846d301cf38b2`)
+also compiled. These are proof and code-generation checks, not an admitted
+large-call latency measurement.
