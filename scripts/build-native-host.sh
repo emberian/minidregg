@@ -9,10 +9,15 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
+  --incremental-host-from SNAPSHOT BUILD_OUTPUT
+              compile only changed Host.Main after byte-checking every imported
+              source, Lean artifact, and package artifact against a successful
+              native build in an independent source snapshot; recompile all
+              project C objects before linking
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -26,11 +31,19 @@ EOF
 output_dir=""
 binary_path=""
 build_umbrella=0
+incremental_baseline_root=""
+incremental_baseline_output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
       build_umbrella=1
       shift
+      ;;
+    --incremental-host-from)
+      [[ $# -ge 3 ]] || { usage >&2; exit 64; }
+      incremental_baseline_root=$2
+      incremental_baseline_output=$3
+      shift 3
       ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
@@ -53,8 +66,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
+  printf 'build-native-host: --umbrella and --incremental-host-from are exclusive\n' >&2
+  exit 64
+fi
 
-for command in git jq lake file find sort join comm xargs shasum uname; do
+for command in git jq lake file find sort join comm xargs shasum uname cmp; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
@@ -213,10 +230,149 @@ if [[ -s "$unregistered" ]]; then
   exit 65
 fi
 
+if [[ -n "$incremental_baseline_root" ]]; then
+  incremental_baseline_root=$(cd "$incremental_baseline_root" && pwd -P)
+  incremental_baseline_output=$(cd "$incremental_baseline_output" && pwd -P)
+  [[ "$incremental_baseline_root" != "$root" ]] || {
+    printf 'build-native-host: incremental baseline must be a different snapshot\n' >&2
+    exit 73
+  }
+  [[ -f "$incremental_baseline_root/.minidregg-native-snapshot" ]] || {
+    printf 'build-native-host: incremental baseline is not an independent snapshot\n' >&2
+    exit 73
+  }
+  baseline_manifest="$incremental_baseline_output/manifest.txt"
+  baseline_sources="$incremental_baseline_output/source-sha256.txt"
+  baseline_artifacts="$incremental_baseline_output/artifact-sha256.txt"
+  baseline_reusable="$incremental_baseline_output/reusable-artifact-sha256.txt"
+  baseline_packages="$incremental_baseline_output/package-objects.txt"
+  for baseline_file in "$baseline_manifest" "$baseline_sources" \
+      "$baseline_artifacts" "$baseline_reusable" "$baseline_packages" \
+      "$incremental_baseline_output/source-modules.txt" \
+      "$incremental_baseline_output/compile-args.txt"; do
+    [[ -f "$baseline_file" ]] || {
+      printf 'build-native-host: missing baseline evidence: %s\n' "$baseline_file" >&2
+      exit 66
+    }
+  done
+  reusable_hash_anchored=0
+  while read -r artifact_hash artifact_path; do
+    [[ -f "$artifact_path" ]] || continue
+    artifact_canonical=$(cd "$(dirname "$artifact_path")" && pwd -P)/$(basename "$artifact_path")
+    if [[ "$artifact_canonical" == "$baseline_reusable" &&
+          "$artifact_hash" == "$(shasum -a 256 "$baseline_reusable" | cut -d ' ' -f 1)" ]]; then
+      reusable_hash_anchored=1
+      break
+    fi
+  done < "$baseline_artifacts"
+  [[ "$reusable_hash_anchored" == 1 ]] || {
+    printf 'build-native-host: reusable artifact manifest has no baseline hash\n' >&2
+    exit 65
+  }
+  grep -qxF 'usage_exit=1' "$baseline_manifest"
+  grep -qxF "native_target=$(uname -s):$(uname -m)" "$baseline_manifest"
+  baseline_binary=$(sed -n 's/^binary=//p' "$baseline_manifest")
+  baseline_binary_hash=$(sed -n 's/^binary_sha256=//p' "$baseline_manifest")
+  [[ -f "$baseline_binary" && -n "$baseline_binary_hash" &&
+      "$(shasum -a 256 "$baseline_binary" | cut -d ' ' -f 1)" == "$baseline_binary_hash" ]] || {
+    printf 'build-native-host: baseline executable identity changed\n' >&2
+    exit 65
+  }
+  shasum -a 256 -c "$baseline_artifacts" > "$output_dir/baseline-artifact-check.log"
+  (cd "$incremental_baseline_root" && shasum -a 256 -c "$baseline_sources") \
+    > "$output_dir/baseline-source-check.log"
+  (cd "$incremental_baseline_root" && shasum -a 256 -c "$baseline_reusable") \
+    > "$output_dir/baseline-reusable-check.log"
+  cmp -s "$source_modules" "$incremental_baseline_output/source-modules.txt" || {
+    printf 'build-native-host: incremental import closure changed\n' >&2
+    exit 65
+  }
+  [[ -f lakefile.lean || -f lakefile.toml ]] || {
+    printf 'build-native-host: neither Lake project file exists\n' >&2
+    exit 65
+  }
+  for source_file in lake-manifest.json lean-toolchain lakefile.lean lakefile.toml; do
+    if [[ ! -e "$incremental_baseline_root/$source_file" && ! -e "$source_file" ]]; then
+      continue
+    fi
+    if [[ ! -f "$incremental_baseline_root/$source_file" || ! -f "$source_file" ]] || \
+        ! cmp -s "$incremental_baseline_root/$source_file" "$source_file"; then
+      printf 'build-native-host: incremental package/toolchain manifest changed: %s\n' \
+        "$source_file" >&2
+      exit 65
+    fi
+  done
+  toolchain=$(lake env lean --print-prefix)
+  grep -qxF "toolchain=$toolchain" "$baseline_manifest"
+  grep -qxF "lean=$(lean --version | sed -n '1p')" "$baseline_manifest"
+  [[ -f Host/Main.lean && -f "$incremental_baseline_root/Host/Main.lean" &&
+      ! Host/Main.lean -ef "$incremental_baseline_root/Host/Main.lean" ]] || {
+    printf 'build-native-host: changed Host.Main must be in an independent copy\n' >&2
+    exit 73
+  }
+  if cmp -s "$incremental_baseline_root/Host/Main.lean" Host/Main.lean; then
+    printf 'build-native-host: incremental Host.Main source is unchanged\n' >&2
+    exit 65
+  fi
+  reused_paths="$output_dir/reused-artifact-paths.nul"
+  : > "$reused_paths"
+  validated_sources=0
+  while IFS= read -r module; do
+    [[ "$module" == Host.Main ]] && continue
+    stem=${module//./\/}
+    for path in "$stem.lean" \
+        ".lake/build/lib/lean/$stem.olean" \
+        ".lake/build/lib/lean/$stem.ilean" \
+        ".lake/build/ir/$stem.c"; do
+      if [[ ! -f "$incremental_baseline_root/$path" || ! -f "$path" ]] || \
+          ! cmp -s "$incremental_baseline_root/$path" "$path"; then
+          printf 'build-native-host: imported source/artifact changed: %s\n' "$path" >&2
+          exit 65
+      fi
+      printf '%s\0' "$path" >> "$reused_paths"
+    done
+    validated_sources=$((validated_sources + 1))
+  done < "$source_modules"
+  validated_packages=0
+  while IFS= read -r object; do
+    package_root=${object%%/.lake/build/ir/*}
+    package_module=${object#"$package_root/.lake/build/ir/"}
+    package_module=${package_module%.c.o.export}
+    for path in "$object" "${object%.o.export}" \
+        "$package_root/.lake/build/lib/lean/$package_module.olean"; do
+      if [[ ! -f "$incremental_baseline_root/$path" || ! -f "$path" ]] || \
+          ! cmp -s "$incremental_baseline_root/$path" "$path"; then
+          printf 'build-native-host: package artifact changed: %s\n' "$path" >&2
+          exit 65
+      fi
+      printf '%s\0' "$path" >> "$reused_paths"
+    done
+    validated_packages=$((validated_packages + 1))
+  done < "$baseline_packages"
+  xargs -0 -n 50 shasum -a 256 < "$reused_paths" \
+    > "$output_dir/reused-artifact-sha256.txt"
+  {
+    printf 'baseline_snapshot=%s\n' "$incremental_baseline_root"
+    printf 'baseline_output=%s\n' "$incremental_baseline_output"
+    printf 'baseline_binary_sha256=%s\n' "$baseline_binary_hash"
+    printf 'unchanged_imported_modules=%s\n' "$validated_sources"
+    printf 'unchanged_package_objects=%s\n' "$validated_packages"
+    printf 'changed_host_source_sha256=%s\n' \
+      "$(shasum -a 256 Host/Main.lean | cut -d ' ' -f 1)"
+  } > "$output_dir/incremental-validation.txt"
+  shasum -a 256 "$toolchain/bin/lean" "$toolchain/bin/clang" \
+    "$toolchain/bin/leanc" > "$output_dir/toolchain-sha256.txt"
+  printf 'incremental imported source/artifact check PASS %s modules, %s package objects\n' \
+    "$validated_sources" "$validated_packages" | tee -a "$output_dir/build.log"
+fi
+
 if [[ "$build_umbrella" == 0 ]]; then
   index=0
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
+    if [[ -n "$incremental_baseline_root" && "$module" != Host.Main ]]; then
+      continue
+    fi
     index=$((index + 1))
     safe=${module//./_}
     log="$output_dir/lean/$(printf '%04d' "$index")-$safe.log"
@@ -387,6 +543,13 @@ cat > "$compile_args" <<EOF
 -DNDEBUG
 -DLEAN_EXPORTING
 EOF
+if [[ -n "$incremental_baseline_root" ]]; then
+  cmp -s "$incremental_baseline_output/compile-args.txt" "$compile_args" || {
+    printf 'build-native-host: incremental C compiler arguments changed\n' >&2
+    exit 65
+  }
+  shasum -a 256 "$compile_args" >> "$output_dir/toolchain-sha256.txt"
+fi
 
 export toolchain output_dir
 # This single-quoted text is the child bash body, not parent interpolation.
@@ -561,7 +724,33 @@ while IFS= read -r module; do
   source=${module//./\/}.lean
   shasum -a 256 "$source"
 done < "$build_modules" > "$output_dir/source-sha256.txt"
+reusable_paths="$output_dir/reusable-artifact-paths.nul"
+: > "$reusable_paths"
+while IFS= read -r module; do
+  stem=${module//./\/}
+  for path in ".lake/build/lib/lean/$stem.olean" \
+      ".lake/build/lib/lean/$stem.ilean" \
+      ".lake/build/ir/$stem.c" \
+      ".lake/build/ir/$stem.c.o.export"; do
+    [[ -f "$path" ]] || { printf 'missing reusable project artifact: %s\n' "$path" >&2; exit 66; }
+    printf '%s\0' "$path" >> "$reusable_paths"
+  done
+done < "$source_modules"
+while IFS= read -r object; do
+  package_root=${object%%/.lake/build/ir/*}
+  package_module=${object#"$package_root/.lake/build/ir/"}
+  package_module=${package_module%.c.o.export}
+  for path in "$object" "${object%.o.export}" \
+      "$package_root/.lake/build/lib/lean/$package_module.olean"; do
+    [[ -f "$path" ]] || { printf 'missing reusable package artifact: %s\n' "$path" >&2; exit 66; }
+    printf '%s\0' "$path" >> "$reusable_paths"
+  done
+done < "$output_dir/package-objects.txt"
+xargs -0 -n 50 shasum -a 256 < "$reusable_paths" \
+  > "$output_dir/reusable-artifact-sha256.txt"
 shasum -a 256 "$binary" "$response" "$closure" > "$output_dir/artifact-sha256.txt"
+shasum -a 256 "$output_dir/reusable-artifact-sha256.txt" \
+  >> "$output_dir/artifact-sha256.txt"
 if [[ "$build_umbrella" == 1 ]]; then
   shasum -a 256 "$umbrella_closure" >> "$output_dir/artifact-sha256.txt"
 fi
@@ -575,15 +764,27 @@ git status --short > "$output_dir/git-status.txt"
   printf 'toolchain=%s\n' "$toolchain"
   printf 'native_target=%s:%s\n' "$(uname -s)" "$(uname -m)"
   printf 'umbrella=%s\n' "$build_umbrella"
+  if [[ -n "$incremental_baseline_root" ]]; then
+    printf 'incremental_baseline=%s\n' "$incremental_baseline_output"
+    printf 'unchanged_imported_modules=%s\n' "$validated_sources"
+    printf 'unchanged_package_objects=%s\n' "$validated_packages"
+    printf 'reused_artifact_manifest=%s\n' "$output_dir/reused-artifact-sha256.txt"
+  fi
   if [[ "$build_umbrella" == 1 ]]; then
     printf 'lake_gate=lake build Minidregg\n'
     printf 'max_concurrent_real_lean=1\n'
     printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   fi
-  printf 'compiled_source_modules=%s\n' "$(wc -l < "$build_modules" | tr -d ' ')"
+  if [[ -n "$incremental_baseline_root" ]]; then
+    printf 'compiled_source_modules=1\n'
+  else
+    printf 'compiled_source_modules=%s\n' "$(wc -l < "$build_modules" | tr -d ' ')"
+  fi
   printf 'source_modules=%s\n' "$(wc -l < "$source_modules" | tr -d ' ')"
   printf 'package_modules=%s\n' "$(wc -l < "$package_required" | tr -d ' ')"
   printf 'response_objects=%s\n' "$(wc -l < "$response" | tr -d ' ')"
+  printf 'reusable_artifact_manifest_sha256=%s\n' \
+    "$(shasum -a 256 "$output_dir/reusable-artifact-sha256.txt" | cut -d ' ' -f 1)"
   printf 'usage_exit=%s\n' "$usage_exit"
   printf 'binary=%s\n' "$binary"
   printf 'binary_sha256=%s\n' "$(shasum -a 256 "$binary" | awk '{print $1}')"
