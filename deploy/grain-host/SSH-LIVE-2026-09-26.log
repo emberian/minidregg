@@ -1,0 +1,108 @@
+host=persvati date=2026-09-26 scope=private-loopback-ssh user-service Mini=combined31a
+31a00492594a9abbde4541fef687f4d6a2fd2cac06c1645e604178a3e7f18179  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-combined
+b0884d2bee8f2cf38e7f7fa8cd17ded48b85fd0bf9bb440fcc9b44250a36661f  /tmp/mini-grain-ssh-live.i35dUm/bin/mini
+903e7ab599f0d73338524a028d9c7b4f8d4e77b44d20395bcedda8a1ffdc95f6  /tmp/mini-grain-ssh-live.i35dUm/bin/grain-runtime
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/mini-grain-ssh-live.i35dUm/bin/minidregg-link-sqlite-store
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/mini-grain-ssh-live.i35dUm/bin/minidregg-credential-signature-verifier
+eb39042732749593fef4ed51269f0a2565b48d961f8403f9acb0d86d69277c24  /tmp/mini-grain-ssh-live.i35dUm/bin/mini-hermes-test-provider
+295e09bc0469310f96bf78b1674ac9f04a646bebd6e85e7e6255bd7f689a0916  /tmp/mini-grain-ssh-live.i35dUm/deploy/grain-host/bwrap
+e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554  /tmp/mini-grain-ssh-live.i35dUm/deploy/grain-host/launch-gate
+317737c2f0fad17d579373cc4741b7286ff7d10a44305c7b86426c3599fd24bb  /tmp/mini-grain-ssh-live.i35dUm/deploy/grain-host/grain-ssh
+5acf1cfb297fb82b83c86bebdfb36f84fbf772e71351c7f161eb350cb874cd43  /tmp/mini-grain-ssh-live.i35dUm/deploy/grain-host/render-friend-key
+4467ac377f6b4bac42b3b04ec0ce521164411619c6e39d591ee6c86e2ab8c273  /tmp/mini-grain-ssh-live.i35dUm/evidence-native/runtime-config.json
+7433a476087a6667913e5b19bff0a9ffdcc29cf3dfeb90df2fc2da7083fa3c37  /tmp/mini-grain-ssh-live.i35dUm/worker-work/.hermes/config.yaml
+2790c7ade33f64b7f24148887c86dda4e9646a174f02b0fd9586fed0da8d940f  /tmp/mini-grain-ssh-live.i35dUm/setup.sh
+10a291d6f2495ff9b049aedcffb0ffd212ac2c605be3ecf253a7808478abdbd1  /tmp/mini-grain-ssh-live.i35dUm/sshd-setup.sh
+47652e3a0d4ff5cdd297cbdfbcd92fdb8b1a1c21079b8f9425d1431a4562b323  /tmp/mini-grain-ssh-live.i35dUm/soft.sh
+875c400f65470e64da4cc5be919691ffbc5260c76f9c417a06d2a7e9f7d01e35  /tmp/mini-grain-ssh-live.i35dUm/hard.sh
+a45db63907281b926df5c73c5bccdeade46c9d01f7bcb3210ef1320ff4eefef0  /tmp/mini-grain-ssh-live.i35dUm/hermes.sh
+5e9d86c1c56ad782dc7c0595b951a93ae760a3734d79dc286035158c3c0bc883  /tmp/mini-grain-ssh-live.i35dUm/second.sh
+source hashes:
+86985534799dc1851c57312437728637e7c7bf251a8e0f2509c1c77cb3dc57b8  /tmp/mini-grain-ssh-live.i35dUm/runtime-latest/src/main.rs
+2cc76f00c49c2e7e02ce7d2d725833763e060a98cbeb4e65a2889eaa81980ee9  /tmp/mini-grain-ssh-live.i35dUm/runtime-latest/src/mcp.rs
+3ee6a8bee0e4fb3f569eafd22a32a90248c8d6721b5fdaeea4849bafa7425526  /tmp/mini-grain-ssh-live.i35dUm/runtime-latest/src/provider_profile.rs
+77d8a78c130a5ade454bf3c67c29a6ea493fd91567b09ac312c0e62918d10380  /tmp/mini-grain-ssh-live.i35dUm/mini-latest/src/main.rs
+461966fc33eb22789c15e4cd73cb9b3c2d2714b57320233d075406c676dd6876  /tmp/mini-grain-ssh-live.i35dUm/mini-latest/src/transport.rs
+65a4ad217a43b103e70dfa41e91a804d7e0e11ce27d376577569f5c65aa68e96  /tmp/mini-grain-ssh-live.i35dUm/deploy/grain-host/launch-gate.rs
+f59cbaab84d8170227fc45c5dba506fce5ea9ebcb8716407d55a5926502f632d  /tmp/mini-grain-ssh-live.i35dUm/provider-source/src/main.rs
+28d8c8cc734c8efd4a4a320c88bd9742f6d82931958409fb265a5cc81afa74ae  /tmp/mini-grain-ssh-live.i35dUm/native/grain-runtime/acceptance.sh
+signed bootstrap delegated read:
+{"root":"33123752497037221731231169017086294867303331174554263998024751327768383133892","grain":null}
+soft SSH scoped short:
+MainPID=254903
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t7001-o9.service
+ActiveState=active
+MainPID=0
+ControlGroup=
+ActiveState=inactive
+gate=fenced
+signed soft aftermath:
+{"generation":"1","remaining":"99","reserved":"0","status":"2","task":"7001"}
+hard SSH held unit and physical stop:
+MainPID=293072
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t7001-o20.service
+ActiveState=active
+captured_cgroup_pid_count=3
+captured_host_pids_all_absent_or_zombie=yes
+MainPID=0
+ControlGroup=
+ActiveState=inactive
+gate=fenced
+signed hard aftermath:
+{"generation":"2","remaining":"96","reserved":"3","status":"5","task":"7001"}
+signed audited reconciliation:
+{"generation":"2","remaining":"99","reserved":"0","status":"0","task":"7001"}
+admin reconciliation journal stages:
+[{"action":"settle-held-allowance","authority":"parent","stage":"requested","charge":"0","externalEffectsAcknowledged":false},{"action":null,"authority":"parent","stage":"signed-settlement-confirmed","charge":"0","externalEffectsAcknowledged":null},{"action":"acknowledge-external-effects","authority":null,"stage":"acknowledged","charge":null,"externalEffectsAcknowledged":true}]
+first Hermes worker:
+RuntimeMaxUSec=25min
+MainPID=368096
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t7001-o45.service
+ActiveState=active
+MainPID=0
+ControlGroup=
+ActiveState=inactive
+gate=fenced
+first Hermes signed native readback:
+{"generation":"3","remaining":"98","reserved":"0","status":"2","task":"7001"}
+{"generation":"2","remaining":"49","reserved":"0","status":"0","task":"7002"}
+{"root":"55070908931993074135985362517665169451634431671625479692889086081017559966815","entries":[{"key":{"field":"1","resource":"7003","type":"object"},"value":"0"},{"key":{"field":"0","resource":"7003","type":"object"},"value":"1"}]}
+second Hermes worker:
+RuntimeMaxUSec=25min
+MainPID=512650
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t7001-o69.service
+ActiveState=active
+MainPID=0
+ControlGroup=
+ActiveState=inactive
+gate=fenced
+second Hermes visible result (last lines):
+attached soft to Mini grain 7001
+acceptance-publicationFixture observed the Mini publication result. The read and publish tool calls completed through Hermes MCP.Custom endpoint rejected this request as malformed, so the model didn't answer. Start a clean session with /new or switch models with /model; if it keeps happening, run `hermes doctor`.
+
+Provider said: HTTP 409: Mini publish returned an error
+provider fixture protocol log:
+completion bytes=36663 stream=true stage=read publication
+reject bytes=1356 reason=mini_read_resource is not advertised to Hermes
+completion bytes=37788 stream=true stage=publish root=33123752497037221731231169017086294867303331174554263998024751327768383133892 field=0
+completion bytes=39197 stream=true stage=complete
+reject bytes=1347 reason=mini_read_resource is not advertised to Hermes
+completion bytes=39380 stream=true stage=read publication
+completion bytes=40627 stream=true stage=publish root=55070908931993074135985362517665169451634431671625479692889086081017559966815 field=2
+reject bytes=41600 reason=Mini publish returned an error
+second Hermes signed native readback:
+{"generation":"3","remaining":"97","reserved":"0","status":"2","task":"7001"}
+{"generation":"4","remaining":"48","reserved":"0","status":"0","task":"7002"}
+{"root":"113165090123915682967404063493066207533634109815478468793224753513096677075760","entries":[{"key":{"field":"1","resource":"7003","type":"object"},"value":"0"},{"key":{"field":"0","resource":"7003","type":"object"},"value":"1"},{"key":{"field":"2","resource":"7003","type":"object"},"value":"2"}]}
+final journal custody summary:
+{"connection":"soft","pending":null,"child":null,"parentHold":null,"toolPending":null,"toolHold":null,"settlementDue":null,"unresolvedExternal":[],"hermesSession":{"id":"6be61cbb-1018-4edf-87fe-5422845a86f5","loadVerified":true,"pendingPrompt":false,"retentionIssue":null}}
+signed evidence hashes:
+7485e2a700b3b88c902ef0825dd232962516e284973a47bec74528a79d38e513  /tmp/mini-grain-ssh-live.i35dUm/ssh/soft-after/view.json
+9f72349b711578dc5cd1789c09b2c90ac324580ee5f8a5e47fe649d318f1632a  /tmp/mini-grain-ssh-live.i35dUm/ssh/hard-after/view.json
+2fd44f86c79927d3b89f58e10067a599f56de37c0604537a34052b89c2ca85e4  /tmp/mini-grain-ssh-live.i35dUm/ssh/reconciled/view.json
+f7efbcb770242f83956c6fc3908d619f5633aab11bca3718b278b0d67f17e907  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-parent/view.json
+d08a5634910dc8fc3cda3970f951090aff54a5aefd3b624eb2c6e6097f47369d  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-tool/view.json
+a1a42de9690d9782d7d72e67b5033d0350d8c859863f8a48e966fd0a300767d3  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-publication/view.json
+7bb206a84234dec265ee4d9ed8ff5047f6076b24bbe94b483dea2c8ce96f1679  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-parent2/view.json
+8ebc7465b046f5a3d00e7af508c3c9a015dfb5916187376d0baa10032d80f6c7  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-tool2/view.json
+c7cc87d0cda2a85d0e551ac468f06672bc7e5f00c5c92f57bf4c64cca698aad5  /tmp/mini-grain-ssh-live.i35dUm/ssh/final-publication2/view.json
