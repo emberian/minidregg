@@ -2,7 +2,7 @@
 
 **September 26 overnight construction is active.** Begin with the suite's
 [current construction brief](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/overnight.md)
-and [native receiving checkpoint](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/checkpoint-6.md).
+and [native receiving checkpoint](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/checkpoint-7.md).
 Main now contains the recovered fn integration lineage and persistent-host,
 gateway-policy and client checkpoints. Native convergence, actual hosted
 grain supervision and fn receiving tests are ongoing. The [fresh fn evidence](docs/evidence/2026-09-26-fresh-fn/README.md)
