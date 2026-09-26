@@ -132,8 +132,8 @@ inductive Confirmation where
   deriving Repr, DecidableEq
 
 inductive Result (rootBytes : List UInt8 → Digest) where
-  /-- `snapshot` was reread from the physical store and its journal contains
-  this exact intent. It may include concurrent subsequent accepted turns. -/
+  /-- Exact physical readback confirmed this snapshot's journal contains the
+  intent. A concurrent later turn may instead require full reopened replay. -/
   | confirmed (kind : Confirmation) (snapshot : DataSnapshot rootBytes)
   | rejected (reason : RejectReason)
   | contention
@@ -150,6 +150,66 @@ def confirm (transport : Transport) (rootBytes : List UInt8 → Digest)
       | .replayed _ => return .confirmed kind loaded.snapshot
       | _ => return .uncertain "CAS attempted; reopened journal does not confirm the exact intent"
 
+/-- An exact readback of the only prepared CAS candidate denotes its already
+checked next snapshot. The candidate is tied to the original loaded image and
+accepted intent by `Ready.restored`, rather than a digest or caller-supplied
+summary. -/
+theorem prepared_exact_readback {rootBytes : List UInt8 → Digest}
+    {image : Image} {before : DataSnapshot rootBytes} {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes image before intent) (readback : List UInt8)
+    (exact : readback = encode (image.append intent)) :
+    ∃ loaded : Loaded rootBytes, loaded.bytes = readback ∧ loaded.snapshot = ready.next := by
+  subst readback
+  exact ⟨⟨encode (image.append intent), image.append intent, ready.next, rfl,
+    ready.restored⟩, rfl, rfl⟩
+
+/-- ByteArray's derived equality compares every byte, with no digest premise.
+This bridge lets the stack-safe native comparison discharge exact list-byte
+identity before using the prepared snapshot. -/
+theorem byteArray_beq_exact (left right : List UInt8) :
+    (left.toByteArray == right.toByteArray) = true ↔ left = right := by
+  have byteArrayBEq (a b : ByteArray) : (a == b) = true ↔ a = b := by
+    cases a with
+    | mk data =>
+      cases b with
+      | mk other =>
+        unfold BEq.beq ByteArray.instBEq
+        unfold ByteArray.instBEq.beq
+        simp only [ByteArray.mk.injEq, beq_iff_eq]
+  rw [byteArrayBEq]
+  constructor
+  · intro exact
+    have lists := congrArg (fun bytes : ByteArray => bytes.data.toList) exact
+    simpa using lists
+  · intro exact
+    subst right
+    rfl
+
+/-- Read once after CAS. Equal complete bytes reuse the prepared executor's
+proved next snapshot; changed bytes follow the existing canonical reopen and
+replay check, which admits a concurrent later commit without hiding it. -/
+private def confirmPrepared (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes)
+    (ready : Ready rootBytes loaded.image loaded.snapshot intent)
+    (proposed : List UInt8) (_canonical : proposed = encode (loaded.image.append intent))
+    (kind : Confirmation) : IO (Result rootBytes) := do
+  match ← transport.read with
+  | .error message => return .uncertain s!"CAS attempted; readback unavailable: {message}"
+  | .ok none => return .uncertain "CAS attempted; readback unavailable: durable image is not initialized"
+  | .ok (some readback) =>
+      if exact : readback.toByteArray == proposed.toByteArray then
+        have exactBytes : readback = proposed := (byteArray_beq_exact readback proposed).mp exact
+        have _ : ∃ reread : Loaded rootBytes,
+            reread.bytes = readback ∧ reread.snapshot = ready.next :=
+          prepared_exact_readback ready readback (exactBytes.trans _canonical)
+        return .confirmed kind ready.next
+      match loadBytes rootBytes readback with
+      | .error message => return .uncertain s!"CAS attempted; readback unavailable: {message}"
+      | .ok reopened =>
+          match DurableDataIntent.execute .complete reopened.snapshot intent with
+          | .replayed _ => return .confirmed kind reopened.snapshot
+          | _ => return .uncertain "CAS attempted; reopened journal does not confirm the exact intent"
+
 /-- Publish against the exact image on which the controller admitted the
 operation. In particular, a logical height derived from `loaded.image` cannot
 silently acquire a later journal boundary between admission and publication.
@@ -164,14 +224,15 @@ def receiveLoaded (transport : Transport) (rootBytes : List UInt8 → Digest)
   | .inr (.replayed _) => return .confirmed .replayed loaded.snapshot
   | .inr (.rejected reason) => return .rejected reason
   | .inr _ => return .unavailable "unexpected complete-schedule outcome"
-  | .inl _ =>
+  | .inl ready =>
       let proposed := encode (loaded.image.append intent)
       match ← transport.cas (some loaded.bytes) proposed with
       | .installed | .alreadyPresent =>
-          confirm transport rootBytes intent .installed
+          confirmPrepared transport rootBytes loaded intent ready proposed rfl .installed
       | .conflict => return .contention
       | .uncertain _ =>
-          confirm transport rootBytes intent .recoveredAfterUncertainResponse
+          confirmPrepared transport rootBytes loaded intent ready proposed rfl
+            .recoveredAfterUncertainResponse
 
 /-- Bounded contention retry for an already constructed internal intent whose
 admission does not depend on a journal-wide clock. Controllers deriving authority

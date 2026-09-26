@@ -190,19 +190,37 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     (← receiveLoaded transport rootBytes finalImage pinnedCandidate)
   require "pinned replay preserves physical image" ((← loadExact transport).bytes == finalImage.bytes)
 
-  require "codec rejects trailing bytes" ((decode (finalImage.bytes ++ [0])).isNone)
+  -- The first CAS is exact, but a second valid commit lands before its
+  -- readback. Confirmation must take the full reopened path and return the
+  -- later snapshot, rather than claiming the prepared candidate was the tip.
+  let afterCas : Transport :=
+    { transport with cas := fun expected proposed => do
+        let observation ← transport.cas expected proposed
+        if observation == .installed then
+          let _ ← confirmed "later commit before readback" .installed
+            (← receive transport rootBytes (advanceJournal 24 [33]) 3)
+        return observation }
+  let withLater ← confirmed "concurrent later commit confirmed" .installed
+    (← receiveLoaded afterCas rootBytes finalImage (advanceJournal 23 [33]))
+  require "concurrent readback returns both accepted turns"
+    (withLater.model.history.length == finalImage.snapshot.model.history.length + 2)
+  let afterConcurrent ← loadExact transport
+  require "concurrent readback returns physical latest snapshot"
+    (withLater.model.history.length == afterConcurrent.snapshot.model.history.length)
+
+  require "codec rejects trailing bytes" ((decode (afterConcurrent.bytes ++ [0])).isNone)
   require "codec rejects redundant natural digit"
-    ((decode (finalImage.bytes.take 1 ++ [0] ++ finalImage.bytes.drop 1)).isNone)
+    ((decode (afterConcurrent.bytes.take 1 ++ [0] ++ afterConcurrent.bytes.drop 1)).isNone)
   require "malformed native success is uncertain"
     (match parseCasOutput ⟨0, "Installed\nextra\n", ""⟩ with | .uncertain _ => true | _ => false)
-  let duplicate : Image := { finalImage.image with accepted := finalImage.image.accepted ++ [IntentRecord.ofIntent fourth] }
+  let duplicate : Image := { afterConcurrent.image with accepted := afterConcurrent.image.accepted ++ [IntentRecord.ofIntent fourth] }
   require "recovery rejects duplicate journal append" ((recover rootBytes (encode duplicate)).isNone)
-  let _ ← transport.cas (some finalImage.bytes) [0, 1, 2]
+  let _ ← transport.cas (some afterConcurrent.bytes) [0, 1, 2]
   require "corrupt image refuses without implicit reset"
     (match ← receive transport rootBytes fourth 3 with | .unavailable _ => true | _ => false)
   require "corrupt image remains visible to operator"
     (match ← transport.read with | .ok (some bytes) => bytes == [0, 1, 2] | _ => false)
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite CAS, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response reopen, concurrent guard move, pinned admission refuses journal-only race, corruption; final valid image {finalImage.bytes.length} bytes / 7 commits"
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite CAS, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response reopen, concurrent guard move, pinned admission refuses journal-only race, concurrent later-commit readback, corruption; final valid image {afterConcurrent.bytes.length} bytes / 9 commits"
 
 end DurableReceiverProbe
 
