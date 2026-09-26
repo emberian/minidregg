@@ -11,6 +11,7 @@ frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
 import Kernel.NativeHostSession
+import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
@@ -164,6 +165,7 @@ structure Settings where
   fnPoll : Option FnPollServiceSettings := none
   fnReplyPoll : Option FnReplyPollServiceSettings := none
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
+  continuityProviderResourceId : Option Nat := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -2194,6 +2196,84 @@ def runFnOriginOutboxSession (config : NativeHost.Config)
        ("miniOrigin", evidenceReceiptJson receipt),
        ("intentHex", toJson intentHex)]).compress.toUTF8.toList)
 
+/-- Reopen the exact accepted tag-10 publication preparation. The local
+gateway signature and full original command shape were checked at admission;
+historical export does not require a grant that may since have been revoked.
+No carrier or verifier path comes from this request. -/
+def runFnOriginOutboxExportSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  unless !payload.isEmpty && payload.length ≤ 80 &&
+      payload.all (fun byte => 48 ≤ byte.toNat && byte.toNat ≤ 57) do
+    throw (IO.userError "prepared R export transaction ID must be bounded decimal ASCII")
+  let transaction := String.fromUTF8! payload.toByteArray
+  let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
+  let gateway ← requireGateway config
+  let opened ← sessionOpened config state
+  let refused := fun (reason : String) =>
+    (18, (Lean.Json.mkObj
+      [("type", toJson "fn-a-origin-outbox-export-v1"),
+       ("status", toJson "refused"), ("reason", toJson reason)]).compress.toUTF8.toList)
+  let some record := opened.durable.image.accepted.find?
+      (fun entry => entry.transactionId.value == transactionId)
+    | return refused "prepared R transaction is absent"
+  let some prepared := FnOriginOutbox.originalPrepared gateway
+      config.deployment.domain config.profile.semantics record
+    | return refused "transaction is not an accepted prepared R outbox"
+  let some outboxReceipt := NativeHost.historicalReceipt config opened.durable
+      record.transactionId record.event.eventId
+    | return refused "prepared R original receipt is unavailable"
+  let some messageId := String.fromUTF8? prepared.messageId.toByteArray
+    | return refused "prepared R Message-ID is not UTF-8"
+  return (18, (Lean.Json.mkObj
+    [("type", toJson "fn-a-origin-outbox-export-v1"),
+     ("status", toJson "accepted"),
+     ("transactionId", toJson transaction),
+     ("messageId", toJson messageId),
+     ("sourceIdentity", toJson
+       (Minidregg.Host.Json.encodeHex prepared.sourceIdentity)),
+     ("carrierHex", toJson (Minidregg.Host.Json.encodeHex prepared.carrier)),
+     ("packageIdentity", toJson (toString prepared.packageIdentity.value)),
+     ("originCallIdentity", toJson (toString prepared.originCallIdentity.value)),
+     ("miniOrigin", evidenceReceiptJson prepared.originReceipt),
+     ("miniOutbox", evidenceReceiptJson outboxReceipt)]).compress.toUTF8.toList)
+
+/-- A current, read-only check of one originally confirmed provider reserve.
+The caller supplies its retained canonical call and outcome bytes; the
+provider resource ID is fixed by operator configuration. This check does not
+lease the provider resource across a later external send. -/
+def runProviderContinuitySession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (providerResourceId : Nat) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  unless providerResourceId > 0 do
+    throw (IO.userError "provider continuity resource ID must be positive")
+  let (reserveCall, outcomeBytes) ← splitPair payload
+  unless !reserveCall.isEmpty && !outcomeBytes.isEmpty &&
+      outcomeBytes.length ≤ 1024 do
+    throw (IO.userError "provider continuity needs bounded original call and outcome")
+  let some (.confirmed _ anchor) := outcomeCodec.decode outcomeBytes
+    | throw (IO.userError "provider continuity outcome is not canonical confirmation")
+  discard <| sessionOpened config state
+  let some current ← state.get
+    | throw (IO.userError "provider continuity session invalidated")
+  let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
+  let checkedBoundary := (NativeHost.imageBoundary config current.target.image).value
+  let checkedCount := current.target.image.accepted.length
+  let verdict := NativeReserveContinuity.check current anchor reserveCall providerCell
+  let (continuous, reason) := match verdict with
+    | .ok _ => (true, "")
+    | .error detail => (false, detail)
+  return (17, (Lean.Json.mkObj
+    [("type", toJson "minidregg-provider-continuity-v1"),
+     ("status", toJson (if continuous then "confirmed" else "refused")),
+     ("continuous", toJson continuous),
+     ("providerResourceId", toJson (toString providerResourceId)),
+     ("anchor", evidenceReceiptJson anchor),
+     ("checkedImageBoundary", toJson (toString checkedBoundary)),
+     ("checkedAcceptedCount", toJson (toString checkedCount)),
+     ("reason", toJson reason)]).compress.toUTF8.toList)
+
 /-- The A reply poll uses one operator-pinned R carrier and a live Q control
 endpoint. The request carries no paths, claims, or verifier selection. -/
 def runFnReplyPollSession (config : NativeHost.Config)
@@ -2527,6 +2607,17 @@ def run (arguments : List String) : IO UInt32 := do
                               | return ((255 : UInt8), failure "fn-origin-outbox"
                                   "A origin outbox service is not configured")
                             runFnOriginOutboxSession pinnedConfig state selected payload
+                        | 17 =>
+                            let some providerResourceId := settings.continuityProviderResourceId
+                              | return ((255 : UInt8), failure "provider-continuity"
+                                  "provider continuity resource is not configured")
+                            runProviderContinuitySession pinnedConfig state
+                              providerResourceId payload
+                        | 18 =>
+                            unless catalogService.isSome do
+                              return ((255 : UInt8), failure "fn-origin-outbox"
+                                "A origin outbox service is not configured")
+                            runFnOriginOutboxExportSession pinnedConfig state payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
