@@ -36,6 +36,20 @@ abbrev Context := ResourceObservationAdmission.Context
 
 variable {deployment : Deployment} {durable : Durable}
 
+/-- Hash the canonical bytes retained by the loaded image. Re-encoding its
+journal for every observed grant adds work without changing the commitment. -/
+def loadedImageBoundary (deployment : Deployment) (semantics : Digest)
+    (durable : Durable) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
+    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
+      (deployment.domain, semantics, durable.bytes))).digest
+
+theorem loadedImageBoundary_exact (deployment : Deployment) (semantics : Digest)
+    (durable : Durable) :
+    loadedImageBoundary deployment semantics durable =
+      NativeHostCodec.imageBoundary deployment.domain semantics durable.image := by
+  simp only [loadedImageBoundary, NativeHostCodec.imageBoundary, durable.canonical]
+
 private def refused : String := "observation refused"
 
 /-- Source contract named by the deployed profile: exact role selection,
@@ -148,7 +162,7 @@ private def bindingBytesAt (deployment : Deployment) (boundary semantics : Diges
 
 def bindingBytes (_context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
-  bindingBytesAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+  bindingBytesAt deployment (loadedImageBoundary deployment semantics durable)
     semantics intent grant
 
 private def effectIdentityAt (deployment : Deployment) (boundary semantics : Digest)
@@ -158,7 +172,7 @@ private def effectIdentityAt (deployment : Deployment) (boundary semantics : Dig
 
 def effectIdentity (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  effectIdentityAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+  effectIdentityAt deployment (loadedImageBoundary deployment semantics durable)
     semantics intent grant
 
 private def markerAt (deployment : Deployment) (boundary semantics : Digest)
@@ -168,13 +182,30 @@ private def markerAt (deployment : Deployment) (boundary semantics : Digest)
 
 def marker (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  markerAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+  markerAt deployment (loadedImageBoundary deployment semantics durable)
     semantics intent grant
+
+theorem effectIdentity_exact (context : Context deployment durable) (semantics : Digest)
+    (intent : Intent) (grant : GrantRef) :
+    effectIdentity context semantics intent grant =
+      effectIdentityAt deployment
+        (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+        semantics intent grant := by
+  simp only [effectIdentity, loadedImageBoundary_exact]
+
+theorem marker_exact (context : Context deployment durable) (semantics : Digest)
+    (intent : Intent) (grant : GrantRef) :
+    marker context semantics intent grant =
+      markerAt deployment
+        (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+        semantics intent grant := by
+  simp only [marker, loadedImageBoundary_exact]
 
 theorem bindingBytesAt_exact (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
     bindingBytesAt deployment (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
-      semantics intent grant = bindingBytes context semantics intent grant := rfl
+      semantics intent grant = bindingBytes context semantics intent grant := by
+  simp only [bindingBytes, loadedImageBoundary_exact]
 
 private def requestAt (context : Context deployment durable) (boundary semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
@@ -199,7 +230,7 @@ private def requestAt (context : Context deployment durable) (boundary semantics
 def request (context : Context deployment durable) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) : Request grant.kind :=
-  requestAt context (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
+  requestAt context (loadedImageBoundary deployment semantics durable)
     semantics federation genesisHeight intent grant preRoot
 
 theorem requestAt_exact (context : Context deployment durable) (semantics : Digest)
@@ -207,7 +238,8 @@ theorem requestAt_exact (context : Context deployment durable) (semantics : Dige
     (grant : GrantRef) (preRoot : Digest) :
     requestAt context (NativeHostCodec.imageBoundary deployment.domain semantics durable.image)
       semantics federation genesisHeight intent grant preRoot =
-      request context semantics federation genesisHeight intent grant preRoot := rfl
+      request context semantics federation genesisHeight intent grant preRoot := by
+  simp only [request, loadedImageBoundary_exact]
 
 abbrev readPatch := ResourceObservationAdmission.readPatch
 
@@ -307,7 +339,7 @@ def header (context : Context deployment durable) (profile : CanonicalRuntimePro
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     Except String CredentialSignedEnvelopeController.SignedHeader :=
   headerAt context profile
-    (NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image)
+    (loadedImageBoundary deployment profile.semantics durable)
     federation genesisHeight intent grant
 
 theorem headerAt_exact (context : Context deployment durable)
@@ -316,14 +348,15 @@ theorem headerAt_exact (context : Context deployment durable)
     headerAt context profile
       (NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image)
       federation genesisHeight intent grant =
-      header context profile federation genesisHeight intent grant := rfl
+      header context profile federation genesisHeight intent grant := by
+  simp only [header, loadedImageBoundary_exact]
 
 /-- The success payload contains no field values, balances or policy source.
 The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data. -/
 def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except String Challenge := do
-  let boundary := NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image
+  let boundary := loadedImageBoundary deployment profile.semantics durable
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
     let value ← headerAt context profile boundary federation genesisHeight intent grant
@@ -338,7 +371,7 @@ def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (grant : GrantRef) (signature : List UInt8) :
     IO (Except String (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error refused
-  let boundary := NativeHostCodec.imageBoundary deployment.domain profile.semantics durable.image
+  let boundary := loadedImageBoundary deployment profile.semantics durable
   let wanted := requestAt context boundary profile.semantics federation genesisHeight
     intent grant selected.packed.payload.root
   let .ok prepared := ResourceObservationAdmission.prepare context profile wanted
