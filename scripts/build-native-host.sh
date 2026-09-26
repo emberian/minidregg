@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for command in git jq lake file find sort join comm xargs shasum; do
+for command in git jq lake file find sort join comm xargs shasum uname; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
@@ -63,6 +63,16 @@ done
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) native_object_description='Mach-O 64-bit object arm64' ;;
+  Linux:x86_64) native_object_description='ELF 64-bit LSB relocatable, x86-64' ;;
+  *)
+    printf 'build-native-host: unsupported native target: %s %s\n' \
+      "$(uname -s)" "$(uname -m)" >&2
+    exit 69
+    ;;
+esac
 
 binary=${binary_path:-.lake/build/bin/minidregg-host}
 if [[ -e "$binary" || -L "$binary" ]]; then
@@ -432,6 +442,8 @@ fi
 
 comm -23 "$package_required" "$output_dir/package-object-modules.txt" \
   > "$output_dir/missing-package-objects.txt"
+missing_package_c="$output_dir/missing-package-c-paths.nul"
+: > "$missing_package_c"
 while IFS= read -r module; do
   [[ -n "$module" ]] || continue
   relative=${module//./\/}
@@ -444,14 +456,25 @@ while IFS= read -r module; do
     exit 66
   fi
   c_path=$(sed -n '1p' "$c_matches")
-  object="$c_path.o.export"
-  "$clang" -c -o "$object" "$c_path" \
-    -I "$toolchain/include" -fstack-clash-protection -fdata-sections \
-    -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
-    --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
-    -O3 -DNDEBUG -DLEAN_EXPORTING \
-    > "$output_dir/c/package-${module//./_}.log" 2>&1
+  printf '%s\0' "$c_path" >> "$missing_package_c"
 done < "$output_dir/missing-package-objects.txt"
+if [[ -s "$missing_package_c" ]]; then
+  # The single-quoted child body expands task-specific variables in bash.
+  # shellcheck disable=SC2016
+  xargs -0 -P "$native_jobs" -n 1 bash -c '
+    set -euo pipefail
+    c_path=$1
+    object="$c_path.o.export"
+    module=${c_path#*/.lake/build/ir/}
+    module=${module%.c}
+    "$toolchain/bin/clang" -c -o "$object" "$c_path" \
+      -I "$toolchain/include" -fstack-clash-protection -fdata-sections \
+      -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
+      --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
+      -O3 -DNDEBUG -DLEAN_EXPORTING \
+      > "$output_dir/c/package-${module//\//_}.log" 2>&1
+  ' build-package < "$missing_package_c"
+fi
 
 make_package_index > "$package_index"
 package_objects_tsv="$output_dir/package-objects.tsv"
@@ -463,9 +486,10 @@ fi
 cut -f2 "$package_objects_tsv" > "$output_dir/package-objects.txt"
 
 file -f "$output_dir/package-objects.txt" > "$output_dir/package-object-types.txt"
-grep -v 'Mach-O 64-bit object arm64$' "$output_dir/package-object-types.txt" \
+grep -vF "$native_object_description" "$output_dir/package-object-types.txt" \
   > "$output_dir/wrong-architecture-package-objects.txt" || true
 while IFS=: read -r object _description; do
+  object=${object%%[[:space:]]*}
   [[ -n "$object" ]] || continue
   c_path=${object%.o.export}
   [[ -f "$c_path" ]] || {
@@ -479,7 +503,7 @@ while IFS=: read -r object _description; do
     -O3 -DNDEBUG -DLEAN_EXPORTING
 done < "$output_dir/wrong-architecture-package-objects.txt"
 file -f "$output_dir/package-objects.txt" > "$output_dir/package-object-types-final.txt"
-if grep -v 'Mach-O 64-bit object arm64$' "$output_dir/package-object-types-final.txt" \
+if grep -vF "$native_object_description" "$output_dir/package-object-types-final.txt" \
     > "$output_dir/wrong-architecture-package-objects-final.txt"; then
   printf 'build-native-host: package objects remain incompatible after recompilation; see %s\n' \
     "$output_dir/wrong-architecture-package-objects-final.txt" >&2
@@ -501,7 +525,7 @@ if [[ -e "$binary" || -L "$binary" ]]; then
 fi
 mkdir -p "$(dirname "$binary")"
 binary="$(cd "$(dirname "$binary")" && pwd -P)/$(basename "$binary")"
-/usr/bin/time -lp "$leanc" -o "$binary" "@$response" > "$output_dir/link.log" 2>&1
+/usr/bin/time -p "$leanc" -o "$binary" "@$response" > "$output_dir/link.log" 2>&1
 
 set +e
 "$binary" > "$output_dir/usage.txt" 2>&1
@@ -528,6 +552,7 @@ git status --short > "$output_dir/git-status.txt"
   printf 'root=%s\n' "$root"
   printf 'lean=%s\n' "$(lean --version | sed -n '1p')"
   printf 'toolchain=%s\n' "$toolchain"
+  printf 'native_target=%s:%s\n' "$(uname -s)" "$(uname -m)"
   printf 'umbrella=%s\n' "$build_umbrella"
   if [[ "$build_umbrella" == 1 ]]; then
     printf 'lake_gate=lake build Minidregg\n'

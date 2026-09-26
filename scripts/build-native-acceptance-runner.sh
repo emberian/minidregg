@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$host_response" && -n "$output_dir" ]] || { usage >&2; exit 64; }
-for command in git lake file nm shasum; do
+for command in git lake file nm shasum uname; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'required command not found: %s\n' "$command" >&2
     exit 69
@@ -62,6 +62,14 @@ done
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) symbol_prefix=_ ;;
+  Linux:x86_64) symbol_prefix='' ;;
+  *)
+    printf 'unsupported native target: %s %s\n' "$(uname -s)" "$(uname -m)" >&2
+    exit 69
+    ;;
+esac
 [[ -f .minidregg-native-snapshot ]] || {
   printf 'independent-snapshot marker missing: %s/.minidregg-native-snapshot\n' "$root" >&2
   exit 73
@@ -89,7 +97,8 @@ host_object=.lake/build/ir/Host/Main.c.o.export
 # direct `lake env lean -c` selects unprefixed symbols (l_*). Match the host
 # object actually present in this snapshot; mixing them fails at link time.
 lean_setup_args=()
-if nm -gU "$host_object" | grep -q ' T _initialize_minidregg_Host_Main$'; then
+nm -g "$host_object" > "$output_dir/host-symbols.txt"
+if grep -q " T ${symbol_prefix}initialize_minidregg_Host_Main$" "$output_dir/host-symbols.txt"; then
   command -v jq >/dev/null 2>&1 || { printf 'jq is required for Lake-setup host objects\n' >&2; exit 69; }
   host_setup=.lake/build/ir/Host/Main.setup.json
   [[ -f "$host_setup" ]] || { printf 'missing Lake host setup: %s\n' "$host_setup" >&2; exit 66; }
@@ -97,7 +106,7 @@ if nm -gU "$host_object" | grep -q ' T _initialize_minidregg_Host_Main$'; then
   jq '.name = "AcceptanceMain"' "$host_setup" > "$driver_setup"
   lean_setup_args=(--setup "$driver_setup")
   printf 'package_namespace=minidregg\n' > "$output_dir/driver-abi.txt"
-elif nm -gU "$host_object" | grep -q ' T _initialize_Host_Main$'; then
+elif grep -q " T ${symbol_prefix}initialize_Host_Main$" "$output_dir/host-symbols.txt"; then
   printf 'package_namespace=unprefixed\n' > "$output_dir/driver-abi.txt"
 else
   printf 'unrecognized Host.Main initializer ABI\n' >&2
@@ -153,17 +162,18 @@ driver_object=.lake/build/ir/AcceptanceMain.c.o.export
   -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
   --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
   -O3 -DNDEBUG -DLEAN_EXPORTING > "$output_dir/driver-c.log" 2>&1
-nm -gU "$driver_object" | grep -q ' T _main$' || {
+nm -g "$driver_object" > "$output_dir/driver-symbols.txt"
+grep -q " T ${symbol_prefix}main$" "$output_dir/driver-symbols.txt" || {
   printf 'compiled driver did not export main\n' >&2
   exit 66
 }
 if [[ ${#lean_setup_args[@]} -gt 0 ]]; then
-  nm -gU "$driver_object" | grep -q ' T _initialize_minidregg_AcceptanceMain$' || {
+  grep -q " T ${symbol_prefix}initialize_minidregg_AcceptanceMain$" "$output_dir/driver-symbols.txt" || {
     printf 'driver object does not use the host Lake package ABI\n' >&2
     exit 66
   }
 else
-  nm -gU "$driver_object" | grep -q ' T _initialize_AcceptanceMain$' || {
+  grep -q " T ${symbol_prefix}initialize_AcceptanceMain$" "$output_dir/driver-symbols.txt" || {
     printf 'driver object does not use the host direct-compiler ABI\n' >&2
     exit 66
   }
@@ -177,7 +187,7 @@ printf '%s\n' "$driver_object" >> "$response"
   exit 65
 }
 binary="$output_dir/native-acceptance-runner"
-/usr/bin/time -lp "$toolchain/bin/leanc" -o "$binary" "@$response" > "$output_dir/link.log" 2>&1
+/usr/bin/time -p "$toolchain/bin/leanc" -o "$binary" "@$response" > "$output_dir/link.log" 2>&1
 set +e
 "$binary" > "$output_dir/usage.txt" 2>&1
 usage_exit=$?
@@ -193,6 +203,7 @@ if [[ ${#lean_setup_args[@]} -gt 0 ]]; then
 fi
 {
   printf 'root=%s\n' "$root"
+  printf 'native_target=%s:%s\n' "$(uname -s)" "$(uname -m)"
   printf 'driver_source=%s\n' "$driver_source"
   printf 'driver_source_sha256=%s\n' "$(shasum -a 256 AcceptanceMain.lean | awk '{print $1}')"
   printf 'host_response=%s\n' "$host_response"
