@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Render two private grain-runtime configs and direct units from signed Mini
+# base configs. This stages files only; it does not start Mini or any worker.
+set -euo pipefail
+umask 077
+
+if (($# != 1)); then
+  echo 'usage: render-hosted-pair ABS_MANIFEST_JSON' >&2
+  exit 64
+fi
+for tool in jq realpath sha256sum stat; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "render-hosted-pair: $*" >&2; exit 65; }
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+manifest=$1
+[[ $manifest == /* && -f $manifest && ! -L $manifest ]] || fail 'manifest must be an absolute regular file'
+[[ $(stat -c %u -- "$manifest") == "$(id -u)" &&
+   $(stat -c %a -- "$manifest") == 600 ]] ||
+  fail 'manifest must be owned by this user with mode 0600'
+
+jq -e '
+  [.baseA,.baseB,.runtime,.launcher,.unitDir,.outputDir,
+   .peerA.cwd,.peerA.workspace,.peerA.runtimeRoot,
+   .peerB.cwd,.peerB.workspace,.peerB.runtimeRoot] |
+  all(type == "string" and startswith("/"))
+' "$manifest" >/dev/null || fail 'manifest lacks absolute deployment paths'
+jq -e '
+  (.wallTimeSeconds | type == "number" and . >= 1 and . <= 1800 and floor == .) and
+  (.reserve | type == "string" and test("^[1-9][0-9]*$")) and
+  (.charge | type == "string" and test("^(0|[1-9][0-9]*)$"))
+' "$manifest" >/dev/null || fail 'manifest lacks bounded command allowance or wall time'
+
+field() { jq -er "$1" "$manifest"; }
+base_a=$(field .baseA)
+base_b=$(field .baseB)
+runtime=$(field .runtime)
+launcher=$(field .launcher)
+unit_dir=$(field .unitDir)
+output_dir=$(field .outputDir)
+wall=$(field .wallTimeSeconds)
+reserve=$(field .reserve)
+charge=$(field .charge)
+[[ ${launcher##*/} == bwrap ]] || fail 'launcher executable must be named bwrap'
+gate=${launcher%/*}/launch-gate
+
+for path in "$manifest" "$base_a" "$base_b" "$runtime" "$launcher" "$gate" "$unit_dir" "$output_dir"; do
+  [[ $path =~ ^/[A-Za-z0-9_./@-]+$ && $path != *//* &&
+     $path != */../* && $path != */./* && $path != */.. && $path != */. ]] ||
+    fail 'unsupported path syntax (spaces, %, quotes and traversal are excluded)'
+  [[ -e $path && ! -L $path && $(realpath -e -- "$path") == "$path" ]] ||
+    fail 'deployment path must exist without symlinks'
+done
+[[ -x $runtime && -x $launcher && -x $gate ]] || fail 'runtime, launcher and gate must be executable'
+[[ -d $unit_dir && -d $output_dir && $(stat -c %a -- "$output_dir") == 700 &&
+   $(stat -c %u -- "$output_dir") == "$(id -u)" ]] ||
+  fail 'outputDir must be an owned mode-0700 directory; unitDir must exist'
+[[ $($launcher --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] ||
+  fail 'launcher/gate protocol mismatch'
+
+for field_name in mini host hostConfig hostSocket; do
+  [[ $(jq -er ".$field_name" "$base_a") == "$(jq -er ".$field_name" "$base_b")" ]] ||
+    fail "base configs disagree on shared $field_name"
+done
+for base in "$base_a" "$base_b"; do
+  jq -e '.commands == []' "$base" >/dev/null || fail 'base config already contains commands'
+done
+
+for peer in a b; do
+  root=$output_dir/peer-$peer
+  [[ ! -e $root && ! -L $root ]] || fail "output already exists: $root"
+done
+
+for peer in a b; do
+  if [[ $peer == a ]]; then
+    base=$base_a
+    member=.peerA
+  else
+    base=$base_b
+    member=.peerB
+  fi
+  cwd=$(field "$member.cwd")
+  workspace=$(field "$member.workspace")
+  runtime_root=$(field "$member.runtimeRoot")
+  for path in "$cwd" "$workspace" "$runtime_root"; do
+    [[ $path =~ ^/[A-Za-z0-9_./@-]+$ && ! -L $path && -d $path &&
+       $(realpath -e -- "$path") == "$path" ]] ||
+      fail 'peer cwd/workspace/runtimeRoot must be existing canonical directories'
+  done
+  root=$output_dir/peer-$peer
+  mkdir -m 700 "$root"
+  cp -- "$base" "$root/base-config.json"
+  chmod 600 "$root/base-config.json"
+  jq --arg cwd "$cwd" --arg launcher "$launcher" --arg work "$workspace" \
+     --arg agent "$runtime_root" --arg reserve "$reserve" --arg charge "$charge" \
+     --argjson wall "$wall" \
+    '.cwd=$cwd | .commands=[{name:"hermes-acp",program:$launcher,
+      args:["--workspace",$work,"--runtime-root",$agent,"--network","host","--","/agent/hermes-acp"],
+      systemdScope:true,wallTimeSeconds:$wall,reserve:$reserve,charge:$charge}]' \
+    "$root/base-config.json" > "$root/runtime-config.json"
+  chmod 600 "$root/runtime-config.json"
+  mini=$(jq -er .mini "$root/runtime-config.json")
+  host=$(jq -er .host "$root/runtime-config.json")
+  sha256sum "$runtime" "$mini" "$host" "$launcher" "$gate" |
+    jq -Rn '[inputs | capture("^(?<sha256>[0-9a-f]{64})  (?<path>.*)$")] | {artifacts:.}' \
+      > "$root/pins.json"
+  chmod 600 "$root/pins.json"
+done
+
+"$here/check-hosted-pair" "$output_dir/peer-a/runtime-config.json" \
+  "$output_dir/peer-b/runtime-config.json"
+for peer in a b; do
+  root=$output_dir/peer-$peer
+  "$here/install-controller" --config "$root/runtime-config.json" \
+    --runtime "$runtime" --pins "$root/pins.json" --unit-dir "$unit_dir" \
+    --render-only > "$root/rendered.service"
+done
+sha256sum "$base_a" "$base_b" "$output_dir/peer-a/runtime-config.json" \
+  "$output_dir/peer-b/runtime-config.json" "$output_dir/peer-a/pins.json" \
+  "$output_dir/peer-a/rendered.service" "$output_dir/peer-b/rendered.service"

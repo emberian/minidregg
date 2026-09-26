@@ -112,7 +112,10 @@ config to check private keys, mode-0700 state, executable pins and live unit
 ownership. Distinct paths do not prove distinct key contents or inode identity,
 and this single-account test is not production account isolation. Native
 content grants, policy generations and source provenance require signed Mini
-readback and retained build/acceptance evidence.
+readback and retained build/acceptance evidence. The
+[hosted pair recipe](HOSTED-PAIR.md) uses `render-hosted-pair` to produce two
+private command overlays and pin manifests from already-provisioned base
+configs; it does not start either service.
 
 `grain-ssh` is an SSH
 forced-command front end for the runtime's `connect ABS_CONTROL_SOCKET
