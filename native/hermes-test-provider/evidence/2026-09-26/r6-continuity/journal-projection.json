@@ -1,0 +1,18 @@
+{
+  "child": null,
+  "connection": "soft",
+  "hermesSession": {
+    "id": "61a3176e-4a07-4a4f-9a3a-11b678a95e3e",
+    "loadVerified": true,
+    "pendingPrompt": true,
+    "retentionIssue": null,
+    "stateFingerprint": "state.db:270336:fedf75a3e02c2135927c3f359ef55594a1eff700be0f59f21c5e73a521108c5b|state.db-wal:absent",
+    "workspace": "/tmp/mini-hermes-provider-codec/evidence-real-r5/worker-work"
+  },
+  "parentHold": null,
+  "pending": null,
+  "settlementDue": null,
+  "toolHold": null,
+  "toolPending": null,
+  "unresolvedExternal": []
+}

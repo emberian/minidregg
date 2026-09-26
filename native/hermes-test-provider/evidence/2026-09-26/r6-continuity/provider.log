@@ -1,0 +1,4 @@
+reject bytes=1410 reason=mini_read_resource is not advertised to Hermes
+completion bytes=39487 stream=true stage=read publication
+completion bytes=40734 stream=true stage=publish root=55070908931993074135985362517665169451634431671625479692889086081017559966815 field=2
+reject bytes=41759 reason=Mini publish returned an error

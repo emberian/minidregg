@@ -60,11 +60,24 @@ framing; Mini's report retains that carrier and the package independently.
 These are allocation ceilings for the linked native path, not Store policy. -/
 def maxCarrierBytes : Nat := maxSourceBytes + 16384
 def maxPortableInboxBytes : Nat := maxCarrierBytes + 4096
--- The older qualified fn image (1a9dd747) and Mini's current poll reader
--- admit at most this much exact fn-e data. Current fn HEAD has wider
--- operator-profile bounds; using them needs a separately pinned qualification.
-def maxStorePollEventBytes : Nat := 196608
 def maxHistoricalVerdictEventBytes : Nat := 65538
+/-- Mini's portable article has at most 256 Newsgroups octets, so even without
+assuming a particular separator spelling it names no more than 256 groups.
+Qualified fn bbf52159 `books/records-shape.lisp` bounds the encoded article
+record by payload + 1111 + 261 per group even for wide integer fields. The schema-1 `fn-e` in
+`books/stx-accept-records.lisp` then carries that record, the exact authored
+source, a verdict of at most 65538 octets, profile/content-subject/authored-id
+of at most 64/256/256 octets, thirteen conservative CBOR heads of at most nine octets, and
+the four-octet magic. This is Mini's selected portable profile ceiling, not a
+claim that every fn deployment has this article limit. -/
+def maxPortableGroups : Nat := 256
+def maxFnArticleRecordBytes : Nat :=
+  maxCarrierBytes + 1111 + 261 * maxPortableGroups
+def maxFnCompositeOverheadBytes : Nat :=
+  64 + 256 + 256 + 13 * 9 + 4
+def maxStorePollEventBytes : Nat :=
+  maxSourceBytes + maxFnArticleRecordBytes +
+    maxHistoricalVerdictEventBytes + maxFnCompositeOverheadBytes
 def maxStorePollInboxBytes : Nat :=
   maxStorePollEventBytes + maxHistoricalVerdictEventBytes + 4096
 def maxPortableVerifyLineBytes : Nat := 2 * maxSourceBytes + 8192
@@ -73,6 +86,17 @@ def maxPollProjectionLineBytes : Nat :=
 def maxConsumerReportBytes : Nat :=
   maxPackageBytes + maxPortableInboxBytes + maxStorePollInboxBytes + 131072
 def maxHostFrameBytes : Nat := 2 * maxConsumerReportBytes + 262144
+
+/-- The selected qualified poll profile and every dependent allocation ceiling
+are one checked arithmetic chain. A changed source/carrier bound must update
+the complete chain, including the host's hex JSON frame. -/
+theorem selected_poll_envelope_exact :
+    maxStorePollEventBytes = 3150546 ∧
+    maxStorePollInboxBytes = 3220180 ∧
+    maxPollProjectionLineBytes = 6448552 ∧
+    maxConsumerReportBytes = 5920308 ∧
+    maxHostFrameBytes = 12102760 := by
+  decide
 
 /-- A local operator may choose tighter limits than this portable ceiling.
 The fn Store must independently be configured to admit the resulting article;

@@ -1,0 +1,79 @@
+{
+  "grain": {
+    "before": {
+      "generation": "3",
+      "remaining": "47",
+      "reserved": "2",
+      "status": "3"
+    },
+    "capability": "81",
+    "context": {
+      "operationId": "48",
+      "payload": "Hermes delegated publication settle"
+    },
+    "expectedAuthorityRoot": "86871439594828070036266646883803907687616212648992960311464713116474675885050",
+    "expectedTargetRoot": "58151059039394273431560904144139171112351526714478666617328323409882470231195",
+    "observeCapability": "81",
+    "operation": {
+      "charge": "1",
+      "type": "settle"
+    },
+    "parentWitness": {
+      "before": {
+        "generation": "1",
+        "remaining": "96",
+        "reserved": "3",
+        "status": "4"
+      },
+      "capability": "73",
+      "expectedTargetRoot": "67001929370058559493245132910541471435741049503920794328033655959119713503139",
+      "observeCapability": "73",
+      "task": "7101"
+    },
+    "publications": [
+      {
+        "capability": "93",
+        "expectedTargetRoot": "55070908931993074135985362517665169451634431671625479692889086081017559966815",
+        "kind": "object",
+        "observeCapability": "93",
+        "payload": {
+          "actions": [
+            {
+              "key": {
+                "field": "2",
+                "resource": "7003",
+                "type": "object"
+              },
+              "type": "create",
+              "value": "2"
+            }
+          ],
+          "type": "scalar"
+        },
+        "schemaVersion": "1",
+        "target": "7003"
+      }
+    ],
+    "schemaVersion": "1",
+    "subject": "8",
+    "task": "7102"
+  },
+  "grants": [
+    {
+      "capability": "81",
+      "kind": "object",
+      "target": "7102"
+    },
+    {
+      "capability": "73",
+      "kind": "object",
+      "target": "7101"
+    },
+    {
+      "capability": "93",
+      "kind": "object",
+      "target": "7003"
+    }
+  ],
+  "intentNonce": "48"
+}

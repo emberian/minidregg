@@ -1,0 +1,34 @@
+[
+  {
+    "timeUtc": "2026-09-26T09:58:54.102882+00:00",
+    "event": "upstream-session-restored-from-db"
+  },
+  {
+    "timeUtc": "2026-09-26T09:58:54.660157+00:00",
+    "event": "mini-mcp-tools-registered"
+  },
+  {
+    "timeUtc": "2026-09-26T09:58:54.908843+00:00",
+    "event": "upstream-acp-session-load-complete"
+  },
+  {
+    "timeUtc": "2026-09-26T09:58:55.042784+00:00",
+    "event": "second-session-prompt-started"
+  },
+  {
+    "timeUtc": "2026-09-26T09:59:34.664094+00:00",
+    "event": "mini-read-resource-returned"
+  },
+  {
+    "timeUtc": "2026-09-26T10:04:34.739729+00:00",
+    "event": "mini-publish-mcp-timeout"
+  },
+  {
+    "timeUtc": "2026-09-26T10:04:34.741476+00:00",
+    "event": "mini-publish-mcp-timeout"
+  },
+  {
+    "timeUtc": "2026-09-26T10:08:48.046372+00:00",
+    "event": "worker-runtime-limit-reached"
+  }
+]
