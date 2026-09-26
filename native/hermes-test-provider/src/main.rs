@@ -3,9 +3,11 @@
 //! Mini's authority, native receiver, or the unmodified Hermes agent.
 
 use serde_json::{json, Value};
+use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -30,6 +32,7 @@ enum Mode {
     ContentWorkroom,
     ContentPeerA,
     ContentPeerB,
+    ContentReceipt8801,
 }
 
 fn decimal(value: &str) -> bool {
@@ -166,6 +169,97 @@ fn has_peer_tool_ack(value: &Value, task: &str, depth: usize) -> bool {
         Value::Object(fields) => fields.values().any(|item| has_peer_tool_ack(item, task, depth + 1)),
         Value::String(text) => nested_json(text).is_some_and(|nested| has_peer_tool_ack(&nested, task, depth + 1)),
         _ => false,
+    }
+}
+
+fn receipt_8801(value: &Value, depth: usize) -> Option<Value> {
+    if depth > 12 { return None; }
+    if value.pointer("/grain/task").and_then(Value::as_str) == Some("8802")
+        && value.get("targetRoot").and_then(Value::as_str).is_some_and(decimal)
+    {
+        let receipt = value.get("publicationReceipt")?;
+        if receipt.get("type").and_then(Value::as_str) != Some("confirmed-mini-publication-v1")
+            || receipt.get("scope").and_then(Value::as_str) != Some("historical-accepted-transition")
+            || receipt.get("promptOperationId").and_then(Value::as_u64).is_none_or(|n| n == 0)
+            || receipt.get("toolOperationId").and_then(Value::as_u64).is_none_or(|n| n == 0)
+            || receipt.get("publicationTargetIds") != Some(&json!(["8001"]))
+        { return None; }
+        for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+            let number = receipt.get(field)?.as_str()?;
+            if number.len() > 80 || !decimal(number) { return None; }
+        }
+        if value.get("imageBoundary") != receipt.get("imageBoundary") { return None; }
+        return Some(json!({"type":"model-visible-mini-publication-receipt-projection-v1",
+            "grainTask":"8802","targetRoot":value.get("targetRoot")?,
+            "publicationReceipt":{
+                "type":"confirmed-mini-publication-v1",
+                "scope":"historical-accepted-transition",
+                "promptOperationId":receipt.get("promptOperationId")?,
+                "toolOperationId":receipt.get("toolOperationId")?,
+                "transactionId":receipt.get("transactionId")?,
+                "eventId":receipt.get("eventId")?,
+                "acceptedCount":receipt.get("acceptedCount")?,
+                "imageBoundary":receipt.get("imageBoundary")?,
+                "publicationTargetIds":["8001"]}}));
+    }
+    match value {
+        Value::Array(items) => items.iter().find_map(|item| receipt_8801(item, depth + 1)),
+        Value::Object(fields) => fields.values().find_map(|item| receipt_8801(item, depth + 1)),
+        Value::String(text) => nested_json(text).and_then(|nested| receipt_8801(&nested, depth + 1)),
+        _ => None,
+    }
+}
+
+fn receipt_8801_reply_for(request: &Value) -> Result<(Value, &'static str, String, Option<Value>), String> {
+    if request.get("model").and_then(Value::as_str) != Some(MODEL) { return Err("unexpected model".into()); }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("current user prompt absent")?;
+    let current = &messages[current_prompt..];
+    if let Some(published) = tool_result(current, PUBLISH_ID) {
+        if tool_failed(published, 0) { return Err("Mini publication tool failed".into()); }
+        let projection = receipt_8801(published, 0).ok_or("model-visible Mini publication receipt absent or malformed")?;
+        return Ok((json!({"role":"assistant","content":"Fixture observed the immediate Mini publication receipt for content8001."}),
+            "stop", "8801 receipt observed".into(), Some(projection)));
+    }
+    if let Some(read) = tool_result(current, READ_ID) {
+        if tool_failed(read, 0) { return Err("Mini content read failed".into()); }
+        let page = find_content_page(read, 0).ok_or("signed content8001 page absent")?;
+        let entries = page.get("entries").and_then(Value::as_array).ok_or("content entries absent")?;
+        if !entries.is_empty() { return Err("8801 receipt fixture requires empty new content page".into()); }
+        let root = page.get("root").and_then(Value::as_str).ok_or("content root absent")?;
+        let publish = tool_name(request, "__mini_publish").ok_or("mini_publish absent")?;
+        let action = json!({"type":"createAtom","atom":"7401","kind":{"type":"text"},
+            "payload":hex_bytes(CONTENT_ORIGINAL)});
+        let args = json!({"publications":[{"kind":"object","target":"8001",
+            "expectedTargetRoot":root,"payload":{"type":"content","actions":[action]}}]});
+        return Ok((json!({"role":"assistant","content":null,
+            "tool_calls":[call(publish, PUBLISH_ID, args)]}),
+            "tool_calls", format!("8801 create root={root}"), None));
+    }
+    let read = tool_name(request, "__mini_read_resource").ok_or("mini_read_resource absent")?;
+    Ok((json!({"role":"assistant","content":null,
+        "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
+        "tool_calls", "8801 read empty room".into(), None))
+}
+
+fn persist_receipt_projection(path: &Path, projection: &Value) -> Result<(), String> {
+    let mut bytes = serde_json::to_vec_pretty(projection).map_err(|e| e.to_string())?;
+    bytes.push(b'\n');
+    if bytes.len() > 4096 { return Err("receipt projection exceeds 4 KiB".into()); }
+    match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+        Ok(mut file) => {
+            file.write_all(&bytes).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            if fs::metadata(path).map_err(|e| e.to_string())?.len() > 4096 {
+                return Err("existing receipt projection exceeds 4 KiB".into());
+            }
+            let prior = fs::read(path).map_err(|e| e.to_string())?;
+            if prior == bytes { Ok(()) } else { Err("existing receipt projection differs".into()) }
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -468,7 +562,7 @@ fn read_line_bounded(reader: &mut impl BufRead) -> Result<String, String> {
     }
 }
 
-fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode) -> Result<(), String> {
+fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option<&Path>) -> Result<(), String> {
     stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
@@ -517,11 +611,16 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode) -> Result<(), String
     let mut body = vec![0; size];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    let mut projection = None;
     let (message, finish, stage) = match match mode {
         Mode::Scalar => reply_for(&request),
         Mode::ContentWorkroom => content_reply_for(&request),
         Mode::ContentPeerA => peer_reply_for(&request, true),
         Mode::ContentPeerB => peer_reply_for(&request, false),
+        Mode::ContentReceipt8801 => receipt_8801_reply_for(&request).map(|(message, finish, stage, receipt)| {
+            projection = receipt;
+            (message, finish, stage)
+        }),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -531,6 +630,10 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode) -> Result<(), String
             return Ok(());
         }
     };
+    if let Some(receipt) = projection {
+        let path = receipt_path.ok_or("receipt projection path absent")?;
+        persist_receipt_projection(path, &receipt)?;
+    }
     let id = format!("chatcmpl-mini-fixture-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
     let streaming = request.get("stream").and_then(Value::as_bool) == Some(true);
     if streaming {
@@ -561,8 +664,12 @@ fn main() -> Result<(), String> {
         Some("--content-workroom") => Mode::ContentWorkroom,
         Some("--content-peer-a") => Mode::ContentPeerA,
         Some("--content-peer-b") => Mode::ContentPeerB,
+        Some("--content-receipt-8801") => Mode::ContentReceipt8801,
         Some(_) => return Err("unknown fixture mode".into()),
     };
+    let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {
+        Some(args.next().ok_or("receipt projection path absent")?)
+    } else { None };
     if args.next().is_some() { return Err("unexpected arguments".into()); }
     let listener = TcpListener::bind(bind).map_err(|e| e.to_string())?;
     println!("http://{}/v1", listener.local_addr().map_err(|e| e.to_string())?);
@@ -570,7 +677,7 @@ fn main() -> Result<(), String> {
     for connection in listener.incoming() {
         match connection {
             Ok(stream) => {
-                if let Err(error) = serve_one(stream, Path::new(&log), mode) {
+                if let Err(error) = serve_one(stream, Path::new(&log), mode, receipt_path.as_deref().map(Path::new)) {
                     let _ = log_event(Path::new(&log), &format!("transport-error {error}"));
                 }
             }
@@ -589,6 +696,57 @@ mod tests {
             {"type":"function","function":{"name":"mcp__mini_grain__mini_read_resource"}},
             {"type":"function","function":{"name":"mcp__mini_grain__mini_publish"}}
         ]})
+    }
+
+    #[test]
+    fn receipt_8801_requires_model_visible_native_fields() {
+        let native = json!({"grain":{"task":"8802"},"targetRoot":"123", "imageBoundary":"456",
+            "publicationReceipt":{"type":"confirmed-mini-publication-v1",
+                "scope":"historical-accepted-transition","promptOperationId":11,"toolOperationId":20,
+                "transactionId":"22","eventId":"23","acceptedCount":"24",
+                "imageBoundary":"456","publicationTargetIds":["8001"]}});
+        let wrapped = json!({"role":"tool","tool_call_id":PUBLISH_ID,
+            "content":[{"type":"text","text":native.to_string()}]});
+        let (done, finish, _, projection) = receipt_8801_reply_for(&request(json!([
+            {"role":"user","content":"create note"}, wrapped
+        ]))).unwrap();
+        assert_eq!(finish, "stop");
+        assert!(done["content"].as_str().unwrap().contains("immediate"));
+        let projection = projection.unwrap();
+        assert_eq!(projection["publicationReceipt"]["transactionId"], "22");
+        assert_eq!(projection["publicationReceipt"]["publicationTargetIds"], json!(["8001"]));
+        for (pointer, bad) in [
+            ("/grain/task", json!("7802")),
+            ("/publicationReceipt/type", json!("tool-ack")),
+            ("/publicationReceipt/scope", json!("current-state")),
+            ("/publicationReceipt/promptOperationId", json!("11")),
+            ("/publicationReceipt/eventId", json!("not-decimal")),
+            ("/publicationReceipt/imageBoundary", json!("457")),
+            ("/publicationReceipt/publicationTargetIds", json!(["7003"])),
+        ] {
+            let mut changed = native.clone();
+            *changed.pointer_mut(pointer).unwrap() = bad;
+            assert!(receipt_8801(&changed, 0).is_none(), "accepted bad {pointer}");
+        }
+    }
+
+    #[test]
+    fn receipt_8801_uses_empty_signed_content_root() {
+        let first = receipt_8801_reply_for(&request(json!([
+            {"role":"user","content":"create note"}
+        ]))).unwrap();
+        assert_eq!(first.1, "tool_calls");
+        assert_eq!(first.0["tool_calls"][0]["function"]["name"], "mcp__mini_grain__mini_read_resource");
+        let page = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"123","entries":[]}}});
+        let next = receipt_8801_reply_for(&request(json!([
+            {"role":"user","content":"create note"},
+            {"role":"tool","tool_call_id":READ_ID,"content":page.to_string()}
+        ]))).unwrap();
+        let args: Value = serde_json::from_str(next.0["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "123");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(CONTENT_ORIGINAL));
+        assert!(next.3.is_none());
     }
 
     #[test]
