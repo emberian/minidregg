@@ -7,6 +7,48 @@ use std::net::SocketAddr;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
+/// Read the same private config.yaml that a scoped worker sees at
+/// /workspace/.hermes. Hermes resolves MCP timeouts from this nested key;
+/// ACP-provided MCP server parameters do not carry a timeout through its
+/// adapter. Refuse a too-short configured value before reserving Mini budget.
+pub fn require_worker_mcp_timeout(home: &Path, worker_wall_seconds: u64) -> Result<(), String> {
+    if !(1..=1800).contains(&worker_wall_seconds) {
+        return Err("worker wall lifetime is outside the scoped profile".into());
+    }
+    let path = home.join("config.yaml");
+    let meta =
+        fs::symlink_metadata(&path).map_err(|e| format!("Hermes config for MCP timeout: {e}"))?;
+    if !meta.file_type().is_file()
+        || meta.file_type().is_symlink()
+        || meta.uid() != unsafe { libc::geteuid() }
+        || meta.permissions().mode() & 0o077 != 0
+        || meta.len() == 0
+        || meta.len() > 16_384
+    {
+        return Err("Hermes config must be an owned private regular file under 16 KiB".into());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("Hermes config read: {e}"))?;
+    let value: serde_yaml::Value =
+        serde_yaml::from_slice(&bytes).map_err(|e| format!("Hermes config YAML: {e}"))?;
+    let timeout = value
+        .get("timeouts")
+        .and_then(|timeouts| timeouts.get("mcp"))
+        .and_then(|mcp| mcp.get("tool_call"))
+        .and_then(|number| match number {
+            serde_yaml::Value::Number(number) => number.as_f64(),
+            serde_yaml::Value::String(text) => text.parse::<f64>().ok(),
+            _ => None,
+        })
+        .ok_or("Hermes config needs timeouts.mcp.tool_call in seconds")?;
+    let required = worker_wall_seconds.saturating_sub(60).max(1);
+    if !timeout.is_finite() || timeout < required as f64 {
+        return Err(format!(
+            "Hermes config timeouts.mcp.tool_call must be finite and at least {required}s for this worker lifetime; actual {timeout}s"
+        ));
+    }
+    Ok(())
+}
+
 const MARKER: &str = "# mini-grain-generated-provider-v1\n";
 
 pub fn private_key(path: &Path, state_dir: &Path) -> Result<String, String> {
@@ -140,6 +182,7 @@ mod tests {
         assert!(text.contains(&format!("api_key: {token}")));
         assert!(text.contains("tool_call: 540"));
         assert!(!text.contains("BYO_PROVIDER_KEY"));
+        require_worker_mcp_timeout(&home, 600).unwrap();
         assert!(install_worker_profile(
             &home,
             "bad:yaml",
@@ -148,6 +191,23 @@ mod tests {
             540
         )
         .is_err());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn scoped_worker_refuses_upstream_mcp_default_before_reserve() {
+        let home =
+            std::env::temp_dir().join(format!("grain-worker-mcp-timeout-{}", std::process::id()));
+        fs::create_dir(&home).unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = home.join("config.yaml");
+        fs::write(&config, "model:\n  provider: custom\n").unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(require_worker_mcp_timeout(&home, 1500).is_err());
+        fs::write(&config, "timeouts:\n  mcp:\n    tool_call: 300\n").unwrap();
+        assert!(require_worker_mcp_timeout(&home, 1500).is_err());
+        fs::write(&config, "timeouts:\n  mcp:\n    tool_call: 1440\n").unwrap();
+        require_worker_mcp_timeout(&home, 1500).unwrap();
         fs::remove_dir_all(home).unwrap();
     }
 }

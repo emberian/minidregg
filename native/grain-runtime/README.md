@@ -126,8 +126,16 @@ For a scoped worker, optional command `wallTimeSeconds` is a fixed integer
 from 1 to 1800; omission retains the launcher's 600-second cap. A hosted
 provider's `hermes-acp` command requires at least 120 seconds. The generated
 Hermes profile sets its per-MCP-call timeout to 60 seconds less than that
-worker cap (540 seconds by default). A timed-out MCP call can still commit in
-Mini; the controller retains its exact attempt and requires signed recovery,
+worker cap (540 seconds by default). For any other scoped Hermes worker, its
+private mounted `/workspace/.hermes/config.yaml` must explicitly set
+`timeouts.mcp.tool_call` to at least the same value. The controller parses
+that exact config and refuses before Mini reserve if it is absent, nonfinite,
+or too short; a larger value is still bounded by the worker unit lifetime.
+This bounded private-config parse uses pinned `serde_yaml` 0.9.34, which is
+deprecated; YAML supplies no Mini authority or admission decision.
+The ACP `mcpServers` parameters do not set this upstream timeout. A timed-out
+MCP call can still commit in Mini; the controller retains its exact attempt
+and requires signed recovery,
 without resending it. A longer deadline does not turn configured charges into
 measured usage.
 

@@ -3192,6 +3192,16 @@ impl Runtime {
         } else {
             None
         };
+        if spec.systemd_scope {
+            // This is the host path bwrap mounts as /workspace/.hermes. The
+            // upstream ACP adapter drops MCP timeout fields supplied in
+            // session/new, so validate the actual worker config before Mini
+            // reserves any prompt allowance.
+            provider_profile::require_worker_mcp_timeout(
+                &hermes_home,
+                spec.wall_time_seconds.unwrap_or(600),
+            )?;
+        }
         let acp_cwd = if spec.systemd_scope {
             PathBuf::from("/workspace")
         } else {
