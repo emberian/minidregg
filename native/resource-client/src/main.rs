@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,8 +14,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod drain;
 #[cfg(unix)]
 mod transport;
+#[cfg(unix)]
+mod worker;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
 
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
@@ -37,6 +41,7 @@ usage:
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -553,6 +558,9 @@ fn write_json_new(path: &Path, value: &Value) -> Result<()> {
 }
 
 fn print_json(value: &Value) -> Result<()> {
+    if QUIET_WORKER.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let rendered = serde_json::to_string_pretty(value)
         .map_err(|error| format!("cannot render host JSON: {error}"))?;
     println!("{rendered}");
@@ -1165,6 +1173,23 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("consumer-drain-once requires Unix sockets".to_owned())
+            }
+        }
+        "consumer-worker" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let key = path(args.required("key")?);
+            let state_dir = path(args.required("state-dir")?);
+            let worker_config = path(args.required("worker-config")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                let socket = SOCKET.get().ok_or("consumer-worker requires --socket")?;
+                worker::run(&host, &config, socket, &key, &state_dir, &worker_config)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("consumer-worker requires Unix sockets".to_owned())
             }
         }
         "profile" | "describe" => {

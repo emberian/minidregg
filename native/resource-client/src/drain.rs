@@ -2,7 +2,7 @@
 use super::*;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 
-fn private_dir(path: &Path) -> Result<()> {
+pub(super) fn private_dir(path: &Path) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => sync_directory_ancestors(path)?,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -80,7 +80,13 @@ fn attempt(pending: &Path, state: &mut Value, label: &str) -> Result<PathBuf> {
     Ok(pending.join(name))
 }
 
-fn pin(state_dir: &Path, host: &Path, config: &Path, socket: &Path, key: &Path) -> Result<()> {
+pub(super) fn pin(
+    state_dir: &Path,
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+) -> Result<()> {
     let config_bytes =
         fs::read(config).map_err(|e| format!("cannot read fn operator config: {e}"))?;
     let public_key = read_secret(key)?.verifying_key().to_bytes();
@@ -131,17 +137,26 @@ fn latest_retry_path(prepare: &Path) -> Result<PathBuf> {
     Ok(json)
 }
 
-fn confirmed_after_retry(prepare: &Path, mode: &str) -> Result<Option<String>> {
+fn retry_outcome(prepare: &Path, mode: &str) -> Result<Value> {
     let json = latest_retry_path(prepare)?;
     let result = retry(prepare, mode, false);
-    match (result, outcome_transaction(&json)?) {
-        (_, Some(txn)) => {
-            sync_directory_ancestors(prepare)?;
-            Ok(Some(txn))
-        }
-        (Err(error), None) => Err(error),
-        (Ok(()), None) => Err("retry completed without confirmed transaction evidence".to_owned()),
+    if json.exists() {
+        sync_directory_ancestors(prepare)?;
+        read_json(&json)
+    } else {
+        Err(result
+            .err()
+            .unwrap_or_else(|| "retry returned no outcome evidence".to_owned()))
     }
+}
+
+fn confirmed_after_retry(prepare: &Path, mode: &str) -> Result<Option<String>> {
+    let json = latest_retry_path(prepare)?;
+    let value = retry_outcome(prepare, mode)?;
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+        return Ok(None);
+    }
+    outcome_transaction(&json)
 }
 
 fn classify_poll(value: &Value) -> Result<(String, bool)> {
@@ -225,11 +240,19 @@ fn ack_newly_confirmed(
     sync_directory_ancestors(&ack)
 }
 
-fn hold(pending: &Path, state: &mut Value, reason: &str) -> Result<()> {
+fn hold<T>(pending: &Path, state: &mut Value, reason: &str) -> Result<T> {
     set(state, "phase", json!("Held"));
     set(state, "reason", json!(reason));
     save_state(pending, state)?;
     Err(reason.to_owned())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Stop {
+    Idle,
+    ShortPage,
+    Publication,
+    PageCap,
 }
 
 pub(super) fn run(
@@ -241,14 +264,29 @@ pub(super) fn run(
     max_pages: u32,
 ) -> Result<()> {
     private_dir(state_dir)?;
+    let socket_dir = socket.parent().ok_or("socket lacks parent")?;
+    private_dir(socket_dir)?;
+    let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
     let _lock = transport::service_lock(&state_dir.join("worker.lock"))?;
+    let stop = run_locked(host, config, socket, key, state_dir, max_pages)?;
+    println!("consumer wake stopped: {stop:?}");
+    Ok(())
+}
+
+pub(super) fn run_locked(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+    max_pages: u32,
+) -> Result<Stop> {
     pin(state_dir, host, config, socket, key)?;
     let pending = state_dir.join("pending");
     let mut pages = 0;
     loop {
         if pages >= max_pages {
-            println!("consumer wake reached {max_pages} page limit");
-            return Ok(());
+            return Ok(Stop::PageCap);
         }
         if !pending.exists() {
             private_dir(&pending)?;
@@ -290,8 +328,7 @@ pub(super) fn run(
                 if kind == "idle" {
                     fs::remove_dir_all(&pending).map_err(|e| format!("cannot clean idle poll: {e}"))?;
                     sync_directory_ancestors(state_dir)?;
-                    println!("consumer idle");
-                    return Ok(());
+                    return Ok(Stop::Idle);
                 }
                 if !path.join("intent.bin").is_file() { return Err("poll did not retain canonical intent".into()); }
                 sync_directory_ancestors(&path)?;
@@ -313,27 +350,14 @@ pub(super) fn run(
                 sync_retained_call(&path, &path.join("call.bin"))?;
                 set(&mut state, "phase", json!("Sending"));
                 save_state(&pending, &state)?;
-                let txn = confirmed_after_retry(&path, "submit")?
-                    .ok_or("submit did not confirm; exact call retained, lookup required")?;
-                set(&mut state, "txn", json!(txn));
-                set(&mut state, "phase", json!("Acking"));
-                save_state(&pending, &state)?;
-                ack_newly_confirmed(host, config, &pending, &mut state)?;
-                finish(state_dir, &pending, &state)?;
-                pages += 1;
-                if field(&state, "kind")? == "publication" || state.get("short").and_then(Value::as_bool) == Some(true) {
-                    println!("consumer wake completed {pages} operation(s)"); return Ok(());
-                }
-            }
-            "Sending" => {
-                let path = pending.join(field(&state, "prepare")?);
-                sync_retained_call(&path, &path.join("call.bin"))?;
-                let txn = match confirmed_after_retry(&path, "lookup") {
-                    Ok(Some(txn)) => txn,
-                    Ok(None) => return hold(&pending, &mut state,
-                        "exact lookup did not confirm; retained call requires operator reconciliation"),
-                    Err(error) => return hold(&pending, &mut state,
-                        &format!("exact lookup unresolved; retained call requires operator reconciliation: {error}")),
+                let outcome_path = latest_retry_path(&path)?;
+                let outcome = retry_outcome(&path, "submit")?;
+                let txn = match outcome.get("type").and_then(Value::as_str) {
+                    Some("confirmed") => outcome_transaction(&outcome_path)?
+                        .ok_or("confirmed submit lacks transaction ID")?,
+                    Some("refused") => return hold(&pending, &mut state,
+                        "Mini definitively refused the exact call; operator review required"),
+                    _ => return Err("submit did not confirm; exact call retained, lookup required".into()),
                 };
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
@@ -341,12 +365,39 @@ pub(super) fn run(
                 ack_newly_confirmed(host, config, &pending, &mut state)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication"
-                    || state.get("short").and_then(Value::as_bool) == Some(true)
-                {
-                    println!("consumer wake completed {pages} operation(s)");
-                    return Ok(());
-                }
+                if field(&state, "kind")? == "publication" { return Ok(Stop::Publication); }
+                if state.get("short").and_then(Value::as_bool) == Some(true) { return Ok(Stop::ShortPage); }
+            }
+            "Sending" => {
+                let path = pending.join(field(&state, "prepare")?);
+                sync_retained_call(&path, &path.join("call.bin"))?;
+                let lookup_path = latest_retry_path(&path)?;
+                let lookup = match retry_outcome(&path, "lookup") {
+                    Ok(value) => value,
+                    Err(error) => return hold(&pending, &mut state,
+                        &format!("exact lookup unresolved; retained call requires operator reconciliation: {error}")),
+                };
+                let txn = match lookup.get("type").and_then(Value::as_str) {
+                    Some("confirmed") => outcome_transaction(&lookup_path)?
+                        .ok_or("confirmed exact lookup lacks transaction ID")?,
+                    Some("absent") => match confirmed_after_retry(&path, "submit") {
+                        Ok(Some(txn)) => txn,
+                        Ok(None) => return hold(&pending, &mut state,
+                            "same-call resubmit did not confirm; exact call retained"),
+                        Err(error) => return hold(&pending, &mut state,
+                            &format!("same-call resubmit uncertain; exact call retained: {error}")),
+                    },
+                    _ => return hold(&pending, &mut state,
+                        "exact lookup did not confirm or prove absence; retained call requires operator reconciliation"),
+                };
+                set(&mut state, "txn", json!(txn));
+                set(&mut state, "phase", json!("Acking"));
+                save_state(&pending, &state)?;
+                ack_newly_confirmed(host, config, &pending, &mut state)?;
+                finish(state_dir, &pending, &state)?;
+                pages += 1;
+                if field(&state, "kind")? == "publication" { return Ok(Stop::Publication); }
+                if state.get("short").and_then(Value::as_bool) == Some(true) { return Ok(Stop::ShortPage); }
             }
             "Acking" => return Err("ACK outcome may have been lost; retained transaction requires operator reconciliation".into()),
             "Held" => return Err(format!("consumer worker held for operator review: {}", field(&state, "reason")?)),

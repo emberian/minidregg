@@ -121,8 +121,10 @@ mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json \
 The worker polls using Host/Main, stores the exact Lean-authored intent, and
 uses `submit --prepare-only true` to retain and sync a signed `call.bin` before
 any Mini submission. It persists `Ready`, then `Sending` before `retry --mode
-submit`. A restart in `Sending` runs exact `lookup` first; absent or uncertain
-lookup holds the call for reconciliation. Once Mini confirms, the worker
+submit`. A restart in `Sending` runs exact `lookup` first. Confirmed lookup
+uses the original receipt; definitive absence permits one resubmission of the
+same retained bytes under Mini's replay and current-authority checks. An
+uncertain lookup or resubmission holds the call for reconciliation. Once Mini confirms, the worker
 persists its transaction ID before fn ACK. A lost ACK reply also holds for
 reconciliation. The operator must keep the same host, config bytes, socket,
 and signing key; a changed pin refuses. The worker archives successful
@@ -134,6 +136,55 @@ polling until idle would generate a new skip and ACK without external work.
 External wake scheduling and automatic uncertain ACK recovery are still open
 work; invoke this command only on a justified external wake or as an operator
 controlled step.
+
+For unattended B consumption, `consumer-worker` uses a private operator wake
+config alongside the same Host config, key, socket, and state directory:
+
+```json
+{
+  "type": "minidregg-b-consumer-wake-v1",
+  "port": 11942,
+  "certificatePath": "/private/path/fn-server.crt",
+  "username": "consumer-observer",
+  "passwordFile": "/private/path/fn-observer.password",
+  "group": "fn.test",
+  "intervalSeconds": 10,
+  "maxPages": 16
+}
+```
+
+Create that file with mode `0600` and invoke:
+
+```sh
+mini consumer-worker --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock --key CONSUMER.key \
+  --state-dir /private/path/b-consumer-worker \
+  --worker-config /private/path/b-consumer-wake.json
+```
+
+The worker connects only to `127.0.0.1:port`, requires STARTTLS, verifies
+the exact operator-pinned certificate bytes and its `localhost` name and
+validity period, verifies the TLS handshake signature, and authenticates with the
+private password file, and reads the exact NNTP `GROUP` count/first/last for
+the group pinned by the Host's `fnPoll` scope. The certificate identity,
+endpoint, auth principal, and custody paths are pinned in the private state;
+the password itself is never copied there or placed on the command line.
+The GROUP tuple is only a wake hint. On a fresh state directory the worker
+drains unconditionally; after restart it resumes any pending attempt and
+otherwise uses the last durably remembered tuple. It continues bounded rounds after a publication or
+full page, checks GROUP again after an idle or short page, and remembers the
+tuple only when it stayed stable through that round. Its owner lock covers
+the whole process and excludes another worker or one-shot drain on the same
+socket. A stable GROUP tuple lets it sleep without turning fn ACK journal
+events into further Mini skip submissions. A changed group may contain an
+unrelated article; Host/Main still verifies each poll before any Mini write.
+The current fn fixture presents one self-signed `CN=localhost` certificate
+with `CA:TRUE` and no SAN; this exact-leaf pin mode is deliberately narrower
+than general public-PKI validation. Operators must rotate the private worker
+state and Host service pin deliberately when the fn certificate, scope, or
+incarnation changes. The worker pins the complete fn scope digest and refuses
+local config drift, but an unchanged GROUP tuple alone cannot prove a remote
+Store incarnation; the next typed Mini poll performs the source-owned check.
 
 To render a retained signed resource query as a bounded fn inbox summary,
 run `mini inspect --host HOST --config CONFIG.json --socket SOCKET --kind
