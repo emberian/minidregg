@@ -10,7 +10,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const MAX_WORKER_WALL: Duration = Duration::from_secs(1800);
+const MCP_DELIVERY_GRACE: Duration = Duration::from_secs(10);
+const MAX_PROXY_WAIT: Duration = Duration::from_secs(1810);
 
 pub struct BrokerRequest {
     pub name: String,
@@ -48,7 +52,11 @@ impl Drop for BrokerEndpoint {
     }
 }
 
-pub fn start_broker(path: &Path) -> Result<BrokerEndpoint, String> {
+pub fn start_broker(path: &Path, worker_wall: Duration) -> Result<BrokerEndpoint, String> {
+    if worker_wall.is_zero() || worker_wall > MAX_WORKER_WALL {
+        return Err("MCP broker worker wall time must be 1..1800 seconds".into());
+    }
+    let response_timeout = worker_wall + MCP_DELIVERY_GRACE;
     let listener = UnixListener::bind(path).map_err(|e| format!("MCP broker bind: {e}"))?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("MCP broker mode: {e}"))?;
@@ -73,7 +81,7 @@ pub fn start_broker(path: &Path) -> Result<BrokerEndpoint, String> {
                     let active = active.clone();
                     let epoch = thread_epoch.clone();
                     thread::spawn(move || {
-                        serve_broker_connection(stream, tx, epoch);
+                        serve_broker_connection(stream, tx, epoch, response_timeout);
                         active.fetch_sub(1, Ordering::SeqCst);
                     });
                 }
@@ -97,26 +105,24 @@ fn serve_broker_connection(
     mut stream: UnixStream,
     tx: SyncSender<BrokerRequest>,
     epoch: Arc<AtomicU64>,
+    response_timeout: Duration,
 ) {
-    if stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .is_err()
-    {
-        return;
-    }
     if stream
         .set_write_timeout(Some(Duration::from_secs(5)))
         .is_err()
     {
         return;
     }
-    let Ok(clone) = stream.try_clone() else {
-        return;
-    };
     let mut line = String::new();
-    if io::BufReader::new(clone.take(65_537))
-        .read_line(&mut line)
-        .is_err()
+    if io::BufReader::new(
+        DeadlineRead {
+            stream: &mut stream,
+            deadline: Instant::now() + Duration::from_secs(5),
+        }
+        .take(65_537),
+    )
+    .read_line(&mut line)
+    .is_err()
         || line.is_empty()
         || line.len() > 65_536
         || !line.ends_with('\n')
@@ -147,37 +153,64 @@ fn serve_broker_connection(
         );
         return;
     }
-    let response = reply_rx
-        .recv_timeout(Duration::from_secs(300))
-        .unwrap_or_else(
-            |_| json!({"isError":true,"text":"controller did not settle the tool call"}),
-        );
+    let response = reply_rx.recv_timeout(response_timeout).unwrap_or_else(|_| {
+        json!({"isError":true,"text":"tool delivery timed out or reply was lost; outcome unknown"})
+    });
     let _ = writeln!(stream, "{response}");
 }
 
 fn call_controller(path: &Path, name: &str, arguments: Value) -> Value {
+    call_controller_with_timeout(path, name, arguments, MAX_PROXY_WAIT)
+}
+
+fn call_controller_with_timeout(
+    path: &Path,
+    name: &str,
+    arguments: Value,
+    response_timeout: Duration,
+) -> Value {
     let result = (|| -> Result<Value, String> {
         let mut stream = UnixStream::connect(path).map_err(|e| e.to_string())?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(310)))
-            .map_err(|e| e.to_string())?;
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
             .map_err(|e| e.to_string())?;
         writeln!(stream, "{}", json!({"name":name,"arguments":arguments}))
             .map_err(|e| e.to_string())?;
         let mut line = String::new();
-        io::BufReader::new(stream.take(16_777_217))
-            .read_line(&mut line)
-            .map_err(|e| e.to_string())?;
+        io::BufReader::new(DeadlineRead {
+            stream: &mut stream,
+            deadline: Instant::now() + response_timeout,
+        })
+        .take(16_777_217)
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
         if line.len() > 16_777_216 || !line.ends_with('\n') {
             return Err("controller reply exceeds 16 MiB".into());
         }
         serde_json::from_str(&line).map_err(|e| e.to_string())
     })();
-    result.unwrap_or_else(
-        |e| json!({"isError":true,"text":format!("Mini controller unavailable: {e}")}),
-    )
+    result.unwrap_or_else(|e| {
+        json!({"isError":true,"text":format!("Mini tool delivery timed out or reply unavailable; outcome unknown: {e}")})
+    })
+}
+
+struct DeadlineRead<'a> {
+    stream: &'a mut UnixStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineRead<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "MCP reply deadline exceeded",
+            ));
+        }
+        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.read(buf)
+    }
 }
 
 pub fn serve_stdio(path: &Path) -> Result<(), String> {
@@ -240,4 +273,63 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
+
+    #[test]
+    fn broker_deadline_reports_unknown_delivery_without_claiming_settlement() {
+        let (mut client, broker) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let epoch = Arc::new(AtomicU64::new(1));
+        let worker = thread::spawn(move || {
+            serve_broker_connection(broker, tx, epoch, Duration::from_millis(30));
+        });
+        writeln!(client, "{}", json!({"name":"mini_publish","arguments":{}})).unwrap();
+        let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(request.prompt_epoch, 1);
+        let mut reply = String::new();
+        io::BufReader::new(&client).read_line(&mut reply).unwrap();
+        let value: Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(value["isError"], true);
+        assert!(value["text"].as_str().unwrap().contains("outcome unknown"));
+        assert!(request.reply.send(json!({"isError":false})).is_err());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn proxy_read_has_total_deadline_and_preserves_unknown_outcome() {
+        let socket = std::env::temp_dir().join(format!(
+            "mini-mcp-timeout-{}-{}",
+            std::process::id(),
+            NEXT_SOCKET.fetch_add(1, Ordering::SeqCst)
+        ));
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            io::BufReader::new(&stream).read_line(&mut request).unwrap();
+            assert!(request.contains("mini_publish"));
+            stream.write_all(b"{\"isError\":").unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        let result = call_controller_with_timeout(
+            &socket,
+            "mini_publish",
+            json!({}),
+            Duration::from_millis(30),
+        );
+        assert_eq!(result["isError"], true);
+        assert!(result["text"].as_str().unwrap().contains("outcome unknown"));
+        server.join().unwrap();
+        fs::remove_file(socket).unwrap();
+    }
 }

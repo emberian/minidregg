@@ -145,6 +145,19 @@ Mini reconciliation, the controller accepts expected writes to the private
 transcript store and tries `session/load` with the same ID. It reports that
 the interrupted turn may be partial; if upstream never wrote a usable row,
 the load fails rather than silently creating a new conversation.
+For new publications, a confirmed Mini settlement records the generated tool
+source, exact call and native outcome digests with its transaction/event IDs
+in the same durable journal update that clears the tool hold. Before a later
+Hermes prompt, the controller performs a read-only lookup of up to four
+unreported exact calls and adds their verified receipt records (4 KiB total) as
+fixed data beside the user prompt. It explicitly says the original MCP result
+may not have reached Hermes and that later edits may supersede the historical
+transition. A new conversation still receives unsurfaced grain receipts, tagged
+as belonging to a prior session, without copying the old session ID or prose.
+It neither fabricates a tool response nor resubmits the operation.
+The records remain unsurfaced until that later ACP prompt completes. Earlier
+journals without these receipt records, including the retained r6 timeout
+fixture, require a separate typed migration; file discovery alone is not proof.
 After the grain is idle and fully reconciled, `conversation new` explicitly
 selects a fresh conversation while retaining the prior session ID in the
 journal. It does not reset Mini authority, allowance, or unresolved effects.

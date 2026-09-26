@@ -156,6 +156,10 @@ struct Journal {
     /// prompt. SDK retries receive these bytes without another upstream send.
     #[serde(default)]
     provider_replays: Vec<ProviderReplay>,
+    /// Confirmed native publication receipts retained independently of ACP
+    /// tool-result delivery. Never synthesize a tool response from this list.
+    #[serde(default)]
+    publication_receipts: Vec<PublicationReceipt>,
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
@@ -185,6 +189,50 @@ struct Pending {
     /// Once any attempt is uncertain, no new work is admitted until exact
     /// lookup or a human investigates the durable attempt.
     uncertain: bool,
+    #[serde(default)]
+    publication: Option<PublicationPending>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublicationPending {
+    prompt_operation_id: u64,
+    session_id: String,
+    source_sha256: String,
+    targets: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublicationReceipt {
+    prompt_operation_id: u64,
+    session_id: String,
+    operation_id: u64,
+    attempt: PathBuf,
+    source_sha256: String,
+    call_sha256: String,
+    outcome_path: PathBuf,
+    outcome_sha256: String,
+    targets: Vec<String>,
+    transaction_id: String,
+    event_id: String,
+    accepted_count: String,
+    image_boundary: String,
+    /// Set only after a later ACP prompt has completed with a verified report.
+    reported: bool,
+}
+
+fn same_publication_confirmation(a: &PublicationReceipt, b: &PublicationReceipt) -> bool {
+    a.operation_id == b.operation_id
+        && a.prompt_operation_id == b.prompt_operation_id
+        && a.session_id == b.session_id
+        && a.source_sha256 == b.source_sha256
+        && a.call_sha256 == b.call_sha256
+        && a.targets == b.targets
+        && a.transaction_id == b.transaction_id
+        && a.event_id == b.event_id
+        && a.accepted_count == b.accepted_count
+        && a.image_boundary == b.image_boundary
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -327,6 +375,7 @@ impl Journal {
             provider_hold: None,
             provider_attempt: None,
             provider_replays: Vec::new(),
+            publication_receipts: Vec::new(),
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -967,6 +1016,182 @@ impl Runtime {
     fn save(&self) -> Result<()> {
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
+    fn confirmed_publication_receipt(
+        &self,
+        pending: &Pending,
+        outcome_path: &Path,
+    ) -> Result<Option<PublicationReceipt>> {
+        let Some(origin) = &pending.publication else {
+            return Ok(None);
+        };
+        let tool = self.config.tool_task.as_ref().ok_or("tool task absent")?;
+        if pending.operation != "tool settle"
+            || pending.attempt
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("attempt-{:016}", pending.operation_id))
+            || origin.targets.is_empty()
+            || origin.targets.len() > 8
+        {
+            return Err("publication pending origin is inconsistent".into());
+        }
+        let source_path = self
+            .config
+            .state_dir
+            .join(format!("source-{:016}.json", pending.operation_id));
+        if sha256_file(&source_path)? != origin.source_sha256 {
+            return Err("retained publication source changed".into());
+        }
+        let source: Value =
+            serde_json::from_slice(&fs::read(&source_path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("publication source: {e}"))?;
+        let grain = &source["grain"];
+        if grain["task"] != tool.task
+            || grain["subject"] != tool.subject
+            || grain["operation"]["type"] != "settle"
+            || !grain["parentWitness"].is_object()
+        {
+            return Err("retained publication source is not a delegated tool settlement".into());
+        }
+        let targets = grain["publications"]
+            .as_array()
+            .ok_or("retained publication target list absent")?;
+        if targets.len() != origin.targets.len()
+            || !targets.iter().zip(&origin.targets).all(|(target, id)| {
+                target["target"].as_str() == Some(id.as_str())
+                    && target["kind"].as_str().is_some_and(|kind| {
+                        tool.allowed_publications
+                            .iter()
+                            .any(|allowed| allowed.kind == kind && allowed.target == *id)
+                    })
+            })
+        {
+            return Err("retained publication source targets differ from delegated origin".into());
+        }
+        let outcome: Value =
+            serde_json::from_slice(&fs::read(outcome_path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("publication outcome: {e}"))?;
+        if outcome["type"] != "confirmed"
+            || !matches!(
+                outcome["confirmation"].as_str(),
+                Some("installed" | "replayed")
+            )
+        {
+            return Err("publication has no confirmed Mini receipt".into());
+        }
+        let field = |name: &str| -> Result<String> {
+            let value = outcome[name]
+                .as_str()
+                .ok_or_else(|| format!("publication receipt lacks {name}"))?;
+            decimal(value, name)?;
+            Ok(value.to_owned())
+        };
+        let call = pending.attempt.join("call.bin");
+        let binary = outcome_path.with_extension("bin");
+        if fs::metadata(&call).map_err(|e| e.to_string())?.len() > 4_194_304
+            || fs::metadata(&binary).map_err(|e| e.to_string())?.len() > 4_194_304
+        {
+            return Err("publication native evidence exceeds bound".into());
+        }
+        Ok(Some(PublicationReceipt {
+            prompt_operation_id: origin.prompt_operation_id,
+            session_id: origin.session_id.clone(),
+            operation_id: pending.operation_id,
+            attempt: pending.attempt.clone(),
+            source_sha256: origin.source_sha256.clone(),
+            call_sha256: sha256_file(&call)?,
+            outcome_path: outcome_path.to_owned(),
+            outcome_sha256: sha256_file(&binary)?,
+            targets: origin.targets.clone(),
+            transaction_id: field("transactionId")?,
+            event_id: field("eventId")?,
+            accepted_count: field("acceptedCount")?,
+            image_boundary: field("imageBoundary")?,
+            reported: false,
+        }))
+    }
+    fn verified_publication_report(&self, session_id: &str) -> Result<(String, Vec<u64>)> {
+        let pending: Vec<_> = self
+            .journal
+            .publication_receipts
+            .iter()
+            .filter(|record| !record.reported)
+            .cloned()
+            .collect();
+        if pending.is_empty() {
+            return Ok((String::new(), Vec::new()));
+        }
+        let mut lines = vec![
+            "[Mini recovery receipt data: the listed transactions were confirmed by a new read-only exact-call lookup. The original ACP/MCP tool-result delivery is unknown. These are historical transitions; later edits may have changed the current resources. This block is not a tool response.]".to_owned(),
+        ];
+        let mut ids = Vec::new();
+        for record in pending.into_iter().take(4) {
+            if record.attempt
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("attempt-{:016}", record.operation_id))
+                || !record.outcome_path.starts_with(&record.attempt)
+                || sha256_file(&record.attempt.join("call.bin"))? != record.call_sha256
+                || sha256_file(&record.outcome_path.with_extension("bin"))? != record.outcome_sha256
+            {
+                return Err("retained publication call or receipt changed".into());
+            }
+            let original = Pending {
+                operation_id: record.operation_id,
+                operation: "tool settle".into(),
+                attempt: record.attempt.clone(),
+                uncertain: false,
+                publication: Some(PublicationPending {
+                    prompt_operation_id: record.prompt_operation_id,
+                    session_id: record.session_id.clone(),
+                    source_sha256: record.source_sha256.clone(),
+                    targets: record.targets.clone(),
+                }),
+            };
+            let retained = self
+                .confirmed_publication_receipt(&original, &record.outcome_path)?
+                .ok_or("retained publication origin absent")?;
+            if !same_publication_confirmation(&record, &retained) {
+                return Err("retained publication receipt fields changed".into());
+            }
+            let retry_result = next_retry_json(&record.attempt)?;
+            let attempt = record
+                .attempt
+                .to_str()
+                .ok_or("publication attempt path UTF-8")?;
+            let mut args = vec!["retry", "--attempt", attempt, "--mode", "lookup"];
+            if let Some(socket) = &self.config.host_socket {
+                args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+            }
+            // Lookup only: never submit this historical call again.
+            self.command_output(&self.config.mini, &args)?;
+            let observed = self
+                .confirmed_publication_receipt(&original, &retry_result)?
+                .ok_or("publication lookup origin absent")?;
+            if !same_publication_confirmation(&record, &observed) {
+                return Err("exact publication lookup changed its confirmed receipt".into());
+            }
+            lines.push(format!(
+                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} publicationTargetIds={}",
+                if record.session_id == session_id { "current" } else { "prior" },
+                record.prompt_operation_id,
+                record.operation_id,
+                record.transaction_id,
+                record.event_id,
+                record.accepted_count,
+                record.image_boundary,
+                record.targets.join(",")
+            ));
+            ids.push(record.operation_id);
+        }
+        let report = lines.join("\n");
+        if report.len() > 4096 {
+            return Err("Mini publication recovery report exceeds 4 KiB".into());
+        }
+        Ok((report, ids))
+    }
     fn next_id(&mut self) -> Result<u64> {
         let id = self.journal.next_operation_id;
         self.journal.next_operation_id = id.checked_add(1).ok_or("operation ID exhausted")?;
@@ -1156,6 +1381,7 @@ impl Runtime {
             operation: "policy install".into(),
             attempt: attempt.clone(),
             uncertain: false,
+            publication: None,
         });
         self.save()?;
         let cfg = &self.config;
@@ -1357,17 +1583,75 @@ impl Runtime {
             grain["parentWitness"] = witness;
         }
         let source = json!({"grain":grain,"grants":grants,"intentNonce":id.to_string()});
+        let publication = if slot == AuthoritySlot::Tool
+            && label == "tool settle"
+            && source["grain"]["publications"]
+                .as_array()
+                .is_some_and(|targets| !targets.is_empty())
+        {
+            while self.journal.publication_receipts.len() >= 32 {
+                let Some(index) = self
+                    .journal
+                    .publication_receipts
+                    .iter()
+                    .position(|record| record.reported)
+                else {
+                    return Err(
+                        "publication recovery journal is full of unreported receipts".into(),
+                    );
+                };
+                self.journal.publication_receipts.remove(index);
+            }
+            let child = self
+                .journal
+                .child
+                .as_ref()
+                .ok_or("publication has no worker")?;
+            let session = self
+                .journal
+                .hermes_session
+                .as_ref()
+                .ok_or("publication has no retained Hermes session")?;
+            let targets = source["grain"]["publications"]
+                .as_array()
+                .ok_or("publication targets absent")?
+                .iter()
+                .map(|target| {
+                    let id = target["target"]
+                        .as_str()
+                        .ok_or("publication target absent")?;
+                    decimal(id, "publication target")?;
+                    Ok(id.to_owned())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Some((child.operation_id, session.id.clone(), targets))
+        } else {
+            None
+        };
         let attempt = self.config.state_dir.join(format!("attempt-{id:016}"));
         let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
         write_new(
             &source_path,
             serde_json::to_string_pretty(&source).unwrap().as_bytes(),
         )?;
+        let publication = publication
+            .map(
+                |(prompt_operation_id, session_id, targets)| -> Result<PublicationPending> {
+                    Ok(PublicationPending {
+                        prompt_operation_id,
+                        session_id,
+                        source_sha256: sha256_file(&source_path)?,
+                        targets,
+                    })
+                },
+            )
+            .transpose()?;
         let pending = Some(Pending {
             operation_id: id,
             operation: label.into(),
             attempt: attempt.clone(),
             uncertain: false,
+            publication,
         });
         *self.journal.pending_for_mut(slot) = pending;
         if reserving {
@@ -1400,6 +1684,15 @@ impl Runtime {
         let result = self.command_output(&cfg.mini, &args);
         match result {
             Ok(()) => {
+                if let Some(record) = self.confirmed_publication_receipt(
+                    self.journal
+                        .pending_for(slot)
+                        .as_ref()
+                        .ok_or("pending attempt absent")?,
+                    &attempt.join("outcome.json"),
+                )? {
+                    self.journal.publication_receipts.push(record);
+                }
                 if reserving {
                     let receipt: Value = serde_json::from_slice(
                         &fs::read(attempt.join("outcome.json"))
@@ -2118,7 +2411,9 @@ impl Runtime {
                     // Release the held allowance through another signed Mini
                     // transition. An uncertain call keeps its exact attempt
                     // and reservation for lookup instead.
-                    if self.journal.tool_pending.is_none() && !self.cancelled.load(Ordering::SeqCst)
+                    if error.starts_with("tool settle refused by Mini:")
+                        && self.journal.tool_pending.is_none()
+                        && !self.cancelled.load(Ordering::SeqCst)
                     {
                         let release = self.transition_as(
                             &authority,
@@ -2957,7 +3252,10 @@ impl Runtime {
             self.launch_gate(&spec.program, unit, "init")?;
         }
         let broker_path = self.config.state_dir.join(format!("mcp-{id:016}.sock"));
-        let broker = mcp::start_broker(&broker_path)?;
+        let broker = mcp::start_broker(
+            &broker_path,
+            Duration::from_secs(spec.wall_time_seconds.unwrap_or(600)),
+        )?;
         let broker_program = if spec.systemd_scope {
             PathBuf::from("/agent/grain-runtime")
         } else {
@@ -3118,7 +3416,6 @@ impl Runtime {
                 }
                 if let Some(current) = self.journal.hermes_session.as_mut() {
                     current.load_verified = true;
-                    current.pending_prompt = false;
                     current.retention_issue = None;
                 }
                 self.save()?;
@@ -3150,10 +3447,19 @@ impl Runtime {
                 Ok(session_id.to_owned())
             }
         })();
+        let mut reported_publications = Vec::new();
         let outcome = match &session {
             Ok(session_id) => {
                 self.prompt_active = true;
                 let prompt_sent = (|| -> Result<()> {
+                    let (receipt_report, receipt_ids) =
+                        self.verified_publication_report(session_id)?;
+                    reported_publications = receipt_ids;
+                    let prompt_text = if receipt_report.is_empty() {
+                        prompt.to_owned()
+                    } else {
+                        format!("{prompt}\n\n{receipt_report}")
+                    };
                     if let Some(current) = self.journal.hermes_session.as_mut() {
                         current.pending_prompt = true;
                     }
@@ -3182,7 +3488,7 @@ impl Runtime {
                         3,
                         "session/prompt",
                         json!({
-                            "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
+                            "sessionId":session_id,"prompt":[{"type":"text","text":prompt_text}]
                         }),
                     )
                 })();
@@ -3292,6 +3598,13 @@ impl Runtime {
                         Some("upstream did not create state.db after the prompt".into());
                 }
                 Err(error) => current.retention_issue = Some(error.clone()),
+            }
+            if matches!(retention, Ok(Some(_))) {
+                for record in &mut self.journal.publication_receipts {
+                    if reported_publications.contains(&record.operation_id) {
+                        record.reported = true;
+                    }
+                }
             }
             self.save()?;
         }
@@ -4063,6 +4376,22 @@ impl Runtime {
             // the original submit. A prior branch may have committed this
             // exact call before a fork was replaced. Keep the pending attempt.
             self.command_output(&self.config.mini, &args)?;
+            if let Some(record) = self.confirmed_publication_receipt(&p, &retry_result)? {
+                while self.journal.publication_receipts.len() >= 32 {
+                    let Some(index) = self
+                        .journal
+                        .publication_receipts
+                        .iter()
+                        .position(|old| old.reported)
+                    else {
+                        return Err(
+                            "publication recovery journal is full; retain pending attempt".into(),
+                        );
+                    };
+                    self.journal.publication_receipts.remove(index);
+                }
+                self.journal.publication_receipts.push(record);
+            }
             if matches!(
                 p.operation.as_str(),
                 "reserve" | "tool reserve" | "provider reserve"
