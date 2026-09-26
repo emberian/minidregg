@@ -100,7 +100,7 @@ unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
 
-fn service_lock(path: &Path) -> Result<fs::File, String> {
+pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
     let file = match OpenOptions::new()
         .write(true)
         .create_new(true)

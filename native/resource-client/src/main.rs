@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+mod drain;
+#[cfg(unix)]
 mod transport;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
@@ -34,6 +36,7 @@ usage:
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -319,10 +322,7 @@ fn create_dir(path: &Path) -> Result<()> {
 
 /// The native host may write call.bin without syncing it. A successful
 /// external submit must never precede a durable exact call and its pathname.
-fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
-    File::open(call)
-        .and_then(|file| file.sync_all())
-        .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
+fn sync_directory_ancestors(directory: &Path) -> Result<()> {
     let mut ancestor = Some(absolute(directory)?);
     while let Some(path) = ancestor {
         File::open(&path)
@@ -333,6 +333,13 @@ fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
         ancestor = path.parent().map(Path::to_path_buf);
     }
     Ok(())
+}
+
+fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
+    File::open(call)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
+    sync_directory_ancestors(directory)
 }
 
 fn copy_new(source: &Path, destination: &Path) -> Result<()> {
@@ -1129,6 +1136,35 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("persistent host sessions require Unix sockets".to_owned())
+            }
+        }
+        "consumer-drain-once" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let key = path(args.required("key")?);
+            let state_dir = path(args.required("state-dir")?);
+            let max_pages = args
+                .optional("max-pages")
+                .unwrap_or_else(|| OsString::from("16"));
+            args.finish()?;
+            let max_pages = max_pages
+                .to_str()
+                .ok_or("--max-pages must be UTF-8")?
+                .parse::<u32>()
+                .map_err(|_| "--max-pages must be an integer from 1 to 16".to_owned())?;
+            if !(1..=16).contains(&max_pages) {
+                return Err("--max-pages must be an integer from 1 to 16".to_owned());
+            }
+            #[cfg(unix)]
+            {
+                let socket = SOCKET
+                    .get()
+                    .ok_or("consumer-drain-once requires --socket")?;
+                drain::run(&host, &config, socket, &key, &state_dir, max_pages)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("consumer-drain-once requires Unix sockets".to_owned())
             }
         }
         "profile" | "describe" => {

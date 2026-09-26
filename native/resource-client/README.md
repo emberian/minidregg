@@ -90,8 +90,9 @@ An accepted historical repeat or recorded conflict has no new intent. Polling do
 not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
 publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
 only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
-repeat the same transaction ID in a new attempt directory and reconcile from
-the retained reply.
+retain the transaction ID and reply for operator reconciliation. An exact
+repeat of op13 has not yet passed native restart validation, so the worker
+does not retry an uncertain ACK automatically.
 
 An empty fn page can return `status: "idle"` with no intent, or
 `status: "skip-decision"`. A fresh skip decision includes a Lean-authored
@@ -107,6 +108,32 @@ attempts retain the same filenames. A historical repeat can return an
 accepted decision without a new intent; in that case no Mini submit is due.
 The A service also uses the `idle` and `skip-decision` empty-page statuses
 described above.
+
+`consumer-drain-once` runs one bounded B consumer wake through that same
+socket. It holds a single private, owner-locked durable state directory:
+
+```sh
+mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock --key CONSUMER.key \
+  --state-dir /private/path/b-consumer-worker --max-pages 16
+```
+
+The worker polls using Host/Main, stores the exact Lean-authored intent, and
+uses `submit --prepare-only true` to retain and sync a signed `call.bin` before
+any Mini submission. It persists `Ready`, then `Sending` before `retry --mode
+submit`. A restart in `Sending` runs exact `lookup` first; absent or uncertain
+lookup holds the call for reconciliation. Once Mini confirms, the worker
+persists its transaction ID before fn ACK. A lost ACK reply also holds for
+reconciliation. The operator must keep the same host, config bytes, socket,
+and signing key; a changed pin refuses. The worker archives successful
+attempts by Mini transaction ID and removes idle poll attempts.
+
+One wake stops after a publication, a short neutral page, an idle poll, or
+the `--max-pages` cap. The fn ACK itself appends a Store event, so repeatedly
+polling until idle would generate a new skip and ACK without external work.
+External wake scheduling and automatic uncertain ACK recovery are still open
+work; invoke this command only on a justified external wake or as an operator
+controlled step.
 
 To render a retained signed resource query as a bounded fn inbox summary,
 run `mini inspect --host HOST --config CONFIG.json --socket SOCKET --kind
