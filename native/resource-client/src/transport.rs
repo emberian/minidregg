@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
-pub(crate) const HOST_MAX_FRAME: usize = 6_194_884;
+pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
