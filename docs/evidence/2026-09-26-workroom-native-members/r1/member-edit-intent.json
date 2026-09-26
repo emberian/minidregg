@@ -1,0 +1,60 @@
+{
+  "subject": "9",
+  "nonce": "60136",
+  "purpose": {
+    "type": "prepare",
+    "draft": {
+      "type": "invoke",
+      "command": {
+        "subject": "9",
+        "expectedAuthorityRoot": "75253943354829769429414481447163742137364413474704891834586249630727959976918",
+        "nonce": "60137",
+        "targets": [
+          {
+            "kind": "object",
+            "target": "8001",
+            "capability": "97",
+            "observeCapability": "98",
+            "schemaVersion": "1",
+            "expectedTargetRoot": "74540402556588611004341531832728097648177612044444328573692332557261173532853",
+            "payload": {
+              "type": "content",
+              "actions": [
+                {
+                  "type": "editAtom",
+                  "atom": "7401",
+                  "before": {
+                    "document": "8001",
+                    "kind": {
+                      "type": "text"
+                    },
+                    "payload": "4d656d62657220656967687420726576697365642074686520736861726564206e6f74652e",
+                    "createdBy": {
+                      "capability": "95",
+                      "capabilityKind": "object",
+                      "subject": "8"
+                    },
+                    "createdAt": "44573402268917316071241812088906549810139755808378389186095051523419508278606",
+                    "tombstonedAt": null
+                  },
+                  "kind": {
+                    "type": "text"
+                  },
+                  "payload": "4d656d626572206e696e65207265636f6e63696c656420746865206e65776572206e6f74652e",
+                  "tombstone": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "8001",
+      "capability": "98"
+    }
+  ]
+}
