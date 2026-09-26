@@ -161,10 +161,14 @@ reconciliation POST after a recorded transport uncertainty; missing response
 evidence holds for operator review. The post config and signed carrier are
 pinned for restart, and the password is never placed on an argument vector.
 
-Host op18 historical readback has been probed in a source-matched native
-image: an accepted tag-10 transaction exported a carrier byte-identical to
-the signed R and receipts matching the retained origin and outbox outcomes.
-No end-to-end native `origin-publish` run is claimed yet.
+The [September 26 workroom publisher run](../../docs/evidence/2026-09-26-workroom-content-publisher/README.md)
+exercised `origin-publish` for an actual hosted Hermes content edit. Host
+op18 returned the exact accepted carrier, fn accepted one POST, both private
+fn peers retained the article, and restarting the publisher did not repost.
+This establishes that operator-driven fixture's custody and transport path;
+it does not authorize an agent to release the origin Store's entire history.
+See the [disclosure boundary](../../docs/FN-PUBLICATION-DISCLOSURE.md) before
+using this full-prefix carrier for a workroom.
 
 `mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json
 --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT` is the read-only
