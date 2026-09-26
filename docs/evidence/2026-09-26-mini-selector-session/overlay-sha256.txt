@@ -1,0 +1,6 @@
+1e69f459b3efaccfbfe841f6d919fa53b7f42eaa53d79ded2789421ef26bc0d8  /tmp/minidregg-overnight-20260926-next/Host/Main.lean
+b052762104d2545c22253531fc7b98e7fe4eb92733ca70a7dd11abeed74237b8  /tmp/minidregg-overnight-20260926-next/Kernel/FnConsumerOperation.lean
+c151ad9b08d3be5cfaed262412904423439768f4b533a4c41fe1fe8a05f46e9e  /tmp/minidregg-overnight-20260926-next/Kernel/FnConsumerProgress.lean
+9d4ada41fd2c6c7d290c12b43a53c49ca57356b592ad2f6775501be17ba7fcd0  /tmp/minidregg-overnight-20260926-next/Kernel/FnReplyConsumption.lean
+7dc5cbc4a9ea8a8b0386c338bd21b09190e5d28f907560f3d94328aeee1e5e41  /tmp/minidregg-overnight-20260926-next/Kernel/NativeObservationController.lean
+7d5b9cbaf76578e3e954fdfb49ab4bbf36986eff5beae2a7fe4edb584a001c46  /tmp/minidregg-overnight-20260926-next/Kernel/NativeHostSession.lean

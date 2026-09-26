@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-next/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-next/.lake/packages/batteries' has local changes
+PASS source-matched accepted B binding and A result selectors: B accepted=2, A accepted=2
