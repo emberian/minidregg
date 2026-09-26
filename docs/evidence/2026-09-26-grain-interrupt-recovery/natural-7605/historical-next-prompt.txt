@@ -1,0 +1,4 @@
+second
+
+[Mini recovery receipt data: the listed transactions were confirmed by a new read-only exact-call lookup. The original ACP/MCP tool-result delivery is unknown. These are historical transitions; later edits may have changed the current resources. This block is not a tool response.]
+originSession=current promptOperationId=11 toolOperationId=19 transactionId=12932403748101041568221534076776710442466220226905475202956079045086496691263 eventId=68843460463941331998988577392768700057282856456562915611570378448324345594977 acceptedCount=10 imageBoundary=108446442676876708350164994910645561465735225010808102006308970562081450921698 publicationTargetIds=7607

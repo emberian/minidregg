@@ -1,0 +1,167 @@
+[
+  {
+    "task": "7605",
+    "operationId": "6",
+    "operation": {
+      "soft": true,
+      "type": "attach"
+    },
+    "before": {
+      "generation": "0",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "0"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "9",
+    "operation": {
+      "amount": "3",
+      "type": "reserve"
+    },
+    "before": {
+      "generation": "1",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "2"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7606",
+    "operationId": "14",
+    "operation": {
+      "soft": false,
+      "type": "attach"
+    },
+    "before": {
+      "generation": "0",
+      "remaining": "50",
+      "reserved": "0",
+      "status": "0"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7606",
+    "operationId": "17",
+    "operation": {
+      "amount": "2",
+      "type": "reserve"
+    },
+    "before": {
+      "generation": "1",
+      "remaining": "50",
+      "reserved": "0",
+      "status": "1"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7606",
+    "operationId": "19",
+    "operation": {
+      "charge": "1",
+      "type": "settle"
+    },
+    "before": {
+      "generation": "1",
+      "remaining": "48",
+      "reserved": "2",
+      "status": "3"
+    },
+    "publicationTargets": [
+      "7607"
+    ]
+  },
+  {
+    "task": "7606",
+    "operationId": "21",
+    "operation": {
+      "type": "disconnect"
+    },
+    "before": {
+      "generation": "1",
+      "remaining": "49",
+      "reserved": "0",
+      "status": "1"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "27",
+    "operation": {
+      "type": "interrupt"
+    },
+    "before": {
+      "generation": "1",
+      "remaining": "97",
+      "reserved": "3",
+      "status": "4"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "31",
+    "operation": {
+      "charge": "1",
+      "type": "settle"
+    },
+    "before": {
+      "generation": "2",
+      "remaining": "97",
+      "reserved": "3",
+      "status": "5"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "40",
+    "operation": {
+      "soft": true,
+      "type": "attach"
+    },
+    "before": {
+      "generation": "2",
+      "remaining": "99",
+      "reserved": "0",
+      "status": "0"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "43",
+    "operation": {
+      "amount": "3",
+      "type": "reserve"
+    },
+    "before": {
+      "generation": "3",
+      "remaining": "99",
+      "reserved": "0",
+      "status": "2"
+    },
+    "publicationTargets": []
+  },
+  {
+    "task": "7605",
+    "operationId": "47",
+    "operation": {
+      "charge": "1",
+      "type": "settle"
+    },
+    "before": {
+      "generation": "3",
+      "remaining": "96",
+      "reserved": "3",
+      "status": "4"
+    },
+    "publicationTargets": []
+  }
+]

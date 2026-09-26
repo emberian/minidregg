@@ -1,0 +1,2 @@
+signed grain bootstrap ready: /tmp/mga-recovery-natural-7605-native-r1
+PASS fresh native publication with lost MCP reply, audited recovery, exact session/load and historical receipt: /tmp/mga-recovery-natural-7605-native-r1

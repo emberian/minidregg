@@ -1,0 +1,7 @@
+# Grain-runtime publication-refusal cleanup image
+
+The Linux image is built from only the 19 tracked `native/grain-runtime` files in committed `1241f52`, archived into `/tmp/minidregg-grain-runtime-1241f52-src`. It includes the existing interrupt and op17 gateway runtime with the new refusal-cleanup diagnostics and focused tests. Foreign Mini Cargo and prover working-tree files are excluded. The source-file hashes were reverified 19/19 after the build.
+
+The isolated x86-64 executable is `/tmp/minidregg-grain-runtime-1241f52-target/release/grain-runtime`, SHA-256 `92e0e307e65b98cc346610e56ea6d140b92781da07d2b51fa67c29242edca4a3`. `cargo build --release --locked` completed under a user systemd scope capped at 8 GiB and 200% CPU with two Cargo build jobs. The three focused release tests passed: confirmed refusal→signed release/disconnect→same-prompt read and retry, uncertain zero-charge release retaining the hold, and uncertain disconnect retaining the exact pending attempt. See [manifest](linux-manifest.txt), [source hashes](linux-source-sha256.txt), [source verification](linux-source-verify.log), [build log](linux-build.log), and [focused test log](linux-focused-tests.log).
+
+This is a new candidate for private qualification. Earlier `f289` and `ed8` runtime images and active hosted/recovery services were not changed. No binary, private config, Store, key, or signed call is copied into this directory.

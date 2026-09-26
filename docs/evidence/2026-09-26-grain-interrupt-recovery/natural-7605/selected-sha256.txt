@@ -1,0 +1,10 @@
+4cbcb6f3988283fbc6f6d75704d0bbf05566ecbb592a1776858d8511278a9b8c  ./README.md
+ba5162ec9e4d8b4bc74766f1375010a9903fe9202235f369223e01e86d97d156  ./historical-next-prompt.txt
+ac03d9be7c7f09746bd9ad692d32c186d916306d04aae2957ebb006f9f3e3b17  ./manifest.txt
+e00e2b0f35efdc06e700f8097cdc7aa08eedb8127e48559fc15f1f8747c59566  ./native-artifact-hashes.txt
+66e59a9e9754a79e0d065f571928edf4b22c31bf8dce86f99b76139dd9082470  ./native-operations.json
+ac9337fb13a57ef6052ecd20fe4f9a5a416dfcdcf255bd8df2ce281baa24eb4b  ./native-run-verdict.txt
+eb40ebf9ea4fb022bc034d64ca4ce582b0f3fb711924f071c6fa2f5ba635be77  ./observed-read-only-retry.txt
+dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22  ./reconcile-effects.stdout
+dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22  ./reconcile-parent.stdout
+a999060ac6f7106d4e40cc7439ea67eb4d4fecd81c1e962c406e7d10b6484ec1  ./selected-native.json

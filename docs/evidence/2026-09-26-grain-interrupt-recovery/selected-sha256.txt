@@ -1,4 +1,4 @@
-2c30eb2a17144c6e2c889143c522c7bc564e98929ccac1ae79d45b36a86489f5  ./README.md
+ecfb5a96a2b6acea0eb376f859601cc939a342fdb605ef3bc980ba5162423356  ./README.md
 7a2f61734b729ac85c436ca7ca042ec98dccfd9eb7a6ff8a07415dd370a219bc  ./after-law-selected.json
 6e08fdd5b8c1d819b57c6f2fa36cdefc5fce62ef2c2872011a8965bf90f190f8  ./continuation-verdict.txt
 df1410aca8e5fb4e2c9eb6477016f0af0fb9600780d2856d4404ec496239855a  ./historical-next-prompt.txt

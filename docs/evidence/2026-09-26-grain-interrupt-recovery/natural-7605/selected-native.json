@@ -1,0 +1,115 @@
+{
+  "receipt": {
+    "promptOperationId": 11,
+    "sessionId": "recovery-fixture",
+    "operationId": 19,
+    "sourceSha256": "bdb473e662770f1261d64e5ca45ee072eb90d7ab7eb299097c555cbce862f3ce",
+    "callSha256": "8edec0b02f8a31f651109a5d6ecc563f5eb24b867f7608d7d097edd063636404",
+    "outcomeSha256": "4df17bf0110580f55037a14425cfe61f55f9651c3bdc0d0bb3a9bebeae695a52",
+    "targets": [
+      "7607"
+    ],
+    "transactionId": "12932403748101041568221534076776710442466220226905475202956079045086496691263",
+    "eventId": "68843460463941331998988577392768700057282856456562915611570378448324345594977",
+    "acceptedCount": "10",
+    "imageBoundary": "108446442676876708350164994910645561465735225010808102006308970562081450921698",
+    "reported": true
+  },
+  "session": {
+    "id": "recovery-fixture",
+    "workspace": "/tmp/mga-recovery-natural-7605-native-r1/worker-work",
+    "loadVerified": true,
+    "stateFingerprint": "state.db:34:31d9df0b77f3d49ed648dd8ea0129d2aefecd97cffeed0ff5dc845968f3c55ff|state.db-wal:absent",
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "finalJournal": {
+    "connection": "soft",
+    "pending": null,
+    "toolPending": null,
+    "parentHold": null,
+    "toolHold": null,
+    "unresolvedExternal": []
+  },
+  "reconciliationLog": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "28",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "/tmp/mga-recovery-natural-7605-native-r1/runtime-state/attempt-0000000000000009",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "28",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "34",
+      "details": [
+        "Hermes prompt 11: Hermes ACP stream closed",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ],
+  "nativePublication": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "10",
+    "transactionId": "12932403748101041568221534076776710442466220226905475202956079045086496691263",
+    "eventId": "68843460463941331998988577392768700057282856456562915611570378448324345594977",
+    "imageBoundary": "108446442676876708350164994910645561465735225010808102006308970562081450921698"
+  },
+  "nativeInterrupt": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "12"
+  },
+  "nativeAuditedSettlement": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "13"
+  },
+  "parentAfterInterrupt": {
+    "root": "3023675795414543967805377376234014671856011182815023662309255735844868859375",
+    "grain": {
+      "generation": "2",
+      "remaining": "97",
+      "reserved": "3",
+      "status": "5",
+      "task": "7605"
+    }
+  },
+  "parentAfterAuditedSettle": {
+    "root": "106883715877714783646886660948888064941235671058826969569540227644289306580380",
+    "grain": {
+      "generation": "2",
+      "remaining": "99",
+      "reserved": "0",
+      "status": "0",
+      "task": "7605"
+    }
+  },
+  "parentAfterReport": {
+    "root": "36255050300032462008440182754764443282169193634980121234286262260733402204095",
+    "grain": {
+      "generation": "3",
+      "remaining": "98",
+      "reserved": "0",
+      "status": "2",
+      "task": "7605"
+    }
+  },
+  "publicationRoots": {
+    "before": "38359978054791843018129030162585434922575275347620833797826384451127149097292",
+    "after": "113952029793691212929984139818193855154678518680884047166752034668201058800914",
+    "afterReport": "113952029793691212929984139818193855154678518680884047166752034668201058800914"
+  }
+}
