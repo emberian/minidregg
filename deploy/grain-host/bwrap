@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Mini grain worker launcher. The controller supplies a unique, journaled unit
+# name for each reserved operation through MINI_GRAIN_UNIT.
+set -euo pipefail
+
+usage() {
+  echo 'usage: bwrap --workspace ABS_DIR --runtime-root ABS_DIR --network none|host -- /agent/PROGRAM [ARG...]' >&2
+  exit 64
+}
+
+[[ $# -ge 8 && $1 == --workspace ]] || usage
+workspace=$2
+shift 2
+[[ $# -ge 6 && $1 == --runtime-root ]] || usage
+runtime_root=$2
+shift 2
+[[ $# -ge 4 && $1 == --network ]] || usage
+network=$2
+shift 2
+[[ $1 == -- ]] || usage
+shift
+[[ $# -ge 1 ]] || usage
+
+[[ $workspace == /* && -d $workspace && $runtime_root == /* && -d $runtime_root ]] || usage
+[[ $1 == /agent/* && $1 != */../* ]] || usage
+[[ $network == none || $network == host ]] || usage
+workspace=$(realpath -e -- "$workspace")
+runtime_root=$(realpath -e -- "$runtime_root")
+[[ $workspace != / && $runtime_root != / ]] || usage
+mount_roots=("$(realpath -e /usr)" "$workspace" "$runtime_root")
+if [[ $network == host ]]; then
+  [[ ! -d /etc/ssl ]] || mount_roots+=("$(realpath -e /etc/ssl)")
+  [[ ! -f /etc/resolv.conf ]] || mount_roots+=("$(realpath -e /etc/resolv.conf)")
+fi
+for secret in "${MINI_GRAIN_STATE_DIR:?controller state path required}" \
+              "${MINI_GRAIN_CUSTODY_KEY:?controller key path required}" \
+              "${MINI_GRAIN_TASK_CONFIG:?task config path required}" \
+              "${MINI_GRAIN_HOST_CONFIG:?Mini host config path required}" \
+              "${MINI_GRAIN_TOOL_CUSTODY_KEY:-}"; do
+  [[ -n $secret ]] || continue
+  [[ $secret == /* ]] || usage
+  secret=$(realpath -e -- "$secret")
+  for mount in "${mount_roots[@]}"; do
+    if [[ $secret == "$mount" || $secret == "$mount"/* ]]; then
+      echo "controller secret or state is exposed by worker mount: $mount" >&2
+      exit 77
+    fi
+  done
+done
+broker_socket=${MINI_GRAIN_BROKER_SOCKET:-}
+if [[ -n $broker_socket ]]; then
+  [[ $broker_socket == /* && -S $broker_socket ]] || usage
+  broker_socket=$(realpath -e -- "$broker_socket")
+fi
+[[ ${MINI_GRAIN_UNIT:-} =~ ^mini-grain-t[0-9]+-o[0-9]+$ ]] || {
+  echo 'MINI_GRAIN_UNIT must identify one reserved Mini operation' >&2
+  exit 64
+}
+unit=${MINI_GRAIN_UNIT}.service
+controller_unit=${MINI_GRAIN_CONTROLLER_UNIT:-}
+if [[ -n $controller_unit ]]; then
+  [[ $controller_unit =~ ^mini-grain-controller@([0-9]+)\.service$ ]] || usage
+  [[ ${MINI_GRAIN_UNIT} == mini-grain-t${BASH_REMATCH[1]}-o* ]] || usage
+fi
+
+# Refuse to attach to an existing unit. A stale name requires investigation;
+# reusing it could signal a process from a different operation.
+if [[ $(systemctl --user show -p LoadState --value "$unit" 2>/dev/null || :) != not-found ]]; then
+  echo "unit already exists: $unit" >&2
+  exit 73
+fi
+
+sandbox=(
+  /usr/bin/bwrap --die-with-parent --unshare-user --unshare-pid
+  --unshare-ipc --unshare-uts --unshare-cgroup --clearenv
+  --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib
+  --symlink usr/lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp
+  --ro-bind "$runtime_root" /agent --bind "$workspace" /workspace
+  --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
+)
+[[ -z $broker_socket ]] || sandbox+=(--dir /run --ro-bind "$broker_socket" /run/mini-grain.sock)
+if [[ $network == none ]]; then
+  sandbox+=(--unshare-net)
+else
+  sandbox+=(--share-net)
+  [[ ! -d /etc/ssl ]] || sandbox+=(--ro-bind /etc/ssl /etc/ssl)
+  [[ ! -f /etc/resolv.conf ]] || sandbox+=(--ro-bind /etc/resolv.conf /etc/resolv.conf)
+fi
+sandbox+=(-- "$@")
+
+runner_pid=
+stop_unit() {
+  trap - TERM INT HUP
+  [[ -z $runner_pid ]] || kill -TERM "$runner_pid" 2>/dev/null || :
+  systemctl --user kill --signal=SIGKILL --kill-whom=all "$unit" >/dev/null 2>&1 || :
+  [[ -z $runner_pid ]] || wait "$runner_pid" 2>/dev/null || :
+  # The service can be created after the first kill if systemd-run was still
+  # sending its start request. Recheck after that client has exited.
+  systemctl --user kill --signal=SIGKILL --kill-whom=all "$unit" >/dev/null 2>&1 || :
+  systemctl --user stop "$unit" >/dev/null 2>&1 || :
+  state=$(systemctl --user show -p ActiveState --value "$unit" 2>/dev/null || :)
+  if [[ $state == active || $state == activating || $state == deactivating ]]; then
+    echo "worker unit did not stop: $unit ($state)" >&2
+    exit 74
+  fi
+  exit 143
+}
+trap stop_unit TERM INT HUP
+
+unit_properties=(
+  --property=KillMode=control-group --property=RuntimeMaxSec=600s
+  --property=MemoryMax=2G --property=TasksMax=128
+)
+[[ -z $controller_unit ]] || unit_properties+=("--property=BindsTo=$controller_unit")
+/usr/bin/systemd-run --user --wait --pipe --collect --unit="${MINI_GRAIN_UNIT}" \
+  "${unit_properties[@]}" \
+  "${sandbox[@]}" <&0 >&1 2>&2 &
+runner_pid=$!
+wait "$runner_pid"

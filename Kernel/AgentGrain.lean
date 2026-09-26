@@ -94,6 +94,10 @@ def transitionPolicy : Pred := .all [
      edge 1 2 0 [unchangedBudget], edge 2 1 0 [unchangedBudget],
      -- Controller start/input is an authorized no-op, not a paid reservation.
      edge 1 1 0 [unchangedBudget, .eq "resource/field/3/after" 0],
+     -- A delegated tool publication may carry the parent execution as a
+     -- joint exact-state witness while its prompt is reserved. The generic
+     -- receiver checks the old root, current grant and signed read leg.
+     edge 3 3 0 [unchangedBudget],
      -- Soft disconnect changes neither authority nor allowance.
      edge 2 2 0 [unchangedBudget], edge 4 4 0 [unchangedBudget]] ++
     -- Reserve before dispatch; zero-cost operations still have a pending state.
@@ -126,6 +130,20 @@ of late external outcomes uses the controller's separately governed right. -/
 def executionCaveat (generation : Int) : Pred :=
   .all [.eq "request/verb" 2, .eq "resource/field/0/after" generation,
     .eq "resource/field/0/delta" 0, .any [edge 1 3 0, edge 2 4 0, edge 3 1 0, edge 4 2 0]]
+
+/-- A delegated tool subject can carry the reserved parent as an exact-state
+witness in a joint publication. It cannot reserve, settle, attach or trip the
+parent. The fixed generation refuses a stale witness after a hard disconnect,
+including when a later controller attaches the same task again. -/
+def witnessCaveat (generation : Int) : Pred :=
+  .all [.eq "request/verb" 2,
+    .eq "resource/field/0/before" generation,
+    .eq "resource/field/0/after" generation,
+    .memberOf "resource/field/1/before" [3,4],
+    .eq "resource/field/0/delta" 0,
+    .eq "resource/field/1/delta" 0,
+    .eq "resource/field/2/delta" 0,
+    .eq "resource/field/3/delta" 0]
 
 /-- Construction is not authorization: only the generic receiver, current
 committed policy, current grants and signature evidence admit these actions. -/
@@ -165,6 +183,11 @@ def Operation.after (operation : Operation) (s : State) : State :=
   | .cancel => { s with
       generation := s.generation + 1
       status := (if s.status = 3 ∨ s.status = 4 ∨ s.status = 5 then 7 else 6) }
+
+theorem input_witness_exact (s : State) : Operation.input.after s = s := rfl
+
+theorem input_witness_generation (s : State) :
+    (Operation.input.after s).generation = s.generation := rfl
 
 /-- Exact canonical host operation bytes include a unique operation id as
 well as the prompt/request. The source-derived nonce binds those bytes into

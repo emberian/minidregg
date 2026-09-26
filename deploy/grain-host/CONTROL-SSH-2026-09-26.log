@@ -1,0 +1,16 @@
+attached:1:soft=false
+attached-output:1:true
+line:1:status
+line-output:1:true
+hard-interrupt:1
+detached:1:hard=true
+attached:2:soft=true
+attached-output:2:true
+line:2:status
+line-output:2:true
+detached:2:hard=false
+attached:3:soft=true
+attached-output:3:true
+line:3:status
+line-output:3:true
+detached:3:hard=false

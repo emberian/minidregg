@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Use only as a fixed SSH forced command for one task/socket.
+set -euo pipefail
+if [[ $# != 2 || $1 != /* || $2 != /* ]]; then
+  echo 'usage: grain-ssh ABS_GRAIN_RUNTIME ABS_CONTROL_SOCKET' >&2
+  exit 64
+fi
+[[ -x $1 ]] || { echo 'grain runtime is not executable' >&2; exit 66; }
+# SSH_ORIGINAL_COMMAND is intentionally ignored. The runtime protocol admits
+# only its own fixed task commands and Mini checks current authority.
+exec "$1" connect "$2"

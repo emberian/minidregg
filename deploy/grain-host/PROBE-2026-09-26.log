@@ -1,0 +1,9 @@
+host=persvati kernel=6.17.0-40-generic systemd=systemd 257 (257.9-0ubuntu2.5) launcher_sha256=4cc9f964120a6f4a5eba4e03057f479f7af4b0ac00dc4cc1d68d0cb1d2a43e24 probe_sha256=cca6e97d962dd8bccccdffd2cba1be33294d922fa02393791f2ee2bc55db7c7e socket_helper_sha256=05cb6e05c386629f766aba20ff868c2d7f7a79fa19b3a7e49f992c452b83d3c5
+PASS broker socket connect through exact bind
+PASS /usr host-config exposure refused before launch
+PASS workspace containing controller state refused before launch
+hard cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t2834395-o1.service host_pids=2834567,2834569,2834571,2834572,
+PASS wrapper TERM stopped setsid unit (4 host pids, state=inactive)
+Running as unit: mini-grain-controller@2834395.service; invocation ID: 3b189c16d1314c829c09e33ba9e587fc
+bound cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t2834395-o2.service host_pids=2834609,2834610,2834611,2834612,
+PASS controller BindsTo stopped setsid unit (4 host pids, state=inactive)
