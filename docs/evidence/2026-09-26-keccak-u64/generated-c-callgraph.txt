@@ -1,0 +1,29 @@
+26:lean_object* l_BitVec_rotateLeft(lean_object*, lean_object*, lean_object*);
+47:uint64_t lean_uint64_xor(uint64_t, uint64_t);
+50:uint64_t lean_uint64_shift_left(uint64_t, uint64_t);
+52:uint64_t lean_uint64_shift_right(uint64_t, uint64_t);
+53:uint64_t lean_uint64_lor(uint64_t, uint64_t);
+54:uint64_t lean_uint64_complement(uint64_t);
+55:uint64_t lean_uint64_land(uint64_t, uint64_t);
+299:LEAN_EXPORT lean_object* l_Minidregg_Compiler_Sp800185Cshake256_absorbPaddedIndexed(lean_object*);
+301:LEAN_EXPORT lean_object* l_Minidregg_Compiler_Sp800185Cshake256_absorbFrom(lean_object*, lean_object*, lean_object*);
+637:v___x_118_ = l_BitVec_rotateLeft(v___x_109_, v___x_117_, v___x_115_);
+701:v___x_145_ = l_BitVec_rotateLeft(v___x_136_, v___x_144_, v___x_141_);
+864:v___x_265_ = l_BitVec_rotateLeft(v___x_262_, v___x_263_, v___x_264_);
+1820:v___x_557_ = lean_uint64_xor(v_x_552_, v___x_556_);
+1874:v___x_582_ = lean_uint64_shift_left(v_x_575_, v___x_581_);
+1879:v___x_585_ = lean_uint64_shift_right(v_x_575_, v___x_584_);
+1880:v___x_586_ = lean_uint64_lor(v___x_582_, v___x_585_);
+1940:v___x_613_ = lean_uint64_xor(v___x_612_, v___x_611_);
+1967:v___x_628_ = lean_uint64_xor(v___x_625_, v___x_627_);
+2184:v___x_723_ = l_BitVec_rotateLeft(v___x_720_, v___x_721_, v___x_722_);
+2215:v___x_738_ = lean_uint64_complement(v___x_737_);
+2222:v___x_742_ = lean_uint64_land(v___x_738_, v___x_741_);
+2223:v___x_743_ = lean_uint64_xor(v___x_734_, v___x_742_);
+2268:v___x_761_ = lean_uint64_xor(v___x_760_, v_constant_753_);
+2664:v___x_915_ = l___private_Compiler_Sp800185Cshake256Core_0__Minidregg_Compiler_Sp800185Cshake256_keccakF1600UInt64(v___x_914_);
+2681:LEAN_EXPORT lean_object* l_Minidregg_Compiler_Sp800185Cshake256_absorbPaddedIndexed(lean_object* v_padded_921_){
+2700:v_res_929_ = l_Minidregg_Compiler_Sp800185Cshake256_absorbPaddedIndexed(v_padded_928_);
+2705:LEAN_EXPORT lean_object* l_Minidregg_Compiler_Sp800185Cshake256_absorbFrom(lean_object* v_x_930_, lean_object* v_x_931_, lean_object* v_x_932_){
+2728:v___x_941_ = l___private_Compiler_Sp800185Cshake256Core_0__Minidregg_Compiler_Sp800185Cshake256_keccakF1600UInt64(v___x_940_);
+2813:v___x_985_ = l_Minidregg_Compiler_Sp800185Cshake256_absorbFrom(v___x_983_, v___x_984_, v_padded_980_);
