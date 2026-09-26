@@ -1,0 +1,18 @@
+#!/bin/sh
+# Read-only process trace for the one retained exact-call lookup in this test.
+set -eu
+[ "$#" -eq 3 ] || exit 2
+mini=$1 attempt=$2 trace=$3
+count=0
+while [ "$count" -lt 15000 ]; do
+  line=$(ps -eo pid=,args= | awk -v mini="$mini" -v attempt="$attempt" \
+    '$2 == mini && $3 == "retry" && $4 == "--attempt" && $5 == attempt &&
+      $6 == "--mode" {print; exit}')
+  if [ -n "$line" ]; then
+    printf '%s\n' "$line" >"$trace"
+    exit 0
+  fi
+  count=$((count + 1))
+  sleep 0.1
+done
+exit 1

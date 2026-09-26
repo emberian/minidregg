@@ -1,0 +1,43 @@
+#!/bin/sh
+# Deterministic two-process ACP peer: first prompt faults, second reloads.
+set -eu
+umask 077
+
+if [ "$#" -ne 4 ]; then
+  echo 'usage: hermes-acp-recovery HERMES_HOME READY RELEASE SECOND_PROMPT' >&2
+  exit 2
+fi
+fixture_home=$1 ready=$2 release=$3 second_prompt=$4
+
+IFS= read -r initialize
+case $initialize in *'"method":"initialize"'*) ;; *) exit 1 ;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+
+IFS= read -r session
+case $session in
+  *'"method":"session/new"'*)
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"recovery-fixture"}}'
+    IFS= read -r prompt
+    case $prompt in *'"method":"session/prompt"'*) ;; *) exit 1 ;; esac
+    test -d "$fixture_home"
+    printf 'retained recovery fixture session\n' >"$fixture_home/state.db"
+    chmod 600 "$fixture_home/state.db"
+    : >"$ready"
+    while [ ! -f "$release" ]; do sleep 1; done
+    # No session/prompt response: the original ACP result is unknown/error.
+    exit 1
+    ;;
+  *'"method":"session/load"'*)
+    printf '%s\n' "$session" | jq -e '.params.sessionId == "recovery-fixture"' >/dev/null
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"recovery-fixture"}}'
+    IFS= read -r prompt
+    printf '%s\n' "$prompt" >"$second_prompt"
+    printf '%s\n' "$prompt" | jq -e '
+      .method == "session/prompt" and
+      (.params.prompt[0].text | contains("[Mini recovery receipt data:")) and
+      (.params.prompt[0].text | contains("original ACP/MCP tool-result delivery is unknown")) and
+      (.params.prompt[0].text | contains("transactionId="))' >/dev/null
+    printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+    ;;
+  *) exit 1 ;;
+esac
