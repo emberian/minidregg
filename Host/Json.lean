@@ -775,6 +775,113 @@ theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
 
 #print axioms grainPolicy_singleton_bytes
 
+/-- A worker witness with a different old generation cannot satisfy even its
+own clause. This uses the deployed predicate evaluator, not list membership. -/
+theorem grainWorkerClause_wrong_generation (subject : Nat) (generation actual : Int)
+    (old new : Minidregg.Pred.State)
+    (before : new.get "resource/field/0/before" = some actual)
+    (stale : actual ≠ generation) :
+    Minidregg.Pred.eval (grainWorkerClause subject generation) old new = false := by
+  have witnessFalse : Minidregg.Pred.eval (AgentGrain.witnessCaveat generation)
+      old new = false := by
+    simp [AgentGrain.witnessCaveat, Minidregg.Pred.eval_all,
+      Minidregg.Pred.eval, Minidregg.Pred.evalWith, before, stale]
+  simp [grainWorkerClause, Minidregg.Pred.eval_all, witnessFalse]
+
+/-- The subject check refuses a caller absent from a worker clause. -/
+theorem grainWorkerClause_wrong_subject (subject caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (different : caller ≠ subject) :
+    Minidregg.Pred.eval (grainWorkerClause subject generation) old new = false := by
+  simp [grainWorkerClause, Minidregg.Pred.eval_all,
+    Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject,
+    Nat.cast_inj, different]
+
+/-- For a mutation, no worker can reuse a previous pinned generation, even
+if that worker can observe a newer state. Owner and management branches are
+explicitly excluded by the request subject and verb. -/
+theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
+    (generation actual : Int) (caller : Nat)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (before : new.get "resource/field/0/before" = some actual)
+    (stale : actual ≠ generation) :
+    Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
+  have workerFalse : ∀ worker ∈ subjects,
+      Minidregg.Pred.eval (grainWorkerClause worker generation) old new = false := by
+    intro worker _
+    exact grainWorkerClause_wrong_generation worker generation actual old new before stale
+  have workerFalseWith : ∀ worker ∈ subjects,
+      Minidregg.Pred.evalWith Minidregg.Pred.failClosed
+        (grainWorkerClause worker generation) old new = false := workerFalse
+  cases subjects with
+  | nil =>
+      simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+        Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+        Nat.cast_inj, notOwner]
+  | cons first rest =>
+      cases rest with
+      | nil =>
+          have firstFalse := workerFalseWith first (by simp)
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, firstFalse]
+      | cons second tail =>
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner]
+          intro _
+          refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
+          intro worker named
+          exact workerFalseWith worker (by simp [named])
+
+#print axioms grainPolicy_stale_worker_refused
+
+/-- A non-owner subject absent from the bounded worker list cannot mutate
+through the plural resource policy, even when it presents a valid generation. -/
+theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
+    (generation : Int) (caller : Nat)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (unnamed : caller ∉ subjects) :
+    Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
+  have workerFalseWith : ∀ worker ∈ subjects,
+      Minidregg.Pred.evalWith Minidregg.Pred.failClosed
+        (grainWorkerClause worker generation) old new = false := by
+    intro worker named
+    have different : caller ≠ worker := by
+      intro same
+      exact unnamed (by simpa [same] using named)
+    exact grainWorkerClause_wrong_subject worker caller generation old new
+      requestSubject different
+  cases subjects with
+  | nil =>
+      simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+        Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+        Nat.cast_inj, notOwner]
+  | cons first rest =>
+      cases rest with
+      | nil =>
+          have firstFalse := workerFalseWith first (by simp)
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, firstFalse]
+      | cons second tail =>
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner]
+          intro _
+          refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
+          intro worker named
+          exact workerFalseWith worker (by simp [named])
+
+#print axioms grainPolicy_unnamed_worker_refused
+
 private def grainWorker (path : String)
     (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
   match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration" with
@@ -1071,6 +1178,36 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
       "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
+
+private def authorRefused (kind : String) (value : Lean.Json) : Bool :=
+  match author kind value with
+  | .error _ => true
+  | .ok _ => false
+
+/-- Negative authoring checks run through the same exact JSON parser used by
+native requests. Duplicate and overbound examples use the compiled evaluator;
+the mixed-form example is kernel-decided. Their printed axioms disclose that
+distinction, and none are used to prove the general policy theorems. -/
+theorem grainPolicy_duplicate_workers_refused :
+    authorRefused "grain-policy" (.mkObj [
+      ("owner", .str "7"), ("workerSubjects", .arr #[.str "8", .str "8"]),
+      ("workerGeneration", .str "1")]) = true := by native_decide
+
+theorem grainPolicy_overbound_workers_refused :
+    authorRefused "grain-policy" (.mkObj [
+      ("owner", .str "7"), ("workerSubjects", .arr #[.str "8", .str "9",
+        .str "10", .str "11", .str "12"]),
+      ("workerGeneration", .str "1")]) = true := by native_decide
+
+theorem grainPolicy_mixed_worker_forms_refused :
+    authorRefused "grain-policy" (.mkObj [
+      ("owner", .str "7"), ("workerSubject", .str "8"),
+      ("workerSubjects", .arr #[.str "8", .str "9"]),
+      ("workerGeneration", .str "1")]) = true := by decide
+
+#print axioms grainPolicy_duplicate_workers_refused
+#print axioms grainPolicy_overbound_workers_refused
+#print axioms grainPolicy_mixed_worker_forms_refused
 
 /-- Source-derived, non-authoritative presentation data. This lets clients
 display the resulting grain generation/state without duplicating the state
