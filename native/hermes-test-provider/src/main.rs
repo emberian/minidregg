@@ -155,6 +155,19 @@ fn has_publish_receipt(value: &Value, depth: usize) -> bool {
     }
 }
 
+fn has_peer_publish_receipt(value: &Value, task: &str, depth: usize) -> bool {
+    if depth > 12 { return false; }
+    if value.pointer("/grain/task").and_then(Value::as_str) == Some(task)
+        && value.get("targetRoot").and_then(Value::as_str).is_some_and(decimal)
+    { return true; }
+    match value {
+        Value::Array(items) => items.iter().any(|item| has_peer_publish_receipt(item, task, depth + 1)),
+        Value::Object(fields) => fields.values().any(|item| has_peer_publish_receipt(item, task, depth + 1)),
+        Value::String(text) => nested_json(text).is_some_and(|nested| has_peer_publish_receipt(&nested, task, depth + 1)),
+        _ => false,
+    }
+}
+
 fn call(name: String, id: &str, args: Value) -> Value {
     json!({"id":id,"type":"function","function":{"name":name,"arguments":args.to_string()}})
 }
@@ -325,7 +338,8 @@ fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str,
             return Ok((json!({"role":"assistant","content":"Fixture observed Mini refuse the stale target root."}),
                 "stop", "peer stale root refused".into()));
         }
-        if tool_failed(published, 0) || !has_publish_receipt(published, 0) {
+        let task = if peer_a { "7802" } else { "7804" };
+        if tool_failed(published, 0) || !has_peer_publish_receipt(published, task, 0) {
             return Err("Mini peer publication did not return a signed resource receipt".into());
         }
         return Ok((json!({"role":"assistant","content":"Fixture observed the peer Mini publication receipt."}),
@@ -717,5 +731,17 @@ mod tests {
         let args: Value = serde_json::from_str(edit["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(args["publications"][0]["expectedTargetRoot"], "456");
         assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(PEER_B_FOLLOWUP));
+        let wrong_receipt = request(json!([
+            {"role":"user","content":"workroom-b-retry"},
+            {"role":"tool","tool_call_id":PUBLISH_ID,
+             "content":"{\"grain\":{\"task\":\"7802\"},\"targetRoot\":\"456\"}"}
+        ]));
+        assert!(peer_reply_for(&wrong_receipt, false).is_err());
+        let correct_receipt = request(json!([
+            {"role":"user","content":"workroom-b-retry"},
+            {"role":"tool","tool_call_id":PUBLISH_ID,
+             "content":"{\"grain\":{\"task\":\"7804\"},\"targetRoot\":\"789\"}"}
+        ]));
+        assert_eq!(peer_reply_for(&correct_receipt, false).unwrap().1, "stop");
     }
 }
