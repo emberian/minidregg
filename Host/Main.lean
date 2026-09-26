@@ -82,6 +82,8 @@ structure FnPollServiceSettings where
 structure FnPollService where
   originConfigPath : String
   fnPinPath : String
+  fnExecutable : String
+  fnPublicKey : String
   scopePath : String
   policyPath : String
   controlPath : String
@@ -103,9 +105,13 @@ structure FnReplyPollServiceSettings where
 structure FnReplyPollService where
   originConfigPath : String
   rPinPath : String
+  rExecutable : String
+  rPublicKey : String
   rClaimPath : String
   rCarrierPath : String
   qPinPath : String
+  qExecutable : String
+  qPublicKey : String
   scopePath : String
   policyPath : String
   controlPath : String
@@ -125,7 +131,11 @@ structure FnReplyCatalogServiceSettings where
 structure FnReplyCatalogService where
   originConfig : NativeHost.Config
   rPinPath : String
+  rExecutable : String
+  rPublicKey : String
   qPinPath : String
+  qExecutable : String
+  qPublicKey : String
   scopePath : String
   policyPath : String
   controlPath : String
@@ -440,6 +450,53 @@ def withPinnedSignature {α : Type} (config : NativeHost.Config)
     discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
     body { config with signature := ⟨pinned⟩ }
 
+partial def readOperatorSnapshot (input : IO.FS.Handle) (limit : Nat)
+    (acc : ByteArray := ByteArray.empty) : IO ByteArray := do
+  if acc.size > limit then
+    throw (IO.userError "operator executable or key exceeds snapshot bound")
+  let chunk ← input.read (min 4096 (limit + 1 - acc.size)).toUSize
+  if chunk.isEmpty then return acc
+  readOperatorSnapshot input limit (acc ++ chunk)
+
+def snapshotOperatorFile (directory : System.FilePath) (name sourcePath : String)
+    (limit : Nat) (mode : String) : IO String := do
+  unless sourcePath.startsWith "/" do
+    throw (IO.userError s!"operator {name} path must be absolute")
+  let input ← IO.FS.Handle.mk sourcePath .read
+  let bytes ← readOperatorSnapshot input limit
+  unless !bytes.isEmpty do
+    throw (IO.userError s!"operator {name} is empty")
+  let destination := directory / name
+  IO.FS.writeBinFile destination bytes
+  let permission ← IO.Process.output
+    { cmd := "/bin/chmod", args := #[mode, destination.toString] }
+  unless permission.exitCode == 0 do
+    throw (IO.userError s!"cannot pin operator {name} permissions")
+  return destination.toString
+
+def withPinnedStorageBinary {α : Type} (config : NativeHost.Config)
+    (body : NativeHost.Config → IO α) : IO α :=
+  IO.FS.withTempDir fun directory => do
+    let pinned ← snapshotOperatorFile directory "origin-storage-helper"
+      config.storage.binary.toString (64 * 1024 * 1024) "0500"
+    body { config with storage := { config.storage with
+      binary := System.FilePath.mk pinned } }
+
+/-- The logical `fnBinary` remains in durable pollControlBinding. Execution
+uses a private byte snapshot of the local helper and ML public PEM for the
+whole process. A remote fn image behind a bridge remains an operator custody
+assumption and must be separately qualified. -/
+def snapshotFnPinFiles (directory : System.FilePath) (label pinPath : String) :
+    IO (String × String) := do
+  let json ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile pinPath))
+  let fnBinary ← IO.ofExcept (json.getObjValAs? String "fnBinary")
+  let mlPublicKey ← IO.ofExcept (json.getObjValAs? String "mlPublicKey")
+  let executable ← snapshotOperatorFile directory (label ++ "-fn-helper")
+    fnBinary (64 * 1024 * 1024) "0500"
+  let publicKey ← snapshotOperatorFile directory (label ++ "-ml-public.pem")
+    mlPublicKey 8192 "0400"
+  return (executable, publicKey)
+
 def withFnPollService {α : Type} (settings : Settings)
     (body : Option FnPollService → IO α) : IO α := do
   let some source := settings.fnPoll | return ← body none
@@ -456,9 +513,11 @@ def withFnPollService {α : Type} (settings : Settings)
       pure (destination.toString : String)
     let originConfigPath ← copyManifest "origin-config.json" source.originConfigPath 65536
     let fnPinPath ← copyManifest "fn-pin.json" source.fnPinPath 8192
+    let (fnExecutable, fnPublicKey) ← snapshotFnPinFiles directory "b" fnPinPath
     let scopePath ← copyManifest "scope.json" source.scopePath 8192
     let policyPath ← copyManifest "policy.json" source.policyPath 8192
-    body (some ⟨originConfigPath, fnPinPath, scopePath, policyPath,
+    body (some ⟨originConfigPath, fnPinPath, fnExecutable, fnPublicKey,
+      scopePath, policyPath,
       source.controlPath⟩)
 
 def readBytes (path : String) : IO (List UInt8) :=
@@ -504,14 +563,37 @@ def withFnReplyPollService {α : Type} (settings : Settings)
       pure destination.toString
     let originConfigPath ← copyInput "origin-config.json" source.originConfigPath 65536
     let rPinPath ← copyInput "r-pin.json" source.rPinPath 8192
+    let (rExecutable, rPublicKey) ← snapshotFnPinFiles directory "r" rPinPath
     let rClaimPath ← copyInput "r-claim.json" source.rClaimPath 8192
     let rCarrierPath ← copyInput "r-carrier.eml" source.rCarrierPath
       FnEvidenceCodec.maxCarrierBytes
     let qPinPath ← copyInput "q-pin.json" source.qPinPath 8192
+    let (qExecutable, qPublicKey) ← snapshotFnPinFiles directory "q" qPinPath
     let scopePath ← copyInput "scope.json" source.scopePath 8192
     let policyPath ← copyInput "policy.json" source.policyPath 8192
-    body (some ⟨originConfigPath, rPinPath, rClaimPath, rCarrierPath,
-      qPinPath, scopePath, policyPath, source.controlPath⟩)
+    body (some ⟨originConfigPath, rPinPath, rExecutable, rPublicKey,
+      rClaimPath, rCarrierPath, qPinPath, qExecutable, qPublicKey,
+      scopePath, policyPath, source.controlPath⟩)
+
+/-- Physical directory identity catches a second pathname to the same Store,
+including a bind mount that `realPath` alone cannot detect. This is a
+launch-time check under the same OS custody assumption as the private helper
+snapshots. -/
+def directoryIdentity (path : System.FilePath) : IO String := do
+  let linux ← IO.Process.output
+    { cmd := "/usr/bin/stat", args := #["-c", "%d:%i", path.toString] }
+  let output ← if linux.exitCode == 0 then pure linux else
+    IO.Process.output
+      { cmd := "/usr/bin/stat", args := #["-f", "%d:%i", path.toString] }
+  unless output.exitCode == 0 && output.stdout.length ≤ 128 do
+    throw (IO.userError "cannot identify Mini Store directory")
+  let identity := output.stdout.trimAscii.toString
+  match identity.splitOn ":" with
+  | [device, inode] =>
+      unless device.toNat?.isSome && inode.toNat?.isSome do
+        throw (IO.userError "Mini Store directory identity is malformed")
+      return identity
+  | _ => throw (IO.userError "Mini Store directory identity is malformed")
 
 def withFnReplyCatalogService {α : Type} (settings : Settings)
     (body : Option FnReplyCatalogService → IO α) : IO α := do
@@ -532,7 +614,9 @@ def withFnReplyCatalogService {α : Type} (settings : Settings)
       pure (destination.toString : String)
     let originConfigPath ← copyInput "origin-config.json" source.originConfigPath 65536
     let rPinPath ← copyInput "r-pin.json" source.rPinPath 8192
+    let (rExecutable, rPublicKey) ← snapshotFnPinFiles directory "r" rPinPath
     let qPinPath ← copyInput "q-pin.json" source.qPinPath 8192
+    let (qExecutable, qPublicKey) ← snapshotFnPinFiles directory "q" qPinPath
     let scopePath ← copyInput "scope.json" source.scopePath 8192
     let policyPath ← copyInput "policy.json" source.policyPath 8192
     let origin := (← loadSettings (System.FilePath.mk originConfigPath)).config
@@ -546,9 +630,19 @@ def withFnReplyCatalogService {α : Type} (settings : Settings)
     let replyRoot ← IO.FS.realPath settings.config.storage.root
     unless originRoot != replyRoot do
       throw (IO.userError "A prepared origin aliases the A reply Store")
-    withPinnedSignature origin fun pinnedOrigin =>
-      body (some ⟨pinnedOrigin, rPinPath, qPinPath, scopePath,
-        policyPath, source.controlPath⟩)
+    let originIdentity ← directoryIdentity originRoot
+    let replyIdentity ← directoryIdentity replyRoot
+    unless originIdentity != replyIdentity do
+      throw (IO.userError "A prepared origin aliases the A reply Store")
+    -- Use the resolved origin root for the entire session, so replacing its
+    -- configured symlink cannot redirect later readback to another Store.
+    let canonicalOrigin := { origin with storage :=
+      { origin.storage with root := originRoot } }
+    withPinnedSignature canonicalOrigin fun signedOrigin =>
+      withPinnedStorageBinary signedOrigin fun pinnedOrigin =>
+        body (some ⟨pinnedOrigin, rPinPath, rExecutable, rPublicKey,
+          qPinPath, qExecutable, qPublicKey, scopePath,
+          policyPath, source.controlPath⟩)
 
 /-- Large source and carrier comparisons use the array primitive after the
 bounded read; recursive list equality is unsuitable for the full V2 profile. -/
@@ -591,7 +685,20 @@ structure FnPortablePin where
   principal : String
   edPublicKey : String
   mlPublicKeyHex : String
+  fnExecution : Option String := none
+  mlPublicKeyExecution : Option String := none
   deriving FromJson
+
+def FnPortablePin.executable (pin : FnPortablePin) : String :=
+  pin.fnExecution.getD pin.fnBinary
+
+def FnPortablePin.publicKeyFile (pin : FnPortablePin) : String :=
+  pin.mlPublicKeyExecution.getD pin.mlPublicKey
+
+def FnPortablePin.withExecution (pin : FnPortablePin)
+    (executable publicKey : String) : FnPortablePin :=
+  ⟨pin.fnBinary, pin.mlPublicKey, pin.principal, pin.edPublicKey,
+    pin.mlPublicKeyHex, some executable, some publicKey⟩
 
 structure FnReplyCreationSource where
   fromMailbox : String
@@ -1098,8 +1205,8 @@ def verifyFnCarrierUnclaimed (pin : FnPortablePin)
       expectedMl.length == 1952 do
     throw (IO.userError "fn pin has invalid field width")
   let child ← IO.Process.spawn
-    { cmd := pin.fnBinary, args := #["--fn", "hybrid-verify-source", carrierPath,
-      pin.mlPublicKey], stdin := .null, stdout := .piped, stderr := .null }
+    { cmd := pin.executable, args := #["--fn", "hybrid-verify-source", carrierPath,
+      pin.publicKeyFile], stdin := .null, stdout := .piped, stderr := .null }
   let lineBytes ← try readBoundedLoop child.stdout FnEvidenceCodec.maxPortableVerifyLineBytes
     catch error =>
       child.kill
@@ -1212,7 +1319,7 @@ def verifyFnPollFiles (pin : FnPortablePin) (scope : FnPollScopePin)
     IO (List UInt8 × List UInt8 × FnPollProjection × List UInt8 ×
       FnPortableVerified × FnPortableSource.Extracted) := do
   let (cursor, report, projection) ←
-    projectFnPoll pin.fnBinary scope cursorPath reportPath
+    projectFnPoll pin.executable scope cursorPath reportPath
   let (carrier, verified, extracted) ← verifyFnPortable pin claim carrierPath
   unless sameBytes projection.received carrier &&
       sameBytes projection.source verified.source &&
@@ -1403,7 +1510,8 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
     (opened : NativeHost.Opened config)
     (controlBinding : Option (String × String))
     (originPath pinPath scopePath claimPath policyPath cursorPath reportPath
-     carrierPath intentPath resultPath : String) : IO UInt32 := do
+     carrierPath intentPath resultPath : String)
+    (execution : Option (String × String) := none) : IO UInt32 := do
   let gateway ← requireGateway config
   let origin := (← loadSettings originPath).config
   let pinJson ← readJson pinPath
@@ -1419,7 +1527,10 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
     ["sourceIdentity", "messageId", "groups"] claimJson)
   IO.ofExcept (requireExactFields "consumer policy"
     ["application", "subject", "target", "capability"] policyJson)
-  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let parsedPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let pin := match execution with
+    | some (binary, key) => parsedPin.withExecution binary key
+    | none => parsedPin
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let claim : FnPortableClaim ← IO.ofExcept (fromJson? claimJson)
   let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
@@ -1485,7 +1596,8 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
     (originPath rPinPath rClaimPath rCarrierPath qPinPath scopePath qClaimPath
      policyPath controlPath cursorPath reportPath carrierPath intentPath
      resultPath : String)
-    (preObserved : Option (List UInt8 × List UInt8) := none) : IO UInt32 := do
+    (preObserved : Option (List UInt8 × List UInt8) := none)
+    (execution : Option ((String × String) × (String × String)) := none) : IO UInt32 := do
   let gateway ← requireGateway config
   let origin := (← loadSettings originPath).config
   let rPinJson ← readJson rPinPath
@@ -1504,9 +1616,14 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
      "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
-  let rPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
+  let parsedRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
   let rClaim : FnPortableClaim ← IO.ofExcept (fromJson? rClaimJson)
-  let qPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let parsedQPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let (rPin, qPin) := match execution with
+    | some ((rBinary, rKey), (qBinary, qKey)) =>
+        (parsedRPin.withExecution rBinary rKey,
+         parsedQPin.withExecution qBinary qKey)
+    | none => (parsedRPin, parsedQPin)
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let qClaim : FnPortableClaim ← IO.ofExcept (fromJson? qClaimJson)
   let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
@@ -1518,11 +1635,11 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
   let (cursor, event) ← match preObserved with
     | some observed => pure observed
     | none => do
-        let (cursor, event, _) ← invokeFnConsumerPoll qPin.fnBinary scope
+        let (cursor, event, _) ← invokeFnConsumerPoll qPin.executable scope
           controlPath cursorPath reportPath carrierPath
         pure (cursor, event)
   let (projectedCursor, projectedEvent, projection) ←
-    projectFnPoll qPin.fnBinary scope cursorPath reportPath
+    projectFnPoll qPin.executable scope cursorPath reportPath
   unless cursor == projectedCursor && sameBytes event projectedEvent do
     throw (IO.userError "A fn poll changed before Mini projection")
   let (carrier, verified) ← verifyFnCarrier qPin qClaim carrierPath
@@ -1620,15 +1737,17 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
      "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
   IO.ofExcept (requireExactFields "A reply policy"
     ["application", "subject", "target", "capability"] policyJson)
-  let rPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
-  let qPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let rawRPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
+  let rawQPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let rPin := rawRPin.withExecution service.rExecutable service.rPublicKey
+  let qPin := rawQPin.withExecution service.qExecutable service.qPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let qClaim : FnPortableClaim ← IO.ofExcept (fromJson? qClaimJson)
   let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
   let policy := policySource.policy
   let (cursor, event) := observed
   let (projectedCursor, projectedEvent, projection) ←
-    projectFnPoll qPin.fnBinary scope cursorPath reportPath
+    projectFnPoll qPin.executable scope cursorPath reportPath
   unless cursor == projectedCursor && sameBytes event projectedEvent do
     throw (IO.userError "A fn poll changed before outbox parent selection")
   let (qCarrier, qVerified) ← verifyFnCarrier qPin qClaim carrierPath
@@ -1767,7 +1886,8 @@ def runFnPollSession (config : NativeHost.Config)
     IO.ofExcept (requireExactFields "fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
        "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-    let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
     let cursorPath := (directory / "cursor.fncu").toString
     let reportPath := (directory / "report.fn-e").toString
@@ -1775,11 +1895,11 @@ def runFnPollSession (config : NativeHost.Config)
     let claimPath := (directory / "claim.json").toString
     let intentPath := (directory / "intent.bin").toString
     let resultPath := (directory / "decision.json").toString
-    let before ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
-    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.fnBinary scope
+    let before ← queryFnConsumerStatus pin.executable scope service.controlPath
+    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.executable scope
       service.controlPath cursorPath reportPath
     if polledEvent.isEmpty then
-      let empty ← classifyFnEmptyPoll pin.fnBinary scope service.controlPath
+      let empty ← classifyFnEmptyPoll pin.executable scope service.controlPath
         cursorPath reportPath polledCursor before
       match empty with
       | none =>
@@ -1791,7 +1911,7 @@ def runFnPollSession (config : NativeHost.Config)
             service.policyPath service.controlPath scope pin.fnBinary
             polledCursor fromPosition toPosition 12 "fn-consumer-poll-session-v1"
     let (_, projectedEvent, projection) ←
-      projectFnPoll pin.fnBinary scope cursorPath reportPath
+      projectFnPoll pin.executable scope cursorPath reportPath
     unless sameBytes projectedEvent polledEvent do
       throw (IO.userError "fn poll event changed before projection")
     IO.FS.writeBinFile carrierPath projection.received.toByteArray
@@ -1807,6 +1927,7 @@ def runFnPollSession (config : NativeHost.Config)
       (some (pin.fnBinary, service.controlPath)) service.originConfigPath
       service.fnPinPath service.scopePath claimPath service.policyPath
       cursorPath reportPath carrierPath intentPath resultPath
+      (some (service.fnExecutable, service.fnPublicKey))
     unless polledCursor == (← readBoundedBytes cursorPath 346) &&
         sameBytes polledEvent (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
         sameBytes polledCarrier (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
@@ -1862,19 +1983,19 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
     let cursorPath := (directory / "retained-skip.fncu").toString
     writeBytes cursorPath skipped.cursor
     let (inspectedScope, position) ←
-      inspectFnConsumerCursor pin.fnBinary cursorPath
+      inspectFnConsumerCursor pin.executable cursorPath
     let selectedScope ← IO.ofExcept scope.progressScope
     unless inspectedScope == selectedScope && position == skipped.toPosition &&
         skipped.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "empty-page ACK cursor differs from accepted Mini skip")
     let (currentPosition, currentStatus) ←
-      queryFnConsumerPosition pin.fnBinary scope controlPath
+      queryFnConsumerPosition pin.executable scope controlPath
     if currentPosition ≥ skipped.toPosition &&
         currentStatus.committedAck > skipped.toPosition then
       return coveredSkipAckResponse operation responseType transaction skipped
         currentStatus.committedAck
     let child ← IO.Process.spawn
-      { cmd := pin.fnBinary,
+      { cmd := pin.executable,
         args := #["--fn", "consumer", "ack", controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
     let output ← try readBoundedLoop child.stdout 128
@@ -1892,14 +2013,14 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
       else "transport-fault"
     if status == "refused" then
       let (latestPosition, latestStatus) ←
-        queryFnConsumerPosition pin.fnBinary scope controlPath
+        queryFnConsumerPosition pin.executable scope controlPath
       if latestPosition ≥ skipped.toPosition &&
           latestStatus.committedAck > skipped.toPosition then
         return coveredSkipAckResponse operation responseType transaction skipped
           latestStatus.committedAck
     let mut committedAck := currentStatus.committedAck
     if status == "durable-accepted" then
-      let after ← queryFnConsumerStatus pin.fnBinary scope controlPath
+      let after ← queryFnConsumerStatus pin.executable scope controlPath
       unless skipped.toPosition ≤ after.committedAck do
         throw (IO.userError "fn accepted skip ACK without durable position advance")
       committedAck := after.committedAck
@@ -1931,7 +2052,8 @@ def runFnAckSession (config : NativeHost.Config)
   IO.ofExcept (requireExactFields "fn service scope"
     ["history", "incarnation", "consumer", "principal", "query",
      "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
@@ -1955,17 +2077,17 @@ def runFnAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
-    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.fnBinary cursorPath
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.executable cursorPath
     unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
         stored.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "fn ack retained cursor differs from signed Mini position")
     let (currentPosition, currentStatus) ←
-      queryFnConsumerPosition pin.fnBinary scope service.controlPath
+      queryFnConsumerPosition pin.executable scope service.controlPath
     if currentPosition ≥ oldPosition && currentStatus.committedAck > oldPosition then
       return coveredArticleAckResponse 13 "fn-consumer-ack-session-v1"
         transaction stored oldPosition currentStatus.committedAck
     let (cursor, event, projected) ←
-      projectFnPoll pin.fnBinary scope cursorPath eventPath
+      projectFnPoll pin.executable scope cursorPath eventPath
     unless cursor == stored.cursor && sameBytes event stored.event &&
         projected.sourceIdentity == stored.sourceIdentity &&
         projected.sequence == stored.sequence &&
@@ -1982,7 +2104,7 @@ def runFnAckSession (config : NativeHost.Config)
         projected.verdictPrincipal == portable.principal do
       throw (IO.userError "fn ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
-      { cmd := pin.fnBinary,
+      { cmd := pin.executable,
         args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
     let output ← try readBoundedLoop child.stdout 128
@@ -2001,7 +2123,7 @@ def runFnAckSession (config : NativeHost.Config)
       else "transport-fault"
     if status == "refused" then
       let (latestPosition, latestStatus) ←
-        queryFnConsumerPosition pin.fnBinary scope service.controlPath
+        queryFnConsumerPosition pin.executable scope service.controlPath
       if latestPosition ≥ oldPosition && latestStatus.committedAck > oldPosition then
         return coveredArticleAckResponse 13 "fn-consumer-ack-session-v1"
           transaction stored oldPosition latestStatus.committedAck
@@ -2028,7 +2150,8 @@ def runFnOriginOutboxSession (config : NativeHost.Config)
     ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
   IO.ofExcept (requireExactFields "A outbox policy"
     ["application", "subject", "target", "capability"] policyJson)
-  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let pin := rawPin.withExecution service.rExecutable service.rPublicKey
   let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
   let policy := policySource.policy
   let gateway ← requireGateway config
@@ -2093,13 +2216,14 @@ def runFnReplyPollSession (config : NativeHost.Config)
     IO.ofExcept (requireExactFields "A fn service scope"
       ["history", "incarnation", "consumer", "principal", "query",
        "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-    let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
-    let before ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
-    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.fnBinary scope
+    let before ← queryFnConsumerStatus pin.executable scope service.controlPath
+    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.executable scope
       service.controlPath cursorPath reportPath
     if polledEvent.isEmpty then
-      let empty ← classifyFnEmptyPoll pin.fnBinary scope service.controlPath
+      let empty ← classifyFnEmptyPoll pin.executable scope service.controlPath
         cursorPath reportPath polledCursor before
       match empty with
       | none =>
@@ -2111,7 +2235,7 @@ def runFnReplyPollSession (config : NativeHost.Config)
             service.policyPath service.controlPath scope pin.fnBinary
             polledCursor fromPosition toPosition 14 "fn-a-reply-poll-session-v1"
     let (_, projectedEvent, projection) ←
-      projectFnPoll pin.fnBinary scope cursorPath reportPath
+      projectFnPoll pin.executable scope cursorPath reportPath
     unless sameBytes projectedEvent polledEvent do
       throw (IO.userError "A fn poll event changed before projection")
     IO.FS.writeBinFile carrierPath projection.received.toByteArray
@@ -2128,6 +2252,8 @@ def runFnReplyPollSession (config : NativeHost.Config)
       claimPath service.policyPath service.controlPath
       cursorPath reportPath carrierPath intentPath resultPath
       (some (polledCursor, polledEvent))
+      (some ((service.rExecutable, service.rPublicKey),
+        (service.qExecutable, service.qPublicKey)))
     unless polledCursor == (← readBoundedBytes cursorPath 346) &&
         sameBytes polledEvent
           (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
@@ -2165,13 +2291,14 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
     IO.ofExcept (requireExactFields "A fn catalog scope"
       ["history", "incarnation", "consumer", "principal", "query",
        "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-    let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let pin := rawPin.withExecution service.qExecutable service.qPublicKey
     let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
-    let before ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
-    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.fnBinary scope
+    let before ← queryFnConsumerStatus pin.executable scope service.controlPath
+    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.executable scope
       service.controlPath cursorPath reportPath
     if polledEvent.isEmpty then
-      let empty ← classifyFnEmptyPoll pin.fnBinary scope service.controlPath
+      let empty ← classifyFnEmptyPoll pin.executable scope service.controlPath
         cursorPath reportPath polledCursor before
       match empty with
       | none =>
@@ -2183,7 +2310,7 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
             service.policyPath service.controlPath scope pin.fnBinary
             polledCursor fromPosition toPosition 14 "fn-a-reply-poll-session-v1"
     let (_, projectedEvent, projection) ←
-      projectFnPoll pin.fnBinary scope cursorPath reportPath
+      projectFnPoll pin.executable scope cursorPath reportPath
     unless sameBytes projectedEvent polledEvent do
       throw (IO.userError "A fn poll event changed before outbox projection")
     IO.FS.writeBinFile carrierPath projection.received.toByteArray
@@ -2214,7 +2341,8 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
 
 def FnReplyCatalogService.ackService (service : FnReplyCatalogService) :
     FnReplyPollService :=
-  ⟨"", "", "", "", service.qPinPath, service.scopePath,
+  ⟨"", "", "", "", "", "", service.qPinPath,
+    service.qExecutable, service.qPublicKey, service.scopePath,
     service.policyPath, service.controlPath⟩
 
 /-- A reply ACK is selected by the accepted A Mini transaction alone. The
@@ -2235,7 +2363,8 @@ def runFnReplyAckSession (config : NativeHost.Config)
   IO.ofExcept (requireExactFields "A fn scope"
     ["history", "incarnation", "consumer", "principal", "query",
      "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
-  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let rawPin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let pin := rawPin.withExecution service.qExecutable service.qPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
   let opened ← sessionOpened config state
@@ -2259,17 +2388,17 @@ def runFnReplyAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
-    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.fnBinary cursorPath
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.executable cursorPath
     unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
         stored.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "A reply ack retained cursor differs from signed Mini position")
     let (currentPosition, currentStatus) ←
-      queryFnConsumerPosition pin.fnBinary scope service.controlPath
+      queryFnConsumerPosition pin.executable scope service.controlPath
     if currentPosition ≥ oldPosition && currentStatus.committedAck > oldPosition then
       return coveredArticleAckResponse 15 "fn-a-reply-ack-session-v1"
         transaction stored oldPosition currentStatus.committedAck
     let (cursor, event, projected) ←
-      projectFnPoll pin.fnBinary scope cursorPath eventPath
+      projectFnPoll pin.executable scope cursorPath eventPath
     unless cursor == stored.cursor && sameBytes event stored.event &&
         projected.sourceIdentity == stored.sourceIdentity &&
         projected.sequence == stored.sequence &&
@@ -2286,7 +2415,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
         verified.mlPublicKey == inbox.portableInbox.mlPublicKey do
       throw (IO.userError "A reply ack source differs from accepted Mini inbox")
     let child ← IO.Process.spawn
-      { cmd := pin.fnBinary,
+      { cmd := pin.executable,
         args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
         stdin := .null, stdout := .piped, stderr := .null }
     let output ← try readBoundedLoop child.stdout 128
@@ -2305,7 +2434,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
       else "transport-fault"
     if status == "refused" then
       let (latestPosition, latestStatus) ←
-        queryFnConsumerPosition pin.fnBinary scope service.controlPath
+        queryFnConsumerPosition pin.executable scope service.controlPath
       if latestPosition ≥ oldPosition && latestStatus.committedAck > oldPosition then
         return coveredArticleAckResponse 15 "fn-a-reply-ack-session-v1"
           transaction stored oldPosition latestStatus.committedAck
