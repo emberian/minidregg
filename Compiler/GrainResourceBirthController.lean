@@ -120,6 +120,26 @@ def Source.canonicalBytes (tariff : Tariff) (source : Source) : List UInt8 :=
       ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
         DeclaredResourceController.commandCodec.encode (source.grainCommand tariff))
 
+/-- A composite factory request is a distinct source-visible request over the
+complete descriptor and grain command. The receiving policy projection must
+expose these same bytes; the existing bare factory request is unchanged. -/
+def Source.factoryRequest (tariff : Tariff) (source : Source)
+    (pins : FactoryPins)
+    (encoding : SourceEncoding CanonicalCellRegistry.registry)
+    (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height) :
+    Request .object :=
+  { ResourceBirth.factoryRequest pins encoding oldAuthority factoryPreRoot height source.birth with
+    argsDigest := encoding.hashBytes
+      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v1".toUTF8.toList ++ source.canonicalBytes tariff)
+    effectsDigest := encoding.hashBytes
+      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++ source.canonicalBytes tariff) }
+
+theorem Source.factoryRequest_subject (tariff : Tariff) (source : Source)
+    (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
+    (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height) :
+    (source.factoryRequest tariff pins encoding oldAuthority factoryPreRoot height).subject =
+      source.birth.creator := rfl
+
 /-- Domain-separated existing replay markers are both retained. The receiving
 path must install both in one durable intent, after checking they differ. -/
 def Source.replayMarkers (domain semantics : Digest) (tariff : Tariff)
