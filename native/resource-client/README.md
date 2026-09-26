@@ -166,6 +166,14 @@ source-green but has not yet been linked and probed in a source-matched native
 image. The Rust broker also refuses public op18 until that gate is lifted.
 No end-to-end native `origin-publish` run is claimed yet.
 
+`mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json
+--socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT` is the read-only
+historical tag-10 readback. It retains `transaction-id.txt`, complete
+`reply.frame`, typed `export.json`, and the exact decoded `carrier.bin` for an
+accepted A outbox transaction. A typed refusal remains in the attempt and
+exits nonzero. This op18 route shares the temporary native-image gate above;
+it never POSTs to fn or mutates Mini.
+
 For a provider reserve already confirmed by Mini, the read-only continuity
 route keeps the original call and canonical confirmed outcome as its inputs:
 

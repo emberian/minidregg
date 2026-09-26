@@ -43,6 +43,7 @@ usage:
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
+  mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
@@ -1228,6 +1229,102 @@ fn origin_outbox_prepare(
 }
 
 #[cfg(unix)]
+fn origin_outbox_export(
+    host: &Path,
+    config: &Path,
+    transaction: &str,
+    directory: &Path,
+) -> Result<()> {
+    if !transport::ORIGIN_EXPORT_READY {
+        return Err("origin outbox export is gated until a source-matched Host op18 is linked and probed; no request was sent".into());
+    }
+    let socket = SOCKET
+        .get()
+        .ok_or("origin-outbox-export requires --socket")?;
+    if transaction.is_empty()
+        || transaction.len() > 80
+        || !transaction.bytes().all(|byte| byte.is_ascii_digit())
+        || (transaction.len() > 1 && transaction.starts_with('0'))
+    {
+        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".into());
+    }
+    let retained_config =
+        private_consumer_attempt(host, config, directory, "origin-outbox-export")?;
+    create_private(
+        &directory.join("transaction-id.txt"),
+        transaction.as_bytes(),
+    )?;
+    sync_directory_ancestors(directory)?;
+    let frame = transport::invoke(socket, &retained_config, 18, transaction.as_bytes())?;
+    write_new(&directory.join("reply.frame"), &frame)?;
+    if frame[0] == 255 {
+        return Err("Host refused origin outbox export; complete frame retained".into());
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|e| format!("invalid origin outbox export JSON; complete frame retained: {e}"))?;
+    write_new(&directory.join("export.json"), &frame[1..])?;
+    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-export-v1") {
+        return Err("unexpected origin outbox export type; complete reply retained".into());
+    }
+    if value.get("status").and_then(Value::as_str) == Some("refused") {
+        print_json(&value)?;
+        return Err("origin outbox export refused; complete typed reply retained".into());
+    }
+    if value.get("status").and_then(Value::as_str) != Some("accepted")
+        || value.get("transactionId").and_then(Value::as_str) != Some(transaction)
+        || value
+            .get("messageId")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        return Err("origin outbox export identity mismatch; complete reply retained".into());
+    }
+    for name in ["packageIdentity", "originCallIdentity"] {
+        let Some(text) = value.get(name).and_then(Value::as_str) else {
+            return Err(format!("origin outbox export lacks {name}"));
+        };
+        if text.is_empty()
+            || text.len() > 80
+            || !text.bytes().all(|byte| byte.is_ascii_digit())
+            || (text.len() > 1 && text.starts_with('0'))
+        {
+            return Err(format!("origin outbox export has noncanonical {name}"));
+        }
+    }
+    let source_hex = value
+        .get("sourceIdentity")
+        .and_then(Value::as_str)
+        .ok_or("origin outbox export lacks source identity")?;
+    let source = decode_hex(source_hex)?;
+    if source.is_empty() || hex(&source) != source_hex {
+        return Err("origin outbox source identity is not canonical lowercase hex".into());
+    }
+    for name in ["miniOrigin", "miniOutbox"] {
+        if value
+            .get(name)
+            .and_then(|receipt| receipt.get("type"))
+            .and_then(Value::as_str)
+            != Some("verified-mini-native-prefix-v1")
+        {
+            return Err(format!("origin outbox export lacks typed {name} receipt"));
+        }
+    }
+    let carrier_hex = value
+        .get("carrierHex")
+        .and_then(Value::as_str)
+        .ok_or("origin outbox export lacks carrierHex")?;
+    if carrier_hex.is_empty() || carrier_hex.len() > 2 * 1_516_384 {
+        return Err("origin outbox export carrier exceeds selected profile".into());
+    }
+    let carrier = decode_hex(carrier_hex)?;
+    if carrier.is_empty() || hex(&carrier) != carrier_hex {
+        return Err("origin outbox carrier is not canonical lowercase hex".into());
+    }
+    write_new(&directory.join("carrier.bin"), &carrier)?;
+    print_json(&value)
+}
+
+#[cfg(unix)]
 fn continuity_reply(value: &Value) -> Result<bool> {
     if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-continuity-v1") {
         return Err("unexpected provider continuity reply type; complete frame retained".into());
@@ -1418,6 +1515,24 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("origin-outbox-prepare requires Unix sockets".to_owned())
+            }
+        }
+        "origin-outbox-export" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let transaction = args.required("mini-transaction")?;
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let transaction = transaction
+                .to_str()
+                .ok_or("--mini-transaction must be UTF-8")?;
+            #[cfg(unix)]
+            {
+                origin_outbox_export(&host, &config, transaction, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("origin-outbox-export requires Unix sockets".to_owned())
             }
         }
         "origin-publish" => {
