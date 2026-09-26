@@ -161,3 +161,125 @@ observation; a future source-matched fn owner must keep A control live for a
 second atomic `a-ready.json`/`a-mini-finished.json` handoff and a separate
 fresh A Mini deployment. The new Mini host source has not repeated the full
 B3 native sign/post run and does not replace that qualified baseline.
+
+## Subsequent composed result and reproducibility note (2026-09-26)
+
+Fn's later `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`
+supersedes the *status* above while preserving this e160 negative evidence.
+The qualified `1a9dd747` production/developer pair added peer-authored
+ingress: B and A each kept the receiving Store's acceptance-time bound
+signature verdict in a kind-4 composite. Fn's unchanged
+`tools/runbooks/two_store_join.py` then completed the signed R→B, Mini B
+transaction/ACK, signed Q→A, Mini A transaction/ACK exchange with separate
+native fn Stores. All five scoped runs (`none`, `a-accepted`, `b-verdict`,
+`ack-response`, `reply-at-b`) reported `EXCHANGE COMPLETE`; a deliberately
+lost ACK reply was uncertain until `consumer position` settled it. This is
+one-host process-death and transport evidence, not power-loss or arbitrary
+topology evidence.
+
+That completed run used Mini `implement/fn-evidence` revision `183cd37` and
+binary SHA-256 `0cce4fbd02c5b5156fb061e2d96f2e25e12588c35b59d2fd2efe20acb202f286`.
+Its Mini A and B deployments reused one pinned genesis and custody key while
+changing only storage roots; the R source also contained a retained earlier
+Mini origin package. A new Mini-side `scripts/fn-e1e2/setup-mini.sh` now
+authors a fresh private deployment, gateway and ordinary keys, content birth,
+policy and origin pin without the vanished historical `/tmp` inputs. An
+independent A/B Mini identity run still needs per-side Mini inputs to the fn
+harness (or an equivalent composed runner). No claim about independent A/B
+Mini administrators transfers from the five completed runs.
+
+The first 2026-09-26 fresh-input attempt used fn's unchanged harness on the
+qualified pair and Mini's exact `183cd37` binary. B's protected transfer,
+historical receiver verdict after restart, and Mini's observed
+`consumer-poll-decide` passed. Its first Mini consumer `submit` was refused by
+the source host at observation preparation, before a Mini application
+transition or fn ACK. A separate authorized target-600 query with the same
+fresh signer passed; recomputed challenge bytes matched the failed attempt.
+The fn owners were stopped by harness cleanup. The encoded invocation measured
+102,872 bytes, but that first genesis's owner grant allowed only 100,000 cost;
+`NativeObservationController.request` sets cost to encoded intent length. This
+explains observation refusal without changing the underlying authorization
+law. The fresh setup now selects an operator `ownerBudget` of 300,000 before
+bootstrap/birth and adds an ordinary key with no content mutation authority.
+Distinct A/B subjects (7 and 17) can be authored from the same script, though
+the existing fn harness still accepts only one Mini deployment input set.
+
+The rerun with a new `ownerBudget=300000` genesis passed B's accepted Mini
+consumer transaction and export, durable fn B ACK, Mini Q preparation and
+signature, signed Q→A peer transfer, both fn Store restarts and A's historical
+Q verdict. It stopped at A's Mini reply decision before a Mini A transaction:
+`minidregg-host: Q source has invalid Message-ID fields`. The exact generated
+Q source is retained privately at
+`/tmp/mini-fn-setup-probe-parent/gateway-run/q.source`; its Message-ID has 68
+hexadecimal digest characters. `FnReplyPublication.messageId` renders a
+variable-length `digestStream.encode digest.digest`, whereas
+`FnReplySource.parse` requires 66 hexadecimal characters. The mismatch is a
+fresh-key source defect in the pinned `183cd37` image, not a fn verdict or
+Store restart failure. The run's `summary.json` records the refusal and
+cleanup; no A Mini result or A ACK is claimed.
+The retained private Q source SHA-256 is
+`c29a617ea0eb53860b9fd04d82e670b5614b9515baacdea5d6f3cec2326d5196`;
+the A refusal step log SHA-256 is
+`b7bee163cffb375198802b7be89ce7dc17f32ee5d89589c64935b96799b81a75`
+and the full run summary SHA-256 is
+`df1550ba26c2893142e893c336a17e126c92cf367636ad263df7913a94b7d062`.
+These are locators for private scratch evidence, not committed custody material.
+
+The setup now additionally confirms a delegated cap 63 for an ordinary signer
+while retaining the exact gateway-subject birth law. Its local two-event
+probe Store permits a stronger policy-refusal test; the fn exchange's fresh
+A/B Stores replay genesis plus birth only. The Mini-owned
+`scripts/fn-e1e2/check-ordinary-refusal.sh` used that accepted cap-63
+delegation and the ordinary signing key; the public direct submit refused
+at observation, with Store height 12 and target root unchanged. That result
+does not claim a signed receiver call was tested. A separate source-owned
+`probe_gateway_direct_submit.sh` then built and signed an exact subject-8
+call under the accepted current cap 63 in the same fresh B probe Store. The
+native receiver returned `policyRejected` and accepted history was unchanged;
+the public submit remained uniformly refused. Its private log is
+`/tmp/fn-gateway-direct-submit.log`, SHA-256
+`bf6391ba46450533ef7a2e25dc000f1130604fec8f50f54611e3ac7e38b1be66`.
+This receiver negative complements the public observation-gate refusal.
+The setup also obtains the
+accepted policy source address and writes a separate operator-pinned
+`gateway-config.json` for the current source gateway check. The Mini-owned
+`scripts/fn-e1e2/two_store_join_per_side.patch` adapts a private copy of fn's
+source-hash-pinned Python test harness to accept independent A/B deployment
+inputs, while qualified fn binaries and the shared fn checkout remain
+unchanged. This is test harness adaptation, not fn platform code. A distinct
+A/B coverage for both canonical Q Message-ID lengths awaits a Mini image with
+the Q Message-ID parser repaired.
+
+## Distinct Mini A/B exchange on first fresh identities (2026-09-26)
+
+The isolated, source-hash-pinned fn harness copy then ran once with newly
+generated, different Mini A and B identities: B gateway subject 7 and A
+gateway subject 17, different custody keys and genesis bytes, separate Mini
+Stores, and each side's own policy and exact current policy-address pin. The
+qualified fn `1a9dd747` image pair and Mini `183cd37` binary remained fixed;
+fn's shared checkout was not edited. All 77 harness steps completed, including
+B's Mini accepted transaction/export/ACK, signed Q→A peering and restart,
+A's Mini accepted result/export/ACK, and final two-article counts. The harness
+summary says `cut=none`, `stopped=EXCHANGE COMPLETE`, reached
+`final-article-counts` with `ACCEPTED`. B and A outcomes each say confirmed,
+installed, accepted count 2 in their own Store.
+
+The private retained run is
+`/tmp/mini-fn-setup-probe-parent/distinct-run-1`, with summary SHA-256
+`5425858da0674fb0ace6c759a997bd9985af5b922a74877d09c5d264c5f318a6`.
+Its adapted harness SHA-256 is
+`fa595de896891cf362c8f8af3a8000d6ab8298d59837f0c8634b6807faaf2015`;
+the unmodified fn source harness was pinned to
+`c88160cf459d3959928f6ae913f455ed9ff49971b89619518ab7b49c884c99e6`.
+The actual Q source SHA-256 is
+`acca211998b1b501aed50f80c66c5696c329656969db0c37e72203b93d97394e`.
+Its Message-ID happened to have the parser's 66 hexadecimal digest characters
+on these first distinct inputs. This success does not erase the independent
+68-character failure above; the source parser defect remains until repaired
+and verified for both lengths. No fresh-key search was performed.
+
+The underlying harness printed `EXCHANGE COMPLETE` and accepted owner cleanup.
+The outer shell wrapper process then reported an EOF syntax error because that
+wrapper file was edited during the long-running child process. The present
+wrapper passes `sh -n`; the documented result rests on the retained harness
+summary and per-step logs, not the outer shell exit status.
