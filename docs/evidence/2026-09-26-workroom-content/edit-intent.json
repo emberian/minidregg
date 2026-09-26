@@ -1,0 +1,60 @@
+{
+  "subject": "8",
+  "nonce": "50004",
+  "purpose": {
+    "type": "prepare",
+    "draft": {
+      "type": "invoke",
+      "command": {
+        "subject": "8",
+        "expectedAuthorityRoot": "52728285627368118837257118824172036884229448855278068766291077592454524421153",
+        "nonce": "50005",
+        "targets": [
+          {
+            "kind": "object",
+            "target": "8001",
+            "capability": "95",
+            "observeCapability": null,
+            "schemaVersion": "1",
+            "expectedTargetRoot": "43588760809796208894087654721232400529460114370049589776250449143074108380498",
+            "payload": {
+              "type": "content",
+              "actions": [
+                {
+                  "type": "editAtom",
+                  "atom": "7401",
+                  "before": {
+                    "document": "8001",
+                    "kind": {
+                      "type": "text"
+                    },
+                    "payload": "576f726b726f6f6d207265736561726368206e6f74653a207665726966792074686520736f757263652072656365697074206265666f72652072657573652e",
+                    "createdBy": {
+                      "subject": "8",
+                      "capabilityKind": "object",
+                      "capability": "95"
+                    },
+                    "createdAt": "47399867865488898983486087328579747702498439567061030212224240882810374082990",
+                    "tombstonedAt": null
+                  },
+                  "kind": {
+                    "type": "text"
+                  },
+                  "payload": "5265766973656420776f726b726f6f6d206e6f74653a204d696e692061636365707465642074686520726563656970743b20666e2070726f76656e616e63652072656d61696e73206120736570617261746520636865636b2e",
+                  "tombstone": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "8001",
+      "capability": "95"
+    }
+  ]
+}

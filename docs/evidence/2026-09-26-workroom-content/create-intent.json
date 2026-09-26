@@ -1,0 +1,45 @@
+{
+  "subject": "8",
+  "nonce": "50001",
+  "purpose": {
+    "type": "prepare",
+    "draft": {
+      "type": "invoke",
+      "command": {
+        "subject": "8",
+        "expectedAuthorityRoot": "78621364103350278099137649166555032428371034614197229419052938221492150215291",
+        "nonce": "50002",
+        "targets": [
+          {
+            "kind": "object",
+            "target": "8001",
+            "capability": "95",
+            "observeCapability": null,
+            "schemaVersion": "1",
+            "expectedTargetRoot": "97349327118568466779609446662939988221287696762075284738918673226692685974561",
+            "payload": {
+              "type": "content",
+              "actions": [
+                {
+                  "type": "createAtom",
+                  "atom": "7401",
+                  "kind": {
+                    "type": "text"
+                  },
+                  "payload": "576f726b726f6f6d207265736561726368206e6f74653a207665726966792074686520736f757263652072656365697074206265666f72652072657573652e"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "8001",
+      "capability": "95"
+    }
+  ]
+}
