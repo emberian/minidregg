@@ -1,0 +1,1 @@
+PASS same-deployment recovered historical receipt, exact load, read-only lookup, unchanged publication

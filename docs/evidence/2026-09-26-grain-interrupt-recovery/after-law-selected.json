@@ -1,0 +1,1102 @@
+{
+  "address": "72735982627125142308436377796776498348939026293577997383452757300677470854334",
+  "predicate": {
+    "predicates": [
+      {
+        "predicates": [
+          {
+            "predicates": [
+              {
+                "predicates": [
+                  {
+                    "slot": "request/verb",
+                    "type": "eq",
+                    "value": "2"
+                  },
+                  {
+                    "predicates": [
+                      {
+                        "slot": "resource/pair/2/3/delta",
+                        "type": "le",
+                        "value": "0"
+                      },
+                      {
+                        "slot": "resource/field/0/delta",
+                        "type": "memberOf",
+                        "values": [
+                          "0",
+                          "1"
+                        ]
+                      },
+                      {
+                        "slot": "resource/field/1/before",
+                        "type": "memberOf",
+                        "values": [
+                          "0",
+                          "1",
+                          "2",
+                          "3",
+                          "4",
+                          "5",
+                          "6",
+                          "7"
+                        ]
+                      },
+                      {
+                        "slot": "resource/field/1/after",
+                        "type": "memberOf",
+                        "values": [
+                          "0",
+                          "1",
+                          "2",
+                          "3",
+                          "4",
+                          "5",
+                          "6",
+                          "7"
+                        ]
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/0/before",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/0/after",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/2/before",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/2/after",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/3/before",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "slot": "resource/field/3/after",
+                          "type": "le",
+                          "value": "-1"
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicates": [
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/before",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/2/delta",
+                                "type": "le",
+                                "value": "0"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/before",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/2/delta",
+                                "type": "le",
+                                "value": "0"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "le",
+                                "value": "0"
+                              },
+                              {
+                                "predicate": {
+                                  "slot": "resource/field/2/delta",
+                                  "type": "le",
+                                  "value": "-1"
+                                },
+                                "type": "not"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "le",
+                                "value": "0"
+                              },
+                              {
+                                "predicate": {
+                                  "slot": "resource/field/2/delta",
+                                  "type": "le",
+                                  "value": "-1"
+                                },
+                                "type": "not"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "5"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "le",
+                                "value": "0"
+                              },
+                              {
+                                "predicate": {
+                                  "slot": "resource/field/2/delta",
+                                  "type": "le",
+                                  "value": "-1"
+                                },
+                                "type": "not"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "7"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "6"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/3/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/pair/2/3/delta",
+                                "type": "le",
+                                "value": "0"
+                              },
+                              {
+                                "predicate": {
+                                  "slot": "resource/field/2/delta",
+                                  "type": "le",
+                                  "value": "-1"
+                                },
+                                "type": "not"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "5"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "5"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "0"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "6"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "6"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "2"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "6"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "3"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "7"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "4"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "7"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          },
+                          {
+                            "predicates": [
+                              {
+                                "slot": "resource/field/1/before",
+                                "type": "eq",
+                                "value": "5"
+                              },
+                              {
+                                "slot": "resource/field/1/after",
+                                "type": "eq",
+                                "value": "7"
+                              },
+                              {
+                                "slot": "resource/field/0/delta",
+                                "type": "eq",
+                                "value": "1"
+                              },
+                              {
+                                "predicates": [
+                                  {
+                                    "slot": "resource/field/2/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  },
+                                  {
+                                    "slot": "resource/field/3/delta",
+                                    "type": "eq",
+                                    "value": "0"
+                                  }
+                                ],
+                                "type": "all"
+                              }
+                            ],
+                            "type": "all"
+                          }
+                        ],
+                        "type": "any"
+                      }
+                    ],
+                    "type": "all"
+                  }
+                ],
+                "type": "all"
+              },
+              {
+                "slot": "request/verb",
+                "type": "memberOf",
+                "values": [
+                  "1",
+                  "3"
+                ]
+              },
+              {
+                "predicates": [
+                  {
+                    "slot": "request/verb",
+                    "type": "memberOf",
+                    "values": [
+                      "4",
+                      "5"
+                    ]
+                  },
+                  {
+                    "slot": "request/subject",
+                    "type": "eq",
+                    "value": "7"
+                  }
+                ],
+                "type": "all"
+              }
+            ],
+            "type": "any"
+          },
+          {
+            "predicates": [
+              {
+                "slot": "request/subject",
+                "type": "eq",
+                "value": "7"
+              },
+              {
+                "slot": "request/verb",
+                "type": "memberOf",
+                "values": [
+                  "1",
+                  "3"
+                ]
+              },
+              {
+                "predicates": [
+                  {
+                    "slot": "request/subject",
+                    "type": "eq",
+                    "value": "8"
+                  },
+                  {
+                    "predicates": [
+                      {
+                        "slot": "request/verb",
+                        "type": "eq",
+                        "value": "2"
+                      },
+                      {
+                        "slot": "resource/field/0/before",
+                        "type": "eq",
+                        "value": "1"
+                      },
+                      {
+                        "slot": "resource/field/0/after",
+                        "type": "eq",
+                        "value": "1"
+                      },
+                      {
+                        "slot": "resource/field/1/before",
+                        "type": "memberOf",
+                        "values": [
+                          "3",
+                          "4"
+                        ]
+                      },
+                      {
+                        "slot": "resource/field/0/delta",
+                        "type": "eq",
+                        "value": "0"
+                      },
+                      {
+                        "slot": "resource/field/1/delta",
+                        "type": "eq",
+                        "value": "0"
+                      },
+                      {
+                        "slot": "resource/field/2/delta",
+                        "type": "eq",
+                        "value": "0"
+                      },
+                      {
+                        "slot": "resource/field/3/delta",
+                        "type": "eq",
+                        "value": "0"
+                      }
+                    ],
+                    "type": "all"
+                  }
+                ],
+                "type": "all"
+              }
+            ],
+            "type": "any"
+          }
+        ],
+        "type": "all"
+      },
+      {
+        "slot": "request/subject",
+        "type": "eq",
+        "value": "7"
+      }
+    ],
+    "type": "all"
+  },
+  "version": "1"
+}

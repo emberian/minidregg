@@ -1,0 +1,15 @@
+source_commit=dbc162e
+runtime_commit=ed8e5b3
+4bb72e1e984de413ee0065d7d229dbe0217bf980b4563ba26dc85ee38ed59c65  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined
+e17ad58b73b43c611bdb6fa22d5fe42a56f75720889fb0901c81337d11eb763f  /tmp/mga-recovery-interrupt-7601-20260926/bin/grain-runtime
+b0884d2bee8f2cf38e7f7fa8cd17ded48b85fd0bf9bb440fcc9b44250a36661f  /tmp/mga-recovery-interrupt-7601-20260926/bin/mini
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/mga-recovery-interrupt-7601-20260926/bin/minidregg-credential-signature-verifier
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/mga-recovery-interrupt-7601-20260926/bin/minidregg-link-sqlite-store
+6cf306982761a051d35dc19060c869b2a6b26e4a830a5fab4c7c60e87162c01f  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/acceptance.sh
+54e60cd75caa141f0e52059e714570ad8b1e999254f93fd699725417e9b6182d  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/receipt-recovery-acceptance.sh
+3897abf11f8354ffd0c19db064c06aa4879b19cd1c3a86a02bd483e49b2b77d7  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/fixture/RECEIPT-RECOVERY.md
+819cf84ce969493f82471cee81274e1bdde6f591bc8f852bec7525fe8d363725  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/fixture/broker-drop.rs
+5901a86203e5a6b0c150f85a5339c2f1d3e6c086407d8c77c00043881d10335a  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/fixture/hermes-acp-recovery
+8777a053a844523d401fe5925045408d8b03e85fcf423badcbd9545f6f77cc6f  /tmp/mga-recovery-interrupt-7601-20260926/native/grain-runtime/fixture/observe-mini-retry
+295e09bc0469310f96bf78b1674ac9f04a646bebd6e85e7e6255bd7f689a0916  /tmp/mga-recovery-interrupt-7601-20260926/deploy/grain-host/bwrap
+e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554  /tmp/mga-recovery-interrupt-7601-20260926/deploy/grain-host/launch-gate

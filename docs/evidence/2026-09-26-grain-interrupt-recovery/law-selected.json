@@ -1,0 +1,35 @@
+{
+  "nativeInstall": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "5"
+  },
+  "policyBefore": {
+    "version": "0",
+    "address": "87433994688738607705296255034908051129515582139530909092353667284408893038371"
+  },
+  "policyInstalled": {
+    "version": "1",
+    "address": "72735982627125142308436377796776498348939026293577997383452757300677470854334"
+  },
+  "policyAfterRefusal": {
+    "version": "1",
+    "address": "72735982627125142308436377796776498348939026293577997383452757300677470854334"
+  },
+  "predicateEqual": true,
+  "grainAfterRefusal": {
+    "root": "11255215616933548944962365235974206398140733688252732196910525233751810867813",
+    "grain": {
+      "generation": "0",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "0",
+      "task": "7701"
+    }
+  },
+  "journal": {
+    "connection": "fenced",
+    "pending": null,
+    "child": null
+  }
+}

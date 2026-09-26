@@ -1,0 +1,113 @@
+{
+  "receipt": {
+    "promptOperationId": 11,
+    "sessionId": "recovery-fixture",
+    "operationId": 19,
+    "sourceSha256": "7278514d7465e0691bc6d2fad11f25895b8f7269f43a39703d426fbfebc94d63",
+    "callSha256": "42317577aa02dc3957e31338783e2ecd7fa5dbcbb94c99c13fc5f43ac0a7e85b",
+    "outcomeSha256": "c9e5b8d7f5109c334157524b0d5a6d98b1dc292ae8365fdcf7df167c186ba5c9",
+    "targets": [
+      "7603"
+    ],
+    "transactionId": "12932403748101041568221534076776710442466220226905475202956079045086496691263",
+    "eventId": "44141325906939213682429805056193927814117119052306505276618802199724280310049",
+    "acceptedCount": "10",
+    "imageBoundary": "23885658276186213377006683196048160585816289299190814373891310780602735128400",
+    "reported": true
+  },
+  "session": {
+    "id": "recovery-fixture",
+    "workspace": "/tmp/mga-recovery-interrupt-7601-native-r1/worker-work",
+    "loadVerified": true,
+    "stateFingerprint": "state.db:34:31d9df0b77f3d49ed648dd8ea0129d2aefecd97cffeed0ff5dc845968f3c55ff|state.db-wal:absent",
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "reconciliationLog": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "30",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "/tmp/mga-recovery-interrupt-7601-native-r1/runtime-state/attempt-0000000000000009",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "30",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "36",
+      "details": [
+        "Hermes prompt 11: Hermes ACP stream closed",
+        "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ],
+  "nativePublication": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "10",
+    "transactionId": "12932403748101041568221534076776710442466220226905475202956079045086496691263",
+    "eventId": "44141325906939213682429805056193927814117119052306505276618802199724280310049",
+    "imageBoundary": "23885658276186213377006683196048160585816289299190814373891310780602735128400"
+  },
+  "nativeInterrupt": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "12"
+  },
+  "parentBeforeRecovery": {
+    "root": "115204196437639996462520147479039301771963431575320525620939280836748566106638",
+    "grain": {
+      "generation": "1",
+      "remaining": "97",
+      "reserved": "3",
+      "status": "4",
+      "task": "7601"
+    }
+  },
+  "parentAfterInterrupt": {
+    "root": "17757813317420066874480807463010899179998471708489030339004485024652326306793",
+    "grain": {
+      "generation": "2",
+      "remaining": "97",
+      "reserved": "3",
+      "status": "5",
+      "task": "7601"
+    }
+  },
+  "parentAfterAuditedSettle": {
+    "root": "66216936910475758899670477741538103025439807007987370014570409623468121633078",
+    "grain": {
+      "generation": "2",
+      "remaining": "99",
+      "reserved": "0",
+      "status": "0",
+      "task": "7601"
+    }
+  },
+  "parentAfterReport": {
+    "root": "1338185196477834011674804822784876173369590208128016273706153381255735574318",
+    "grain": {
+      "generation": "3",
+      "remaining": "98",
+      "reserved": "0",
+      "status": "2",
+      "task": "7601"
+    }
+  },
+  "publicationRoots": {
+    "before": "73557896835829609965600378744480051328746430521057150677987196831230193629235",
+    "after": "23570282670683811146909275877762533885532435753592780426568594532685985046698",
+    "afterReport": "23570282670683811146909275877762533885532435753592780426568594532685985046698"
+  }
+}
