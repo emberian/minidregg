@@ -243,6 +243,80 @@ theorem Verified.accepted_history {config : Config} {target : Durable}
       verified.opened verified.receipts :=
   verified.admitted
 
+/-- The sole candidate produced from a previously verified image and the
+receiver's checked `Ready`; it contains no caller-supplied post snapshot. -/
+def exactCandidate {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (derived : Derived config old.opened)
+    (ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
+      old.opened.durable.image old.opened.durable.snapshot derived.intent) : Durable :=
+  let image := old.opened.durable.image.append derived.intent
+  ⟨DurableReceiverCodec.encode image, image, ready.next, rfl, ready.restored⟩
+
+/-- A receiver-created exact readback carries the *complete* physical bytes.
+The readback equality must come from its post-CAS byte comparison, never from a
+hash or the mere `.confirmed` result, which also covers concurrent suffixes. -/
+structure ExactReadback (config : Config) {oldTarget : Durable}
+    (old : Verified config oldTarget) where
+  derived : Derived config old.opened
+  ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
+    old.opened.durable.image old.opened.durable.snapshot derived.intent
+  prepared : DurableReceiver.prepare old.opened.durable.image
+    old.opened.durable.snapshot old.opened.durable.represented derived.intent = .inl ready
+  physicalBytes : List UInt8
+  exactBytes : physicalBytes = (exactCandidate old derived ready).bytes
+  after : Opened config
+  validated : validateLoaded config (exactCandidate old derived ready) = .ok after
+  afterExact : after.durable.bytes = (exactCandidate old derived ready).bytes
+
+/-- This is the pure proof target for a future receiving fast path: the
+verifier-minted old trace plus the same admitted command's exact readback gives
+one new accepted step and its *original-prefix* receipt. -/
+def extendExact {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (readback : ExactReadback config old) :
+    Verified config (exactCandidate old readback.derived readback.ready) := by
+  let record := DurableReceiver.IntentRecord.ofIntent readback.derived.intent
+  let target := exactCandidate old readback.derived readback.ready
+  let receipt : NativeHostCodec.Receipt :=
+    ⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
+      old.opened.durable.image.accepted.length + 1, imageBoundary config target.image⟩
+  have matched : recordMatches record readback.derived.intent = true := by
+    exact (recordMatches_iff _ _).mpr rfl
+  have step : AdmittedStep config old.opened readback.after record receipt := by
+    have advanced : advance old.opened readback.derived = .ok target := by
+      unfold advance
+      rw [readback.prepared]
+      rfl
+    exact ⟨readback.derived, matched, target, advanced, readback.validated, rfl⟩
+  have exactBytes : readback.after.durable.bytes = target.bytes := readback.afterExact
+  have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
+    simp [target, exactCandidate, DurableReceiver.Image.append, old.countExact,
+      ← old.image_exact]
+  have admitted : AdmittedReplay config old.origin target.image.accepted
+      readback.after (old.receipts ++ [receipt]) := by
+    change AdmittedReplay config old.origin
+      (old.opened.durable.image.accepted ++ [record]) readback.after
+      (old.receipts ++ [receipt])
+    rw [old.image_exact]
+    exact old.admitted.append (.cons step (.nil readback.after))
+  exact ⟨old.origin, readback.after, exactBytes, old.receipts ++ [receipt], countExact, admitted⟩
+
+/-- Exact readback keeps the original accepted-prefix receipt, even when a
+subsequent current tip will contain more accepted entries. -/
+theorem extendExact_receipts {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (readback : ExactReadback config old) :
+    (extendExact old readback).receipts = old.receipts ++
+      [⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
+        old.opened.durable.image.accepted.length + 1,
+        imageBoundary config (exactCandidate old readback.derived readback.ready).image⟩] := by
+  rfl
+
+/-- The newly verified target is byte-for-byte the physical post-CAS readback.
+This is stronger than equal height, state root, or transaction digest. -/
+theorem extendExact_physicalBytes {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (readback : ExactReadback config old) :
+    (extendExact old readback).opened.durable.bytes = readback.physicalBytes := by
+  exact (extendExact old readback).exactBytes.trans readback.exactBytes.symm
+
 /-- An explicit semantic model of the native helper's verdicts. Physical
 `derive` performs IO; a fixed pathname in `Config` does not make its result
 stable. A session using this model must separately pin the verifier artifact
@@ -407,3 +481,6 @@ end Minidregg.Kernel.NativeHostReplay
 #print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
 #print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
 #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
+#print axioms Minidregg.Kernel.NativeHostReplay.extendExact
+#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
+#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes
