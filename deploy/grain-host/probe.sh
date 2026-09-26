@@ -70,6 +70,17 @@ if MINI_GRAIN_UNIT="mini-grain-t${task}-o5" \
 fi
 rg -q 'exposed by worker mount' "$scratch/work-refusal.out"
 echo 'PASS workspace containing controller state refused before launch'
+printf 'probe-only' > "$scratch/work/provider.key"
+for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_PROVIDER_KEY_FILE; do
+  if env "$provider_var=$scratch/work/provider.key" MINI_GRAIN_UNIT="mini-grain-t${task}-o6" \
+    "$launcher" --workspace "$scratch/work" --runtime-root "$scratch/runtime" \
+    --network none -- /agent/probe-socket client /run/mini-grain.sock \
+    > "$scratch/provider-refusal.out" 2>&1; then
+    echo "$provider_var exposure was accepted" >&2; exit 1
+  fi
+  rg -q 'exposed by worker mount' "$scratch/provider-refusal.out"
+done
+echo 'PASS provider custody and key file exposure refused before launch'
 
 printf '#!/bin/sh\nsetsid /bin/sleep 30 &\necho started > /workspace/started\nwait\n' > "$scratch/runtime/setsid-probe"
 chmod +x "$scratch/runtime/setsid-probe"

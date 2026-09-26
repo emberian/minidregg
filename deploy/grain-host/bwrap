@@ -52,7 +52,9 @@ for secret in "${MINI_GRAIN_STATE_DIR:?controller state path required}" \
               "${MINI_GRAIN_CUSTODY_KEY:?controller key path required}" \
               "${MINI_GRAIN_TASK_CONFIG:?task config path required}" \
               "${MINI_GRAIN_HOST_CONFIG:?Mini host config path required}" \
-              "${MINI_GRAIN_TOOL_CUSTODY_KEY:-}"; do
+              "${MINI_GRAIN_TOOL_CUSTODY_KEY:-}" \
+              "${MINI_GRAIN_PROVIDER_CUSTODY_KEY:-}" \
+              "${MINI_GRAIN_PROVIDER_KEY_FILE:-}"; do
   [[ -n $secret ]] || continue
   [[ $secret == /* ]] || usage
   secret=$(realpath -e -- "$secret")

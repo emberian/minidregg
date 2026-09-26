@@ -1,10 +1,11 @@
-host=persvati kernel=6.17.0-40-generic systemd=systemd 257 (257.9-0ubuntu2.5) launcher_sha256=9cd9b650d82f90985bd9be625d853de949714e01417f9878d29d33cadf6630ef gate_sha256=e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554 probe_sha256=9b744f6f7915d96b8eeedc67819905c616b845b9a00866bbcbc081ad06dbc291 socket_helper_sha256=05cb6e05c386629f766aba20ff868c2d7f7a79fa19b3a7e49f992c452b83d3c5
+host=persvati kernel=6.17.0-40-generic systemd=systemd 257 (257.9-0ubuntu2.5) launcher_sha256=09b76dd5cb04a3e0668921483842996c9b19600225490a300a0ab6a5ae1ee6bd gate_sha256=e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554 probe_sha256=1e7ee0ee9d91e149bde4b669ff8a1d2b9907a08180d7093a1eaf8d1bac91d9c5 socket_helper_sha256=05cb6e05c386629f766aba20ff868c2d7f7a79fa19b3a7e49f992c452b83d3c5
 PASS launcher requires sibling gate protocol v1
 PASS broker socket connect through exact bind
 PASS /usr host-config exposure refused before launch
 PASS workspace containing controller state refused before launch
-hard cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t3586777-o1.service host_pids=3586938,3586939,3586940,3586941,
+PASS provider custody and key file exposure refused before launch
+hard cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t3861262-o1.service host_pids=3861457,3861458,3861459,3861460,
 PASS wrapper TERM stopped setsid unit (4 host pids, state=inactive)
-Running as unit: mini-grain-controller@3586777.service; invocation ID: 011a546b57674f859a41abf0dcdd8c84
-bound cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t3586777-o2.service host_pids=3587019,3587020,3587021,3587022,
+Running as unit: mini-grain-controller@3861262.service; invocation ID: dd4afade5a5041058346d010474af908
+bound cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t3861262-o2.service host_pids=3861500,3861502,3861503,3861504,
 PASS controller BindsTo stopped setsid unit (4 host pids, state=inactive)

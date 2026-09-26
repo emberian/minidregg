@@ -9,7 +9,8 @@ inside a bubblewrap mount, user, PID, IPC and cgroup namespace. The name is
 `mini-grain-t<TASK>-o<OPERATION_ID>` and comes from the runtime's durable child
 marker as `MINI_GRAIN_UNIT`. The runtime also supplies
 `MINI_GRAIN_STATE_DIR`, `MINI_GRAIN_CUSTODY_KEY`, and, when configured,
-`MINI_GRAIN_TOOL_CUSTODY_KEY`, plus `MINI_GRAIN_TASK_CONFIG` and
+`MINI_GRAIN_TOOL_CUSTODY_KEY`, `MINI_GRAIN_PROVIDER_CUSTODY_KEY`, and
+`MINI_GRAIN_PROVIDER_KEY_FILE`, plus `MINI_GRAIN_TASK_CONFIG` and
 `MINI_GRAIN_HOST_CONFIG`. The launcher refuses any mount (including `/usr`
 and the optional network certificate mounts) that contains these paths, and
 refuses a unit name that already exists. If the controller sets

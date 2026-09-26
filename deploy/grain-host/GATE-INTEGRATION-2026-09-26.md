@@ -5,10 +5,11 @@ On persvati (Linux 6.17.0-40-generic, systemd 257), the production `launch-gate.
 - Exact `mini-grain-launch-gate-v1` launcher protocol after checking the sibling gate's own protocol. An executable but incompatible `/usr/bin/true` sibling was separately refused with `launch-gate protocol mismatch`.
 - Exact broker socket bind and bidirectional ping/pong while controller state and keys stayed outside the worker mount.
 - `/usr` host-config and workspace-contained controller-state mount refusals.
+- Provider custody key and provider key file refusals when either lies under the worker workspace.
 - Wrapper TERM and controller `BindsTo=` stop of `setsid` descendants: four host cgroup PIDs in each worker, all dead or zombie afterward, units inactive.
 
 Reproduce in a new private Linux scratch by copying `deploy/grain-host/`, compiling `rustc --edition=2021 launch-gate.rs -o launch-gate`, then running `./probe.sh ./bwrap`. The separate delayed-systemd-start race probe is in `scripts/overnight-tests/launch-gate-probe.sh` and compiles this same deployed source.
 
-SHA-256 at execution: gate source `65a4ad217a43b103e70dfa41e91a804d7e0e11ce27d376577569f5c65aa68e96`; compiled Linux gate `e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554`; launcher `9cd9b650d82f90985bd9be625d853de949714e01417f9878d29d33cadf6630ef`; probe `9b744f6f7915d96b8eeedc67819905c616b845b9a00866bbcbc081ad06dbc291`; raw log `ea6d835cf8044e775a9cd8c5ac126a8a7b827eef04e6b0e56ae3cbe1bf8aad8d`.
+SHA-256 at execution: gate source `65a4ad217a43b103e70dfa41e91a804d7e0e11ce27d376577569f5c65aa68e96`; compiled Linux gate `e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554`; launcher `09b76dd5cb04a3e0668921483842996c9b19600225490a300a0ab6a5ae1ee6bd`; probe `1e7ee0ee9d91e149bde4b669ff8a1d2b9907a08180d7093a1eaf8d1bac91d9c5`; raw log `abc401415458d8fce58379ea2f7b8dc9b278f3c79418cf531df74964ce703b9c`.
 
 This probe covers the physical launcher and unit behavior. Signed Mini grain operations are exercised separately by `native/grain-runtime/acceptance.sh`.
