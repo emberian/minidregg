@@ -15,6 +15,10 @@ const READ_ID: &str = "mini-fixture-read-1";
 const PUBLISH_ID: &str = "mini-fixture-publish-1";
 const CONTENT_ORIGINAL: &str = "Workroom research note: verify the source receipt before reuse.";
 const CONTENT_REVISED: &str = "Revised workroom note: Mini accepted the receipt; fn provenance remains a separate check.";
+const PEER_A_NOTE: &str = "Peer A research note: review source receipts before sharing.";
+const PEER_B_REVIEW: &str = "Peer B reviewed the note and added cross-check evidence.";
+const PEER_A_RECONCILED: &str = "Peer A reconciled the note with the latest peer review.";
+const PEER_B_FOLLOWUP: &str = "Peer B reread the shared note and recorded a final follow-up.";
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_HEADER_LINE: usize = 8 * 1024;
 static RESPONSE_ID: AtomicU64 = AtomicU64::new(1);
@@ -23,6 +27,8 @@ static RESPONSE_ID: AtomicU64 = AtomicU64::new(1);
 enum Mode {
     Scalar,
     ContentWorkroom,
+    ContentPeerA,
+    ContentPeerB,
 }
 
 fn decimal(value: &str) -> bool {
@@ -267,6 +273,108 @@ fn content_reply_for(request: &Value) -> Result<(Value, &'static str, String), S
         "tool_calls", "content read workroom".into()))
 }
 
+fn peer_atom(page: &Value, expected_text: &str) -> Result<Value, String> {
+    let entries = page.get("entries").and_then(Value::as_array).ok_or("content entries absent")?;
+    if entries.len() != 1 { return Err("expected exactly one signed content atom".into()); }
+    let atom = &entries[0];
+    if atom.get("type").and_then(Value::as_str) != Some("atom")
+        || atom.get("id").and_then(Value::as_str) != Some("7401")
+        || atom.get("document").and_then(Value::as_str) != Some("8001")
+        || atom.pointer("/kind/type").and_then(Value::as_str) != Some("text")
+        || atom.pointer("/createdBy/subject").and_then(Value::as_str) != Some("8")
+        || atom.pointer("/createdBy/capability").and_then(Value::as_str) != Some("95")
+        || atom.get("payload").and_then(Value::as_str) != Some(hex_bytes(expected_text).as_str())
+    { return Err("signed content atom does not match the peer stage".into()); }
+    Ok(json!({
+        "document":atom.get("document").ok_or("atom document absent")?,
+        "kind":atom.get("kind").ok_or("atom kind absent")?,
+        "payload":atom.get("payload").ok_or("atom payload absent")?,
+        "createdBy":atom.get("createdBy").ok_or("atom creator absent")?,
+        "createdAt":atom.get("createdAt").ok_or("atom creation event absent")?,
+        "tombstonedAt":atom.get("tombstonedAt").ok_or("atom tombstone field absent")?
+    }))
+}
+
+fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str, String), String> {
+    if request.get("model").and_then(Value::as_str) != Some(MODEL) {
+        return Err("unexpected model".into());
+    }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("current user prompt absent")?;
+    let prompt = messages[current_prompt].get("content").and_then(Value::as_str).ok_or("user prompt text absent")?;
+    let (expected, replacement, stale, verify) = match (peer_a, prompt) {
+        (true, "workroom-a-create") => (None, Some(PEER_A_NOTE), false, false),
+        (true, "workroom-a-reconcile") => (Some(PEER_B_REVIEW), Some(PEER_A_RECONCILED), false, false),
+        (true, "workroom-a-verify") => (Some(PEER_B_FOLLOWUP), None, false, true),
+        (false, "workroom-b-review") => (Some(PEER_A_NOTE), Some(PEER_B_REVIEW), false, false),
+        (false, "workroom-b-stale") => (Some(PEER_A_NOTE), Some(PEER_B_FOLLOWUP), true, false),
+        (false, "workroom-b-retry") => (Some(PEER_A_RECONCILED), Some(PEER_B_FOLLOWUP), false, false),
+        (false, "workroom-b-verify") => (Some(PEER_B_FOLLOWUP), None, false, true),
+        _ => return Err("unsupported peer workroom prompt".into()),
+    };
+    let current = &messages[current_prompt..];
+    if let Some(published) = tool_result(current, PUBLISH_ID) {
+        if stale {
+            // A transport timeout or arbitrary tool failure is not a stale-root proof.
+            let refusal = published.to_string().to_ascii_lowercase();
+            let refused_root = tool_failed(published, 0)
+                && (refusal.contains("declaredresourcecontroller.reject.staletarget")
+                    || refusal.contains("target root mismatch"));
+            if !refused_root { return Err("Mini did not explicitly refuse the stale target root".into()); }
+            return Ok((json!({"role":"assistant","content":"Fixture observed Mini refuse the stale target root."}),
+                "stop", "peer stale root refused".into()));
+        }
+        if tool_failed(published, 0) || !has_publish_receipt(published, 0) {
+            return Err("Mini peer publication did not return a signed resource receipt".into());
+        }
+        return Ok((json!({"role":"assistant","content":"Fixture observed the peer Mini publication receipt."}),
+            "stop", "peer receipt".into()));
+    }
+    let signed_read = if stale {
+        // Reuse B's previously observed signed page. A later A edit makes its
+        // root stale; the fixture never substitutes an application-side root.
+        messages[..current_prompt].iter().rev().find(|message| {
+            message.get("role").and_then(Value::as_str) == Some("tool")
+                && message.get("tool_call_id").and_then(Value::as_str) == Some(READ_ID)
+                && find_content_page(message, 0).is_some_and(|page| peer_atom(&page, PEER_A_NOTE).is_ok())
+        })
+    } else { tool_result(current, READ_ID) };
+    if let Some(read) = signed_read {
+        if tool_failed(read, 0) { return Err("Mini peer content read returned an error".into()); }
+        let page = find_content_page(read, 0).ok_or("signed Mini read did not expose content object 8001")?;
+        let root = page.get("root").and_then(Value::as_str).ok_or("content root absent")?;
+        if verify {
+            peer_atom(&page, expected.ok_or("verify stage absent")?)?;
+            return Ok((json!({"role":"assistant","content":"Fixture verified the peer's latest text through Mini's signed ContentResource read."}),
+                "stop", "peer verified".into()));
+        }
+        let action = match expected {
+            None => {
+                if page.get("entries").and_then(Value::as_array).is_none_or(|entries| !entries.is_empty()) {
+                    return Err("peer create requires an empty signed content page".into());
+                }
+                json!({"type":"createAtom","atom":"7401","kind":{"type":"text"},
+                    "payload":hex_bytes(replacement.ok_or("replacement absent")?)})
+            }
+            Some(old_text) => json!({"type":"editAtom","atom":"7401","before":peer_atom(&page, old_text)?,
+                "kind":{"type":"text"},"payload":hex_bytes(replacement.ok_or("replacement absent")?),
+                "tombstone":false}),
+        };
+        let publish = tool_name(request, "__mini_publish").ok_or("mini_publish is not advertised to Hermes")?;
+        let args = json!({"publications":[{"kind":"object","target":"8001",
+            "expectedTargetRoot":root,"payload":{"type":"content","actions":[action]}}]});
+        return Ok((json!({"role":"assistant","content":null,
+            "tool_calls":[call(publish, PUBLISH_ID, args)]}), "tool_calls",
+            format!("peer publish stale={stale} root={root}")));
+    }
+    if stale { return Err("retained B signed read absent for stale-root attempt".into()); }
+    let read = tool_name(request, "__mini_read_resource").ok_or("mini_read_resource is not advertised to Hermes")?;
+    Ok((json!({"role":"assistant","content":null,
+        "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
+        "tool_calls", "peer read workroom".into()))
+}
+
 fn write_http(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) -> io::Result<()> {
     write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())?;
     stream.write_all(body)?;
@@ -371,6 +479,8 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode) -> Result<(), String
     let (message, finish, stage) = match match mode {
         Mode::Scalar => reply_for(&request),
         Mode::ContentWorkroom => content_reply_for(&request),
+        Mode::ContentPeerA => peer_reply_for(&request, true),
+        Mode::ContentPeerB => peer_reply_for(&request, false),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -408,6 +518,8 @@ fn main() -> Result<(), String> {
     let mode = match args.next().as_deref() {
         None => Mode::Scalar,
         Some("--content-workroom") => Mode::ContentWorkroom,
+        Some("--content-peer-a") => Mode::ContentPeerA,
+        Some("--content-peer-b") => Mode::ContentPeerB,
         Some(_) => return Err("unknown fixture mode".into()),
     };
     if args.next().is_some() { return Err("unexpected arguments".into()); }
@@ -551,5 +663,59 @@ mod tests {
         ]))).unwrap();
         assert_eq!(finish, "stop");
         assert!(done["content"].as_str().unwrap().contains("verified"));
+    }
+
+    #[test]
+    fn peer_stale_root_requires_prior_signed_read_and_explicit_refusal() {
+        let atom = json!({"type":"atom","id":"7401","document":"8001","kind":{"type":"text"},
+            "payload":hex_bytes(PEER_A_NOTE),
+            "createdBy":{"subject":"8","capabilityKind":"object","capability":"95"},
+            "createdAt":"77","tombstonedAt":null});
+        let old_read = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"123","entries":[atom]}}});
+        let old_history = json!([
+            {"role":"user","content":"workroom-b-review"},
+            {"role":"tool","tool_call_id":READ_ID,"content":old_read.to_string()},
+            {"role":"user","content":"workroom-b-stale"}
+        ]);
+        let (call, finish, _) = peer_reply_for(&request(old_history.clone()), false).unwrap();
+        assert_eq!(finish, "tool_calls");
+        let args: Value = serde_json::from_str(call["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "123");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["before"]["payload"], hex_bytes(PEER_A_NOTE));
+        let mut messages = old_history.as_array().unwrap().clone();
+        messages.push(json!({"role":"tool","tool_call_id":PUBLISH_ID,
+            "content":"{\"isError\":true,\"error\":\"MCP deadline exceeded\"}"}));
+        assert!(peer_reply_for(&request(json!(messages)), false).is_err());
+        let mut messages = old_history.as_array().unwrap().clone();
+        messages.push(json!({"role":"tool","tool_call_id":PUBLISH_ID,
+            "content":"{\"isError\":true,\"error\":\"Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget\"}"}));
+        let (done, finish, _) = peer_reply_for(&request(json!(messages)), false).unwrap();
+        assert_eq!(finish, "stop");
+        assert!(done["content"].as_str().unwrap().contains("stale target root"));
+        let no_old_read = request(json!([{"role":"user","content":"workroom-b-stale"}]));
+        assert!(peer_reply_for(&no_old_read, false).is_err());
+    }
+
+    #[test]
+    fn peer_retry_reads_current_root_before_editing() {
+        let (read, finish, _) = peer_reply_for(&request(json!([
+            {"role":"user","content":"workroom-b-retry"}
+        ])), false).unwrap();
+        assert_eq!(finish, "tool_calls");
+        assert_eq!(read["tool_calls"][0]["function"]["arguments"], "{\"name\":\"workroom\"}");
+        let atom = json!({"type":"atom","id":"7401","document":"8001","kind":{"type":"text"},
+            "payload":hex_bytes(PEER_A_RECONCILED),
+            "createdBy":{"subject":"8","capabilityKind":"object","capability":"95"},
+            "createdAt":"77","tombstonedAt":null});
+        let current = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"456","entries":[atom]}}});
+        let (edit, _, _) = peer_reply_for(&request(json!([
+            {"role":"user","content":"workroom-b-retry"},
+            {"role":"tool","tool_call_id":READ_ID,"content":current.to_string()}
+        ])), false).unwrap();
+        let args: Value = serde_json::from_str(edit["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "456");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(PEER_B_FOLLOWUP));
     }
 }
