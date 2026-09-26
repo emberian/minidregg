@@ -472,6 +472,16 @@ partial def readBoundedLoop (input : IO.FS.Handle) (limit : Nat)
   if chunk.isEmpty then return acc.toList
   readBoundedLoop input limit (acc ++ chunk)
 
+/-- Drain diagnostic stderr concurrently with stdout while retaining only a
+bounded prefix. The child cannot block the projection read by filling stderr. -/
+partial def readDiagnosticStderr (input : IO.FS.Handle) (limit : Nat)
+    (acc : ByteArray := ByteArray.empty) : IO ByteArray := do
+  let chunk ← input.read 4096
+  if chunk.isEmpty then return acc
+  let room := limit - acc.size
+  let retained := acc ++ chunk.extract 0 (min room chunk.size)
+  readDiagnosticStderr input limit retained
+
 def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
   let input ← IO.FS.Handle.mk path .read
   readBoundedLoop input limit
@@ -532,6 +542,10 @@ def withFnReplyCatalogService {α : Type} (settings : Settings)
         origin.storage.root.toString != settings.storageRoot do
       throw (IO.userError
         "A prepared outbox needs a distinct live Mini origin deployment")
+    let originRoot ← IO.FS.realPath origin.storage.root
+    let replyRoot ← IO.FS.realPath settings.config.storage.root
+    unless originRoot != replyRoot do
+      throw (IO.userError "A prepared origin aliases the A reply Store")
     withPinnedSignature origin fun pinnedOrigin =>
       body (some ⟨pinnedOrigin, rPinPath, qPinPath, scopePath,
         policyPath, source.controlPath⟩)
@@ -838,24 +852,45 @@ def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
   let report ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
   unless !cursor.isEmpty && !report.isEmpty do
     throw (IO.userError "fn poll has no schema-1 report and cursor")
-  let child ← IO.Process.spawn
-    { cmd := fnBinary, args := #["--fn", "consumer-project", cursorPath,
-      reportPath], stdin := .null, stdout := .piped, stderr := .null }
-  let lineBytes ← try readBoundedLoop child.stdout FnEvidenceCodec.maxPollProjectionLineBytes
-    catch error =>
-      child.kill
-      discard <| child.wait
-      throw error
-  let exitCode ← child.wait
-  unless exitCode == 0 do
-    throw (IO.userError "fn native consumer projection refused")
-  unless cursor == (← readBoundedBytes cursorPath 346) &&
-      sameBytes report (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
-    throw (IO.userError "fn poll files changed during native projection")
-  unless lineBytes.all (fun byte => byte.toNat < 128) do
-    throw (IO.userError "fn consumer projection is not ASCII")
-  let projection ← IO.ofExcept (parseFnPollProjectLine
-    (String.fromUTF8! lineBytes.toByteArray))
+  -- A malformed projection never authorizes anything. One second read-only
+  -- projection of the unchanged files may recover a one-off transport fault;
+  -- both failures retain bounded byte-count and hash diagnostics, not content.
+  let mut selected : Option FnPollProjection := none
+  let mut framingDiagnostic := "none"
+  for _ in [:2] do
+    if selected.isNone then do
+      let child ← IO.Process.spawn
+        { cmd := fnBinary, args := #["--fn", "consumer-project", cursorPath,
+          reportPath], stdin := .null, stdout := .piped, stderr := .piped }
+      let stderrTask ← IO.asTask (readDiagnosticStderr child.stderr 2048)
+      let lineBytes ← try readBoundedLoop child.stdout FnEvidenceCodec.maxPollProjectionLineBytes
+        catch error =>
+          child.kill
+          discard <| child.wait
+          throw error
+      let exitCode ← child.wait
+      let stderrBytes ← match stderrTask.get with
+        | .ok bytes => pure bytes
+        | .error error => throw error
+      let digest := fun (label : String) (bytes : List UInt8) =>
+        (Sp800185Cshake256.hash label.toUTF8.toList bytes).digest.value
+      let diagnostic := s!"exit={exitCode}, stdoutBytes={lineBytes.length}, stdoutLF={(lineBytes.filter (· == 10)).length}, stdoutDigest={digest "DREGG.FN.PROJECTION-STDOUT/v1" lineBytes}, stderrPrefixBytes={stderrBytes.size}, stderrPrefixDigest={digest "DREGG.FN.PROJECTION-STDERR/v1" stderrBytes.toList}"
+      unless exitCode == 0 do
+        throw (IO.userError s!"fn native consumer projection refused ({diagnostic})")
+      unless cursor == (← readBoundedBytes cursorPath 346) &&
+          sameBytes report (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
+        throw (IO.userError "fn poll files changed during native projection")
+      unless lineBytes.all (fun byte => byte.toNat < 128) do
+        throw (IO.userError "fn consumer projection is not ASCII")
+      match parseFnPollProjectLine (String.fromUTF8! lineBytes.toByteArray) with
+      | .ok projection => selected := some projection
+      | .error detail =>
+          unless detail == "fn consumer projection has unexpected framing" do
+            throw (IO.userError s!"{detail} ({diagnostic})")
+          IO.eprintln s!"minidregg-host: fn projection framing retry ({diagnostic})"
+          framingDiagnostic := diagnostic
+  let some projection := selected
+    | throw (IO.userError s!"fn consumer projection framing refused after retry ({framingDiagnostic})")
   IO.ofExcept (pin.check projection)
   pure (cursor, report, projection)
 
@@ -884,18 +919,76 @@ def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
 
 def inspectFnConsumerCursor (fnBinary : String) (cursorPath : String) :
     IO (FnConsumerProgress.Scope × Nat) := do
-  let child ← IO.Process.spawn
-    { cmd := fnBinary, args := #["--fn", "consumer-inspect", cursorPath],
-      stdin := .null, stdout := .piped, stderr := .null }
-  let output ← try readBoundedLoop child.stdout 1024
-    catch error =>
-      child.kill
-      discard <| child.wait
-      throw error
-  let exitCode ← child.wait
-  unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
-    throw (IO.userError "fn consumer cursor inspect refused")
-  IO.ofExcept (parseFnConsumerInspect (String.fromUTF8! output.toByteArray))
+  let cursor ← readBoundedBytes cursorPath 346
+  let mut selected : Option (FnConsumerProgress.Scope × Nat) := none
+  let mut framingDiagnostic := "none"
+  for _ in [:2] do
+    if selected.isNone then do
+      let child ← IO.Process.spawn
+        { cmd := fnBinary, args := #["--fn", "consumer-inspect", cursorPath],
+          stdin := .null, stdout := .piped, stderr := .piped }
+      let stderrTask ← IO.asTask (readDiagnosticStderr child.stderr 2048)
+      let output ← try readBoundedLoop child.stdout 1024
+        catch error =>
+          child.kill
+          discard <| child.wait
+          throw error
+      let exitCode ← child.wait
+      let stderrBytes ← match stderrTask.get with
+        | .ok bytes => pure bytes
+        | .error error => throw error
+      let digest := fun (label : String) (bytes : List UInt8) =>
+        (Sp800185Cshake256.hash label.toUTF8.toList bytes).digest.value
+      let diagnostic := s!"exit={exitCode}, stdoutBytes={output.length}, stdoutLF={(output.filter (· == 10)).length}, stdoutDigest={digest "DREGG.FN.INSPECT-STDOUT/v1" output}, stderrPrefixBytes={stderrBytes.size}, stderrPrefixDigest={digest "DREGG.FN.INSPECT-STDERR/v1" stderrBytes.toList}"
+      unless cursor == (← readBoundedBytes cursorPath 346) do
+        throw (IO.userError "fn consumer cursor changed during inspect")
+      unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
+        throw (IO.userError s!"fn consumer cursor inspect refused ({diagnostic})")
+      match parseFnConsumerInspect (String.fromUTF8! output.toByteArray) with
+      | .ok value => selected := some value
+      | .error detail =>
+          unless detail == "fn consumer inspect has unexpected framing" do
+            throw (IO.userError s!"{detail} ({diagnostic})")
+          IO.eprintln s!"minidregg-host: fn cursor inspect framing retry ({diagnostic})"
+          framingDiagnostic := diagnostic
+  let some value := selected
+    | throw (IO.userError s!"fn consumer inspect framing refused after retry ({framingDiagnostic})")
+  return value
+
+/-- The local owner supplies a fresh committed-position cursor. Inspecting a
+caller file would establish only syntax; this path binds the inspected full
+scope to a live authenticated owner response and fences it with status. -/
+def queryFnConsumerPosition (fnBinary : String) (scope : FnPollScopePin)
+    (controlPath : String) : IO (Nat × FnConsumerStatus) := do
+  unless controlPath.startsWith "/" do
+    throw (IO.userError "fn consumer position control must be absolute")
+  IO.FS.withTempDir fun directory => do
+    let path := (directory / "current-position.fncu").toString
+    let consumer ← fnConsumerAscii scope
+    let child ← IO.Process.spawn
+      { cmd := fnBinary, args := #["--fn", "consumer", "position",
+        controlPath, consumer, path],
+        stdin := .null, stdout := .piped, stderr := .null }
+    let output ← try readBoundedLoop child.stdout 128
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
+      throw (IO.userError "fn current consumer position refused or uncertain")
+    let cursor ← readBoundedBytes path 346
+    unless !cursor.isEmpty do
+      throw (IO.userError "fn current position returned no cursor")
+    let (inspectedScope, position) ← inspectFnConsumerCursor fnBinary path
+    let selectedScope ← IO.ofExcept scope.progressScope
+    unless inspectedScope == selectedScope &&
+        cursor == (← readBoundedBytes path 346) do
+      throw (IO.userError "fn current position scope or cursor changed")
+    let status ← queryFnConsumerStatus fnBinary scope controlPath
+    unless status.committedAck ≥ position do
+      throw (IO.userError "fn current position exceeds fenced durable ACK")
+    return (position, status)
 
 /-- One authenticated local poll, before choosing the article or empty-page
 branch. The cursor is written last by fn; requiring both files and the exact
@@ -1730,6 +1823,35 @@ def runFnPollSession (config : NativeHost.Config)
 /-- A previously admitted empty-page skip retains its exact fn cursor. ACK
 never needs a current Mini mutation grant, but fn still checks its own scoped
 cursor and durable position through the local control endpoint. -/
+def coveredSkipAckResponse (operation : UInt8) (responseType transaction : String)
+    (skipped : FnConsumerProgress.Evidence) (committedAck : Nat) :
+    UInt8 × List UInt8 :=
+  (operation, (Lean.Json.mkObj
+    [("type", toJson responseType),
+     ("kind", toJson "empty-page-skip"),
+     ("miniTransactionId", toJson transaction),
+     ("fnCursorPosition", toJson (toString skipped.toPosition)),
+     ("fnCommittedAck", toJson (toString committedAck)),
+     ("fnStoreSequence", toJson ""),
+     ("fnStoreTransactionId", toJson ""),
+     ("fnAck", toJson "covered-by-durable-frontier")]).compress.toUTF8.toList)
+
+/-- Position-only coverage of a signed historical article inbox. This says
+the scoped durable ACK frontier now lies past its cursor; it does not claim a
+fresh carrier verification or identify which earlier ACK advanced the Store. -/
+def coveredArticleAckResponse (operation : UInt8) (responseType transaction : String)
+    (stored : FnConsumerOperation.StorePollInbox) (position committedAck : Nat) :
+    UInt8 × List UInt8 :=
+  (operation, (Lean.Json.mkObj
+    [("type", toJson responseType),
+     ("kind", toJson "article-prefix-coverage"),
+     ("miniTransactionId", toJson transaction),
+     ("fnCursorPosition", toJson (toString position)),
+     ("fnCommittedAck", toJson (toString committedAck)),
+     ("fnStoreSequence", toJson (toString stored.sequence)),
+     ("fnStoreTransactionId", toJson (toString stored.transactionId)),
+     ("fnAck", toJson "covered-by-durable-frontier")]).compress.toUTF8.toList)
+
 def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
     (controlPath transaction : String) (skipped : FnConsumerProgress.Evidence)
     (operation : UInt8) (responseType : String) : IO (UInt8 × List UInt8) := do
@@ -1745,6 +1867,12 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
     unless inspectedScope == selectedScope && position == skipped.toPosition &&
         skipped.cursor == (← readBoundedBytes cursorPath 346) do
       throw (IO.userError "empty-page ACK cursor differs from accepted Mini skip")
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition pin.fnBinary scope controlPath
+    if currentPosition ≥ skipped.toPosition &&
+        currentStatus.committedAck > skipped.toPosition then
+      return coveredSkipAckResponse operation responseType transaction skipped
+        currentStatus.committedAck
     let child ← IO.Process.spawn
       { cmd := pin.fnBinary,
         args := #["--fn", "consumer", "ack", controlPath, cursorPath],
@@ -1762,15 +1890,25 @@ def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
       else if exitCode == 2 then "refused"
       else if exitCode == 3 then "uncertain"
       else "transport-fault"
+    if status == "refused" then
+      let (latestPosition, latestStatus) ←
+        queryFnConsumerPosition pin.fnBinary scope controlPath
+      if latestPosition ≥ skipped.toPosition &&
+          latestStatus.committedAck > skipped.toPosition then
+        return coveredSkipAckResponse operation responseType transaction skipped
+          latestStatus.committedAck
+    let mut committedAck := currentStatus.committedAck
     if status == "durable-accepted" then
       let after ← queryFnConsumerStatus pin.fnBinary scope controlPath
       unless skipped.toPosition ≤ after.committedAck do
         throw (IO.userError "fn accepted skip ACK without durable position advance")
+      committedAck := after.committedAck
     return (operation, (Lean.Json.mkObj
       [("type", toJson responseType),
        ("kind", toJson "empty-page-skip"),
        ("miniTransactionId", toJson transaction),
        ("fnCursorPosition", toJson (toString skipped.toPosition)),
+       ("fnCommittedAck", toJson (toString committedAck)),
        ("fnStoreSequence", toJson ""),
        ("fnStoreTransactionId", toJson ""),
        ("fnAck", toJson status)]).compress.toUTF8.toList)
@@ -1817,6 +1955,15 @@ def runFnAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.fnBinary cursorPath
+    unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
+        stored.cursor == (← readBoundedBytes cursorPath 346) do
+      throw (IO.userError "fn ack retained cursor differs from signed Mini position")
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition pin.fnBinary scope service.controlPath
+    if currentPosition ≥ oldPosition && currentStatus.committedAck > oldPosition then
+      return coveredArticleAckResponse 13 "fn-consumer-ack-session-v1"
+        transaction stored oldPosition currentStatus.committedAck
     let (cursor, event, projected) ←
       projectFnPoll pin.fnBinary scope cursorPath eventPath
     unless cursor == stored.cursor && sameBytes event stored.event &&
@@ -1852,6 +1999,12 @@ def runFnAckSession (config : NativeHost.Config)
       else if exitCode == 2 then "refused"
       else if exitCode == 3 then "uncertain"
       else "transport-fault"
+    if status == "refused" then
+      let (latestPosition, latestStatus) ←
+        queryFnConsumerPosition pin.fnBinary scope service.controlPath
+      if latestPosition ≥ oldPosition && latestStatus.committedAck > oldPosition then
+        return coveredArticleAckResponse 13 "fn-consumer-ack-session-v1"
+          transaction stored oldPosition latestStatus.committedAck
     return (13, (Lean.Json.mkObj
       [("type", toJson "fn-consumer-ack-session-v1"),
        ("miniTransactionId", toJson transaction),
@@ -2106,6 +2259,15 @@ def runFnReplyAckSession (config : NativeHost.Config)
     let eventPath := (directory / "retained-report.fn-e").toString
     writeBytes cursorPath stored.cursor
     writeBytes eventPath stored.event
+    let (oldScope, oldPosition) ← inspectFnConsumerCursor pin.fnBinary cursorPath
+    unless oldScope == selectedScope && oldPosition == stored.sequence + 1 &&
+        stored.cursor == (← readBoundedBytes cursorPath 346) do
+      throw (IO.userError "A reply ack retained cursor differs from signed Mini position")
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition pin.fnBinary scope service.controlPath
+    if currentPosition ≥ oldPosition && currentStatus.committedAck > oldPosition then
+      return coveredArticleAckResponse 15 "fn-a-reply-ack-session-v1"
+        transaction stored oldPosition currentStatus.committedAck
     let (cursor, event, projected) ←
       projectFnPoll pin.fnBinary scope cursorPath eventPath
     unless cursor == stored.cursor && sameBytes event stored.event &&
@@ -2141,6 +2303,12 @@ def runFnReplyAckSession (config : NativeHost.Config)
       else if exitCode == 2 then "refused"
       else if exitCode == 3 then "uncertain"
       else "transport-fault"
+    if status == "refused" then
+      let (latestPosition, latestStatus) ←
+        queryFnConsumerPosition pin.fnBinary scope service.controlPath
+      if latestPosition ≥ oldPosition && latestStatus.committedAck > oldPosition then
+        return coveredArticleAckResponse 15 "fn-a-reply-ack-session-v1"
+          transaction stored oldPosition latestStatus.committedAck
     return (15, (Lean.Json.mkObj
       [("type", toJson "fn-a-reply-ack-session-v1"),
        ("miniTransactionId", toJson transaction),
