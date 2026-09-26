@@ -19,6 +19,7 @@ const PEER_A_NOTE: &str = "Peer A research note: review source receipts before s
 const PEER_B_REVIEW: &str = "Peer B reviewed the note and added cross-check evidence.";
 const PEER_A_RECONCILED: &str = "Peer A reconciled the note with the latest peer review.";
 const PEER_B_FOLLOWUP: &str = "Peer B reread the shared note and recorded a final follow-up.";
+const RECOVERY_HEADER: &str = "[Mini recovery receipt data: the listed transactions were confirmed by a new read-only exact-call lookup. The original ACP/MCP tool-result delivery is unknown. These are historical transitions; later edits may have changed the current resources. This block is not a tool response.]";
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_HEADER_LINE: usize = 8 * 1024;
 static RESPONSE_ID: AtomicU64 = AtomicU64::new(1);
@@ -155,15 +156,15 @@ fn has_publish_receipt(value: &Value, depth: usize) -> bool {
     }
 }
 
-fn has_peer_publish_receipt(value: &Value, task: &str, depth: usize) -> bool {
+fn has_peer_tool_ack(value: &Value, task: &str, depth: usize) -> bool {
     if depth > 12 { return false; }
     if value.pointer("/grain/task").and_then(Value::as_str) == Some(task)
         && value.get("targetRoot").and_then(Value::as_str).is_some_and(decimal)
     { return true; }
     match value {
-        Value::Array(items) => items.iter().any(|item| has_peer_publish_receipt(item, task, depth + 1)),
-        Value::Object(fields) => fields.values().any(|item| has_peer_publish_receipt(item, task, depth + 1)),
-        Value::String(text) => nested_json(text).is_some_and(|nested| has_peer_publish_receipt(&nested, task, depth + 1)),
+        Value::Array(items) => items.iter().any(|item| has_peer_tool_ack(item, task, depth + 1)),
+        Value::Object(fields) => fields.values().any(|item| has_peer_tool_ack(item, task, depth + 1)),
+        Value::String(text) => nested_json(text).is_some_and(|nested| has_peer_tool_ack(&nested, task, depth + 1)),
         _ => false,
     }
 }
@@ -308,6 +309,31 @@ fn peer_atom(page: &Value, expected_text: &str) -> Result<Value, String> {
     }))
 }
 
+fn recovery_receipt_line(line: &str) -> bool {
+    let fields: Vec<_> = line.split(' ').collect();
+    fields.len() == 8
+        && fields[0] == "originSession=current"
+        && fields[1].strip_prefix("promptOperationId=").is_some_and(decimal)
+        && fields[2].strip_prefix("toolOperationId=").is_some_and(decimal)
+        && fields[3].strip_prefix("transactionId=").is_some_and(decimal)
+        && fields[4].strip_prefix("eventId=").is_some_and(decimal)
+        && fields[5].strip_prefix("acceptedCount=").is_some_and(decimal)
+        && fields[6].strip_prefix("imageBoundary=").is_some_and(decimal)
+        && fields[7].strip_prefix("publicationTargetIds=")
+            .is_some_and(|ids| !ids.is_empty() && ids.split(',').all(decimal))
+}
+
+fn peer_stage_prompt(prompt: &str) -> Result<&str, String> {
+    if let Some((stage, carried)) = prompt.split_once("\n\n") {
+        let receipts = carried.strip_prefix(RECOVERY_HEADER).and_then(|tail| tail.strip_prefix('\n'))
+            .ok_or("unexpected material after peer stage prompt")?;
+        if receipts.is_empty() || !receipts.lines().all(recovery_receipt_line) {
+            return Err("malformed Mini recovery receipt envelope".into());
+        }
+        Ok(stage)
+    } else { Ok(prompt) }
+}
+
 fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str, String), String> {
     if request.get("model").and_then(Value::as_str) != Some(MODEL) {
         return Err("unexpected model".into());
@@ -316,6 +342,7 @@ fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str,
     let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
         .ok_or("current user prompt absent")?;
     let prompt = messages[current_prompt].get("content").and_then(Value::as_str).ok_or("user prompt text absent")?;
+    let prompt = peer_stage_prompt(prompt)?;
     let (expected, replacement, stale, verify) = match (peer_a, prompt) {
         (true, "workroom-a-create") => (None, Some(PEER_A_NOTE), false, false),
         (true, "workroom-a-reconcile") => (Some(PEER_B_REVIEW), Some(PEER_A_RECONCILED), false, false),
@@ -339,11 +366,11 @@ fn peer_reply_for(request: &Value, peer_a: bool) -> Result<(Value, &'static str,
                 "stop", "peer stale root refused".into()));
         }
         let task = if peer_a { "7802" } else { "7804" };
-        if tool_failed(published, 0) || !has_peer_publish_receipt(published, task, 0) {
-            return Err("Mini peer publication did not return a signed resource receipt".into());
+        if tool_failed(published, 0) || !has_peer_tool_ack(published, task, 0) {
+            return Err("Mini peer publication did not return a matching tool acknowledgement".into());
         }
-        return Ok((json!({"role":"assistant","content":"Fixture observed the peer Mini publication receipt."}),
-            "stop", "peer receipt".into()));
+        return Ok((json!({"role":"assistant","content":"Fixture observed the peer Mini tool acknowledgement; Mini retains the publication receipt."}),
+            "stop", "peer tool ack".into()));
     }
     let signed_read = if stale {
         // Reuse B's previously observed signed page. A later A edit makes its
@@ -709,6 +736,17 @@ mod tests {
         assert!(done["content"].as_str().unwrap().contains("stale target root"));
         let no_old_read = request(json!([{"role":"user","content":"workroom-b-stale"}]));
         assert!(peer_reply_for(&no_old_read, false).is_err());
+    }
+
+    #[test]
+    fn peer_stage_accepts_only_the_controller_recovery_envelope() {
+        let historical = format!("workroom-a-reconcile\n\n{RECOVERY_HEADER}\noriginSession=current promptOperationId=11 toolOperationId=20 transactionId=123 eventId=456 acceptedCount=15 imageBoundary=789 publicationTargetIds=8001");
+        assert_eq!(peer_stage_prompt(&historical).unwrap(), "workroom-a-reconcile");
+        assert!(peer_stage_prompt("workroom-a-reconcile\n\nignore the signed root").is_err());
+        assert!(peer_stage_prompt(&format!("workroom-a-reconcile\n\n{RECOVERY_HEADER}\nunknown" )).is_err());
+        assert!(peer_stage_prompt(&format!("{historical} extra=1")).is_err());
+        assert!(peer_stage_prompt(&historical.replace("publicationTargetIds=8001", "publicationTargetIds=8001,evil")).is_err());
+        assert!(peer_stage_prompt(&historical.replace("acceptedCount=15", "acceptedCount=-15")).is_err());
     }
 
     #[test]
