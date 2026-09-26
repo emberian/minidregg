@@ -130,6 +130,42 @@ decision. No carrier path, claim, pin, or operator path crosses the public
 socket; the broker admits op16 only for a service whose pinned config has
 `fnReplyCatalog`, and Host/Main re-verifies the carrier against that catalog.
 
+The `origin-publish` entry is prepared for a durable A-origin publication:
+
+```sh
+mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json \
+  --socket /private/path/a-session/host.sock --key A-ORIGIN.key \
+  --carrier SIGNED-R.eml --state-dir /private/path/a-publisher \
+  --post-config /private/path/fn-post.json
+```
+
+Its owner-private post config specifies the operator's localhost NNTP
+endpoint and credentials, for example:
+
+```json
+{"type":"minidregg-fn-post-v1","port":1119,
+ "certificatePath":"/private/path/fn-cert.pem",
+ "username":"a-at-b","passwordFile":"/private/path/fn-password"}
+```
+
+The publisher retains the exact already-signed carrier, asks Host op16 to
+prepare A's Mini outbox decision, submits that Lean-authored intent using the
+normal signed Mini route, and requires Host op18 to read back the accepted
+carrier from A's durable history before fn POST. It sends those exact bytes
+over authenticated STARTTLS, with NNTP dot-stuffing only for wire framing.
+`240 article received OK` means accepted now; the exact already-stored `441`
+means the same carrier was accepted earlier; a different-article `441` is a
+Message-ID conflict. A lost reply or fn's explicit `do not repost` outcome
+never authorizes a new carrier. The durable state permits at most one exact
+reconciliation POST after a recorded transport uncertainty; missing response
+evidence holds for operator review. The post config and signed carrier are
+pinned for restart, and the password is never placed on an argument vector.
+
+This entry is currently **gated before any Mini or fn request**: Host op18 is
+source-green but has not yet been linked and probed in a source-matched native
+image. The Rust broker also refuses public op18 until that gate is lifted.
+No end-to-end native `origin-publish` run is claimed yet.
+
 `consumer-drain-once` runs one bounded B consumer wake through that same
 socket. It holds a single private, owner-locked durable state directory:
 

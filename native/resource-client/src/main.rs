@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod publisher;
+#[cfg(unix)]
 mod transport;
 #[cfg(unix)]
 mod worker;
@@ -41,6 +43,7 @@ usage:
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
+  mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
@@ -1308,6 +1311,35 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("origin-outbox-prepare requires Unix sockets".to_owned())
+            }
+        }
+        "origin-publish" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let key = path(args.required("key")?);
+            let carrier = path(args.required("carrier")?);
+            let state_dir = path(args.required("state-dir")?);
+            let post_config = path(args.required("post-config")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                if !transport::ORIGIN_EXPORT_READY {
+                    return Err("origin-publish is gated until a source-matched Host op18 export is linked and probed; no Mini or fn request was sent".into());
+                }
+                let socket = SOCKET.get().ok_or("origin-publish requires --socket")?;
+                publisher::publish(
+                    &host,
+                    &config,
+                    socket,
+                    &key,
+                    &carrier,
+                    &state_dir,
+                    &post_config,
+                )
+            }
+            #[cfg(not(unix))]
+            {
+                Err("origin-publish requires Unix sockets".to_owned())
             }
         }
         "consumer-drain-once" => {

@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
+// The historical accepted-outbox export is source-green but not yet linked
+// and probed in the deployed Host image. Keep the public route closed.
+pub(crate) const ORIGIN_EXPORT_READY: bool = false;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
@@ -25,6 +28,14 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && (digits.len() == 1 || digits[0] != b'0')
         }
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
+        [18, digits @ ..] => {
+            ORIGIN_EXPORT_READY
+                && catalog_enabled
+                && !digits.is_empty()
+                && digits.len() <= 80
+                && digits.iter().all(u8::is_ascii_digit)
+                && (digits.len() == 1 || digits[0] != b'0')
+        }
         _ => false,
     }
 }
@@ -613,6 +624,8 @@ mod tests {
         assert!(!allowed_operation(&[16, b'R'], false));
         assert!(!allowed_operation(&[16], true));
         assert!(allowed_operation(&[16, b'R'], true));
+        assert!(!allowed_operation(&[18, b'1'], true));
+        assert!(!allowed_operation(&[18, b'/'], true));
         let mut oversized = vec![b'R'; 1_516_386];
         oversized[0] = 16;
         assert!(!allowed_operation(&oversized, true));
