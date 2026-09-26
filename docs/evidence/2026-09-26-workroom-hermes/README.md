@@ -63,7 +63,11 @@ and pinned Mini config SHA-256
 `8d886ccb35bab3bebd1da65b23b2a234517f721f24d3d65dd09a4019b0668f96`.
 The final controller and worker proxy binary SHA-256 was
 `f3b9b160524f55231035833bee4da3d558bca0c53ca62f45ded732fdf521418a`;
-the first two turns used earlier binaries, preserved in the private run.
+the first create turn used SHA-256
+`173cb9a6b14aca36f2c232c96e88d54c4355f5be67695b91f05360068b7ee1d6`,
+and the second edit turn used SHA-256
+`8126b3432c56b040219ef53436a740f123813ee3658888663aa0f0e3df78ff30`.
+Those binaries remain in the private run.
 The independent Mac selected-bbf Host SHA-256 was
 `d94f7eb91ff9c54d1e6c4b46a650e491c0e54ca9b3a1114c5b0dd4ee717269fb`.
 No keys, pinned config, full Store, or Hermes transcript are copied here.

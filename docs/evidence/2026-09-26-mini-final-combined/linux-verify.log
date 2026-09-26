@@ -1,0 +1,4 @@
+source-manifest-PASS-169/169
+artifact-manifest-PASS-4/4
+/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.32, with debug_info, not stripped
+4bb72e1e984de413ee0065d7d229dbe0217bf980b4563ba26dc85ee38ed59c65  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined

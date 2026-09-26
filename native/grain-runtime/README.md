@@ -140,6 +140,13 @@ and requires signed recovery,
 without resending it. A longer deadline does not turn configured charges into
 measured usage.
 
+For a provider task, the gateway's Reserve and BeforeSend waits end at the
+worker's absolute wall-clock deadline, measured before the wrapper starts.
+Revocation or expiry also blocks a late controller acknowledgement before the
+upstream HTTP send. Provider admission requires `hostSocket` and a pinned Mini
+client with the read-only `mini continuity` command; the controller refuses
+configurations without that socket before reserving allowance.
+
 `hermes PROMPT` speaks ACP JSON-RPC to the actual upstream `hermes-acp`
 process and registers the keyless `mini-grain` MCP proxy. Its
 session ID is retained in the controller journal. Later prompts start a new
