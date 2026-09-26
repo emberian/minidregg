@@ -1,0 +1,12 @@
+2ae1f166685e45e4fd1f3aeda49236af2a14e6719602bca89a7fe24d2fd406c0  /tmp/minidregg-overnight-20260926/minidregg-host-exact-session-2
+9384047b5949744ff6fa0317a3daa0cd8d3167c207a804a6907152a4025a65e3  /tmp/minidregg-overnight-20260926/mini-client-fsync-restart-inspect-wip
+452908cb42070c57051fa7ccd65696541ec940f158c17db4f832a6355bc85e03  /Users/ember/dev/minidregg/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store
+dd5273f30a999dc7594018dd57605aebf2f9f15c43010f31e8674d28f14aafd9  /Users/ember/dev/minidregg/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier
+e782fb265912c2216b087bdaf422486edd323017ddcae522f8df2cdd2967b9d7  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-birth.bin
+3eded26c9c70ba6977225a1cc9722fb3bec189cf4c7dc8c970cee1c4a613c5eb  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-content.bin
+85ace0834ee238d490fc1cd82a084b485f7c136f0af9fc281d7650556d679121  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-joint.bin
+545b2ce7308cd0af7c5cdce323c4f44d6b36cb2600b018fbd29b17deb722c990  /tmp/minidregg-replay-poison-initial-20260926/fixture/content-attempt/call.bin
+85ace0834ee238d490fc1cd82a084b485f7c136f0af9fc281d7650556d679121  /tmp/minidregg-exact-readback-physical-suffix-pass-20260926/concurrent-suffix/physical-after.bin
+3eded26c9c70ba6977225a1cc9722fb3bec189cf4c7dc8c970cee1c4a613c5eb  /tmp/minidregg-exact-readback-physical-suffix-pass-20260926/failed-readback/physical-after.bin
+3eded26c9c70ba6977225a1cc9722fb3bec189cf4c7dc8c970cee1c4a613c5eb  /tmp/minidregg-exact-readback-physical-suffix-pass-20260926/installed/physical-after.bin
+3eded26c9c70ba6977225a1cc9722fb3bec189cf4c7dc8c970cee1c4a613c5eb  /tmp/minidregg-exact-readback-physical-suffix-pass-20260926/lost-cas-reply/physical-after.bin

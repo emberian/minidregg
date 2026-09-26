@@ -1,4 +1,4 @@
-# Exact readback reuse contract (design, not an enabled receiving path)
+# Exact readback reuse contract (persistent receiving path)
 
 The persistent native session already holds `NativeHostReplay.Verified config oldTarget`.
 `Session.refresh` rereads the complete physical image before each request and reuses this
@@ -30,8 +30,8 @@ accepted count plus one, and `imageBoundary config (oldTarget.image.append inten
 The receipt is not derived from a potentially later current tip. Its verified
 target is the complete physical readback, not the proposed image alone.
 
-The exact-readback witness must be constructed only inside the receiver's
-post-CAS equal-bytes branch and returned as a distinct typed result. The current
+The exact-readback witness is constructed only inside the receiver's
+post-CAS equal-bytes branch and returned as a distinct typed result. The legacy
 `Result.confirmed kind snapshot` loses the branch provenance: it also denotes
 a replayed prior transaction or a changed readback with a concurrent append.
 Those cases must retain the current canonical load and semantic suffix
@@ -40,7 +40,7 @@ A missing/error readback after CAS remains uncertain. Rewritten prefixes and
 rollback remain refusal. A lost CAS response followed by exact candidate
 readback may keep the existing `recoveredAfterUncertainResponse` confirmation.
 
-The first implementation target is the persistent session, which retains the
+The implemented fast path is the persistent session, which retains the
 old `Verified` object and a pinned verifier for its lifetime. The one-shot
 entrypoint currently discards `Verified` in `openExisting`, so its full semantic
 reopen remains the baseline until it is given an equally strong verifier and
@@ -50,7 +50,7 @@ second verifier launch would have failed. Both paths require the original
 admission, full physical readback, and exact source-derived receipt, conditional
 on stable pinned verifier semantics.
 
-Measurement must compare the persistent-session path on private accepted-one
+Measurement compares the persistent-session path on private accepted-one
 Store copies with the same signed call and physical bytes. The previous
 189.68-second Linux large-call measurement used a one-shot submit, so it is
 not a baseline for this proposed session optimization.
@@ -74,3 +74,59 @@ CPU and held about 1.30 GiB RSS near completion. The fixture is private at
 `/tmp/minidregg-large-b-profile-20260926/session-baseline-v1`; its service
 process was stopped after the measurement. This is one run under shared host
 load, not a general latency bound.
+
+The exact-session Linux host SHA-256
+`5c6bf412b2e77675874dc820ac6bd2f6d0b20c3f6752e5e4728228649d63daab`
+was built from the committed detailed receiver, typed replay extension, and
+persistent Host routing with the pre-UInt64 cSHAKE core. On a fresh copy of the
+same accepted-one SQLite image and the same retained signed call, the warmed
+persistent submit took **96.55 seconds** of client wall time. Its retained
+132-byte Outcome is byte-identical (`caf4009a…`) to the before run, and its
+post-submit SQLite image is byte-identical (`0066f07f…`). The case evidence is
+`/tmp/minidregg-large-b-profile-20260926/session-exact-v2/` on Persvati;
+`input-sha256.txt`, `output-sha256.txt`, `retry.time`, and the retained JSON
+record the full identities. These are two single runs under shared load, so
+the measured reduction is specific to this call and environment.
+The bounded copies here are `exact-session-linux-before.time`,
+`exact-session-linux-retry.time`, `exact-session-linux-input-sha256.txt`, and
+`exact-session-linux-output-sha256.txt`. The Mac and Linux build manifests and
+five changed-source SHA lists are archived alongside them; the changed-source
+lists match byte-for-byte across platforms.
+
+The certified Mac host SHA-256
+`2ae1f166685e45e4fd1f3aeda49236af2a14e6719602bca89a7fe24d2fd406c0`
+passed [`exact-readback-session.sh`](../../../scripts/overnight-tests/exact-readback-session.sh)
+(source SHA-256 `8d9728e4e8673a593a334af7362928a1c09c5c42d5ea37b694f818b9a91e9a48`)
+on four separate private accepted-one Stores. Normal CAS returned `installed`;
+a successfully installed CAS with its response lost returned
+`recoveredAfterUncertainResponse`; a failed post-CAS readback returned typed
+`uncertain` and a later exact lookup returned the original receipt. When the
+wrapper appended an independently accepted next event between CAS and
+readback, the response kept the original count-two receipt while the physical
+Store matched the valid count-three image byte-for-byte. The complete four
+receipt fields were compared with the retained original, and every case made
+an exact physical image comparison. Evidence remains at
+`/tmp/minidregg-exact-readback-physical-suffix-pass-20260926/`; this directory's
+bounded physical SHA list and typed first outcomes are copied here as
+`exact-session-physical-sha256.txt` and
+`exact-session-physical-results.jsonl`. The first suffix trial used test script
+SHA-256 `d12017bd…` and exited because its assertion incorrectly expected
+`recoveredAfterUncertainResponse` for an ordinary successful CAS with a later
+concurrent append. Its retained result was actually `installed` with the
+correct original receipt, and the physical image matched the valid suffix.
+The corrected script SHA above passed all four cases on fresh Stores; the
+initial trial is not counted as a green gate.
+
+The same Mac host passed the existing
+[`replay-poison.sh`](../../../scripts/overnight-tests/replay-poison.sh) on a
+fresh private native fixture: rollback to an earlier valid accepted image and
+a valid same-height different branch both closed the live session without
+accepting a later frame. Logs at
+`/tmp/minidregg-exact-session-poison-20260926/rollback.log` and
+`same-height-fork.log` have SHA-256 prefixes `2299a1c4` and `7c8e793e`.
+Bounded copies of both logs are archived here as `exact-session-rollback.log`
+and `exact-session-same-height-fork.log`.
+These physical gates complement the pure typed extension and the scripted
+receiver probe; they do not turn the public `ExactReadback` structure into an
+IO authentication primitive. Production constructs it only after the actual
+post-CAS full-byte read.
