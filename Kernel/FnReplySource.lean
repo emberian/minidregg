@@ -98,11 +98,19 @@ private def parseRaw (source : List UInt8) : Except String Extracted := do
   let some parentMessageId := Minidregg.Kernel.FnPortableSource.headerValue
       "In-Reply-To: " parentLine
     | throw "Q source lacks parent Message-ID"
+  let suffix := "@" ++ creation.messageIdDomain ++ ">"
   unless messageIdValid messageId && messageId.startsWith "<mini-e2-" &&
-      messageId.endsWith ("@" ++ creation.messageIdDomain ++ ">") &&
-      messageId.length == 9 + 66 + 1 + creation.messageIdDomain.length + 1 &&
-      ((messageId.toList.drop 9).take 66).all
-        (fun c => (hexDigit c).isSome) &&
+      messageId.endsWith suffix && messageId.length > 9 + suffix.length do
+    throw "Q source has invalid Message-ID fields"
+  let digestChars := (messageId.toList.drop 9).take
+    (messageId.length - 9 - suffix.length)
+  let some digestBytes := hexOctets digestChars
+    | throw "Q source has invalid Message-ID digest hexadecimal"
+  let some digest := Minidregg.Compiler.Tower256ConcreteBackend.digestStream.toLawful.decode digestBytes
+    | throw "Q source has invalid Message-ID digest encoding"
+  unless !digestBytes.isEmpty &&
+      Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode digest == digestBytes &&
+      messageId == "<mini-e2-" ++ String.ofList digestChars ++ suffix &&
       messageIdValid parentMessageId &&
       (version != 1 || parentMessageId.startsWith "<mini-e1-") do
     throw "Q source has invalid Message-ID fields"

@@ -88,8 +88,7 @@ private def dateSafe (value : String) : Bool :=
 
 def CreationContext.valid (value : CreationContext) : Bool :=
   mailbox value.fromMailbox && dottedName value.newsgroup &&
-  dottedName value.messageIdDomain &&
-  value.messageIdDomain.length ≤ 179 && dateSafe value.date
+  dottedName value.messageIdDomain && dateSafe value.date
 
 def creationContextStream : StreamCodec CreationContext :=
   StreamCodec.xmap
@@ -204,6 +203,8 @@ headers or article terminators. The prepared record retains this source and
 all operator-selected creation fields before any signature or post. -/
 def Selection.source (value : Selection) : Except String (List UInt8) := do
   unless value.valid do throw "reply publication selection is outside bounded profile"
+  unless value.messageId.length ≤ 256 do
+    throw "reply Message-ID exceeds article profile"
   let article := "From: " ++ value.creation.fromMailbox ++ "\r\n" ++
     "Date: " ++ value.creation.date ++ "\r\n" ++
     "Newsgroups: " ++ value.creation.newsgroup ++ "\r\n" ++
