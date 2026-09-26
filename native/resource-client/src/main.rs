@@ -7,6 +7,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 mod transport;
@@ -21,6 +22,7 @@ usage:
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
+  mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
@@ -315,6 +317,24 @@ fn create_dir(path: &Path) -> Result<()> {
     fs::create_dir(path).map_err(|error| format!("cannot create {}: {error}", path.display()))
 }
 
+/// The native host may write call.bin without syncing it. A successful
+/// external submit must never precede a durable exact call and its pathname.
+fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
+    File::open(call)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
+    let mut ancestor = Some(absolute(directory)?);
+    while let Some(path) = ancestor {
+        File::open(&path)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| {
+                format!("cannot sync attempt directory {}: {error}", path.display())
+            })?;
+        ancestor = path.parent().map(Path::to_path_buf);
+    }
+    Ok(())
+}
+
 fn copy_new(source: &Path, destination: &Path) -> Result<()> {
     let mut input =
         File::open(source).map_err(|error| format!("cannot open {}: {error}", source.display()))?;
@@ -409,6 +429,46 @@ fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, output: &Path) 
         fs::read(output).map_err(|error| format!("cannot read {}: {error}", output.display()))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid host JSON {}: {error}", output.display()))
+}
+
+fn inspect_fn_inbox(host: &Path, config: &Path, input: &Path, output: &Path) -> Result<()> {
+    if output.exists() {
+        return Err(format!("refusing to replace {}", output.display()));
+    }
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temporary = parent.join(format!(
+        ".mini-inspect-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("clock before Unix epoch: {error}"))?
+            .as_nanos()
+    ));
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder
+        .create(&temporary)
+        .map_err(|error| format!("cannot create private inspection directory: {error}"))?;
+    let result = (|| {
+        let temporary_output = temporary.join("result.json");
+        let summary = inspect(host, config, "fn-inbox-resource", input, &temporary_output)?;
+        if summary.get("type").and_then(Value::as_str) != Some("fn-inbox-resource-summary-v1") {
+            return Err("host returned an unexpected fn inbox summary type".to_owned());
+        }
+        let bytes = fs::read(&temporary_output)
+            .map_err(|error| format!("cannot read host inspection output: {error}"))?;
+        write_new(output, &bytes)?;
+        print_json(&summary)
+    })();
+    let _ = fs::remove_dir_all(&temporary);
+    result
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>> {
@@ -639,6 +699,7 @@ fn submit(
         &retained_config,
         &[Path::new("assemble"), &plan_bin, &signatures_bin, &call],
     )?;
+    sync_retained_call(directory, &call)?;
     if prepare_only {
         return Ok(());
     }
@@ -752,6 +813,7 @@ fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
     }
+    sync_retained_call(directory, &call)?;
     let (host, config, socket) = manifest_paths(directory)?;
     if !direct && SOCKET.get().is_none() {
         if let Some(socket) = socket {
@@ -1107,6 +1169,18 @@ fn run(mut args: Args) -> Result<()> {
             let output = path(args.required("output")?);
             args.finish()?;
             author(&host, &config, &kind, &input, &output)
+        }
+        "inspect" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let kind = args.required("kind")?;
+            let input = path(args.required("input")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            if kind != OsStr::new("fn-inbox-resource") {
+                return Err("public inspect kind must be fn-inbox-resource".to_owned());
+            }
+            inspect_fn_inbox(&host, &config, &input, &output)
         }
         "submit" => {
             let host = path(args.required("host")?);

@@ -10,7 +10,7 @@ needed to recover from an uncertain response.
 
 Start one local Lean host with a Unix socket in a directory owned by your
 account and inaccessible to other accounts. The service refuses an existing
-socket and a directory with group or world access:
+live owner and a directory with group or world access:
 
 ```sh
 mkdir -m 700 /private/path/mini-session
@@ -19,8 +19,11 @@ mini serve --host /absolute/path/minidregg-host \
   --socket /private/path/mini-session/host.sock
 ```
 
-After an abrupt service kill, verify that its process is gone before removing
-the stale `host.sock` and `host.config` files and restarting at the same path.
+The service holds an owner-private lock, preserves `host.config` across
+restarts, and recovers a stale socket only after proving it is an owned Unix
+socket with no listener. Restart with the same config bytes and socket path;
+config drift refuses. A live owner always refuses a second service. To change
+the operator config, stop the service and choose a new private socket path.
 
 In another shell, add `--socket /private/path/mini-session/host.sock` to
 `mini author`, `submit`, `query`, or `retry`. Evidence export, independent
@@ -38,7 +41,8 @@ fn ACK accepts only a canonical decimal Mini transaction ID, never paths.
 
 The transport covers profile, description, author, inspect, signatures,
 observation challenge/assembly, prepare, call assembly, submit, lookup, and
-query. `submit` retains `ATTEMPT/call.bin` before sending it. If a pipe or
+query. `submit` syncs the exact `ATTEMPT/call.bin` and its directory ancestry
+before sending it; retry does the same before reuse. If a pipe or
 socket closes during a request, the client reports **uncertain**; inspect the
 retained attempt and use `mini retry --attempt ATTEMPT --mode lookup` to
 recover the original receipt. A fresh service can use the same pinned config
@@ -104,7 +108,14 @@ accepted decision without a new intent; in that case no Mini submit is due.
 The A service also uses the `idle` and `skip-decision` empty-page statuses
 described above.
 
-## Portable native prefix evidence (P0)
+To render a retained signed resource query as a bounded fn inbox summary,
+run `mini inspect --host HOST --config CONFIG.json --socket SOCKET --kind
+fn-inbox-resource --input ATTEMPT/view.bin --output ATTEMPT/inbox.json`.
+This admits only the `fn-inbox-resource` kind, refuses to replace an existing
+output, and does not make a new query or mutation. Keep the signed query and
+raw `view.bin`; the JSON is a source-rendered presentation of those bytes.
+
+## Portable native prefix evidence
 
 `mini export-evidence --host HOST --config PINNED.json --call CALL.bin --output PACKAGE.bin`
 reads a previously accepted exact call from the local native history. The Lean
@@ -120,18 +131,21 @@ profile parameters, genesis identity and native signature helper. The package
 pin is only a claim to compare with that config. Lean calls
 `NativeHostReplay.verifyBytes` to re-admit the retained original signed ingress
 from the pinned genesis, compares the reconstructed original receipt, and
-requires exact historical lookup of the supplied call in that one-event prefix.
+requires exact historical lookup of the supplied call in that accepted prefix.
 Successful output identifies a verified historical Mini operation. It does not
 authorize a new local action, prove an external side effect, or replace fn's
 authorship and retention decisions.
 
-`DREGG/FN/NATIVE-PREFIX/v1` is the canonical binary codec in
-`Compiler/FnEvidenceCodec.lean`. P0 caps the complete package at 17,408 bytes,
-the signed call at 6,144 bytes, the retained prefix at 12,288 bytes, and the
-accepted count at exactly one. The CLI caps file reads before decoding; the
-codec repeats these checks before nested re-admission. Larger histories refuse
-until a separately designed bounded witness format exists. The package contains
-public authority history and must not be exported from a private live store.
+`DREGG/FN/NATIVE-PREFIX/v2` is the current canonical codec in
+`Compiler/FnEvidenceCodec.lean`. Its portable limits are 1,048,576 bytes for
+the complete package, 262,144 for the signed call, and 786,432 for the
+retained accepted prefix; the original receipt must have a positive accepted
+count within that prefix. The verifier also decodes historical v1 evidence
+under its original 17,408-byte package, 6,144-byte call, 12,288-byte prefix,
+and exactly one accepted event bounds. The host caps input before decoding,
+and the codec checks the decoded shape before native re-admission. The
+package contains public authority history and must not be exported from a
+private live store.
 
 ## Local E1 consumer experiment
 

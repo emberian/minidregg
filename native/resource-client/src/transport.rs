@@ -3,7 +3,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -97,6 +97,116 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     fn fcntl(fd: i32, command: i32, ...) -> i32;
+    fn flock(fd: i32, operation: i32) -> i32;
+}
+
+fn service_lock(path: &Path) -> Result<fs::File, String> {
+    let file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|error| format!("cannot open service lock {}: {error}", path.display()))?,
+        Err(error) => {
+            return Err(format!(
+                "cannot create service lock {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let named = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect service lock {}: {error}", path.display()))?;
+    let opened = file
+        .metadata()
+        .map_err(|error| format!("cannot inspect opened service lock: {error}"))?;
+    if !named.file_type().is_file()
+        || named.uid() != effective_uid()
+        || named.mode() & 0o077 != 0
+        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
+    {
+        return Err("service lock is not an owner-private regular file".to_owned());
+    }
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } < 0 {
+        return Err(format!(
+            "another service owns {}: {}",
+            path.display(),
+            io::Error::last_os_error()
+        ));
+    }
+    Ok(file)
+}
+
+fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file()
+                || metadata.uid() != effective_uid()
+                || metadata.mode() & 0o077 != 0
+            {
+                return Err("retained host config is not an owner-private regular file".to_owned());
+            }
+            if read_config(path)? != bytes {
+                return Err("retained host config differs from requested service config".to_owned());
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path)
+                .map_err(|error| {
+                    format!("cannot create pinned config {}: {error}", path.display())
+                })?;
+            file.write_all(bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|error| {
+                    format!("cannot write pinned config {}: {error}", path.display())
+                })?;
+            fs::File::open(path.parent().ok_or("pinned config has no parent")?)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| format!("cannot sync pinned config directory: {error}"))?;
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect pinned config {}: {error}",
+                path.display()
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn clear_stale_socket(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect socket {}: {error}", path.display())),
+    };
+    if !metadata.file_type().is_socket() || metadata.uid() != effective_uid() {
+        return Err("socket path is not an owned Unix socket".to_owned());
+    }
+    match UnixStream::connect(path) {
+        Ok(_) => Err("another service still listens on socket".to_owned()),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+            let current = fs::symlink_metadata(path)
+                .map_err(|error| format!("cannot recheck stale socket: {error}"))?;
+            if !current.file_type().is_socket()
+                || (current.dev(), current.ino()) != (metadata.dev(), metadata.ino())
+            {
+                return Err("socket path changed during stale recovery".to_owned());
+            }
+            fs::remove_file(path).map_err(|error| format!("cannot remove stale socket: {error}"))
+        }
+        Err(error) => Err(format!("cannot prove socket stale: {error}")),
+    }
 }
 
 fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
@@ -255,48 +365,29 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
             parent.display()
         ));
     }
-    if socket.exists() {
-        return Err(format!("refusing to replace socket {}", socket.display()));
-    }
+    let _service_lock = service_lock(&socket.with_extension("lock"))?;
+    clear_stale_socket(socket)?;
+    let pinned_config = socket.with_extension("config");
+    pin_config(&pinned_config, &config_bytes)?;
     let listener =
         UnixListener::bind(socket).map_err(|e| format!("cannot bind {}: {e}", socket.display()))?;
-    struct SocketGuard<'a>(&'a Path);
+    let socket_metadata = fs::symlink_metadata(socket)
+        .map_err(|e| format!("cannot inspect new socket {}: {e}", socket.display()))?;
+    struct SocketGuard<'a>(&'a Path, u64, u64);
     impl Drop for SocketGuard<'_> {
         fn drop(&mut self) {
-            let _ = fs::remove_file(self.0);
+            if let Ok(metadata) = fs::symlink_metadata(self.0) {
+                if metadata.file_type().is_socket()
+                    && (metadata.dev(), metadata.ino()) == (self.1, self.2)
+                {
+                    let _ = fs::remove_file(self.0);
+                }
+            }
         }
     }
-    let _guard = SocketGuard(socket);
+    let _guard = SocketGuard(socket, socket_metadata.dev(), socket_metadata.ino());
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
-    let pinned_config = socket.with_extension("config");
-    let mut config_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&pinned_config)
-        .map_err(|e| {
-            format!(
-                "cannot create pinned config {}: {e}",
-                pinned_config.display()
-            )
-        })?;
-    struct ConfigGuard<'a>(&'a Path);
-    impl Drop for ConfigGuard<'_> {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(self.0);
-        }
-    }
-    let _config_guard = ConfigGuard(&pinned_config);
-    config_file
-        .write_all(&config_bytes)
-        .and_then(|()| config_file.sync_all())
-        .map_err(|e| {
-            format!(
-                "cannot write pinned config {}: {e}",
-                pinned_config.display()
-            )
-        })?;
     let child = Command::new(host)
         .arg(&pinned_config)
         .arg("stdio")
@@ -514,5 +605,40 @@ mod tests {
         assert!(!allowed_operation(&[14, b'/']));
         assert!(allowed_operation(&[15, b'2']));
         assert!(!allowed_operation(&[15, b'0', b'2']));
+    }
+
+    #[test]
+    fn service_restart_reuses_exact_pin_and_only_recovers_a_stale_socket() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-restart-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let lock_path = directory.join("host.lock");
+        let first_lock = service_lock(&lock_path).unwrap();
+        assert!(service_lock(&lock_path).is_err());
+        drop(first_lock);
+        let second_lock = service_lock(&lock_path).unwrap();
+        let config = directory.join("host.config");
+        pin_config(&config, b"fixed\n").unwrap();
+        pin_config(&config, b"fixed\n").unwrap();
+        assert!(pin_config(&config, b"drift\n").is_err());
+        assert_eq!(fs::read(&config).unwrap(), b"fixed\n");
+
+        let socket = directory.join("host.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        assert!(clear_stale_socket(&socket).is_err());
+        drop(listener);
+        clear_stale_socket(&socket).unwrap();
+        assert!(!socket.exists());
+        drop(second_lock);
+        fs::remove_file(config).unwrap();
+        fs::remove_file(lock_path).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 }
