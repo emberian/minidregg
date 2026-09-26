@@ -363,3 +363,23 @@ stops its drain wake, publishes R, and completes the normal B/A exchange.
 It does not poll until idle because fn ACK itself adds a Store event. The
 111-step native verdict and a separate red repeated-ACK probe are recorded in
 `docs/evidence/2026-09-26-fresh-fn/public-b-skip-bbf/README.md`.
+
+`setup-mini.sh` selects `OWNER_BUDGET=300000` by default. A larger observed
+fn event produces a larger Mini intent, so select any required higher budget
+**before** fresh bootstrap and birth, for example `OWNER_BUDGET=1000000` for
+the measured AgentGrain R follow-up. The setup puts that one operator-selected
+value in the profile, birth template and mutation grant; changing a deployed
+config after birth would not raise the accepted grant.
+
+`run-grain-r.sh` is a distinct private-copy adapter for a real Mini origin
+source. Its final two arguments are the strict rendered R source and an
+independently pinned Mini origin verifier config; it parses and pins the R
+Message-ID and source SHA, then derives the fn source-identity claim from
+native hybrid verification of the signed article. The adapter uses fn's
+existing protected signed v2 NNTP POST route, because `hybrid-author` control
+still has a 65,535-byte v1 source ceiling. The run-4 trial accepted a real
+191,283-byte AgentGrain R at fn A, peered and verified it at B, then stopped
+at Mini's current 196,608-byte fn poll-event reader bound for the observed
+391,022-byte Store report. See
+`docs/evidence/2026-09-26-fresh-fn/public-grain-r-bbf/README.md` for exact
+qualification and retained artifacts. It does not claim B Mini consumption.

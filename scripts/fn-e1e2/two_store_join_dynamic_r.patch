@@ -1,0 +1,203 @@
+--- two_store_join.py
++++ two_store_join.py
+@@ -44,8 +44,6 @@
+ 
+ ACCEPTED, REFUSED, UNCERTAIN, FAULT = "ACCEPTED", "REFUSED", "UNCERTAIN", "FAULT"
+ EXIT = {ACCEPTED: 0, REFUSED: 1, UNCERTAIN: 3, FAULT: 4}
+-R_ID = "<mini-e1-1bea29c16a63e8722f156770@example.invalid>"
+-R_SOURCE_SHA256 = "fca9c81e8cd02281b3703df4e931ae82c55a0bda63b3cf3447c8e32e13199000"
+ GROUP = "fn.test"
+ CONSUMER = "worker"  # Mini's bridge settles an ACK against consumer "worker".
+ CUTS = ("none", "a-accepted", "b-verdict", "ack-response", "reply-at-b")
+@@ -214,6 +212,13 @@
+             'tls_cert = "{}"\ntls_key = "{}"\n[control]\npath = "{}"\n'
+             '[auth]\nrequired = true\nprotected_only = true\npath = "{}"\n'.format(
+                 store, port, cert, root / (name + "-key.pem"), control, root / "auth.toml"))
++        # This isolated AgentGrain R is a 191 KiB authored source. The served
++        # v2 POST route needs room for its hybrid carrier. The developer
++        # Store's 65,535-group structural ceiling makes its article-record
++        # bound >17 MiB when A rises to 256 KiB; H remains the 24 MiB default.
++        self.native_ok("operator", config, "store", "upgrade-profile",
++                       "--max-article-octets", "262144",
++                       "--max-record-octets", "18874368")
+         self.native_ok("operator", config, "principal", "set-password", login, "--posting",
+                        stdin=(password + "\n" + password + "\n").encode())
+         listed = self.native_ok("operator", config, "principal", "list").stdout.decode()
+@@ -270,9 +275,10 @@
+         self.state = {"version": 1, "openssl_prefix": prefix, "cut": args.cut}
+         self.state.update(self.image_pair(args.image_dir, args.manifest))
+         r_source = Path(args.r_source).read_bytes()
+-        if hashlib.sha256(r_source).hexdigest() != R_SOURCE_SHA256 or \
+-                ("Message-ID: " + R_ID).encode() not in r_source:
+-            raise Outcome(REFUSED, "R source is not the retained Mini E1 report source")
++        if hashlib.sha256(r_source).hexdigest() != args.r_source_sha256 or \
++                ("Message-ID: " + args.r_message_id).encode() not in r_source:
++            raise Outcome(REFUSED, "R source differs from the pinned rendered Mini origin")
++        self.state["r_message_id"] = args.r_message_id
+         port_a, port_b = self.free_ports(2)
+         a = self.initialize("a", port_a, "b-at-a")
+         b = self.initialize("b", port_b, "a-at-b")
+@@ -449,6 +455,45 @@
+                         if row == b".\r\n":
+                             return status, bytes(body)
+                         body.extend(row[1:] if row.startswith(b"..") else row)
++
++    def nntp_post_carrier(self, node, carrier):
++        """Protected served POST of the exact signed v2 carrier."""
++        password = Path(node["password_file"]).read_text().strip()
++        with socket.create_connection(("127.0.0.1", node["port"]), timeout=15) as raw:
++            def line():
++                data = bytearray()
++                while not data.endswith(b"\n"):
++                    chunk = raw.recv(1)
++                    if not chunk:
++                        break
++                    data.extend(chunk)
++                return bytes(data)
++            if not line().startswith((b"200 ", b"201 ")):
++                raise Outcome(UNCERTAIN, "no NNTP greeting from " + node["name"])
++            raw.sendall(b"STARTTLS\r\n")
++            if not line().startswith(b"382 "):
++                raise Outcome(REFUSED, node["name"] + " refused STARTTLS")
++            context = ssl.create_default_context(cafile=node["certificate"])
++            with context.wrap_socket(raw, server_hostname="localhost") as tls:
++                with tls.makefile("rwb", buffering=0) as stream:
++                    stream.write(b"AUTHINFO USER " + node["login"].encode() + b"\r\n")
++                    if not stream.readline().startswith(b"381 "):
++                        raise Outcome(REFUSED, node["name"] + " refused AUTHINFO USER")
++                    stream.write(b"AUTHINFO PASS " + password.encode() + b"\r\n")
++                    if not stream.readline().startswith(b"281 "):
++                        raise Outcome(REFUSED, node["name"] + " refused AUTHINFO PASS")
++                    stream.write(b"POST\r\n")
++                    if not stream.readline().startswith(b"340 "):
++                        raise Outcome(REFUSED, node["name"] + " refused POST setup")
++                    if not carrier.endswith(b"\r\n"):
++                        carrier += b"\r\n"
++                    stream.write(b"".join(
++                        (b"." + row if row.startswith(b".") else row)
++                        for row in carrier.splitlines(keepends=True)) + b".\r\n")
++                    status = stream.readline()
++                    if not status:
++                        raise Outcome(UNCERTAIN, "EOF after signed POST")
++                    return status
+ 
+     def article(self, node, message_id):
+         status, body = self.nntp(node, b"ARTICLE " + message_id.encode())
+@@ -505,7 +550,7 @@
+ 
+     def message_id(self, token):
+         if token == "R":
+-            return R_ID
++            return self.state["r_message_id"]
+         if token == "Q":
+             return self.state["q_message_id"]
+         return token
+@@ -535,19 +580,20 @@
+ 
+     def cmd_author_r(self, args):
+         a, r = self.node("a"), self.state["r"]
+-        signed = self.native_ok("hybrid-sign", r["principal"], r["ed_public"], r["ed_secret"],
+-                                r["ml_public"], r["ml_private"], self.state["r_source"])
+-        values = dict(line.split() for line in signed.stdout.decode().splitlines())
+         root = Path(a["root"])
+-        (root / "r-ed.sig").write_bytes(bytes.fromhex(values["ed25519"]))
+-        (root / "r-ml.sig").write_bytes(bytes.fromhex(values["ml-dsa-65"]))
+-        answer = self.native("hybrid-author", a["control"], 1, self.state["r_source"],
+-                             root / "r-ed.sig", root / "r-ml.sig", r["ml_public"])
+-        if answer.returncode == 3:
+-            raise Outcome(UNCERTAIN, "A hybrid-author answered uncertain (exit 3)")
+-        if answer.returncode != 0:
+-            raise Outcome(REFUSED, "A hybrid-author exit {}".format(answer.returncode))
+-        return {"hybrid_author_stdout": answer.stdout.decode("utf-8", "replace").strip()}
++        carrier = root / "r-signed-carrier.eml"
++        self.native_ok("hybrid-sign-carrier", r["principal"], r["ed_public"],
++                       r["ed_secret"], r["ml_public"], r["ml_private"],
++                       self.state["r_source"], carrier)
++        received = carrier.read_bytes()
++        if not received.endswith(Path(self.state["r_source"]).read_bytes()):
++            raise Outcome(REFUSED, "signed carrier changed the Mini origin source")
++        status = self.nntp_post_carrier(a, received)
++        if not status.startswith(b"240 "):
++            raise Outcome(REFUSED, "A signed POST refused: " +
++                          status.decode("utf-8", "replace").strip())
++        return {"signed_post_status": status.decode("ascii", "replace").strip(),
++                "carrier_sha256": sha(carrier), "carrier_bytes": len(received)}
+ 
+     def cmd_verify(self, args):
+         node = self.node(args.node)
+@@ -708,6 +754,8 @@
+     p.add_argument("--manifest")
+     p.add_argument("--openssl-prefix", required=True)
+     p.add_argument("--r-source", required=True)
++    p.add_argument("--r-message-id", required=True)
++    p.add_argument("--r-source-sha256", required=True)
+     p.add_argument("--cut", default="none")
+     p = sub.add_parser("start")
+     p.add_argument("node", choices=("a", "b"))
+@@ -957,7 +1005,7 @@
+         config["fnReplyPoll"] = {
+             "originConfigPath": str(Path(self.args.origin_pin).resolve()),
+             "rPinPath": str(L / "r-fn-pin.json"),
+-            "rClaimPath": str(Path(self.args.r_claim).resolve()),
++            "rClaimPath": str((L / "r-claim.json").resolve()),
+             "rCarrierPath": str(L / "r-at-a.eml"),
+             "qPinPath": str(L / "q-fn-pin.json"),
+             "scopePath": str(L / "a-scope-pin.json"),
+@@ -1055,7 +1103,9 @@
+ 
+         self.fn("provision", "provision", "--image-dir", a.image_dir,
+                 "--openssl-prefix", a.openssl_prefix, "--cut", cut,
+-                "--r-source", self.scratch + "/harness/" + Path(a.r_source).name)
++                "--r-source", self.scratch + "/harness/" + Path(a.r_source).name,
++                "--r-message-id", a.r_message_id,
++                "--r-source-sha256", a.r_source_sha256)
+         # Cut a-accepted: A runs the developer image whose feed worker stops
+         # (SIGSTOP) after the durable :feed-sent record and before the
+         # article bytes reach B (FN_NATIVE_FEED_TEST_STOP_AFTER_SENT).
+@@ -1103,10 +1153,15 @@
+                               (b_root + "/b-preview.fncu", "b-preview.fncu"),
+                               (b_root + "/b-preview.fn-e", "b-preview.fn-e")):
+             self.scp_from("fetch-" + local, remote, self.out / local)
+-        if sha(self.out / "r.source") != R_SOURCE_SHA256:
++        if sha(self.out / "r.source") != a.r_source_sha256:
+             raise Stop("fetched R source digest changed")
+         r_verified = self.bridge_verify("mini-verify-r-at-b", self.out / "r-at-b.eml",
+                                         r_keys["ml_public"])
++        if bytes.fromhex(r_verified[5]) != (self.out / "r.source").read_bytes():
++            raise Stop("native verifier source differs from the rendered Mini origin")
++        (self.out / "r-claim.json").write_text(json.dumps({
++            "sourceIdentity": r_verified[2], "messageId": a.r_message_id,
++            "groups": GROUP}, sort_keys=True) + "\n")
+         r_pin = self.pin(self.bridge, r_keys)
+         (self.out / "r-fn-pin.json").write_text(json.dumps(r_pin, sort_keys=True) + "\n")
+         fields = self.project("mini-project-b-preview", self.out / "b-preview.fncu",
+@@ -1136,7 +1191,7 @@
+                       check=session_decision)
+         else:
+             self.mini("mini-b-poll-decide", [self.mini_bin, mini_b, "consumer-poll-decide",
+-                      a.origin_pin, L / "r-fn-pin.json", L / "b-scope-pin.json", a.r_claim,
++                      a.origin_pin, L / "r-fn-pin.json", L / "b-scope-pin.json", L / "r-claim.json",
+                       a.mini_b_policy or a.policy, ready["b_control"], L / "b-live.fncu",
+                       L / "b-live.fn-e", L / "b-live.eml", L / "intent.bin",
+                       L / "decision.json"], check=fresh_decision)
+@@ -1292,7 +1347,7 @@
+                       "--dir", L / "a-poll-session"], check=a_session_decision)
+         else:
+             self.mini("mini-a-reply-decide", [self.mini_bin, mini_a, "reply-consumer-poll-decide",
+-                      a.origin_pin, L / "r-fn-pin.json", a.r_claim, L / "r-at-a.eml",
++                      a.origin_pin, L / "r-fn-pin.json", L / "r-claim.json", L / "r-at-a.eml",
+                       L / "q-fn-pin.json", L / "a-scope-pin.json", L / "q-claim.json",
+                       a.mini_a_policy or a.policy, ready["a_control"], L / "a-live.fncu",
+                       L / "a-live.fn-e", L / "a-live.eml", L / "a-intent.bin",
+@@ -1397,8 +1452,9 @@
+         for field in ("pinned-config", "genesis", "birth-intent", "custody-key", "policy"):
+             parser.add_argument("--mini-{}-{}".format(side, field))
+     here = Path(__file__).resolve().parent.parent.parent
+-    parser.add_argument("--r-claim", default=str(here / "tests/fixtures/dregg-e1/portable-p2/source-claim.json"))
+-    parser.add_argument("--r-source", default=str(here / "tests/fixtures/dregg-e1/source.eml"))
++    parser.add_argument("--r-source", required=True)
++    parser.add_argument("--r-message-id", required=True)
++    parser.add_argument("--r-source-sha256", required=True)
+     args = parser.parse_args(argv)
+     if args.public_b_session and args.cut != "none":
+         parser.error("public B session currently supports --cut none only")

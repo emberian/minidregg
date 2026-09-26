@@ -18,6 +18,7 @@ SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier
 FN_FIXTURES=${FN_FIXTURES:-"$REPO/../fn/tests/fixtures/dregg-e1"}
 GATEWAY_SUBJECT=${GATEWAY_SUBJECT:-7}
 ORDINARY_SUBJECT=${ORDINARY_SUBJECT:-8}
+OWNER_BUDGET=${OWNER_BUDGET:-300000}
 
 case "$GATEWAY_SUBJECT:$ORDINARY_SUBJECT" in
   *[!0-9:]*|:*|*:) echo "subjects must be decimal integers" >&2; exit 2 ;;
@@ -35,6 +36,9 @@ if [ "$GATEWAY_SUBJECT" = "$ORDINARY_SUBJECT" ]; then
   echo "gateway and ordinary subjects must differ" >&2
   exit 2
 fi
+case "$OWNER_BUDGET" in
+  *[!0-9]*|0|0*|'') echo "owner budget must be a positive canonical decimal" >&2; exit 2 ;;
+esac
 
 for file in "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY"; do
   if [ ! -x "$file" ]; then
@@ -69,7 +73,7 @@ fi
 cat >"$ROOT/operator.json" <<EOF
 {
   "domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
-  "authorityCatalogueId":12,"issuer":5,"ownerBudget":300000,"lifetime":10000,
+  "authorityCatalogueId":12,"issuer":5,"ownerBudget":$OWNER_BUDGET,"lifetime":10000,
   "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
   "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
   "genesisHeight":10,"expectedSeed":0,
@@ -121,7 +125,7 @@ cat >"$ROOT/birth-intent.json" <<EOF
   "subject":"$GATEWAY_SUBJECT","nonce":"22000",
   "birth":{
     "genesis":$(cat "$ROOT/genesis.json"),
-    "template":{"issuer":"5","ownerBudget":"300000","lifetime":"10000"},
+    "template":{"issuer":"5","ownerBudget":"$OWNER_BUDGET","lifetime":"10000"},
     "creator":"$GATEWAY_SUBJECT","nonce":"22000",
     "resources":[{"kind":"object","storage":"content","target":"600",
       "owner":"$GATEWAY_SUBJECT","ownerCapability":"61","controlCapability":"62",
@@ -190,7 +194,7 @@ cat >"$ROOT/delegate-intent.json" <<EOF
  "expectedPreRoot":"$AUTHORITY_ROOT",
  "child":{"id":"63","root":"61","parent":"61","issuer":"5",
    "holder":{"type":"subject","subject":"$ORDINARY_SUBJECT"},"targets":["600"],
-   "verbs":["observe","mutate"],"maxCost":"300000",
+   "verbs":["observe","mutate"],"maxCost":"$OWNER_BUDGET",
    "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
    "policyId":"600","policyEpoch":"0","ancestors":["61"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}

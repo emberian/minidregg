@@ -1,0 +1,98 @@
+{
+  "acceptedBeforeRefusal": 37,
+  "reached": "mini-b-poll-session",
+  "reachedOutcome": "REFUSED",
+  "steps": [
+    {
+      "detail": "provision",
+      "n": 7,
+      "outcome": "ACCEPTED",
+      "step": "provision"
+    },
+    {
+      "detail": "author-r",
+      "n": 13,
+      "outcome": "ACCEPTED",
+      "step": "r-accept-at-a"
+    },
+    {
+      "detail": "await",
+      "n": 14,
+      "outcome": "ACCEPTED",
+      "step": "r-durable-at-a"
+    },
+    {
+      "detail": "verdict",
+      "n": 15,
+      "outcome": "ACCEPTED",
+      "step": "a-verdict-r-control"
+    },
+    {
+      "detail": "await",
+      "n": 16,
+      "outcome": "ACCEPTED",
+      "step": "r-peered-to-b"
+    },
+    {
+      "detail": "verify",
+      "n": 17,
+      "outcome": "ACCEPTED",
+      "step": "r-verified-at-b"
+    },
+    {
+      "detail": "count",
+      "n": 18,
+      "outcome": "ACCEPTED",
+      "step": "r-exactly-once"
+    },
+    {
+      "detail": "await",
+      "n": 21,
+      "outcome": "ACCEPTED",
+      "step": "r-at-b-after-restart"
+    },
+    {
+      "detail": "same",
+      "n": 22,
+      "outcome": "ACCEPTED",
+      "step": "r-at-b-bytes-stable"
+    },
+    {
+      "detail": "verdict",
+      "n": 23,
+      "outcome": "ACCEPTED",
+      "step": "b-verdict-gen1"
+    },
+    {
+      "detail": "verdict",
+      "n": 26,
+      "outcome": "ACCEPTED",
+      "step": "b-verdict-gen2-and-poll"
+    },
+    {
+      "detail": "exit 0",
+      "n": 35,
+      "outcome": "ACCEPTED",
+      "step": "mini-verify-r-at-b"
+    },
+    {
+      "detail": "exit 0",
+      "n": 36,
+      "outcome": "ACCEPTED",
+      "step": "mini-project-b-preview"
+    },
+    {
+      "detail": "exit 1 (expected 0)",
+      "n": 38,
+      "outcome": "REFUSED",
+      "step": "mini-b-poll-session"
+    },
+    {
+      "detail": "exit 0",
+      "n": 39,
+      "outcome": "ACCEPTED",
+      "step": "cleanup-owners"
+    }
+  ],
+  "stopped": "STOPPED: mini-b-poll-session was REFUSED, not ACCEPTED"
+}
