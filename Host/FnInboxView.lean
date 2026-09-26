@@ -65,6 +65,35 @@ private def actionJson : Minidregg.Theory.DeclaredActionLowering.Action → Json
        ("expectedDestination", expectedDestination.map signed |>.getD Json.null),
        ("amount", signed amount)]
 
+private def textPayloadJson (kind : Minidregg.Theory.Hyperdocument.AtomKind)
+    (payload : List UInt8) : Json :=
+  let base := [("exactBytes", number payload.length),
+    ("trust", toJson "untrusted source text or bytes")]
+  match kind with
+  | .text =>
+      match String.fromUTF8? payload.toByteArray with
+      | some value => Json.mkObj <| base ++
+          [("encoding", toJson "utf8"), ("text", toJson value)]
+      | none => Json.mkObj <| base ++
+          [("encoding", toJson "hex"), ("bytes", hex payload)]
+  | .inlineObject schema => Json.mkObj <| base ++
+      [("encoding", toJson "hex"), ("schema", number schema.value),
+       ("bytes", hex payload)]
+
+private def contentActionJson (action : ContentResource.Action) : Json :=
+  match action with
+  | .createAtom atom kind payload => Json.mkObj
+      [("type", toJson "createAtom"), ("atom", number atom.digest.value),
+       ("payload", textPayloadJson kind payload)]
+  | .editAtom edit => Json.mkObj
+      [("type", toJson "editAtom"), ("atom", number edit.atomId.digest.value),
+       ("before", textPayloadJson edit.before.kind edit.before.payload),
+       ("replacement", textPayloadJson edit.kind edit.payload),
+       ("tombstone", toJson edit.tombstone)]
+  | other => Json.mkObj
+      [("type", toJson "otherContentAction"),
+       ("exactActionHex", hex (ContentResource.actionStream.encode other))]
+
 private def targetJson (target : DeclaredResourceController.Target) : Json :=
   let kind := match target.kind with
     | .object => "object" | .account => "account" | .program => "program"
@@ -73,7 +102,8 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
         [("type", toJson "scalar"),
          ("actions", .arr (actions.toArray.map actionJson))]
     | .content command => .mkObj
-        [("type", toJson "content"), ("actionCount", number command.actions.length)]
+        [("type", toJson "content"), ("actionCount", number command.actions.length),
+         ("actions", .arr (command.actions.toArray.map contentActionJson))]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]
 
