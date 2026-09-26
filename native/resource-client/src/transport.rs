@@ -17,8 +17,8 @@ const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 fn allowed_operation(request: &[u8]) -> bool {
     match request {
         [0..=11, ..] => true,
-        [12] => true,
-        [13, digits @ ..] => {
+        [12 | 14] => true,
+        [13 | 15, digits @ ..] => {
             !digits.is_empty()
                 && digits.len() <= 80
                 && digits.iter().all(u8::is_ascii_digit)
@@ -510,6 +510,9 @@ mod tests {
         assert!(!allowed_operation(&[13]));
         assert!(!allowed_operation(&[13, b'0', b'1']));
         assert!(!allowed_operation(&[13, b'1', b'/']));
-        assert!(!allowed_operation(&[14]));
+        assert!(allowed_operation(&[14]));
+        assert!(!allowed_operation(&[14, b'/']));
+        assert!(allowed_operation(&[15, b'2']));
+        assert!(!allowed_operation(&[15, b'0', b'2']));
     }
 }

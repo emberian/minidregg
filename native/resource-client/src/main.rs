@@ -30,6 +30,8 @@ usage:
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
+  mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -797,6 +799,61 @@ fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsStri
 }
 
 #[cfg(unix)]
+#[derive(Clone, Copy)]
+struct ConsumerRoute {
+    poll_command: &'static str,
+    ack_command: &'static str,
+    poll_opcode: u8,
+    ack_opcode: u8,
+    poll_type: &'static str,
+    ack_type: &'static str,
+    reply: bool,
+}
+
+#[cfg(unix)]
+const B_CONSUMER: ConsumerRoute = ConsumerRoute {
+    poll_command: "consumer-poll",
+    ack_command: "consumer-ack",
+    poll_opcode: 12,
+    ack_opcode: 13,
+    poll_type: "fn-consumer-poll-session-v1",
+    ack_type: "fn-consumer-ack-session-v1",
+    reply: false,
+};
+
+#[cfg(unix)]
+const A_REPLY_CONSUMER: ConsumerRoute = ConsumerRoute {
+    poll_command: "reply-consumer-poll",
+    ack_command: "reply-consumer-ack",
+    poll_opcode: 14,
+    ack_opcode: 15,
+    poll_type: "fn-a-reply-poll-session-v1",
+    ack_type: "fn-a-reply-ack-session-v1",
+    reply: true,
+};
+
+#[cfg(unix)]
+fn historical_without_intent(value: &Value, route: ConsumerRoute) -> bool {
+    if route.reply {
+        matches!(
+            value.pointer("/decision/decision").and_then(Value::as_str),
+            Some("repeated" | "conflict-recorded")
+        )
+    } else {
+        matches!(
+            value
+                .pointer("/decision/decision/type")
+                .and_then(Value::as_str),
+            Some(
+                "historical-repeat"
+                    | "historical-carrier-variation-evidence"
+                    | "historical-conflict-evidence"
+            )
+        )
+    }
+}
+
+#[cfg(unix)]
 fn private_consumer_attempt(
     host: &Path,
     config: &Path,
@@ -820,21 +877,22 @@ fn private_consumer_attempt(
 }
 
 #[cfg(unix)]
-fn consumer_poll(host: &Path, config: &Path, directory: &Path) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer-poll requires --socket")?;
-    let retained_config = private_consumer_attempt(host, config, directory, "consumer-poll")?;
-    let frame = transport::invoke(socket, &retained_config, 12, &[])?;
+fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRoute) -> Result<()> {
+    let socket = SOCKET.get().ok_or("consumer poll requires --socket")?;
+    let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
+    let frame = transport::invoke(socket, &retained_config, route.poll_opcode, &[])?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
-            "host refused consumer-poll; complete encoded reply retained in {}",
+            "host refused {}; complete encoded reply retained in {}",
+            route.poll_command,
             directory.join("reply.frame").display()
         ));
     }
     let value: Value = serde_json::from_slice(&frame[1..])
         .map_err(|e| format!("invalid fn consumer host JSON; complete reply retained: {e}"))?;
     write_new(&directory.join("decision.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-consumer-poll-session-v1") {
+    if value.get("type").and_then(Value::as_str) != Some(route.poll_type) {
         return Err("unexpected fn consumer host reply type; complete reply retained".to_owned());
     }
     let status = value
@@ -852,8 +910,14 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path) -> Result<()> {
         );
     }
     match status {
-        "accepted-decision" if !intent.is_empty() => {
-            write_new(&directory.join("intent.bin"), &intent)?;
+        "accepted-decision" => {
+            if intent.is_empty() {
+                if !historical_without_intent(&value, route) {
+                    return Err("fn consumer accepted without an intent or historical decision; complete reply retained".to_owned());
+                }
+            } else {
+                write_new(&directory.join("intent.bin"), &intent)?;
+            }
             print_json(&value)
         }
         "refused" if intent.is_empty() => {
@@ -865,8 +929,14 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn consumer_ack(host: &Path, config: &Path, transaction: &str, directory: &Path) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer-ack requires --socket")?;
+fn consumer_ack(
+    host: &Path,
+    config: &Path,
+    transaction: &str,
+    directory: &Path,
+    route: ConsumerRoute,
+) -> Result<()> {
+    let socket = SOCKET.get().ok_or("consumer ack requires --socket")?;
     let bytes = transaction.as_bytes();
     if bytes.is_empty()
         || bytes.len() > 80
@@ -875,20 +945,21 @@ fn consumer_ack(host: &Path, config: &Path, transaction: &str, directory: &Path)
     {
         return Err("--mini-transaction must be canonical decimal (1–80 bytes)".to_owned());
     }
-    let retained_config = private_consumer_attempt(host, config, directory, "consumer-ack")?;
+    let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
     write_new(&directory.join("transaction-id.txt"), bytes)?;
-    let frame = transport::invoke(socket, &retained_config, 13, bytes)?;
+    let frame = transport::invoke(socket, &retained_config, route.ack_opcode, bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
-            "host refused consumer-ack; complete encoded reply retained in {}",
+            "host refused {}; complete encoded reply retained in {}",
+            route.ack_command,
             directory.join("reply.frame").display()
         ));
     }
     let value: Value = serde_json::from_slice(&frame[1..])
         .map_err(|e| format!("invalid fn ack host JSON; complete reply retained: {e}"))?;
     write_new(&directory.join("ack.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-consumer-ack-session-v1")
+    if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
         || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
     {
         return Err("fn ack reply identity mismatch; complete reply retained".to_owned());
@@ -930,21 +1001,28 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             host_command(&host, &config, &command, &arguments)
         }
-        "consumer-poll" => {
+        "consumer-poll" | "reply-consumer-poll" => {
+            let reply = args.command == OsStr::new("reply-consumer-poll");
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let directory = path(args.required("dir")?);
             args.finish()?;
             #[cfg(unix)]
             {
-                consumer_poll(&host, &config, &directory)
+                consumer_poll(
+                    &host,
+                    &config,
+                    &directory,
+                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
+                )
             }
             #[cfg(not(unix))]
             {
                 Err("persistent host sessions require Unix sockets".to_owned())
             }
         }
-        "consumer-ack" => {
+        "consumer-ack" | "reply-consumer-ack" => {
+            let reply = args.command == OsStr::new("reply-consumer-ack");
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let transaction = args.required("mini-transaction")?;
@@ -955,7 +1033,13 @@ fn run(mut args: Args) -> Result<()> {
                 .ok_or("--mini-transaction must be UTF-8")?;
             #[cfg(unix)]
             {
-                consumer_ack(&host, &config, transaction, &directory)
+                consumer_ack(
+                    &host,
+                    &config,
+                    transaction,
+                    &directory,
+                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
+                )
             }
             #[cfg(not(unix))]
             {
@@ -1165,6 +1249,31 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         args.finish().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn historical_fn_decisions_need_no_new_mini_intent() {
+        assert!(historical_without_intent(
+            &json!({"decision": {"decision": {"type": "historical-repeat"}}}),
+            B_CONSUMER,
+        ));
+        assert!(historical_without_intent(
+            &json!({"decision": {"decision": {"type": "historical-carrier-variation-evidence"}}}),
+            B_CONSUMER,
+        ));
+        assert!(historical_without_intent(
+            &json!({"decision": {"decision": "repeated"}}),
+            A_REPLY_CONSUMER,
+        ));
+        assert!(!historical_without_intent(
+            &json!({"decision": {"decision": {"type": "proposed-fresh"}}}),
+            B_CONSUMER,
+        ));
+        assert!(!historical_without_intent(
+            &json!({"decision": {"decision": "proposed-fresh"}}),
+            A_REPLY_CONSUMER,
+        ));
     }
 
     #[test]

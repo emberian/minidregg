@@ -82,12 +82,20 @@ mini consumer-ack --host HOST --config FN-POLL-CONFIG.json \
 The operator config pins the fn control socket, origin, scope, and policy;
 the caller supplies no fn paths or policy. Each consumer attempt directory is
 private (`0700`). Poll retains `reply.frame` before decoding, `decision.json`,
-and a Lean-authored `intent.bin` only for an accepted decision. Polling does
+and a Lean-authored `intent.bin` when the decision proposes a Mini operation.
+An accepted historical repeat or recorded conflict has no new intent. Polling does
 not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
 publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
 only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
 repeat the same transaction ID in a new attempt directory and reconcile from
 the retained reply.
+
+The A reply consumer uses the same custody sequence with its own operator
+`fnReplyPoll` config and separate socket. Replace `consumer-poll` and
+`consumer-ack` above with `reply-consumer-poll` and `reply-consumer-ack`;
+submit A's returned `intent.bin` through that A socket. The A poll and ACK
+attempts retain the same filenames. A historical repeat can return an
+accepted decision without a new intent; in that case no Mini submit is due.
 
 ## Portable native prefix evidence (P0)
 
