@@ -4,6 +4,8 @@ mod control;
 mod mcp;
 mod provider;
 mod provider_profile;
+#[cfg(test)]
+mod publication_refusal_tests;
 mod resource_tools;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -2593,14 +2595,17 @@ impl Runtime {
             || self.journal.connection == Connection::Fenced
             || self.journal.child.is_none()
             || self.journal.pending.is_some()
-            || self.journal.tool_pending.is_some()
-            || self.journal.tool_hold.is_some()
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
             || !self.prompt_active
         {
             return Err("Hermes task is not running under this controller".into());
+        }
+        if self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some() {
+            return Err(
+                "delegated tool has an unresolved native attempt or held allowance; exact lookup and owner reconciliation are required before another tool call".into(),
+            );
         }
         let authority = self.tool()?;
         match name {
@@ -2736,17 +2741,42 @@ impl Runtime {
                             "definitively refused publication",
                             vec![],
                         );
-                        if release.is_ok() {
-                            let _ = self.transition_as(
-                                &authority,
-                                json!({"type":"disconnect"}),
-                                "tool disconnect",
-                                "refused publication cleanup",
-                                vec![],
-                            );
+                        match release {
+                            Ok(()) => {
+                                match self.transition_as(
+                                    &authority,
+                                    json!({"type":"disconnect"}),
+                                    "tool disconnect",
+                                    "refused publication cleanup",
+                                    vec![],
+                                ) {
+                                    Ok(()) => {
+                                        return Err(format!(
+                                            "{error}; signed zero-charge tool release and disconnect confirmed; if this prompt remains active, a fresh signed read may precede a new publication"
+                                        ));
+                                    }
+                                    Err(cleanup) => {
+                                        let disposition = if self.journal.tool_pending.is_some() {
+                                            "exact lookup or owner reconciliation is required before retry"
+                                        } else {
+                                            "inspect the current signed tool state before retry"
+                                        };
+                                        return Err(format!(
+                                            "{error}; zero-charge tool release confirmed, but disconnect cleanup did not confirm: {cleanup}; {disposition}"
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(cleanup) => {
+                                return Err(format!(
+                                    "{error}; zero-charge tool release unresolved or refused: {cleanup}; retained tool allowance requires exact lookup or owner reconciliation before retry"
+                                ));
+                            }
                         }
                     }
-                    return Err(error);
+                    return Err(format!(
+                        "{error}; delegated tool allowance remains unresolved; exact lookup or owner reconciliation is required before retry"
+                    ));
                 }
                 self.check_not_cancelled()?;
                 self.transition_as(

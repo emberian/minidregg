@@ -193,7 +193,17 @@ uses a separate signed tool task, reserves allowance, and atomically settles
 that task with allowlisted resource publications and a pinned parent-grain
 no-op witness. The parent witness is authored by Lean and checked in the same
 native transaction; a later generation cannot authorize the old prompt's
-publication. Before attach or soft-to-hard mode change, the controller
+publication.
+If Mini definitively refuses a publication, the controller submits a signed
+zero-charge settlement and disconnect for the delegated tool task. A confirmed
+cleanup clears the held allowance, so Hermes may make another allowlisted read
+and retry with a fresh root in the same prompt. An unresolved release or
+disconnect retains its exact pending attempt or held allowance and blocks
+further tools until exact lookup or owner reconciliation. The MCP error reports
+which cleanup transition confirmed; it never treats a missing response as a
+negative native receipt.
+
+Before attach or soft-to-hard mode change, the controller
 compares the whole signed installed predicate with source-authored canonical
 managed-law bytes for the configured worker subjects and permitted prior
 generation. A custom or unrecognized law refuses automatic renewal. It then
