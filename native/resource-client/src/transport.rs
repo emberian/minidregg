@@ -1,4 +1,5 @@
 //! Bounded framing shared by the local socket and the Lean host's stdio service.
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
@@ -12,7 +13,74 @@ use std::time::{Duration, Instant};
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
 const MAX_CONFIG: usize = 65_536;
-const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
+const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG + 32;
+
+fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = fs::File::open(path)
+        .map_err(|e| format!("cannot open host image {}: {e}", path.display()))?;
+    let mut hash = Sha256::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut chunk)
+            .map_err(|e| format!("cannot hash host image {}: {e}", path.display()))?;
+        if count == 0 {
+            return Ok(hash.finalize().into());
+        }
+        hash.update(&chunk[..count]);
+    }
+}
+
+fn parse_host_sha256(value: &str) -> Result<[u8; 32], String> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("expected host SHA-256 must be 64 lowercase hex digits".to_owned());
+    }
+    let mut bytes = [0u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[2 * index..2 * index + 2], 16)
+            .map_err(|_| "invalid expected host SHA-256")?;
+    }
+    Ok(bytes)
+}
+
+fn request_from_envelope<'a>(
+    envelope: &'a [u8],
+    config: &[u8],
+    host_sha256: &[u8; 32],
+) -> Result<&'a [u8], &'static str> {
+    if envelope.len() < 5 || !matches!(envelope[0], 1 | 2) {
+        return Err("invalid socket envelope");
+    }
+    let config_length = u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize;
+    let config_end = config_length
+        .checked_add(5)
+        .ok_or("invalid socket envelope")?;
+    if config_length != config.len() || envelope.get(5..config_end) != Some(config) {
+        return Err("config pin mismatch");
+    }
+    let request_start = if envelope[0] == 2 {
+        let sha_end = config_end
+            .checked_add(32)
+            .ok_or("invalid socket envelope")?;
+        if envelope.get(config_end..sha_end) != Some(host_sha256.as_slice()) {
+            return Err("host image pin mismatch");
+        }
+        sha_end
+    } else {
+        config_end
+    };
+    let request = envelope
+        .get(request_start..)
+        .ok_or("invalid socket envelope")?;
+    if request.is_empty() {
+        return Err("invalid socket envelope");
+    }
+    Ok(request)
+}
 
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
@@ -322,6 +390,30 @@ pub fn invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
+    invoke_inner(socket, config, None, operation, payload)
+}
+
+/// An upgraded worker requires the executable image actually serving the
+/// socket to match its durable host pin. Version 2 is mandatory on this path:
+/// an older service rejects the envelope before it can forward the request.
+pub fn invoke_pinned(
+    socket: &Path,
+    config: &Path,
+    expected_host_sha256: &str,
+    operation: u8,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let expected = parse_host_sha256(expected_host_sha256)?;
+    invoke_inner(socket, config, Some(&expected), operation, payload)
+}
+
+fn invoke_inner(
+    socket: &Path,
+    config: &Path,
+    expected_host_sha256: Option<&[u8; 32]>,
+    operation: u8,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
     let config = read_config(config)?;
     if payload.len() >= HOST_MAX_FRAME {
         return Err("host request exceeds frame bound before transmission".to_owned());
@@ -331,10 +423,13 @@ pub fn invoke(
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
-    let mut frame = Vec::with_capacity(payload.len() + config.len() + 6);
-    frame.push(1); // local socket envelope version
+    let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
+    frame.push(if expected_host_sha256.is_some() { 2 } else { 1 });
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
     frame.extend_from_slice(&config);
+    if let Some(expected) = expected_host_sha256 {
+        frame.extend_from_slice(expected);
+    }
     frame.push(operation);
     frame.extend_from_slice(payload);
     write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
@@ -365,6 +460,7 @@ pub fn invoke(
 /// The socket directory must be owned by this account and inaccessible to
 /// others. This closes the interval between bind and chmod on the socket.
 pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
+    let host_sha256 = host_image_sha256(host)?;
     let config_bytes = read_config(config)?;
     let catalog_enabled = serde_json::from_slice::<serde_json::Value>(&config_bytes)
         .map_err(|e| format!("invalid operator config JSON: {e}"))?
@@ -447,23 +543,15 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
                 continue;
             }
         };
-        let config_length = if envelope.len() >= 5 && envelope[0] == 1 {
-            u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize
-        } else {
-            usize::MAX
+        let request = match request_from_envelope(&envelope, &config_bytes, &host_sha256) {
+            Ok(request) => request,
+            Err(reason) => {
+                let mut refusal = vec![254];
+                refusal.extend_from_slice(reason.as_bytes());
+                let _ = write_frame(&mut stream, &refusal);
+                continue;
+            }
         };
-        let end = config_length.checked_add(5);
-        if config_length != config_bytes.len()
-            || end.and_then(|end| envelope.get(5..end)) != Some(config_bytes.as_slice())
-            || end.is_none_or(|end| envelope.len() <= end)
-        {
-            let _ = write_frame(
-                &mut stream,
-                b"\xfeconfig pin mismatch or invalid socket envelope",
-            );
-            continue;
-        }
-        let request = &envelope[end.unwrap()..];
         if request.len() > HOST_MAX_FRAME {
             let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
             continue;
@@ -507,6 +595,80 @@ fn effective_uid() -> u32 {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn pinned_envelope_checks_config_and_host_before_exposing_request() {
+        let host = [7u8; 32];
+        let other_host = [8u8; 32];
+        let request = [13, b'4'];
+        let v2 = [
+            vec![2, 6, 0, 0, 0],
+            b"config".to_vec(),
+            host.to_vec(),
+            request.to_vec(),
+        ]
+        .concat();
+        assert_eq!(
+            request_from_envelope(&v2, b"config", &host),
+            Ok(request.as_slice())
+        );
+        assert_eq!(
+            request_from_envelope(&v2, b"changed", &host),
+            Err("config pin mismatch")
+        );
+        assert_eq!(
+            request_from_envelope(&v2, b"config", &other_host),
+            Err("host image pin mismatch")
+        );
+        assert_eq!(
+            request_from_envelope(&v2[..v2.len() - 2], b"config", &host),
+            Err("invalid socket envelope")
+        );
+        let v1 = [vec![1, 6, 0, 0, 0], b"config".to_vec(), request.to_vec()].concat();
+        assert_eq!(
+            request_from_envelope(&v1, b"config", &host),
+            Ok(request.as_slice())
+        );
+        assert_ne!(v2[0], 1); // A prior v1-only service refuses rather than forwarding v2.
+    }
+
+    #[test]
+    fn pinned_invocation_sends_v2_without_fallback() {
+        let directory = Path::new("/tmp").join(format!(
+            "mip-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let socket = directory.join("test.sock");
+        let config = directory.join("config.json");
+        fs::write(&config, b"config").unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let host = [7u8; 32];
+        let host_hex = "07".repeat(32);
+        let thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let envelope = read_frame(&mut stream).unwrap().unwrap();
+            assert_eq!(envelope[0], 2);
+            assert_eq!(
+                request_from_envelope(&envelope, b"config", &host),
+                Ok(&[13, b'4'][..])
+            );
+            write_frame(&mut stream, &[13, 1]).unwrap();
+        });
+        assert_eq!(
+            invoke_pinned(&socket, &config, &host_hex, 13, b"4").unwrap(),
+            vec![13, 1]
+        );
+        thread.join().unwrap();
+        assert!(invoke_pinned(&socket, &config, &"AB".repeat(32), 13, b"4").is_err());
+        fs::remove_file(socket).unwrap();
+        fs::remove_file(config).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
 
     struct SmallReader<'a> {
         bytes: &'a [u8],

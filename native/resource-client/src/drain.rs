@@ -870,6 +870,7 @@ pub(super) fn run_locked(
     max_pages: u32,
 ) -> Result<Stop> {
     pin(state_dir, host, config, socket, key)?;
+    pin_worker_host_image(state_dir)?;
     let pending = state_dir.join("pending");
     let mut pages = 0;
     loop {

@@ -21,7 +21,42 @@ mod transport;
 mod worker;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+#[cfg(unix)]
+static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+fn session_invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+    if let Some(sha) = EXPECTED_HOST_SHA.get() {
+        transport::invoke_pinned(socket, config, sha, operation, payload)
+    } else {
+        transport::invoke(socket, config, operation, payload)
+    }
+}
+
+#[cfg(unix)]
+fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
+    let pin: Value =
+        serde_json::from_slice(&fs::read(state_dir.join("pin.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    if pin.get("type").and_then(Value::as_str) == Some("minidregg-b-consumer-worker-pin-v2") {
+        let sha = pin
+            .get("hostSha256")
+            .and_then(Value::as_str)
+            .ok_or("v2 worker pin lacks host image digest")?
+            .to_owned();
+        if let Some(existing) = EXPECTED_HOST_SHA.get() {
+            if existing != &sha {
+                return Err("worker host image changed within process".into());
+            }
+        } else {
+            EXPECTED_HOST_SHA
+                .set(sha)
+                .map_err(|_| "cannot pin worker host image")?;
+        }
+    }
+    Ok(())
+}
 
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
@@ -296,7 +331,7 @@ fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<
             ))
         }
     };
-    let reply = transport::invoke(socket, config, operation, &payload)?;
+    let reply = session_invoke(socket, config, operation, &payload)?;
     if reply[0] == 255 {
         return Err(format!(
             "host refused {command}; encoded refusal: {}",
@@ -1048,7 +1083,7 @@ fn private_consumer_attempt(
 fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRoute) -> Result<()> {
     let socket = SOCKET.get().ok_or("consumer poll requires --socket")?;
     let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
-    let frame = transport::invoke(socket, &retained_config, route.poll_opcode, &[])?;
+    let frame = session_invoke(socket, &retained_config, route.poll_opcode, &[])?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
@@ -1191,7 +1226,7 @@ fn consumer_ack(
     }
     let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
     write_new(&directory.join("transaction-id.txt"), bytes)?;
-    let frame = transport::invoke(socket, &retained_config, route.ack_opcode, bytes)?;
+    let frame = session_invoke(socket, &retained_config, route.ack_opcode, bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
@@ -1278,7 +1313,7 @@ fn origin_outbox_prepare(
         private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
     create_private(&directory.join("carrier.bin"), &bytes)?;
     sync_directory_ancestors(directory)?;
-    let frame = transport::invoke(socket, &retained_config, 16, &bytes)?;
+    let frame = session_invoke(socket, &retained_config, 16, &bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused origin outbox preparation; complete frame retained".into());
@@ -1322,7 +1357,7 @@ fn origin_outbox_export(
         transaction.as_bytes(),
     )?;
     sync_directory_ancestors(directory)?;
-    let frame = transport::invoke(socket, &retained_config, 18, transaction.as_bytes())?;
+    let frame = session_invoke(socket, &retained_config, 18, transaction.as_bytes())?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused origin outbox export; complete frame retained".into());
@@ -1480,7 +1515,7 @@ fn continuity(
     payload.extend_from_slice(&(call_bytes.len() as u32).to_le_bytes());
     payload.extend_from_slice(&call_bytes);
     payload.extend_from_slice(&outcome_bytes);
-    let frame = transport::invoke(socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(socket, &retained_config, 17, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused provider continuity; complete frame retained".into());

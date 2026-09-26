@@ -274,6 +274,39 @@ incarnation changes. The worker pins the complete fn scope digest and refuses
 local config drift, but an unchanged GROUP tuple alone cannot prove a remote
 Store incarnation; the next typed Mini poll performs the source-owned check.
 
+For an already confirmed call stranded in the worker's `Sending` phase,
+`consumer-host-upgrade` changes the executable pin explicitly:
+
+```sh
+mini consumer-host-upgrade \
+  --old-host OLD-HOST --old-sha256 OLD-SHA256 \
+  --new-host NEW-HOST --new-sha256 NEW-SHA256 \
+  --config FN-POLL-CONFIG.json --socket SOCKET --key CONSUMER.key \
+  --state-dir PRIVATE-WORKER-STATE \
+  --known-outcome CONFIRMED.bin --known-sha256 OUTCOME-SHA256
+```
+
+Stop the service and worker first. The command takes their locks, checks the
+existing pin and exact retained call/config snapshot, and asks the new Host
+for a read-only lookup. All four receipt fields must match the retained
+confirmed outcome. It saves the previous pin and migration evidence before
+atomically replacing the pin; it neither submits the call nor ACKs fn.
+Restart the service with the explicit new Host path and run the worker with
+that same path. Its own lookup must match the migration receipt before ACK;
+absence or disagreement retains the pending attempt for review. The old
+attempt manifest and signed call remain unchanged. This command is scoped
+to confirmed pending calls, not general deployment or config migration.
+
+New and upgraded worker pins also record the Host executable digest and the
+referenced fn manifest digests. Their socket requests use envelope v2: the
+service checks the expected executable digest and exact config before
+forwarding a request, including lookup and ACK. Use the matching new `mini
+serve`; an older service refuses v2, and the worker does not fall back to v1.
+Existing v1 worker pins retain their original behavior. The service hashes
+its configured executable before spawning it, relying on the owner keeping
+that path stable through launch. This is a local deployment check, not remote
+attestation against a malicious service owner.
+
 To render a retained signed resource query as a bounded fn inbox summary,
 run `mini query --host HOST --config CONFIG.json --socket SOCKET --intent
 INTENT.json --key KEY --view resource --presentation fn-inbox-resource --dir
