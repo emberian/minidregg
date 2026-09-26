@@ -115,6 +115,15 @@ a definitively unreserved, unsent attempt. External effects require separate
 `reconcile effects` acknowledgement. These are configured allowance units,
 not a measured provider invoice.
 
+For a scoped worker, optional command `wallTimeSeconds` is a fixed integer
+from 1 to 1800; omission retains the launcher's 600-second cap. A hosted
+provider's `hermes-acp` command requires at least 120 seconds. The generated
+Hermes profile sets its per-MCP-call timeout to 60 seconds less than that
+worker cap (540 seconds by default). A timed-out MCP call can still commit in
+Mini; the controller retains its exact attempt and requires signed recovery,
+without resending it. A longer deadline does not turn configured charges into
+measured usage.
+
 `hermes PROMPT` speaks ACP JSON-RPC to the actual upstream `hermes-acp`
 process and registers the keyless `mini-grain` MCP proxy. Its
 session ID is retained in the controller journal. Later prompts start a new

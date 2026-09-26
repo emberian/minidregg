@@ -118,6 +118,9 @@ struct AllowedCommand {
     args: Vec<String>,
     #[serde(default)]
     systemd_scope: bool,
+    /// Fixed scoped worker lifetime; omitted retains the launcher's 600s cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wall_time_seconds: Option<u64>,
     /// Maximum amount to reserve, in AgentGrain permission micro-units.
     reserve: String,
     /// Amount reported after the command. This is an operator configured
@@ -544,6 +547,12 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("systemdScope requires the grain-host bwrap launcher".into());
         }
+        if command
+            .wall_time_seconds
+            .is_some_and(|seconds| !command.systemd_scope || !(1..=1800).contains(&seconds))
+        {
+            return Err("wallTimeSeconds requires a scoped worker and 1..1800 seconds".into());
+        }
         decimal(&command.reserve, "reserve")?;
         decimal(&command.charge, "charge")?;
         if command
@@ -674,6 +683,7 @@ fn validate(c: &Config) -> Result<()> {
             .find(|command| command.name == "hermes-acp")
             .is_some_and(|command| {
                 command.systemd_scope
+                    && command.wall_time_seconds.unwrap_or(600) >= 120
                     && command
                         .args
                         .windows(2)
@@ -786,7 +796,13 @@ impl Runtime {
         }
         Ok(())
     }
-    fn worker_env(&self, command: &mut Command, unit: &Option<String>, broker: Option<&Path>) {
+    fn worker_env(
+        &self,
+        command: &mut Command,
+        spec: &AllowedCommand,
+        unit: &Option<String>,
+        broker: Option<&Path>,
+    ) {
         if let Some(unit) = unit {
             command
                 .env("MINI_GRAIN_UNIT", unit)
@@ -798,6 +814,9 @@ impl Runtime {
                 .env("MINI_GRAIN_CUSTODY_KEY", &self.config.custody_key)
                 .env("MINI_GRAIN_TASK_CONFIG", &self.config_path)
                 .env("MINI_GRAIN_HOST_CONFIG", &self.config.host_config);
+            if let Some(seconds) = spec.wall_time_seconds {
+                command.env("MINI_GRAIN_RUNTIME_MAX_SEC", seconds.to_string());
+            }
             if let Some(tool) = &self.config.tool_task {
                 command.env("MINI_GRAIN_TOOL_CUSTODY_KEY", &tool.custody_key);
             }
@@ -2391,7 +2410,7 @@ impl Runtime {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        self.worker_env(&mut command, &unit, None);
+        self.worker_env(&mut command, &spec, &unit, None);
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() < 0 {
@@ -2684,6 +2703,7 @@ impl Runtime {
                 &task.model,
                 endpoint.local_addr(),
                 &token,
+                spec.wall_time_seconds.unwrap_or(600) - 60,
             )?;
             *self
                 .provider_control
@@ -2773,7 +2793,7 @@ impl Runtime {
         if !spec.systemd_scope {
             command.env("HERMES_HOME", &hermes_home);
         }
-        self.worker_env(&mut command, &unit, Some(&broker_path));
+        self.worker_env(&mut command, &spec, &unit, Some(&broker_path));
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -4519,6 +4539,22 @@ mod tests {
             .unwrap()
             .get("systemdScope")
             .is_some());
+        let legacy: AllowedCommand = serde_json::from_value(json!({
+            "name":"hermes-acp","program":"/opt/mini/bwrap",
+            "args":["--","/agent/hermes-acp"],"systemdScope":true,
+            "reserve":"5","charge":"5"
+        }))
+        .unwrap();
+        assert!(serde_json::to_value(&legacy)
+            .unwrap()
+            .get("wallTimeSeconds")
+            .is_none());
+        let mut bounded = legacy;
+        bounded.wall_time_seconds = Some(1200);
+        assert_eq!(
+            serde_json::to_value(bounded).unwrap()["wallTimeSeconds"],
+            json!(1200)
+        );
     }
 
     #[test]

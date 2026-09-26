@@ -1,0 +1,12 @@
+host=persvati kernel=6.17.0-40-generic systemd=systemd 257 (257.9-0ubuntu2.5) launcher_sha256=295e09bc0469310f96bf78b1674ac9f04a646bebd6e85e7e6255bd7f689a0916 gate_sha256=e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554 probe_sha256=531ebb7f1374d38d224b5292ac87a7379b03b2ff61507629e5ff9c17b6493f56 socket_helper_sha256=05cb6e05c386629f766aba20ff868c2d7f7a79fa19b3a7e49f992c452b83d3c5
+PASS launcher requires sibling gate protocol v1
+PASS broker socket connect through exact bind
+PASS /usr host-config exposure refused before launch
+PASS workspace containing controller state refused before launch
+PASS provider custody and key file exposure refused before launch
+PASS invalid worker runtime max refused before launch
+PASS controller-selected 47-second worker lifetime installed in transient unit
+hard cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t99434-o1.service host_pids=99727,99728,99729,99730,
+PASS wrapper TERM stopped setsid unit (4 host pids, state=inactive)
+bound cgroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t99434-o2.service host_pids=99770,99771,99772,99773,
+PASS controller BindsTo stopped setsid unit (4 host pids, state=inactive)

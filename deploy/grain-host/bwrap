@@ -74,6 +74,15 @@ fi
   echo 'MINI_GRAIN_UNIT must identify one reserved Mini operation' >&2
   exit 64
 }
+runtime_max_sec=${MINI_GRAIN_RUNTIME_MAX_SEC:-600}
+[[ $runtime_max_sec =~ ^[1-9][0-9]*$ && ${#runtime_max_sec} -le 4 ]] || {
+  echo 'MINI_GRAIN_RUNTIME_MAX_SEC must be a decimal second count from 1 to 1800' >&2
+  exit 64
+}
+(( runtime_max_sec <= 1800 )) || {
+  echo 'MINI_GRAIN_RUNTIME_MAX_SEC exceeds 1800 seconds' >&2
+  exit 64
+}
 unit=${MINI_GRAIN_UNIT}.service
 controller_unit=${MINI_GRAIN_CONTROLLER_UNIT:-}
 if [[ -n $controller_unit ]]; then
@@ -126,7 +135,7 @@ stop_unit() {
 trap stop_unit TERM INT HUP
 
 unit_properties=(
-  --property=KillMode=control-group --property=RuntimeMaxSec=600s
+  --property=KillMode=control-group "--property=RuntimeMaxSec=${runtime_max_sec}s"
   --property=MemoryMax=2G --property=TasksMax=128
 )
 [[ -z $controller_unit ]] || unit_properties+=("--property=BindsTo=$controller_unit")

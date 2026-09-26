@@ -55,6 +55,7 @@ pub fn install_worker_profile(
     model: &str,
     gateway: SocketAddr,
     token: &str,
+    mcp_timeout_seconds: u64,
 ) -> Result<(), String> {
     if model.is_empty()
         || model.len() > 256
@@ -65,6 +66,7 @@ pub fn install_worker_profile(
         || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
         || !gateway.ip().is_loopback()
         || gateway.port() == 0
+        || !(1..=1740).contains(&mcp_timeout_seconds)
     {
         return Err("provider profile route, model, or token invalid".into());
     }
@@ -96,7 +98,7 @@ pub fn install_worker_profile(
         Err(error) => return Err(format!("Hermes config metadata: {error}")),
     }
     let text = format!(
-        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: 65536\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nagent:\n  max_iterations: 6\ntools:\n  tool_search:\n    enabled: false\n"
+        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: 65536\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\ntimeouts:\n  mcp:\n    tool_call: {mcp_timeout_seconds}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nagent:\n  max_iterations: 6\ntools:\n  tool_search:\n    enabled: false\n"
     );
     let tmp = home.join(".config.yaml.tmp");
     let mut file = OpenOptions::new()
@@ -130,17 +132,20 @@ mod tests {
             "test-model",
             "127.0.0.1:18761".parse().unwrap(),
             &token,
+            540,
         )
         .unwrap();
         let text = fs::read_to_string(home.join("config.yaml")).unwrap();
         assert!(text.contains("base_url: http://127.0.0.1:18761/v1"));
         assert!(text.contains(&format!("api_key: {token}")));
+        assert!(text.contains("tool_call: 540"));
         assert!(!text.contains("BYO_PROVIDER_KEY"));
         assert!(install_worker_profile(
             &home,
             "bad:yaml",
             "127.0.0.1:18761".parse().unwrap(),
-            &token
+            &token,
+            540
         )
         .is_err());
         fs::remove_dir_all(home).unwrap();
