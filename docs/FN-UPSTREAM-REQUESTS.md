@@ -15,6 +15,15 @@ requesting another cap-only patch or reporting the stale prose as current
 implementation. The integration needs the supported operator profile and
 matching qualified executable. The protected live node need not change.
 
+**Packet 002 image availability resolved, September 26:** read-only follow-up
+found qualified `bbf52159`, which includes `4979f0a35`; its immutable hbox image
+manifest passed 58/58 checks and its core hash matches the qualification.
+[The capture](evidence/2026-09-26-fresh-fn/fn-bbf52159-qualification.md) records
+exact production/developer paths and hashes. No new image build or deployment
+is needed merely to obtain the wider codec. Mini still needs a selected
+operator profile and end-to-end evidence before advertising larger Store
+poll inputs. The stale consumer-spec prose remains a documentation request.
+
 We are rebuilding fresh local fixture inputs in Mini and can use the qualified
 `1a9dd747` isolated pair for baseline checks. No change to the protected live node
 is needed for that. New fn behavior will use a source-matched qualified image;
