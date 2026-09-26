@@ -11,9 +11,6 @@ use std::time::{Duration, Instant};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
 pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
-// The historical accepted-outbox export is source-green but not yet linked
-// and probed in the deployed Host image. Keep the public route closed.
-pub(crate) const ORIGIN_EXPORT_READY: bool = false;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
@@ -33,8 +30,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             call_length > 0 && call_length < pair.len() - 4 && pair.len() - 4 - call_length <= 1024
         }
         [18, digits @ ..] => {
-            ORIGIN_EXPORT_READY
-                && catalog_enabled
+            catalog_enabled
                 && !digits.is_empty()
                 && digits.len() <= 80
                 && digits.iter().all(u8::is_ascii_digit)
@@ -628,7 +624,8 @@ mod tests {
         assert!(!allowed_operation(&[16, b'R'], false));
         assert!(!allowed_operation(&[16], true));
         assert!(allowed_operation(&[16, b'R'], true));
-        assert!(!allowed_operation(&[18, b'1'], true));
+        assert!(allowed_operation(&[18, b'1'], true));
+        assert!(!allowed_operation(&[18, b'1'], false));
         assert!(!allowed_operation(&[18, b'/'], true));
         assert!(allowed_operation(&[17, 1, 0, 0, 0, b'C', b'O'], false));
         assert!(!allowed_operation(&[17, 0, 0, 0, 0, b'O'], false));

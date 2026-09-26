@@ -1235,9 +1235,6 @@ fn origin_outbox_export(
     transaction: &str,
     directory: &Path,
 ) -> Result<()> {
-    if !transport::ORIGIN_EXPORT_READY {
-        return Err("origin outbox export is gated until a source-matched Host op18 is linked and probed; no request was sent".into());
-    }
     let socket = SOCKET
         .get()
         .ok_or("origin-outbox-export requires --socket")?;
@@ -1545,9 +1542,6 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             #[cfg(unix)]
             {
-                if !transport::ORIGIN_EXPORT_READY {
-                    return Err("origin-publish is gated until a source-matched Host op18 export is linked and probed; no Mini or fn request was sent".into());
-                }
                 let socket = SOCKET.get().ok_or("origin-publish requires --socket")?;
                 publisher::publish(
                     &host,
