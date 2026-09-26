@@ -1,0 +1,55 @@
+host=persvati task=7401 date=2026-09-26 scope=fresh-controller-SIGKILL-recover
+775a98c704e98b8a3065b2a93e9659aacf8f731f31d38b6360607e6bce64af19  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-bbf
+b0884d2bee8f2cf38e7f7fa8cd17ded48b85fd0bf9bb440fcc9b44250a36661f  /tmp/mini-grain-crash-20260926/bin/mini
+8126b3432c56b040219ef53436a740f123813ee3658888663aa0f0e3df78ff30  /tmp/mini-grain-crash-20260926/bin/grain-runtime
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/mini-grain-crash-20260926/bin/minidregg-link-sqlite-store
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/mini-grain-crash-20260926/bin/minidregg-credential-signature-verifier
+295e09bc0469310f96bf78b1674ac9f04a646bebd6e85e7e6255bd7f689a0916  /tmp/mini-grain-crash-20260926/deploy/grain-host/bwrap
+e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554  /tmp/mini-grain-crash-20260926/deploy/grain-host/launch-gate
+fd03ae3670e115962112d5d10eba0f41c3698ff5bdc97a53ddc67c4362c1756a  /tmp/mini-grain-crash-20260926/evidence-native/runtime-config.json
+ff7eccfd3704828c7b7cdb2b57ddd776f0ac962e000b807dd53068290d1854cb  /tmp/mini-grain-crash-20260926/setup.sh
+1e1049a7711e9b560e29dfd5399b77f08fe8c77eeb826420ea4745e2821c1b0f  /tmp/mini-grain-crash-20260926/kill.sh
+cf8f5dc3ba6c91d7be3d0f2b5af668a1e781b404a65e029ed55b57836e899ca2  /tmp/mini-grain-crash-20260926/recover.sh
+a77bad80c523a93cc10a9ae43da12647f61dd8437e60af371ba0ff570e9cfba5  /tmp/mini-grain-crash-20260926/native/grain-runtime/acceptance-original.sh
+46f3f2004f63667ed0fcda6a5adc4152a1c707e9498e8b416fa2d4e506ff2d3c  /tmp/mini-grain-crash-20260926/native/grain-runtime/acceptance.sh
+source hashes:
+28bb49e187964f1606433f6d51cec5154b4fe9e07cb68194d2981b16a73eaa27  /tmp/mini-grain-crash-20260926/runtime-frozen/src/main.rs
+03b4963831f44a77b9b4051dac98f86ef1dbe30a1cf2662d565b5bcc23a08ef4  /tmp/mini-grain-crash-20260926/runtime-frozen/src/mcp.rs
+before SIGKILL controller:
+MainPID=682574
+Id=mini-grain-controller@7401.service
+ActiveState=active
+before SIGKILL worker:
+MainPID=696615
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-grain-t7401-o6.service
+BindsTo=mini-grain-controller@7401.service
+ActiveState=active
+captured host cgroup PID count=3
+after SIGKILL controller:
+MainPID=0
+Id=mini-grain-controller@7401.service
+ActiveState=inactive
+after SIGKILL worker:
+MainPID=0
+Result=success
+ControlGroup=
+ActiveState=inactive
+captured_host_pids_all_absent_or_zombie=yes
+gate after controller death=started
+durable child after controller death:
+{"connection":"hard","child":{"operationId":6,"pid":696598,"program":"/tmp/mini-grain-crash-20260926/deploy/grain-host/bwrap","pgid":696598,"unit":"mini-grain-t7401-o6","launchGateProtocol":"mini-grain-launch-gate-v1"},"pending":null,"parentHold":{"reserve":"3","charge":"0","beforeGeneration":"1","beforeTargetRoot":"109924769428201104115889035228121293914177818590581378947746063220940889336654","reserveAttempt":"/tmp/mini-grain-crash-20260926/evidence-native/runtime-state/attempt-0000000000000005","reserveConfirmed":true,"reserveRefused":false,"reserveBoundary":"91027748670899373252071304179282008300818789752131397246142302239113044124297"}}
+after same-name controller restart and recover:
+MainPID=0
+ControlGroup=
+ActiveState=inactive
+gate=fenced
+{"connection":"detached","child":null,"pending":null,"parentHold":{"reserve":"3","charge":"0","beforeGeneration":"1","beforeTargetRoot":"109924769428201104115889035228121293914177818590581378947746063220940889336654","reserveAttempt":"/tmp/mini-grain-crash-20260926/evidence-native/runtime-state/attempt-0000000000000005","reserveConfirmed":true,"reserveRefused":false,"reserveBoundary":"91027748670899373252071304179282008300818789752131397246142302239113044124297"},"unresolvedExternal":["worker operation 6 stopped after controller restart; external effects need acknowledgement","controller restarted with a held allowance but no retained worker completion; effects require acknowledgement"],"recovery":[{"action":"recover-gated-worker","decisionId":"7","machineProven":true,"operationId":"6","stage":"physical-stop-verified","unit":"mini-grain-t7401-o6"}]}
+signed native after recover:
+{"generation":"2","remaining":"97","reserved":"3","status":"5","task":"7401"}
+signed native after audited zero-charge settlement:
+{"generation":"2","remaining":"100","reserved":"0","status":"0","task":"7401"}
+final journal custody summary:
+{"connection":"detached","child":null,"pending":null,"parentHold":null,"unresolvedExternal":[],"reconciliationLog":[{"action":"recover-gated-worker","authority":null,"stage":"physical-stop-verified","charge":null,"machineProven":true,"externalEffectsAcknowledged":null},{"action":"settle-held-allowance","authority":"parent","stage":"requested","charge":"0","machineProven":null,"externalEffectsAcknowledged":false},{"action":null,"authority":"parent","stage":"signed-settlement-confirmed","charge":"0","machineProven":null,"externalEffectsAcknowledged":null},{"action":"acknowledge-external-effects","authority":null,"stage":"acknowledged","charge":null,"machineProven":null,"externalEffectsAcknowledged":true}]}
+signed view hashes:
+54b849158d3617a0d1d3434f6c6093b746ced7c66ab6f46d43250a458d4d8343  /tmp/mini-grain-crash-20260926/probe/after-recover/view.json
+370a24167e65091c88de31f73f4e8ab4fe267c05b4d3ec937a28fd1b18f12bd5  /tmp/mini-grain-crash-20260926/probe/reconciled/view.json

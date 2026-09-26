@@ -1,0 +1,51 @@
+{
+  "grain": {
+    "before": {
+      "generation": "1",
+      "remaining": "50",
+      "reserved": "0",
+      "status": "1"
+    },
+    "capability": "101",
+    "context": {
+      "operationId": "18",
+      "payload": "gateway exact request reserve"
+    },
+    "expectedAuthorityRoot": "41596530925889604685111199909770205048033988969740828865544807236778145226166",
+    "expectedTargetRoot": "3687137569198262869667744521674178965518437106912092889164652157227542688385",
+    "observeCapability": "101",
+    "operation": {
+      "amount": "3",
+      "type": "reserve"
+    },
+    "parentWitness": {
+      "before": {
+        "generation": "1",
+        "remaining": "97",
+        "reserved": "3",
+        "status": "4"
+      },
+      "capability": "75",
+      "expectedTargetRoot": "74712555150466291852522930868907252279549663878553910281147963637622985729530",
+      "observeCapability": "75",
+      "task": "7201"
+    },
+    "publications": [],
+    "schemaVersion": "1",
+    "subject": "9",
+    "task": "7204"
+  },
+  "grants": [
+    {
+      "capability": "101",
+      "kind": "object",
+      "target": "7204"
+    },
+    {
+      "capability": "75",
+      "kind": "object",
+      "target": "7201"
+    }
+  ],
+  "intentNonce": "18"
+}

@@ -1,0 +1,47 @@
+{
+  "connection": "soft",
+  "child": null,
+  "pending": null,
+  "parentHold": null,
+  "toolHold": null,
+  "providerHold": null,
+  "toolPending": null,
+  "providerPending": null,
+  "providerAttempt": null,
+  "settlementDue": null,
+  "unresolvedExternal": [],
+  "hermesSession": {
+    "id": "1a41becd-9d93-454c-baa5-3f21e1e6f487",
+    "workspace": "/tmp/mini-hermes-gateway-codec/evidence-gateway-r1/worker-work",
+    "loadVerified": false,
+    "stateFingerprint": "state.db:270336:52794e7b40868521683a1a0ef4787005e23084bd575c7b6a6f9d179797299066|state.db-wal:absent",
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "providerReplays": [
+    {
+      "requestBytes": 36773,
+      "requestSha256": "e4d0dc1453fb8af7ad3ce6fde8cd68a48956bed0d2add53305215d0f6463896b",
+      "responseBytes": 571,
+      "responseSha256": "acad53ee3c81afdf061936cfdfca0c5da65a30e2b853cf6601306b9015750274",
+      "status": 200,
+      "contentType": "text/event-stream"
+    },
+    {
+      "requestBytes": 37898,
+      "requestSha256": "99036d588dda4a9b4f70cebc4c7eb9b2847a8f07a0ef900e345d0a58971b06e9",
+      "responseBytes": 863,
+      "responseSha256": "e74532a5bf5807a533f4b9ba940f25cb811cf8925bcbcff067b2e7727c2c51e9",
+      "status": 200,
+      "contentType": "text/event-stream"
+    },
+    {
+      "requestBytes": 39308,
+      "requestSha256": "5982a9c7b156c298d6a321109248b2134a16703043f61dbe26793b9f4f2cb52c",
+      "responseBytes": 514,
+      "responseSha256": "4ebfad198cf06d8251fcb4f858a23a2167a14af63b5870a9c37b49a1b7cf42a1",
+      "status": 200,
+      "contentType": "text/event-stream"
+    }
+  ]
+}

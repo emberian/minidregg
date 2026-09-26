@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-session/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-session/.lake/packages/batteries' has local changes
+PASS: NIST cSHAKE sample 3 and FIPS SHAKE256 empty vector checks completed

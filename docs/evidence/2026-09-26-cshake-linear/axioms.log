@@ -1,0 +1,6 @@
+warning: mathlib: repository '/private/tmp/minidregg-overnight-20260926-session/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-overnight-20260926-session/.lake/packages/batteries' has local changes
+'Minidregg.Compiler.Sp800185Cshake256.absorbPadded_eq_indexed' depends on axioms: [propext, Quot.sound]
+'Minidregg.Compiler.Sp800185Cshake256.cshake256Bytes_eq_indexed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
