@@ -27,6 +27,7 @@ socket, inaccessible through the forced-command connector:
 
 ```sh
 grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile parent audited'
+grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile provider audited'
 grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile effects'
 ```
 
@@ -78,6 +79,41 @@ bootstrapped native Mini deployment):
   ]
 }
 ```
+
+An optional `providerTask` gives a hosted Hermes prompt a separate Mini
+authority and a controller-held provider key. It requires a distinct subject,
+task, and custody key; the parent grain policy must name both the tool and
+provider subjects at the prompt generation. The selected `hermes-acp` command
+must be the scoped Linux `bwrap` launcher with fixed `--network host` and an
+upstream `hermes-acp` executable. For example, alongside the tool task above:
+
+```json
+"providerTask": {
+  "task":"7004", "subject":"9", "capability":"101",
+  "queryCapability":"101", "custodyKey":"/opt/mini/secrets/provider-task.key",
+  "parentCapability":"75", "parentObserveCapability":"75",
+  "reserve":"3", "charge":"1",
+  "model":"pinned-model", "upstreamUrl":"https://openrouter.ai/api/v1/chat/completions",
+  "providerKeyFile":"/var/lib/mini/grains/task-7001/provider.key",
+  "gatewayBind":"127.0.0.1:18762",
+  "maxRequestBytes":1048576, "maxResponseBytes":8388608,
+  "timeoutSeconds":30
+}
+```
+
+The real provider key stays in the private controller state directory. Each
+worker receives only a new prompt token and a generated local Hermes profile.
+Before forwarding one exact request, the controller retains its bytes, gets
+a signed provider-task reserve with a parent-generation witness, and checks
+the confirmed reserve's signed image boundary again at the durable send
+boundary. It retains the response or uncertainty before acknowledging the
+worker; an uncertain send is never retried automatically. Admin
+`reconcile provider audited` checks the retained request/response digests and
+signed held allowance, then settles the configured charge or refuses if it
+cannot identify the held reservation. `reconcile provider abort` clears only
+a definitively unreserved, unsent attempt. External effects require separate
+`reconcile effects` acknowledgement. These are configured allowance units,
+not a measured provider invoice.
 
 `hermes PROMPT` speaks ACP JSON-RPC to the actual upstream `hermes-acp`
 process and registers the keyless `mini-grain` MCP proxy. Its
@@ -161,7 +197,10 @@ is retained for lookup, and external effects remain a reconciliation matter.
 
 The `reserve` and `charge` values are operator-provided allowance units, not
 measured provider bills. `fn_read` is not advertised until a fixed-config
-NNTP path is wired and tested. Hosted provider custody, metering, and TLS
-evidence remain separate receiving work. The existing
+NNTP path is wired and tested. The provider-task controller path and local
+gateway have focused Rust tests; signed native provider reserve plus the
+plural-worker parent policy and a real Hermes prompt through that gateway
+still need end-to-end acceptance. The completed upstream Hermes publication
+used an earlier runtime without `providerTask`. The existing
 Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;
 this runtime does not reinterpret that synthetic acceptance as a hosted agent.

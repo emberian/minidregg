@@ -527,6 +527,14 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("command name must be alphanumeric or '-'".into());
         }
+        if c.commands
+            .iter()
+            .filter(|other| other.name == command.name)
+            .count()
+            != 1
+        {
+            return Err(format!("duplicate command name {}", command.name));
+        }
         if !command.program.is_absolute() || command.program == c.mini || command.program == c.host
         {
             return Err(format!("invalid executable for {}", command.name));
@@ -623,6 +631,10 @@ fn validate(c: &Config) -> Result<()> {
                 .is_some_and(|t| t.custody_key == p.custody_key)
             || !p.provider_key_file.is_absolute()
             || p.provider_key_file == p.custody_key
+            || p.provider_key_file == c.custody_key
+            || c.tool_task
+                .as_ref()
+                .is_some_and(|t| t.custody_key == p.provider_key_file)
         {
             return Err("providerTask needs distinct absolute key paths".into());
         }
@@ -656,13 +668,22 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("providerTask model or bounds invalid".into());
         }
-        if !c.commands.iter().any(|command| {
-            command.systemd_scope
-                && command.args.iter().any(|arg| arg == "--network")
-                && command.args.iter().any(|arg| arg == "host")
-        }) {
+        if !c
+            .commands
+            .iter()
+            .find(|command| command.name == "hermes-acp")
+            .is_some_and(|command| {
+                command.systemd_scope
+                    && command
+                        .args
+                        .windows(2)
+                        .any(|args| args[0] == "--network" && args[1] == "host")
+                    && command.args.iter().any(|arg| arg.ends_with("hermes-acp"))
+            })
+        {
             return Err(
-                "providerTask requires an explicit scoped host-network Hermes command".into(),
+                "providerTask requires the selected hermes-acp command to be scoped with --network host"
+                    .into(),
             );
         }
     }
