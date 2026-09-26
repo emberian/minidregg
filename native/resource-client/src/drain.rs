@@ -236,8 +236,146 @@ fn ack_newly_confirmed(
     state: &mut Value,
 ) -> Result<()> {
     let ack = attempt(pending, state, "ack")?;
-    consumer_ack(host, config, field(state, "txn")?, &ack, B_CONSUMER)?;
-    sync_directory_ancestors(&ack)
+    match consumer_ack(host, config, field(state, "txn")?, &ack, B_CONSUMER) {
+        Ok(()) => sync_directory_ancestors(&ack),
+        Err(_) => recover_acking(host, config, pending, state),
+    }
+}
+
+// A retained op13 frame is sufficient evidence even if the process died before
+// it wrote ack.json or archived the pending operation. Never infer an ACK from
+// an absent reply, and never conflate prefix coverage with an exact ACK.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AckEvidence {
+    Exact,
+    Covered,
+    Refused,
+    Uncertain,
+    TransportFault,
+}
+
+fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
+    let Some(name) = state.get("ack").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    if name.len() != 12
+        || !name.starts_with("ack-")
+        || !name[4..].bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err("durable ACK attempt name is invalid".into());
+    }
+    let directory = pending.join(name);
+    let frame_path = directory.join("reply.frame");
+    let json_path = directory.join("ack.json");
+    if !frame_path.exists() {
+        if json_path.exists() {
+            return Err("ACK JSON exists without its complete retained frame".into());
+        }
+        return Ok(None);
+    }
+    let frame = fs::read(&frame_path)
+        .map_err(|error| format!("cannot read retained ACK frame: {error}"))?;
+    if frame.first() != Some(&B_CONSUMER.ack_opcode) {
+        return Err("retained ACK frame is not a successful B ACK reply".into());
+    }
+    if json_path.exists()
+        && fs::read(&json_path)
+            .map_err(|error| format!("cannot read retained ACK JSON: {error}"))?
+            != frame[1..]
+    {
+        return Err("retained ACK JSON differs from the complete frame".into());
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|error| format!("retained ACK frame has invalid JSON: {error}"))?;
+    match value.get("fnAck").and_then(Value::as_str) {
+        Some("durable-accepted") => {
+            parse_ack_result(&value, B_CONSUMER, field(state, "txn")?)?;
+            Ok(Some(AckEvidence::Exact))
+        }
+        Some("covered-by-durable-frontier") => {
+            parse_ack_result(&value, B_CONSUMER, field(state, "txn")?)?;
+            Ok(Some(AckEvidence::Covered))
+        }
+        Some(status @ ("refused" | "uncertain" | "transport-fault")) => {
+            if value.get("type").and_then(Value::as_str) != Some(B_CONSUMER.ack_type)
+                || value.get("miniTransactionId").and_then(Value::as_str)
+                    != Some(field(state, "txn")?)
+            {
+                return Err("retained ACK reply identity mismatch".into());
+            }
+            Ok(Some(match status {
+                "refused" => AckEvidence::Refused,
+                "uncertain" => AckEvidence::Uncertain,
+                _ => AckEvidence::TransportFault,
+            }))
+        }
+        _ => Err("retained ACK reply lacks a supported outcome".into()),
+    }
+}
+
+fn recover_acking(host: &Path, config: &Path, pending: &Path, state: &mut Value) -> Result<()> {
+    match retained_ack(pending, state) {
+        Ok(Some(AckEvidence::Exact)) => return Ok(()),
+        Ok(Some(AckEvidence::Covered)) => return hold(
+            pending,
+            state,
+            "retained ACK proves only durable cursor-prefix coverage, not the exact old ACK event",
+        ),
+        Ok(Some(AckEvidence::Refused)) => {
+            return hold(
+                pending,
+                state,
+                "fn definitively refused the retained exact ACK; operator review required",
+            )
+        }
+        Ok(Some(AckEvidence::Uncertain | AckEvidence::TransportFault)) => {}
+        Err(error) => {
+            return hold(
+                pending,
+                state,
+                &format!("retained ACK reply requires operator review: {error}"),
+            )
+        }
+        Ok(None) => {}
+    }
+    // A fresh native equal-current skip repeat returned durable-accepted with
+    // unchanged ACK and journal frontiers. Retry only this retained transaction,
+    // and persist the retry marker before sending so a second restart cannot
+    // turn a lost reply into an unbounded stream of ACK attempts.
+    if state.get("ackRetryStarted").and_then(Value::as_bool) == Some(true) {
+        return hold(pending, state,
+            "one exact ACK retry was already started without a complete reply; operator review required");
+    }
+    set(state, "ackRetryStarted", json!(true));
+    save_state(pending, state)?;
+    let ack = attempt(pending, state, "ack")?;
+    match consumer_ack(host, config, field(state, "txn")?, &ack, B_CONSUMER) {
+        Ok(()) => {
+            sync_directory_ancestors(&ack)?;
+            Ok(())
+        }
+        Err(error) => {
+            let reason = match retained_ack(pending, state) {
+                Ok(Some(AckEvidence::Exact)) => {
+                    return hold(pending, state,
+                        "exact ACK reply exists but client reported an error; operator review required")
+                }
+                Ok(Some(AckEvidence::Covered)) =>
+                    "ACK retry proves only durable cursor-prefix coverage, not the exact old ACK event".to_owned(),
+                Ok(Some(AckEvidence::Refused)) =>
+                    "fn definitively refused the exact ACK retry; operator review required".to_owned(),
+                Ok(Some(AckEvidence::Uncertain)) =>
+                    "fn reported uncertain ACK retry; one retry exhausted".to_owned(),
+                Ok(Some(AckEvidence::TransportFault)) =>
+                    "fn reported ACK retry transport fault; one retry exhausted".to_owned(),
+                Ok(None) => format!("ACK retry reply missing; one retry exhausted: {error}"),
+                Err(inspect_error) => format!(
+                    "ACK retry reply cannot be validated: {inspect_error}; client error: {error}"
+                ),
+            };
+            hold(pending, state, &reason)
+        }
+    }
 }
 
 fn hold<T>(pending: &Path, state: &mut Value, reason: &str) -> Result<T> {
@@ -316,7 +454,11 @@ pub(super) fn run_locked(
                 let path = attempt(&pending, &mut state, "poll")?;
                 if let Err(error) = consumer_poll(host, config, &path, B_CONSUMER) {
                     if path.join("reply.frame").exists() {
-                        return hold(&pending, &mut state, &format!("poll reply retained but unusable: {error}"));
+                        return hold(
+                            &pending,
+                            &mut state,
+                            &format!("poll reply retained but unusable: {error}"),
+                        );
                     }
                     return Err(error);
                 }
@@ -326,11 +468,14 @@ pub(super) fn run_locked(
                     Err(error) => return hold(&pending, &mut state, &error),
                 };
                 if kind == "idle" {
-                    fs::remove_dir_all(&pending).map_err(|e| format!("cannot clean idle poll: {e}"))?;
+                    fs::remove_dir_all(&pending)
+                        .map_err(|e| format!("cannot clean idle poll: {e}"))?;
                     sync_directory_ancestors(state_dir)?;
                     return Ok(Stop::Idle);
                 }
-                if !path.join("intent.bin").is_file() { return Err("poll did not retain canonical intent".into()); }
+                if !path.join("intent.bin").is_file() {
+                    return Err("poll did not retain canonical intent".into());
+                }
                 sync_directory_ancestors(&path)?;
                 set(&mut state, "phase", json!("Preparing"));
                 set(&mut state, "kind", json!(kind));
@@ -340,7 +485,15 @@ pub(super) fn run_locked(
             "Preparing" => {
                 let poll = pending.join(field(&state, "poll")?);
                 let path = attempt(&pending, &mut state, "prepare")?;
-                submit(host, config, &poll.join("intent.bin"), OsStr::new("binary"), key, &path, true)?;
+                submit(
+                    host,
+                    config,
+                    &poll.join("intent.bin"),
+                    OsStr::new("binary"),
+                    key,
+                    &path,
+                    true,
+                )?;
                 sync_retained_call(&path, &path.join("call.bin"))?;
                 set(&mut state, "phase", json!("Ready"));
                 save_state(&pending, &state)?;
@@ -355,9 +508,18 @@ pub(super) fn run_locked(
                 let txn = match outcome.get("type").and_then(Value::as_str) {
                     Some("confirmed") => outcome_transaction(&outcome_path)?
                         .ok_or("confirmed submit lacks transaction ID")?,
-                    Some("refused") => return hold(&pending, &mut state,
-                        "Mini definitively refused the exact call; operator review required"),
-                    _ => return Err("submit did not confirm; exact call retained, lookup required".into()),
+                    Some("refused") => {
+                        return hold(
+                            &pending,
+                            &mut state,
+                            "Mini definitively refused the exact call; operator review required",
+                        )
+                    }
+                    _ => {
+                        return Err(
+                            "submit did not confirm; exact call retained, lookup required".into(),
+                        )
+                    }
                 };
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
@@ -365,8 +527,12 @@ pub(super) fn run_locked(
                 ack_newly_confirmed(host, config, &pending, &mut state)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication" { return Ok(Stop::Publication); }
-                if state.get("short").and_then(Value::as_bool) == Some(true) { return Ok(Stop::ShortPage); }
+                if field(&state, "kind")? == "publication" {
+                    return Ok(Stop::Publication);
+                }
+                if state.get("short").and_then(Value::as_bool) == Some(true) {
+                    return Ok(Stop::ShortPage);
+                }
             }
             "Sending" => {
                 let path = pending.join(field(&state, "prepare")?);
@@ -396,11 +562,30 @@ pub(super) fn run_locked(
                 ack_newly_confirmed(host, config, &pending, &mut state)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication" { return Ok(Stop::Publication); }
-                if state.get("short").and_then(Value::as_bool) == Some(true) { return Ok(Stop::ShortPage); }
+                if field(&state, "kind")? == "publication" {
+                    return Ok(Stop::Publication);
+                }
+                if state.get("short").and_then(Value::as_bool) == Some(true) {
+                    return Ok(Stop::ShortPage);
+                }
             }
-            "Acking" => return Err("ACK outcome may have been lost; retained transaction requires operator reconciliation".into()),
-            "Held" => return Err(format!("consumer worker held for operator review: {}", field(&state, "reason")?)),
+            "Acking" => {
+                recover_acking(host, config, &pending, &mut state)?;
+                finish(state_dir, &pending, &state)?;
+                pages += 1;
+                if field(&state, "kind")? == "publication" {
+                    return Ok(Stop::Publication);
+                }
+                if state.get("short").and_then(Value::as_bool) == Some(true) {
+                    return Ok(Stop::ShortPage);
+                }
+            }
+            "Held" => {
+                return Err(format!(
+                    "consumer worker held for operator review: {}",
+                    field(&state, "reason")?
+                ))
+            }
             other => return Err(format!("unknown durable consumer phase {other}")),
         }
     }
@@ -453,6 +638,72 @@ mod tests {
         assert_eq!(
             field(&read_json(&pending.join("state.json")).unwrap(), "phase").unwrap(),
             "Preparing"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retained_ack_distinguishes_exact_coverage_and_missing_reply() {
+        let root = env::temp_dir().join(format!(
+            "mini-ack-recovery-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let pending = root.join("pending");
+        private_dir(&pending).unwrap();
+        let mut state = json!({"phase":"Acking", "serial":0, "txn":"123"});
+        assert_eq!(retained_ack(&pending, &state).unwrap(), None);
+        let ack = attempt(&pending, &mut state, "ack").unwrap();
+        private_dir(&ack).unwrap();
+        assert_eq!(retained_ack(&pending, &state).unwrap(), None);
+
+        let exact = json!({"type":B_CONSUMER.ack_type,
+            "miniTransactionId":"123", "fnAck":"durable-accepted"});
+        let mut frame = vec![B_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&exact).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        assert_eq!(
+            retained_ack(&pending, &state).unwrap(),
+            Some(AckEvidence::Exact)
+        );
+
+        fs::remove_file(ack.join("reply.frame")).unwrap();
+        let covered = json!({"type":B_CONSUMER.ack_type,
+            "miniTransactionId":"123", "fnAck":"covered-by-durable-frontier",
+            "kind":"empty-page-skip", "fnCursorPosition":"16", "fnCommittedAck":"21"});
+        let mut frame = vec![B_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&covered).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        assert_eq!(
+            retained_ack(&pending, &state).unwrap(),
+            Some(AckEvidence::Covered)
+        );
+        create_private(&ack.join("ack.json"), b"different").unwrap();
+        assert!(retained_ack(&pending, &state).is_err());
+        fs::remove_file(ack.join("ack.json")).unwrap();
+        fs::remove_file(ack.join("reply.frame")).unwrap();
+        let uncertain = json!({"type":B_CONSUMER.ack_type,
+            "miniTransactionId":"123", "fnAck":"uncertain"});
+        let mut frame = vec![B_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&uncertain).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        assert_eq!(
+            retained_ack(&pending, &state).unwrap(),
+            Some(AckEvidence::Uncertain)
+        );
+        fs::remove_file(ack.join("reply.frame")).unwrap();
+        let refused = json!({"type":B_CONSUMER.ack_type,
+            "miniTransactionId":"123", "fnAck":"refused"});
+        let mut frame = vec![B_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&refused).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        assert_eq!(
+            retained_ack(&pending, &state).unwrap(),
+            Some(AckEvidence::Refused)
         );
         fs::remove_dir_all(root).unwrap();
     }

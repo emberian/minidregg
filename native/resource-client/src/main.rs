@@ -30,7 +30,7 @@ usage:
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
-  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability --dir ATTEMPT
+  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
@@ -736,18 +736,26 @@ fn submit(
     print_confirmed_outcome(&outcome)
 }
 
+fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
+    if !matches!(view, "resource" | "policy" | "capability") {
+        return Err("--view must be resource, policy, or capability".to_owned());
+    }
+    match presentation {
+        None => Ok(format!("view-{view}")),
+        Some("fn-inbox-resource") if view == "resource" => Ok("fn-inbox-resource".to_owned()),
+        _ => Err("--presentation fn-inbox-resource requires --view resource".to_owned()),
+    }
+}
+
 fn query(
     host: &Path,
     config: &Path,
     intent: &Path,
     intent_kind: &OsStr,
     key: &Path,
-    view: &str,
+    inspection_kind: &str,
     directory: &Path,
 ) -> Result<()> {
-    if !matches!(view, "resource" | "policy" | "capability") {
-        return Err("--view must be resource, policy, or capability".to_owned());
-    }
     create_dir(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
@@ -774,14 +782,21 @@ fn query(
         &retained_config,
         &[Path::new("query"), &observed.signed, &view_bin],
     )?;
-    let presentation = inspect(
+    let presented = inspect(
         host,
         &retained_config,
-        &format!("view-{view}"),
+        inspection_kind,
         &view_bin,
         &view_json,
     )?;
-    print_json(&presentation)
+    if inspection_kind == "fn-inbox-resource"
+        && presented.get("type").and_then(Value::as_str) != Some("fn-inbox-resource-summary-v1")
+    {
+        return Err(
+            "host returned an unexpected fn inbox summary type; signed view retained".to_owned(),
+        );
+    }
+    print_json(&presented)
 }
 
 fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
@@ -1427,18 +1442,24 @@ fn run(mut args: Args) -> Result<()> {
                 .unwrap_or_else(|| OsString::from("intent"));
             let key = path(args.required("key")?);
             let view = args.required("view")?;
+            let presentation = args.optional("presentation");
             let directory = path(args.required("dir")?);
             args.finish()?;
             let view = view
                 .to_str()
                 .ok_or_else(|| "--view must be UTF-8".to_owned())?;
+            let presentation = presentation
+                .as_deref()
+                .map(|value| value.to_str().ok_or("--presentation must be UTF-8"))
+                .transpose()?;
+            let inspection_kind = query_presentation_kind(view, presentation)?;
             query(
                 &host,
                 &config,
                 &intent,
                 &intent_kind,
                 &key,
-                view,
+                &inspection_kind,
                 &directory,
             )
         }
@@ -1625,6 +1646,20 @@ mod tests {
             AckResult::Exact
         );
         assert!(parse_ack_result(&value, B_CONSUMER, "124").is_err());
+    }
+
+    #[test]
+    fn query_typed_inbox_presentation_is_resource_only() {
+        assert_eq!(
+            query_presentation_kind("resource", Some("fn-inbox-resource")).unwrap(),
+            "fn-inbox-resource"
+        );
+        assert_eq!(
+            query_presentation_kind("policy", None).unwrap(),
+            "view-policy"
+        );
+        assert!(query_presentation_kind("policy", Some("fn-inbox-resource")).is_err());
+        assert!(query_presentation_kind("resource", Some("view-resource")).is_err());
     }
 
     #[test]

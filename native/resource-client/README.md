@@ -89,14 +89,14 @@ and a Lean-authored `intent.bin` when the decision proposes a Mini operation.
 An accepted historical repeat or recorded conflict has no new intent. Polling does
 not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
 publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
-only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
-retain the transaction ID and reply for operator reconciliation. An exact
-repeat of the current article cursor has passed native validation; an older
+only `fnAck: "durable-accepted"` reports success. An exact repeat of the
+current article or skip cursor has passed native validation without a new fn
+Store event. The worker can retry one uncertain ACK using the same retained
+Mini transaction ID; a second uncertainty holds for operator reconciliation. An older
 cursor can instead return `covered-by-durable-frontier`, which proves scoped
 cursor coverage but not the exact old ACK event. The worker does not retry an
-uncertain ACK automatically until the corresponding skip recovery path is
-qualified. Coverage is retained and reported distinctly from exact durable
-acceptance.
+old covered cursor. Coverage is retained and reported distinctly from exact
+durable acceptance.
 
 An empty fn page can return `status: "idle"` with no intent, or
 `status: "skip-decision"`. A fresh skip decision includes a Lean-authored
@@ -146,17 +146,17 @@ submit`. A restart in `Sending` runs exact `lookup` first. Confirmed lookup
 uses the original receipt; definitive absence permits one resubmission of the
 same retained bytes under Mini's replay and current-authority checks. An
 uncertain lookup or resubmission holds the call for reconciliation. Once Mini confirms, the worker
-persists its transaction ID before fn ACK. A lost ACK reply also holds for
-reconciliation. The operator must keep the same host, config bytes, socket,
+persists its transaction ID before fn ACK. A lost ACK reply is recovered from
+its complete retained frame when available, or triggers one exact transaction
+retry; further uncertainty holds for reconciliation. The operator must keep the same host, config bytes, socket,
 and signing key; a changed pin refuses. The worker archives successful
 attempts by Mini transaction ID and removes idle poll attempts.
 
 One wake stops after a publication, a short neutral page, an idle poll, or
 the `--max-pages` cap. The fn ACK itself appends a Store event, so repeatedly
 polling until idle would generate a new skip and ACK without external work.
-External wake scheduling and automatic uncertain ACK recovery are still open
-work; invoke this command only on a justified external wake or as an operator
-controlled step.
+`consumer-drain-once` remains an operator-controlled bounded wake; the
+`consumer-worker` command below provides the unattended GROUP scheduler.
 
 For unattended B consumption, `consumer-worker` uses a private operator wake
 config alongside the same Host config, key, socket, and state directory:
@@ -208,6 +208,11 @@ local config drift, but an unchanged GROUP tuple alone cannot prove a remote
 Store incarnation; the next typed Mini poll performs the source-owned check.
 
 To render a retained signed resource query as a bounded fn inbox summary,
+run `mini query --host HOST --config CONFIG.json --socket SOCKET --intent
+INTENT.json --key KEY --view resource --presentation fn-inbox-resource --dir
+ATTEMPT`. It retains the exact signed `view.bin` and writes the typed summary
+directly to `view.json`, without a raw `view-resource` presentation step. For
+an existing `view.bin`,
 run `mini inspect --host HOST --config CONFIG.json --socket SOCKET --kind
 fn-inbox-resource --input ATTEMPT/view.bin --output ATTEMPT/inbox.json`.
 This admits only the `fn-inbox-resource` kind, refuses to replace an existing
