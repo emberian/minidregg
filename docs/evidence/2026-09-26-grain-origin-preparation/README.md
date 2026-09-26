@@ -37,7 +37,11 @@ minidregg-host ORIGIN-CONFIG.json grain-origin-prepare REQUEST.json PACKAGE.bin 
 ```
 
 It exclusively creates `OUTPUT_DIR`, then retains `source.eml` and
-`scope.json` with exact readback before success. Existing output paths are
-refused. The request example reproduces this fixture's article context and
+`scope.json` with exact readback before success. The directory is set to
+`0700` before any full-prefix bytes are written, and both files are set to
+`0600`. Existing output paths are refused. The operator must control the
+parent directory and other processes running under the same UID; POSIX modes
+do not isolate those processes from each other. The request example reproduces
+this fixture's article context and
 selected signed targets; later R2 publications use the same command with
 their own independently verified package and operator-selected request.

@@ -2687,11 +2687,18 @@ def run (arguments : List String) : IO UInt32 := do
             let scopePath := directory / "scope.json"
             let source := prepared.rendered.source
             let scope := (GrainOriginCommand.scopeJson prepared).pretty
-            -- `mkdir` claims the final path exclusively. The operator retains
-            -- custody of its parent and any same-UID writers thereafter.
+            -- `mkdir` claims the final path exclusively. Make it private before
+            -- writing full-prefix bytes; the operator retains custody of the
+            -- parent and any same-UID writers thereafter.
             IO.FS.createDir directory
+            IO.setAccessRights directory
+              { user := { read := true, write := true, execution := true } }
             IO.FS.writeBinFile sourcePath source.toByteArray
+            IO.setAccessRights sourcePath
+              { user := { read := true, write := true } }
             IO.FS.writeFile scopePath scope
+            IO.setAccessRights scopePath
+              { user := { read := true, write := true } }
             unless sameBytes source (← IO.FS.readBinFile sourcePath).toList &&
                 (← IO.FS.readFile scopePath) == scope do
               throw (IO.userError "grain origin preparation output changed before exact readback")
