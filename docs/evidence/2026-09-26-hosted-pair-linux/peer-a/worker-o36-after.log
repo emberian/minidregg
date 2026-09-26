@@ -1,0 +1,8 @@
+2026-09-26T22:57:46Z
+MainPID=0
+Result=success
+ExecMainStatus=0
+ControlGroup=
+Id=mini-grain-t7801-o36.service
+ActiveState=inactive
+gate=fenced

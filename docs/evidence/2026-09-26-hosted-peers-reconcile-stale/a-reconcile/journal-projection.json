@@ -1,0 +1,36 @@
+{
+  "connection": "soft",
+  "pending": null,
+  "child": null,
+  "parentHold": null,
+  "toolPending": null,
+  "toolHold": null,
+  "providerPending": null,
+  "providerHold": null,
+  "settlementDue": null,
+  "unresolvedExternal": [],
+  "hermesSession": {
+    "id": "a22070a4-df24-4c34-89e0-1d0772b5a995",
+    "loadVerified": true,
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "publicationReceipts": [
+    {
+      "operationId": 20,
+      "transactionId": "102880997551007654483402307768314486722647903662184607915090640480056943725114",
+      "eventId": "107848528897897700198443394989789666395004609712696620424157089603472949403164",
+      "acceptedCount": "15",
+      "imageBoundary": "4695009488064504610488676458937062718957562296109476944507075623067101219274",
+      "reported": true
+    },
+    {
+      "operationId": 58,
+      "transactionId": "14358396813081949732388176001886310974782792329627781586967388820161585883737",
+      "eventId": "80963629866777002407198942306886379066984354677392772720811432218165939994558",
+      "acceptedCount": "35",
+      "imageBoundary": "65349467367451698574133643431191635660833317671093324124006569744634048789906",
+      "reported": false
+    }
+  ]
+}

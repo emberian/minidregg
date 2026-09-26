@@ -1,0 +1,50 @@
+{
+  "connection": "soft",
+  "pending": null,
+  "child": null,
+  "parentHold": null,
+  "toolPending": {
+    "operationId": 44,
+    "operation": "tool settle",
+    "attempt": "/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000044",
+    "uncertain": true,
+    "publication": {
+      "promptOperationId": 36,
+      "sessionId": "05e9ccf7-73d1-404f-8702-dcc60fd4bdf2",
+      "sourceSha256": "071856b1536050c249491eb1177e03b96d9efd66e0ebb85bb885b8970ac7662e",
+      "targets": [
+        "8001"
+      ]
+    }
+  },
+  "toolHold": {
+    "reserve": "2",
+    "charge": "1",
+    "beforeGeneration": "3",
+    "beforeTargetRoot": "6879155612796239601219456337685747104923170193617255913337503956417390586994",
+    "reserveAttempt": "/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000042",
+    "reserveConfirmed": true,
+    "reserveRefused": false,
+    "reserveBoundary": "68743037989298246820551563739845355993238042545007743375114387610743556038516"
+  },
+  "providerPending": null,
+  "providerHold": null,
+  "settlementDue": null,
+  "unresolvedExternal": [],
+  "hermesSession": {
+    "id": "05e9ccf7-73d1-404f-8702-dcc60fd4bdf2",
+    "loadVerified": true,
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "publicationReceipts": [
+    {
+      "operationId": 20,
+      "transactionId": "91584406951252096426343980097823765581993847451754431567186572108196622647305",
+      "eventId": "2130796006310182160631371902657327534093710263064086308136635274172395065351",
+      "acceptedCount": "23",
+      "imageBoundary": "91625779509469758577613274978405724820365207977867762207140257502836143236357",
+      "reported": true
+    }
+  ]
+}

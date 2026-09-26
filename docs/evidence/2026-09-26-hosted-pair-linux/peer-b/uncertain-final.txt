@@ -1,0 +1,7 @@
+2026-09-26T23:30:11Z
+{"connection":"soft","child":null,"pending":null,"parentHold":null,"toolHold":{"reserve":"2","charge":"1","reserveConfirmed":true},"toolPending":{"operationId":44,"operation":"tool settle","uncertain":true,"targets":["8001"]},"settlementDue":null,"unresolvedExternal":[]}
+MainPID=0
+ControlGroup=
+Id=mini-grain-t7803-o36.service
+ActiveState=inactive
+gate=fenced

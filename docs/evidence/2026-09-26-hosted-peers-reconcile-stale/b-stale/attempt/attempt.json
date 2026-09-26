@@ -1,0 +1,7 @@
+{
+  "config": "/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000044/config.json",
+  "format": "minidregg-resource-client-attempt-v1",
+  "host": "/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined",
+  "operation": "submit",
+  "socket": "/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-host/host.sock"
+}

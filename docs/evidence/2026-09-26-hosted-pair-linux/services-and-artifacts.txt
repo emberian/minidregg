@@ -1,0 +1,34 @@
+RuntimeMaxUSec=6h
+MainPID=3550768
+MemoryMax=8589934592
+Id=mini-hosted-shared-host-20260926.service
+ActiveState=active
+
+RuntimeMaxUSec=infinity
+MainPID=3553306
+MemoryMax=1073741824
+Id=mini-grain-controller@7801.service
+ActiveState=active
+
+RuntimeMaxUSec=infinity
+MainPID=3557300
+MemoryMax=1073741824
+Id=mini-grain-controller@7803.service
+ActiveState=active
+
+RuntimeMaxUSec=6h
+MainPID=3873292
+MemoryMax=536870912
+Id=mini-hosted-peer-a-provider-20260926.service
+ActiveState=active
+
+RuntimeMaxUSec=6h
+MainPID=3873896
+MemoryMax=536870912
+Id=mini-hosted-peer-b-provider-20260926.service
+ActiveState=active
+4bb72e1e984de413ee0065d7d229dbe0217bf980b4563ba26dc85ee38ed59c65  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined
+e17ad58b73b43c611bdb6fa22d5fe42a56f75720889fb0901c81337d11eb763f  /tmp/mini-hosted-deploy-20260926/bin/grain-runtime
+295e09bc0469310f96bf78b1674ac9f04a646bebd6e85e7e6255bd7f689a0916  /tmp/mini-hosted-deploy-20260926/bin/bwrap
+e4e90c9ef16961bb305e42df6e9d40a69933d1b02294727454425339063cd554  /tmp/mini-hosted-deploy-20260926/bin/launch-gate
+1e399d6c79fe2cdc1edda38accd2a8d799c6aded6a8469fdc9bea884c1cccc57  /tmp/mini-hosted-deploy-20260926/provider-target-c9baaac/release/mini-hermes-test-provider

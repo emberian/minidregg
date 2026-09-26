@@ -1,0 +1,10 @@
+2026-09-26T23:24:11Z
+MainPID=0
+Result=success
+ExecMainStatus=0
+ControlGroup=
+Id=mini-grain-t7803-o36.service
+BindsTo=
+ActiveState=inactive
+gate=fenced
+{"connection":"soft","child":null,"pending":{"operationId":46,"operation":"settle","attempt":"/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000046","uncertain":false,"publication":null},"parentHold":{"reserve":"3","charge":"1","beforeGeneration":"1","beforeTargetRoot":"4420198803629474558707407452953577185707338374241008441174891313198862854308","reserveAttempt":"/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000034","reserveConfirmed":true,"reserveRefused":false,"reserveBoundary":"91902324033101703819598619344449057365216820572593847843555179482136026243931"},"toolHold":{"reserve":"2","charge":"1","beforeGeneration":"3","beforeTargetRoot":"6879155612796239601219456337685747104923170193617255913337503956417390586994","reserveAttempt":"/tmp/mini-workroom-hosted-20260926/provision-r1/runtime-state-b/attempt-0000000000000042","reserveConfirmed":true,"reserveRefused":false,"reserveBoundary":"68743037989298246820551563739845355993238042545007743375114387610743556038516"},"settlementDue":"1","unresolvedExternal":[]}
