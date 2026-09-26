@@ -1,0 +1,13 @@
+{
+  "fromMailbox": "mini-grain@example.invalid",
+  "group": "fn.test",
+  "date": "Sat, 26 Sep 2026 09:45:00 +0000",
+  "subject": "Mini AgentGrain publication",
+  "messageIdDomain": "mini.invalid",
+  "grainTask": "7102",
+  "parentTask": "7101",
+  "publicationTarget": "7003",
+  "wholePrefixDisclosure": true,
+  "destinationNewsgroup": "fn.test",
+  "audienceAcknowledgement": "Full Mini genesis and accepted prefix may reach fn peers and readers"
+}

@@ -27,3 +27,17 @@ This is a read-only preparation check. The operator's disclosure intent
 records a request to render the full-prefix article; it is not proof of
 contributors' consent, a recipient restriction after fn peering, or
 authorization to sign or publish the article. No fn transport was invoked.
+
+The reusable operator command takes an independently selected origin config,
+strict [request-r5.json](request-r5.json), exact package and a **new** output
+directory:
+
+```text
+minidregg-host ORIGIN-CONFIG.json grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR
+```
+
+It exclusively creates `OUTPUT_DIR`, then retains `source.eml` and
+`scope.json` with exact readback before success. Existing output paths are
+refused. The request example reproduces this fixture's article context and
+selected signed targets; later R2 publications use the same command with
+their own independently verified package and operator-selected request.
