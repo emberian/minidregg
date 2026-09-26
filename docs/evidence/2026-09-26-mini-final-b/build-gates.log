@@ -1,0 +1,12 @@
+Mac arm64 Host.Main leanArts: PASS (162/162)
+Native C/link: PASS (3095 response objects)
+Native usage contract: PASS (expected exit 1)
+Source SHA-256 verification: PASS (162/162)
+Full Minidregg umbrella: pending incremental gate on same frozen source
+Runtime acceptance: pending independent agents
+Binary SHA-256: c2a1fd3699338f28eaf1d076b53cbd1bf27b4438b857b0482666205b334a394c
+Linux x86_64 Host.Main leanArts: PASS (162/162)
+Linux native C/link: PASS (3095 response objects)
+Linux native usage contract: PASS (expected exit 1)
+Linux source SHA-256 verification: PASS (162/162)
+Linux binary SHA-256: faf1f8371f692c404acd5b4c5727bd2019249c1b5f7d1850022789d35f4ee30f

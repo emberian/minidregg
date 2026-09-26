@@ -1,0 +1,15 @@
+end_utc=2026-09-26T08:34:20Z
+elapsed_seconds=724
+git_head=2aeaf6437365187e7d28a32eadcfce40b4654f70
+root=/private/tmp/minidregg-overnight-20260926-final
+lean=Lean (version 4.30.0, arm64-apple-darwin24.6.0, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/Users/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Darwin:arm64
+umbrella=0
+compiled_source_modules=162
+source_modules=162
+package_modules=2933
+response_objects=3095
+usage_exit=1
+binary=/private/tmp/minidregg-overnight-20260926/minidregg-host-final-b-fast
+binary_sha256=c2a1fd3699338f28eaf1d076b53cbd1bf27b4438b857b0482666205b334a394c

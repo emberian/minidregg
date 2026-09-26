@@ -1,0 +1,15 @@
+end_utc=2026-09-26T08:37:10Z
+elapsed_seconds=933
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-overnight-20260926/source-b
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=162
+source_modules=162
+package_modules=2933
+response_objects=3095
+usage_exit=1
+binary=/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-b-fast
+binary_sha256=faf1f8371f692c404acd5b4c5727bd2019249c1b5f7d1850022789d35f4ee30f
