@@ -23,6 +23,8 @@ pub(super) struct AllowedResourceRead {
     pub target: String,
     pub observe_capability: String,
     pub max_result_bytes: usize,
+    #[serde(default)]
+    pub fn_inbox_summary: bool,
 }
 
 pub(super) fn validate_reads(
@@ -43,6 +45,12 @@ pub(super) fn validate_reads(
         }
         if !matches!(read.kind.as_str(), "object" | "account" | "program") {
             return Err(format!("unknown resource read kind for {}", read.name));
+        }
+        if read.fn_inbox_summary && read.kind != "object" {
+            return Err(format!(
+                "{} fnInboxSummary requires an object content resource",
+                read.name
+            ));
         }
         crate::decimal(&read.target, "resource read target")?;
         crate::decimal(&read.observe_capability, "resource observe capability")?;
@@ -150,16 +158,67 @@ pub(super) fn read_resource(
             attempt.display()
         ));
     }
-    let path = attempt.join("view.json");
+    // The query above remains the only authority-bearing read. This optional
+    // source-owned presentation consumes its exact retained view.bin; it does
+    // not fetch or admit another resource or reinterpret A's effect at B.
+    let path = if read.fn_inbox_summary {
+        let output = attempt.join("fn-inbox-summary.json");
+        let mut inspect = Command::new(&config.mini);
+        inspect
+            .arg("inspect")
+            .arg("--host")
+            .arg(&config.host)
+            .arg("--config")
+            .arg(&config.host_config)
+            .arg("--kind")
+            .arg("fn-inbox-resource")
+            .arg("--input")
+            .arg(attempt.join("view.bin"))
+            .arg("--output")
+            .arg(&output)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(socket) = &config.host_socket {
+            inspect.arg("--socket").arg(socket);
+        }
+        let status = inspect
+            .status()
+            .map_err(|e| format!("native Mini fn inbox presentation: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "native Mini refused fn inbox presentation {} ({}); complete query retained at {}",
+                read.name,
+                status,
+                attempt.display()
+            ));
+        }
+        output
+    } else {
+        attempt.join("view.json")
+    };
     let bytes = read_bounded(&path, read.max_result_bytes)?;
     let view: Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("native resource view is not JSON: {e}"))?;
-    if view.get("type").and_then(Value::as_str) != Some("resource")
-        || !view.get("page").is_some_and(Value::is_object)
-    {
+    let expected_type = if read.fn_inbox_summary {
+        "fn-inbox-resource-summary-v1"
+    } else {
+        "resource"
+    };
+    let expected_content = if read.fn_inbox_summary {
+        view.get("entries").is_some_and(Value::is_array)
+    } else {
+        view.get("page").is_some_and(Value::is_object)
+    };
+    if view.get("type").and_then(Value::as_str) != Some(expected_type) || !expected_content {
         return Err("native resource query returned the wrong view shape".into());
     }
-    let result = json!({"kind":read.kind,"target":read.target,"view":view});
+    let result = json!({
+        "kind": read.kind,
+        "target": read.target,
+        "presentation": if read.fn_inbox_summary { "fn-inbox-resource" } else { "resource" },
+        "view": view
+    });
     let result_len = serde_json::to_vec(&result)
         .map_err(|e| e.to_string())?
         .len();
@@ -204,6 +263,7 @@ mod tests {
             target: "8001".into(),
             observe_capability: capability.into(),
             max_result_bytes: 64 * 1024,
+            fn_inbox_summary: false,
         }
     }
 

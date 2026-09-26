@@ -225,6 +225,13 @@ struct ProviderAttempt {
     outcome: Option<String>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AuthoritySlot {
+    Parent,
+    Tool,
+    Provider,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HermesSession {
@@ -244,6 +251,34 @@ struct HermesSession {
 }
 
 impl Journal {
+    fn pending_for(&self, slot: AuthoritySlot) -> &Option<Pending> {
+        match slot {
+            AuthoritySlot::Parent => &self.pending,
+            AuthoritySlot::Tool => &self.tool_pending,
+            AuthoritySlot::Provider => &self.provider_pending,
+        }
+    }
+    fn pending_for_mut(&mut self, slot: AuthoritySlot) -> &mut Option<Pending> {
+        match slot {
+            AuthoritySlot::Parent => &mut self.pending,
+            AuthoritySlot::Tool => &mut self.tool_pending,
+            AuthoritySlot::Provider => &mut self.provider_pending,
+        }
+    }
+    fn hold_for(&self, slot: AuthoritySlot) -> &Option<HeldCharge> {
+        match slot {
+            AuthoritySlot::Parent => &self.parent_hold,
+            AuthoritySlot::Tool => &self.tool_hold,
+            AuthoritySlot::Provider => &self.provider_hold,
+        }
+    }
+    fn hold_for_mut(&mut self, slot: AuthoritySlot) -> &mut Option<HeldCharge> {
+        match slot {
+            AuthoritySlot::Parent => &mut self.parent_hold,
+            AuthoritySlot::Tool => &mut self.tool_hold,
+            AuthoritySlot::Provider => &mut self.provider_hold,
+        }
+    }
     fn fresh(binding: Value) -> Self {
         Self {
             format: "minidregg-grain-runtime-v1".into(),
@@ -313,6 +348,34 @@ fn decimal(s: &str, label: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn grain_observation_grants(
+    authority: &Authority,
+    parent: Option<(&str, &str)>,
+    publications: &[Value],
+) -> Result<Vec<Value>> {
+    let mut grants = vec![json!({"kind":"object","target":authority.task,
+        "capability":authority.query_capability})];
+    if let Some((task, capability)) = parent {
+        grants.push(json!({"kind":"object","target":task,"capability":capability}));
+    }
+    for publication in publications {
+        let kind = publication
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or("publication observation kind absent")?;
+        let target = publication
+            .get("target")
+            .and_then(Value::as_str)
+            .ok_or("publication observation target absent")?;
+        let capability = publication
+            .get("observeCapability")
+            .and_then(Value::as_str)
+            .ok_or("publication observe capability absent")?;
+        grants.push(json!({"kind":kind,"target":target,"capability":capability}));
+    }
+    Ok(grants)
 }
 
 fn hermes_workspace_home(cwd: &Path) -> Result<(PathBuf, PathBuf)> {
@@ -508,7 +571,10 @@ fn validate(c: &Config) -> Result<()> {
             ("providerTask.capability", &p.capability),
             ("providerTask.queryCapability", &p.query_capability),
             ("providerTask.parentCapability", &p.parent_capability),
-            ("providerTask.parentObserveCapability", &p.parent_observe_capability),
+            (
+                "providerTask.parentObserveCapability",
+                &p.parent_observe_capability,
+            ),
             ("providerTask.reserve", &p.reserve),
             ("providerTask.charge", &p.charge),
         ] {
@@ -516,11 +582,16 @@ fn validate(c: &Config) -> Result<()> {
         }
         if !p.custody_key.is_absolute()
             || p.custody_key == c.custody_key
-            || c.tool_task.as_ref().is_some_and(|t| t.custody_key == p.custody_key)
+            || c.tool_task
+                .as_ref()
+                .is_some_and(|t| t.custody_key == p.custody_key)
             || !p.provider_key_file.is_absolute()
             || p.provider_key_file == p.custody_key
         {
             return Err("providerTask needs distinct absolute key paths".into());
+        }
+        if p.provider_key_file.parent() != Some(c.state_dir.as_path()) {
+            return Err("provider key must be directly inside private stateDir".into());
         }
         if p.reserve
             .parse::<u64>()
@@ -530,22 +601,33 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("providerTask charge exceeds reserve".into());
         }
-        let bind = p.gateway_bind.parse::<std::net::SocketAddr>()
+        let bind = p
+            .gateway_bind
+            .parse::<std::net::SocketAddr>()
             .map_err(|_| "providerTask.gatewayBind must be a socket address")?;
         if !bind.ip().is_loopback() || bind.port() == 0 {
             return Err("providerTask.gatewayBind must pin a loopback port".into());
         }
-        if p.model.is_empty() || p.model.len() > 256 || p.model.chars().any(char::is_control)
-            || p.max_request_bytes == 0 || p.max_request_bytes > 1_048_576
-            || p.max_response_bytes == 0 || p.max_response_bytes > 8_388_608
-            || p.timeout_seconds == 0 || p.timeout_seconds > 600
+        if p.model.is_empty()
+            || p.model.len() > 256
+            || p.model.chars().any(char::is_control)
+            || p.max_request_bytes == 0
+            || p.max_request_bytes > 1_048_576
+            || p.max_response_bytes == 0
+            || p.max_response_bytes > 8_388_608
+            || p.timeout_seconds == 0
+            || p.timeout_seconds > 600
         {
             return Err("providerTask model or bounds invalid".into());
         }
-        if !c.commands.iter().any(|command| command.systemd_scope
-            && command.args.iter().any(|arg| arg == "--network")
-            && command.args.iter().any(|arg| arg == "host")) {
-            return Err("providerTask requires an explicit scoped host-network Hermes command".into());
+        if !c.commands.iter().any(|command| {
+            command.systemd_scope
+                && command.args.iter().any(|arg| arg == "--network")
+                && command.args.iter().any(|arg| arg == "host")
+        }) {
+            return Err(
+                "providerTask requires an explicit scoped host-network Hermes command".into(),
+            );
         }
     }
     Ok(())
@@ -569,6 +651,8 @@ struct Runtime {
     cancelled: Arc<AtomicBool>,
     completion_phase: Arc<AtomicU8>,
     current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
+    provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
+    provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
     output: Option<control::OutputHandle>,
 }
@@ -578,6 +662,14 @@ impl Runtime {
         if let Some(output) = &self.output {
             let _ = output.try_output(message);
         }
+    }
+    fn revoke_provider_gateway(&mut self) {
+        if let Ok(control) = self.provider_control.lock() {
+            if let Some(control) = control.as_ref() {
+                control.revoke();
+            }
+        }
+        self.provider_lease = None;
     }
     fn claim_completion(&mut self, charge: &str) -> Result<bool> {
         match self.completion_phase.compare_exchange(
@@ -633,6 +725,10 @@ impl Runtime {
             if let Some(tool) = &self.config.tool_task {
                 command.env("MINI_GRAIN_TOOL_CUSTODY_KEY", &tool.custody_key);
             }
+            if let Some(provider) = &self.config.provider_task {
+                command.env("MINI_GRAIN_PROVIDER_CUSTODY_KEY", &provider.custody_key);
+                command.env("MINI_GRAIN_PROVIDER_KEY_FILE", &provider.provider_key_file);
+            }
             if let Some(broker) = broker {
                 command.env("MINI_GRAIN_BROKER_SOCKET", broker);
             }
@@ -659,6 +755,20 @@ impl Runtime {
             capability: t.capability.clone(),
             query_capability: t.query_capability.clone(),
             custody_key: t.custody_key.clone(),
+        })
+    }
+    fn provider(&self) -> Result<Authority> {
+        let p = self
+            .config
+            .provider_task
+            .as_ref()
+            .ok_or("providerTask is not configured")?;
+        Ok(Authority {
+            task: p.task.clone(),
+            subject: p.subject.clone(),
+            capability: p.capability.clone(),
+            query_capability: p.query_capability.clone(),
+            custody_key: p.custody_key.clone(),
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
@@ -718,6 +828,8 @@ impl Runtime {
             cancelled: Arc::new(AtomicBool::new(false)),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
+            provider_control: Arc::new(Mutex::new(None)),
+            provider_lease: None,
             prompt_active: false,
             output: None,
         };
@@ -960,6 +1072,24 @@ impl Runtime {
     }
     fn mark_hold(&mut self, tool: bool, reserve: &str, charge: &str) -> Result<()> {
         let authority = if tool { self.tool()? } else { self.parent() };
+        self.mark_hold_as(
+            if tool {
+                AuthoritySlot::Tool
+            } else {
+                AuthoritySlot::Parent
+            },
+            &authority,
+            reserve,
+            charge,
+        )
+    }
+    fn mark_hold_as(
+        &mut self,
+        slot: AuthoritySlot,
+        authority: &Authority,
+        reserve: &str,
+        charge: &str,
+    ) -> Result<()> {
         let observed = self.query_as(&authority)?;
         let hold = HeldCharge {
             reserve: reserve.to_owned(),
@@ -979,11 +1109,7 @@ impl Runtime {
             reserve_refused: false,
             reserve_boundary: None,
         };
-        if tool {
-            self.journal.tool_hold = Some(hold);
-        } else {
-            self.journal.parent_hold = Some(hold);
-        }
+        *self.journal.hold_for_mut(slot) = Some(hold);
         self.save()
     }
     fn transition_as(
@@ -994,27 +1120,48 @@ impl Runtime {
         payload: &str,
         publications: Vec<Value>,
     ) -> Result<()> {
-        let tool_authority = authority.task != self.config.task;
-        if (if tool_authority {
-            &self.journal.tool_pending
-        } else {
-            &self.journal.pending
-        })
-        .is_some()
+        self.transition_as_with_witness(authority, op, label, payload, publications, None)
+    }
+    fn transition_as_with_witness(
+        &mut self,
+        authority: &Authority,
+        op: Value,
+        label: &str,
+        payload: &str,
+        publications: Vec<Value>,
+        witness_capabilities: Option<(String, String)>,
+    ) -> Result<()> {
+        let slot = if authority.task == self.config.task {
+            AuthoritySlot::Parent
+        } else if self
+            .config
+            .tool_task
+            .as_ref()
+            .is_some_and(|tool| tool.task == authority.task)
         {
+            AuthoritySlot::Tool
+        } else if self
+            .config
+            .provider_task
+            .as_ref()
+            .is_some_and(|provider| provider.task == authority.task)
+        {
+            AuthoritySlot::Provider
+        } else {
+            return Err("transition authority is not configured".into());
+        };
+        if self.journal.pending_for(slot).is_some() {
             return Err("this Mini authority has an unresolved transition".into());
         }
         let observed = self.query_as(authority)?;
         let before = observed.get("grain").ok_or("missing observed grain")?;
         let reserving = op.get("type").and_then(Value::as_str) == Some("reserve");
         if reserving {
-            let hold = (if tool_authority {
-                &self.journal.tool_hold
-            } else {
-                &self.journal.parent_hold
-            })
-            .as_ref()
-            .ok_or("reserve has no durable charge marker")?;
+            let hold = self
+                .journal
+                .hold_for(slot)
+                .as_ref()
+                .ok_or("reserve has no durable charge marker")?;
             if observed.get("targetRoot").and_then(Value::as_str)
                 != Some(hold.before_target_root.as_str())
                 || before.get("generation").and_then(Value::as_str)
@@ -1024,40 +1171,45 @@ impl Runtime {
             }
         }
         let id = self.next_id()?;
-        let joint = !publications.is_empty();
-        let mut grants = vec![json!({"kind":"object","target":authority.task,
-            "capability":authority.capability})];
-        if joint {
-            grants.push(json!({"kind":"object","target":authority.task,
-                "capability":authority.query_capability}));
-            for target in &publications {
-                grants.push(json!({"kind":target["kind"],"target":target["target"],
-                    "capability":target["capability"]}));
-                grants.push(json!({"kind":target["kind"],"target":target["target"],
-                    "capability":target["observeCapability"]}));
-            }
-        }
+        let joint = !publications.is_empty() || witness_capabilities.is_some();
         let parent_witness = if joint {
-            let t = self
-                .config
-                .tool_task
-                .as_ref()
-                .ok_or("tool task absent for joint publication")?;
+            let (parent_capability, parent_observe_capability) =
+                if let Some(caps) = witness_capabilities {
+                    caps
+                } else {
+                    let t = self
+                        .config
+                        .tool_task
+                        .as_ref()
+                        .ok_or("tool task absent for joint publication")?;
+                    (
+                        t.parent_capability.clone(),
+                        t.parent_observe_capability.clone(),
+                    )
+                };
             let mut witness = self
                 .journal
                 .prompt_witness
                 .clone()
                 .ok_or("parent prompt witness absent")?;
-            witness["capability"] = json!(t.parent_capability);
-            witness["observeCapability"] = json!(t.parent_observe_capability);
-            grants.push(json!({"kind":"object","target":self.config.task,
-                "capability":t.parent_capability}));
-            grants.push(json!({"kind":"object","target":self.config.task,
-                "capability":t.parent_observe_capability}));
+            witness["capability"] = json!(parent_capability);
+            witness["observeCapability"] = json!(parent_observe_capability);
             Some(witness)
         } else {
             None
         };
+        // The native observation footprint is exact: primary target, optional
+        // prepended parent witness, then publications, one observe grant each.
+        let parent_observation = parent_witness
+            .as_ref()
+            .map(|witness| {
+                witness["observeCapability"]
+                    .as_str()
+                    .map(|capability| (self.config.task.as_str(), capability))
+                    .ok_or("parent witness observe capability absent")
+            })
+            .transpose()?;
+        let grants = grain_observation_grants(authority, parent_observation, &publications)?;
         let mut grain = json!({"task":authority.task,"subject":authority.subject,
             "capability":authority.capability,"schemaVersion":"1",
             "expectedAuthorityRoot":observed.get("authorityRoot").ok_or("missing authority root")?,
@@ -1066,7 +1218,7 @@ impl Runtime {
             "before":{"generation":before.get("generation"),"status":before.get("status"),
                 "remaining":before.get("remaining"),"reserved":before.get("reserved")},
             "operation":op,"publications":publications,
-            "observeCapability":if joint { json!(authority.query_capability) } else { Value::Null }});
+            "observeCapability":authority.query_capability});
         if let Some(witness) = parent_witness {
             grain["parentWitness"] = witness;
         }
@@ -1083,18 +1235,11 @@ impl Runtime {
             attempt: attempt.clone(),
             uncertain: false,
         });
-        if tool_authority {
-            self.journal.tool_pending = pending;
-        } else {
-            self.journal.pending = pending;
-        }
+        *self.journal.pending_for_mut(slot) = pending;
         if reserving {
-            let hold = if tool_authority {
-                &mut self.journal.tool_hold
-            } else {
-                &mut self.journal.parent_hold
-            };
-            hold.as_mut()
+            self.journal
+                .hold_for_mut(slot)
+                .as_mut()
                 .ok_or("reserve marker disappeared")?
                 .reserve_attempt = Some(attempt.clone());
         }
@@ -1135,25 +1280,18 @@ impl Runtime {
                         .and_then(Value::as_str)
                         .ok_or("reserve receipt lacks image boundary")?
                         .to_owned();
-                    let hold = if tool_authority {
-                        &mut self.journal.tool_hold
-                    } else {
-                        &mut self.journal.parent_hold
-                    };
-                    let hold = hold.as_mut().ok_or("reserve marker disappeared")?;
+                    let hold = self
+                        .journal
+                        .hold_for_mut(slot)
+                        .as_mut()
+                        .ok_or("reserve marker disappeared")?;
                     hold.reserve_confirmed = true;
                     hold.reserve_boundary = Some(boundary);
                 }
-                if tool_authority {
-                    self.journal.tool_pending = None;
-                } else {
-                    self.journal.pending = None;
-                }
+                *self.journal.pending_for_mut(slot) = None;
                 if op.get("type").and_then(Value::as_str) == Some("settle") {
-                    if tool_authority {
-                        self.journal.tool_hold = None;
-                    } else {
-                        self.journal.parent_hold = None;
+                    *self.journal.hold_for_mut(slot) = None;
+                    if slot == AuthoritySlot::Parent {
                         self.journal.settlement_due = None;
                     }
                 }
@@ -1174,20 +1312,13 @@ impl Runtime {
                     == Some("refused")
                 {
                     if reserving {
-                        let hold = if tool_authority {
-                            &mut self.journal.tool_hold
-                        } else {
-                            &mut self.journal.parent_hold
-                        };
-                        hold.as_mut()
+                        self.journal
+                            .hold_for_mut(slot)
+                            .as_mut()
                             .ok_or("reserve marker disappeared")?
                             .reserve_refused = true;
                     }
-                    if tool_authority {
-                        self.journal.tool_pending = None;
-                    } else {
-                        self.journal.pending = None;
-                    }
+                    *self.journal.pending_for_mut(slot) = None;
                     self.save()?;
                     return Err(format!("{label} refused by Mini: {}", explicit.unwrap()));
                 }
@@ -1196,21 +1327,13 @@ impl Runtime {
                     // negative native receipt: an older client/host could
                     // have sent the call before its directory entry became
                     // durable. Keep the exact pending attempt and hold.
-                    if let Some(p) = if tool_authority {
-                        &mut self.journal.tool_pending
-                    } else {
-                        &mut self.journal.pending
-                    } {
+                    if let Some(p) = self.journal.pending_for_mut(slot) {
                         p.uncertain = true;
                     }
                     self.save()?;
                     return Err(format!("{label} has no retained call.bin after custody failure; disposition requires audit: {e}"));
                 }
-                if let Some(p) = if tool_authority {
-                    &mut self.journal.tool_pending
-                } else {
-                    &mut self.journal.pending
-                } {
+                if let Some(p) = self.journal.pending_for_mut(slot) {
                     p.uncertain = true;
                 }
                 self.save()?;
@@ -1603,6 +1726,7 @@ impl Runtime {
         }
         let soft_reserved = self.journal.connection == Connection::Soft;
         self.cancelled.store(true, Ordering::SeqCst);
+        self.revoke_provider_gateway();
         let _ = self.completion_phase.compare_exchange(
             PHASE_RUNNING,
             PHASE_CANCELLED,
@@ -1970,7 +2094,25 @@ impl Runtime {
         if !spec.args.iter().any(|s| s.ends_with("hermes-acp")) {
             return Err("Hermes wrapper must launch the upstream hermes-acp executable".into());
         }
-        let (workspace, hermes_home) = hermes_workspace_home(&self.config.cwd)?;
+        let worker_workspace = if spec.systemd_scope {
+            let index = spec
+                .args
+                .iter()
+                .position(|argument| argument == "--workspace")
+                .ok_or("scoped Hermes command has no fixed --workspace")?;
+            let path = spec
+                .args
+                .get(index + 1)
+                .ok_or("scoped Hermes command has no workspace path")?;
+            let path = PathBuf::from(path);
+            if !path.is_absolute() {
+                return Err("scoped Hermes workspace must be absolute".into());
+            }
+            path
+        } else {
+            self.config.cwd.clone()
+        };
+        let (workspace, hermes_home) = hermes_workspace_home(&worker_workspace)?;
         if let Some(session) = self.journal.hermes_session.clone() {
             if session.workspace != workspace {
                 return Err("saved Hermes session belongs to another workspace".into());
@@ -2838,11 +2980,14 @@ impl Runtime {
         self.save()
     }
     fn retry_pending(&mut self, tool: bool) -> Result<()> {
-        let pending = if tool {
-            &self.journal.tool_pending
+        self.retry_pending_slot(if tool {
+            AuthoritySlot::Tool
         } else {
-            &self.journal.pending
-        };
+            AuthoritySlot::Parent
+        })
+    }
+    fn retry_pending_slot(&mut self, slot: AuthoritySlot) -> Result<()> {
+        let pending = self.journal.pending_for(slot);
         if let Some(p) = pending.clone() {
             if !p.attempt.join("call.bin").is_file() {
                 // A crashed custody subprocess may still assemble the call and
@@ -2859,7 +3004,10 @@ impl Runtime {
             // the original submit. A prior branch may have committed this
             // exact call before a fork was replaced. Keep the pending attempt.
             self.command_output(&self.config.mini, &args)?;
-            if matches!(p.operation.as_str(), "reserve" | "tool reserve") {
+            if matches!(
+                p.operation.as_str(),
+                "reserve" | "tool reserve" | "provider reserve"
+            ) {
                 let receipt: Value =
                     serde_json::from_slice(&fs::read(&retry_result).map_err(|e| e.to_string())?)
                         .map_err(|e| e.to_string())?;
@@ -2871,34 +3019,25 @@ impl Runtime {
                     .and_then(Value::as_str)
                     .ok_or("reserve lookup lacks image boundary")?
                     .to_owned();
-                let hold = if tool {
-                    &mut self.journal.tool_hold
-                } else {
-                    &mut self.journal.parent_hold
-                };
-                let hold = hold
+                let hold = self
+                    .journal
+                    .hold_for_mut(slot)
                     .as_mut()
                     .ok_or("reserve lookup has no held-charge marker")?;
                 hold.reserve_confirmed = true;
                 hold.reserve_boundary = Some(boundary);
             }
-            if tool {
-                self.journal.tool_pending = None;
-            } else {
-                self.journal.pending = None;
-            }
+            *self.journal.pending_for_mut(slot) = None;
             if matches!(
                 p.operation.as_str(),
-                "settle" | "tool settle" | "tool release" | "reconcile settle"
+                "settle" | "tool settle" | "tool release" | "reconcile settle" | "provider settle"
             ) {
-                if tool {
-                    self.journal.tool_hold = None;
-                } else {
-                    self.journal.parent_hold = None;
+                *self.journal.hold_for_mut(slot) = None;
+                if slot == AuthoritySlot::Parent {
                     self.journal.settlement_due = None;
                 }
             }
-            if p.operation == "disconnect" && !tool {
+            if p.operation == "disconnect" && slot == AuthoritySlot::Parent {
                 self.journal.connection = Connection::Detached;
             }
             self.save()?;
@@ -3224,9 +3363,15 @@ fn serve(mut rt: Runtime) -> Result<()> {
     let cancelled = rt.cancelled.clone();
     let completion_phase = rt.completion_phase.clone();
     let current_unit = rt.current_unit.clone();
+    let provider_control = rt.provider_control.clone();
     let state_dir = rt.config.state_dir.clone();
     let interrupt: control::HardInterrupt = Arc::new(move |_| {
         cancelled.store(true, Ordering::SeqCst);
+        if let Ok(control) = provider_control.lock() {
+            if let Some(control) = control.as_ref() {
+                control.revoke();
+            }
+        }
         let _ = completion_phase.compare_exchange(
             PHASE_RUNNING,
             PHASE_CANCELLED,
@@ -3451,6 +3596,29 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn joint_grants_match_native_observation_footprint() {
+        let authority = Authority {
+            task: "7102".into(),
+            subject: "8".into(),
+            capability: "81".into(),
+            query_capability: "82".into(),
+            custody_key: PathBuf::from("/private/tool.key"),
+        };
+        let publications = vec![json!({"kind":"object","target":"7003",
+            "capability":"93","observeCapability":"94"})];
+        let grants =
+            grain_observation_grants(&authority, Some(("7101", "74")), &publications).unwrap();
+        assert_eq!(
+            grants,
+            vec![
+                json!({"kind":"object","target":"7102","capability":"82"}),
+                json!({"kind":"object","target":"7101","capability":"74"}),
+                json!({"kind":"object","target":"7003","capability":"94"}),
+            ]
+        );
+    }
 
     #[test]
     fn configured_systemd_scope_uses_camel_case() {

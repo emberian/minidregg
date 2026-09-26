@@ -718,6 +718,11 @@ fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
             status = Some(parsed);
             content_type = None;
         } else if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-encoding")
+                && !value.trim().eq_ignore_ascii_case("identity")
+            {
+                return Err("provider response used unsupported content encoding".into());
+            }
             if name.eq_ignore_ascii_case("content-type") {
                 let value = value.trim();
                 if value.len() > 128 || value.bytes().any(|b| !(0x20..=0x7e).contains(&b)) {
@@ -777,6 +782,7 @@ fn forward(
     let mut command = Command::new("/usr/bin/curl");
     command
         .env_clear()
+        .current_dir(&config.private_dir)
         .arg("--disable")
         .args(["--silent", "--http1.1", "--request", "POST"])
         .args(["--proto", protocol, "--noproxy", "*", "--proxy", ""])
@@ -806,7 +812,13 @@ fn forward(
                 rlim_cur: file_limit,
                 rlim_max: file_limit,
             };
-            if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) == 0 {
+            let no_core = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) == 0
+                && libc::setrlimit(libc::RLIMIT_CORE, &no_core) == 0
+            {
                 Ok(())
             } else {
                 Err(io::Error::last_os_error())
@@ -851,15 +863,15 @@ fn forward(
         drop(guard);
         stdin
     };
-    if let Some(mut stdin) = child_stdin.take() {
-        if stdin
+    let credential_written = child_stdin.take().is_some_and(|mut stdin| {
+        stdin
             .write_all(curl_header_config(&config.provider_key).as_bytes())
-            .is_err()
-        {
-            if let Ok(mut slot) = shared.curl.lock() {
-                if let Some(child) = slot.as_mut() {
-                    let _ = child.kill();
-                }
+            .is_ok()
+    });
+    if !credential_written {
+        if let Ok(mut slot) = shared.curl.lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
             }
         }
     }
@@ -923,7 +935,7 @@ fn forward(
             reason: "prompt lease revoked during provider send".into(),
         };
     }
-    if !exit.is_some_and(|status| status.success()) {
+    if !credential_written || !exit.is_some_and(|status| status.success()) {
         return ProviderOutcome::Uncertain {
             partial_body,
             reason: "provider transport outcome uncertain".into(),
