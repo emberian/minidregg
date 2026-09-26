@@ -1,0 +1,20 @@
+{
+  "attachSource": {
+    "schemaVersion": null,
+    "grain": {
+      "task": "7715",
+      "subject": "7",
+      "before": {
+        "generation": "0",
+        "remaining": "100",
+        "reserved": "0",
+        "status": "0"
+      },
+      "operation": {
+        "soft": true,
+        "type": "attach"
+      },
+      "publications": []
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "originalPolicyInstall": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "acceptedCount": "5",
+    "transactionId": "43319237775209483420661836614659377785395404111816480206103265926404938711287",
+    "eventId": "79307218490283921492708454499221416710916522981665648074336018222288181085881",
+    "imageBoundary": "38746775187184414182712057348089783358091927298909758774895862637282261702252"
+  },
+  "exactLookup": {
+    "type": "confirmed",
+    "confirmation": "replayed",
+    "acceptedCount": "5",
+    "transactionId": "43319237775209483420661836614659377785395404111816480206103265926404938711287",
+    "eventId": "79307218490283921492708454499221416710916522981665648074336018222288181085881",
+    "imageBoundary": "38746775187184414182712057348089783358091927298909758774895862637282261702252"
+  },
+  "lookupIdentityMatches": true,
+  "parentAfterCrash": {
+    "root": "86658783596595486311764085485937632432198279657441596947882809088564863756483",
+    "grain": {
+      "generation": "0",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "0",
+      "task": "7705"
+    }
+  },
+  "parentAfterAttach": {
+    "root": "34952766284434195132503161763755549791196448517808844143009815398402460377885",
+    "grain": {
+      "generation": "1",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "2",
+      "task": "7705"
+    }
+  },
+  "policyInstalledBeforeAttach": {
+    "version": "1",
+    "address": "53063123019539045212517279346756253525103201603554888612874451617237539220430"
+  },
+  "policyAfterAttach": {
+    "version": "2",
+    "address": "22712227507440109772940476559664405192348728779195534690475806407348691022196"
+  },
+  "policyPredicateEqual": true,
+  "finalJournal": {
+    "connection": "soft",
+    "pending": null,
+    "child": null
+  }
+}

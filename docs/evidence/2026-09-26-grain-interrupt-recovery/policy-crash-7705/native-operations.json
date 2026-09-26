@@ -1,0 +1,16 @@
+[
+  {
+    "task": "7705",
+    "operationId": "13",
+    "operation": {
+      "soft": true,
+      "type": "attach"
+    },
+    "before": {
+      "generation": "0",
+      "remaining": "100",
+      "reserved": "0",
+      "status": "0"
+    }
+  }
+]

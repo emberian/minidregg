@@ -1,0 +1,2 @@
+signed grain bootstrap ready: /tmp/mga-law-crash-7715-native-r1
+PASS exact g+1 policy install survived owned-controller crash before attach; lookup-only recovery and signed attach

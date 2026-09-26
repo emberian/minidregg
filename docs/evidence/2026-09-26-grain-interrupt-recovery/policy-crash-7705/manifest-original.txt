@@ -1,0 +1,8 @@
+runtime_commit=ed8e5b3
+4bb72e1e984de413ee0065d7d229dbe0217bf980b4563ba26dc85ee38ed59c65  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined
+e17ad58b73b43c611bdb6fa22d5fe42a56f75720889fb0901c81337d11eb763f  /tmp/mga-recovery-interrupt-7601-20260926/bin/grain-runtime
+b0884d2bee8f2cf38e7f7fa8cd17ded48b85fd0bf9bb440fcc9b44250a36661f  /tmp/mga-recovery-interrupt-7601-20260926/bin/mini
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/mga-recovery-interrupt-7601-20260926/bin/minidregg-credential-signature-verifier
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/mga-recovery-interrupt-7601-20260926/bin/minidregg-link-sqlite-store
+deeab758ab8e45571a3716b0d14589808bcb89981c3fce2d48aa8e4191e86c5b  /tmp/mga-law-crash-7705-20260926/native/grain-runtime/acceptance.sh
+f65c5bf98158f80b73e97bef89a685f57919dd1deb9764b6a8ee12b14a469c80  /tmp/mga-law-crash-7705-20260926/native/grain-runtime/policy-crash-acceptance.sh

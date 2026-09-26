@@ -11,3 +11,7 @@ The separate fresh 7701 scratch grain confirmed an owner-authorized custom polic
 All selected files are keyless. `selected-sha256.txt` checks their local bytes; `native-artifact-hashes.txt` records hashes of the retained signed query views and op19 call/receipt without copying private Store, keys, or binary calls. Fixture-owned controller unit 7601 was stopped by its exact description and InvocationID and ended inactive/MainPID0. The owner demo on unit 7001 was not touched.
 
 The later [natural 7605 run](natural-7605/README.md) passed the complete soft-fault journey without an extra controller restart. Its separate immutable fixture and native evidence remove the first run's harness-crash qualification.
+
+The separate [7705 policy-install crash probe](policy-crash-7705/README.md) confirms that a generation-1 worker law installed before a controller crash can be recovered by exact lookup and still permits attach. Its multi-stage harness qualification is stated in that evidence.
+
+The corrected [fresh 7715 policy-install crash run](policy-crash-7715/README.md) passes this `g+1` window in one invocation, including an owned controller SIGKILL, exact lookup-only recovery, and signed attach.
