@@ -166,6 +166,13 @@ impl GatewayControl {
         }
     }
 
+    /// True once no accepted request can enqueue another controller command.
+    /// The controller should still drain commands already queued before it
+    /// drops its receiver.
+    pub fn is_idle(&self) -> bool {
+        !self.shared.active_request.load(Ordering::SeqCst)
+    }
+
     fn current(&self, token: &str) -> Option<LeaseId> {
         if self.shared.revoked.load(Ordering::SeqCst) {
             return None;
