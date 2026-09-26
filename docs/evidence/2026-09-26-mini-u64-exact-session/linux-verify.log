@@ -1,0 +1,5 @@
+source_169=PASS
+artifacts_4=PASS
+changes_5=PASS
+aa4e9294eab4243590a51b3ecfbb54c7e613f6807a37b055800cc649437949c0  Compiler/Sp800185Cshake256Core.lean
+d413081bb6c6ac1c0699b5fdc22cf3a13fb87930ff49ac147ae994e2c364e7a3  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-u64-exact-session

@@ -1,0 +1,6 @@
+source_169=PASS
+artifacts_4=PASS
+changes_5=PASS
+linux_mac_sources_equal=PASS
+aa4e9294eab4243590a51b3ecfbb54c7e613f6807a37b055800cc649437949c0  Compiler/Sp800185Cshake256Core.lean
+a7dd4605ef80d49a3cc9a9e5eeaed5cb8fc4bac4554ce7ea7562475aaa70717f  /tmp/minidregg-overnight-20260926/minidregg-host-u64-exact-session

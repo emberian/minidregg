@@ -1,0 +1,9 @@
+a7dd4605ef80d49a3cc9a9e5eeaed5cb8fc4bac4554ce7ea7562475aaa70717f  /tmp/minidregg-overnight-20260926/minidregg-host-u64-exact-session
+9384047b5949744ff6fa0317a3daa0cd8d3167c207a804a6907152a4025a65e3  /tmp/minidregg-overnight-20260926/mini-client-fsync-restart-inspect-wip
+452908cb42070c57051fa7ccd65696541ec940f158c17db4f832a6355bc85e03  /Users/ember/dev/minidregg/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store
+dd5273f30a999dc7594018dd57605aebf2f9f15c43010f31e8674d28f14aafd9  /Users/ember/dev/minidregg/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier
+dd5273f30a999dc7594018dd57605aebf2f9f15c43010f31e8674d28f14aafd9  /tmp/minidregg-u64-exact-helper-pinning-20260926/source-verifier.original
+85ace0834ee238d490fc1cd82a084b485f7c136f0af9fc281d7650556d679121  /tmp/minidregg-replay-poison-initial-20260926/fixture/image-joint.bin
+85ace0834ee238d490fc1cd82a084b485f7c136f0af9fc281d7650556d679121  /tmp/minidregg-u64-exact-helper-pinning-20260926/physical-after.bin
+c36e08f12838a16803d6257db3e77c6ed9adcee3fc179ea2ea9dae948b0291b5  /tmp/minidregg-u64-exact-helper-pinning-20260926/content/retry-0001.bin
+3d790625f89235bd3249f2ae17d295f0fc541616a27170c37832cd8704c6e89f  /tmp/minidregg-u64-exact-helper-pinning-20260926/joint/retry-0001.bin
