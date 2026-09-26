@@ -1,0 +1,30 @@
+Read-only exact lookup latency on the fixed valid same-height fork image
+2026-09-26, Darwin arm64, /usr/bin/time -p wall seconds
+
+Host SHA-256: edad4dad46dd1f7d0084ec881f046e281c2a134ebdadb8cf28843935b5933308
+Mini client SHA-256: eb8d1753e8dfa80119aa7673605ba32170c0cc6e4ccb1fd1fa7ba9957c58e952
+SQLite image SHA-256: 527194645a32d5599dfa72f1e6c038e2eda6b398db3a3a0b40302f6bd423bd9d
+Retained signed call SHA-256: 9f25d6bf5961145fbd945c5972e8a8ae7efb3b362ea9e76e84193152f9831f06
+Binary outcome SHA-256, all six: af12afd7d6db9b2738a2d1068518b37ae1ced7ec3a649ed9c60022eec2782666
+
+One private `mini serve` process held the host open. For each pair, `mini retry
+--mode lookup --direct true` ran first, followed by the same retry with
+`--socket` to that process. Each retry performs lookup and host outcome
+inspection. The socket service startup was excluded from timed requests.
+The attempt directory was a private copy; the original replay fixture was
+read only. The store image was checked byte-identical to image-fork.bin before
+the run. Every result was `confirmed` / `replayed` with acceptedCount `2` and
+imageBoundary `91176041496996755960484387790824018865158052126020199877499137440300066892095`.
+
+pair  cold direct (s)  persistent socket (s)
+1     8.92             0.31
+2     8.96             0.35
+3     9.00             0.31
+median 8.96             0.31
+
+All six exact binary outcome files compared equal. This small fixed-image
+measurement says the retained host removes most repeated lookup latency in
+this fixture; it is not a throughput benchmark or a large-history estimate.
+The host is the initial source snapshot described in README.md. The Mini
+client is the later Darwin poll-deadline-fixed client; only core lookup and
+inspection opcodes were exercised here.

@@ -49,3 +49,9 @@ The result establishes persistent-process refusal of these two valid-image
 rewrites for these exact binaries. It does not claim that a fresh host rejects
 the old image or fork: cold opening both is part of the test. It does not
 generalize to every history, storage backend, or later source snapshot.
+
+A separate read-only [latency comparison](latency.log) used the same fixed fork
+image and exact signed lookup call with a later Darwin poll-deadline-fixed Mini
+client. Three cold direct retries took 8.92–9.00 seconds each; three retries
+through one persistent socket host took 0.31–0.35 seconds each. All six binary
+outcomes were byte-identical. The service startup was outside those timings.
