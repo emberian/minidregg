@@ -2,6 +2,7 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod control;
 mod mcp;
+mod provider;
 mod resource_tools;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -43,6 +44,8 @@ struct Config {
     policy_control_capability: Option<String>,
     #[serde(default)]
     tool_task: Option<ToolTask>,
+    #[serde(default)]
+    provider_task: Option<ProviderTask>,
     /// A command must be selected by its configured name. Its arguments are
     /// fixed by the operator, so a remote connection cannot inject paths or
     /// gain a new executable through this interface.
@@ -64,6 +67,27 @@ struct ToolTask {
     allowed_publications: Vec<PublicationGrant>,
     #[serde(default)]
     allowed_reads: Vec<resource_tools::AllowedResourceRead>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderTask {
+    task: String,
+    subject: String,
+    capability: String,
+    query_capability: String,
+    custody_key: PathBuf,
+    parent_capability: String,
+    parent_observe_capability: String,
+    reserve: String,
+    charge: String,
+    model: String,
+    upstream_url: String,
+    provider_key_file: PathBuf,
+    gateway_bind: String,
+    max_request_bytes: usize,
+    max_response_bytes: usize,
+    timeout_seconds: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -111,6 +135,8 @@ struct Journal {
     #[serde(default)]
     tool_pending: Option<Pending>,
     #[serde(default)]
+    provider_pending: Option<Pending>,
+    #[serde(default)]
     hard_reconnect_pending: bool,
     child: Option<ChildRecord>,
     settlement_due: Option<String>,
@@ -118,6 +144,10 @@ struct Journal {
     parent_hold: Option<HeldCharge>,
     #[serde(default)]
     tool_hold: Option<HeldCharge>,
+    #[serde(default)]
+    provider_hold: Option<HeldCharge>,
+    #[serde(default)]
+    provider_attempt: Option<ProviderAttempt>,
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
@@ -182,6 +212,21 @@ struct HeldCharge {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderAttempt {
+    id: u64,
+    prompt_operation_id: u64,
+    parent_generation: String,
+    model: String,
+    request_path: PathBuf,
+    /// The send boundary is durable before gateway I/O starts. An absent
+    /// response after this point means the external effect is uncertain.
+    send_started: bool,
+    outcome_path: Option<PathBuf>,
+    outcome: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HermesSession {
     id: String,
     workspace: PathBuf,
@@ -207,11 +252,14 @@ impl Journal {
             connection: Connection::Detached,
             pending: None,
             tool_pending: None,
+            provider_pending: None,
             hard_reconnect_pending: false,
             child: None,
             settlement_due: None,
             parent_hold: None,
             tool_hold: None,
+            provider_hold: None,
+            provider_attempt: None,
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -446,6 +494,59 @@ fn validate(c: &Config) -> Result<()> {
             decimal(&grant.observe_capability, "publication observe capability")?;
         }
         resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
+    }
+    if let Some(p) = &c.provider_task {
+        if p.task == c.task || c.tool_task.as_ref().is_some_and(|t| t.task == p.task) {
+            return Err("providerTask must be a distinct Mini resource".into());
+        }
+        if c.policy_control_capability.is_none() {
+            return Err("providerTask requires parent policy generation renewal".into());
+        }
+        for (name, value) in [
+            ("providerTask.task", &p.task),
+            ("providerTask.subject", &p.subject),
+            ("providerTask.capability", &p.capability),
+            ("providerTask.queryCapability", &p.query_capability),
+            ("providerTask.parentCapability", &p.parent_capability),
+            ("providerTask.parentObserveCapability", &p.parent_observe_capability),
+            ("providerTask.reserve", &p.reserve),
+            ("providerTask.charge", &p.charge),
+        ] {
+            decimal(value, name)?;
+        }
+        if !p.custody_key.is_absolute()
+            || p.custody_key == c.custody_key
+            || c.tool_task.as_ref().is_some_and(|t| t.custody_key == p.custody_key)
+            || !p.provider_key_file.is_absolute()
+            || p.provider_key_file == p.custody_key
+        {
+            return Err("providerTask needs distinct absolute key paths".into());
+        }
+        if p.reserve
+            .parse::<u64>()
+            .ok()
+            .zip(p.charge.parse::<u64>().ok())
+            .is_none_or(|(reserve, charge)| charge > reserve)
+        {
+            return Err("providerTask charge exceeds reserve".into());
+        }
+        let bind = p.gateway_bind.parse::<std::net::SocketAddr>()
+            .map_err(|_| "providerTask.gatewayBind must be a socket address")?;
+        if !bind.ip().is_loopback() || bind.port() == 0 {
+            return Err("providerTask.gatewayBind must pin a loopback port".into());
+        }
+        if p.model.is_empty() || p.model.len() > 256 || p.model.chars().any(char::is_control)
+            || p.max_request_bytes == 0 || p.max_request_bytes > 1_048_576
+            || p.max_response_bytes == 0 || p.max_response_bytes > 8_388_608
+            || p.timeout_seconds == 0 || p.timeout_seconds > 600
+        {
+            return Err("providerTask model or bounds invalid".into());
+        }
+        if !c.commands.iter().any(|command| command.systemd_scope
+            && command.args.iter().any(|arg| arg == "--network")
+            && command.args.iter().any(|arg| arg == "host")) {
+            return Err("providerTask requires an explicit scoped host-network Hermes command".into());
+        }
     }
     Ok(())
 }
@@ -1532,12 +1633,24 @@ impl Runtime {
                     .parent_hold
                     .as_ref()
                     .ok_or("signed fenced reservation has no durable parent hold")?;
+                let before_generation = hold
+                    .before_generation
+                    .parse::<u64>()
+                    .map_err(|_| "durable parent hold generation invalid")?;
+                let expected_generation = before_generation
+                    .checked_add(1)
+                    .ok_or("durable parent hold generation overflow")?
+                    .to_string();
                 if parent_state
                     .pointer("/grain/reserved")
                     .and_then(Value::as_str)
                     != Some(hold.reserve.as_str())
+                    || parent_state
+                        .pointer("/grain/generation")
+                        .and_then(Value::as_str)
+                        != Some(expected_generation.as_str())
                 {
-                    Err("signed fenced amount differs from durable parent hold".into())
+                    Err("signed fenced reservation differs from durable parent hold origin".into())
                 } else {
                     Ok(())
                 }

@@ -79,10 +79,31 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
 
 private def originJson (bytes : List UInt8) : Except String Json := do
   let package ← FnEvidenceCodec.decodeChecked bytes
-  let some (.invoke signedCall) := callCodec.decode package.signedCall
-    | throw "carried Mini origin is not a signed resource invocation"
-  let some command := DeclaredResourceController.commandCodec.decode signedCall.commandBytes
-    | throw "carried Mini origin command is noncanonical"
+  let some signedCall := callCodec.decode package.signedCall
+    | throw "carried Mini origin call is noncanonical"
+  let call ← match signedCall with
+    | .birth ingressBytes => do
+        let some ingress := ResourceBirthPolicyController.Concrete.ingressCodec.decode ingressBytes
+          | throw "carried Mini birth ingress is noncanonical"
+        let some descriptor := CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes
+          | throw "carried Mini birth descriptor is noncanonical"
+        pure <| Json.mkObj
+          [("type", toJson "birth"), ("exactIngressBytes", number ingressBytes.length),
+           ("exactDescriptorBytes", number ingress.descriptorBytes.length),
+           ("createdResourceCount", number descriptor.createRequests.length),
+           ("resourceOperationCount", number descriptor.resourceBatch.operations.length)]
+    | .invoke invocation => do
+        let some command := DeclaredResourceController.commandCodec.decode invocation.commandBytes
+          | throw "carried Mini invocation command is noncanonical"
+        pure <| Json.mkObj
+          [("type", toJson "invoke"), ("exactCommandBytes", number invocation.commandBytes.length),
+           ("signedTargets", .arr (command.targets.toArray.map targetJson))]
+    | .install ingressBytes => pure (Json.mkObj
+        [("type", toJson "install"), ("exactIngressBytes", number ingressBytes.length)])
+    | .delegate ingressBytes => pure (Json.mkObj
+        [("type", toJson "delegate"), ("exactIngressBytes", number ingressBytes.length)])
+    | .revoke ingressBytes => pure (Json.mkObj
+        [("type", toJson "revoke"), ("exactIngressBytes", number ingressBytes.length)])
   pure <| .mkObj
     [("verification", toJson "decoded carried package; consult original B admission for historical verification"),
      ("domain", number package.domain.value),
@@ -92,7 +113,7 @@ private def originJson (bytes : List UInt8) : Except String Json := do
      ("exactSignedCallBytes", number package.signedCall.length),
      ("exactAcceptedPrefixBytes", number package.acceptedPrefix.length),
      ("receipt", receiptJson package.originalReceipt),
-     ("signedTargets", .arr (command.targets.toArray.map targetJson))]
+     ("signedCall", call)]
 
 private def typedAtom (schema : String) (payload : List UInt8) : Except String Json := do
   match schema with
