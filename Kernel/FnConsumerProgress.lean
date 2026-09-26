@@ -169,6 +169,29 @@ def progressCommand (domain semantics : Digest) (report : Report) :
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
         (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩]⟩
 
+/-- Historical recognition checks the entire signed command while taking
+authority and target roots from that historical command, never the current
+snapshot. In particular, target kind, schema, and observation grant cannot
+be omitted by a command that merely carries the progress atom. -/
+def matchesSignedShape (domain semantics : Digest)
+    (signedBytes : List UInt8) (command : DeclaredResourceController.Command)
+    (target : DeclaredResourceController.Target) (evidence : Evidence) : Bool :=
+  FnConsumerOperation.exactSignedCommand signedBytes
+    (progressCommand domain semantics
+    ⟨evidence, command.subject, target.target, target.capability,
+      command.expectedAuthorityRoot, target.expectedTargetRoot⟩)
+
+theorem matchesSignedShape_sound (domain semantics : Digest)
+    (signedBytes : List UInt8) (command : DeclaredResourceController.Command)
+    (target : DeclaredResourceController.Target) (evidence : Evidence)
+    (decoded : DeclaredResourceController.commandCodec.decode signedBytes = some command)
+    (matched : matchesSignedShape domain semantics signedBytes command target evidence = true) :
+    command = progressCommand domain semantics
+      ⟨evidence, command.subject, target.target, target.capability,
+        command.expectedAuthorityRoot, target.expectedTargetRoot⟩ := by
+  exact FnConsumerOperation.exactSignedCommand_sound signedBytes command _
+    decoded matched
+
 /-- The entire native write is exactly one progress atom, with no application
 operation, result, reply, or outbox action. -/
 theorem progressCommand_exact_action (domain semantics : Digest) (report : Report) :
@@ -195,9 +218,7 @@ def originalSkip (pin : FnGatewayPolicy.Pin) (scope : Scope)
   if evidence.application == pin.application && evidence.scope == scope &&
       evidence.valid && command.subject == pin.subject &&
       target.target == pin.target && target.capability == pin.capability &&
-      command == progressCommand domain semantics
-        ⟨evidence, command.subject, target.target, target.capability,
-          command.expectedAuthorityRoot, target.expectedTargetRoot⟩ &&
+      matchesSignedShape domain semantics signed.commandBytes command target evidence &&
       command.nonce == progressNonce domain semantics evidence &&
       atom == progressAtom domain semantics evidence &&
       record.transactionId == marker domain semantics command.subject evidence then

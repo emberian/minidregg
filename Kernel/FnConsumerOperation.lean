@@ -120,6 +120,23 @@ ordinary list equality over a full portable article exhausts Lean's stack. -/
 def sameBytes (left right : List UInt8) : Bool :=
   decide (left.toByteArray = right.toByteArray)
 
+/-- Compare the exact original signed command bytes to a reconstructed
+constructor without recursively comparing multi-megabyte List fields. -/
+def exactSignedCommand (signedBytes : List UInt8)
+    (expected : DeclaredResourceController.Command) : Bool :=
+  sameBytes signedBytes (DeclaredResourceController.commandCodec.encode expected)
+
+theorem exactSignedCommand_sound (signedBytes : List UInt8)
+    (command expected : DeclaredResourceController.Command)
+    (decoded : DeclaredResourceController.commandCodec.decode signedBytes = some command)
+    (matched : exactSignedCommand signedBytes expected = true) :
+    command = expected := by
+  have bytesEq : signedBytes = DeclaredResourceController.commandCodec.encode expected := by
+    simpa only [exactSignedCommand, sameBytes, decide_eq_true_eq,
+      List.toByteArray_inj] using matched
+  rw [bytesEq, DeclaredResourceController.command_decode_encode] at decoded
+  exact (Option.some.inj decoded).symm
+
 def PortableInbox.same (left right : PortableInbox) : Bool :=
   sameBytes left.carrier right.carrier &&
   left.sourceIdentity == right.sourceIdentity &&
@@ -537,6 +554,16 @@ private def originalBindingWithInboxRaw (domain semantics : Digest)
                       binding.provenance.fnVerdictRef then
                   some (some storeInbox)
                 else none
+          let report : Report :=
+            { application := binding.application, operation := binding.operation,
+              provenance := binding.provenance, package := binding.package,
+              subject := command.subject, target := target.target,
+              capability := target.capability,
+              expectedAuthorityRoot := command.expectedAuthorityRoot,
+              expectedTargetRoot := target.expectedTargetRoot,
+              portableInbox := inbox, storePoll := storeInbox }
+          let .ok expected := bindingCommand domain semantics report binding.reply.miniReceipt
+            | none
           if atom == operationAtom domain semantics binding.application binding.operation &&
               outbox == replyAtom domain semantics binding.application binding.operation &&
               reply == binding.reply &&
@@ -544,7 +571,8 @@ private def originalBindingWithInboxRaw (domain semantics : Digest)
               reply.operation == binding.operation &&
               reply.sourceIdentity == binding.provenance.sourceIdentity &&
               command.nonce == operationNonce domain semantics
-                binding.application binding.operation then
+                binding.application binding.operation &&
+              exactSignedCommand signed.commandBytes expected then
             some (binding, inbox, storeInbox)
           else none
       | _ => none
@@ -654,7 +682,9 @@ private def originalConflictWithInboxRaw (domain semantics : Digest)
               (storeAction.isNone ||
                 storeAction.any (fun pair =>
                   pair.1 == storeConflictAtom domain semantics report)) &&
-              command.nonce == conflictNonce domain semantics report then
+              command.nonce == conflictNonce domain semantics report &&
+              exactSignedCommand signed.commandBytes
+                (conflictCommand domain semantics report) then
             some (evidence, inbox, storeInbox)
           else none
       | _ => none

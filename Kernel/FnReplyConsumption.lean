@@ -217,7 +217,9 @@ def originalConflict (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
       command.subject == report.subject && target.target == report.target &&
       target.capability == report.capability &&
       command.expectedAuthorityRoot == report.expectedAuthorityRoot &&
-      target.expectedTargetRoot == report.expectedTargetRoot then
+      target.expectedTargetRoot == report.expectedTargetRoot &&
+      FnConsumerOperation.exactSignedCommand signed.commandBytes
+        (conflictCommand domain semantics report) then
     some report else none
 
 /-- Reopen the original accepted result under the configured gateway identity.
@@ -238,6 +240,7 @@ def originalResult (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
   let .ok checked := check
       ⟨report.application, report.subject, report.target, report.capability⟩ report
     | none
+  let .ok expected := resultCommand domain semantics report result | none
   if report.application == pin.application &&
       command.subject == pin.subject && target.target == pin.target &&
       target.capability == pin.capability &&
@@ -249,7 +252,9 @@ def originalResult (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
       target.capability == report.capability &&
       command.expectedAuthorityRoot == report.expectedAuthorityRoot &&
       target.expectedTargetRoot == report.expectedTargetRoot &&
-      checked == result then some (result, report) else none
+      checked == result &&
+      FnConsumerOperation.exactSignedCommand signed.commandBytes expected then
+    some (result, report) else none
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (result : Result)
