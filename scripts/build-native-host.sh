@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -18,6 +18,10 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
               source, Lean artifact, and package artifact against a successful
               native build in an independent source snapshot; recompile all
               project C objects before linking
+  --incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE
+              compile MODULE and every later source module in import order;
+              verify the successful baseline, every earlier source/artifact,
+              unchanged later sources, packages, and toolchain before reuse
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -33,6 +37,7 @@ binary_path=""
 build_umbrella=0
 incremental_baseline_root=""
 incremental_baseline_output=""
+incremental_changed_module=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -41,9 +46,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --incremental-host-from)
       [[ $# -ge 3 ]] || { usage >&2; exit 64; }
+      [[ -z "$incremental_baseline_root" ]] || { usage >&2; exit 64; }
       incremental_baseline_root=$2
       incremental_baseline_output=$3
+      incremental_changed_module=Host.Main
       shift 3
+      ;;
+    --incremental-suffix-from)
+      [[ $# -ge 4 ]] || { usage >&2; exit 64; }
+      [[ -z "$incremental_baseline_root" ]] || { usage >&2; exit 64; }
+      incremental_baseline_root=$2
+      incremental_baseline_output=$3
+      incremental_changed_module=$4
+      shift 4
       ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
@@ -67,7 +82,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
-  printf 'build-native-host: --umbrella and --incremental-host-from are exclusive\n' >&2
+  printf 'build-native-host: --umbrella and incremental modes are exclusive\n' >&2
   exit 64
 fi
 
@@ -305,21 +320,45 @@ if [[ -n "$incremental_baseline_root" ]]; then
   toolchain=$(lake env lean --print-prefix)
   grep -qxF "toolchain=$toolchain" "$baseline_manifest"
   grep -qxF "lean=$(lean --version | sed -n '1p')" "$baseline_manifest"
-  [[ -f Host/Main.lean && -f "$incremental_baseline_root/Host/Main.lean" &&
-      ! Host/Main.lean -ef "$incremental_baseline_root/Host/Main.lean" ]] || {
-    printf 'build-native-host: changed Host.Main must be in an independent copy\n' >&2
+  changed_stem=${incremental_changed_module//./\/}
+  changed_source="$changed_stem.lean"
+  grep -qxF "$incremental_changed_module" "$source_modules" || {
+    printf 'build-native-host: changed module is outside native source closure: %s\n' \
+      "$incremental_changed_module" >&2
+    exit 65
+  }
+  [[ -f "$changed_source" && -f "$incremental_baseline_root/$changed_source" &&
+      ! "$changed_source" -ef "$incremental_baseline_root/$changed_source" ]] || {
+    printf 'build-native-host: changed module must be in an independent copy: %s\n' \
+      "$changed_source" >&2
     exit 73
   }
-  if cmp -s "$incremental_baseline_root/Host/Main.lean" Host/Main.lean; then
-    printf 'build-native-host: incremental Host.Main source is unchanged\n' >&2
+  if cmp -s "$incremental_baseline_root/$changed_source" "$changed_source"; then
+    printf 'build-native-host: incremental source is unchanged: %s\n' \
+      "$changed_source" >&2
     exit 65
   fi
   reused_paths="$output_dir/reused-artifact-paths.nul"
   : > "$reused_paths"
   validated_sources=0
+  validated_tail_sources=0
+  changed_seen=0
   while IFS= read -r module; do
-    [[ "$module" == Host.Main ]] && continue
     stem=${module//./\/}
+    if [[ "$module" == "$incremental_changed_module" ]]; then
+      changed_seen=1
+      continue
+    fi
+    if [[ "$changed_seen" == 1 ]]; then
+      if [[ ! -f "$incremental_baseline_root/$stem.lean" ||
+            ! -f "$stem.lean" ]] || \
+          ! cmp -s "$incremental_baseline_root/$stem.lean" "$stem.lean"; then
+        printf 'build-native-host: later source changed: %s\n' "$stem.lean" >&2
+        exit 65
+      fi
+      validated_tail_sources=$((validated_tail_sources + 1))
+      continue
+    fi
     for path in "$stem.lean" \
         ".lake/build/lib/lean/$stem.olean" \
         ".lake/build/lib/lean/$stem.ilean" \
@@ -333,6 +372,10 @@ if [[ -n "$incremental_baseline_root" ]]; then
     done
     validated_sources=$((validated_sources + 1))
   done < "$source_modules"
+  [[ "$changed_seen" == 1 ]] || {
+    printf 'build-native-host: changed module was not reached in source closure\n' >&2
+    exit 65
+  }
   validated_packages=0
   while IFS= read -r object; do
     package_root=${object%%/.lake/build/ir/*}
@@ -355,25 +398,39 @@ if [[ -n "$incremental_baseline_root" ]]; then
     printf 'baseline_snapshot=%s\n' "$incremental_baseline_root"
     printf 'baseline_output=%s\n' "$incremental_baseline_output"
     printf 'baseline_binary_sha256=%s\n' "$baseline_binary_hash"
+    printf 'changed_module=%s\n' "$incremental_changed_module"
     printf 'unchanged_imported_modules=%s\n' "$validated_sources"
+    printf 'unchanged_later_sources=%s\n' "$validated_tail_sources"
     printf 'unchanged_package_objects=%s\n' "$validated_packages"
-    printf 'changed_host_source_sha256=%s\n' \
-      "$(shasum -a 256 Host/Main.lean | cut -d ' ' -f 1)"
+    printf 'changed_source_sha256=%s\n' \
+      "$(shasum -a 256 "$changed_source" | cut -d ' ' -f 1)"
+    if [[ "$incremental_changed_module" == Host.Main ]]; then
+      printf 'changed_host_source_sha256=%s\n' \
+        "$(shasum -a 256 "$changed_source" | cut -d ' ' -f 1)"
+    fi
   } > "$output_dir/incremental-validation.txt"
   shasum -a 256 "$toolchain/bin/lean" "$toolchain/bin/clang" \
     "$toolchain/bin/leanc" > "$output_dir/toolchain-sha256.txt"
-  printf 'incremental imported source/artifact check PASS %s modules, %s package objects\n' \
-    "$validated_sources" "$validated_packages" | tee -a "$output_dir/build.log"
+  printf 'incremental source/artifact check PASS %s earlier modules, %s later sources, %s package objects\n' \
+    "$validated_sources" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
 fi
 
 if [[ "$build_umbrella" == 0 ]]; then
   index=0
+  compiled_sources=0
+  incremental_started=0
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
-    if [[ -n "$incremental_baseline_root" && "$module" != Host.Main ]]; then
-      continue
+    if [[ -n "$incremental_baseline_root" && "$incremental_started" == 0 ]]; then
+      if [[ "$module" == "$incremental_changed_module" ]]; then
+        incremental_started=1
+      else
+        index=$((index + 1))
+        continue
+      fi
     fi
     index=$((index + 1))
+    compiled_sources=$((compiled_sources + 1))
     safe=${module//./_}
     log="$output_dir/lean/$(printf '%04d' "$index")-$safe.log"
     one_start=$(date +%s)
@@ -766,7 +823,9 @@ git status --short > "$output_dir/git-status.txt"
   printf 'umbrella=%s\n' "$build_umbrella"
   if [[ -n "$incremental_baseline_root" ]]; then
     printf 'incremental_baseline=%s\n' "$incremental_baseline_output"
+    printf 'incremental_changed_module=%s\n' "$incremental_changed_module"
     printf 'unchanged_imported_modules=%s\n' "$validated_sources"
+    printf 'unchanged_later_sources=%s\n' "$validated_tail_sources"
     printf 'unchanged_package_objects=%s\n' "$validated_packages"
     printf 'reused_artifact_manifest=%s\n' "$output_dir/reused-artifact-sha256.txt"
   fi
@@ -776,7 +835,7 @@ git status --short > "$output_dir/git-status.txt"
     printf 'wrapper_invocations=%s\n' "$(grep -c '^START' "$wrapper_log")"
   fi
   if [[ -n "$incremental_baseline_root" ]]; then
-    printf 'compiled_source_modules=1\n'
+    printf 'compiled_source_modules=%s\n' "$compiled_sources"
   else
     printf 'compiled_source_modules=%s\n' "$(wc -l < "$build_modules" | tr -d ' ')"
   fi
