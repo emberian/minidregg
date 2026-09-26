@@ -9,7 +9,10 @@ of its reserved generation. The conserved Book birth fee is independent of
 the tool's permission-unit charge.
 -/
 import Kernel.AgentGrain
-import Kernel.ResourceBirthReceiver
+import Kernel.ResourceBirthController
+import Kernel.DeclaredResourceController
+import Compiler.ResourceBirthCodec
+import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.GrainResourceBirthAuthority
 import Compiler.Tower256ConcreteBackend
 
@@ -68,14 +71,30 @@ def Source.parentTarget (source : Source) : DeclaredResourceController.Target :=
 theorem Source.parent_after_exact (source : Source) :
     AgentGrain.Operation.input.after source.parentBefore = source.parentBefore := rfl
 
+/-- Physical shard allocation must not alter the user-signed grain command.
+The source commitment includes the complete user draft, including births,
+grants, funding, fee and the user's birth identity. -/
+def Source.userDraft (source : Source) :
+    ResourceBirth.Descriptor CanonicalCellRegistry.registry :=
+  { source.birth with auxiliaryCreates := [] }
+
+def Source.grainNonce (source : Source) : Nat :=
+  (Sp800185Cshake256.hash
+    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v1".toUTF8.toList
+    ((StreamCodec.product StreamCodec.nat bytesStream).encode
+      (source.birth.nonce,
+        (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
+          source.userDraft))).digest.value
+
 /-- Exactly two existing resource incidences: settle the tool reservation and
-carry the parent as an exact-state witness. The command subject and nonce are
-the birth creator and nonce; the existing operation marker remains domain
-separated from the birth identity. -/
+carry the parent as an exact-state witness. The subject is the birth creator;
+the nonce commits to the canonical user draft under the hash's collision
+resistance assumption. The operation marker remains domain separated from
+the birth identity. -/
 def Source.grainCommand (tariff : Tariff) (source : Source) :
     DeclaredResourceController.Command :=
   AgentGrain.Operation.command (.settle (Int.ofNat (tariff.charge source.birth)))
-    source.birth.creator source.authorityRoot source.birth.nonce
+    source.birth.creator source.authorityRoot source.grainNonce
     source.toolTask source.toolCapability source.toolRoot source.toolBefore
     [source.parentTarget] (some source.toolObserveCapability)
 
@@ -93,7 +112,7 @@ theorem Source.grainCommand_subject (tariff : Tariff) (source : Source) :
     (source.grainCommand tariff).subject = source.birth.creator := rfl
 
 theorem Source.grainCommand_nonce (tariff : Tariff) (source : Source) :
-    (source.grainCommand tariff).nonce = source.birth.nonce := rfl
+    (source.grainCommand tariff).nonce = source.grainNonce := rfl
 
 theorem Source.grainCommand_targets (tariff : Tariff) (source : Source) :
     (source.grainCommand tariff).targets =
