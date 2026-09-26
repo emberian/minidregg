@@ -398,6 +398,14 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 131_072 {
+        return Err("source-authored policy predicate is absent or exceeds 128 KiB".into());
+    }
+    fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     let output = Command::new("/usr/bin/openssl")
         .args(["dgst", "-sha256"])
@@ -1315,7 +1323,7 @@ impl Runtime {
         }
         Ok(json!({"view":view,"authorityRoot":challenge.pointer("/signing/0/authorityRoot")}))
     }
-    fn renew_worker_policy(&mut self) -> Result<()> {
+    fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
         let mut workers = Vec::new();
         if let Some(tool) = &self.config.tool_task {
             workers.push(tool.subject.clone());
@@ -1341,11 +1349,25 @@ impl Runtime {
             .pointer("/grain/status")
             .and_then(Value::as_str)
             .ok_or("signed parent status absent")?;
-        if !matches!(status, "1" | "2") {
-            return Err("parent is not attached for policy renewal".into());
+        if (attaching_from_paused && status != "0") || (!attaching_from_paused && status != "2") {
+            return Err("signed parent status does not match policy renewal phase".into());
         }
+        // Fresh attach advances the grain generation. Install the new source
+        // predicate before that transition, pinned to the generation it will
+        // enter, so a controller crash after attach still admits interrupt.
+        let generation = if attaching_from_paused {
+            generation
+                .parse::<u64>()
+                .map_err(|_| "signed parent generation invalid")?
+                .checked_add(1)
+                .ok_or("signed parent generation overflow")?
+                .to_string()
+        } else {
+            generation.to_owned()
+        };
         let policy = self.query_policy()?;
         let view = policy.get("view").ok_or("signed policy view absent")?;
+        self.require_managed_worker_policy(view, &workers, status, generation.as_str())?;
         let id = self.next_id()?;
         let mut source = json!({"subject":self.config.subject,"intentNonce":id.to_string(),
             "declarationNonce":id.to_string(),"task":self.config.task,
@@ -1425,6 +1447,83 @@ impl Runtime {
                 ))
             }
         }
+    }
+    fn require_managed_worker_policy(
+        &mut self,
+        view: &Value,
+        workers: &[String],
+        status: &str,
+        desired_generation: &str,
+    ) -> Result<()> {
+        let predicate = view
+            .get("predicate")
+            .ok_or("signed policy has no predicate")?;
+        let current_generation = desired_generation
+            .parse::<u64>()
+            .map_err(|_| "desired worker generation invalid")?;
+        let candidates = if status == "0" {
+            let paused_generation = current_generation
+                .checked_sub(1)
+                .ok_or("paused generation has no prior value")?;
+            let mut values = vec![current_generation];
+            if let Some(prior) = paused_generation.checked_sub(1) {
+                values.push(prior);
+            }
+            values
+        } else {
+            vec![current_generation]
+        };
+        let id = self.next_id()?;
+        let dir = self.config.state_dir.join(format!("policy-check-{id:016}"));
+        fs::create_dir(&dir).map_err(|e| format!("policy check directory: {e}"))?;
+        let observed_source = dir.join("signed-predicate.json");
+        write_new(
+            &observed_source,
+            &serde_json::to_vec(predicate).map_err(|e| e.to_string())?,
+        )?;
+        let observed_bytes = dir.join("signed-predicate.bin");
+        self.author_grain_policy_bytes("predicate", &observed_source, &observed_bytes)?;
+        let observed = bounded_policy_bytes(&observed_bytes)?;
+        for candidate in candidates {
+            let source = if workers.len() == 1 {
+                json!({"owner":self.config.subject,"workerSubject":workers[0],
+                    "workerGeneration":candidate.to_string()})
+            } else {
+                json!({"owner":self.config.subject,"workerSubjects":workers,
+                    "workerGeneration":candidate.to_string()})
+            };
+            let path = dir.join(format!("managed-{candidate}.json"));
+            write_new(
+                &path,
+                &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
+            )?;
+            let output = dir.join(format!("managed-{candidate}.bin"));
+            self.author_grain_policy_bytes("grain-policy", &path, &output)?;
+            if bounded_policy_bytes(&output)? == observed {
+                return Ok(());
+            }
+        }
+        Err("signed policy is not a supported exact managed worker law; explicit owner audit and policy upgrade required".into())
+    }
+    fn author_grain_policy_bytes(&self, kind: &str, input: &Path, output: &Path) -> Result<()> {
+        let cfg = &self.config;
+        let mut args = vec![
+            "author",
+            "--host",
+            cfg.host.to_str().ok_or("host path UTF-8")?,
+            "--config",
+            cfg.host_config.to_str().ok_or("config path UTF-8")?,
+            "--kind",
+            kind,
+            "--input",
+            input.to_str().ok_or("policy source path UTF-8")?,
+            "--output",
+            output.to_str().ok_or("policy output path UTF-8")?,
+        ];
+        if let Some(socket) = &cfg.host_socket {
+            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+        }
+        self.command_output(&cfg.mini, &args)
     }
     fn transition(&mut self, op: Value, label: &str, payload: &str) -> Result<()> {
         let authority = self.parent();
@@ -2513,7 +2612,7 @@ impl Runtime {
         self.journal.hard_reconnect_pending = true;
         self.save()?;
         self.hard_connection.store(true, Ordering::SeqCst);
-        self.emit("hard transport attached to soft reservation; loss will cancel the task\n");
+        self.emit("hard transport attached to soft reservation; loss will interrupt the task\n");
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
@@ -2539,8 +2638,8 @@ impl Runtime {
         };
         self.journal.connection = Connection::Fenced;
         self.save()?;
+        self.renew_worker_policy(prior != Connection::Soft)?;
         self.transition(op, "attach", "controller attach")?;
-        self.renew_worker_policy()?;
         self.journal.connection = if soft {
             Connection::Soft
         } else {
@@ -2652,7 +2751,6 @@ impl Runtime {
         {
             return Ok(());
         }
-        let soft_reserved = self.journal.connection == Connection::Soft;
         self.cancelled.store(true, Ordering::SeqCst);
         self.revoke_provider_gateway();
         let _ = self.completion_phase.compare_exchange(
@@ -2718,12 +2816,8 @@ impl Runtime {
                 Ok(())
             } else {
                 self.transition(
-                    if soft_reserved {
-                        json!({"type":"cancel"})
-                    } else {
-                        json!({"type":"disconnect"})
-                    },
-                    "disconnect",
+                    json!({"type":"interrupt"}),
+                    "interrupt",
                     "hard connection lost",
                 )
             }
@@ -3831,17 +3925,11 @@ impl Runtime {
                 .pointer("/grain/status")
                 .and_then(Value::as_str)
                 .ok_or("recovered grain has no status")?;
-            if matches!(status, "1" | "3") {
+            if matches!(status, "1" | "2" | "3" | "4") {
                 self.transition(
-                    json!({"type":"disconnect"}),
-                    "disconnect",
-                    "recovered hard connection loss",
-                )?;
-            } else if matches!(status, "2" | "4") {
-                self.transition(
-                    json!({"type":"cancel"}),
-                    "cancel",
-                    "recovered hard transport loss during soft reservation",
+                    json!({"type":"interrupt"}),
+                    "interrupt",
+                    "recovered lost controller or hard transport",
                 )?;
             } else if !matches!(status, "0" | "5" | "6" | "7") {
                 return Err(format!(
@@ -3961,14 +4049,13 @@ impl Runtime {
             self.save()?;
         }
         if matches!(status.as_str(), "3" | "4") {
-            let op = if status == "3" {
-                json!({"type":"disconnect"})
-            } else {
-                json!({"type":"cancel"})
-            };
             self.transition_as(
                 &authority,
-                op,
+                if status == "3" {
+                    json!({"type":"disconnect"})
+                } else {
+                    json!({"type":"interrupt"})
+                },
                 "reconcile fence",
                 "operator fenced held allowance",
                 vec![],

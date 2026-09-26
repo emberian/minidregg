@@ -31,13 +31,14 @@ grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile provide
 grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile effects'
 ```
 
-Hard EOF or explicit
-disconnect signals the owned process group immediately; the persistent
-controller then stops its remaining members and sends Mini a signed generation
-fence. A soft attachment lets the current reserved command or Hermes prompt
-finish after the connector closes, then settles its configured charge. A later
-connector can reattach to the same task. Each command name and all arguments
-come from the operator's fixed allowlist.
+Hard EOF or explicit disconnect signals the owned process group immediately;
+the persistent controller then stops its remaining members and sends Mini a
+signed `interrupt` generation fence. A soft transport close leaves its current
+reserved command or Hermes prompt running, then settles its configured charge.
+An abnormal worker or controller loss still interrupts a soft reservation;
+the held allowance must be reconciled before the task can reattach. `cancel`
+remains a distinct terminal native operation and is not a controller command.
+Each command name and all arguments come from the operator's fixed allowlist.
 
 Example configuration shape (IDs and paths must match an independently
 bootstrapped native Mini deployment):
@@ -185,8 +186,15 @@ uses a separate signed tool task, reserves allowance, and atomically settles
 that task with allowlisted resource publications and a pinned parent-grain
 no-op witness. The parent witness is authored by Lean and checked in the same
 native transaction; a later generation cannot authorize the old prompt's
-publication. The controller renews the parent worker policy after every
-attach through a signed native policy install before allowing a prompt.
+publication. Before attach or soft-to-hard mode change, the controller
+compares the whole signed installed predicate with source-authored canonical
+managed-law bytes for the configured worker subjects and permitted prior
+generation. A custom or unrecognized law refuses automatic renewal. It then
+installs the next-generation worker law through signed native policy control
+before attach, so a controller crash after attach still leaves `interrupt`
+admitted. An old grain with no configured worker policy has no automatic
+policy-upgrade route; if its installed law refuses `interrupt`, the controller
+remains fenced for explicit owner audit.
 Hermes still retains its built-in tools; ACP permission requests are refused,
 and an operator-selected OS confinement wrapper is mandatory. The Linux
 `deploy/grain-host/bwrap` launcher runs each worker in a transient systemd
