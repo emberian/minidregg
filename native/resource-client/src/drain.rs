@@ -305,7 +305,14 @@ fn load_upgrade(
     let old_host = PathBuf::from(field(&evidence, "oldHost")?);
     let socket = PathBuf::from(field(&evidence, "socket")?);
     let config = PathBuf::from(field(&evidence, "configPath")?);
-    if manifest_config != config || manifest_socket.as_deref() != Some(socket.as_path()) {
+    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
+    if hex(&Sha256::digest(&config_bytes)) != field(&evidence, "configSha256")? {
+        return Err("host upgrade config bytes changed".into());
+    }
+    if manifest_config != prepare.join("config.json")
+        || fs::read(&manifest_config).map_err(|e| e.to_string())? != config_bytes
+        || manifest_socket.as_deref() != Some(socket.as_path())
+    {
         return Err("Sending attempt config or socket differs from upgraded worker pin".into());
     }
     if manifest_host == new_host {
@@ -315,6 +322,11 @@ fn load_upgrade(
     }
     if manifest_host != old_host {
         return Err("Sending attempt host is neither original nor upgraded image".into());
+    }
+    if field(&evidence, "attemptConfigPath")? != utf8_path(&manifest_config)?
+        || field(&evidence, "attemptConfigSha256")? != file_digest(&manifest_config)?
+    {
+        return Err("host upgrade does not bind original attempt config snapshot".into());
     }
     let call_bytes = fs::read(prepare.join("call.bin")).map_err(|e| e.to_string())?;
     let call_sha = hex(&Sha256::digest(&call_bytes));
@@ -335,10 +347,6 @@ fn load_upgrade(
         || expected_fields.as_object().is_none_or(|m| m.len() != 4)
     {
         return Err("host upgrade evidence has malformed confirmed receipt".into());
-    }
-    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
-    if hex(&Sha256::digest(&config_bytes)) != field(&evidence, "configSha256")? {
-        return Err("host upgrade config bytes changed".into());
     }
     Ok(Some(HostUpgrade {
         old_host,
@@ -426,8 +434,10 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
     let call = prepare.join("call.bin");
     sync_retained_call(&prepare, &call)?;
     let (manifest_host, manifest_config, manifest_socket) = manifest_paths(&prepare)?;
+    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
     if manifest_host != old_host
-        || manifest_config != config
+        || manifest_config != prepare.join("config.json")
+        || fs::read(&manifest_config).map_err(|e| e.to_string())? != config_bytes
         || manifest_socket.as_deref() != Some(socket.as_path())
     {
         return Err("pending attempt manifest differs from existing worker pin".into());
@@ -436,7 +446,6 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
     if file_digest(known_outcome)? != known_sha {
         return Err("known confirmed outcome digest differs from operator assertion".into());
     }
-    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
     let config_sha = hex(&Sha256::digest(&config_bytes));
     let original_manifests = manifest_digests(&config)?;
     let mut upgrade_dir = None;
@@ -511,6 +520,8 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
         "oldPinType":old_pin_type, "oldPinSha256":old_pin_sha,
         "oldPinPath":utf8_path(&upgrade_dir.join("old-pin.json"))?,
         "configPath":utf8_path(&config)?, "configSha256":config_sha,
+        "attemptConfigPath":utf8_path(&manifest_config)?,
+        "attemptConfigSha256":file_digest(&manifest_config)?,
         "socket":utf8_path(&socket)?, "keyPath":utf8_path(&key)?,
         "publicKey":old_pin.get("publicKey"), "manifestSha256":original_manifests,
         "prepare":prepare_name, "callSha256":call_sha,
@@ -1074,9 +1085,11 @@ mod tests {
         private_dir(&pending).unwrap();
         private_dir(&prepare).unwrap();
         create_private(&prepare.join("call.bin"), b"exact retained call").unwrap();
+        let attempt_config = prepare.join("config.json");
+        create_private(&attempt_config, b"{}\n").unwrap();
         let original_manifest = json!({"format":"minidregg-resource-client-attempt-v1",
             "operation":"submit", "host":utf8_path(&old_host).unwrap(),
-            "config":utf8_path(&config).unwrap(), "socket":utf8_path(&socket).unwrap()});
+            "config":utf8_path(&attempt_config).unwrap(), "socket":utf8_path(&socket).unwrap()});
         write_json_new(&prepare.join("attempt.json"), &original_manifest).unwrap();
         let mut state = json!({"phase":"Sending","prepare":"prepare-00000002"});
         save_state(&pending, &state).unwrap();
@@ -1093,6 +1106,8 @@ mod tests {
             "oldHost":utf8_path(&old_host).unwrap(), "oldHostSha256":file_digest(&old_host).unwrap(),
             "newHost":utf8_path(&new_host).unwrap(), "newHostSha256":file_digest(&new_host).unwrap(),
             "configPath":utf8_path(&config).unwrap(), "configSha256":file_digest(&config).unwrap(),
+            "attemptConfigPath":utf8_path(&attempt_config).unwrap(),
+            "attemptConfigSha256":file_digest(&attempt_config).unwrap(),
             "socket":utf8_path(&socket).unwrap(), "prepare":"prepare-00000002",
             "callSha256":file_digest(&prepare.join("call.bin")).unwrap(),
             "confirmedFields":{"acceptedCount":"3","transactionId":"123",
@@ -1112,6 +1127,9 @@ mod tests {
         assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
             .unwrap()
             .is_some());
+        fs::write(&attempt_config, b"{\"changed\":true}").unwrap();
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host).is_err());
+        fs::write(&attempt_config, b"{}\n").unwrap();
         state["phase"] = json!("Acking");
         assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
             .unwrap()
