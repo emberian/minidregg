@@ -193,13 +193,17 @@ query_publication after-publish 51002
 AFTER_ROOT=$(jq -er '.page.root' "$EVIDENCE/after-publish/view.json")
 [ "$AFTER_ROOT" != "$BEFORE_ROOT" ]
 : >"$RELEASE"
-wait_journal '.child == null and (.connection == "detached" or .connection == "fenced")'
-jq -se '[.[] | select(.grain.task == "7001" and
+wait_journal '.connection == "detached" and .child == null and .pending == null and
+  .toolPending == null and .parentHold != null'
+FAULT_ID=$(jq -ser '[.[] | select(.grain.task == "7001" and
   (.grain.operation.type == "interrupt" or .grain.operation.type == "cancel"))]
   as $faults | ($faults | length) == 1 and
   $faults[0].grain.operation.type == "interrupt" and
-  $faults[0].grain.before == {generation:"1",status:"4",remaining:"97",reserved:"3"}' \
-  "$STATE"/source-*.json >/dev/null
+  $faults[0].grain.before == {generation:"1",status:"4",remaining:"97",reserved:"3"}
+  | if . then $faults[0].grain.context.operationId else empty end' \
+  "$STATE"/source-*.json)
+jq -e '.type == "confirmed" and .confirmation == "installed"' \
+  "$STATE/attempt-$(printf '%016d' "$FAULT_ID")/outcome.json" >/dev/null
 query_parent after-interrupt 52001
 jq -e '.page.grain == {task:"7001",generation:"2",status:"5",
   remaining:"97",reserved:"3"}' "$EVIDENCE/after-interrupt/view.json" >/dev/null

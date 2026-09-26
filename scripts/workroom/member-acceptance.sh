@@ -61,6 +61,16 @@ refused() {
   jq -e '.type == "refused" and (.phase | type == "string" and test("^[0-9a-f]+$")) and
     (.detail | type == "string" and test("^[0-9a-f]+$"))' "$1" >/dev/null
 }
+reason_hex() { printf '%s' "$1" | od -An -tx1 -v | tr -d ' \n'; }
+assert_refusal_reason() {
+  label=$1 reason=$2
+  encoded=$(reason_hex "$reason")
+  if [ -f "$EVIDENCE/$label-attempt/outcome.json" ]; then
+    jq -er '.detail' "$EVIDENCE/$label-attempt/outcome.json" | grep -Fq "$encoded"
+  else
+    grep -Fq "$encoded" "$EVIDENCE/$label.stderr"
+  fi || { echo "wrong native refusal for $label: expected $reason" >&2; exit 1; }
+}
 query() {
   label=$1 subject=$2 target=$3 capability=$4 key=$5 nonce=$6
   jq -n --arg subject "$subject" --arg target "$target" --arg capability "$capability" \
@@ -84,7 +94,12 @@ deny_query() {
     --dir "$EVIDENCE/$label" >"$EVIDENCE/$label.stdout" 2>"$EVIDENCE/$label.stderr"; then
     echo "unauthorized query succeeded: $label" >&2; exit 1
   fi
-  [ ! -e "$EVIDENCE/$label/view.json" ] || exit 1
+  [ -s "$EVIDENCE/$label/signed-observation.bin" ] &&
+    [ ! -e "$EVIDENCE/$label/view.json" ] &&
+    grep -Fq 'host refused query' "$EVIDENCE/$label.stderr" &&
+    grep -Fq "$(reason_hex 'observation refused')" "$EVIDENCE/$label.stderr" || {
+      echo "denial lacked native observation refusal: $label" >&2; exit 1;
+    }
 }
 submit() {
   label=$1 key=$2
@@ -94,7 +109,7 @@ submit() {
   confirmed "$EVIDENCE/$label-attempt/outcome.json"
 }
 deny_submit() {
-  label=$1 key=$2
+  label=$1 key=$2 expected=$3
   if "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     --intent "$EVIDENCE/$label-intent.json" --key "$key" \
     --dir "$EVIDENCE/$label-attempt" >"$EVIDENCE/$label.stdout" 2>"$EVIDENCE/$label.stderr"; then
@@ -111,6 +126,7 @@ deny_submit() {
         echo "denial lacked native prepare evidence: $label" >&2; exit 1;
       }
   fi
+  assert_refusal_reason "$label" "$expected"
 }
 delegate() {
   label=$1 child=$2 verb=$3 query_label=$4 nonce=$5
@@ -192,7 +208,7 @@ make_edit first-edit 8 95 first-observed "$second" 60104
 submit first-edit "$FIRST_KEY"
 query after-first-edit 8 8001 96 "$FIRST_KEY" 60106
 make_edit member-stale 9 97 member-observed "$third" 60107
-deny_submit member-stale "$SECOND_KEY"
+deny_submit member-stale "$SECOND_KEY" 'Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget'
 fi
 if [ "$RESUME" != split ]; then
 query after-stale 9 8001 98 "$SECOND_KEY" 60109
@@ -236,7 +252,7 @@ query owner-after-revoke 7 8001 89 "$OWNER_KEY" 60126
 # Use the owner's fresh signed page and authority root, so this next-action
 # refusal tests revoked member authority rather than an accidentally stale root.
 make_edit member-revoked-edit 9 97 owner-after-revoke "$third" 60123
-deny_submit member-revoked-edit "$SECOND_KEY"
+deny_submit member-revoked-edit "$SECOND_KEY" 'observation refused'
 query first-after-revoke 8 8001 96 "$FIRST_KEY" 60125
 test "$(jq -er '.page.root' "$EVIDENCE/first-after-revoke/view.json")" = \
   "$(jq -er '.page.root' "$EVIDENCE/owner-after-revoke/view.json")"
