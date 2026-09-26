@@ -1,0 +1,5 @@
+late_start_before_fence_state=activating
+late_gate_result=exit-code exec_status=1
+PASS prior systemd start request, delayed ExecStart, fence first: worker did not run
+PASS fence before init cannot rearm or launch
+PASS fence plus exact unit kill stops running worker and blocks retry

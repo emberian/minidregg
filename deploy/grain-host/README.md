@@ -2,8 +2,9 @@
 
 This directory supplies a Linux launcher for `native/grain-runtime`. The
 runtime remains the Mini authority and budget controller. Its worker process
-uses this `bwrap` executable, which creates a distinct transient **user**
-systemd service for each reserved operation, then executes the fixed command
+uses this `bwrap` executable and its sibling `launch-gate` executable. The
+launcher creates a distinct transient **user** systemd service for each
+reserved operation. The gate is that service's `ExecStart` and executes the fixed command
 inside a bubblewrap mount, user, PID, IPC and cgroup namespace. The name is
 `mini-grain-t<TASK>-o<OPERATION_ID>` and comes from the runtime's durable child
 marker as `MINI_GRAIN_UNIT`. The runtime also supplies
@@ -23,17 +24,25 @@ Example fixed runtime command (the operator chooses paths and amounts):
  "args":["--workspace","/srv/mini/grains/7001/work",
          "--runtime-root","/opt/hermes/runtime",
          "--network","host","--","/agent/hermes-acp"],
- "reserve":"10000","charge":"10000"}
+"systemdScope":true,"reserve":"10000","charge":"10000"}
 ```
 
-The controller must put the exact unit name in its child journal before spawn,
-set `MINI_GRAIN_UNIT` on the command, and on hard disconnect first signal its
-owned process group, then kill **all** processes in that unit with
-`systemctl --user kill --signal=SIGKILL --kill-whom=all NAME.service`. It must
-observe the unit stopped before clearing the child marker or fencing the Mini
-generation. The wrapper also kills the unit when it receives TERM, INT or HUP.
-After controller death, an old journal entry is only an audit clue; it must
-never trigger an automatic kill of a possibly reused unit.
+Compile `launch-gate.rs` on the Linux host with
+`rustc --edition=2021 launch-gate.rs -o launch-gate` and install it beside
+`bwrap`; both must be executable. The launcher verifies the sibling gate's
+exact protocol response before advertising its own protocol to the runtime.
+Before spawning, the controller durably arms
+the operation gate and records the exact unit name in its private state. The
+service's `ExecStart` runs `launch-gate run STATE_DIR UNIT -- /usr/bin/bwrap …`.
+After a hard disconnect or crash, the controller durably fences the gate before
+killing **all** processes in that unit with
+`systemctl --user kill --signal=SIGKILL --kill-whom=all NAME.service`. This
+also blocks a start request that reached systemd but has not executed yet. The
+controller must audit the unit stopped before clearing the child marker or
+reconciling the Mini reservation; a failed fence or audit leaves it unresolved.
+The wrapper also kills the unit when it receives TERM, INT or HUP. Gate
+tombstones must remain while an operation ID might be reused. An old journal
+entry alone must never trigger an automatic kill of a possibly reused unit.
 
 `mini-grain-controller@.service` is a user-systemd template for a persistent
 `grain-runtime serve` process. Its `%i` is the decimal task ID and its JSON

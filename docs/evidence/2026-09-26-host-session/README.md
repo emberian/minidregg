@@ -55,3 +55,31 @@ image and exact signed lookup call with a later Darwin poll-deadline-fixed Mini
 client. Three cold direct retries took 8.92–9.00 seconds each; three retries
 through one persistent socket host took 0.31–0.35 seconds each. All six binary
 outcomes were byte-identical. The service startup was outside those timings.
+
+An independent [Linux launch-fence race result](launch-gate-linux-race.log)
+from persvati (see [platform](launch-gate-linux-platform.log) and
+[source/binary hashes](launch-gate-linux-sha256.txt)) exercised the isolated
+`launch-gate` prototype with a real transient systemd user service. A start
+request was already in `activating/start-pre` when the gate was durably
+fenced; its delayed ExecStart exited with status 1 and never ran the worker.
+The probe also checked fence-before-init and fence plus exact unit kill for a
+running worker. The [prototype contract](../../../scripts/overnight-tests/LAUNCH-GATE.md)
+requires runtime and launcher integration; this result alone does not claim
+that the current runtime uses the gate.
+
+After the helper moved into `deploy/grain-host/launch-gate.rs`, the same
+[race probe](launch-gate-linux-deployed-race.log) compiled that exact deployed
+source and passed on persvati ([platform](launch-gate-linux-deployed-platform.log),
+[source and binary hashes](launch-gate-linux-deployed-sha256.txt)). A real
+transient user service was already in `activating/start-pre` when the durable
+fence was written. Its delayed ExecStart refused with exit status 1 and no
+worker ran. The probe also passed fence-before-init and running-worker
+kill/cgroup-empty/retry refusal. The probe uses a harmless sleep worker; the
+paired `bwrap` launcher and final native runtime require their own integrated
+acceptance. This evidence is separate from the initial native host snapshot
+above and does not retroactively change its source scope.
+The deploy owner's separate
+[`bwrap` integration smoke](../../../deploy/grain-host/GATE-INTEGRATION-2026-09-26.log)
+exercised the matching launcher and helper on persvati, including the sibling
+protocol check and exact-unit stop behavior. It is not a native Mini
+reserve/worker/recovery acceptance run.

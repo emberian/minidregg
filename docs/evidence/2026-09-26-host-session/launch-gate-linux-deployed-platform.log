@@ -1,0 +1,5 @@
+persvati, Linux 6.17.0-40-generic
+systemd 257 (257.9-0ubuntu2.5)
+Probe: real transient user service with ExecStartPre=/bin/sleep 3
+Final protocol-coupled source scratch: /tmp/mini-launch-gate-run-final-20260926
+No Mini node, key, store, or external tool was used by this race probe.

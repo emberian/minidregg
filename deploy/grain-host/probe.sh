@@ -2,8 +2,10 @@
 # Bounded Linux user-systemd/bwrap containment probe. Uses only transient user
 # units and a private /tmp tree; no Mini/fn deployment or privileged changes.
 set -euo pipefail
+umask 077
 
 launcher=$(realpath -e "${1:-$(dirname "$0")/bwrap}")
+gate=$(realpath -e "$(dirname "$launcher")/launch-gate")
 helper_source=$(realpath -e "$(dirname "$0")/probe_socket.rs")
 scratch=$(mktemp -d /tmp/mini-grain-probe.XXXXXX)
 task=$$
@@ -17,11 +19,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'host=%s kernel=%s systemd=%s launcher_sha256=%s probe_sha256=%s socket_helper_sha256=%s\n' \
+printf 'host=%s kernel=%s systemd=%s launcher_sha256=%s gate_sha256=%s probe_sha256=%s socket_helper_sha256=%s\n' \
   "$(hostname)" "$(uname -r)" "$(systemctl --version | head -1)" \
   "$(sha256sum "$launcher" | cut -d' ' -f1)" \
+  "$(sha256sum "$gate" | cut -d' ' -f1)" \
   "$(sha256sum "$0" | cut -d' ' -f1)" \
   "$(sha256sum "$helper_source" | cut -d' ' -f1)"
+[[ $($launcher --launch-gate-protocol) == mini-grain-launch-gate-v1 ]]
+echo 'PASS launcher requires sibling gate protocol v1'
 mkdir "$scratch/runtime" "$scratch/work" "$scratch/controller"
 printf 'key' > "$scratch/controller/key"
 printf '{}' > "$scratch/controller/task.json"
@@ -41,6 +46,7 @@ for _ in {1..30}; do
 done
 [[ -S "$scratch/controller/broker.sock" ]]
 export MINI_GRAIN_BROKER_SOCKET="$scratch/controller/broker.sock"
+"$gate" init "$scratch/controller" "mini-grain-t${task}-o3" >/dev/null
 MINI_GRAIN_UNIT="mini-grain-t${task}-o3" timeout 10 "$launcher" --workspace "$scratch/work" \
   --runtime-root "$scratch/runtime" --network none -- /agent/probe-socket client /run/mini-grain.sock \
   > "$scratch/broker.out" 2>&1
@@ -92,6 +98,7 @@ assert_dead() {
   done
 }
 
+"$gate" init "$scratch/controller" "$hard_unit" >/dev/null
 MINI_GRAIN_UNIT="$hard_unit" "$launcher" --workspace "$scratch/work" \
   --runtime-root "$scratch/runtime" --network none -- /agent/setsid-probe \
   > "$scratch/hard.out" 2>&1 &
@@ -111,6 +118,7 @@ printf 'PASS wrapper TERM stopped setsid unit (%s host pids, state=%s)\n' \
 rm "$scratch/work/started"
 systemd-run --user --unit="mini-grain-controller@$task" \
   --property=RuntimeMaxSec=20s /bin/sleep 20 >/dev/null
+"$gate" init "$scratch/controller" "$bound_unit" >/dev/null
 MINI_GRAIN_CONTROLLER_UNIT="$controller" MINI_GRAIN_UNIT="$bound_unit" \
   "$launcher" --workspace "$scratch/work" --runtime-root "$scratch/runtime" \
   --network none -- /agent/setsid-probe > "$scratch/bound.out" 2>&1 &

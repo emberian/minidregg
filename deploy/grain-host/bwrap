@@ -3,6 +3,22 @@
 # name for each reserved operation through MINI_GRAIN_UNIT.
 set -euo pipefail
 
+launcher_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+launch_gate=$launcher_dir/launch-gate
+[[ -x $launch_gate ]] || { echo "launch-gate executable absent: $launch_gate" >&2; exit 66; }
+gate_protocol=$("$launch_gate" --launch-gate-protocol) || {
+  echo 'launch-gate protocol check failed' >&2
+  exit 66
+}
+[[ $gate_protocol == mini-grain-launch-gate-v1 ]] || {
+  echo 'launch-gate protocol mismatch' >&2
+  exit 66
+}
+if [[ $# == 1 && $1 == --launch-gate-protocol ]]; then
+  printf 'mini-grain-launch-gate-v1\n'
+  exit 0
+fi
+
 usage() {
   echo 'usage: bwrap --workspace ABS_DIR --runtime-root ABS_DIR --network none|host -- /agent/PROGRAM [ARG...]' >&2
   exit 64
@@ -114,6 +130,7 @@ unit_properties=(
 [[ -z $controller_unit ]] || unit_properties+=("--property=BindsTo=$controller_unit")
 /usr/bin/systemd-run --user --wait --pipe --collect --unit="${MINI_GRAIN_UNIT}" \
   "${unit_properties[@]}" \
+  "$launch_gate" run "$MINI_GRAIN_STATE_DIR" "$MINI_GRAIN_UNIT" -- \
   "${sandbox[@]}" <&0 >&1 2>&2 &
 runner_pid=$!
 wait "$runner_pid"
