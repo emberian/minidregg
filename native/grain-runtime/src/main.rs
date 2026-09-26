@@ -191,6 +191,11 @@ struct HermesSession {
     /// changes between turns; the worker can still write its own transcript.
     state_fingerprint: Option<String>,
     retention_issue: Option<String>,
+    /// A prompt was sent but no completed-turn fingerprint was recorded.
+    /// Its expected SQLite writes are examined after physical and Mini
+    /// reconciliation, then the exact ID must pass session/load.
+    #[serde(default)]
+    pending_prompt: bool,
 }
 
 impl Journal {
@@ -1845,16 +1850,38 @@ impl Runtime {
             return Err("Hermes wrapper must launch the upstream hermes-acp executable".into());
         }
         let (workspace, hermes_home) = hermes_workspace_home(&self.config.cwd)?;
-        if let Some(session) = &self.journal.hermes_session {
+        if let Some(session) = self.journal.hermes_session.clone() {
             if session.workspace != workspace {
                 return Err("saved Hermes session belongs to another workspace".into());
             }
-            if let Some(issue) = &session.retention_issue {
-                return Err(format!("Hermes conversation not retained: {issue}; use `conversation new` to start explicitly"));
-            }
             let current = hermes_state_fingerprint(&hermes_home)?;
-            if current != session.state_fingerprint {
-                return Err("Hermes transcript store changed between prompts; use `conversation new` after review".into());
+            if session.pending_prompt {
+                if current == session.state_fingerprint {
+                    self.emit("Hermes interrupted turn made no observed transcript-store change; its last prompt may be absent\n");
+                } else {
+                    self.emit("Hermes interrupted turn changed the transcript store; reloading its exact session ID after Mini reconciliation\n");
+                }
+                if let Some(fingerprint) = current {
+                    if let Some(saved) = self.journal.hermes_session.as_mut() {
+                        saved.state_fingerprint = Some(fingerprint);
+                        saved.retention_issue = None;
+                    }
+                    self.save()?;
+                } else {
+                    if let Some(saved) = self.journal.hermes_session.as_mut() {
+                        saved.retention_issue =
+                            Some("interrupted prompt left no Hermes state.db".into());
+                    }
+                    self.save()?;
+                    return Err("interrupted Hermes prompt has no retained state; use `conversation new` explicitly".into());
+                }
+            } else {
+                if let Some(issue) = &session.retention_issue {
+                    return Err(format!("Hermes conversation not retained: {issue}; use `conversation new` to start explicitly"));
+                }
+                if current != session.state_fingerprint {
+                    return Err("Hermes transcript store changed between prompts; use `conversation new` after review".into());
+                }
             }
         }
         let acp_cwd = if spec.systemd_scope {
@@ -2072,8 +2099,13 @@ impl Runtime {
                 }
                 if let Some(current) = self.journal.hermes_session.as_mut() {
                     current.load_verified = true;
+                    current.pending_prompt = false;
+                    current.retention_issue = None;
                 }
                 self.save()?;
+                if previous.pending_prompt {
+                    self.emit("Hermes session reloaded; the interrupted last turn may be partial, so inspect its history before repeating effects\n");
+                }
                 Ok(previous.id.clone())
             } else {
                 let session_id = response
@@ -2093,6 +2125,7 @@ impl Runtime {
                     load_verified: false,
                     state_fingerprint: None,
                     retention_issue: Some("first prompt has not yet been retained".into()),
+                    pending_prompt: false,
                 });
                 self.save()?;
                 Ok(session_id.to_owned())
@@ -2101,14 +2134,20 @@ impl Runtime {
         let outcome = match &session {
             Ok(session_id) => {
                 self.prompt_active = true;
-                let prompt_sent = acp_send(
-                    &mut child_stdin,
-                    3,
-                    "session/prompt",
-                    json!({
-                        "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
-                    }),
-                );
+                let prompt_sent = (|| -> Result<()> {
+                    if let Some(current) = self.journal.hermes_session.as_mut() {
+                        current.pending_prompt = true;
+                    }
+                    self.save()?;
+                    acp_send(
+                        &mut child_stdin,
+                        3,
+                        "session/prompt",
+                        json!({
+                            "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
+                        }),
+                    )
+                })();
                 if prompt_sent.is_ok() {
                     broker.activate_prompt();
                 }
@@ -2188,6 +2227,7 @@ impl Runtime {
         self.finish_reconnected_mode()?;
         let retention = hermes_state_fingerprint(&hermes_home);
         if let Some(current) = self.journal.hermes_session.as_mut() {
+            current.pending_prompt = false;
             match &retention {
                 Ok(Some(fingerprint)) => {
                     current.state_fingerprint = Some(fingerprint.clone());
@@ -3220,7 +3260,24 @@ fn main() -> ExitCode {
         };
     }
     if args.len() == 3 && args[1] == "connect" {
-        return match control::connect(&PathBuf::from(&args[2])) {
+        return match control::connect(&PathBuf::from(&args[2]), None) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("grain-runtime connect: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.len() == 4 && args[1] == "connect" {
+        let Some(mode) = args[3].to_str() else {
+            eprintln!("grain-runtime connect: mode must be hard or soft");
+            return ExitCode::from(2);
+        };
+        if !matches!(mode, "hard" | "soft") {
+            eprintln!("grain-runtime connect: mode must be hard or soft");
+            return ExitCode::from(2);
+        }
+        return match control::connect(&PathBuf::from(&args[2]), Some(mode)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("grain-runtime connect: {e}");
@@ -3252,7 +3309,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);

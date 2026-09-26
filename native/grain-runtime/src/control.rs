@@ -412,14 +412,38 @@ fn read_line(stream: &mut UnixStream) -> io::Result<String> {
     String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Forward SSH forced-command stdin/stdout to the persistent controller. The
+/// Forward SSH forced-command stdin/stdout to the persistent controller. An
+/// optional fixed mode sends the first attach line before accepting user input;
+/// the original raw connector remains available to scripted clients. The
 /// connector does not read config, keys, journals, or Mini authority data.
-pub fn connect(path: &Path) -> Result<(), String> {
+pub fn connect(path: &Path, mode: Option<&str>) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("controller socket path must be absolute".into());
     }
     let mut stream =
         UnixStream::connect(path).map_err(|e| format!("connect {}: {e}", path.display()))?;
+    if let Some(mode) = mode {
+        let attach = match mode {
+            "hard" => b"attach hard\n".as_slice(),
+            "soft" => b"attach soft\n".as_slice(),
+            _ => return Err("attachment mode must be hard or soft".into()),
+        };
+        stream
+            .write_all(attach)
+            .map_err(|e| format!("send {mode} attachment: {e}"))?;
+        // The socket can refuse a second attachment before any runtime event
+        // is delivered. Read its first line before starting the stdin copier,
+        // so that refusal exits even when SSH stdin is still open.
+        let first = read_line(&mut stream)
+            .map_err(|e| format!("{mode} attachment closed before a response: {e}"))?;
+        if first == "controller already has an attachment"
+            || first == "first line must be attach hard|soft"
+            || first.starts_with("grain-runtime:")
+        {
+            return Err(format!("{mode} attachment refused: {first}"));
+        }
+        writeln!(io::stdout().lock(), "{first}").map_err(|e| format!("attachment output: {e}"))?;
+    }
     let mut to_server = stream.try_clone().map_err(|e| e.to_string())?;
     thread::spawn(move || {
         let _ = io::copy(&mut io::stdin().lock(), &mut to_server);
@@ -514,6 +538,34 @@ mod tests {
 
         drop(server);
         assert!(!socket.exists());
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn mode_connector_reports_busy_attachment_without_waiting_for_ssh_input() {
+        let dir = PathBuf::from("/tmp").join(format!(
+            "gb-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let socket = dir.join("controller.sock");
+        let server = start(&socket, Arc::new(|_| {})).unwrap();
+        let mut held = UnixStream::connect(&socket).unwrap();
+        held.write_all(b"attach soft\n").unwrap();
+        assert!(matches!(
+            server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Attached { soft: true, .. }
+        ));
+        let error = connect(&socket, Some("hard")).unwrap_err();
+        assert!(error.contains("controller already has an attachment"));
+        assert!(server.events.try_recv().is_err());
+        drop(held);
+        let _ = server.events.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(server);
         fs::remove_dir(dir).unwrap();
     }
 

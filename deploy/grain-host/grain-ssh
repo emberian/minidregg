@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Use only as a fixed SSH forced command for one task/socket.
+# Use only as a fixed SSH forced command for one task/socket and attachment mode.
 set -euo pipefail
-if [[ $# != 2 || $1 != /* || $2 != /* ]]; then
-  echo 'usage: grain-ssh ABS_GRAIN_RUNTIME ABS_CONTROL_SOCKET' >&2
+if [[ $# -lt 2 || $# -gt 3 || $1 != /* || $2 != /* ]]; then
+  echo 'usage: grain-ssh ABS_GRAIN_RUNTIME ABS_CONTROL_SOCKET [hard|soft]' >&2
+  exit 64
+fi
+mode=${3:-hard}
+if [[ $mode != hard && $mode != soft ]]; then
+  echo 'attachment mode must be hard or soft' >&2
   exit 64
 fi
 [[ -x $1 ]] || { echo 'grain runtime is not executable' >&2; exit 66; }
 # SSH_ORIGINAL_COMMAND is intentionally ignored. The runtime protocol admits
 # only its own fixed task commands and Mini checks current authority.
-exec "$1" connect "$2"
+echo "Mini grain: requesting ${mode} attachment; waiting for controller confirmation." >&2
+echo 'Once attached: hermes PROMPT uses the configured worker; run NAME uses the operator allowlist.' >&2
+echo 'Other commands: status, conversation new, recover, disconnect. Status and recover do not grant authority.' >&2
+exec "$1" connect "$2" "$mode"

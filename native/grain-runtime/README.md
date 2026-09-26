@@ -88,6 +88,11 @@ checks the closed upstream `state.db`/WAL fingerprint between prompts. The
 upstream transcript is worker-authored state, not a Mini-signed record. If the
 first prompt never creates a retained database row, loading fails, or the
 database changes outside the controller, the task reports a retention issue.
+An interrupted prompt stays marked in the journal. After physical stop and
+Mini reconciliation, the controller accepts expected writes to the private
+transcript store and tries `session/load` with the same ID. It reports that
+the interrupted turn may be partial; if upstream never wrote a usable row,
+the load fails rather than silently creating a new conversation.
 After the grain is idle and fully reconciled, `conversation new` explicitly
 selects a fresh conversation while retaining the prior session ID in the
 journal. It does not reset Mini authority, allowance, or unresolved effects.

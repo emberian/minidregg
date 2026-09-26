@@ -53,10 +53,29 @@ directory and keep it at mode 0700. The service
 sets `MINI_GRAIN_CONTROLLER_UNIT` for the launcher, which adds a `BindsTo=`
 dependency: stopping the controller service also stops its worker units.
 The operator must install the runtime and per-task config at the template's
-paths or adjust those paths before using the unit. `grain-ssh` is an SSH forced
-command front end for the runtime's `connect ABS_CONTROL_SOCKET` mode. A
-per-task `authorized_keys` entry can fix both absolute arguments and use
-OpenSSH's `restrict` option. It ignores `SSH_ORIGINAL_COMMAND`.
+paths or adjust those paths before using the unit. `grain-ssh` is an SSH
+forced-command front end for the runtime's `connect ABS_CONTROL_SOCKET
+hard|soft` mode. A per-task `authorized_keys` entry fixes the absolute
+runtime and socket paths and uses OpenSSH's `restrict` option. For example,
+after installing the persistent service and task configuration:
+
+```text
+restrict,pty,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock" ssh-ed25519 AAAA... hard-key
+restrict,pty,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock soft" ssh-ed25519 AAAA... soft-key
+```
+
+The two-argument entry defaults to **hard**: SSH EOF interrupts an active
+worker and the persistent controller fences its Mini generation. **Soft** is
+an explicit third argument in a separate fixed entry: SSH EOF detaches while
+the already reserved task may finish; a later connection can reattach. The
+wrapper ignores `SSH_ORIGINAL_COMMAND`, sends exactly one attach line, and
+forwards only the controller's line interface. Wait for its `attached ...`
+or reconnect message before entering `hermes PROMPT`, an allowlisted
+`run NAME`, `status`, `conversation new`, `recover`, or `disconnect`.
+Attachment can take seconds while Mini confirms the transition; a refusal is
+printed and closes the SSH connection. A reconnect resumes the task's
+controller and retained Hermes conversation when its state permits; it does
+not claim to resume an interrupted provider call or settle unresolved effects.
 
 The persistent controller process is required for hard SSH EOF to signal the
 worker before Mini fencing and for a deliberate soft attachment to continue
