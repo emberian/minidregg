@@ -188,7 +188,6 @@ fn receipt_8801(value: &Value, depth: usize) -> Option<Value> {
             let number = receipt.get(field)?.as_str()?;
             if number.len() > 80 || !decimal(number) { return None; }
         }
-        if value.get("imageBoundary") != receipt.get("imageBoundary") { return None; }
         return Some(json!({"type":"model-visible-mini-publication-receipt-projection-v1",
             "grainTask":"8802","targetRoot":value.get("targetRoot")?,
             "publicationReceipt":{
@@ -700,7 +699,9 @@ mod tests {
 
     #[test]
     fn receipt_8801_requires_model_visible_native_fields() {
-        let native = json!({"grain":{"task":"8802"},"targetRoot":"123", "imageBoundary":"456",
+        // The top-level query runs after publication/disconnect and can have a
+        // later boundary. Only the nested historical receipt is publication evidence.
+        let native = json!({"grain":{"task":"8802"},"targetRoot":"123", "imageBoundary":"999",
             "publicationReceipt":{"type":"confirmed-mini-publication-v1",
                 "scope":"historical-accepted-transition","promptOperationId":11,"toolOperationId":20,
                 "transactionId":"22","eventId":"23","acceptedCount":"24",
@@ -714,6 +715,7 @@ mod tests {
         assert!(done["content"].as_str().unwrap().contains("immediate"));
         let projection = projection.unwrap();
         assert_eq!(projection["publicationReceipt"]["transactionId"], "22");
+        assert_eq!(projection["publicationReceipt"]["imageBoundary"], "456");
         assert_eq!(projection["publicationReceipt"]["publicationTargetIds"], json!(["8001"]));
         for (pointer, bad) in [
             ("/grain/task", json!("7802")),
@@ -721,7 +723,7 @@ mod tests {
             ("/publicationReceipt/scope", json!("current-state")),
             ("/publicationReceipt/promptOperationId", json!("11")),
             ("/publicationReceipt/eventId", json!("not-decimal")),
-            ("/publicationReceipt/imageBoundary", json!("457")),
+            ("/publicationReceipt/imageBoundary", json!("not-decimal")),
             ("/publicationReceipt/publicationTargetIds", json!(["7003"])),
         ] {
             let mut changed = native.clone();
