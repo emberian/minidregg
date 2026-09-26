@@ -40,6 +40,7 @@ usage:
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
@@ -1029,6 +1030,59 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRo
 }
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AckResult {
+    Exact,
+    Covered,
+}
+
+#[cfg(unix)]
+fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> Result<AckResult> {
+    if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
+        || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
+    {
+        return Err("fn ack reply identity mismatch; complete reply retained".into());
+    }
+    match value.get("fnAck").and_then(Value::as_str) {
+        Some("durable-accepted") => Ok(AckResult::Exact),
+        Some("covered-by-durable-frontier") => {
+            let cursor = value
+                .get("fnCursorPosition")
+                .and_then(Value::as_str)
+                .ok_or("fn coverage lacks retained cursor position")?;
+            let committed = value
+                .get("fnCommittedAck")
+                .and_then(Value::as_str)
+                .ok_or("fn coverage lacks committed ACK frontier")?;
+            let decimal = |s: &str| -> Result<u128> {
+                if s.is_empty()
+                    || !s.bytes().all(|b| b.is_ascii_digit())
+                    || (s.len() > 1 && s.starts_with('0'))
+                {
+                    return Err("fn coverage position is not canonical decimal".into());
+                }
+                s.parse::<u128>()
+                    .map_err(|_| "fn coverage position exceeds u128".into())
+            };
+            if decimal(cursor)? > decimal(committed)? {
+                return Err("fn coverage cursor exceeds committed ACK frontier".into());
+            }
+            if !matches!(
+                value.get("kind").and_then(Value::as_str),
+                Some("empty-page-skip" | "article-prefix-coverage")
+            ) {
+                return Err("fn coverage lacks supported kind".into());
+            }
+            Ok(AckResult::Covered)
+        }
+        Some("refused" | "uncertain" | "transport-fault") => {
+            Err("fn ack incomplete; complete reply retained for reconciliation".into())
+        }
+        _ => Err("fn ack reply lacks valid status; complete reply retained".into()),
+    }
+}
+
+#[cfg(unix)]
 fn consumer_ack(
     host: &Path,
     config: &Path,
@@ -1059,18 +1113,98 @@ fn consumer_ack(
     let value: Value = serde_json::from_slice(&frame[1..])
         .map_err(|e| format!("invalid fn ack host JSON; complete reply retained: {e}"))?;
     write_new(&directory.join("ack.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
-        || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
-    {
-        return Err("fn ack reply identity mismatch; complete reply retained".to_owned());
-    }
     print_json(&value)?;
-    match value.get("fnAck").and_then(Value::as_str) {
-        Some("durable-accepted") => Ok(()),
-        Some("refused" | "uncertain" | "transport-fault") => {
-            Err("fn ack incomplete; complete reply retained for reconciliation".to_owned())
+    let status = parse_ack_result(&value, route, transaction)?;
+    match status {
+        AckResult::Exact => Ok(()),
+        AckResult::Covered => Err("fn cursor is covered by a durable frontier; exact old ACK event is not proven; complete reply retained".into()),
+    }
+}
+
+#[cfg(unix)]
+fn origin_outbox_intent(value: &Value) -> Result<Option<Vec<u8>>> {
+    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-session-v1") {
+        return Err("unexpected origin outbox reply type; complete frame retained".into());
+    }
+    if value
+        .get("messageId")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+        || value.get("miniOrigin").is_none_or(|v| !v.is_object())
+    {
+        return Err("origin outbox reply lacks message identity or Mini origin".into());
+    }
+    let source = value
+        .get("sourceIdentity")
+        .and_then(Value::as_str)
+        .ok_or("origin outbox reply lacks source identity")?;
+    let source_bytes = decode_hex(source)?;
+    if source_bytes.is_empty() || hex(&source_bytes) != source {
+        return Err("origin outbox source identity is not canonical lowercase hex".into());
+    }
+    let intent_hex = value
+        .get("intentHex")
+        .and_then(Value::as_str)
+        .ok_or("origin outbox reply lacks intentHex")?;
+    let intent = decode_hex(intent_hex)?;
+    if hex(&intent) != intent_hex {
+        return Err("origin outbox intentHex is not canonical lowercase".into());
+    }
+    match (
+        value.get("status").and_then(Value::as_str),
+        value.get("decision").and_then(Value::as_str),
+        intent.is_empty(),
+    ) {
+        (Some("prepared-decision"), Some("proposed-fresh"), false) => Ok(Some(intent)),
+        (Some("prepared-decision"), Some("repeated"), true) => Ok(None),
+        (Some("refused"), Some("refused"), true) => {
+            Err("origin outbox preparation refused; complete decision retained".into())
         }
-        _ => Err("fn ack reply lacks valid status; complete reply retained".to_owned()),
+        _ => Err("inconsistent origin outbox decision and intent; complete reply retained".into()),
+    }
+}
+
+#[cfg(unix)]
+fn origin_outbox_prepare(
+    host: &Path,
+    config: &Path,
+    carrier: &Path,
+    directory: &Path,
+) -> Result<()> {
+    const MAX_CARRIER: usize = 1_516_384;
+    let socket = SOCKET
+        .get()
+        .ok_or("origin-outbox-prepare requires --socket")?;
+    let mut bytes = Vec::new();
+    File::open(carrier)
+        .map_err(|e| format!("cannot open R carrier {}: {e}", carrier.display()))?
+        .take((MAX_CARRIER + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read R carrier {}: {e}", carrier.display()))?;
+    if bytes.is_empty() || bytes.len() > MAX_CARRIER {
+        return Err("R carrier must be 1..1516384 bytes".into());
+    }
+    let retained_config =
+        private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
+    create_private(&directory.join("carrier.bin"), &bytes)?;
+    sync_directory_ancestors(directory)?;
+    let frame = transport::invoke(socket, &retained_config, 16, &bytes)?;
+    write_new(&directory.join("reply.frame"), &frame)?;
+    if frame[0] == 255 {
+        return Err("Host refused origin outbox preparation; complete frame retained".into());
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|e| format!("invalid origin outbox JSON; complete frame retained: {e}"))?;
+    write_new(&directory.join("decision.json"), &frame[1..])?;
+    let selected = origin_outbox_intent(&value);
+    print_json(&value)?;
+    match selected {
+        Ok(Some(intent)) => {
+            write_new(&directory.join("intent.bin"), &intent)?;
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -1144,6 +1278,21 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("persistent host sessions require Unix sockets".to_owned())
+            }
+        }
+        "origin-outbox-prepare" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let carrier = path(args.required("carrier")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                origin_outbox_prepare(&host, &config, &carrier, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("origin-outbox-prepare requires Unix sockets".to_owned())
             }
         }
         "consumer-drain-once" => {
@@ -1432,6 +1581,50 @@ mod tests {
             &json!({"decision": {"decision": "proposed-fresh"}}),
             A_REPLY_CONSUMER,
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn origin_outbox_requires_exact_status_intent_pair() {
+        let mut value = json!({"type":"fn-a-origin-outbox-session-v1",
+            "status":"prepared-decision", "decision":"proposed-fresh",
+            "messageId":"<r@example.invalid>", "sourceIdentity":"ab",
+            "miniOrigin":{"type":"verified-mini-native-prefix-v1"}, "intentHex":"00"});
+        assert_eq!(origin_outbox_intent(&value).unwrap(), Some(vec![0]));
+        value["decision"] = json!("repeated");
+        assert!(origin_outbox_intent(&value).is_err());
+        value["intentHex"] = json!("");
+        assert_eq!(origin_outbox_intent(&value).unwrap(), None);
+        value["status"] = json!("refused");
+        value["decision"] = json!("refused");
+        assert!(origin_outbox_intent(&value)
+            .unwrap_err()
+            .contains("refused"));
+        value["sourceIdentity"] = json!("AB");
+        assert!(origin_outbox_intent(&value).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ack_coverage_is_distinct_from_exact_durable_ack() {
+        let mut value = json!({"type":"fn-consumer-ack-session-v1",
+            "miniTransactionId":"123", "kind":"empty-page-skip",
+            "fnAck":"covered-by-durable-frontier",
+            "fnCursorPosition":"16", "fnCommittedAck":"23",
+            "fnStoreSequence":"", "fnStoreTransactionId":""});
+        assert_eq!(
+            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
+            AckResult::Covered
+        );
+        value["fnCursorPosition"] = json!("24");
+        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
+        value["fnCursorPosition"] = json!("16");
+        value["fnAck"] = json!("durable-accepted");
+        assert_eq!(
+            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
+            AckResult::Exact
+        );
+        assert!(parse_ack_result(&value, B_CONSUMER, "124").is_err());
     }
 
     #[test]

@@ -14,7 +14,7 @@ pub(crate) const HOST_MAX_FRAME: usize = 6_194_884;
 const MAX_CONFIG: usize = 65_536;
 const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
-fn allowed_operation(request: &[u8]) -> bool {
+fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         [0..=11, ..] => true,
         [12 | 14] => true,
@@ -24,6 +24,7 @@ fn allowed_operation(request: &[u8]) -> bool {
                 && digits.iter().all(u8::is_ascii_digit)
                 && (digits.len() == 1 || digits[0] != b'0')
         }
+        [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         _ => false,
     }
 }
@@ -354,6 +355,10 @@ pub fn invoke(
 /// others. This closes the interval between bind and chmod on the socket.
 pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
     let config_bytes = read_config(config)?;
+    let catalog_enabled = serde_json::from_slice::<serde_json::Value>(&config_bytes)
+        .map_err(|e| format!("invalid operator config JSON: {e}"))?
+        .get("fnReplyCatalog")
+        .is_some_and(serde_json::Value::is_object);
     let parent = socket
         .parent()
         .ok_or("socket requires a parent directory")?;
@@ -452,7 +457,7 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
             let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
             continue;
         }
-        if !allowed_operation(request) {
+        if !allowed_operation(request, catalog_enabled) {
             let _ = write_frame(&mut stream, b"\xfeoperation unavailable on public socket");
             continue;
         }
@@ -594,17 +599,23 @@ mod tests {
 
     #[test]
     fn public_fn_operations_have_no_path_payload() {
-        assert!(allowed_operation(&[12]));
-        assert!(!allowed_operation(&[12, b'/']));
-        assert!(allowed_operation(&[13, b'0']));
-        assert!(allowed_operation(&[13, b'1', b'2', b'3']));
-        assert!(!allowed_operation(&[13]));
-        assert!(!allowed_operation(&[13, b'0', b'1']));
-        assert!(!allowed_operation(&[13, b'1', b'/']));
-        assert!(allowed_operation(&[14]));
-        assert!(!allowed_operation(&[14, b'/']));
-        assert!(allowed_operation(&[15, b'2']));
-        assert!(!allowed_operation(&[15, b'0', b'2']));
+        assert!(allowed_operation(&[12], false));
+        assert!(!allowed_operation(&[12, b'/'], false));
+        assert!(allowed_operation(&[13, b'0'], false));
+        assert!(allowed_operation(&[13, b'1', b'2', b'3'], false));
+        assert!(!allowed_operation(&[13], false));
+        assert!(!allowed_operation(&[13, b'0', b'1'], false));
+        assert!(!allowed_operation(&[13, b'1', b'/'], false));
+        assert!(allowed_operation(&[14], false));
+        assert!(!allowed_operation(&[14, b'/'], false));
+        assert!(allowed_operation(&[15, b'2'], false));
+        assert!(!allowed_operation(&[15, b'0', b'2'], false));
+        assert!(!allowed_operation(&[16, b'R'], false));
+        assert!(!allowed_operation(&[16], true));
+        assert!(allowed_operation(&[16, b'R'], true));
+        let mut oversized = vec![b'R'; 1_516_386];
+        oversized[0] = 16;
+        assert!(!allowed_operation(&oversized, true));
     }
 
     #[test]

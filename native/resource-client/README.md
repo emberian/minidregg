@@ -91,8 +91,12 @@ not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
 publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
 only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
 retain the transaction ID and reply for operator reconciliation. An exact
-repeat of op13 has not yet passed native restart validation, so the worker
-does not retry an uncertain ACK automatically.
+repeat of the current article cursor has passed native validation; an older
+cursor can instead return `covered-by-durable-frontier`, which proves scoped
+cursor coverage but not the exact old ACK event. The worker does not retry an
+uncertain ACK automatically until the corresponding skip recovery path is
+qualified. Coverage is retained and reported distinctly from exact durable
+acceptance.
 
 An empty fn page can return `status: "idle"` with no intent, or
 `status: "skip-decision"`. A fresh skip decision includes a Lean-authored
@@ -108,6 +112,23 @@ attempts retain the same filenames. A historical repeat can return an
 accepted decision without a new intent; in that case no Mini submit is due.
 The A service also uses the `idle` and `skip-decision` empty-page statuses
 described above.
+
+For an A service configured with operator-owned `fnReplyCatalog`, the bounded
+R carrier is the only client-supplied op16 payload:
+
+```sh
+mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json \
+  --socket /private/path/a-session/host.sock --carrier R.eml \
+  --dir attempts/a-outbox-r-1
+```
+
+The client retains `carrier.bin` and the complete `reply.frame` before
+decoding `decision.json`. A `prepared-decision`/`proposed-fresh` response
+also retains the Lean-authored `intent.bin` for ordinary signed Mini submit.
+A repeated decision has no new intent. A refusal retains its full frame and
+decision. No carrier path, claim, pin, or operator path crosses the public
+socket; the broker admits op16 only for a service whose pinned config has
+`fnReplyCatalog`, and Host/Main re-verifies the carrier against that catalog.
 
 `consumer-drain-once` runs one bounded B consumer wake through that same
 socket. It holds a single private, owner-locked durable state directory:
