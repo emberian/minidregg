@@ -1,0 +1,10 @@
+baseline_snapshot=/home/ember/build/minidregg-overnight-20260926/source-final-permissions
+baseline_output=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-final-permissions
+baseline_binary_sha256=186051dc37b8e1df7ae7737d5dffbc249681f66160fed328a6c5938b630bb78c
+changed_module=Compiler.DurableReceiverIO
+unchanged_imported_modules=117
+unchanged_later_sources=47
+additional_changed_sources=4
+changed_source_manifest=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-exact-session-2/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=1236f07e808469f8b955335011a914486e39660db6e781a3e7ee6fedad273f39

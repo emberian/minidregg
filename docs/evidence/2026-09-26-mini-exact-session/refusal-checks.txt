@@ -1,0 +1,19 @@
+Guarded suffix builder refusal checks (Mac private copied snapshot)
+
+Each command used a unique output directory and exited before a Lean module began.
+The lines below are the observed terminal diagnostics and exit statuses.
+
+No additional allowlist (four later sources actually changed):
+  exit=65
+  build-native-host: undeclared later source changed: Kernel/DeclaredResourceController.lean
+
+Four valid later changes plus Compiler.PredCompile (before the restart module):
+  exit=65
+  build-native-host: declared suffix change is absent or precedes Compiler.DurableReceiverIO
+
+Four valid later changes plus unchanged Host.FnInboxView:
+  exit=65
+  build-native-host: declared suffix change is unchanged: Host/FnInboxView.lean
+
+The separate valid invocation passed preflight with 117 earlier modules, four
+declared later changes, 47 unchanged later sources, and 2,933 package objects.

@@ -1,0 +1,10 @@
+baseline_snapshot=/private/tmp/minidregg-overnight-20260926-combined-permissions
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-final-permissions
+baseline_binary_sha256=22954f15df67cc19e46d42d70a89a67e4c980f1e051ffb08c64386b901bc9f6a
+changed_module=Compiler.DurableReceiverIO
+unchanged_imported_modules=117
+unchanged_later_sources=47
+additional_changed_sources=4
+changed_source_manifest=/private/tmp/minidregg-overnight-20260926/build-local-exact-session-2/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=1236f07e808469f8b955335011a914486e39660db6e781a3e7ee6fedad273f39
