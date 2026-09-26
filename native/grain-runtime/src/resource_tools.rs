@@ -9,11 +9,13 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 // A complete content page can include the fn consumer's typed inbox atom and
-// exact carrier. Refuse larger pages explicitly instead of returning a prefix.
-// The native content page may carry several 36 KiB inbox atoms. Its JSON
-// presentation repeats bytes in the whole-page canonical stream and per-entry
-// fields, so the operator may provision a larger complete response.
+// exact carrier. Refuse larger results explicitly instead of returning a
+// prefix. The raw JSON presentation repeats whole-page and per-entry bytes;
+// named fn reads ask Lean for its typed presentation of the same signed view.
 const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
+// The typed view may be larger, but the returned JSON is nested as MCP text
+// before reaching the ACP peer. Leave room for that escaping and its envelope.
+const MAX_TOOL_RESULT_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -147,6 +149,9 @@ pub(super) fn read_resource(
     if let Some(socket) = &config.host_socket {
         command.arg("--socket").arg(socket);
     }
+    if read.fn_inbox_summary {
+        command.arg("--presentation").arg("fn-inbox-resource");
+    }
     let status = command
         .status()
         .map_err(|e| format!("native Mini resource query: {e}"))?;
@@ -158,45 +163,11 @@ pub(super) fn read_resource(
             attempt.display()
         ));
     }
-    // The query above remains the only authority-bearing read. This optional
-    // source-owned presentation consumes its exact retained view.bin; it does
-    // not fetch or admit another resource or reinterpret A's effect at B.
-    let path = if read.fn_inbox_summary {
-        let output = attempt.join("fn-inbox-summary.json");
-        let mut inspect = Command::new(&config.mini);
-        inspect
-            .arg("inspect")
-            .arg("--host")
-            .arg(&config.host)
-            .arg("--config")
-            .arg(&config.host_config)
-            .arg("--kind")
-            .arg("fn-inbox-resource")
-            .arg("--input")
-            .arg(attempt.join("view.bin"))
-            .arg("--output")
-            .arg(&output)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(socket) = &config.host_socket {
-            inspect.arg("--socket").arg(socket);
-        }
-        let status = inspect
-            .status()
-            .map_err(|e| format!("native Mini fn inbox presentation: {e}"))?;
-        if !status.success() {
-            return Err(format!(
-                "native Mini refused fn inbox presentation {} ({}); complete query retained at {}",
-                read.name,
-                status,
-                attempt.display()
-            ));
-        }
-        output
-    } else {
-        attempt.join("view.json")
-    };
+    // The query above is the only authority-bearing read. With fn summary
+    // selected, the native client asks Lean to present its exact retained
+    // view.bin directly as typed JSON. It skips the potentially much larger
+    // raw JSON rendering of the same content page.
+    let path = attempt.join("view.json");
     let bytes = read_bounded(&path, read.max_result_bytes)?;
     let view: Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("native resource view is not JSON: {e}"))?;
@@ -226,6 +197,12 @@ pub(super) fn read_resource(
         return Err(format!(
             "signed resource result is {result_len} bytes, above {} maxResultBytes; complete attempt retained at {}",
             read.max_result_bytes,
+            attempt.display()
+        ));
+    }
+    if result_len > MAX_TOOL_RESULT_BYTES {
+        return Err(format!(
+            "signed resource result is {result_len} bytes, above {MAX_TOOL_RESULT_BYTES} byte MCP/ACP response budget; complete attempt retained at {}",
             attempt.display()
         ));
     }

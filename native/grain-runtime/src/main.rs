@@ -152,6 +152,10 @@ struct Journal {
     provider_hold: Option<HeldCharge>,
     #[serde(default)]
     provider_attempt: Option<ProviderAttempt>,
+    /// Bounded exact-body replay for completed responses in the current ACP
+    /// prompt. SDK retries receive these bytes without another upstream send.
+    #[serde(default)]
+    provider_replays: Vec<ProviderReplay>,
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
@@ -231,6 +235,25 @@ struct ProviderAttempt {
     outcome_bytes: Option<usize>,
     outcome_sha256: Option<String>,
     outcome: Option<String>,
+    #[serde(default)]
+    response_status: Option<u16>,
+    #[serde(default)]
+    response_content_type: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderReplay {
+    prompt_operation_id: u64,
+    parent_generation: String,
+    request_path: PathBuf,
+    request_bytes: usize,
+    request_sha256: String,
+    response_path: PathBuf,
+    response_bytes: usize,
+    response_sha256: String,
+    status: u16,
+    content_type: String,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -303,6 +326,7 @@ impl Journal {
             tool_hold: None,
             provider_hold: None,
             provider_attempt: None,
+            provider_replays: Vec::new(),
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -1499,10 +1523,27 @@ impl Runtime {
                 reply,
             } => {
                 let recorded = self.provider_record_outcome(attempt_id, outcome);
-                let settle = recorded.as_ref().ok().copied().flatten();
-                let _ = reply.send(recorded.map(|_| ()));
-                if let Some(charge) = settle {
-                    if let Err(error) = self.provider_settle(charge) {
+                let not_sent = recorded.as_ref().ok().copied().flatten() == Some("0");
+                let acknowledged = reply.send(recorded.map(|_| ())).is_ok();
+                // A Received response is not a delivered response. Keep its
+                // exact hold until a separate local-write outcome arrives;
+                // an SDK retry cannot be allowed to reserve again here.
+                if not_sent && acknowledged {
+                    if let Err(error) = self.provider_settle("0") {
+                        eprintln!("provider fixed-charge settlement unresolved: {error}");
+                    }
+                }
+            }
+            provider::ProviderCommand::Delivery {
+                attempt_id,
+                local_write_success,
+                reply,
+            } => {
+                let result = self.provider_delivery(attempt_id, local_write_success);
+                let settle = result.as_ref().is_ok_and(|delivered| *delivered);
+                let _ = reply.send(result.map(|_| ()));
+                if settle {
+                    if let Err(error) = self.provider_settle("configured") {
                         eprintln!("provider fixed-charge settlement unresolved: {error}");
                     }
                 }
@@ -1565,6 +1606,12 @@ impl Runtime {
         {
             return Err("prior provider request needs exact reconciliation".into());
         }
+        if let Some(replay) = Self::provider_replay(&self.journal.provider_replays, &request)? {
+            return Ok(replay);
+        }
+        if self.journal.provider_replays.len() >= 16 {
+            return Err("provider prompt response replay bound reached".into());
+        }
         // Refresh only the root and unchanged state coordinates of this same
         // reserved generation. The native joint reserve remains the atomic
         // authority check; Rust cannot infer admission from this observation.
@@ -1612,6 +1659,8 @@ impl Runtime {
             outcome_bytes: None,
             outcome_sha256: None,
             outcome: None,
+            response_status: None,
+            response_content_type: None,
         });
         self.save()?;
         let authority = self.provider()?;
@@ -1652,11 +1701,49 @@ impl Runtime {
             Some((task.parent_capability, task.parent_observe_capability)),
         )?;
         self.provider_lease_current(&request.lease)?;
-        Ok(provider::ForwardPermit {
+        Ok(provider::ForwardPermit::Fresh {
             attempt_id: id,
             lease: request.lease,
             exact_body: request.exact_body,
         })
+    }
+    fn provider_replay(
+        replays: &[ProviderReplay],
+        request: &provider::ProviderRequest,
+    ) -> Result<Option<provider::ForwardPermit>> {
+        for prior in replays {
+            if prior.prompt_operation_id != request.lease.prompt_operation_id
+                || prior.parent_generation != request.lease.parent_generation
+                || prior.request_bytes != request.exact_body.len()
+            {
+                continue;
+            }
+            let exact_request = fs::read(&prior.request_path)
+                .map_err(|e| format!("retained provider replay request absent: {e}"))?;
+            if exact_request.len() != prior.request_bytes
+                || sha256_file(&prior.request_path)? != prior.request_sha256
+            {
+                return Err("provider replay request differs from durable exact bytes".into());
+            }
+            if exact_request != request.exact_body {
+                continue;
+            }
+            let exact_response = fs::read(&prior.response_path)
+                .map_err(|e| format!("retained provider replay response absent: {e}"))?;
+            if exact_response.len() != prior.response_bytes
+                || sha256_file(&prior.response_path)? != prior.response_sha256
+            {
+                return Err("provider replay response differs from durable exact bytes".into());
+            }
+            return Ok(Some(provider::ForwardPermit::Replay {
+                lease: request.lease.clone(),
+                exact_body: request.exact_body.clone(),
+                status: prior.status,
+                content_type: prior.content_type.clone(),
+                exact_response,
+            }));
+        }
+        Ok(None)
     }
     fn provider_before_send(&mut self, attempt_id: u64, lease: &provider::LeaseId) -> Result<()> {
         self.provider_lease_current(lease)?;
@@ -1719,7 +1806,7 @@ impl Runtime {
         if attempt.id != attempt_id || attempt.outcome.is_some() {
             return Err("provider outcome differs from durable attempt".into());
         }
-        let (kind, bytes, charge) = match outcome {
+        let (kind, bytes, charge, response_status, response_content_type) = match outcome {
             provider::ProviderOutcome::Received {
                 status,
                 content_type,
@@ -1732,15 +1819,27 @@ impl Runtime {
                     format!("received:{status}:{content_type}"),
                     exact_body,
                     Some("configured"),
+                    Some(status),
+                    Some(content_type),
                 )
             }
-            provider::ProviderOutcome::NotSent { reason } => {
-                (format!("not-sent:{reason}"), Vec::new(), Some("0"))
-            }
+            provider::ProviderOutcome::NotSent { reason } => (
+                format!("not-sent:{reason}"),
+                Vec::new(),
+                Some("0"),
+                None,
+                None,
+            ),
             provider::ProviderOutcome::Uncertain {
                 partial_body,
                 reason,
-            } => (format!("uncertain:{reason}"), partial_body, None),
+            } => (
+                format!("uncertain:{reason}"),
+                partial_body,
+                None,
+                None,
+                None,
+            ),
         };
         let path = self
             .config
@@ -1757,6 +1856,8 @@ impl Runtime {
         attempt.outcome_bytes = Some(bytes.len());
         attempt.outcome_sha256 = Some(digest);
         attempt.outcome = Some(kind.clone());
+        attempt.response_status = response_status;
+        attempt.response_content_type = response_content_type;
         if charge.is_none() {
             self.journal.unresolved_external.push(format!(
                 "provider request {attempt_id} may have reached upstream; exact response uncertain"
@@ -1764,6 +1865,84 @@ impl Runtime {
         }
         self.save()?;
         Ok(charge)
+    }
+    fn provider_delivery(&mut self, attempt_id: u64, local_write_success: bool) -> Result<bool> {
+        let attempt = self
+            .journal
+            .provider_attempt
+            .clone()
+            .ok_or("provider delivery has no durable request")?;
+        if attempt.id != attempt_id
+            || !attempt.send_started
+            || !attempt
+                .outcome
+                .as_deref()
+                .is_some_and(|kind| kind.starts_with("received:"))
+        {
+            return Err("provider delivery differs from received request".into());
+        }
+        if !local_write_success {
+            let note = format!(
+                "provider response {} was retained but local HTTP delivery failed; client may retry",
+                attempt_id
+            );
+            if !self.journal.unresolved_external.contains(&note) {
+                self.journal.unresolved_external.push(note);
+                self.save()?;
+            }
+            return Ok(false);
+        }
+        let response_path = attempt
+            .outcome_path
+            .clone()
+            .ok_or("provider response evidence path absent")?;
+        let response_bytes = attempt
+            .outcome_bytes
+            .ok_or("provider response length absent")?;
+        let response_sha256 = attempt
+            .outcome_sha256
+            .clone()
+            .ok_or("provider response digest absent")?;
+        let status = attempt
+            .response_status
+            .ok_or("provider response status absent")?;
+        let content_type = attempt
+            .response_content_type
+            .clone()
+            .ok_or("provider response content type absent")?;
+        if fs::metadata(&response_path)
+            .map_err(|e| format!("provider response evidence absent: {e}"))?
+            .len()
+            != response_bytes as u64
+            || sha256_file(&response_path)? != response_sha256
+            || fs::metadata(&attempt.request_path)
+                .map_err(|e| format!("provider request evidence absent: {e}"))?
+                .len()
+                != attempt.request_bytes as u64
+            || sha256_file(&attempt.request_path)? != attempt.request_sha256
+        {
+            return Err("provider delivery evidence differs from durable exact bytes".into());
+        }
+        if self.journal.provider_replays.len() >= 16 {
+            return Err("provider prompt response replay bound reached".into());
+        }
+        self.journal.provider_replays.push(ProviderReplay {
+            prompt_operation_id: attempt.prompt_operation_id,
+            parent_generation: attempt.parent_generation,
+            request_path: attempt.request_path,
+            request_bytes: attempt.request_bytes,
+            request_sha256: attempt.request_sha256,
+            response_path,
+            response_bytes,
+            response_sha256,
+            status,
+            content_type,
+        });
+        // Save the replay entry before settlement may clear the hold. If a
+        // response reached the local socket but the SDK retries the same body,
+        // it can never trigger another upstream send in this prompt.
+        self.save()?;
+        Ok(true)
     }
     fn provider_settle(&mut self, charge: &str) -> Result<()> {
         let authority = self.provider()?;
@@ -2766,6 +2945,12 @@ impl Runtime {
             }
         }
         let id = self.next_id()?;
+        if !self.journal.provider_replays.is_empty() {
+            // A new explicit prompt rotates the gateway token and its replay
+            // scope. Prior exact artifacts remain on disk for audit.
+            self.journal.provider_replays.clear();
+            self.save()?;
+        }
         let unit = self.worker_unit(id, &spec);
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
@@ -4524,6 +4709,68 @@ mod tests {
         replaced = current.clone();
         replaced["grain"]["reserved"] = json!("2");
         assert!(!exact_provider_reserve(&replaced, &hold));
+    }
+
+    #[test]
+    fn provider_retry_replays_exact_retained_response_without_new_reserve() {
+        let dir =
+            std::env::temp_dir().join(format!("grain-provider-replay-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let request_path = dir.join("request");
+        let response_path = dir.join("response");
+        let request_bytes = br#"{"model":"local","messages":[]}"#;
+        let response_bytes = br#"{"choices":[]}"#;
+        write_new(&request_path, request_bytes).unwrap();
+        write_new(&response_path, response_bytes).unwrap();
+        let retained = ProviderReplay {
+            prompt_operation_id: 42,
+            parent_generation: "3".into(),
+            request_path: request_path.clone(),
+            request_bytes: request_bytes.len(),
+            request_sha256: sha256_file(&request_path).unwrap(),
+            response_path: response_path.clone(),
+            response_bytes: response_bytes.len(),
+            response_sha256: sha256_file(&response_path).unwrap(),
+            status: 200,
+            content_type: "application/json".into(),
+        };
+        let request = provider::ProviderRequest {
+            lease: provider::LeaseId {
+                prompt_operation_id: 42,
+                parent_generation: "3".into(),
+            },
+            model: "local".into(),
+            exact_body: request_bytes.to_vec(),
+        };
+        match Runtime::provider_replay(std::slice::from_ref(&retained), &request).unwrap() {
+            Some(provider::ForwardPermit::Replay { exact_response, .. }) => {
+                assert_eq!(exact_response, response_bytes)
+            }
+            _ => panic!("same-body retry must use retained response"),
+        }
+        let mut other_prompt = provider::ProviderRequest {
+            lease: provider::LeaseId {
+                prompt_operation_id: 43,
+                parent_generation: "4".into(),
+            },
+            model: "local".into(),
+            exact_body: request_bytes.to_vec(),
+        };
+        assert!(
+            Runtime::provider_replay(std::slice::from_ref(&retained), &other_prompt)
+                .unwrap()
+                .is_none()
+        );
+        other_prompt.lease = request.lease.clone();
+        other_prompt.exact_body.push(b' ');
+        assert!(
+            Runtime::provider_replay(std::slice::from_ref(&retained), &other_prompt)
+                .unwrap()
+                .is_none()
+        );
+        fs::write(&response_path, b"changed").unwrap();
+        assert!(Runtime::provider_replay(&[retained], &request).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

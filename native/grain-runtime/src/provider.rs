@@ -57,12 +57,23 @@ pub struct ProviderRequest {
     pub exact_body: Vec<u8>,
 }
 
-pub struct ForwardPermit {
-    pub attempt_id: u64,
-    pub lease: LeaseId,
-    /// Must equal the request bytes; a permit is never transferable to a
-    /// changed model, request, generation, or prompt.
-    pub exact_body: Vec<u8>,
+pub enum ForwardPermit {
+    Fresh {
+        attempt_id: u64,
+        lease: LeaseId,
+        /// Must equal the request bytes; a permit is never transferable to a
+        /// changed model, request, generation, or prompt.
+        exact_body: Vec<u8>,
+    },
+    /// A previously delivered response for these exact request bytes. It
+    /// carries no permission to reach the upstream provider again.
+    Replay {
+        lease: LeaseId,
+        exact_body: Vec<u8>,
+        status: u16,
+        content_type: String,
+        exact_response: Vec<u8>,
+    },
 }
 
 pub enum ProviderOutcome {
@@ -93,6 +104,11 @@ pub enum ProviderCommand {
     Outcome {
         attempt_id: u64,
         outcome: ProviderOutcome,
+        reply: Sender<Result<(), String>>,
+    },
+    Delivery {
+        attempt_id: u64,
+        local_write_success: bool,
         reply: Sender<Result<(), String>>,
     },
 }
@@ -558,14 +574,47 @@ fn serve_client(
             return;
         }
     };
-    if permit.attempt_id == 0 || permit.lease != lease || permit.exact_body != request.body {
-        error_reply(stream, 503, "provider permit did not bind this request");
-        return;
-    }
+    let permit = match permit {
+        ForwardPermit::Replay {
+            lease: permit_lease,
+            exact_body,
+            status,
+            content_type,
+            exact_response,
+        } => {
+            if permit_lease != lease
+                || exact_body != request.body
+                || exact_response.len() > config.max_response_bytes
+                || !(100..=599).contains(&status)
+                || content_type.len() > 256
+                || content_type
+                    .bytes()
+                    .any(|byte| byte == b'\r' || byte == b'\n')
+                || !control.still_active(&lease)
+            {
+                error_reply(stream, 503, "provider replay did not bind this request");
+                return;
+            }
+            let _ = write_http(stream, status, &content_type, &exact_response);
+            return;
+        }
+        ForwardPermit::Fresh {
+            attempt_id,
+            lease: permit_lease,
+            exact_body,
+        } => {
+            if attempt_id == 0 || permit_lease != lease || exact_body != request.body {
+                error_reply(stream, 503, "provider permit did not bind this request");
+                return;
+            }
+            (attempt_id, exact_body)
+        }
+    };
+    let (attempt_id, exact_body) = permit;
     if shared
         .last_permit_id
-        .fetch_max(permit.attempt_id, Ordering::SeqCst)
-        >= permit.attempt_id
+        .fetch_max(attempt_id, Ordering::SeqCst)
+        >= attempt_id
     {
         error_reply(stream, 503, "provider permit was already consumed");
         return;
@@ -573,7 +622,7 @@ fn serve_client(
     let (tx, rx) = mpsc::channel();
     if commands
         .try_send(ProviderCommand::BeforeSend {
-            attempt_id: permit.attempt_id,
+            attempt_id,
             lease: lease.clone(),
             reply: tx,
         })
@@ -582,7 +631,7 @@ fn serve_client(
     {
         report_outcome(
             commands,
-            permit.attempt_id,
+            attempt_id,
             ProviderOutcome::NotSent {
                 reason: "send boundary not acknowledged".into(),
             },
@@ -590,7 +639,7 @@ fn serve_client(
         error_reply(stream, 503, "provider send boundary was not acknowledged");
         return;
     }
-    let outcome = forward(config, shared, &control, &lease, &permit);
+    let outcome = forward(config, shared, &control, &lease, attempt_id, &exact_body);
     let reply = match &outcome {
         ProviderOutcome::Received {
             status,
@@ -599,7 +648,7 @@ fn serve_client(
         } => Some((*status, content_type.clone(), exact_body.clone())),
         _ => None,
     };
-    if !report_outcome(commands, permit.attempt_id, outcome) {
+    if !report_outcome(commands, attempt_id, outcome) {
         error_reply(
             stream,
             503,
@@ -608,7 +657,8 @@ fn serve_client(
         return;
     }
     if let Some((status, content_type, body)) = reply {
-        let _ = write_http(stream, status, &content_type, &body);
+        let local_write_success = write_http(stream, status, &content_type, &body).is_ok();
+        let _ = report_delivery(commands, attempt_id, local_write_success);
     } else {
         error_reply(
             stream,
@@ -651,6 +701,38 @@ fn report_outcome(
     let mut command = ProviderCommand::Outcome {
         attempt_id,
         outcome,
+        reply: tx,
+    };
+    let started = Instant::now();
+    loop {
+        match commands.try_send(command) {
+            Ok(()) => break,
+            Err(TrySendError::Full(remaining)) => {
+                command = remaining;
+                if started.elapsed() >= Duration::from_secs(30) {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    }
+    rx.recv_timeout(Duration::from_secs(30))
+        .is_ok_and(|result| result.is_ok())
+}
+
+/// A response is not considered delivered merely because its upstream bytes
+/// were durably recorded. A missing delivery acknowledgement leaves the
+/// controller's exact attempt held for reconciliation.
+fn report_delivery(
+    commands: &SyncSender<ProviderCommand>,
+    attempt_id: u64,
+    local_write_success: bool,
+) -> bool {
+    let (tx, rx) = mpsc::channel();
+    let mut command = ProviderCommand::Delivery {
+        attempt_id,
+        local_write_success,
         reply: tx,
     };
     let started = Instant::now();
@@ -759,18 +841,19 @@ fn forward(
     shared: &Arc<Shared>,
     control: &GatewayControl,
     lease: &LeaseId,
-    permit: &ForwardPermit,
+    attempt_id: u64,
+    exact_body: &[u8],
 ) -> ProviderOutcome {
     if !control.still_active(lease) {
         return ProviderOutcome::NotSent {
             reason: "prompt lease revoked before dispatch".into(),
         };
     }
-    let prefix = format!("provider-{:016}", permit.attempt_id);
+    let prefix = format!("provider-{attempt_id:016}");
     let request_path = config.private_dir.join(format!("{prefix}.request"));
     let body_path = config.private_dir.join(format!("{prefix}.response"));
     let header_path = config.private_dir.join(format!("{prefix}.headers"));
-    if let Err(reason) = write_private(&request_path, &permit.exact_body)
+    if let Err(reason) = write_private(&request_path, exact_body)
         .and_then(|_| create_private(&body_path))
         .and_then(|_| create_private(&header_path))
         .and_then(|_| {
@@ -986,6 +1069,7 @@ fn forward(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsRawFd;
     use std::sync::atomic::AtomicUsize;
 
     static TEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -1118,7 +1202,7 @@ mod tests {
                     assert_eq!(request.exact_body, expected);
                     assert_eq!(request.lease.prompt_operation_id, 1);
                     reply
-                        .send(Ok(ForwardPermit {
+                        .send(Ok(ForwardPermit::Fresh {
                             attempt_id: 7,
                             lease: request.lease,
                             exact_body: request.exact_body,
@@ -1155,6 +1239,18 @@ mod tests {
                     reply.send(Ok(())).unwrap();
                 }
                 _ => panic!("outcome missing"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Delivery {
+                    attempt_id,
+                    local_write_success,
+                    reply,
+                } => {
+                    assert_eq!(attempt_id, 7);
+                    assert!(local_write_success);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("delivery acknowledgement missing"),
             }
         });
         let response = post(gateway.local_addr(), TOKEN, &body);
@@ -1204,6 +1300,225 @@ mod tests {
     }
 
     #[test]
+    fn lost_outcome_ack_does_not_deliver_or_send_again() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread = fake_upstream(
+            upstream.try_clone().unwrap(),
+            deliveries.clone(),
+            false,
+            br#"{"id":"once"}"#.to_vec(),
+        );
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        let controller = thread::spawn(move || {
+            let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { request, reply } => (request, reply),
+                _ => panic!("first reserve expected"),
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 21,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::BeforeSend { reply, .. } => reply.send(Ok(())).unwrap(),
+                _ => panic!("send boundary expected"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Outcome {
+                    outcome: ProviderOutcome::Received { .. },
+                    reply,
+                    ..
+                } => {
+                    drop(reply); // Controller crash after receiving the exact upstream result.
+                }
+                _ => panic!("received outcome expected"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { reply, .. } => {
+                    reply.send(Err("held attempt".into())).unwrap()
+                }
+                _ => panic!("retry must first ask controller"),
+            }
+            assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+        });
+        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let first = post(gateway.local_addr(), TOKEN, body);
+        assert!(first.starts_with("HTTP/1.1 503"), "{first}");
+        assert!(!first.contains("once"));
+        let retry = post(gateway.local_addr(), TOKEN, body);
+        assert!(retry.starts_with("HTTP/1.1 503"), "{retry}");
+        controller.join().unwrap();
+        upstream_thread.join().unwrap();
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+        upstream.set_nonblocking(true).unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cached_replay_never_contacts_upstream_or_claims_a_new_delivery() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        let body = br#"{"model":"operator-model","messages":[]}"#.to_vec();
+        let expected = body.clone();
+        let controller = thread::spawn(move || {
+            for _ in 0..2 {
+                match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    ProviderCommand::Reserve { request, reply } => {
+                        assert_eq!(request.exact_body, expected);
+                        reply
+                            .send(Ok(ForwardPermit::Replay {
+                                lease: request.lease,
+                                exact_body: request.exact_body,
+                                status: 200,
+                                content_type: "application/json".into(),
+                                exact_response: br#"{"id":"cached"}"#.to_vec(),
+                            }))
+                            .unwrap();
+                    }
+                    _ => panic!("replay must only request cached reserve"),
+                }
+            }
+            assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+        });
+        for _ in 0..2 {
+            let response = post(gateway.local_addr(), TOKEN, &body);
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+            assert!(response.contains("cached"));
+        }
+        controller.join().unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn broken_local_reply_reports_failed_delivery_and_blocks_retry() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread = fake_upstream(
+            upstream.try_clone().unwrap(),
+            deliveries.clone(),
+            false,
+            br#"{"id":"sent"}"#.to_vec(),
+        );
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway.control().activate(lease(1, TOKEN)).unwrap();
+        let (outcome_ready_tx, outcome_ready_rx) = mpsc::channel();
+        let (client_closed_tx, client_closed_rx) = mpsc::channel();
+        let controller = thread::spawn(move || {
+            let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { request, reply } => (request, reply),
+                _ => panic!("reserve expected"),
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 22,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::BeforeSend { reply, .. } => reply.send(Ok(())).unwrap(),
+                _ => panic!("send boundary expected"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Outcome {
+                    outcome: ProviderOutcome::Received { .. },
+                    reply,
+                    ..
+                } => {
+                    outcome_ready_tx.send(()).unwrap();
+                    client_closed_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("received outcome expected"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Delivery {
+                    attempt_id,
+                    local_write_success,
+                    reply,
+                } => {
+                    assert_eq!(attempt_id, 22);
+                    assert!(!local_write_success);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("failed delivery must be retained"),
+            }
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                ProviderCommand::Reserve { reply, .. } => {
+                    reply.send(Err("delivery unresolved".into())).unwrap()
+                }
+                _ => panic!("retry must first ask controller"),
+            }
+        });
+        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let mut client = TcpStream::connect(gateway.local_addr()).unwrap();
+        write!(client, "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+        client.write_all(body).unwrap();
+        outcome_ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        let linger = libc::linger {
+            l_onoff: 1,
+            l_linger: 0,
+        };
+        let result = unsafe {
+            libc::setsockopt(
+                client.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_LINGER,
+                (&linger as *const libc::linger).cast(),
+                std::mem::size_of_val(&linger) as libc::socklen_t,
+            )
+        };
+        assert_eq!(result, 0);
+        drop(client);
+        thread::sleep(Duration::from_millis(50));
+        client_closed_tx.send(()).unwrap();
+        let retry = post(gateway.local_addr(), TOKEN, body);
+        assert!(retry.starts_with("HTTP/1.1 503"), "{retry}");
+        controller.join().unwrap();
+        upstream_thread.join().unwrap();
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+        upstream.set_nonblocking(true).unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn lost_upstream_reply_is_retained_as_uncertain_without_resend() {
         let dir = test_dir();
         let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1219,7 +1534,7 @@ mod tests {
                 _ => panic!("reserve expected"),
             };
             reply
-                .send(Ok(ForwardPermit {
+                .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 9,
                     lease: request.lease,
                     exact_body: request.exact_body,
@@ -1269,7 +1584,7 @@ mod tests {
                 _ => panic!("reserve expected"),
             };
             reply
-                .send(Ok(ForwardPermit {
+                .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 10,
                     lease: request.lease,
                     exact_body: request.exact_body,
@@ -1330,7 +1645,7 @@ mod tests {
                 _ => panic!("reserve expected"),
             };
             reply
-                .send(Ok(ForwardPermit {
+                .send(Ok(ForwardPermit::Fresh {
                     attempt_id: 11,
                     lease: request.lease,
                     exact_body: request.exact_body,

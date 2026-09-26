@@ -107,7 +107,14 @@ Before forwarding one exact request, the controller retains its bytes, gets
 a signed provider-task reserve with a parent-generation witness, and checks
 the confirmed reserve's signed image boundary again at the durable send
 boundary. It retains the response or uncertainty before acknowledging the
-worker; an uncertain send is never retried automatically. Admin
+worker; an uncertain send is never retried automatically. A completed local
+response has a retained, digest-checked replay entry before its fixed signed
+settlement clears the hold. An SDK retry with the same exact request bytes in
+the same prompt receives those cached response bytes without another upstream
+send; at most 16 responses are indexed per prompt. A failed or unacknowledged
+local delivery keeps the provider hold for reconciliation. A new explicit
+prompt rotates the token and replay scope, so this is not cross-prompt
+deduplication. Admin
 `reconcile provider audited` checks the retained request/response digests and
 signed held allowance, then settles the configured charge or refuses if it
 cannot identify the held reservation. `reconcile provider abort` clears only
@@ -146,7 +153,13 @@ private task-local `HERMES_HOME` under the configured workspace.
 
 The `mini_grain_status` tool reads signed grain views. `mini_read_resource` reads
 only an operator-named allowlisted resource using a separate observe grant;
-it returns the complete bounded native view. Its `mini_publish` tool
+it returns the complete bounded native view. Each read retains exact signed
+bytes at `stateDir/resource-read-N/attempt/view.bin`. The configured
+`maxResultBytes` bounds the native view up to 4 MiB; a final serialized MCP
+result over 256 KiB refuses with the retained attempt path rather than
+truncating. An allowlisted `fnInboxSummary:true` uses the Lean typed inbox
+presentation for provenance and actions while keeping the same exact signed
+view bytes. Its `mini_publish` tool
 uses a separate signed tool task, reserves allowance, and atomically settles
 that task with allowlisted resource publications and a pinned parent-grain
 no-op witness. The parent witness is authored by Lean and checked in the same
