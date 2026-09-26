@@ -8,13 +8,13 @@ use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -121,6 +121,10 @@ struct Journal {
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
+    hermes_session: Option<HermesSession>,
+    #[serde(default)]
+    prior_hermes_sessions: Vec<HermesSession>,
+    #[serde(default)]
     prompt_witness: Option<Value>,
     unresolved_external: Vec<String>,
 }
@@ -156,6 +160,11 @@ struct ChildRecord {
     pgid: i32,
     #[serde(default)]
     unit: Option<String>,
+    /// A durable launch-gate tombstone exists before the wrapper can start.
+    /// Old records lacking the exact paired launcher protocol require an
+    /// operator's physical audit.
+    #[serde(default)]
+    launch_gate_protocol: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -169,6 +178,19 @@ struct HeldCharge {
     reserve_confirmed: bool,
     reserve_refused: bool,
     reserve_boundary: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HermesSession {
+    id: String,
+    workspace: PathBuf,
+    /// A successful fresh-process session/load proves this ID was retained.
+    load_verified: bool,
+    /// Hashes of the closed SQLite database and WAL, if present. This detects
+    /// changes between turns; the worker can still write its own transcript.
+    state_fingerprint: Option<String>,
+    retention_issue: Option<String>,
 }
 
 impl Journal {
@@ -186,6 +208,8 @@ impl Journal {
             parent_hold: None,
             tool_hold: None,
             reconciliation_log: Vec::new(),
+            hermes_session: None,
+            prior_hermes_sessions: Vec::new(),
             prompt_witness: None,
             unresolved_external: Vec::new(),
         }
@@ -236,6 +260,77 @@ fn decimal(s: &str, label: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn hermes_workspace_home(cwd: &Path) -> Result<(PathBuf, PathBuf)> {
+    let workspace = fs::canonicalize(cwd).map_err(|e| format!("Hermes workspace: {e}"))?;
+    if !workspace.is_dir() {
+        return Err("Hermes workspace is not a directory".into());
+    }
+    let home = workspace.join(".hermes");
+    if !home.exists() {
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+            .create(&home)
+            .map_err(|e| format!("Hermes home create: {e}"))?;
+    }
+    let meta = fs::symlink_metadata(&home).map_err(|e| format!("Hermes home: {e}"))?;
+    if !meta.file_type().is_dir()
+        || meta.file_type().is_symlink()
+        || meta.uid() != unsafe { libc::geteuid() }
+        || meta.mode() & 0o077 != 0
+    {
+        return Err("Hermes home must be an owned real 0700 directory".into());
+    }
+    Ok((workspace, home))
+}
+
+fn hermes_state_fingerprint(home: &Path) -> Result<Option<String>> {
+    let db = home.join("state.db");
+    if !db.exists() {
+        return Ok(None);
+    }
+    let mut parts = Vec::new();
+    for name in ["state.db", "state.db-wal"] {
+        let path = home.join(name);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                parts.push(format!("{name}:absent"));
+                continue;
+            }
+            Err(error) => return Err(format!("Hermes state metadata: {error}")),
+        };
+        if !meta.file_type().is_file()
+            || meta.file_type().is_symlink()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.mode() & 0o077 != 0
+            || meta.len() > 536_870_912
+        {
+            return Err(format!(
+                "Hermes {name} must be an owned private regular file under 512 MiB"
+            ));
+        }
+        let output = Command::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256"])
+            .arg(&path)
+            .output()
+            .map_err(|e| format!("Hermes state digest: {e}"))?;
+        if !output.status.success() {
+            return Err(format!("Hermes state digest refused for {name}"));
+        }
+        let line = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+        let digest = line
+            .split_whitespace()
+            .last()
+            .ok_or("Hermes state digest absent")?;
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("Hermes state digest malformed".into());
+        }
+        parts.push(format!("{name}:{}:{digest}", meta.len()));
+    }
+    Ok(Some(parts.join("|")))
 }
 
 fn validate(c: &Config) -> Result<()> {
@@ -350,6 +445,11 @@ fn validate(c: &Config) -> Result<()> {
     Ok(())
 }
 
+const PHASE_IDLE: u8 = 0;
+const PHASE_RUNNING: u8 = 1;
+const PHASE_SETTLING: u8 = 2;
+const PHASE_CANCELLED: u8 = 3;
+
 struct Runtime {
     config: Config,
     config_path: PathBuf,
@@ -361,7 +461,8 @@ struct Runtime {
     hard_connection: Arc<AtomicBool>,
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
-    current_unit: Arc<Mutex<Option<String>>>,
+    completion_phase: Arc<AtomicU8>,
+    current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
     prompt_active: bool,
     output: Option<control::OutputHandle>,
 }
@@ -372,9 +473,44 @@ impl Runtime {
             let _ = output.try_output(message);
         }
     }
+    fn claim_completion(&mut self, charge: &str) -> Result<bool> {
+        match self.completion_phase.compare_exchange(
+            PHASE_RUNNING,
+            PHASE_SETTLING,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => {
+                self.journal.settlement_due = Some(charge.to_owned());
+                self.save()?;
+                Ok(true)
+            }
+            Err(PHASE_CANCELLED) => {
+                if self.journal.connection == Connection::Hard {
+                    self.journal.connection = Connection::Fenced;
+                }
+                self.save()?;
+                Ok(false)
+            }
+            Err(phase) => Err(format!("unexpected worker completion phase {phase}")),
+        }
+    }
     fn worker_unit(&self, id: u64, spec: &AllowedCommand) -> Option<String> {
         spec.systemd_scope
             .then(|| format!("mini-grain-t{}-o{id}", self.config.task))
+    }
+    fn launch_gate(&self, program: &Path, unit: &str, action: &str) -> Result<()> {
+        launch_gate(&self.config.state_dir, program, unit, action)
+    }
+    fn prove_launcher_gate(program: &Path) -> Result<()> {
+        let output = Command::new(program)
+            .arg("--launch-gate-protocol")
+            .output()
+            .map_err(|e| format!("grain launcher protocol: {e}"))?;
+        if !output.status.success() || output.stdout != b"mini-grain-launch-gate-v1\n" {
+            return Err("configured grain launcher lacks launch-gate v1 protocol".into());
+        }
+        Ok(())
     }
     fn worker_env(&self, command: &mut Command, unit: &Option<String>, broker: Option<&Path>) {
         if let Some(unit) = unit {
@@ -474,6 +610,7 @@ impl Runtime {
             hard_connection: Arc::new(AtomicBool::new(false)),
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
+            completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
             prompt_active: false,
             output: None,
@@ -1196,6 +1333,36 @@ impl Runtime {
         }
         Ok(())
     }
+    fn conversation_new(&mut self) -> Result<()> {
+        if !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_hold.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty()
+        {
+            return Err(
+                "conversation reset requires an attached, fully reconciled idle task".into(),
+            );
+        }
+        if let Some(prior) = self.journal.hermes_session.take() {
+            if self.journal.prior_hermes_sessions.len() >= 32 {
+                self.journal.hermes_session = Some(prior);
+                return Err("conversation history archive reached its 32-session bound".into());
+            }
+            self.journal.prior_hermes_sessions.push(prior);
+            self.save()?;
+            self.emit(
+                "new conversation selected; prior Hermes session ID remains in the journal\n",
+            );
+        } else {
+            self.emit("conversation is already new\n");
+        }
+        Ok(())
+    }
     fn note_hard_reconnect(&mut self) -> Result<()> {
         self.journal.hard_reconnect_pending = true;
         self.save()?;
@@ -1232,6 +1399,7 @@ impl Runtime {
         };
         self.hard_connection.store(!soft, Ordering::SeqCst);
         self.cancelled.store(false, Ordering::SeqCst);
+        self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
         self.save()?;
         self.emit(format!(
             "attached {} to Mini grain {}\n",
@@ -1240,12 +1408,9 @@ impl Runtime {
         ));
         Ok(())
     }
-    fn stop_and_reap_owned(
-        &mut self,
-        completed_charge: Option<&str>,
-    ) -> Result<std::process::ExitStatus> {
+    fn stop_and_reap_owned(&mut self) -> Result<std::process::ExitStatus> {
         let unit = self.journal.child.as_ref().and_then(|c| c.unit.clone());
-        let child = self.child.as_mut().ok_or("no live owned child")?;
+        let child = self.child.as_ref().ok_or("no live owned child")?;
         let pgid = child.id() as i32;
         // The leader remains unreaped until group cleanup, so its PID cannot
         // be recycled while signals address the process group.
@@ -1253,6 +1418,15 @@ impl Runtime {
             signal_group(pgid, libc::SIGTERM)?;
         }
         if let Some(unit) = &unit {
+            let record = self
+                .journal
+                .child
+                .as_ref()
+                .ok_or("owned child record absent")?;
+            if record.launch_gate_protocol.as_deref() != Some("mini-grain-launch-gate-v1") {
+                return Err("scoped worker has no durable launch gate".into());
+            }
+            self.launch_gate(&record.program, unit, "fence")?;
             kill_unit(unit)?;
         }
         for _ in 0..10 {
@@ -1293,19 +1467,27 @@ impl Runtime {
             if !unit_inactive(unit)? {
                 return Err(format!("worker unit {unit} remains active"));
             }
+            let record = self
+                .journal
+                .child
+                .as_ref()
+                .ok_or("owned child record absent")?;
+            prove_worker_unit_stopped(&self.config.task, record, unit)?;
         }
         let _signal_guard = self
             .signal_lock
             .lock()
             .map_err(|_| "signal lock poisoned")?;
-        let status = child.wait().map_err(|e| format!("child wait: {e}"))?;
+        let status = self
+            .child
+            .as_mut()
+            .ok_or("owned child disappeared")?
+            .wait()
+            .map_err(|e| format!("child wait: {e}"))?;
         self.child = None;
         self.current_pgid.store(0, Ordering::SeqCst);
         *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = None;
         self.journal.child = None;
-        if let Some(charge) = completed_charge {
-            self.journal.settlement_due = Some(charge.to_owned());
-        }
         self.save()?;
         Ok(status)
     }
@@ -1313,7 +1495,7 @@ impl Runtime {
         if self.child.is_none() {
             return Ok(());
         }
-        self.stop_and_reap_owned(None).map(|_| ())
+        self.stop_and_reap_owned().map(|_| ())
     }
     fn disconnect(&mut self) -> Result<()> {
         if self.journal.connection == Connection::Soft
@@ -1323,6 +1505,12 @@ impl Runtime {
         }
         let soft_reserved = self.journal.connection == Connection::Soft;
         self.cancelled.store(true, Ordering::SeqCst);
+        let _ = self.completion_phase.compare_exchange(
+            PHASE_RUNNING,
+            PHASE_CANCELLED,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
         self.journal.connection = Connection::Fenced;
         self.hard_connection.store(false, Ordering::SeqCst);
         // Signal first on detection; neither filesystem sync nor Mini's
@@ -1330,6 +1518,27 @@ impl Runtime {
         let stopped = self.kill_child();
         self.save()?;
         let tool_fenced = self.fence_tool();
+        if stopped.is_ok()
+            && tool_fenced.is_ok()
+            && self.journal.parent_hold.is_none()
+            && self.journal.tool_hold.is_none()
+            && self.journal.pending.is_none()
+            && self.journal.tool_pending.is_none()
+            && self.journal.settlement_due.is_none()
+        {
+            let state = self.query()?;
+            if matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "6")
+            ) {
+                // A completed settlement can win the atomic completion race
+                // immediately before EOF. There is no live allowance to trip.
+                self.journal.connection = Connection::Detached;
+                self.journal.hard_reconnect_pending = false;
+                self.journal.prompt_witness = None;
+                return self.save();
+            }
+        }
         let fenced = self.transition(
             if soft_reserved {
                 json!({"type":"cancel"})
@@ -1410,6 +1619,7 @@ impl Runtime {
             .clone();
         if spec.systemd_scope {
             prove_controller_unit(&self.config.task)?;
+            Self::prove_launcher_gate(&spec.program)?;
         }
         self.mark_hold(false, &spec.reserve, &spec.charge)?;
         self.transition(
@@ -1439,6 +1649,10 @@ impl Runtime {
         }
         let id = self.next_id()?;
         let unit = self.worker_unit(id, &spec);
+        if let Some(unit) = &unit {
+            Self::prove_launcher_gate(&spec.program)?;
+            self.launch_gate(&spec.program, unit, "init")?;
+        }
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
@@ -1464,16 +1678,24 @@ impl Runtime {
             program: spec.program.clone(),
             pgid: 0,
             unit: unit.clone(),
+            launch_gate_protocol: unit.as_ref().map(|_| "mini-grain-launch-gate-v1".into()),
         });
         self.save()?;
-        *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = unit.clone();
+        self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
+        *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = unit
+            .as_ref()
+            .map(|unit| (unit.clone(), spec.program.clone()));
         let signal_lock = self.signal_lock.clone();
         let spawn_guard = signal_lock.lock().map_err(|_| "signal lock poisoned")?;
         if self.cancelled.load(Ordering::SeqCst) {
             drop(spawn_guard);
             *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = None;
+            if let Some(unit) = &unit {
+                self.launch_gate(&spec.program, unit, "fence")?;
+            }
             self.journal.child = None;
             self.save()?;
+            self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
             return self.disconnect();
         }
         let mut child = match command.spawn() {
@@ -1481,8 +1703,12 @@ impl Runtime {
             Err(e) => {
                 drop(spawn_guard);
                 *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = None;
+                if let Some(unit) = &unit {
+                    self.launch_gate(&spec.program, unit, "fence")?;
+                }
                 self.journal.child = None;
                 self.save()?;
+                self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
                 self.transition(
                     json!({"type":"settle","charge":"0"}),
                     "settle",
@@ -1508,6 +1734,7 @@ impl Runtime {
             pid,
             program: spec.program,
             pgid: pid as i32,
+            launch_gate_protocol: unit.as_ref().map(|_| "mini-grain-launch-gate-v1".into()),
             unit,
         });
         if let Err(e) = self.save() {
@@ -1515,8 +1742,15 @@ impl Runtime {
             return Err(e);
         }
         loop {
+            if self.cancelled.load(Ordering::SeqCst) && self.hard_connection.load(Ordering::SeqCst)
+            {
+                return self.disconnect();
+            }
             if child_exited_unreaped(self.child.as_ref().unwrap())? {
-                let status = self.stop_and_reap_owned(Some(&spec.charge))?;
+                let status = self.stop_and_reap_owned()?;
+                if !self.claim_completion(&spec.charge)? {
+                    return self.disconnect();
+                }
                 self.transition(
                     json!({"type":"settle","charge":spec.charge}),
                     "settle",
@@ -1524,6 +1758,7 @@ impl Runtime {
                 )?;
                 self.journal.settlement_due = None;
                 self.save()?;
+                self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
                 self.finish_reconnected_mode()?;
                 self.emit(format!("command {name} exited {status}\n"));
                 return Ok(());
@@ -1609,8 +1844,27 @@ impl Runtime {
         if !spec.args.iter().any(|s| s.ends_with("hermes-acp")) {
             return Err("Hermes wrapper must launch the upstream hermes-acp executable".into());
         }
+        let (workspace, hermes_home) = hermes_workspace_home(&self.config.cwd)?;
+        if let Some(session) = &self.journal.hermes_session {
+            if session.workspace != workspace {
+                return Err("saved Hermes session belongs to another workspace".into());
+            }
+            if let Some(issue) = &session.retention_issue {
+                return Err(format!("Hermes conversation not retained: {issue}; use `conversation new` to start explicitly"));
+            }
+            let current = hermes_state_fingerprint(&hermes_home)?;
+            if current != session.state_fingerprint {
+                return Err("Hermes transcript store changed between prompts; use `conversation new` after review".into());
+            }
+        }
+        let acp_cwd = if spec.systemd_scope {
+            PathBuf::from("/workspace")
+        } else {
+            workspace.clone()
+        };
         if spec.systemd_scope {
             prove_controller_unit(&self.config.task)?;
+            Self::prove_launcher_gate(&spec.program)?;
         }
         self.mark_hold(false, &spec.reserve, &spec.charge)?;
         self.transition(
@@ -1652,6 +1906,10 @@ impl Runtime {
         }
         let id = self.next_id()?;
         let unit = self.worker_unit(id, &spec);
+        if let Some(unit) = &unit {
+            Self::prove_launcher_gate(&spec.program)?;
+            self.launch_gate(&spec.program, unit, "init")?;
+        }
         let broker_path = self.config.state_dir.join(format!("mcp-{id:016}.sock"));
         let broker = mcp::start_broker(&broker_path)?;
         let broker_program = if spec.systemd_scope {
@@ -1671,9 +1929,13 @@ impl Runtime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        if !spec.systemd_scope {
+            command.env("HERMES_HOME", &hermes_home);
+        }
         self.worker_env(&mut command, &unit, Some(&broker_path));
         unsafe {
             command.pre_exec(|| {
+                libc::umask(0o077);
                 if libc::setsid() < 0 {
                     Err(io::Error::last_os_error())
                 } else {
@@ -1687,16 +1949,24 @@ impl Runtime {
             program: spec.program.clone(),
             pgid: 0,
             unit: unit.clone(),
+            launch_gate_protocol: unit.as_ref().map(|_| "mini-grain-launch-gate-v1".into()),
         });
         self.save()?;
-        *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = unit.clone();
+        self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
+        *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = unit
+            .as_ref()
+            .map(|unit| (unit.clone(), spec.program.clone()));
         let signal_lock = self.signal_lock.clone();
         let spawn_guard = signal_lock.lock().map_err(|_| "signal lock poisoned")?;
         if self.cancelled.load(Ordering::SeqCst) {
             drop(spawn_guard);
             *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = None;
+            if let Some(unit) = &unit {
+                self.launch_gate(&spec.program, unit, "fence")?;
+            }
             self.journal.child = None;
             self.save()?;
+            self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
             return self.disconnect();
         }
         let mut child = match command.spawn() {
@@ -1704,8 +1974,12 @@ impl Runtime {
             Err(e) => {
                 drop(spawn_guard);
                 *self.current_unit.lock().map_err(|_| "unit lock poisoned")? = None;
+                if let Some(unit) = &unit {
+                    self.launch_gate(&spec.program, unit, "fence")?;
+                }
                 self.journal.child = None;
                 self.save()?;
+                self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
                 self.transition(
                     json!({"type":"settle","charge":"0"}),
                     "settle",
@@ -1725,6 +1999,7 @@ impl Runtime {
             pid,
             program: spec.program,
             pgid: pid as i32,
+            launch_gate_protocol: unit.as_ref().map(|_| "mini-grain-launch-gate-v1".into()),
             unit,
         });
         if let Err(e) = self.save() {
@@ -1763,6 +2038,7 @@ impl Runtime {
                 }
             }
         });
+        let existing_session = self.journal.hermes_session.clone();
         let session = (|| -> Result<String> {
             acp_send(
                 &mut child_stdin,
@@ -1775,25 +2051,54 @@ impl Runtime {
                 }),
             )?;
             self.acp_response(1, &rx, input, &mut child_stdin, &display_tx, &broker)?;
-            acp_send(
-                &mut child_stdin,
-                2,
-                "session/new",
-                json!({
-                    "cwd":self.config.cwd,"mcpServers":[{"name":"mini-grain",
-                        "command":broker_program,"args":["mcp-stdio",broker_socket],"env":[]}]
-                }),
-            )?;
+            let method = if existing_session.is_some() {
+                "session/load"
+            } else {
+                "session/new"
+            };
+            let mut params = json!({
+                "cwd":acp_cwd,"mcpServers":[{"name":"mini-grain",
+                    "command":broker_program,"args":["mcp-stdio",broker_socket],"env":[]}]
+            });
+            if let Some(previous) = &existing_session {
+                params["sessionId"] = Value::String(previous.id.clone());
+            }
+            acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker)?;
-            response
-                .get("sessionId")
-                .or_else(|| response.get("session_id"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or("Hermes omitted session ID".into())
+            if let Some(previous) = &existing_session {
+                if !response.is_object() {
+                    return Err("Hermes did not reload the retained session".into());
+                }
+                if let Some(current) = self.journal.hermes_session.as_mut() {
+                    current.load_verified = true;
+                }
+                self.save()?;
+                Ok(previous.id.clone())
+            } else {
+                let session_id = response
+                    .get("sessionId")
+                    .or_else(|| response.get("session_id"))
+                    .and_then(Value::as_str)
+                    .ok_or("Hermes omitted session ID")?;
+                if session_id.is_empty()
+                    || session_id.len() > 256
+                    || session_id.chars().any(char::is_control)
+                {
+                    return Err("Hermes returned an invalid session ID".into());
+                }
+                self.journal.hermes_session = Some(HermesSession {
+                    id: session_id.to_owned(),
+                    workspace: workspace.clone(),
+                    load_verified: false,
+                    state_fingerprint: None,
+                    retention_issue: Some("first prompt has not yet been retained".into()),
+                });
+                self.save()?;
+                Ok(session_id.to_owned())
+            }
         })();
-        let outcome = match session {
+        let outcome = match &session {
             Ok(session_id) => {
                 self.prompt_active = true;
                 let prompt_sent = acp_send(
@@ -1811,15 +2116,44 @@ impl Runtime {
                     self.acp_response(3, &rx, input, &mut child_stdin, &display_tx, &broker)
                 })
             }
-            Err(e) => Err(e),
+            Err(e) => Err(e.clone()),
         };
         self.prompt_active = false;
         broker.deactivate_prompt();
+        if self.cancelled.load(Ordering::SeqCst) && self.hard_connection.load(Ordering::SeqCst) {
+            self.disconnect()?;
+            return Err("hard disconnect while Hermes was running".into());
+        }
         if self.journal.connection == Connection::Fenced {
             return outcome.map(|_| ());
         }
+        if let Err(error) = &session {
+            drop(child_stdin);
+            let exit = self.stop_and_reap_owned()?;
+            if !self.claim_completion("0")? {
+                self.disconnect()?;
+                return Err("hard disconnect before Hermes setup settlement".into());
+            }
+            if existing_session.is_some() {
+                if let Some(current) = self.journal.hermes_session.as_mut() {
+                    current.retention_issue = Some(format!("session/load failed: {error}"));
+                }
+                self.save()?;
+            }
+            self.transition(
+                json!({"type":"settle","charge":"0"}),
+                "settle",
+                &format!("hermes-acp setup failed exit:{exit}"),
+            )?;
+            self.journal.settlement_due = None;
+            self.journal.prompt_witness = None;
+            self.save()?;
+            self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
+            self.finish_reconnected_mode()?;
+            return Err(format!("Hermes setup failed before prompt: {error}"));
+        }
         if let Err(error) = &outcome {
-            let stopped = self.stop_and_reap_owned(None);
+            let stopped = self.stop_and_reap_owned();
             self.journal.connection = Connection::Fenced;
             self.hard_connection.store(false, Ordering::SeqCst);
             self.journal
@@ -1837,7 +2171,11 @@ impl Runtime {
         // process. Provider usage may still be uncertain; charge is explicitly
         // the configured budget unit, not an attested invoice.
         drop(child_stdin);
-        let exit = self.stop_and_reap_owned(Some(&spec.charge))?;
+        let exit = self.stop_and_reap_owned()?;
+        if !self.claim_completion(&spec.charge)? {
+            self.disconnect()?;
+            return Err("hard disconnect before Hermes settlement".into());
+        }
         self.transition(
             json!({"type":"settle","charge":spec.charge}),
             "settle",
@@ -1846,7 +2184,25 @@ impl Runtime {
         self.journal.settlement_due = None;
         self.journal.prompt_witness = None;
         self.save()?;
+        self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
         self.finish_reconnected_mode()?;
+        let retention = hermes_state_fingerprint(&hermes_home);
+        if let Some(current) = self.journal.hermes_session.as_mut() {
+            match &retention {
+                Ok(Some(fingerprint)) => {
+                    current.state_fingerprint = Some(fingerprint.clone());
+                    current.retention_issue = None;
+                }
+                Ok(None) => {
+                    current.state_fingerprint = None;
+                    current.retention_issue =
+                        Some("upstream did not create state.db after the prompt".into());
+                }
+                Err(error) => current.retention_issue = Some(error.clone()),
+            }
+            self.save()?;
+        }
+        retention?;
         outcome.map(|_| ())
     }
     fn acp_response(
@@ -1948,8 +2304,39 @@ impl Runtime {
         }
     }
     fn recover(&mut self) -> Result<()> {
-        if self.journal.child.is_some() {
-            return Err("prior controller died with active child; PID reuse prevents automatic kill; operator process audit required".into());
+        if let Some(record) = self.journal.child.clone() {
+            let unit = record.unit.as_deref().ok_or(
+                "prior controller died with unscoped child; operator process audit required",
+            )?;
+            if record.launch_gate_protocol.as_deref() != Some("mini-grain-launch-gate-v1") {
+                return Err(
+                    "prior child has no durable launch gate; operator process audit required"
+                        .into(),
+                );
+            }
+            if unit != format!("mini-grain-t{}-o{}", self.config.task, record.operation_id) {
+                return Err("saved worker unit does not match its operation ID".into());
+            }
+            Self::prove_launcher_gate(&record.program)?;
+            // The durable gate bars a delayed systemd StartTransientUnit from
+            // executing after this observation. Never signal the saved PID:
+            // it may belong to a different process after controller death.
+            self.launch_gate(&record.program, unit, "fence")?;
+            kill_unit(unit)?;
+            prove_worker_unit_stopped(&self.config.task, &record, unit)?;
+            let id = self.next_id()?;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":id.to_string(),"action":"recover-gated-worker",
+                "operationId":record.operation_id.to_string(),"unit":unit,
+                "machineProven":true,"stage":"physical-stop-verified"
+            }));
+            self.journal.child = None;
+            self.journal.connection = Connection::Fenced;
+            self.journal.unresolved_external.push(format!(
+                "worker operation {} stopped after controller restart; external effects need acknowledgement",
+                record.operation_id
+            ));
+            self.save()?;
         }
         self.retry_pending(true)?;
         self.retry_pending(false)?;
@@ -1976,6 +2363,28 @@ impl Runtime {
                 return Err(format!(
                     "recovery settlement has unexpected grain status {status}"
                 ));
+            }
+        }
+        if self.journal.parent_hold.is_some()
+            && self.journal.child.is_none()
+            && self.journal.pending.is_none()
+            && self.journal.settlement_due.is_none()
+            && matches!(
+                self.journal.connection,
+                Connection::Hard | Connection::Soft | Connection::Fenced
+            )
+        {
+            let state = self.query()?;
+            if matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("3" | "4")
+            ) {
+                self.journal.connection = Connection::Fenced;
+                let note = "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement";
+                if !self.journal.unresolved_external.iter().any(|s| s == note) {
+                    self.journal.unresolved_external.push(note.into());
+                }
+                self.save()?;
             }
         }
         if self.journal.connection == Connection::Fenced {
@@ -2242,8 +2651,16 @@ impl Runtime {
             .ok_or("no stranded child record")?;
         let evidence = match &record.unit {
             Some(unit) => {
+                if record.launch_gate_protocol.as_deref() == Some("mini-grain-launch-gate-v1") {
+                    self.launch_gate(&record.program, unit, "fence")?;
+                    kill_unit(unit)?;
+                }
                 prove_worker_unit_stopped(&self.config.task, &record, unit)?;
-                "operator asserted no late wrapper/start request; unit currently inactive, empty cgroup, controller MainPID verified"
+                if record.launch_gate_protocol.as_deref() == Some("mini-grain-launch-gate-v1") {
+                    "durable gate fenced; operator audited unit and external effects"
+                } else {
+                    "operator asserted no late wrapper/start request; unit currently inactive, empty cgroup, controller MainPID verified"
+                }
             }
             None => "explicit operator assertion of physical process audit; no machine proof",
         };
@@ -2403,6 +2820,23 @@ fn kill_unit(unit: &str) -> Result<()> {
     } else {
         Err(format!("systemd worker kill refused: {}", error.trim()))
     }
+}
+
+fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Result<()> {
+    let helper = program.with_file_name("launch-gate");
+    let output = Command::new(&helper)
+        .arg(action)
+        .arg(state_dir)
+        .arg(unit)
+        .output()
+        .map_err(|e| format!("launch gate {}: {e}", helper.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "launch gate {action} refused for {unit}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
 }
 
 fn unit_inactive(unit: &str) -> Result<bool> {
@@ -2627,14 +3061,23 @@ fn serve(mut rt: Runtime) -> Result<()> {
     let hard = rt.hard_connection.clone();
     let lock = rt.signal_lock.clone();
     let cancelled = rt.cancelled.clone();
+    let completion_phase = rt.completion_phase.clone();
     let current_unit = rt.current_unit.clone();
+    let state_dir = rt.config.state_dir.clone();
     let interrupt: control::HardInterrupt = Arc::new(move |_| {
         cancelled.store(true, Ordering::SeqCst);
+        let _ = completion_phase.compare_exchange(
+            PHASE_RUNNING,
+            PHASE_CANCELLED,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
         interrupt_from_input(&pgid, &hard, &lock);
-        if let Ok(unit) = current_unit.lock() {
-            if let Some(unit) = unit.as_deref() {
-                let _ = kill_unit(unit);
-            }
+        let owned = current_unit.lock().ok().and_then(|entry| entry.clone());
+        if let Some((unit, program)) = owned {
+            let _ = kill_unit(&unit);
+            let _ = launch_gate(&state_dir, &program, &unit, "fence");
+            let _ = kill_unit(&unit);
         }
     });
     clear_stale_control_socket(&rt.config.control_socket)?;
@@ -2691,6 +3134,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
                 Ok(())
             }
             Input::Line(line) if line == "recover" => rt.recover(),
+            Input::Line(line) if line == "conversation new" => rt.conversation_new(),
             Input::Admin(request) => {
                 if Instant::now() >= request.deadline
                     || request
@@ -2735,7 +3179,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
             Input::Disconnect => rt.disconnect(),
             Input::SoftDetach => Ok(()),
             Input::Line(_) => Err(
-                "expected attach hard|soft, run NAME, hermes PROMPT, status, recover, disconnect"
+                "expected attach hard|soft, run NAME, hermes PROMPT, conversation new, status, recover, disconnect"
                     .into(),
             ),
         };
@@ -2843,6 +3287,14 @@ mod tests {
             .unwrap()
             .get("systemdScope")
             .is_some());
+    }
+
+    #[test]
+    fn legacy_launcher_cannot_arm_a_recoverable_worker() {
+        // Even an executable that exits successfully is insufficient: the
+        // paired bwrap launcher must advertise the exact gate ExecStart contract
+        // before the controller creates a gate or child marker.
+        assert!(Runtime::prove_launcher_gate(Path::new("/bin/true")).is_err());
     }
 
     #[test]

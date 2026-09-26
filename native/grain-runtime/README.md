@@ -81,7 +81,20 @@ bootstrapped native Mini deployment):
 
 `hermes PROMPT` speaks ACP JSON-RPC to the actual upstream `hermes-acp`
 process and registers the keyless `mini-grain` MCP proxy. Its
-`mini_grain_status` tool reads signed grain views. `mini_read_resource` reads
+session ID is retained in the controller journal. Later prompts start a new
+confined worker and use ACP `session/load` with that exact ID; they do not
+silently start another conversation. The controller pins the workspace and
+checks the closed upstream `state.db`/WAL fingerprint between prompts. The
+upstream transcript is worker-authored state, not a Mini-signed record. If the
+first prompt never creates a retained database row, loading fails, or the
+database changes outside the controller, the task reports a retention issue.
+After the grain is idle and fully reconciled, `conversation new` explicitly
+selects a fresh conversation while retaining the prior session ID in the
+journal. It does not reset Mini authority, allowance, or unresolved effects.
+The Linux worker sees `/workspace` as its ACP cwd and `HOME`; macOS sets a
+private task-local `HERMES_HOME` under the configured workspace.
+
+The `mini_grain_status` tool reads signed grain views. `mini_read_resource` reads
 only an operator-named allowlisted resource using a separate observe grant;
 it returns the complete bounded native view. Its `mini_publish` tool
 uses a separate signed tool task, reserves allowance, and atomically settles
@@ -93,9 +106,15 @@ attach through a signed native policy install before allowing a prompt.
 Hermes still retains its built-in tools; ACP permission requests are refused,
 and an operator-selected OS confinement wrapper is mandatory. The Linux
 `deploy/grain-host/bwrap` launcher runs each worker in a transient systemd
-cgroup, mounts a single broker socket into the sandbox, and withholds Mini
-keys and controller state. The controller signals the process group first,
-kills the unit, and observes it inactive before clearing the child record.
+cgroup through its sibling `launch-gate`, mounts a single broker socket into
+the sandbox, and withholds Mini keys and controller state. The runtime
+requires the launcher's exact gate protocol before reserving allowance. It
+durably arms a unique gate before spawning the wrapper, then fences that gate
+after the immediate process-group signal and before clearing a child record.
+It also kills the unit and checks MainPID and the full cgroup for remaining
+processes. On restart, a gate-backed child can be fenced and audited without
+signalling a possibly recycled PID; older child records still require an
+operator physical audit. Gate tombstones remain in the private state directory.
 Set a command's `systemdScope` to `true` only when its program is the
 `deploy/grain-host/bwrap` launcher and `serve` runs as the matching active
 `mini-grain-controller@TASK.service`; the runtime checks that unit's MainPID
@@ -105,19 +124,25 @@ The controller journals separate parent and tool pending operations before invok
 a pre-spawn child marker before creating a worker. A successful `mini submit`
 or exact `mini retry --mode lookup` confirms the native operation. If a crash
 leaves an active-child marker, startup refuses to signal its saved PID/PGID:
-the number may have been recycled. If a custody subprocess might still create
+the number may have been recycled. A paired launch gate permits recovery to
+fence a late start, kill the unique unit, and verify its empty cgroup before
+clearing that marker. An older marker without the exact gate protocol requires
+an operator physical audit. If a custody subprocess might still create
 `call.bin` after a controller crash, recovery likewise refuses to infer that
-no operation occurred from a missing file. Both conditions need an operator
-process audit and reconciliation before the task can be relaunched. A settled
+no operation occurred from a missing file; that uncertainty requires an
+operator audit and reconciliation before the task can be relaunched. A settled
 local command leaves its charge in the journal until Mini confirms settlement.
+Completion and hard interruption have one atomic ordering point after physical
+stop. If the controller dies before it records completion, recovery treats the
+durable held allowance as uncertain and fences it through Mini; it never
+infers a successful command from the missing child record.
 The controller also journals the fixed charge before every reserve. After a
 hard fence, admin `reconcile parent` or `reconcile tool` verifies the signed
 held amount, reserve receipt, generation, and event boundary before settling
 through Mini at the fixed configured charge. If later Mini events make origin
 proof ambiguous, the operator must use the explicit `audited` form after
-reviewing the exact retained attempt. A post-crash unit check alone cannot
-exclude a delayed `systemd-run` start. Admin `reconcile worker audited`
-therefore records a physical-process assertion; for a scoped worker it also
+reviewing the exact retained attempt. Admin `reconcile worker audited`
+records an explicit physical-process assertion; for a scoped worker it also
 checks the controller MainPID, unique unit, and currently empty cgroup. Admin
 `reconcile effects` separately acknowledges external uncertainty after all
 signed holds resolve. All decisions and results remain in the journal.
