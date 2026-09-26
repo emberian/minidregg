@@ -59,10 +59,9 @@ mini host-command --host HOST --config CONFIG.json \
 
 `--arg` order is preserved. Only the fn consumer command allowlist in the
 client source is accepted; Rust invokes Host/Main directly without a shell or a
-second implementation of those semantics. These commands are not yet framed
-session operations. Their multi-file outputs and external fn control socket
-need dedicated typed host operations before they can share the persistent
-session safely.
+second implementation of those semantics. The typed B and A poll/ACK routes
+below use the framed session; other allowlisted file-oriented fn commands still
+use a separate direct host process.
 
 For a service configured with the host's `fnPoll` pin, the typed consumer
 path uses one socket for the entire poll, Mini submission, and fn ACK:
@@ -89,6 +88,12 @@ publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
 only `fnAck: "durable-accepted"` reports success. After an uncertain ACK,
 repeat the same transaction ID in a new attempt directory and reconcile from
 the retained reply.
+
+An empty fn page can return `status: "idle"` with no intent, or
+`status: "skip-decision"`. A fresh skip decision includes a Lean-authored
+`intent.bin` to submit before acknowledging; a repeated skip decision has no
+new intent. An accepted skip ACK identifies itself as `kind:
+"empty-page-skip"` in `ack.json`.
 
 The A reply consumer uses the same custody sequence with its own operator
 `fnReplyPoll` config and separate socket. Replace `consumer-poll` and

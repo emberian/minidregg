@@ -920,6 +920,31 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRo
             }
             print_json(&value)
         }
+        "idle"
+            if !route.reply
+                && intent.is_empty()
+                && value.pointer("/decision/type").and_then(Value::as_str)
+                    == Some("fn-empty-page-idle-v1") =>
+        {
+            print_json(&value)
+        }
+        "skip-decision"
+            if !route.reply
+                && value.pointer("/decision/type").and_then(Value::as_str)
+                    == Some("fn-empty-page-progress-decision-v1") =>
+        {
+            match value.pointer("/decision/decision").and_then(Value::as_str) {
+                Some("proposed-fresh") if !intent.is_empty() => {
+                    write_new(&directory.join("intent.bin"), &intent)?;
+                    print_json(&value)
+                }
+                Some("repeated") if intent.is_empty() => print_json(&value),
+                _ => Err(
+                    "inconsistent fn empty-page decision and intent; complete reply retained"
+                        .to_owned(),
+                ),
+            }
+        }
         "refused" if intent.is_empty() => {
             print_json(&value)?;
             Err("fn consumer refused; complete decision retained".to_owned())

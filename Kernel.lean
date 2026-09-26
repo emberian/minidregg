@@ -65,6 +65,7 @@ import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnConsumerOperationProofs
+import Kernel.FnConsumerProgress
 import Kernel.FnPortableSource
 import Kernel.FnReplyConsumption
 import Kernel.FnReplyPublication

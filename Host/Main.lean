@@ -14,6 +14,7 @@ import Kernel.NativeHostSession
 import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
+import Kernel.FnConsumerProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnPortableSource
@@ -708,6 +709,69 @@ def FnPollScopePin.check (pin : FnPollScopePin)
       projection.registrationEpoch == pin.registrationEpoch do
     throw "fn poll cursor differs from independently pinned consumer scope"
 
+def FnPollScopePin.progressScope (pin : FnPollScopePin) :
+    Except String FnConsumerProgress.Scope := do
+  return ⟨← decodeCanonicalHex "pinned fn history" pin.history,
+    ← decodeCanonicalHex "pinned fn incarnation" pin.incarnation,
+    ← decodeCanonicalHex "pinned fn consumer" pin.consumer,
+    ← decodeCanonicalHex "pinned fn principal" pin.principal,
+    ← decodeCanonicalHex "pinned fn query" pin.query,
+    pin.queryVersion, pin.viewVersion, pin.registrationEpoch⟩
+
+def exactNamedDecimal (name field : String) : Except String Nat := do
+  let [label, value] := field.splitOn "="
+    | throw s!"fn {name} field has unexpected framing"
+  unless label == name do throw s!"fn {name} field has unexpected label"
+  exactDecimal name value
+
+def exactNamedHex (name field : String) : Except String (List UInt8) := do
+  let [label, value] := field.splitOn "="
+    | throw s!"fn {name} field has unexpected framing"
+  unless label == name do throw s!"fn {name} field has unexpected label"
+  decodeCanonicalHex name value
+
+structure FnConsumerStatus where
+  committedAck : Nat
+  frontier : Nat
+  distance : Nat
+
+def parseFnConsumerStatus (output : String) : Except String FnConsumerStatus := do
+  let [line, ""] := output.splitOn "\n"
+    | throw "fn consumer status has unexpected framing"
+  let ["consumer", "status", "accepted", ack, frontier, distance] :=
+      line.splitOn " "
+    | throw "fn consumer status has unexpected fields"
+  let committedAck ← exactNamedDecimal "committed-ack" ack
+  let frontier ← exactNamedDecimal "committed-journal-frontier" frontier
+  let distance ← exactNamedDecimal "journal-event-distance" distance
+  unless committedAck ≤ frontier && distance == frontier - committedAck &&
+      frontier ≤ 4294967295 do
+    throw "fn consumer status has invalid positions"
+  return ⟨committedAck, frontier, distance⟩
+
+def parseFnConsumerInspect (output : String) :
+    Except String (FnConsumerProgress.Scope × Nat) := do
+  let [line, ""] := output.splitOn "\n"
+    | throw "fn consumer inspect has unexpected framing"
+  let ["fn-consumer-inspect-v1", history, incarnation, consumer, principal,
+       query, qver, view, epoch, position,
+       "currentness=unverified", "acceptance=unverified",
+       "processing=unverified"] := line.splitOn " "
+    | throw "fn consumer inspect has unexpected fields"
+  let scope : FnConsumerProgress.Scope :=
+    ⟨← exactNamedHex "history" history,
+     ← exactNamedHex "incarnation" incarnation,
+     ← exactNamedHex "consumer" consumer,
+     ← exactNamedHex "principal" principal,
+     ← exactNamedHex "query" query,
+     ← exactNamedDecimal "query-version" qver,
+     ← exactNamedDecimal "view-version" view,
+     ← exactNamedDecimal "registration-epoch" epoch⟩
+  let position ← exactNamedDecimal "position" position
+  unless scope.valid && position ≤ 4294967295 do
+    throw "fn consumer inspect has invalid scope or position"
+  return (scope, position)
+
 def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (cursorPath reportPath : String) : IO (List UInt8 × List UInt8 × FnPollProjection) := do
   let cursor ← readBoundedBytes cursorPath 346
@@ -734,6 +798,74 @@ def projectFnPoll (fnBinary : String) (pin : FnPollScopePin)
     (String.fromUTF8! lineBytes.toByteArray))
   IO.ofExcept (pin.check projection)
   pure (cursor, report, projection)
+
+def fnConsumerAscii (scope : FnPollScopePin) : IO String := do
+  let consumer ← IO.ofExcept (decodeCanonicalHex "pinned fn consumer" scope.consumer)
+  unless !consumer.isEmpty && consumer.length ≤ 64 &&
+      consumer.all (fun b => 33 ≤ b.toNat && b.toNat ≤ 126) do
+    throw (IO.userError "pinned fn consumer is outside local CLI ASCII profile")
+  pure (String.fromUTF8! consumer.toByteArray)
+
+def queryFnConsumerStatus (fnBinary : String) (scope : FnPollScopePin)
+    (controlPath : String) : IO FnConsumerStatus := do
+  let consumer ← fnConsumerAscii scope
+  let child ← IO.Process.spawn
+    { cmd := fnBinary, args := #["--fn", "consumer", "status", controlPath, consumer],
+      stdin := .null, stdout := .piped, stderr := .null }
+  let output ← try readBoundedLoop child.stdout 256
+    catch error =>
+      child.kill
+      discard <| child.wait
+      throw error
+  let exitCode ← child.wait
+  unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
+    throw (IO.userError "fn local consumer status refused or was uncertain")
+  IO.ofExcept (parseFnConsumerStatus (String.fromUTF8! output.toByteArray))
+
+def inspectFnConsumerCursor (fnBinary : String) (cursorPath : String) :
+    IO (FnConsumerProgress.Scope × Nat) := do
+  let child ← IO.Process.spawn
+    { cmd := fnBinary, args := #["--fn", "consumer-inspect", cursorPath],
+      stdin := .null, stdout := .piped, stderr := .null }
+  let output ← try readBoundedLoop child.stdout 1024
+    catch error =>
+      child.kill
+      discard <| child.wait
+      throw error
+  let exitCode ← child.wait
+  unless exitCode == 0 && output.all (fun byte => byte.toNat < 128) do
+    throw (IO.userError "fn consumer cursor inspect refused")
+  IO.ofExcept (parseFnConsumerInspect (String.fromUTF8! output.toByteArray))
+
+/-- One authenticated local poll, before choosing the article or empty-page
+branch. The cursor is written last by fn; requiring both files and the exact
+accepted line excludes partial or uncertain output from progress admission. -/
+def invokeFnConsumerPollRaw (fnBinary : String) (scope : FnPollScopePin)
+    (controlPath cursorPath reportPath : String) : IO (List UInt8 × List UInt8) := do
+  unless [controlPath, cursorPath, reportPath].all (·.startsWith "/") &&
+      cursorPath != reportPath do
+    throw (IO.userError "fn poll control and output paths must be distinct absolute paths")
+  for path in [cursorPath, reportPath] do
+    if ← (System.FilePath.mk path).pathExists then
+      throw (IO.userError "fn poll output path already exists")
+  let consumer ← fnConsumerAscii scope
+  let child ← IO.Process.spawn
+    { cmd := fnBinary, args := #["--fn", "consumer", "poll", controlPath,
+      consumer, cursorPath, reportPath],
+      stdin := .null, stdout := .piped, stderr := .null }
+  let output ← try readBoundedLoop child.stdout 512
+    catch error =>
+      child.kill
+      discard <| child.wait
+      throw error
+  let exitCode ← child.wait
+  unless exitCode == 0 && output == "consumer accepted\n".toUTF8.toList do
+    throw (IO.userError "authenticated fn local consumer poll refused or was uncertain")
+  let cursor ← readBoundedBytes cursorPath 346
+  let event ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
+  unless !cursor.isEmpty do
+    throw (IO.userError "accepted fn poll did not produce a cursor")
+  return (cursor, event)
 
 /-- Invoke the actual same-UID fn local consumer route under an operator
 selected absolute control socket and independently pinned cursor scope. The
@@ -1232,6 +1364,54 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
     rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath cursorPath
     reportPath carrierPath intentPath resultPath
 
+def runFnEmptyPageDecisionLoaded (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (service : FnPollService)
+    (scope : FnPollScopePin) (fnBinary : String)
+    (cursor : List UInt8) (fromPosition toPosition : Nat) :
+    IO (UInt8 × List UInt8) := do
+  let gateway ← requireGateway config
+  let policyJson ← readJson service.policyPath
+  IO.ofExcept (requireExactFields "consumer policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let policy := policySource.policy
+  let selectedScope ← IO.ofExcept scope.progressScope
+  let probeTarget : DeclaredResourceController.Target :=
+    ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
+      .content ⟨[]⟩, none⟩
+  let targetRoot ← IO.ofExcept <| (do
+    let .present cell := opened.directory.directory.slots policy.target
+      | throw "empty-page consumer target is absent"
+    let some pre := DeclaredResourceController.selectTarget
+      config.deployment probeTarget cell
+      | throw "empty-page consumer target is not a valid content resource"
+    pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
+  let evidence : FnConsumerProgress.Evidence :=
+    ⟨policy.application, selectedScope, cursor, fromPosition, toPosition,
+      FnConsumerOperation.pollControlBinding fnBinary service.controlPath, true⟩
+  let report : FnConsumerProgress.Report :=
+    ⟨evidence, policy.subject, policy.target, policy.capability,
+      opened.authority.snapshot.cell.root, targetRoot⟩
+  let decision ← IO.ofExcept (FnConsumerProgress.evaluateVerified config
+    gateway policy selectedScope report opened)
+  let (decisionName, intent) ← match decision with
+    | .fresh _ =>
+        let some authored := decision.intent report
+          | throw (IO.userError "fresh empty-page decision has no intent")
+        pure ("proposed-fresh", Minidregg.Host.Json.encodeHex
+          (NativeObservationCodec.intentCodec.encode authored))
+    | .repeated => pure ("repeated", "")
+    | .refused _ => pure ("refused", "")
+  return (12, (Lean.Json.mkObj
+    [("type", toJson "fn-consumer-poll-session-v1"),
+     ("status", toJson (if decisionName == "refused" then "refused" else "skip-decision")),
+     ("decision", Lean.Json.mkObj
+       [("type", toJson "fn-empty-page-progress-decision-v1"),
+        ("decision", toJson decisionName),
+        ("fromPosition", toJson (toString fromPosition)),
+        ("toPosition", toJson (toString toPosition))]),
+     ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
 /-- A typed live fn poll. All paths come from the operator manifest or a
 private temporary directory. The frame has no path, fn helper, policy or
 claim fields; the claim is derived from the exact ACL2-projected source. -/
@@ -1255,10 +1435,40 @@ def runFnPollSession (config : NativeHost.Config)
     let claimPath := (directory / "claim.json").toString
     let intentPath := (directory / "intent.bin").toString
     let resultPath := (directory / "decision.json").toString
-    let (polledCursor, polledEvent, polledCarrier) ←
-      invokeFnConsumerPoll pin.fnBinary scope service.controlPath
-        cursorPath reportPath carrierPath
-    let (_, _, projection) ← projectFnPoll pin.fnBinary scope cursorPath reportPath
+    let before ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
+    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.fnBinary scope
+      service.controlPath cursorPath reportPath
+    if polledEvent.isEmpty then
+      let (inspectedScope, position) ←
+        inspectFnConsumerCursor pin.fnBinary cursorPath
+      let selectedScope ← IO.ofExcept scope.progressScope
+      let after ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
+      unless inspectedScope == selectedScope &&
+          before.committedAck == after.committedAck &&
+          polledCursor == (← readBoundedBytes cursorPath 346) &&
+          (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes).isEmpty do
+        throw (IO.userError "empty fn poll scope, ACK, or output changed")
+      if position == before.committedAck && position == after.frontier then
+        return (12, (Lean.Json.mkObj
+          [("type", toJson "fn-consumer-poll-session-v1"),
+           ("status", toJson "idle"),
+           ("decision", Lean.Json.mkObj
+             [("type", toJson "fn-empty-page-idle-v1"),
+              ("position", toJson (toString position))]),
+           ("intentHex", toJson "")]).compress.toUTF8.toList)
+      unless before.committedAck < position &&
+          position ≤ before.committedAck + FnConsumerProgress.maxPollScan &&
+          position ≤ after.frontier do
+        throw (IO.userError "empty fn poll continuation is outside observed scan")
+      let opened ← sessionOpened config state
+      return ← runFnEmptyPageDecisionLoaded config opened service scope
+        pin.fnBinary polledCursor before.committedAck position
+    let (_, projectedEvent, projection) ←
+      projectFnPoll pin.fnBinary scope cursorPath reportPath
+    unless sameBytes projectedEvent polledEvent do
+      throw (IO.userError "fn poll event changed before projection")
+    IO.FS.writeBinFile carrierPath projection.received.toByteArray
+    let polledCarrier := projection.received
     let extracted ← IO.ofExcept (FnPortableSource.extract projection.source)
     let claim := Lean.Json.mkObj
       [("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
@@ -1282,6 +1492,54 @@ def runFnPollSession (config : NativeHost.Config)
       [("type", toJson "fn-consumer-poll-session-v1"),
        ("status", toJson (if exitCode == 0 then "accepted-decision" else "refused")),
        ("decision", decision), ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
+/-- A previously admitted empty-page skip retains its exact fn cursor. ACK
+never needs a current Mini mutation grant, but fn still checks its own scoped
+cursor and durable position through the local control endpoint. -/
+def runFnSkipAckSession (pin : FnPortablePin) (scope : FnPollScopePin)
+    (service : FnPollService) (transaction : String)
+    (skipped : FnConsumerProgress.Evidence) : IO (UInt8 × List UInt8) := do
+  unless skipped.controlBinding ==
+      FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath do
+    throw (IO.userError "empty-page ACK control differs from accepted Mini skip")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "retained-skip.fncu").toString
+    writeBytes cursorPath skipped.cursor
+    let (inspectedScope, position) ←
+      inspectFnConsumerCursor pin.fnBinary cursorPath
+    let selectedScope ← IO.ofExcept scope.progressScope
+    unless inspectedScope == selectedScope && position == skipped.toPosition &&
+        skipped.cursor == (← readBoundedBytes cursorPath 346) do
+      throw (IO.userError "empty-page ACK cursor differs from accepted Mini skip")
+    let child ← IO.Process.spawn
+      { cmd := pin.fnBinary,
+        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        stdin := .null, stdout := .piped, stderr := .null }
+    let output ← try readBoundedLoop child.stdout 128
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    unless skipped.cursor == (← readBoundedBytes cursorPath 346) do
+      throw (IO.userError "empty-page ACK cursor changed during local call")
+    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+        "durable-accepted"
+      else if exitCode == 2 then "refused"
+      else if exitCode == 3 then "uncertain"
+      else "transport-fault"
+    if status == "durable-accepted" then
+      let after ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
+      unless skipped.toPosition ≤ after.committedAck do
+        throw (IO.userError "fn accepted skip ACK without durable position advance")
+    return (13, (Lean.Json.mkObj
+      [("type", toJson "fn-consumer-ack-session-v1"),
+       ("kind", toJson "empty-page-skip"),
+       ("miniTransactionId", toJson transaction),
+       ("fnCursorPosition", toJson (toString skipped.toPosition)),
+       ("fnStoreSequence", toJson ""),
+       ("fnStoreTransactionId", toJson ""),
+       ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 /-- A typed acknowledgement only for an original accepted Mini operation.
 The request names that transaction, never a cursor or fn pathname. An
@@ -1308,6 +1566,10 @@ def runFnAckSession (config : NativeHost.Config)
   let some record := opened.durable.image.accepted.find?
       (fun entry => entry.transactionId.value == transactionId)
     | throw (IO.userError "fn ack Mini transaction is absent")
+  let selectedScope ← IO.ofExcept scope.progressScope
+  if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
+      config.deployment.domain config.profile.semantics record then
+    return ← runFnSkipAckSession pin scope service transaction skipped
   let some (_, some portable, some stored) :=
       FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
         config.profile.semantics record
