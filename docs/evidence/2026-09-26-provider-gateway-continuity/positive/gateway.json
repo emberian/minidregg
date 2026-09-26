@@ -1,0 +1,13 @@
+{
+  "reserveConfirmed": true,
+  "reserveAnchor": {
+    "transactionId": "48441112973311040168988432536105609351809229523955906780652818084982636362574",
+    "eventId": "107776132586780375755656231875574815122989123201306014028249551396730437110035",
+    "acceptedCount": "10",
+    "imageBoundary": "70373278689193785483629214538273438588023598049807134894726424758658943394628"
+  },
+  "sendStarted": true,
+  "responseStatus": 200,
+  "responseContentType": "text/event-stream",
+  "outcome": "received:200:text/event-stream"
+}

@@ -1,0 +1,13 @@
+{
+  "reserveConfirmed": true,
+  "reserveAnchor": {
+    "transactionId": "48441112973311040168988432536105609351809229523955906780652818084982636362574",
+    "eventId": "5305284498751870628429589197704141577172173467897773507467299366183201029114",
+    "acceptedCount": "10",
+    "imageBoundary": "39047480682490852557509092778970744903357698596242906830001410278963299309334"
+  },
+  "sendStarted": false,
+  "responseStatus": null,
+  "responseContentType": null,
+  "outcome": "not-sent:send boundary not acknowledged"
+}
