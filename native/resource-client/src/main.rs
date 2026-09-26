@@ -1,5 +1,6 @@
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
+use sha2::Digest;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -47,6 +48,7 @@ usage:
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
@@ -841,7 +843,12 @@ fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Err("attempt has exhausted retry evidence names".to_owned())
 }
 
-fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
+fn retry_with_upgrade(
+    directory: &Path,
+    mode: &str,
+    direct: bool,
+    #[cfg(unix)] upgrade: Option<&drain::HostUpgrade>,
+) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
@@ -850,16 +857,79 @@ fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
         return Err(format!("attempt has no retained {}", call.display()));
     }
     sync_retained_call(directory, &call)?;
-    let (host, config, socket) = manifest_paths(directory)?;
+    let (original_host, config, socket) = manifest_paths(directory)?;
     if !direct && SOCKET.get().is_none() {
         if let Some(socket) = socket {
             let _ = SOCKET.set(socket);
         }
     }
     let (outcome_bin, outcome_json) = next_retry(directory)?;
-    host_files(&host, &config, &[Path::new(mode), &call, &outcome_bin])?;
-    let outcome = inspect(&host, &config, "outcome", &outcome_bin, &outcome_json)?;
+    #[cfg(unix)]
+    let host = if let Some(upgrade) = upgrade {
+        if direct || original_host != upgrade.old_host {
+            return Err("upgraded retry must use the original manifest and pinned socket".into());
+        }
+        let socket = SOCKET
+            .get()
+            .ok_or("upgraded retry requires pinned socket")?;
+        if socket != &upgrade.socket
+            || fs::read(&config).map_err(|e| e.to_string())? != upgrade.config_bytes
+            || fs::read(&call).map_err(|e| e.to_string())? != upgrade.call_bytes
+        {
+            return Err("upgraded retry inputs differ from durable migration evidence".into());
+        }
+        let evidence = fs::read(&upgrade.evidence_path).map_err(|e| e.to_string())?;
+        if hex(&sha2::Sha256::digest(&evidence)) != upgrade.evidence_sha
+            || hex(&sha2::Sha256::digest(
+                fs::read(&upgrade.new_host).map_err(|e| e.to_string())?,
+            )) != upgrade.new_host_sha
+        {
+            return Err("upgraded retry migration evidence changed".into());
+        }
+        let transport_path = outcome_json.with_extension("transport.json");
+        let transport = json!({
+            "type":"minidregg-upgraded-retry-transport-v1",
+            "originalAttemptHost":utf8_path(&original_host)?,
+            "effectiveHost":utf8_path(&upgrade.new_host)?,
+            "effectiveHostSha256":upgrade.new_host_sha,
+            "upgradeEvidencePath":utf8_path(&upgrade.evidence_path)?,
+            "upgradeEvidenceSha256":upgrade.evidence_sha,
+            "callSha256":upgrade.call_sha,
+            "mode":mode,
+            "socket":utf8_path(socket)?
+        });
+        if transport_path.exists() {
+            let existing: Value =
+                serde_json::from_slice(&fs::read(&transport_path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            if existing != transport {
+                return Err("upgraded retry transport record changed".into());
+            }
+        } else {
+            let mut bytes = serde_json::to_vec_pretty(&transport).map_err(|e| e.to_string())?;
+            bytes.push(b'\n');
+            create_private(&transport_path, &bytes)?;
+            sync_directory_ancestors(directory)?;
+        }
+        &upgrade.new_host
+    } else {
+        &original_host
+    };
+    #[cfg(not(unix))]
+    let host = &original_host;
+    host_files(host, &config, &[Path::new(mode), &call, &outcome_bin])?;
+    let outcome = inspect(host, &config, "outcome", &outcome_bin, &outcome_json)?;
     print_confirmed_outcome(&outcome)
+}
+
+fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
+    retry_with_upgrade(
+        directory,
+        mode,
+        direct,
+        #[cfg(unix)]
+        None,
+    )
 }
 
 fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsString]) -> Result<()> {
@@ -1601,6 +1671,40 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("consumer-drain-once requires Unix sockets".to_owned())
+            }
+        }
+        "consumer-host-upgrade" => {
+            let old_host = path(args.required("old-host")?);
+            let old_sha = args.required("old-sha256")?;
+            let new_host = path(args.required("new-host")?);
+            let new_sha = args.required("new-sha256")?;
+            let config = path(args.required("config")?);
+            let key = path(args.required("key")?);
+            let state_dir = path(args.required("state-dir")?);
+            let known_outcome = path(args.required("known-outcome")?);
+            let known_sha = args.required("known-sha256")?;
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                let socket = SOCKET
+                    .get()
+                    .ok_or("consumer-host-upgrade requires --socket")?;
+                drain::upgrade_host(drain::UpgradeRequest {
+                    old_host: &old_host,
+                    new_host: &new_host,
+                    config: &config,
+                    socket,
+                    key: &key,
+                    state_dir: &state_dir,
+                    known_outcome: &known_outcome,
+                    old_sha: old_sha.to_str().ok_or("old SHA must be UTF-8")?,
+                    new_sha: new_sha.to_str().ok_or("new SHA must be UTF-8")?,
+                    known_sha: known_sha.to_str().ok_or("known SHA must be UTF-8")?,
+                })
+            }
+            #[cfg(not(unix))]
+            {
+                Err("consumer-host-upgrade requires Unix sockets".to_owned())
             }
         }
         "consumer-worker" => {

@@ -1,6 +1,105 @@
 //! One bounded B consumer wake. All policy decisions and calls come from Host/Main.
 use super::*;
+use sha2::{Digest, Sha256};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+
+fn file_digest(path: &Path) -> Result<String> {
+    let mut input = File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = input
+            .read(&mut buffer)
+            .map_err(|e| format!("cannot hash {}: {e}", path.display()))?;
+        if count == 0 {
+            return Ok(hex(&digest.finalize()));
+        }
+        digest.update(&buffer[..count]);
+    }
+}
+
+pub(super) struct HostUpgrade {
+    pub old_host: PathBuf,
+    pub new_host: PathBuf,
+    pub new_host_sha: String,
+    pub socket: PathBuf,
+    pub config_bytes: Vec<u8>,
+    pub call_bytes: Vec<u8>,
+    pub call_sha: String,
+    pub evidence_path: PathBuf,
+    pub evidence_sha: String,
+    pub expected_fields: Value,
+}
+
+fn confirmed_fields(value: &Value) -> Result<Value> {
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+        return Err("host upgrade lookup is not confirmed".into());
+    }
+    let mut fields = serde_json::Map::new();
+    for name in ["acceptedCount", "transactionId", "eventId", "imageBoundary"] {
+        let field = value
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("confirmed outcome lacks {name}"))?;
+        if field.is_empty()
+            || field.len() > 80
+            || !field.bytes().all(|b| b.is_ascii_digit())
+            || (field.len() > 1 && field.starts_with('0'))
+        {
+            return Err(format!("confirmed outcome has noncanonical {name}"));
+        }
+        fields.insert(name.into(), json!(field));
+    }
+    Ok(Value::Object(fields))
+}
+
+fn require_upgraded_receipt(lookup: &Value, expected: &Value) -> Result<()> {
+    if confirmed_fields(lookup)? != *expected {
+        return Err("upgraded lookup confirmed a different four-field receipt".into());
+    }
+    Ok(())
+}
+
+fn direct_host(host: &Path, config: &Path, args: &[&Path]) -> Result<()> {
+    let mut child = std::process::Command::new(host)
+        .arg(config)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("cannot start read-only host {}: {e}", host.display()))?;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("cannot wait for read-only host: {e}"))?
+        {
+            return if status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "read-only host exited {status}; retained read-only outputs require review"
+                ))
+            };
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("read-only host exceeded 180-second migration deadline".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn canonical_sha(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
 
 pub(super) fn private_dir(path: &Path) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(path) {
@@ -80,6 +179,51 @@ fn attempt(pending: &Path, state: &mut Value, label: &str) -> Result<PathBuf> {
     Ok(pending.join(name))
 }
 
+fn pin_identity(host: &Path, config: &Path, socket: &Path, key: &Path) -> Result<Value> {
+    let config_bytes =
+        fs::read(config).map_err(|e| format!("cannot read fn operator config: {e}"))?;
+    let public_key = read_secret(key)?.verifying_key().to_bytes();
+    Ok(json!({
+        "type":"minidregg-b-consumer-worker-pin-v1",
+        "host":utf8_path(&absolute(host)?)?, "configPath":utf8_path(&absolute(config)?)?,
+        "configHex":hex(&config_bytes), "socket":utf8_path(&absolute(socket)?)?,
+        "keyPath":utf8_path(&absolute(key)?)?, "publicKey":hex(&public_key)
+    }))
+}
+
+fn manifest_digests(config: &Path) -> Result<Value> {
+    let value: Value = serde_json::from_slice(&fs::read(config).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("invalid fn operator config: {e}"))?;
+    let mut digests = serde_json::Map::new();
+    if let Some(poll) = value.get("fnPoll") {
+        for name in ["originConfigPath", "fnPinPath", "scopePath", "policyPath"] {
+            let path = poll
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("fnPoll lacks {name}"))?;
+            digests.insert(name.to_owned(), json!(file_digest(Path::new(path))?));
+        }
+    }
+    Ok(Value::Object(digests))
+}
+
+fn v2_pin(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    evidence_path: Option<&str>,
+    evidence_sha: Option<&str>,
+) -> Result<Value> {
+    let mut value = pin_identity(host, config, socket, key)?;
+    value["type"] = json!("minidregg-b-consumer-worker-pin-v2");
+    value["hostSha256"] = json!(file_digest(host)?);
+    value["manifestSha256"] = manifest_digests(config)?;
+    value["upgradeEvidencePath"] = json!(evidence_path);
+    value["upgradeEvidenceSha256"] = json!(evidence_sha);
+    Ok(value)
+}
+
 pub(super) fn pin(
     state_dir: &Path,
     host: &Path,
@@ -87,26 +231,317 @@ pub(super) fn pin(
     socket: &Path,
     key: &Path,
 ) -> Result<()> {
-    let config_bytes =
-        fs::read(config).map_err(|e| format!("cannot read fn operator config: {e}"))?;
-    let public_key = read_secret(key)?.verifying_key().to_bytes();
-    let value = json!({
-        "type":"minidregg-b-consumer-worker-pin-v1",
-        "host":utf8_path(&absolute(host)?)?, "configPath":utf8_path(&absolute(config)?)?,
-        "configHex":hex(&config_bytes), "socket":utf8_path(&absolute(socket)?)?,
-        "keyPath":utf8_path(&absolute(key)?)?, "publicKey":hex(&public_key)
-    });
     let path = state_dir.join("pin.json");
     if path.exists() {
-        if read_json(&path)? != value {
+        let retained = read_json(&path)?;
+        let expected = match retained.get("type").and_then(Value::as_str) {
+            Some("minidregg-b-consumer-worker-pin-v1") => pin_identity(host, config, socket, key)?,
+            Some("minidregg-b-consumer-worker-pin-v2") => {
+                let evidence_path = retained.get("upgradeEvidencePath").and_then(Value::as_str);
+                let evidence_sha = retained
+                    .get("upgradeEvidenceSha256")
+                    .and_then(Value::as_str);
+                if evidence_path.is_some() != evidence_sha.is_some() {
+                    return Err("consumer host upgrade evidence is incomplete".into());
+                }
+                if let (Some(path), Some(sha)) = (evidence_path, evidence_sha) {
+                    if !canonical_sha(sha) || file_digest(Path::new(path))? != sha {
+                        return Err("consumer host upgrade evidence changed".into());
+                    }
+                    let evidence = read_json(Path::new(path))?;
+                    let old_pin_path = field(&evidence, "oldPinPath")?;
+                    let old_pin_sha = field(&evidence, "oldPinSha256")?;
+                    if evidence.get("type").and_then(Value::as_str)
+                        != Some("minidregg-b-consumer-host-upgrade-v1")
+                        || !canonical_sha(old_pin_sha)
+                        || file_digest(Path::new(old_pin_path))? != old_pin_sha
+                    {
+                        return Err("consumer previous worker pin evidence changed".into());
+                    }
+                }
+                v2_pin(host, config, socket, key, evidence_path, evidence_sha)?
+            }
+            _ => return Err("consumer worker pin has unsupported version".into()),
+        };
+        if retained != expected {
             return Err(
                 "consumer worker pin changed; retain old state for operator review".to_owned(),
             );
         }
     } else {
+        let value = v2_pin(host, config, socket, key, None, None)?;
         write_json_new(&path, &value)?;
         sync_directory_ancestors(state_dir)?;
     }
+    Ok(())
+}
+
+fn load_upgrade(
+    state_dir: &Path,
+    pending: &Path,
+    state: &Value,
+    host: &Path,
+) -> Result<Option<HostUpgrade>> {
+    if field(state, "phase")? != "Sending" {
+        return Ok(None);
+    }
+    let pin = read_json(&state_dir.join("pin.json"))?;
+    let Some(evidence_path) = pin.get("upgradeEvidencePath").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let evidence_path = PathBuf::from(evidence_path);
+    let evidence_sha = pin
+        .get("upgradeEvidenceSha256")
+        .and_then(Value::as_str)
+        .ok_or("upgraded pin lacks evidence digest")?
+        .to_owned();
+    if file_digest(&evidence_path)? != evidence_sha {
+        return Err("host upgrade evidence digest changed".into());
+    }
+    let evidence = read_json(&evidence_path)?;
+    let prepare = pending.join(field(state, "prepare")?);
+    let (manifest_host, manifest_config, manifest_socket) = manifest_paths(&prepare)?;
+    let new_host = PathBuf::from(field(&evidence, "newHost")?);
+    let old_host = PathBuf::from(field(&evidence, "oldHost")?);
+    let socket = PathBuf::from(field(&evidence, "socket")?);
+    let config = PathBuf::from(field(&evidence, "configPath")?);
+    if manifest_config != config || manifest_socket.as_deref() != Some(socket.as_path()) {
+        return Err("Sending attempt config or socket differs from upgraded worker pin".into());
+    }
+    if manifest_host == new_host {
+        // A new attempt belongs to the upgraded image. The migration binds only
+        // the old retained call, even if a new wake reuses prepare-00000002.
+        return Ok(None);
+    }
+    if manifest_host != old_host {
+        return Err("Sending attempt host is neither original nor upgraded image".into());
+    }
+    let call_bytes = fs::read(prepare.join("call.bin")).map_err(|e| e.to_string())?;
+    let call_sha = hex(&Sha256::digest(&call_bytes));
+    let new_host_sha = field(&evidence, "newHostSha256")?.to_owned();
+    if field(&evidence, "prepare")? != field(state, "prepare")?
+        || field(&evidence, "callSha256")? != call_sha
+        || new_host != absolute(host)?
+        || file_digest(&new_host)? != new_host_sha
+        || file_digest(&old_host)? != field(&evidence, "oldHostSha256")?
+    {
+        return Err("host upgrade no longer binds retained Sending call and images".into());
+    }
+    let expected_fields = evidence
+        .get("confirmedFields")
+        .cloned()
+        .ok_or("host upgrade evidence lacks original confirmed receipt")?;
+    if expected_fields.get("transactionId").is_none()
+        || expected_fields.as_object().is_none_or(|m| m.len() != 4)
+    {
+        return Err("host upgrade evidence has malformed confirmed receipt".into());
+    }
+    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
+    if hex(&Sha256::digest(&config_bytes)) != field(&evidence, "configSha256")? {
+        return Err("host upgrade config bytes changed".into());
+    }
+    Ok(Some(HostUpgrade {
+        old_host,
+        new_host,
+        new_host_sha,
+        socket,
+        config_bytes,
+        call_bytes,
+        call_sha,
+        evidence_path,
+        evidence_sha,
+        expected_fields,
+    }))
+}
+
+pub(super) struct UpgradeRequest<'a> {
+    pub old_host: &'a Path,
+    pub new_host: &'a Path,
+    pub config: &'a Path,
+    pub socket: &'a Path,
+    pub key: &'a Path,
+    pub state_dir: &'a Path,
+    pub known_outcome: &'a Path,
+    pub old_sha: &'a str,
+    pub new_sha: &'a str,
+    pub known_sha: &'a str,
+}
+
+pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
+    let UpgradeRequest {
+        old_host,
+        new_host,
+        config,
+        socket,
+        key,
+        state_dir,
+        known_outcome,
+        old_sha,
+        new_sha,
+        known_sha,
+    } = request;
+    for (label, sha) in [
+        ("old", old_sha),
+        ("new", new_sha),
+        ("known outcome", known_sha),
+    ] {
+        if !canonical_sha(sha) {
+            return Err(format!("{label} SHA-256 must be canonical lowercase hex"));
+        }
+    }
+    private_dir(state_dir)?;
+    let socket_dir = socket.parent().ok_or("socket lacks parent")?;
+    private_dir(socket_dir)?;
+    let _service = transport::service_lock(&socket.with_extension("lock"))?;
+    let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
+    let _worker = transport::service_lock(&state_dir.join("worker.lock"))?;
+    let old_host = absolute(old_host)?;
+    let new_host = absolute(new_host)?;
+    let config = absolute(config)?;
+    let socket = absolute(socket)?;
+    let key = absolute(key)?;
+    if old_host == new_host
+        || file_digest(&old_host)? != old_sha
+        || file_digest(&new_host)? != new_sha
+    {
+        return Err("host upgrade image paths or operator-provided digests disagree".into());
+    }
+    let pin_path = state_dir.join("pin.json");
+    if !pin_path.is_file() {
+        return Err("host upgrade requires an existing durable worker pin".into());
+    }
+    pin(state_dir, &old_host, &config, &socket, &key)?;
+    let old_pin_bytes = fs::read(&pin_path).map_err(|e| e.to_string())?;
+    let old_pin_sha = hex(&Sha256::digest(&old_pin_bytes));
+    let old_pin: Value = serde_json::from_slice(&old_pin_bytes).map_err(|e| e.to_string())?;
+    let old_pin_type = field(&old_pin, "type")?.to_owned();
+    let pending = state_dir.join("pending");
+    private_dir(&pending)?;
+    let state = read_json(&pending.join("state.json"))?;
+    if field(&state, "phase")? != "Sending" {
+        return Err("host upgrade requires the exact pending Sending phase".into());
+    }
+    let prepare_name = field(&state, "prepare")?;
+    let prepare = pending.join(prepare_name);
+    let call = prepare.join("call.bin");
+    sync_retained_call(&prepare, &call)?;
+    let (manifest_host, manifest_config, manifest_socket) = manifest_paths(&prepare)?;
+    if manifest_host != old_host
+        || manifest_config != config
+        || manifest_socket.as_deref() != Some(socket.as_path())
+    {
+        return Err("pending attempt manifest differs from existing worker pin".into());
+    }
+    let call_sha = file_digest(&call)?;
+    if file_digest(known_outcome)? != known_sha {
+        return Err("known confirmed outcome digest differs from operator assertion".into());
+    }
+    let config_bytes = fs::read(&config).map_err(|e| e.to_string())?;
+    let config_sha = hex(&Sha256::digest(&config_bytes));
+    let original_manifests = manifest_digests(&config)?;
+    let mut upgrade_dir = None;
+    for index in 1..=999 {
+        let path = state_dir.join(format!("host-upgrade-{index:03}"));
+        if !path.exists() {
+            upgrade_dir = Some(path);
+            break;
+        }
+    }
+    let upgrade_dir = upgrade_dir.ok_or("exhausted host upgrade evidence names")?;
+    private_dir(&upgrade_dir)?;
+    create_private(&upgrade_dir.join("old-pin.json"), &old_pin_bytes)?;
+    if file_digest(&upgrade_dir.join("old-pin.json"))? != old_pin_sha {
+        return Err("retained old worker pin differs from pre-upgrade digest".into());
+    }
+    create_private(
+        &upgrade_dir.join("known-outcome.bin"),
+        &fs::read(known_outcome).map_err(|e| e.to_string())?,
+    )?;
+    sync_directory_ancestors(&upgrade_dir)?;
+    direct_host(
+        &new_host,
+        &config,
+        &[
+            Path::new("inspect"),
+            Path::new("outcome"),
+            &upgrade_dir.join("known-outcome.bin"),
+            &upgrade_dir.join("known-outcome.json"),
+        ],
+    )?;
+    direct_host(
+        &new_host,
+        &config,
+        &[Path::new("lookup"), &call, &upgrade_dir.join("lookup.bin")],
+    )?;
+    direct_host(
+        &new_host,
+        &config,
+        &[
+            Path::new("inspect"),
+            Path::new("outcome"),
+            &upgrade_dir.join("lookup.bin"),
+            &upgrade_dir.join("lookup.json"),
+        ],
+    )?;
+    for name in ["known-outcome.json", "lookup.bin", "lookup.json"] {
+        File::open(upgrade_dir.join(name))
+            .and_then(|f| f.sync_all())
+            .map_err(|e| e.to_string())?;
+    }
+    sync_directory_ancestors(&upgrade_dir)?;
+    let known = confirmed_fields(&read_json(&upgrade_dir.join("known-outcome.json"))?)?;
+    let fresh = confirmed_fields(&read_json(&upgrade_dir.join("lookup.json"))?)?;
+    if known != fresh {
+        return Err(
+            "new host lookup does not match all four original confirmed receipt fields".into(),
+        );
+    }
+    if pin_identity(&old_host, &config, &socket, &key)? != old_pin
+        || file_digest(&old_host)? != old_sha
+        || file_digest(&new_host)? != new_sha
+        || file_digest(&upgrade_dir.join("known-outcome.bin"))? != known_sha
+        || manifest_digests(&config)? != original_manifests
+    {
+        return Err("host upgrade inputs changed during read-only lookup".into());
+    }
+    let evidence_path = upgrade_dir.join("migration.json");
+    let evidence = json!({
+        "type":"minidregg-b-consumer-host-upgrade-v1", "oldHost":utf8_path(&old_host)?,
+        "oldHostSha256":old_sha, "newHost":utf8_path(&new_host)?, "newHostSha256":new_sha,
+        "oldPinType":old_pin_type, "oldPinSha256":old_pin_sha,
+        "oldPinPath":utf8_path(&upgrade_dir.join("old-pin.json"))?,
+        "configPath":utf8_path(&config)?, "configSha256":config_sha,
+        "socket":utf8_path(&socket)?, "keyPath":utf8_path(&key)?,
+        "publicKey":old_pin.get("publicKey"), "manifestSha256":original_manifests,
+        "prepare":prepare_name, "callSha256":call_sha,
+        "knownOutcomeSha256":known_sha, "newLookupSha256":file_digest(&upgrade_dir.join("lookup.bin"))?,
+        "confirmedFields":known, "pendingPhase":"Sending",
+        "scope":"operator-authorized rebind for one retained call; no submit or ACK"
+    });
+    write_json_new(&evidence_path, &evidence)?;
+    sync_directory_ancestors(&upgrade_dir)?;
+    let evidence_sha = file_digest(&evidence_path)?;
+    let next_pin = v2_pin(
+        &new_host,
+        &config,
+        &socket,
+        &key,
+        Some(utf8_path(&evidence_path)?),
+        Some(&evidence_sha),
+    )?;
+    let temp_pin = (1..=999)
+        .map(|index| state_dir.join(format!("pin-upgrade-{index:03}.tmp")))
+        .find(|path| !path.exists())
+        .ok_or("exhausted host upgrade temporary pin names")?;
+    write_json_new(&temp_pin, &next_pin)?;
+    sync_directory_ancestors(state_dir)?;
+    if read_json(&pin_path)? != old_pin || file_digest(&pin_path)? != old_pin_sha {
+        return Err("worker pin changed during host upgrade".into());
+    }
+    fs::rename(&temp_pin, &pin_path)
+        .map_err(|e| format!("cannot activate upgraded host pin: {e}"))?;
+    sync_directory_ancestors(state_dir)?;
+    println!("host upgrade pinned; retained Sending call unchanged; no submit or ACK performed");
     Ok(())
 }
 
@@ -137,9 +572,9 @@ fn latest_retry_path(prepare: &Path) -> Result<PathBuf> {
     Ok(json)
 }
 
-fn retry_outcome(prepare: &Path, mode: &str) -> Result<Value> {
+fn retry_outcome(prepare: &Path, mode: &str, upgrade: Option<&HostUpgrade>) -> Result<Value> {
     let json = latest_retry_path(prepare)?;
-    let result = retry(prepare, mode, false);
+    let result = retry_with_upgrade(prepare, mode, false, upgrade);
     if json.exists() {
         sync_directory_ancestors(prepare)?;
         read_json(&json)
@@ -150,9 +585,13 @@ fn retry_outcome(prepare: &Path, mode: &str) -> Result<Value> {
     }
 }
 
-fn confirmed_after_retry(prepare: &Path, mode: &str) -> Result<Option<String>> {
+fn confirmed_after_retry(
+    prepare: &Path,
+    mode: &str,
+    upgrade: Option<&HostUpgrade>,
+) -> Result<Option<String>> {
     let json = latest_retry_path(prepare)?;
-    let value = retry_outcome(prepare, mode)?;
+    let value = retry_outcome(prepare, mode, upgrade)?;
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         return Ok(None);
     }
@@ -504,7 +943,7 @@ pub(super) fn run_locked(
                 set(&mut state, "phase", json!("Sending"));
                 save_state(&pending, &state)?;
                 let outcome_path = latest_retry_path(&path)?;
-                let outcome = retry_outcome(&path, "submit")?;
+                let outcome = retry_outcome(&path, "submit", None)?;
                 let txn = match outcome.get("type").and_then(Value::as_str) {
                     Some("confirmed") => outcome_transaction(&outcome_path)?
                         .ok_or("confirmed submit lacks transaction ID")?,
@@ -537,16 +976,27 @@ pub(super) fn run_locked(
             "Sending" => {
                 let path = pending.join(field(&state, "prepare")?);
                 sync_retained_call(&path, &path.join("call.bin"))?;
+                let upgrade = load_upgrade(state_dir, &pending, &state, host)?;
                 let lookup_path = latest_retry_path(&path)?;
-                let lookup = match retry_outcome(&path, "lookup") {
+                let lookup = match retry_outcome(&path, "lookup", upgrade.as_ref()) {
                     Ok(value) => value,
                     Err(error) => return hold(&pending, &mut state,
                         &format!("exact lookup unresolved; retained call requires operator reconciliation: {error}")),
                 };
                 let txn = match lookup.get("type").and_then(Value::as_str) {
-                    Some("confirmed") => outcome_transaction(&lookup_path)?
-                        .ok_or("confirmed exact lookup lacks transaction ID")?,
-                    Some("absent") => match confirmed_after_retry(&path, "submit") {
+                    Some("confirmed") => {
+                        if let Some(upgrade) = &upgrade {
+                            if require_upgraded_receipt(&lookup, &upgrade.expected_fields).is_err() {
+                                return hold(&pending, &mut state,
+                                    "upgraded lookup confirmed a different four-field receipt; no ACK or resubmit");
+                            }
+                        }
+                        outcome_transaction(&lookup_path)?
+                            .ok_or("confirmed exact lookup lacks transaction ID")?
+                    }
+                    Some("absent") if upgrade.is_some() => return hold(&pending, &mut state,
+                        "upgraded lookup is absent despite prior confirmed receipt; exact call retained for operator review"),
+                    Some("absent") => match confirmed_after_retry(&path, "submit", None) {
                         Ok(Some(txn)) => txn,
                         Ok(None) => return hold(&pending, &mut state,
                             "same-call resubmit did not confirm; exact call retained"),
@@ -594,6 +1044,208 @@ pub(super) fn run_locked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgraded_pin_binds_pending_call_but_allows_next_fresh_wake() {
+        let root = env::temp_dir().join(format!(
+            "mini-upgrade-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let state_dir = root.join("state");
+        let socket_dir = root.join("service");
+        private_dir(&state_dir).unwrap();
+        private_dir(&socket_dir).unwrap();
+        let old_host = root.join("old-host");
+        let new_host = root.join("new-host");
+        let config = root.join("config.json");
+        let key = root.join("key");
+        let socket = socket_dir.join("host.sock");
+        create_private(&old_host, b"old image").unwrap();
+        create_private(&new_host, b"new image").unwrap();
+        create_private(&config, b"{}\n").unwrap();
+        create_private(&key, &[7; 32]).unwrap();
+        let pending = state_dir.join("pending");
+        let prepare = pending.join("prepare-00000002");
+        private_dir(&pending).unwrap();
+        private_dir(&prepare).unwrap();
+        create_private(&prepare.join("call.bin"), b"exact retained call").unwrap();
+        let original_manifest = json!({"format":"minidregg-resource-client-attempt-v1",
+            "operation":"submit", "host":utf8_path(&old_host).unwrap(),
+            "config":utf8_path(&config).unwrap(), "socket":utf8_path(&socket).unwrap()});
+        write_json_new(&prepare.join("attempt.json"), &original_manifest).unwrap();
+        let mut state = json!({"phase":"Sending","prepare":"prepare-00000002"});
+        save_state(&pending, &state).unwrap();
+        let evidence = state_dir.join("migration.json");
+        let prior_pin = state_dir.join("old-pin.json");
+        write_json_new(
+            &prior_pin,
+            &pin_identity(&old_host, &config, &socket, &key).unwrap(),
+        )
+        .unwrap();
+        write_json_new(&evidence, &json!({
+            "type":"minidregg-b-consumer-host-upgrade-v1",
+            "oldPinPath":utf8_path(&prior_pin).unwrap(), "oldPinSha256":file_digest(&prior_pin).unwrap(),
+            "oldHost":utf8_path(&old_host).unwrap(), "oldHostSha256":file_digest(&old_host).unwrap(),
+            "newHost":utf8_path(&new_host).unwrap(), "newHostSha256":file_digest(&new_host).unwrap(),
+            "configPath":utf8_path(&config).unwrap(), "configSha256":file_digest(&config).unwrap(),
+            "socket":utf8_path(&socket).unwrap(), "prepare":"prepare-00000002",
+            "callSha256":file_digest(&prepare.join("call.bin")).unwrap(),
+            "confirmedFields":{"acceptedCount":"3","transactionId":"123",
+                "eventId":"456","imageBoundary":"789"}
+        })).unwrap();
+        let pin_value = v2_pin(
+            &new_host,
+            &config,
+            &socket,
+            &key,
+            Some(utf8_path(&evidence).unwrap()),
+            Some(&file_digest(&evidence).unwrap()),
+        )
+        .unwrap();
+        write_json_new(&state_dir.join("pin.json"), &pin_value).unwrap();
+        pin(&state_dir, &new_host, &config, &socket, &key).unwrap();
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
+            .unwrap()
+            .is_some());
+        state["phase"] = json!("Acking");
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
+            .unwrap()
+            .is_none());
+        state["phase"] = json!("Polling");
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
+            .unwrap()
+            .is_none());
+        state["phase"] = json!("Sending");
+        let mut fresh_manifest = original_manifest.clone();
+        fresh_manifest["host"] = json!(utf8_path(&new_host).unwrap());
+        fs::write(
+            prepare.join("attempt.json"),
+            serde_json::to_vec(&fresh_manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(prepare.join("call.bin"), b"next fresh call").unwrap();
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host)
+            .unwrap()
+            .is_none());
+        fresh_manifest["host"] = json!(utf8_path(&root.join("unknown-host")).unwrap());
+        fs::write(
+            prepare.join("attempt.json"),
+            serde_json::to_vec(&fresh_manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host).is_err());
+        fs::write(
+            prepare.join("attempt.json"),
+            serde_json::to_vec(&original_manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(prepare.join("call.bin"), b"different").unwrap();
+        assert!(load_upgrade(&state_dir, &pending, &state, &new_host).is_err());
+        fs::write(prepare.join("call.bin"), b"exact retained call").unwrap();
+        fs::write(&config, b"{\"changed\":true}").unwrap();
+        assert!(pin(&state_dir, &new_host, &config, &socket, &key).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn upgrade_receipt_requires_all_four_canonical_fields() {
+        let original = json!({"type":"confirmed","acceptedCount":"3", "transactionId":"123",
+            "eventId":"456", "imageBoundary":"789", "confirmation":"replayed"});
+        let mut replay = original.clone();
+        replay["confirmation"] = json!("accepted");
+        let expected = confirmed_fields(&original).unwrap();
+        assert!(require_upgraded_receipt(&replay, &expected).is_ok());
+        for field in ["acceptedCount", "transactionId", "eventId", "imageBoundary"] {
+            let mut changed = replay.clone();
+            changed[field] = json!("001");
+            assert!(confirmed_fields(&changed).is_err());
+            changed[field] = json!("8");
+            assert_ne!(
+                confirmed_fields(&original).unwrap(),
+                confirmed_fields(&changed).unwrap()
+            );
+            assert!(require_upgraded_receipt(&changed, &expected).is_err());
+        }
+        replay["type"] = json!("absent");
+        assert!(confirmed_fields(&replay).is_err());
+    }
+
+    #[test]
+    fn live_service_lock_blocks_upgrade_before_any_host_probe() {
+        let root = env::temp_dir().join(format!(
+            "mini-upgrade-lock-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let socket = root.join("host.sock");
+        let _running = transport::service_lock(&socket.with_extension("lock")).unwrap();
+        let old_host = root.join("missing-old");
+        let new_host = root.join("missing-new");
+        let config = root.join("missing-config");
+        let key = root.join("missing-key");
+        let state_dir = root.join("state");
+        let known_outcome = root.join("missing-outcome");
+        let error = upgrade_host(UpgradeRequest {
+            old_host: &old_host,
+            new_host: &new_host,
+            config: &config,
+            socket: &socket,
+            key: &key,
+            state_dir: &state_dir,
+            known_outcome: &known_outcome,
+            old_sha: &"0".repeat(64),
+            new_sha: &"1".repeat(64),
+            known_sha: &"2".repeat(64),
+        })
+        .unwrap_err();
+        assert!(error.contains("another service owns"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn orphaned_upgrade_files_do_not_activate_a_v1_pin() {
+        let root = env::temp_dir().join(format!(
+            "mini-upgrade-orphan-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let host = root.join("old-host");
+        let config = root.join("config.json");
+        let key = root.join("key");
+        let socket = root.join("host.sock");
+        create_private(&host, b"old").unwrap();
+        create_private(&config, b"{}").unwrap();
+        create_private(&key, &[9; 32]).unwrap();
+        write_json_new(
+            &root.join("pin.json"),
+            &pin_identity(&host, &config, &socket, &key).unwrap(),
+        )
+        .unwrap();
+        private_dir(&root.join("host-upgrade-001")).unwrap();
+        create_private(&root.join("pin-upgrade-001.tmp"), b"incomplete").unwrap();
+        pin(&root, &host, &config, &socket, &key).unwrap();
+        assert_eq!(
+            read_json(&root.join("pin.json"))
+                .unwrap()
+                .get("type")
+                .and_then(Value::as_str),
+            Some("minidregg-b-consumer-worker-pin-v1")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn source_skip_page_bound_stops_short_page_and_rejects_history_without_txn() {
