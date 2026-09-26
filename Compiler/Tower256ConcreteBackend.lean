@@ -246,8 +246,58 @@ def digestStream : StreamCodec Digest :=
   StreamCodec.xmap StreamCodec.nat (fun digest => digest.value)
     Digest.mk (by intro digest; cases digest; rfl)
 
-def bytesStream : StreamCodec (List UInt8) :=
-  StreamCodec.list StreamCodec.byte
+/-- The byte specialization of `StreamCodec.encodeMany` has no per-byte
+framing. Keep this equality explicit so the faster implementation below stays
+on the existing wire format. -/
+theorem encodeMany_byte (values : List UInt8) :
+    StreamCodec.encodeMany StreamCodec.byte values = values := by
+  induction values with
+  | nil => rfl
+  | cons value values ih =>
+      change [value] ++ StreamCodec.encodeMany StreamCodec.byte values = value :: values
+      simpa only [List.singleton_append] using congrArg (value :: ·) ih
+
+/-- Unlike the general element decoder, a byte consumes exactly one input
+byte. Splitting once uses the tail-recursive list implementation. -/
+def decodeBytesPrefix (count : Nat) (bytes : List UInt8) :
+    Option (List UInt8 × List UInt8) :=
+  if count ≤ bytes.length then some (bytes.splitAt count) else none
+
+theorem decodeMany_byte (count : Nat) (bytes : List UInt8) :
+    StreamCodec.decodeMany StreamCodec.byte count bytes =
+      decodeBytesPrefix count bytes := by
+  induction count generalizing bytes with
+  | zero => simp [StreamCodec.decodeMany, decodeBytesPrefix, List.splitAt_eq]
+  | succ count ih =>
+      cases bytes with
+      | nil => simp [StreamCodec.decodeMany, StreamCodec.byte, decodeBytesPrefix]
+      | cons value bytes =>
+          rw [StreamCodec.decodeMany]
+          have tail := ih bytes
+          simp only [StreamCodec.byte] at tail
+          simp [StreamCodec.byte, tail, decodeBytesPrefix, List.splitAt_eq]
+          split_ifs <;> simp_all
+
+/-- Same length-prefixed bytes as `StreamCodec.list StreamCodec.byte`, with
+one list split instead of one recursive codec call per payload byte. -/
+def bytesStream : StreamCodec (List UInt8) where
+  encode values := StreamCodec.nat.encode values.length ++ values
+  decodePrefix bytes := do
+    let (count, afterCount) ← StreamCodec.nat.decodePrefix bytes
+    decodeBytesPrefix count afterCount
+  decodePrefix_encode := by
+    intro values suffix
+    have old := (StreamCodec.list StreamCodec.byte).decodePrefix_encode values suffix
+    simpa [StreamCodec.list, encodeMany_byte, decodeMany_byte] using old
+
+theorem bytesStream_encode_eq_list_byte (values : List UInt8) :
+    bytesStream.encode values = (StreamCodec.list StreamCodec.byte).encode values := by
+  simp [bytesStream, StreamCodec.list, encodeMany_byte]
+
+theorem bytesStream_decodePrefix_eq_list_byte (bytes : List UInt8) :
+    bytesStream.decodePrefix bytes =
+      (StreamCodec.list StreamCodec.byte).decodePrefix bytes := by
+  simp [bytesStream, StreamCodec.list, decodeMany_byte]
 
 def merklePathStream : StreamCodec (List Digest) :=
   StreamCodec.list digestStream

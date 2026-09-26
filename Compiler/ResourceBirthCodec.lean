@@ -36,12 +36,43 @@ set_option autoImplicit false
 
 /-! ## Exact canonical transport -/
 
+/-- Compare two byte lists in tail position, avoiding the recursive list
+equality call chain on large native envelopes. -/
+def bytesEqual : List UInt8 → List UInt8 → Bool
+  | [], [] => true
+  | left :: lefts, right :: rights =>
+      if left = right then bytesEqual lefts rights else false
+  | _, _ => false
+
+theorem bytesEqual_eq_true_iff (left right : List UInt8) :
+    bytesEqual left right = true ↔ left = right := by
+  induction left generalizing right with
+  | nil => cases right <;> simp [bytesEqual]
+  | cons left lefts ih =>
+      cases right with
+      | nil => simp [bytesEqual]
+      | cons right rights => simp [bytesEqual, ih]
+
 def strictCodec {α : Type} (codec : LawfulCodec α) : LawfulCodec α where
   encode := codec.encode
   decode bytes := do
     let value ← codec.decode bytes
-    if codec.encode value = bytes then some value else none
-  decode_encode := by intro value; simp [codec.decode_encode]
+    if bytesEqual (codec.encode value) bytes then some value else none
+  decode_encode := by
+    intro value
+    rw [codec.decode_encode]
+    change (if bytesEqual (codec.encode value) (codec.encode value) then
+      some value else none) = some value
+    rw [(bytesEqual_eq_true_iff _ _).2 rfl]
+    rfl
+
+theorem strictCodec_decode_eq_list_comparison {α : Type} (codec : LawfulCodec α)
+    (bytes : List UInt8) :
+    (strictCodec codec).decode bytes =
+      (do
+        let value ← codec.decode bytes
+        if codec.encode value = bytes then some value else none) := by
+  simp [strictCodec, bytesEqual_eq_true_iff]
 
 theorem strictCodec_canonical {α : Type} (codec : LawfulCodec α)
     {bytes : List UInt8} {value : α}
@@ -51,7 +82,7 @@ theorem strictCodec_canonical {α : Type} (codec : LawfulCodec α)
   obtain ⟨decoded, _, accepted⟩ := accepted
   split_ifs at accepted with exactBytes
   · cases Option.some.inj accepted
-    exact exactBytes
+    exact (bytesEqual_eq_true_iff _ _).mp exactBytes
 
 theorem lawful_encode_injective {α : Type} (codec : LawfulCodec α) :
     Function.Injective codec.encode := by
