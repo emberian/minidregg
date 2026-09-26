@@ -1,0 +1,12 @@
+[package]
+name = "mini-hermes-test-provider"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Deterministic loopback OpenAI-compatible protocol fixture for Hermes/Mini acceptance"
+
+[workspace]
+
+[dependencies]
+serde_json = "=1.0.151"

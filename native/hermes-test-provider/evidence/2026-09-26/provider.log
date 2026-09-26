@@ -1,0 +1,4 @@
+reject bytes=1399 reason=mini_read_resource is not advertised to Hermes
+completion bytes=36706 stream=true stage=read publication
+completion bytes=37831 stream=true stage=publish root=33123752497037221731231169017086294867303331174554263998024751327768383133892
+completion bytes=39241 stream=true stage=complete

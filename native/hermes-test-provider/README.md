@@ -1,0 +1,9 @@
+# Hermes/Mini local protocol fixture
+
+This standalone executable is a deterministic, loopback-only OpenAI chat-completions endpoint for an **actual upstream Hermes ACP** integration probe. It is not an AI model, a provider adapter for production, or a custody implementation. It makes no outbound requests and accepts no credentials. Mini still authenticates and settles every MCP operation through its normal controller and signed native path.
+
+Run `cargo build --release`, then `target/release/mini-hermes-test-provider 127.0.0.1:PORT LOG_PATH`. Point an isolated Hermes `HERMES_HOME/config.yaml` at `http://127.0.0.1:PORT/v1` with `provider: custom`, `api_mode: chat_completions`, `default: mini-hermes-protocol-fixture`, and a dummy local API key. Do not carry a real provider key into the sandbox.
+
+The fixture requires Hermes to advertise `mcp__mini_grain__mini_read_resource` and `mcp__mini_grain__mini_publish`. Its first response for each prompt calls `mini_read_resource` for the allowlisted `publication` resource. It extracts the decimal `view.page.root` from that actual MCP result and uses it as `expectedTargetRoot`. On a fresh object it creates scalar field 0 with value 1; on a retained session whose signed read shows field 0, it creates field 2 with value 2. It considers only tool results after the current user prompt, so prior session history cannot fake completion. It ends only after a signed tool resource receipt. Unexpected models, missing tools, unreadable roots, reported tool errors, and missing receipts are rejected. The append-only log records protocol stages and byte counts, not prompts or tool-result bodies.
+
+Use a fresh Mini deployment and controller state for each end-to-end run. The model-driven behavior here is only a repeatable protocol stimulus; acceptance evidence must also include the native signed read and publication outcome.

@@ -1,0 +1,21 @@
+{
+  "journal": {
+    "child": null,
+    "connection": "soft",
+    "hermesSession": {
+      "id": "61a3176e-4a07-4a4f-9a3a-11b678a95e3e",
+      "loadVerified": false,
+      "pendingPrompt": false,
+      "retentionIssue": "upstream did not create state.db after the prompt",
+      "stateFingerprint": null,
+      "workspace": "/tmp/mini-hermes-provider-codec/evidence-real-r5"
+    },
+    "pending": null,
+    "settlementDue": null,
+    "toolHold": null,
+    "toolPending": null,
+    "unresolvedExternal": []
+  },
+  "published": "55070908931993074135985362517665169451634431671625479692889086081017559966815",
+  "type": "real-upstream-hermes-mini"
+}
