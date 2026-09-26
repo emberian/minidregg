@@ -20,14 +20,23 @@ An earlier accepted-20 query was discarded before this measurement.
 | --- | ---: | ---: | --- | --- |
 | Old `faf1f8371f692c404acd5b4c5727bd2019249c1b5f7d1850022789d35f4ee30f` | 180.352 s | 1.426 s | 11.122, 11.187, 10.714 | 33.721, 26.481, 24.803 |
 | Combined `31a00492594a9abbde4541fef687f4d6a2fd2cac06c1645e604178a3e7f18179` | 169.688 s | 0.029 s | 4.768, 3.345, 3.444 | 7.111, 7.499, 8.375 |
+| Linear CShake, pre-loaded-byte `41647562c7dd1fe6cdf41836aa62c61fd7b24314f883b2bb14cb38779707c49a` | 166.516 s | 0.025 s | 2.804, 2.931, 2.871 | 7.414, 6.360, 6.800 |
 
 All eight framed responses have identical opcode and SHA-256 between hosts;
 all three challenges and queries also match the freshly recorded exact bytes.
 The complete per-call records are
 [old](linux-old-accepted22.jsonl) and
-[combined](linux-combined-accepted22.jsonl), generated with
+[combined](linux-combined-accepted22.jsonl). A third
+[linear-CShake run](linux-linear-accepted22.jsonl), SHA-256
+`a8a343648b147298e04d1b8ea53aeccc18f294d1193c419862d10cce1bd73548`,
+used the same sealed backup, copied configuration, signed query, and driver.
+It includes the proven linear absorber and later op17/18 endpoints, but not
+commit `83ba61e`'s loaded-byte observation change. Its eight framed response
+bytes match the combined image; every challenge and query also matches the
+recorded source bytes. All records were generated with
 [the benchmark driver](bench-grain-observation.py). This is a sequential,
 wall-clock comparison on Persvati under ambient load, not an isolated CPU
 microbenchmark. The combined observation/session path cuts warm challenge
 and query latency substantially, while cold semantic replay remains near
-three minutes at this history size.
+three minutes at this history size. Linear CShake gives a smaller gain on
+this short signed query; these runs do not measure a large payload admission.
