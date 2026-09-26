@@ -1,0 +1,13 @@
+Running as unit: mini-hermes-provider-strict-8801-5ebaaff-build.service
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling mini-hermes-test-provider v0.1.0 (/tmp/mini-hermes-provider-strict-8801-5ebaaff/src)
+    Finished `release` profile [optimized] target(s) in 3.58s
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 3.615s
+CPU time consumed: 6.081s
+Memory peak: 211.7M (swap: 0B)

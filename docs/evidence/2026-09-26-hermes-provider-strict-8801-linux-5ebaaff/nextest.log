@@ -1,0 +1,24 @@
+Running as unit: mini-hermes-provider-strict-8801-5ebaaff-tests.service; invocation ID: 524a1685d82f4f85a64f6362e316787f
+   Compiling mini-hermes-test-provider v0.1.0 (/tmp/mini-hermes-provider-strict-8801-5ebaaff/src)
+    Finished `release` profile [optimized] target(s) in 1.25s
+────────────
+ Nextest run ID f9783e6a-745a-44c4-a805-86218021b5f8 with nextest profile: default
+    Starting 11 tests across 1 binary
+        PASS [   0.003s] ( 1/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::header_reader_rejects_missing_newline_and_oversized_line
+        PASS [   0.003s] ( 2/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::content_mode_uses_signed_page_for_create_edit_and_final_read
+        PASS [   0.003s] ( 3/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::parses_hermes_untrusted_tool_wrapper_without_following_prose
+        PASS [   0.003s] ( 4/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::loaded_session_ignores_old_tool_results_and_selects_next_field
+        PASS [   0.003s] ( 5/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::peer_stage_accepts_only_the_controller_recovery_envelope
+        PASS [   0.003s] ( 6/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::peer_retry_reads_current_root_before_editing
+        PASS [   0.003s] ( 7/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::read_publish_and_finish_use_observed_root
+        PASS [   0.003s] ( 8/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::peer_stale_root_requires_prior_signed_read_and_explicit_refusal
+        PASS [   0.003s] ( 9/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::receipt_8801_uses_empty_signed_content_root
+        PASS [   0.003s] (10/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::receipt_8801_requires_model_visible_native_fields
+        PASS [   0.003s] (11/11) mini-hermes-test-provider::bin/mini-hermes-test-provider tests::rejects_bad_read_and_failed_publish
+────────────
+     Summary [   0.018s] 11 tests run: 11 passed, 0 skipped
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 1.361s
+CPU time consumed: 2.185s
+Memory peak: 112M (swap: 0B)
