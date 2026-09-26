@@ -6,18 +6,31 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
+use std::sync::OnceLock;
+
+#[cfg(unix)]
+mod transport;
+
+static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
   mini keygen --secret KEY --public PUBLIC
+  mini profile --host HOST --config CONFIG.json [--socket SOCKET]
+  mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability --dir ATTEMPT
-  mini retry --attempt ATTEMPT [--mode submit|lookup]
+  mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
+  mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
+
+Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
+supported host commands to use one persistent Lean host session.
 
 The Lean host authors and decodes every semantic value. This client owns only
 private-key custody, process transport, retained attempts, and exact retries.
@@ -57,13 +70,27 @@ impl Args {
         let Some(index) = self.values.iter().position(|(key, _)| *key == flag) else {
             return Err(format!("missing --{name}"));
         };
-        Ok(self.values.swap_remove(index).1)
+        Ok(self.values.remove(index).1)
     }
 
     fn optional(&mut self, name: &str) -> Option<OsString> {
         let flag = OsString::from(format!("--{name}"));
         let index = self.values.iter().position(|(key, _)| *key == flag)?;
-        Some(self.values.swap_remove(index).1)
+        Some(self.values.remove(index).1)
+    }
+
+    fn repeated(&mut self, name: &str) -> Vec<OsString> {
+        let flag = OsString::from(format!("--{name}"));
+        let mut found = Vec::new();
+        self.values.retain(|(key, value)| {
+            if *key == flag {
+                found.push(value.clone());
+                false
+            } else {
+                true
+            }
+        });
+        found
     }
 
     fn finish(self) -> Result<()> {
@@ -164,6 +191,9 @@ fn keygen(secret: &Path, public: &Path) -> Result<()> {
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
+    if let Some(socket) = SOCKET.get() {
+        return socket_process(socket, config, arguments);
+    }
     let output = Command::new(host)
         .arg(config)
         .args(arguments)
@@ -171,13 +201,100 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
         return Err(format!(
-            "{} exited {}: {}",
+            "{} exited {}; request status uncertain: {}",
             host.display(),
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
     Ok(output)
+}
+
+#[cfg(unix)]
+fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
+    let command = arguments
+        .first()
+        .and_then(|s| s.to_str())
+        .ok_or("missing host command")?;
+    let read = |index: usize| -> Result<Vec<u8>> {
+        let path = arguments.get(index).ok_or("missing host input path")?;
+        let path = Path::new(path);
+        let mut file = File::open(path)
+            .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(1_048_576 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("cannot read host input {}: {e}", path.display()))?;
+        if bytes.len() > 1_048_576 {
+            return Err(format!(
+                "host input {} exceeds session frame bound",
+                path.display()
+            ));
+        }
+        Ok(bytes)
+    };
+    let pair = |first: Vec<u8>, second: Vec<u8>| -> Result<Vec<u8>> {
+        let length: u32 = first.len().try_into().map_err(|_| "host input too large")?;
+        let mut bytes = length.to_le_bytes().to_vec();
+        bytes.extend(first);
+        bytes.extend(second);
+        Ok(bytes)
+    };
+    let kind_payload = |kind: &OsStr, input: Vec<u8>| -> Result<Vec<u8>> {
+        let kind = kind.to_str().ok_or("host kind must be UTF-8")?.as_bytes();
+        let length: u16 = kind.len().try_into().map_err(|_| "host kind too long")?;
+        let mut bytes = length.to_le_bytes().to_vec();
+        bytes.extend(kind);
+        bytes.extend(input);
+        Ok(bytes)
+    };
+    let (operation, payload, destination) = match command {
+        "describe" if arguments.len() == 1 => (0, vec![], None),
+        "profile" if arguments.len() == 1 => (6, vec![], None),
+        "prepare" if arguments.len() == 3 => (1, read(1)?, Some(arguments[2])),
+        "submit" if arguments.len() == 3 => (2, read(1)?, Some(arguments[2])),
+        "lookup" if arguments.len() == 3 => (3, read(1)?, Some(arguments[2])),
+        "challenge" if arguments.len() == 3 => (4, read(1)?, Some(arguments[2])),
+        "query" if arguments.len() == 3 => (5, read(1)?, Some(arguments[2])),
+        "author" if arguments.len() == 4 => {
+            (7, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
+        }
+        "inspect" if arguments.len() == 4 => {
+            (8, kind_payload(arguments[1], read(2)?)?, Some(arguments[3]))
+        }
+        "signatures" if arguments.len() == 3 => (9, read(1)?, Some(arguments[2])),
+        "observe-assemble" if arguments.len() == 4 => {
+            (10, pair(read(1)?, read(2)?)?, Some(arguments[3]))
+        }
+        "assemble" if arguments.len() == 4 => (11, pair(read(1)?, read(2)?)?, Some(arguments[3])),
+        _ => {
+            return Err(format!(
+                "{command} is not available through the persistent host session"
+            ))
+        }
+    };
+    let reply = transport::invoke(socket, config, operation, &payload)?;
+    if reply[0] == 255 {
+        return Err(format!(
+            "host refused {command}; encoded refusal: {}",
+            hex(&reply[1..])
+        ));
+    }
+    if let Some(destination) = destination {
+        write_new(Path::new(destination), &reply[1..])?;
+    }
+    use std::os::unix::process::ExitStatusExt;
+    Ok(Output {
+        status: std::process::ExitStatus::from_raw(0),
+        stdout: reply[1..].to_vec(),
+        stderr: Vec::new(),
+    })
+}
+
+#[cfg(not(unix))]
+fn socket_process(_socket: &Path, _config: &Path, _arguments: &[&OsStr]) -> Result<Output> {
+    Err("persistent host sessions require Unix sockets".to_owned())
 }
 
 fn host_files(host: &Path, config: &Path, arguments: &[&Path]) -> Result<()> {
@@ -410,7 +527,8 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
         "format": "minidregg-resource-client-attempt-v1",
         "operation": operation,
         "host": utf8_path(&host)?,
-        "config": utf8_path(&config)?
+        "config": utf8_path(&config)?,
+        "socket": SOCKET.get().map(|socket| absolute(socket)).transpose()?.map(|socket| socket.to_string_lossy().into_owned())
     });
     write_json_new(&directory.join("attempt.json"), &manifest)
 }
@@ -585,7 +703,7 @@ fn query(
     print_json(&presentation)
 }
 
-fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf)> {
+fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
     let path = directory.join("attempt.json");
     let bytes =
         fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -604,7 +722,11 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf)> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .ok_or_else(|| "attempt manifest has no config path".to_owned())?;
-    Ok((host, config))
+    let socket = value
+        .get("socket")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    Ok((host, config, socket))
 }
 
 fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
@@ -618,7 +740,7 @@ fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Err("attempt has exhausted retry evidence names".to_owned())
 }
 
-fn retry(directory: &Path, mode: &str) -> Result<()> {
+fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
@@ -626,22 +748,102 @@ fn retry(directory: &Path, mode: &str) -> Result<()> {
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
     }
-    let (host, config) = manifest_paths(directory)?;
+    let (host, config, socket) = manifest_paths(directory)?;
+    if !direct && SOCKET.get().is_none() {
+        if let Some(socket) = socket {
+            let _ = SOCKET.set(socket);
+        }
+    }
     let (outcome_bin, outcome_json) = next_retry(directory)?;
     host_files(&host, &config, &[Path::new(mode), &call, &outcome_bin])?;
     let outcome = inspect(&host, &config, "outcome", &outcome_bin, &outcome_json)?;
     print_confirmed_outcome(&outcome)
 }
 
+fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsString]) -> Result<()> {
+    let word = command.to_str().ok_or("host command must be UTF-8")?;
+    if !matches!(
+        word,
+        "portable-verify-fn"
+            | "consumer-verify-poll-files"
+            | "portable-consumer-decide"
+            | "poll-consumer-decide"
+            | "consumer-poll-decide"
+            | "consumer-export-inbox"
+            | "consumer-export-poll"
+            | "consumer-ack-poll"
+            | "reply-consumer-poll-decide"
+            | "reply-consumer-export-result"
+            | "reply-consumer-ack-poll"
+            | "consumer-export-reply"
+            | "consumer-stage-reply-plan"
+            | "consumer-stage-reply-sign"
+            | "consumer-decide-test"
+    ) {
+        return Err(format!("unsupported fn consumer command {word}"));
+    }
+    if SOCKET.get().is_some() {
+        return Err("fn consumer file commands require direct Host/Main CLI until a typed session opcode exists".to_owned());
+    }
+    let mut all = Vec::with_capacity(arguments.len() + 1);
+    all.push(command);
+    all.extend(arguments.iter().map(OsString::as_os_str));
+    let output = process(host, config, &all)?;
+    io::stdout()
+        .write_all(&output.stdout)
+        .map_err(|e| format!("cannot print host output: {e}"))
+}
+
 fn run(mut args: Args) -> Result<()> {
+    if let Some(socket) = args.optional("socket") {
+        let _ = SOCKET.set(path(socket));
+    }
     match args.command.to_string_lossy().as_ref() {
+        "serve" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve requires --socket")?;
+            #[cfg(unix)]
+            {
+                transport::serve(socket, &host, &config)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("persistent host sessions require Unix sockets".to_owned())
+            }
+        }
+        "host-command" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let command = args.required("command")?;
+            let arguments = args.repeated("arg");
+            args.finish()?;
+            host_command(&host, &config, &command, &arguments)
+        }
+        "profile" | "describe" => {
+            let command = args.command.clone();
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let output = process(&host, &config, &[command.as_os_str()])?;
+            io::stdout()
+                .write_all(&output.stdout)
+                .map_err(|e| format!("cannot print host output: {e}"))
+        }
         "keygen" => {
+            if SOCKET.get().is_some() {
+                return Err("keygen does not use a host socket".to_owned());
+            }
             let secret = path(args.required("secret")?);
             let public = path(args.required("public")?);
             args.finish()?;
             keygen(&secret, &public)
         }
         "bootstrap" => {
+            if SOCKET.get().is_some() {
+                return Err("bootstrap requires direct Host/Main CLI".to_owned());
+            }
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let source = path(args.required("source")?);
@@ -674,7 +876,15 @@ fn run(mut args: Args) -> Result<()> {
             let key = path(args.required("key")?);
             let directory = path(args.required("dir")?);
             args.finish()?;
-            submit(&host, &config, &intent, &intent_kind, &key, &directory, prepare_only)
+            submit(
+                &host,
+                &config,
+                &intent,
+                &intent_kind,
+                &key,
+                &directory,
+                prepare_only,
+            )
         }
         "query" => {
             let host = path(args.required("host")?);
@@ -705,11 +915,20 @@ fn run(mut args: Args) -> Result<()> {
             let mode = args
                 .optional("mode")
                 .unwrap_or_else(|| OsString::from("submit"));
+            let direct = match args.optional("direct").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--direct must be true or false".to_owned()),
+            };
+            if direct && SOCKET.get().is_some() {
+                return Err("--direct true cannot be combined with --socket".to_owned());
+            }
             args.finish()?;
             let mode = mode
                 .to_str()
                 .ok_or_else(|| "--mode must be UTF-8".to_owned())?;
-            retry(&directory, mode)
+            retry(&directory, mode, direct)
         }
         "export-evidence" => {
             let host = path(args.required("host")?);
@@ -720,7 +939,11 @@ fn run(mut args: Args) -> Result<()> {
             if output.exists() {
                 return Err(format!("refusing to replace {}", output.display()));
             }
-            host_files(&host, &config, &[Path::new("export-evidence"), &call, &output])
+            host_files(
+                &host,
+                &config,
+                &[Path::new("export-evidence"), &call, &output],
+            )
         }
         "verify-evidence" => {
             let host = path(args.required("host")?);
@@ -731,7 +954,11 @@ fn run(mut args: Args) -> Result<()> {
             if output.exists() {
                 return Err(format!("refusing to replace {}", output.display()));
             }
-            host_files(&host, &config, &[Path::new("verify-evidence"), &package, &output])
+            host_files(
+                &host,
+                &config,
+                &[Path::new("verify-evidence"), &package, &output],
+            )
         }
         other => Err(format!("unknown command {other}\n\n{USAGE}")),
     }
@@ -765,6 +992,38 @@ mod tests {
         let path = env::temp_dir().join(format!("mini-{name}-{}-{unique}", std::process::id()));
         fs::create_dir(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn named_options_preserve_interleaved_fn_argument_order() {
+        let mut args = Args {
+            command: OsString::from("host-command"),
+            values: [
+                ("--arg", "first"),
+                ("--host", "host"),
+                ("--arg", "second"),
+                ("--config", "config"),
+                ("--command", "consumer-export-reply"),
+                ("--arg", "third"),
+            ]
+            .into_iter()
+            .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+            .collect(),
+        };
+        assert_eq!(args.required("host").unwrap(), OsStr::new("host"));
+        assert_eq!(args.required("config").unwrap(), OsStr::new("config"));
+        assert_eq!(
+            args.required("command").unwrap(),
+            OsStr::new("consumer-export-reply")
+        );
+        assert_eq!(
+            args.repeated("arg"),
+            vec!["first", "second", "third"]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+        args.finish().unwrap();
     }
 
     #[test]
@@ -849,9 +1108,9 @@ mod tests {
         )
         .unwrap();
 
-        retry(&directory, "submit").unwrap();
+        retry(&directory, "submit", false).unwrap();
         let first = fs::read(directory.join("retry-0001.bin")).unwrap();
-        retry(&directory, "lookup").unwrap();
+        retry(&directory, "lookup", false).unwrap();
         assert_eq!(fs::read(&call).unwrap(), [0, 1, 2, 255, 17]);
         assert_eq!(first, [0, 1, 2, 255, 17]);
         assert_eq!(fs::read(directory.join("retry-0002.bin")).unwrap(), first);

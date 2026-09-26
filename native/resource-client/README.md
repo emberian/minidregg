@@ -6,6 +6,63 @@ receiver that decides admission. The Rust process generates and holds raw
 Ed25519 keys, signs the host's exact inspected headers, and retains every byte
 needed to recover from an uncertain response.
 
+## Persistent local host session
+
+Start one local Lean host with a Unix socket in a directory owned by your
+account and inaccessible to other accounts. The service refuses an existing
+socket and a directory with group or world access:
+
+```sh
+mkdir -m 700 /private/path/mini-session
+mini serve --host /absolute/path/minidregg-host \
+  --config /absolute/path/deployment/pinned-config.json \
+  --socket /private/path/mini-session/host.sock
+```
+
+After an abrupt service kill, verify that its process is gone before removing
+the stale `host.sock` and `host.config` files and restarting at the same path.
+
+In another shell, add `--socket /private/path/mini-session/host.sock` to
+`mini author`, `submit`, `query`, or `retry`. Evidence export, independent
+verification and bootstrap still use direct Host/Main CLI commands. The socket
+carries bounded length-framed
+binary requests; the service passes them to one long-lived
+`minidregg-host CONFIG.json stdio` process, one request at a time. Lean still
+authors canonical bytes, inspects headers, assembles signed calls, checks
+current authority and decides submissions. The service accepts no shell
+command or client-supplied file path. It reads its fixed config at startup.
+The daemon passes a private launch copy of that config to the host and
+requires each client request to present identical config bytes. The local
+socket rejects unknown operation codes, including path-bearing fn commands.
+
+The transport covers profile, description, author, inspect, signatures,
+observation challenge/assembly, prepare, call assembly, submit, lookup, and
+query. `submit` retains `ATTEMPT/call.bin` before sending it. If a pipe or
+socket closes during a request, the client reports **uncertain**; inspect the
+retained attempt and use `mini retry --attempt ATTEMPT --mode lookup` to
+recover the original receipt. A fresh service can use the same pinned config
+and store after a restart. Attempt manifests record the socket path, and
+`retry --socket NEW-SOCKET` may select a restarted endpoint. `retry --direct
+true` uses the retained host and config paths when no socket is available.
+The broker bounds a client frame to 10 seconds, a host request write to 30
+seconds, and a host reply to 600 seconds. On a host pipe timeout it exits and
+reaps the child; the caller still treats the request as uncertain.
+
+The existing file-oriented fn consumer Host/Main commands are exposed by a
+restricted direct bridge, for example:
+
+```sh
+mini host-command --host HOST --config CONFIG.json \
+  --command consumer-export-reply --arg TRANSACTION-ID --arg REPLY.bin
+```
+
+`--arg` order is preserved. Only the fn consumer command allowlist in the
+client source is accepted; Rust invokes Host/Main directly without a shell or a
+second implementation of those semantics. These commands are not yet framed
+session operations. Their multi-file outputs and external fn control socket
+need dedicated typed host operations before they can share the persistent
+session safely.
+
 ## Portable native prefix evidence (P0)
 
 `mini export-evidence --host HOST --config PINNED.json --call CALL.bin --output PACKAGE.bin`
@@ -191,7 +248,8 @@ native/resource-client/acceptance.sh .lake/build/bin/minidregg-host /tmp/mini-ac
 The directory retains the generated `birth-intent.json`, `content-intent.json`,
 `joint-intent.json`, query sources, canonical binary artifacts, signatures,
 receipts, and `acceptance.json`. These are concrete examples for the local
-process client; `mini` does not provide a network server or SSH interface.
+client. The Unix socket is local only; no network server or SSH interface is
+provided yet.
 
 The separate authority journey uses two fresh enrolled signers and the same
 ordinary `mini` JSON interface. Alice installs a source-authored policy,
