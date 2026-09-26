@@ -48,6 +48,7 @@ be lowered here rather than added through a second policy verifier.
 import Pred.Core
 import Compiler.PredOrderGadget
 import Mathlib.Data.List.Dedup
+import Std.Data.HashSet
 
 namespace Minidregg.Compiler
 
@@ -185,10 +186,56 @@ theorem castInjOn_iff_castEntries (I : List ℤ) :
     exact h (x, (x : F)) (List.mem_map.mpr ⟨x, List.mem_dedup.mpr hx, rfl⟩)
       (y, (y : F)) (List.mem_map.mpr ⟨y, List.mem_dedup.mpr hy, rfl⟩)
 
-instance [DecidableEq F] (I : List ℤ) : Decidable (castInjOn F I) :=
+/-- The decision procedure only needs the set of source integers. A hash set
+avoids `List.dedup`'s repeated linear scans of byte-expanded old/new states.
+The existing `castEntries` API keeps its ordering; this private decision list
+has exactly the same members. -/
+private def castValuesHashed (I : List ℤ) : List ℤ :=
+  (Std.HashSet.ofList I).toList
+
+private theorem mem_castValuesHashed (I : List ℤ) (x : ℤ) :
+    x ∈ castValuesHashed I ↔ x ∈ I := by
+  simp only [castValuesHashed, Std.HashSet.mem_toList, Std.HashSet.mem_ofList,
+    List.contains_iff_mem]
+
+private def castEntriesHashed (F : Type) [Field F] (I : List ℤ) : List (ℤ × F) :=
+  (castValuesHashed I).map fun a => (a, (a : F))
+
+theorem castInjOn_iff_castEntriesHashed (I : List ℤ) :
+    castInjOn F I ↔
+      ∀ a ∈ castEntriesHashed F I, ∀ b ∈ castEntriesHashed F I,
+        a.2 = b.2 → a.1 = b.1 := by
+  constructor
+  · intro h a ha b hb
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ha
+    obtain ⟨y, hy, rfl⟩ := List.mem_map.mp hb
+    exact h x ((mem_castValuesHashed I x).mp hx) y ((mem_castValuesHashed I y).mp hy)
+  · intro h x hx y hy
+    exact h (x, (x : F))
+      (List.mem_map.mpr ⟨x, (mem_castValuesHashed I x).mpr hx, rfl⟩)
+      (y, (y : F))
+      (List.mem_map.mpr ⟨y, (mem_castValuesHashed I y).mpr hy, rfl⟩)
+
+/-- Kernel evaluation retains the original list decision, so closed source
+proofs remain reducible without trusting compilation. -/
+def castInjOnDecidableSpec [DecidableEq F] (I : List ℤ) : Decidable (castInjOn F I) :=
   let entries := castEntries F I
   decidable_of_iff (∀ a ∈ entries, ∀ b ∈ entries, a.2 = b.2 → a.1 = b.1)
     (castInjOn_iff_castEntries I).symm
+
+/-- The compiled decision uses the proved equivalent hashed entries. -/
+def castInjOnDecidableFast [DecidableEq F] (I : List ℤ) : Decidable (castInjOn F I) :=
+  let entries := castEntriesHashed F I
+  decidable_of_iff (∀ a ∈ entries, ∀ b ∈ entries, a.2 = b.2 → a.1 = b.1)
+    (castInjOn_iff_castEntriesHashed I).symm
+
+@[csimp] theorem castInjOnDecidableSpec_eq_fast :
+    @castInjOnDecidableSpec = @castInjOnDecidableFast := by
+  funext F field decEq I
+  exact Subsingleton.elim _ _
+
+instance [DecidableEq F] (I : List ℤ) : Decidable (castInjOn F I) :=
+  castInjOnDecidableSpec I
 
 /-- info: 'Minidregg.Compiler.castInjOn_dedup' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms castInjOn_dedup
