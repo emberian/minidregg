@@ -50,6 +50,11 @@ case "$verb" in
     scp -q "$4" "hbox:$remote_dir/event"
     ssh hbox "FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer-project $remote_dir/cursor $remote_dir/event"
     ;;
+  consumer-inspect)
+    [ "$#" -eq 3 ] || exit 64
+    scp -q "$3" "hbox:$remote_dir/cursor"
+    ssh hbox "FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer-inspect $remote_dir/cursor"
+    ;;
   hybrid-verify-source)
     [ "$#" -eq 4 ] || exit 64
     scp -q "$3" "hbox:$remote_dir/carrier"
@@ -58,6 +63,12 @@ case "$verb" in
     ;;
   consumer)
     case "$3" in
+      status)
+        [ "$#" -eq 5 ] || exit 64
+        case "$4" in *[!A-Za-z0-9_./-]*|'') exit 64;; esac
+        case "$5" in *[!A-Za-z0-9_-]*|'') exit 64;; esac
+        ssh hbox "FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer status $4 $5"
+        ;;
       poll)
         [ "$#" -eq 7 ] || exit 64
         case "$4" in *[!A-Za-z0-9_./-]*|'') exit 64;; esac
@@ -75,7 +86,6 @@ case "$verb" in
           exit 75
         fi
         ssh hbox "FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer ack $4 $remote_dir/cursor"
-        ssh hbox "FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer position $4 worker $remote_dir/position >/dev/null && cmp $remote_dir/cursor $remote_dir/position && FN_OPENSSL_PREFIX=/tank/fn/toolchains/openssl-3.5.8 $image --fn consumer poll $4 worker $remote_dir/after-cursor $remote_dir/after-event >/dev/null && test ! -s $remote_dir/after-event"
         ;;
       position)
         [ "$#" -eq 6 ] || exit 64

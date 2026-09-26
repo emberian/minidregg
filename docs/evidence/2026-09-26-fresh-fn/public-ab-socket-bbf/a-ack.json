@@ -1,0 +1,7 @@
+{
+  "type": "fn-a-reply-ack-session-v1",
+  "miniTransactionId": "85676626552862900867055208793141180018633836400653653029078281543893525874045",
+  "fnStoreSequence": "6",
+  "fnStoreTransactionId": "6",
+  "fnAck": "durable-accepted"
+}

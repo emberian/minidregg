@@ -1,0 +1,9 @@
+source_semantics=9004b288d8dc0e7d78955a34af3e4d3abd954503
+source_basis=B frozen source 591a5a91252846d1ffca51e8bf87524d7027a20d plus Kernel/AgentGrainAudit.lean from 3744eb268a321766ad10abb3c1f32f4fdc147b03
+source_delta=Host/Main.lean 4213e0a3f8e2e487d2a45bde329860af5d295e116300834b689022d01cff4146
+source_delta=Kernel.lean c0060965c016617ddcbc70ac6d163997d2245a42a81087006c12b41b83a220ab
+source_delta=Kernel/FnConsumerProgress.lean d5dd4a2f0979dddfebb88e7c48f731d74e573f0a92b5df031a4da0fdb0de5e13
+source_tree_macos=/tmp/minidregg-overnight-20260926-a
+source_tree_linux=/home/ember/build/minidregg-overnight-20260926/source-a
+builder_script_sha256=6cdb379cb7cf670f84eed9624adf635214ec31af449a42649a184e842abd31db
+scope=A op14/15 Q-profile ACK fix plus B op12/13 and empty-page skip; later unpublished work excluded

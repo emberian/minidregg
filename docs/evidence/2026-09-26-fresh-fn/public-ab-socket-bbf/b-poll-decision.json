@@ -1,0 +1,6 @@
+{
+  "type": "fn-consumer-poll-session-v1",
+  "status": "accepted-decision",
+  "storeAdmission": "observed-control-poll",
+  "decisionType": "proposed-fresh"
+}

@@ -1,0 +1,144 @@
+{
+  "stopped": "EXCHANGE COMPLETE",
+  "reached": "final-article-counts",
+  "reached_outcome": "ACCEPTED",
+  "cut": "none",
+  "steps": [
+    {
+      "n": 37,
+      "step": "mini-b-service-ready",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "ba9be1c028d501c20d67e6d62a20789eaf2677d5e17396bea97679d09123eb36"
+    },
+    {
+      "n": 38,
+      "step": "mini-b-poll-session",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "46eaf990b02ee516410c20e66f6d9a47a94ff755c56c576fa99a29c0794c829e"
+    },
+    {
+      "n": 39,
+      "step": "mini-b-submit",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "8fc4b8b68494f4005dc6eb0c217f6f26b2e6a6e64bde40a07a28fbe127f4a0a6"
+    },
+    {
+      "n": 40,
+      "step": "mini-b-export-poll",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "966217a555adc7bfae0ed707d4f96fcc28fad1a94649c1fda76aed6f4434cc77"
+    },
+    {
+      "n": 41,
+      "step": "mini-b-export-reply",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "a282e0e59f032f241187f80633ddd150b03d8eb57aa6e76707c17c947e6c74b3"
+    },
+    {
+      "n": 42,
+      "step": "mini-b-ack-session",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "e04b27eeb137b80cb0b3593290df0f881c2534e1a42c0cd29b5835302072b947"
+    },
+    {
+      "n": 43,
+      "step": "b-position-after-ack",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "b81dc6e1c6a64413b8395704166fa9bf87e4f11b5c05fd960bdd4a0de774c2f9"
+    },
+    {
+      "n": 70,
+      "step": "mini-a-service-ready",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "32bc89edba9f3a35cd64f41ac73baf039e54cc61c388a6884ebd19bfa88c9505"
+    },
+    {
+      "n": 71,
+      "step": "mini-a-reply-poll-session",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "fe23e6db8eb9b1058ab6cc8b64c909c06e8407cd3f8d135bf679d520fd0dd13c"
+    },
+    {
+      "n": 72,
+      "step": "mini-a-submit",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "6b8da6eb69051c59f55f39636618b6eb1740e53283a7ece2bceccded925b6b53"
+    },
+    {
+      "n": 73,
+      "step": "mini-a-export-result",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "1a2be9388536feaffa523aa688fe6320e3bb44ff9d62ea42e6c53e7d9279ac01"
+    },
+    {
+      "n": 74,
+      "step": "mini-a-ack-session",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "f15fb4712cd9cb85279794e037783723ff42ac3af762abcb6d7d3ac328b232b4"
+    },
+    {
+      "n": 75,
+      "step": "a-position-after-ack",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "78154a68059eef17de05496f6244fcbb222f86ace668bdd6307aae271727c6fa"
+    },
+    {
+      "n": 76,
+      "step": "final-stop-a",
+      "outcome": "ACCEPTED",
+      "detail": "stop",
+      "exit": 0,
+      "log_sha256": "f8c501fb108471c3e92a1779ebaefec284d87d725a94a164e5d42bff02286b62"
+    },
+    {
+      "n": 77,
+      "step": "final-stop-b",
+      "outcome": "ACCEPTED",
+      "detail": "stop",
+      "exit": 0,
+      "log_sha256": "4aa0e0534cfe22b9e25099fd11c6c6aed483b55dd9e549357535b54f87a4aafc"
+    },
+    {
+      "n": 78,
+      "step": "final-article-counts",
+      "outcome": "ACCEPTED",
+      "detail": "status",
+      "exit": 0,
+      "log_sha256": "2caba79d57e151fad46a190ef41ff1cc64ec097e42a53b2072cc63c27a4a9f56"
+    },
+    {
+      "n": 79,
+      "step": "cleanup-owners",
+      "outcome": "ACCEPTED",
+      "detail": "exit 0",
+      "exit": 0,
+      "log_sha256": "e52e80455d9c40274cef2ce1279ffb9d302c89c5dc3880297210237cfc240a7d"
+    }
+  ]
+}

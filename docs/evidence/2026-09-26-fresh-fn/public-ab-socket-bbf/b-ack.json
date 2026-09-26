@@ -1,0 +1,7 @@
+{
+  "type": "fn-consumer-ack-session-v1",
+  "miniTransactionId": "38597618243160867309796552145820195279544051064490397259935699993518329756481",
+  "fnStoreSequence": "3",
+  "fnStoreTransactionId": "3",
+  "fnAck": "durable-accepted"
+}
