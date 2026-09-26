@@ -841,7 +841,7 @@ impl Runtime {
                     .ok()
                     .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
                     .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("refused"));
-                if refusal || !attempt.join("call.bin").is_file() {
+                if refusal {
                     self.journal.pending = None;
                 } else if let Some(p) = &mut self.journal.pending {
                     p.uncertain = true;
@@ -1091,27 +1091,19 @@ impl Runtime {
                     return Err(format!("{label} refused by Mini: {}", explicit.unwrap()));
                 }
                 if !attempt.join("call.bin").is_file() {
-                    // The custody subprocess has completed, and it always
-                    // materializes call.bin before submission. This case is
-                    // a local construction failure, unlike a crash while
-                    // the custody subprocess might still be running.
-                    if tool_authority {
-                        self.journal.tool_pending = None;
+                    // A missing file after subprocess exit is still not a
+                    // negative native receipt: an older client/host could
+                    // have sent the call before its directory entry became
+                    // durable. Keep the exact pending attempt and hold.
+                    if let Some(p) = if tool_authority {
+                        &mut self.journal.tool_pending
                     } else {
-                        self.journal.pending = None;
-                    }
-                    if reserving {
-                        let hold = if tool_authority {
-                            &mut self.journal.tool_hold
-                        } else {
-                            &mut self.journal.parent_hold
-                        };
-                        hold.as_mut()
-                            .ok_or("reserve marker disappeared")?
-                            .reserve_refused = true;
+                        &mut self.journal.pending
+                    } {
+                        p.uncertain = true;
                     }
                     self.save()?;
-                    return Err(format!("{label} did not produce a signed call: {e}"));
+                    return Err(format!("{label} has no retained call.bin after custody failure; disposition requires audit: {e}"));
                 }
                 if let Some(p) = if tool_authority {
                     &mut self.journal.tool_pending
@@ -1522,37 +1514,53 @@ impl Runtime {
         // potentially slow replay may precede local physical interruption.
         let stopped = self.kill_child();
         self.save()?;
-        let tool_fenced = self.fence_tool();
-        if stopped.is_ok()
-            && tool_fenced.is_ok()
-            && self.journal.parent_hold.is_none()
-            && self.journal.tool_hold.is_none()
-            && self.journal.pending.is_none()
-            && self.journal.tool_pending.is_none()
-            && self.journal.settlement_due.is_none()
-        {
-            let state = self.query()?;
-            if matches!(
-                state.pointer("/grain/status").and_then(Value::as_str),
-                Some("0" | "6")
-            ) {
-                // A completed settlement can win the atomic completion race
-                // immediately before EOF. There is no live allowance to trip.
-                self.journal.connection = Connection::Detached;
-                self.journal.hard_reconnect_pending = false;
-                self.journal.prompt_witness = None;
-                return self.save();
-            }
-        }
-        let fenced = self.transition(
-            if soft_reserved {
-                json!({"type":"cancel"})
+        // Exact retained lookups settle any lost reply before we decide if a
+        // second transport event needs a new transition. A missing or refused
+        // lookup remains unresolved; it is never a license to resubmit.
+        let parent_retry = self.retry_pending(false);
+        let tool_retry = self.retry_pending(true);
+        let tool_fenced = tool_retry.and_then(|_| self.fence_tool());
+        let fenced = parent_retry.and_then(|_| {
+            let parent_state = self.query()?;
+            let parent_status = parent_state
+                .pointer("/grain/status")
+                .and_then(Value::as_str)
+                .ok_or("hard disconnect signed grain status absent")?;
+            if matches!(parent_status, "5" | "7") {
+                let hold = self
+                    .journal
+                    .parent_hold
+                    .as_ref()
+                    .ok_or("signed fenced reservation has no durable parent hold")?;
+                if parent_state
+                    .pointer("/grain/reserved")
+                    .and_then(Value::as_str)
+                    != Some(hold.reserve.as_str())
+                {
+                    Err("signed fenced amount differs from durable parent hold".into())
+                } else {
+                    Ok(())
+                }
+            } else if matches!(parent_status, "0" | "6")
+                && self.journal.parent_hold.is_none()
+                && self.journal.settlement_due.is_none()
+            {
+                // Completion can win the atomic phase race immediately before
+                // EOF. With no live allowance, the signed terminal state is
+                // already the fence; a second disconnect edge is invalid.
+                Ok(())
             } else {
-                json!({"type":"disconnect"})
-            },
-            "disconnect",
-            "hard connection lost",
-        );
+                self.transition(
+                    if soft_reserved {
+                        json!({"type":"cancel"})
+                    } else {
+                        json!({"type":"disconnect"})
+                    },
+                    "disconnect",
+                    "hard connection lost",
+                )
+            }
+        });
         match (stopped, fenced, tool_fenced) {
             (Ok(()), Ok(()), Ok(())) => {
                 self.journal.connection = Connection::Detached;
