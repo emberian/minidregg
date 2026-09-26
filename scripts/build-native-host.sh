@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...]] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -22,6 +22,9 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
               compile MODULE and every later source module in import order;
               verify the successful baseline, every earlier source/artifact,
               unchanged later sources, packages, and toolchain before reuse
+  --allow-suffix-change MODULE
+              require this additional later source to differ from the baseline;
+              compile it in the suffix and reject any undeclared source change
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -38,6 +41,8 @@ build_umbrella=0
 incremental_baseline_root=""
 incremental_baseline_output=""
 incremental_changed_module=""
+incremental_suffix_mode=0
+suffix_allowed_modules=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -58,7 +63,19 @@ while [[ $# -gt 0 ]]; do
       incremental_baseline_root=$2
       incremental_baseline_output=$3
       incremental_changed_module=$4
+      incremental_suffix_mode=1
       shift 4
+      ;;
+    --allow-suffix-change)
+      [[ $# -ge 2 && -n "$2" ]] || { usage >&2; exit 64; }
+      for allowed in "${suffix_allowed_modules[@]}"; do
+        [[ "$allowed" != "$2" ]] || {
+          printf 'build-native-host: duplicate suffix change: %s\n' "$2" >&2
+          exit 64
+        }
+      done
+      suffix_allowed_modules+=("$2")
+      shift 2
       ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
@@ -83,6 +100,10 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
   printf 'build-native-host: --umbrella and incremental modes are exclusive\n' >&2
+  exit 64
+fi
+if [[ ${#suffix_allowed_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]]; then
+  printf 'build-native-host: suffix change allowlist requires --incremental-suffix-from\n' >&2
   exit 64
 fi
 
@@ -338,10 +359,12 @@ if [[ -n "$incremental_baseline_root" ]]; then
       "$changed_source" >&2
     exit 65
   fi
+  shasum -a 256 "$changed_source" > "$output_dir/changed-source-sha256.txt"
   reused_paths="$output_dir/reused-artifact-paths.nul"
   : > "$reused_paths"
   validated_sources=0
   validated_tail_sources=0
+  validated_additional_changes=0
   changed_seen=0
   while IFS= read -r module; do
     stem=${module//./\/}
@@ -350,13 +373,32 @@ if [[ -n "$incremental_baseline_root" ]]; then
       continue
     fi
     if [[ "$changed_seen" == 1 ]]; then
+      allowed_change=0
+      for allowed in "${suffix_allowed_modules[@]}"; do
+        if [[ "$allowed" == "$module" ]]; then
+          allowed_change=1
+          break
+        fi
+      done
       if [[ ! -f "$incremental_baseline_root/$stem.lean" ||
-            ! -f "$stem.lean" ]] || \
-          ! cmp -s "$incremental_baseline_root/$stem.lean" "$stem.lean"; then
-        printf 'build-native-host: later source changed: %s\n' "$stem.lean" >&2
+            ! -f "$stem.lean" ]]; then
+        printf 'build-native-host: later source absent: %s\n' "$stem.lean" >&2
         exit 65
       fi
-      validated_tail_sources=$((validated_tail_sources + 1))
+      if [[ "$allowed_change" == 1 ]]; then
+        if cmp -s "$incremental_baseline_root/$stem.lean" "$stem.lean"; then
+          printf 'build-native-host: declared suffix change is unchanged: %s\n' "$stem.lean" >&2
+          exit 65
+        fi
+        shasum -a 256 "$stem.lean" >> "$output_dir/changed-source-sha256.txt"
+        validated_additional_changes=$((validated_additional_changes + 1))
+      else
+        if ! cmp -s "$incremental_baseline_root/$stem.lean" "$stem.lean"; then
+          printf 'build-native-host: undeclared later source changed: %s\n' "$stem.lean" >&2
+          exit 65
+        fi
+        validated_tail_sources=$((validated_tail_sources + 1))
+      fi
       continue
     fi
     for path in "$stem.lean" \
@@ -374,6 +416,11 @@ if [[ -n "$incremental_baseline_root" ]]; then
   done < "$source_modules"
   [[ "$changed_seen" == 1 ]] || {
     printf 'build-native-host: changed module was not reached in source closure\n' >&2
+    exit 65
+  }
+  [[ "$validated_additional_changes" == "${#suffix_allowed_modules[@]}" ]] || {
+    printf 'build-native-host: declared suffix change is absent or precedes %s\n' \
+      "$incremental_changed_module" >&2
     exit 65
   }
   validated_packages=0
@@ -401,6 +448,8 @@ if [[ -n "$incremental_baseline_root" ]]; then
     printf 'changed_module=%s\n' "$incremental_changed_module"
     printf 'unchanged_imported_modules=%s\n' "$validated_sources"
     printf 'unchanged_later_sources=%s\n' "$validated_tail_sources"
+    printf 'additional_changed_sources=%s\n' "$validated_additional_changes"
+    printf 'changed_source_manifest=%s\n' "$output_dir/changed-source-sha256.txt"
     printf 'unchanged_package_objects=%s\n' "$validated_packages"
     printf 'changed_source_sha256=%s\n' \
       "$(shasum -a 256 "$changed_source" | cut -d ' ' -f 1)"
@@ -411,8 +460,8 @@ if [[ -n "$incremental_baseline_root" ]]; then
   } > "$output_dir/incremental-validation.txt"
   shasum -a 256 "$toolchain/bin/lean" "$toolchain/bin/clang" \
     "$toolchain/bin/leanc" > "$output_dir/toolchain-sha256.txt"
-  printf 'incremental source/artifact check PASS %s earlier modules, %s later sources, %s package objects\n' \
-    "$validated_sources" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
+  printf 'incremental source/artifact check PASS %s earlier modules, %s declared later changes, %s unchanged later sources, %s package objects\n' \
+    "$validated_sources" "$validated_additional_changes" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
 fi
 
 if [[ "$build_umbrella" == 0 ]]; then
