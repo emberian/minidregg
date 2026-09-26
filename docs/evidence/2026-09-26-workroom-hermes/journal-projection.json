@@ -1,0 +1,36 @@
+{
+  "connection": "soft",
+  "pending": null,
+  "child": null,
+  "toolPending": null,
+  "toolHold": null,
+  "settlementDue": null,
+  "unresolvedExternal": [],
+  "hermesSession": {
+    "id": "1cb2989c-ea0a-46cd-98ec-40187419cd37",
+    "loadVerified": true,
+    "stateFingerprint": "state.db:327680:059de110aa2c7b976a898bd8ad7e22bfd380c717951db855f1165f6ee50be739|state.db-wal:absent",
+    "retentionIssue": null,
+    "pendingPrompt": false
+  },
+  "publicationReceipts": [
+    {
+      "operationId": 43,
+      "sourceSha256": "774bba499882756729d76de30d3a602c83339054d20a24f6dc0b0f0d66b7542a",
+      "callSha256": "cdff48fa8e57f530e276350eaa86a70db334a24978f50ade6e82fc132c7e818a",
+      "outcomeSha256": "bba382e01bc57db7eb971b5299739d459f704dd46e4a2119f673223ef7dc06f5",
+      "targets": [
+        "8001"
+      ],
+      "transactionId": "75066520320494335503287207186282537477487057135753415221093985984904776611415",
+      "eventId": "19302899713478614648317033798292983451013749099175324834566009145612214627877",
+      "acceptedCount": "20",
+      "imageBoundary": "53417682264557877670488054077774732041751696713496998209344473990154327520105",
+      "reported": true
+    }
+  ],
+  "parentHold": null,
+  "providerHold": null,
+  "providerPending": null,
+  "hardReconnectPending": false
+}

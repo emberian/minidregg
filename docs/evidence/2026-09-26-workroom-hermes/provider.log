@@ -1,0 +1,11 @@
+reject bytes=1409 reason=mini_read_resource is not advertised to Hermes
+completion bytes=36716 stream=true stage=content read workroom
+completion bytes=37801 stream=true stage=content create root=97349327118568466779609446662939988221287696762075284738918673226692685974561
+reject bytes=38937 reason=Mini content publish did not return a signed tool resource receipt
+reject bytes=1419 reason=mini_read_resource is not advertised to Hermes
+completion bytes=39051 stream=true stage=content read workroom
+completion bytes=41133 stream=true stage=content edit root=101347284563792911572322111536168290862555887478179640853948786731911350546071
+reject bytes=42751 reason=Mini content publish did not return a signed tool resource receipt
+completion bytes=43561 stream=true stage=content read workroom
+reject bytes=2115 reason=mini_read_resource is not advertised to Hermes
+completion bytes=45798 stream=true stage=content verified
