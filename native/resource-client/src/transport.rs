@@ -9,16 +9,19 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const MAX_FRAME: usize = 1_048_576;
+// Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
+pub(crate) const HOST_MAX_FRAME: usize = 6_194_884;
+const MAX_CONFIG: usize = 65_536;
+const MAX_FRAME: usize = HOST_MAX_FRAME + 5 + MAX_CONFIG;
 
 fn read_config(path: &Path) -> Result<Vec<u8>, String> {
     let file = fs::File::open(path)
         .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
     let mut bytes = Vec::new();
-    file.take(65_537)
+    file.take((MAX_CONFIG + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
-    if bytes.len() > 65_536 {
+    if bytes.len() > MAX_CONFIG {
         return Err("host config exceeds socket pin bound".to_owned());
     }
     Ok(bytes)
@@ -61,11 +64,6 @@ fn write_frame<W: Write>(writer: &mut W, frame: &[u8]) -> io::Result<()> {
     writer.write_all(&(frame.len() as u32).to_le_bytes())?;
     writer.write_all(frame)?;
     writer.flush()
-}
-
-struct DeadlineRead<'a> {
-    stream: &'a mut UnixStream,
-    deadline: Instant,
 }
 
 #[repr(C)]
@@ -116,7 +114,7 @@ impl<R: Read + AsRawFd> Read for DeadlinePipe<'_, R> {
             if remaining.is_zero() {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "host reply deadline",
+                    "frame read deadline",
                 ));
             }
             let mut fd = PollFd {
@@ -180,20 +178,6 @@ impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
     }
 }
 
-impl Read for DeadlineRead<'_> {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "socket frame deadline",
-            ));
-        }
-        self.stream.set_read_timeout(Some(remaining))?;
-        self.stream.read(bytes)
-    }
-}
-
 /// A failed write or read leaves the request's execution status unknown. Callers
 /// retain the original signed call and use historical lookup before resubmission.
 pub fn invoke(
@@ -203,6 +187,9 @@ pub fn invoke(
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let config = read_config(config)?;
+    if payload.len() >= HOST_MAX_FRAME {
+        return Err("host request exceeds frame bound before transmission".to_owned());
+    }
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
     stream
@@ -215,12 +202,15 @@ pub fn invoke(
     frame.push(operation);
     frame.extend_from_slice(payload);
     write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
-    let reply = read_frame(&mut DeadlineRead {
-        stream: &mut stream,
+    let reply = read_frame(&mut DeadlinePipe {
+        reader: &mut stream,
         deadline: Instant::now() + Duration::from_secs(600),
     })
     .map_err(|e| format!("uncertain host response read: {e}"))?
     .ok_or_else(|| "uncertain host response: connection closed".to_owned())?;
+    if reply.len() > HOST_MAX_FRAME {
+        return Err("uncertain host response exceeds host frame bound".to_owned());
+    }
     if reply[0] == 254 {
         return Err(format!(
             "socket rejected request: {}",
@@ -325,8 +315,8 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
         stream
             .set_write_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("cannot set client write deadline: {e}"))?;
-        let envelope = match read_frame(&mut DeadlineRead {
-            stream: &mut stream,
+        let envelope = match read_frame(&mut DeadlinePipe {
+            reader: &mut stream,
             deadline: Instant::now() + Duration::from_secs(10),
         }) {
             Ok(Some(frame)) => frame,
@@ -353,6 +343,10 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
             continue;
         }
         let request = &envelope[end.unwrap()..];
+        if request.len() > HOST_MAX_FRAME {
+            let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
+            continue;
+        }
         if request[0] > 11 {
             let _ = write_frame(&mut stream, b"\xfeoperation unavailable on public socket");
             continue;
@@ -362,7 +356,7 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
                 writer: &mut input,
                 deadline: Instant::now() + Duration::from_secs(30),
             },
-            &request,
+            request,
         )
         .map_err(|e| format!("host request status uncertain: {e}"))?;
         let reply = read_frame(&mut DeadlinePipe {
@@ -371,6 +365,9 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
         })
         .map_err(|e| format!("host request status uncertain: {e}"))?
         .ok_or_else(|| "host closed during request; status uncertain".to_owned())?;
+        if reply.len() > HOST_MAX_FRAME {
+            return Err("host response exceeds bounded native frame; status uncertain".to_owned());
+        }
         if let Err(error) = write_frame(&mut stream, &reply) {
             eprintln!("mini: client lost host reply; status uncertain: {error}");
         }
