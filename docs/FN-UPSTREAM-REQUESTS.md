@@ -24,6 +24,19 @@ is needed merely to obtain the wider codec. Mini still needs a selected
 operator profile and end-to-end evidence before advertising larger Store
 poll inputs. The stale consumer-spec prose remains a documentation request.
 
+PKT-codex-003: Clarify and, if intended, align the local `hybrid-author`
+control request's v1 source ceiling with the supported signed v2 NNTP POST
+profile. The actual Mini AgentGrain R source is 191,283 bytes: qualified
+`bbf52159` refused it through `hybrid-author`, then accepted the exact source
+through `hybrid-sign-carrier` and protected authenticated POST. Current
+`books/native-hybrid-control.lisp` still explicitly uses
+`*fn-hsig-v1-max-source*` in its author specification and encoder/decoder.
+This is a surface/profile mismatch, not a failure of the larger served route;
+Mini is using that existing route without modifying fn. The exact experiment
+is [retained here](evidence/2026-09-26-fresh-fn/public-grain-r-bbf/README.md).
+The reader-bound failure later in that experiment belongs to Mini and is
+being repaired here, independently of this request.
+
 We are rebuilding fresh local fixture inputs in Mini and can use the qualified
 `1a9dd747` isolated pair for baseline checks. No change to the protected live node
 is needed for that. New fn behavior will use a source-matched qualified image;
