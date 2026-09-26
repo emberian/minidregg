@@ -261,6 +261,26 @@ def historicalReceipt (config : Config) (durable : Durable) (transactionId event
     let acceptedPrefix : DurableReceiver.Image := ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
     some ⟨transactionId, eventId, index + 1, imageBoundary config acceptedPrefix⟩
 
+/-- When the old chronological prefix has no matching transaction ID, the
+historical selector points at the newly appended record and reproduces its
+original-prefix receipt. This is a list fact, not a hash collision premise. -/
+theorem historicalReceipt_exactCandidate_fresh (config : Config)
+    {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
+    (derived : NativeHostReplay.Derived config old.opened)
+    (ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
+      old.opened.durable.image old.opened.durable.snapshot derived.intent)
+    (fresh : old.opened.durable.image.accepted.findIdx?
+      (fun record => record.transactionId == derived.intent.transactionId) = none) :
+    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready)
+      derived.intent.transactionId derived.intent.event.eventId =
+      some ⟨derived.intent.transactionId, derived.intent.event.eventId,
+        old.opened.durable.image.accepted.length + 1,
+        imageBoundary config (NativeHostReplay.exactCandidate old derived ready).image⟩ := by
+  simp [historicalReceipt, NativeHostReplay.exactCandidate,
+    DurableReceiver.Image.append, List.findIdx?_append, fresh,
+    DurableReceiver.IntentRecord.ofIntent, List.take_append,
+    List.take_of_length_le (Nat.le_succ _)]
+
 private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
   match ← openExisting config with
@@ -334,6 +354,72 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
 
 def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
   submitLoadedWith config opened call (confirmed config)
+
+/-- A persistent session may retain the exact already-admitted invocation and
+complete post-CAS readback. Only that branch extends its verifier-minted prefix
+without another native signature launch. Every other branch retains the
+ordinary historical confirmation and current-tip refresh. -/
+def submitVerifiedLoadedWith (config : Config) {oldTarget : Durable}
+    (old : NativeHostReplay.Verified config oldTarget) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
+    (confirmExact : (kind : DurableReceiverIO.Confirmation) →
+      {target : Durable} → NativeHostReplay.Verified config target →
+      NativeHostCodec.Receipt → IO Outcome) : IO Outcome := do
+  match call with
+  | .invoke signed =>
+      let height := logicalHeight config old.opened.durable
+      DeclaredResourceController.withAcceptedLoaded config.deployment config.profile
+        ⟨config.federation, height⟩ config.signature old.opened.durable signed
+        (fun prepared shape accepted => do
+          let intent := accepted.dataIntent shape
+          let derived : NativeHostReplay.Derived config old.opened :=
+            ⟨intent, .invoke prepared signed shape accepted⟩
+          let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+            ResourceBirthCodec.rootBytes old.opened.durable intent
+          match result with
+          | .exact kind ready preparedEq readback readbackExact =>
+              let candidate := NativeHostReplay.exactCandidate old derived ready
+              match validated : validateLoaded config candidate with
+              | .error detail =>
+                  return .uncertain s!"receipt readback: {detail}".toUTF8.toList
+              | .ok after =>
+                  if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
+                    let proof : NativeHostReplay.ExactReadback config old :=
+                      { derived := derived
+                        ready := ready
+                        prepared := preparedEq
+                        physicalBytes := readback
+                        exactBytes := readbackExact
+                        after := after
+                        validated := validated
+                        afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+                    let verified := NativeHostReplay.extendExact old proof
+                    let receipt : NativeHostCodec.Receipt :=
+                      ⟨intent.transactionId, intent.event.eventId,
+                        old.opened.durable.image.accepted.length + 1,
+                        imageBoundary config candidate.image⟩
+                    match historicalReceipt config candidate intent.transactionId intent.event.eventId with
+                    | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+                    | some selected =>
+                        if _selectedExact : selected = receipt then
+                          confirmExact kind verified selected
+                        else return .uncertain "original receipt prefix mismatch".toUTF8.toList
+                  else return .uncertain "receipt readback: validated successor bytes changed".toUTF8.toList
+          | .ordinary result =>
+              match result with
+              | .confirmed kind _ => confirm kind intent.transactionId intent.event.eventId
+              | .rejected reason => return refused "durable" s!"{repr reason}"
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail.toUTF8.toList
+              | .uncertain detail => return .uncertain detail.toUTF8.toList)
+        (fun result =>
+          match result with
+          | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
+          | .rejected reason => pure <| refused "invoke" s!"{repr reason}"
+          | .transactionConflict => pure <| refused "replay" "transaction identity conflict"
+          | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+          | .settlement _ => pure (.unavailable "unexpected invocation settlement".toUTF8.toList))
+  | _ => submitLoadedWith config old.opened call confirm
 
 /-- A fresh mutation need not confer read authority (blind writes and credits
 remain possible). Its preflight/native/semantic refusal therefore exposes no
@@ -413,3 +499,5 @@ def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
       | .ok opened => return lookupLoaded config opened call
 
 end Minidregg.Kernel.NativeHost
+
+#print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh

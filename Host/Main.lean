@@ -262,9 +262,9 @@ def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UI
 
 /-- Session state is poisoned on any physical read, decode, prefix, or replay
 failure. A new process must revalidate the entire history before serving again. -/
-def sessionOpened (config : NativeHost.Config)
+def sessionCurrent (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
-    IO (NativeHost.Opened config) := do
+    IO (NativeHostSession.Session config) := do
   let some prior ← state.get
     | throw (IO.userError "native host session invalidated")
   match ← NativeHostSession.refresh config prior with
@@ -273,7 +273,12 @@ def sessionOpened (config : NativeHost.Config)
       throw (IO.userError detail)
   | .ok current =>
       state.set (some current)
-      return current.opened
+      return current
+
+def sessionOpened (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO (NativeHost.Opened config) := do
+  return (← sessionCurrent config state).opened
 
 def sessionConfirmed (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -286,6 +291,16 @@ def sessionConfirmed (config : NativeHost.Config)
     | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
     | some receipt => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
+
+/-- The exact post-CAS branch already has the verified successor and original
+receipt; retain that verifier-minted tip for the next session request. -/
+def sessionExactConfirmed (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (kind : DurableReceiverIO.Confirmation) {target : NativeHost.Durable}
+    (verified : NativeHostReplay.Verified config target)
+    (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
+  state.set (some ⟨target, verified⟩)
+  return .confirmed kind receipt
 
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
   unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
@@ -326,11 +341,13 @@ def dispatchSession (config : NativeHost.Config)
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, failure "prepare" detail)
   | 2 =>
-      let opened ← sessionOpened config state
+      let session ← sessionCurrent config state
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
             "noncanonical or unsupported native host call".toUTF8.toList)
-        | some call => NativeHost.submitLoadedWith config opened call (sessionConfirmed config state)
+        | some call =>
+            NativeHost.submitVerifiedLoadedWith config session.verified call
+              (sessionConfirmed config state) (sessionExactConfirmed config state)
       return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
   | 3 =>
       let opened ← sessionOpened config state
