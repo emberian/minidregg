@@ -1,0 +1,154 @@
+--- two_store_join.py
++++ two_store_join.py
+@@ -805,6 +805,7 @@
+         self.bridge = Path(args.mini_repo) / "scripts" / "fn-e1e2" / "fn_bridge.sh"
+         self.benv = dict(os.environ)
+         self.b_service = None
++        self.a_service = None
+ 
+     # -- step machinery ----------------------------------------------------
+ 
+@@ -947,6 +948,41 @@
+         else:
+             raise Stop("Mini B session socket did not become ready")
+         self.mini("mini-b-service-ready", ["/bin/test", "-S", socket])
++        return service_config, socket
++
++    def start_a_service(self, mini_a, ready):
++        """Pin A's R origin and live Q consumer outside the typed request."""
++        L = self.out
++        config = json.loads(Path(mini_a).read_text())
++        config["fnReplyPoll"] = {
++            "originConfigPath": str(Path(self.args.origin_pin).resolve()),
++            "rPinPath": str(L / "r-fn-pin.json"),
++            "rClaimPath": str(Path(self.args.r_claim).resolve()),
++            "rCarrierPath": str(L / "r-at-a.eml"),
++            "qPinPath": str(L / "q-fn-pin.json"),
++            "scopePath": str(L / "a-scope-pin.json"),
++            "qClaimPath": str(L / "q-claim.json"),
++            "policyPath": str(Path(self.args.mini_a_policy or self.args.policy).resolve()),
++            "controlPath": ready["a_control"]}
++        service_config = L / "mini-a-service-config.json"
++        service_config.write_text(json.dumps(config, sort_keys=True, indent=2) + "\n")
++        socket_dir = L / "mini-a-service"
++        socket_dir.mkdir(mode=0o700)
++        socket = socket_dir / "host.sock"
++        with (L / "mini-a-service.log").open("wb") as log:
++            self.a_service = subprocess.Popen(
++                [self.mini_client, "serve", "--host", self.mini_bin,
++                 "--config", service_config, "--socket", socket],
++                stdout=log, stderr=subprocess.STDOUT, cwd=L, env=self.benv)
++        for _ in range(600):
++            if socket.exists():
++                break
++            if self.a_service.poll() is not None:
++                raise Stop("Mini A session exited before socket readiness")
++            time.sleep(0.1)
++        else:
++            raise Stop("Mini A session socket did not become ready")
++        self.mini("mini-a-service-ready", ["/bin/test", "-S", socket])
+         return service_config, socket
+ 
+     def bridge_verify(self, label, carrier, ml_public):
+@@ -1235,35 +1271,71 @@
+             d = self.json("a-decision.json")
+             return (d.get("decision") == "proposed-fresh"
+                     and (L / "a-live.fncu").read_bytes() == (L / "a-preview.fncu").read_bytes())
+-        self.mini("mini-a-reply-decide", [self.mini_bin, mini_a, "reply-consumer-poll-decide",
+-                  a.origin_pin, L / "r-fn-pin.json", a.r_claim, L / "r-at-a.eml",
+-                  L / "q-fn-pin.json", L / "a-scope-pin.json", L / "q-claim.json", a.mini_a_policy or a.policy,
+-                  ready["a_control"], L / "a-live.fncu", L / "a-live.fn-e", L / "a-live.eml",
+-                  L / "a-intent.bin", L / "a-decision.json"], check=a_fresh)
++        if a.public_a_session:
++            a_config, a_socket = self.start_a_service(mini_a, ready)
++            def a_session_decision():
++                d = self.json("a-poll-session/decision.json")
++                inner = d.get("decision", {})
++                return (d.get("type") == "fn-a-reply-poll-session-v1"
++                        and d.get("status") == "accepted-decision"
++                        and inner.get("decision") == "proposed-fresh"
++                        and (L / "a-poll-session/intent.bin").is_file())
++            self.mini("mini-a-reply-poll-session", [self.mini_client,
++                      "reply-consumer-poll", "--host", self.mini_bin,
++                      "--config", a_config, "--socket", a_socket,
++                      "--dir", L / "a-poll-session"], check=a_session_decision)
++        else:
++            self.mini("mini-a-reply-decide", [self.mini_bin, mini_a, "reply-consumer-poll-decide",
++                      a.origin_pin, L / "r-fn-pin.json", a.r_claim, L / "r-at-a.eml",
++                      L / "q-fn-pin.json", L / "a-scope-pin.json", L / "q-claim.json",
++                      a.mini_a_policy or a.policy, ready["a_control"], L / "a-live.fncu",
++                      L / "a-live.fn-e", L / "a-live.eml", L / "a-intent.bin",
++                      L / "a-decision.json"], check=a_fresh)
+ 
+         def a_installed():
+             o = self.json("mini-a-attempt/outcome.json")
+             return o.get("type") == "confirmed"
+-        self.mini("mini-a-submit", [self.mini_client, "submit", "--host", self.mini_bin,
+-                  "--config", mini_a, "--intent", L / "a-intent.bin", "--intent-kind", "binary",
+-                  "--key", a.mini_a_custody_key or a.mini_custody_key, "--dir", L / "mini-a-attempt"], check=a_installed)
++        a_submit = [self.mini_client, "submit", "--host", self.mini_bin,
++                    "--config", a_config if a.public_a_session else mini_a,
++                    "--intent", L / "a-poll-session/intent.bin" if a.public_a_session else L / "a-intent.bin",
++                    "--intent-kind", "binary", "--key", a.mini_a_custody_key or a.mini_custody_key,
++                    "--dir", L / "mini-a-attempt"]
++        if a.public_a_session:
++            a_submit += ["--socket", a_socket]
++        self.mini("mini-a-submit", a_submit, check=a_installed)
+         a_tx = self.json("mini-a-attempt/outcome.json")["transactionId"]
+         self.mini("mini-a-export-result", [self.mini_bin, mini_a, "reply-consumer-export-result",
+                   a_tx, L / "a-result.bin", L / "a-inbox.bin", L / "a-export.fncu",
+                   L / "a-export.fn-e"],
+-                  check=lambda: (L / "a-export.fncu").read_bytes() == (L / "a-live.fncu").read_bytes())
+-        self.ack("mini-a-ack", [self.mini_bin, mini_a, "reply-consumer-ack-poll",
+-                 L / "q-fn-pin.json", L / "a-scope-pin.json", ready["a_control"], a_tx,
+-                 L / "a-live.fncu", L / "a-live.fn-e"], "a-ack.json")
++                  check=lambda: (L / "a-export.fncu").read_bytes() ==
++                    (L / ("a-preview.fncu" if a.public_a_session else "a-live.fncu")).read_bytes())
++        if a.public_a_session:
++            self.mini("mini-a-ack-session", [self.mini_client,
++                      "reply-consumer-ack", "--host", self.mini_bin,
++                      "--config", a_config, "--socket", a_socket,
++                      "--mini-transaction", a_tx, "--dir", L / "a-ack-session"],
++                      check=lambda: self.json("a-ack-session/ack.json").get("fnAck") == "durable-accepted")
++        else:
++            self.ack("mini-a-ack", [self.mini_bin, mini_a, "reply-consumer-ack-poll",
++                     L / "q-fn-pin.json", L / "a-scope-pin.json", ready["a_control"], a_tx,
++                     L / "a-live.fncu", L / "a-live.fn-e"], "a-ack.json")
+         self.mini("a-position-after-ack", [self.bridge, "--fn", "consumer", "position",
+                   ready["a_control"], CONSUMER, L / "a-position.fncu"],
+-                  check=lambda: (L / "a-position.fncu").read_bytes() == (L / "a-live.fncu").read_bytes())
++                  check=lambda: (L / "a-position.fncu").read_bytes() ==
++                    (L / ("a-export.fncu" if a.public_a_session else "a-live.fncu")).read_bytes())
+         # No loss, no duplicate: each Store holds exactly R and Q.
+         self.fn("final-stop-a", "stop", "a")
+         self.fn("final-stop-b", "stop", "b")
+         self.fn("final-article-counts", "status", "--expect", "2")
+ 
+     def finish(self, reason):
++        if self.a_service is not None and self.a_service.poll() is None:
++            self.a_service.terminate()
++            try:
++                self.a_service.wait(timeout=10)
++            except subprocess.TimeoutExpired:
++                self.a_service.kill()
++                self.a_service.wait()
+         if self.b_service is not None and self.b_service.poll() is None:
+             self.b_service.terminate()
+             try:
+@@ -1314,6 +1386,7 @@
+     parser.add_argument("--origin-pin", default=e2 + "/fn/origin-pin.json")
+     parser.add_argument("--policy", default=e2 + "/policy.json")
+     parser.add_argument("--public-b-session", action="store_true")
++    parser.add_argument("--public-a-session", action="store_true")
+     for side in ("a", "b"):
+         for field in ("pinned-config", "genesis", "birth-intent", "custody-key", "policy"):
+             parser.add_argument("--mini-{}-{}".format(side, field))
+@@ -1323,6 +1396,8 @@
+     args = parser.parse_args(argv)
+     if args.public_b_session and args.cut != "none":
+         parser.error("public B session currently supports --cut none only")
++    if args.public_a_session and not args.public_b_session:
++        parser.error("public A session requires the separate B session")
+     run = Run(args)
+     try:
+         run.preflight()

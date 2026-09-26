@@ -1,0 +1,50 @@
+--- two_store_join.py
++++ two_store_join.py
+@@ -1069,6 +1069,39 @@
+                   check=lambda: (L / "export.fncu").read_bytes() == (L / "b-live.fncu").read_bytes())
+         self.mini("mini-b-export-reply", [self.mini_bin, mini_b, "consumer-export-reply", tx,
+                   L / "reply.bin"])
++        if a.revoke_gateway_before_b_ack:
++            # Historical export and ACK must remain available after the
++            # gateway's fresh mutation grant is revoked. This is opt-in test
++            # harness behavior, never part of the baseline exchange.
++            b_subject = json.loads(Path(a.mini_b_policy or a.policy).read_text())["subject"]
++            query = {"subject": str(b_subject), "nonce": "830101",
++                     "purpose": {"type": "query", "kind": "object", "target": "600",
++                                 "view": "resource"},
++                     "grants": [{"kind": "object", "target": "600", "capability": "61"}]}
++            (L / "b-before-revoke-query.json").write_text(json.dumps(query) + "\n")
++            self.mini("b-before-revoke-query", [self.mini_client, "query", "--host", self.mini_bin,
++                      "--config", mini_b, "--intent", L / "b-before-revoke-query.json",
++                      "--key", a.mini_b_custody_key or a.mini_custody_key,
++                      "--view", "resource", "--dir", L / "b-before-revoke"])
++            target_root = self.json("b-before-revoke/view.json")["page"]["root"]
++            authority_root = self.json("b-before-revoke/challenge.json")["signing"][0]["authorityRoot"]
++            revoke = {"subject": str(b_subject), "nonce": "830102", "purpose": {
++                "type": "prepare", "draft": {"type": "revoke-source", "command": {
++                    "kind": "object", "subject": str(b_subject), "nonce": "830103",
++                    "target": "600", "victimKind": "object", "capability": "61",
++                    "controlCapability": "62", "expectedTargetRoot": target_root,
++                    "expectedAuthorityRoot": authority_root}}},
++                "grants": [{"kind": "object", "target": "600", "capability": "61"}]}
++            (L / "b-revoke-intent.json").write_text(json.dumps(revoke) + "\n")
++            self.mini("b-revoke-gateway", [self.mini_client, "submit", "--host", self.mini_bin,
++                      "--config", mini_b, "--intent", L / "b-revoke-intent.json",
++                      "--key", a.mini_b_custody_key or a.mini_custody_key,
++                      "--dir", L / "b-revoke-attempt"],
++                      check=lambda: self.json("b-revoke-attempt/outcome.json").get("acceptedCount") == "3")
++            self.mini("b-export-after-revoke", [self.mini_bin, mini_b, "consumer-export-poll", tx,
++                      L / "post-revoke.fncu", L / "post-revoke.fn-e", L / "post-revoke.json"],
++                      check=lambda: (L / "post-revoke.fncu").read_bytes() == (L / "b-live.fncu").read_bytes()
++                      and (L / "post-revoke.fn-e").read_bytes() == (L / "b-live.fn-e").read_bytes())
+         # Cut b-verdict: B dies after its verdict is durable and Mini has
+         # committed the poll in its own transaction, before Mini's ACK.  The
+         # restarted Store must re-deliver the same event at the same cursor
+@@ -1244,6 +1277,7 @@
+     parser.add_argument("--mini-custody-key", default="/tmp/mini-fn-portable-inbox-native-20260923/consumer.key")
+     parser.add_argument("--origin-pin", default=e2 + "/fn/origin-pin.json")
+     parser.add_argument("--policy", default=e2 + "/policy.json")
++    parser.add_argument("--revoke-gateway-before-b-ack", action="store_true")
+     for side in ("a", "b"):
+         for field in ("pinned-config", "genesis", "birth-intent", "custody-key", "policy"):
+             parser.add_argument("--mini-{}-{}".format(side, field))

@@ -289,3 +289,55 @@ reported `EXCHANGE COMPLETE`. An edit to the shell wrapper during the
 long-running child caused a later outer-shell EOF error; the current wrapper
 passes `sh -n`, and the retained harness summary and 77 step logs provide the
 exchange verdict.
+
+Set `FN_REVOKE_GATEWAY_BEFORE_B_ACK=1` for an opt-in historical recovery
+check. The wrapper applies the separate `two_store_join_revoke_hook.patch` to
+its private harness copy. After B's accepted consumer event and exact export,
+the hook queries current roots, submits a native `revoke-source` for B gateway
+mutation cap 61, requires a third accepted Mini event, then re-exports the
+original B transaction's exact cursor/event before the normal fn B ACK. The
+2026-09-26 native hook run completed all 80 harness steps on the old pinned
+Mini image: B consumer accepted count 2, gateway cap-61 revocation confirmed
+at accepted count 3, historical re-export returned the exact pre-revocation
+cursor and event, and B's fn ACK was durable-accepted. A's result/ACK and
+final article counts also passed. Its private summary is
+`/tmp/mini-fn-setup-probe-parent/revoke-run-1/summary.json`, SHA-256
+`278a6ae4dc40df4c3f86fcbc66c800e60863ca02768839ada25b727c9dc6cf2d`.
+The hook leaves the baseline per-side patch and fn's shared harness intact.
+
+All new harness modes also apply `two_store_join_creation_context.patch`.
+Current Mini reply-plan authoring requires the operator's explicit Q creation
+fields. This test profile fixes From `mini-e2@example.invalid`, newsgroup
+`fn.test`, Message-ID domain `example.invalid`, and Date
+`Wed, 23 Sep 2026 12:00:00 +0000` in the signer JSON before source planning.
+That matches the historical synthetic Q profile while making the selection
+explicit and source-bound for the current host. This adapter has passed patch
+application and Python syntax checks; native validation awaits the new host.
+
+Set `FN_PUBLIC_B_SESSION=1` for the separate public B transport trial. The
+wrapper applies `two_store_join_socket_b.patch` to its private harness copy.
+After the B fn pin and scope exist, it starts one `mini serve` process on a
+private Unix socket with operator-fixed `fnPoll` origin, fn pin, scope, policy
+and control paths. B then calls typed `mini consumer-poll` (op 12), signs and
+submits the returned binary intent through that same socket, and calls typed
+`mini consumer-ack` (op 13) with only the accepted Mini transaction ID. The
+accepted export must match B's preview cursor, and fn position must match the
+export after ACK. In B-only socket mode, A's Q reply decision and ACK still
+use the existing native CLI; the full A socket mode is described below. The
+public B overlay supports `--cut none` only and cannot be combined with the revoke
+overlay. It is staged for the source-matched final host/client build; patch
+application, Python syntax and CLI flag parsing passed, but no native public
+B run is claimed yet.
+
+Set `FN_PUBLIC_B_SESSION=1 FN_PUBLIC_A_SESSION=1` for the full public socket
+trial. A second, separate `mini serve` process is started after A's R carrier,
+R/Q pins, Q claim and scope are fixed in the operator `fnReplyPoll` manifest.
+The A overlay calls typed `mini reply-consumer-poll` (op 14), signs and submits
+its proposed intent on the A socket, and calls typed
+`mini reply-consumer-ack` (op 15) with only the accepted A Mini transaction
+ID. Both sockets are terminated by harness cleanup. The A overlay requires
+the B overlay and `--cut none`. Its patch chain applies to the pinned fn
+harness and Python compilation passes; it awaits a source-matched linked Mini
+host for a native exchange. The frozen combined client is
+`/tmp/minidregg-overnight-20260926/mini-client-ba-311ab01`, SHA-256
+`0523c8d2a340da315c926b1c73d25f0bb6d5be647d3492841bfc2c589fff6014`.

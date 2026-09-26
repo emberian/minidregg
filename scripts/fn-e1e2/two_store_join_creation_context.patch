@@ -1,0 +1,19 @@
+--- two_store_join.py
++++ two_store_join.py
+@@ -1101,8 +1101,14 @@
+         q_keys = self.fetch_keys(ready["q"], "q")
+         q_pin = self.pin(self.bridge, q_keys)
+         (L / "q-fn-pin.json").write_text(json.dumps(q_pin, sort_keys=True) + "\n")
+-        (L / "q-signer.json").write_text(json.dumps({k: q_pin[k] for k in (
+-            "principal", "edPublicKey", "mlPublicKeyHex")}, sort_keys=True) + "\n")
++        q_signer = {k: q_pin[k] for k in (
++            "principal", "edPublicKey", "mlPublicKeyHex")}
++        q_signer["creation"] = {
++            "fromMailbox": "mini-e2@example.invalid",
++            "newsgroup": GROUP,
++            "messageIdDomain": "example.invalid",
++            "date": "Wed, 23 Sep 2026 12:00:00 +0000"}
++        (L / "q-signer.json").write_text(json.dumps(q_signer, sort_keys=True) + "\n")
+         self.mini("mini-q-prepare", [self.mini_bin, mini_b, "consumer-stage-reply-plan",
+                   L / "q-signer.json", tx, L / "q-prepared-store", L / "q-prepared-candidate.bin",
+                   L / "q-prepared-readback.bin", L / "q-prepared.source", L / "q-prepared.json"],

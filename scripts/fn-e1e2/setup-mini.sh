@@ -156,10 +156,15 @@ POLICY_ADDRESS=$(jq -er '.address | select(type == "string" and test("^(0|[1-9][
 # The gateway pin is an operator observation of the just-installed policy
 # head. It is outside the genesis runtime-parameter commitment; keep the
 # original bootstrap output intact and hand this copy to fn consumer routes.
-jq --argjson subject "$GATEWAY_SUBJECT" --argjson address "$POLICY_ADDRESS" \
+jq --argjson subject "$GATEWAY_SUBJECT" --arg address "$POLICY_ADDRESS" \
   '.fnGateway = {application:"mini-e1",subject:$subject,target:600,
                  capability:61,policyAddress:$address}' \
   "$ROOT/deployment/pinned-config.json" >"$ROOT/gateway-config.json"
+if [ "$(jq -er '.fnGateway.policyAddress | select(type == "string")' "$ROOT/gateway-config.json")" != \
+     "$POLICY_ADDRESS" ]; then
+  echo "fnGateway policy address differs from current source" >&2
+  exit 1
+fi
 jq '.storageBinary = "" | .storageRoot = ""' \
   "$ROOT/gateway-config.json" >"$ROOT/independent-verifier-pin.json"
 

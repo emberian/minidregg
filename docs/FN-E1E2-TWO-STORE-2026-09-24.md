@@ -283,3 +283,17 @@ The outer shell wrapper process then reported an EOF syntax error because that
 wrapper file was edited during the long-running child process. The present
 wrapper passes `sh -n`; the documented result rests on the retained harness
 summary and per-step logs, not the outer shell exit status.
+
+An opt-in private harness overlay then exercised historical recovery after a
+new B Mini grant revocation on a fresh Store clone. B's fn consumer event was
+accepted at Mini count 2. The gateway subject signed a native `revoke-source`
+of its content mutation cap 61 through control cap 62; Mini confirmed count
+3. Re-exporting the *original* B consumer transaction returned cursor and
+event bytes identical to those retained before revocation, and its exact fn
+ACK was `durable-accepted`. The run continued through Q→A peering, A Mini
+result/ACK, and final article counts: all 80 steps accepted, `EXCHANGE
+COMPLETE`, outer shell exit 0. The private summary at
+`/tmp/mini-fn-setup-probe-parent/revoke-run-1/summary.json` has SHA-256
+`278a6ae4dc40df4c3f86fcbc66c800e60863ca02768839ada25b727c9dc6cf2d`.
+This uses the pinned old Mini image and direct native B ACK; the typed
+persistent socket ACK is a separate upcoming integration test.

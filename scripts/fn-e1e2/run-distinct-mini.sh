@@ -43,6 +43,10 @@ if [ "$A_SUBJECT" = "$B_SUBJECT" ]; then
 fi
 jq -e --argjson subject "$B_SUBJECT" '.subject == $subject' "$MINI_B/policy.json" >/dev/null
 jq -e --argjson subject "$A_SUBJECT" '.subject == $subject' "$MINI_A/policy.json" >/dev/null
+case "${FN_REVOKE_GATEWAY_BEFORE_B_ACK:-0}:${FN_PUBLIC_B_SESSION:-0}:${FN_PUBLIC_A_SESSION:-0}" in
+  0:0:0|1:0:0|0:1:0|0:1:1) ;;
+  *) echo "select baseline, revoke, B socket, or B+A socket mode with 0/1 variables" >&2; exit 2 ;;
+esac
 if [ -e "$COPY_DIR" ] || [ -e "$LOCAL_OUT" ]; then
   echo "refusing to replace private run directory" >&2
   exit 2
@@ -63,6 +67,26 @@ mkdir -m 700 "$COPY_DIR"
 cp "$FN_HARNESS" "$COPY_DIR/two_store_join.py"
 patch -s -d "$COPY_DIR" -p0 <"$HERE/two_store_join_per_side.patch"
 cp "$HERE/two_store_join_per_side.patch" "$COPY_DIR/"
+patch -s -d "$COPY_DIR" -p0 <"$HERE/two_store_join_creation_context.patch"
+cp "$HERE/two_store_join_creation_context.patch" "$COPY_DIR/"
+case "${FN_REVOKE_GATEWAY_BEFORE_B_ACK:-0}:${FN_PUBLIC_B_SESSION:-0}:${FN_PUBLIC_A_SESSION:-0}" in
+  0:0:0) set -- ;;
+  1:0:0)
+    patch -s -d "$COPY_DIR" -p0 <"$HERE/two_store_join_revoke_hook.patch"
+    cp "$HERE/two_store_join_revoke_hook.patch" "$COPY_DIR/"
+    set -- --revoke-gateway-before-b-ack
+    ;;
+  0:1:0|0:1:1)
+    patch -s -d "$COPY_DIR" -p0 <"$HERE/two_store_join_socket_b.patch"
+    cp "$HERE/two_store_join_socket_b.patch" "$COPY_DIR/"
+    set -- --public-b-session
+    if [ "${FN_PUBLIC_A_SESSION:-0}" = 1 ]; then
+      patch -s -d "$COPY_DIR" -p0 <"$HERE/two_store_join_socket_a.patch"
+      cp "$HERE/two_store_join_socket_a.patch" "$COPY_DIR/"
+      set -- --public-b-session --public-a-session
+    fi
+    ;;
+esac
 printf '%s  %s\n' "$actual_harness_sha" "$FN_HARNESS" >"$COPY_DIR/source.sha256"
 shasum -a 256 "$COPY_DIR/two_store_join.py" >"$COPY_DIR/adapted.sha256"
 
@@ -81,4 +105,5 @@ python3 "$COPY_DIR/two_store_join.py" run \
   --mini-a-pinned-config "$MINI_A/gateway-config.json" \
   --mini-a-genesis "$MINI_A/deployment/genesis.bin" \
   --mini-a-birth-intent "$MINI_A/birth-intent.json" \
-  --mini-a-custody-key "$MINI_A/custody.key" --mini-a-policy "$MINI_A/policy.json"
+  --mini-a-custody-key "$MINI_A/custody.key" --mini-a-policy "$MINI_A/policy.json" \
+  "$@"
