@@ -1,0 +1,98 @@
+[
+  {
+    "n": 37,
+    "step": "mini-b-service-ready",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "8c28b0c41082d9df23628f8342c2b22fe6fa785fcadfcdb17da8a3f3e762322b"
+  },
+  {
+    "n": 38,
+    "step": "mini-b-poll-session",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "0042ca0664389d621f0e294073cd06a3582baa0613437a519c0a273573c21497"
+  },
+  {
+    "n": 39,
+    "step": "mini-b-submit",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "f542199bd914ec22d606a2dff581e4a231923eb0415d5ce598b09d2e3027ebe0"
+  },
+  {
+    "n": 40,
+    "step": "mini-b-export-poll",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "b5bb62f314e984b568227467df09f446566804592b7bb3438bfffbe93133ef17"
+  },
+  {
+    "n": 41,
+    "step": "mini-b-export-reply",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "f7a5af04c300952f1af65f6e9a896a3f6288a6de312dd91a08f1bd33361a89bb"
+  },
+  {
+    "n": 42,
+    "step": "mini-b-ack-session",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "6f99b027b90befd70f4c5cdedb1f800b0767e69fda78bb953e3fd95d7b2d21fd"
+  },
+  {
+    "n": 43,
+    "step": "b-position-after-ack",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "6ef7a05e84d4f2d54e48e1fef35cbc70c3416cc0604164b4ab6006f65fc770f1"
+  },
+  {
+    "n": 70,
+    "step": "mini-a-reply-decide",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "ab081ad1efee73247b88dfb7a8b246dc0fc586f2bc32cced3b58edc225d164f5"
+  },
+  {
+    "n": 71,
+    "step": "mini-a-submit",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "1e3b6f33f67eaf7b5b8316cc3c62a0b4a5002d9cc36723c108fe25edb6dc9cbc"
+  },
+  {
+    "n": 72,
+    "step": "mini-a-export-result",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "67774ea6e8f2837583baefa06161f9fbf0d956532776d1d205d06b04c61deb85"
+  },
+  {
+    "n": 73,
+    "step": "mini-a-ack",
+    "outcome": "REFUSED",
+    "detail": "exit 1 fnAck None",
+    "exit": 1,
+    "log_sha256": "29b76a049b7258fd5f6c1d48b4aa713390919751314351c1c4a4b0466d688ba7"
+  },
+  {
+    "n": 74,
+    "step": "cleanup-owners",
+    "outcome": "ACCEPTED",
+    "detail": "exit 0",
+    "exit": 0,
+    "log_sha256": "5161992115c3e588409c83f72fafcb2fc1c1a3a63b780436284c9e4daa4b4668"
+  }
+]

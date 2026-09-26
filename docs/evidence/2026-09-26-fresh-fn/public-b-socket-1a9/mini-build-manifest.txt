@@ -1,0 +1,10 @@
+source_basis=2aeaf6437365187e7d28a32eadcfce40b4654f70
+source_semantics=591a5a91252846d1ffca51e8bf87524d7027a20d (all build-relevant Lean files byte-identical after ten explicit overlays)
+source_repair=Kernel/AgentGrainAudit.lean from committed 3744eb2, sha256 8459613dabe6d395fc1de4bab1cbd3f3fea344ddf62576ec462948b21fac01cc
+source_tree_macos=/tmp/minidregg-overnight-20260926-final
+source_tree_linux=/home/ember/build/minidregg-overnight-20260926/source-b
+source_overlay_sha256_file=/tmp/minidregg-overnight-20260926/final-b-overlays-sha256.txt
+excluded_foreign_wip=Compiler.lean and A op14/15 Host.Main; full B source as frozen
+scope=B op12/13, variable-length Message-ID parser, FnEvidence V2, selected caps, AgentGrain/Host.Json, persistent receiver
+probe_extra=scripts/probe-fn-consumer-max-envelope.lean (test-only, not imported)
+gates=Host.Main leanArts plus native C/link; separate incremental lake build Minidregg on identical frozen source
