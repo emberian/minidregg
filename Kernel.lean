@@ -68,6 +68,7 @@ import Kernel.FnConsumerOperationProofs
 import Kernel.FnConsumerProgress
 import Kernel.FnPortableSource
 import Kernel.FnReplyConsumption
+import Kernel.FnOriginOutbox
 import Kernel.FnReplyPublication
 import Kernel.FnReplySource
 import Kernel.ContentResource

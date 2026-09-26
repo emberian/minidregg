@@ -17,6 +17,7 @@ import Kernel.FnConsumerOperation
 import Kernel.FnConsumerProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
+import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
 import Host.Json
 import Host.FnInboxView
@@ -109,6 +110,26 @@ structure FnReplyPollService where
   policyPath : String
   controlPath : String
 
+/-- The long-lived A service selects each prepared R from admitted Mini
+history. The operator pins only the origin verifier and Q consumer context;
+no individual R pathname is part of this service or a client frame. -/
+structure FnReplyCatalogServiceSettings where
+  originConfigPath : String
+  rPinPath : String
+  qPinPath : String
+  scopePath : String
+  policyPath : String
+  controlPath : String
+  deriving FromJson, ToJson
+
+structure FnReplyCatalogService where
+  originConfig : NativeHost.Config
+  rPinPath : String
+  qPinPath : String
+  scopePath : String
+  policyPath : String
+  controlPath : String
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -132,6 +153,7 @@ structure Settings where
   fnGateway : Option GatewayPinSettings := none
   fnPoll : Option FnPollServiceSettings := none
   fnReplyPoll : Option FnReplyPollServiceSettings := none
+  fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -431,7 +453,7 @@ def withFnPollService {α : Type} (settings : Settings)
         throw (IO.userError s!"fn poll service manifest {name} exceeds bound")
       let destination := directory / name
       IO.FS.writeBinFile destination bytes
-      pure destination.toString
+      pure (destination.toString : String)
     let originConfigPath ← copyManifest "origin-config.json" source.originConfigPath 65536
     let fnPinPath ← copyManifest "fn-pin.json" source.fnPinPath 8192
     let scopePath ← copyManifest "scope.json" source.scopePath 8192
@@ -480,6 +502,39 @@ def withFnReplyPollService {α : Type} (settings : Settings)
     let policyPath ← copyInput "policy.json" source.policyPath 8192
     body (some ⟨originConfigPath, rPinPath, rClaimPath, rCarrierPath,
       qPinPath, scopePath, policyPath, source.controlPath⟩)
+
+def withFnReplyCatalogService {α : Type} (settings : Settings)
+    (body : Option FnReplyCatalogService → IO α) : IO α := do
+  let some source := settings.fnReplyCatalog | return ← body none
+  unless settings.fnReplyPoll.isNone do
+    throw (IO.userError "static and catalog A reply services are mutually exclusive")
+  unless [source.originConfigPath, source.rPinPath, source.qPinPath,
+      source.scopePath, source.policyPath, source.controlPath].all
+      (·.startsWith "/") do
+    throw (IO.userError "A reply catalog paths must be operator-selected absolute paths")
+  IO.FS.withTempDir fun directory => do
+    let copyInput := fun (name sourcePath : String) (bound : Nat) => do
+      let bytes ← readBoundedBytes sourcePath bound
+      unless !bytes.isEmpty do
+        throw (IO.userError s!"A reply catalog input {name} is empty")
+      let destination := directory / name
+      IO.FS.writeBinFile destination bytes.toByteArray
+      pure (destination.toString : String)
+    let originConfigPath ← copyInput "origin-config.json" source.originConfigPath 65536
+    let rPinPath ← copyInput "r-pin.json" source.rPinPath 8192
+    let qPinPath ← copyInput "q-pin.json" source.qPinPath 8192
+    let scopePath ← copyInput "scope.json" source.scopePath 8192
+    let policyPath ← copyInput "policy.json" source.policyPath 8192
+    let origin := (← loadSettings (System.FilePath.mk originConfigPath)).config
+    unless origin.expectedSeed != settings.config.expectedSeed &&
+        origin.storage.root.toString.startsWith "/" &&
+        origin.storage.binary.toString.startsWith "/" &&
+        origin.storage.root.toString != settings.storageRoot do
+      throw (IO.userError
+        "A prepared outbox needs a distinct live Mini origin deployment")
+    withPinnedSignature origin fun pinnedOrigin =>
+      body (some ⟨pinnedOrigin, rPinPath, qPinPath, scopePath,
+        policyPath, source.controlPath⟩)
 
 /-- Large source and carrier comparisons use the array primitive after the
 bounded read; recursive list equality is unsuitable for the full V2 profile. -/
@@ -939,17 +994,16 @@ def invokeFnConsumerPoll (fnBinary : String) (scope : FnPollScopePin)
   IO.FS.writeBinFile carrierPath projected.received.toByteArray
   pure (cursor, event, projected.received)
 
-def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
+def verifyFnCarrierUnclaimed (pin : FnPortablePin)
     (carrierPath : String) : IO (List UInt8 × FnPortableVerified) := do
   let carrier ← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes
   unless !carrier.isEmpty do throw (IO.userError "empty fn carrier")
   let expectedPrincipal ← IO.ofExcept (decodeCanonicalHex "pinned principal" pin.principal)
   let expectedEd ← IO.ofExcept (decodeCanonicalHex "pinned Ed25519 key" pin.edPublicKey)
   let expectedMl ← IO.ofExcept (decodeCanonicalHex "pinned ML-DSA-65 key" pin.mlPublicKeyHex)
-  let expectedId ← IO.ofExcept (decodeCanonicalHex "claimed source identity" claim.sourceIdentity)
   unless expectedPrincipal.length == 32 && expectedEd.length == 32 &&
-      expectedMl.length == 1952 && expectedId.length == 48 do
-    throw (IO.userError "fn pin or claim has invalid field width")
+      expectedMl.length == 1952 do
+    throw (IO.userError "fn pin has invalid field width")
   let child ← IO.Process.spawn
     { cmd := pin.fnBinary, args := #["--fn", "hybrid-verify-source", carrierPath,
       pin.mlPublicKey], stdin := .null, stdout := .piped, stderr := .null }
@@ -970,8 +1024,18 @@ def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
   unless verified.principal == expectedPrincipal &&
       verified.edPublicKey == expectedEd &&
       verified.mlPublicKey == expectedMl &&
-      verified.sourceIdentity == expectedId do
-    throw (IO.userError "fn portable identity differs from independent pin or claim")
+      verified.sourceIdentity.length == 48 do
+    throw (IO.userError "fn portable identity differs from independent pin")
+  pure (carrier, verified)
+
+def verifyFnCarrier (pin : FnPortablePin) (claim : FnPortableClaim)
+    (carrierPath : String) : IO (List UInt8 × FnPortableVerified) := do
+  let expectedId ← IO.ofExcept (decodeCanonicalHex "claimed source identity" claim.sourceIdentity)
+  unless expectedId.length == 48 do
+    throw (IO.userError "claimed source identity has invalid width")
+  let (carrier, verified) ← verifyFnCarrierUnclaimed pin carrierPath
+  unless verified.sourceIdentity == expectedId do
+    throw (IO.userError "fn portable identity differs from independent claim")
   pure (carrier, verified)
 
 def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
@@ -981,6 +1045,26 @@ def verifyFnPortable (pin : FnPortablePin) (claim : FnPortableClaim)
   unless extracted.messageId == claim.messageId && extracted.groups == claim.groups do
     throw (IO.userError "fn source metadata differs from claimed exact report")
   pure (carrier, verified, extracted)
+
+/-- A prepared R must carry the exact package that this independently pinned
+origin Mini currently exports for the same locally accepted signed call. The
+carrier is native-verified first, and neither its receipt nor a client claim is
+allowed to select a different local transaction. This establishes preparation
+under local custody; fn posting remains a separate external event. -/
+def verifyRLocalOrigin (origin : NativeHost.Config) (pin : FnPortablePin)
+    (carrierPath : String) : IO
+    (List UInt8 × FnPortableVerified × FnPortableSource.Extracted ×
+      FnEvidenceCodec.Package × NativeHostCodec.Receipt) := do
+  let (carrier, verified) ← verifyFnCarrierUnclaimed pin carrierPath
+  let extracted ← IO.ofExcept (FnPortableSource.extract verified.source)
+  let package ← IO.ofExcept (FnEvidenceCodec.decodeChecked extracted.package)
+  let receipt ← IO.ofExcept (← FnEvidence.verify origin extracted.package)
+  unless package.originalReceipt == receipt do
+    throw (IO.userError "R carried receipt differs from re-admitted local origin")
+  let exported ← IO.ofExcept (← FnEvidence.exportPackage origin package.signedCall)
+  unless sameBytes exported extracted.package do
+    throw (IO.userError "R carried package differs from exact local accepted origin")
+  pure (carrier, verified, extracted, package, receipt)
 
 /-- An acknowledgement is for the exact carrier and signed source retained
 inside the accepted Mini operation, even after its mutation grant is revoked.
@@ -1128,6 +1212,20 @@ def requireGateway (config : NativeHost.Config) : IO NativeHost.FnGatewayPin := 
   let some pin := config.fnGateway
     | throw (IO.userError "fn gateway is not pinned in operator config")
   return pin
+
+def gatewayContentTargetRoot (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (policy : FnConsumerOperation.Policy) :
+    IO Minidregg.Theory.TypedAuthorization.Digest :=
+  IO.ofExcept <| (do
+    let probe : DeclaredResourceController.Target :=
+      ⟨.object, policy.target, policy.capability, 1, ⟨0⟩,
+        .content ⟨[]⟩, none⟩
+    let .present cell := opened.directory.directory.slots policy.target
+      | throw "fn gateway content target is absent"
+    let some pre := DeclaredResourceController.selectTarget
+      config.deployment probe cell
+      | throw "fn gateway target is not a valid content resource"
+    pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
 
 /-- Export only from a source-owned, re-admitted accepted event. The typed
 inbox keeps exact carrier octets; this asserts Mini retention, not an fn Store
@@ -1405,6 +1503,113 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
     rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath cursorPath
     reportPath carrierPath intentPath resultPath
 
+/-- Q selects its R parent only after a real authenticated fn poll and native
+hybrid verification of Q. The selected R comes from A's accepted Mini outbox;
+its retained carrier and exact locally accepted origin package are verified
+again before admitting the A reply result. -/
+def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (service : FnReplyCatalogService)
+    (qClaimPath cursorPath reportPath carrierPath intentPath resultPath : String)
+    (observed : List UInt8 × List UInt8) : IO UInt32 := do
+  let gateway ← requireGateway config
+  let rPinJson ← readJson service.rPinPath
+  let qPinJson ← readJson service.qPinPath
+  let scopeJson ← readJson service.scopePath
+  let qClaimJson ← readJson qClaimPath
+  let policyJson ← readJson service.policyPath
+  for (label, value) in [("R fn pin", rPinJson), ("Q fn pin", qPinJson)] do
+    IO.ofExcept (requireExactFields label
+      ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] value)
+  IO.ofExcept (requireExactFields "Q fn claim"
+    ["sourceIdentity", "messageId", "groups"] qClaimJson)
+  IO.ofExcept (requireExactFields "A fn scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+  IO.ofExcept (requireExactFields "A reply policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let rPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
+  let qPin : FnPortablePin ← IO.ofExcept (fromJson? qPinJson)
+  let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+  let qClaim : FnPortableClaim ← IO.ofExcept (fromJson? qClaimJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let policy := policySource.policy
+  let (cursor, event) := observed
+  let (projectedCursor, projectedEvent, projection) ←
+    projectFnPoll qPin.fnBinary scope cursorPath reportPath
+  unless cursor == projectedCursor && sameBytes event projectedEvent do
+    throw (IO.userError "A fn poll changed before outbox parent selection")
+  let (qCarrier, qVerified) ← verifyFnCarrier qPin qClaim carrierPath
+  let qExtracted ← IO.ofExcept (FnReplySource.extract qVerified.source)
+  unless sameBytes projection.received qCarrier &&
+      sameBytes projection.source qVerified.source &&
+      projection.sourceIdentity == qVerified.sourceIdentity &&
+      projection.verdictPrincipal == qVerified.principal &&
+      projection.messageId == qExtracted.messageId.toUTF8.toList &&
+      qClaim.messageId == qExtracted.messageId &&
+      qClaim.groups == qExtracted.creation.newsgroup do
+    throw (IO.userError "A Q projection differs from exact native-verified reply")
+  let (prepared, _) ← IO.ofExcept (FnOriginOutbox.selectUniqueParent gateway
+    config.deployment.domain config.profile.semantics
+    qExtracted.parentMessageId.toUTF8.toList opened.durable.image.accepted)
+  let (rCarrier, rVerified, rExtracted, originPackage, originReceipt) ←
+    IO.FS.withTempDir fun directory => do
+      let path := (directory / "retained-r-carrier.eml").toString
+      writeBytes path prepared.carrier
+      verifyRLocalOrigin service.originConfig rPin path
+  unless sameBytes rCarrier prepared.carrier &&
+      rVerified.sourceIdentity == prepared.sourceIdentity &&
+      rVerified.principal == prepared.principal &&
+      rVerified.edPublicKey == prepared.edPublicKey &&
+      rVerified.mlPublicKey == prepared.mlPublicKey &&
+      rExtracted.messageId.toUTF8.toList == prepared.messageId &&
+      qExtracted.parentMessageId == rExtracted.messageId &&
+      FnConsumerOperation.originOperation originPackage == prepared.operation &&
+      originReceipt == prepared.originReceipt &&
+      FnOriginOutbox.packageIdentity rExtracted.package == prepared.packageIdentity &&
+      FnOriginOutbox.callIdentity originPackage.signedCall == prepared.originCallIdentity do
+    throw (IO.userError "selected R outbox differs from exact retained native/local origin")
+  let targetRoot ← gatewayContentTargetRoot config opened policy
+  let storePoll : FnConsumerOperation.StorePollInbox :=
+    ⟨cursor, event, true, projection.sourceIdentity, projection.sequence,
+      projection.transactionId, projection.messageId,
+      projection.verdictPrincipal, projection.verdictEvent,
+      FnConsumerOperation.pollControlBinding qPin.fnBinary service.controlPath⟩
+  let report : FnReplyConsumption.Report :=
+    ⟨policy.application, FnConsumerOperation.originOperation originPackage,
+      rVerified.sourceIdentity, rExtracted.messageId.toUTF8.toList,
+      originReceipt, qVerified.source, qVerified.sourceIdentity,
+      qExtracted.messageId.toUTF8.toList,
+      ⟨qCarrier, qVerified.sourceIdentity, qVerified.principal,
+        qVerified.edPublicKey, qVerified.mlPublicKey⟩, storePoll,
+      policy.subject, policy.target, policy.capability,
+      opened.authority.snapshot.cell.root, targetRoot⟩
+  let decision ← IO.ofExcept (FnReplyConsumption.evaluateVerified config opened
+    gateway ⟨policy.application, policy.subject,
+      policy.target, policy.capability⟩ report)
+  let verdict := match decision with
+    | .fresh _ _ => "proposed-fresh"
+    | .repeated _ => "repeated"
+    | .conflict _ => "proposed-conflict"
+    | .conflictRecorded => "conflict-recorded"
+    | .refused _ => "refused"
+  writeJson resultPath <| Lean.Json.mkObj
+    [("type", toJson "fn-a-reply-consumer-decision-v1"),
+     ("decision", toJson verdict),
+     ("operation", toJson (String.fromUTF8! report.operation.toByteArray)),
+     ("qSourceIdentity", toJson
+       (Minidregg.Host.Json.encodeHex qVerified.sourceIdentity)),
+     ("fnStoreSequence", toJson (toString projection.sequence)),
+     ("fnStoreTransactionId", toJson (toString projection.transactionId)),
+     ("miniOrigin", evidenceReceiptJson originReceipt)]
+  match decision.intent report with
+  | some intent =>
+      writeBytes intentPath (NativeObservationCodec.intentCodec.encode intent)
+      pure 0
+  | none =>
+      match decision with
+      | .refused _ => pure 1
+      | _ => pure 0
+
 def runFnEmptyPageDecisionLoaded (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (policyPath controlPath : String)
     (scope : FnPollScopePin) (fnBinary : String)
@@ -1654,6 +1859,65 @@ def runFnAckSession (config : NativeHost.Config)
        ("fnStoreTransactionId", toJson (toString stored.transactionId)),
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
+/-- Record one locally prepared R in A's accepted Mini outbox. The request is
+only the bounded carrier bytes; the fn verifier key, origin Mini, gateway and
+target policy all come from the operator's pinned lifetime service. The
+returned intent still needs the gateway signature and normal Mini admission. -/
+def runFnOriginOutboxSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnReplyCatalogService) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  unless !payload.isEmpty && payload.length ≤ FnEvidenceCodec.maxCarrierBytes do
+    throw (IO.userError "prepared R carrier exceeds bounded outbox input")
+  let pinJson ← readJson service.rPinPath
+  let policyJson ← readJson service.policyPath
+  IO.ofExcept (requireExactFields "R fn catalog pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  IO.ofExcept (requireExactFields "A outbox policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let policy := policySource.policy
+  let gateway ← requireGateway config
+  IO.FS.withTempDir fun directory => do
+    let carrierPath := (directory / "prepared-r-carrier.eml").toString
+    writeBytes carrierPath payload
+    let (carrier, verified, extracted, package, receipt) ←
+      verifyRLocalOrigin service.originConfig pin carrierPath
+    unless sameBytes carrier payload do
+      throw (IO.userError "prepared R carrier changed during local verification")
+    let opened ← sessionOpened config state
+    let targetRoot ← gatewayContentTargetRoot config opened policy
+    let prepared : FnOriginOutbox.Prepared :=
+      ⟨policy.application, FnConsumerOperation.originOperation package,
+        extracted.messageId.toUTF8.toList, verified.sourceIdentity, carrier,
+        FnOriginOutbox.packageIdentity extracted.package,
+        FnOriginOutbox.callIdentity package.signedCall, receipt,
+        verified.principal, verified.edPublicKey, verified.mlPublicKey⟩
+    let report : FnOriginOutbox.Report :=
+      ⟨prepared, extracted.package, policy.subject, policy.target,
+        policy.capability, opened.authority.snapshot.cell.root, targetRoot,
+        true, true⟩
+    let decision ← IO.ofExcept (FnOriginOutbox.evaluateVerified config opened
+      gateway policy report)
+    let (verdict, intent) := match decision with
+      | .fresh _ => ("proposed-fresh", decision.intent report)
+      | .repeated => ("repeated", none)
+      | .refused _ => ("refused", none)
+    let intentHex := match intent with
+      | some authored => Minidregg.Host.Json.encodeHex
+          (NativeObservationCodec.intentCodec.encode authored)
+      | none => ""
+    return (16, (Lean.Json.mkObj
+      [("type", toJson "fn-a-origin-outbox-session-v1"),
+       ("status", toJson (if verdict == "refused" then "refused" else "prepared-decision")),
+       ("decision", toJson verdict),
+       ("messageId", toJson extracted.messageId),
+       ("sourceIdentity", toJson
+         (Minidregg.Host.Json.encodeHex verified.sourceIdentity)),
+       ("miniOrigin", evidenceReceiptJson receipt),
+       ("intentHex", toJson intentHex)]).compress.toUTF8.toList)
+
 /-- The A reply poll uses one operator-pinned R carrier and a live Q control
 endpoint. The request carries no paths, claims, or verifier selection. -/
 def runFnReplyPollSession (config : NativeHost.Config)
@@ -1725,6 +1989,80 @@ def runFnReplyPollSession (config : NativeHost.Config)
       [("type", toJson "fn-a-reply-poll-session-v1"),
        ("status", toJson (if exitCode == 0 then "accepted-decision" else "refused")),
        ("decision", decision), ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
+/-- Long-lived A poll: derive the Q claim from the one live fn projection,
+then resolve its parent from the refreshed admitted Mini outbox. -/
+def runFnReplyCatalogPollSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnReplyCatalogService) (payload : List UInt8) :
+    IO (UInt8 × List UInt8) := do
+  unless payload.isEmpty do
+    throw (IO.userError "A reply catalog poll does not accept a payload")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "cursor.fncu").toString
+    let reportPath := (directory / "report.fn-e").toString
+    let carrierPath := (directory / "q-carrier.eml").toString
+    let claimPath := (directory / "q-claim.json").toString
+    let intentPath := (directory / "intent.bin").toString
+    let resultPath := (directory / "decision.json").toString
+    let pinJson ← readJson service.qPinPath
+    let scopeJson ← readJson service.scopePath
+    IO.ofExcept (requireExactFields "Q fn catalog pin"
+      ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+    IO.ofExcept (requireExactFields "A fn catalog scope"
+      ["history", "incarnation", "consumer", "principal", "query",
+       "queryVersion", "viewVersion", "registrationEpoch"] scopeJson)
+    let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+    let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
+    let before ← queryFnConsumerStatus pin.fnBinary scope service.controlPath
+    let (polledCursor, polledEvent) ← invokeFnConsumerPollRaw pin.fnBinary scope
+      service.controlPath cursorPath reportPath
+    if polledEvent.isEmpty then
+      let empty ← classifyFnEmptyPoll pin.fnBinary scope service.controlPath
+        cursorPath reportPath polledCursor before
+      match empty with
+      | none =>
+          return idleFnPollResponse 14 "fn-a-reply-poll-session-v1"
+            before.committedAck
+      | some (fromPosition, toPosition) =>
+          let opened ← sessionOpened config state
+          return ← runFnEmptyPageDecisionLoaded config opened
+            service.policyPath service.controlPath scope pin.fnBinary
+            polledCursor fromPosition toPosition 14 "fn-a-reply-poll-session-v1"
+    let (_, projectedEvent, projection) ←
+      projectFnPoll pin.fnBinary scope cursorPath reportPath
+    unless sameBytes projectedEvent polledEvent do
+      throw (IO.userError "A fn poll event changed before outbox projection")
+    IO.FS.writeBinFile carrierPath projection.received.toByteArray
+    let extracted ← IO.ofExcept (FnReplySource.extract projection.source)
+    writeJson claimPath (Lean.Json.mkObj
+      [("sourceIdentity", toJson
+        (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
+       ("messageId", toJson extracted.messageId),
+       ("groups", toJson extracted.creation.newsgroup)])
+    let opened ← sessionOpened config state
+    let exitCode ← runReplyConsumerCatalogDecisionLoaded config opened service
+      claimPath cursorPath reportPath carrierPath intentPath resultPath
+      (polledCursor, polledEvent)
+    unless polledCursor == (← readBoundedBytes cursorPath 346) &&
+        sameBytes polledEvent
+          (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
+        sameBytes projection.received
+          (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
+      throw (IO.userError "A fn poll output changed before catalog decision")
+    let decision ← readJson resultPath
+    let intent ← if ← (System.FilePath.mk intentPath).pathExists then do
+        pure (Minidregg.Host.Json.encodeHex (← readBoundedBytes intentPath maxFrame))
+      else pure ""
+    return (14, (Lean.Json.mkObj
+      [("type", toJson "fn-a-reply-poll-session-v1"),
+       ("status", toJson (if exitCode == 0 then "accepted-decision" else "refused")),
+       ("decision", decision), ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
+def FnReplyCatalogService.ackService (service : FnReplyCatalogService) :
+    FnReplyPollService :=
+  ⟨"", "", "", "", service.qPinPath, service.scopePath,
+    service.policyPath, service.controlPath⟩
 
 /-- A reply ACK is selected by the accepted A Mini transaction alone. The
 retained inbox supplies the exact cursor, event, carrier, and signed source. -/
@@ -1857,31 +2195,44 @@ def run (arguments : List String) : IO UInt32 := do
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
               withFnReplyPollService settings fun replyService => do
-                let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
-                let state ← IO.mkRef (some session)
-                let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) :=
-                  fun operation payload => do
-                    try
-                      match operation with
-                      | 12 | 13 =>
-                          let some selected := service
-                            | return ((255 : UInt8), failure "fn-poll"
-                                "fn consumer poll service is not configured")
-                          if operation == 12 then
-                            runFnPollSession pinnedConfig state selected payload
-                          else
-                            runFnAckSession pinnedConfig state selected payload
-                      | 14 | 15 =>
-                          let some selected := replyService
-                            | return ((255 : UInt8), failure "fn-reply-poll"
-                                "A reply poll service is not configured")
-                          if operation == 14 then
-                            runFnReplyPollSession pinnedConfig state selected payload
-                          else
-                            runFnReplyAckSession pinnedConfig state selected payload
-                      | _ => throw (IO.userError "unsupported native host operation")
-                    catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
-                serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
+                withFnReplyCatalogService settings fun catalogService => do
+                  let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+                  let state ← IO.mkRef (some session)
+                  let fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8) :=
+                    fun operation payload => do
+                      try
+                        match operation with
+                        | 12 | 13 =>
+                            let some selected := service
+                              | return ((255 : UInt8), failure "fn-poll"
+                                  "fn consumer poll service is not configured")
+                            if operation == 12 then
+                              runFnPollSession pinnedConfig state selected payload
+                            else
+                              runFnAckSession pinnedConfig state selected payload
+                        | 14 | 15 =>
+                            match catalogService, replyService with
+                            | some selected, none =>
+                                if operation == 14 then
+                                  runFnReplyCatalogPollSession pinnedConfig state selected payload
+                                else
+                                  runFnReplyAckSession pinnedConfig state
+                                    selected.ackService payload
+                            | none, some selected =>
+                                if operation == 14 then
+                                  runFnReplyPollSession pinnedConfig state selected payload
+                                else
+                                  runFnReplyAckSession pinnedConfig state selected payload
+                            | _, _ => return ((255 : UInt8), failure "fn-reply-poll"
+                                "exactly one A reply poll service must be configured")
+                        | 16 =>
+                            let some selected := catalogService
+                              | return ((255 : UInt8), failure "fn-origin-outbox"
+                                  "A origin outbox service is not configured")
+                            runFnOriginOutboxSession pinnedConfig state selected payload
+                        | _ => throw (IO.userError "unsupported native host operation")
+                      catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
+                  serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
