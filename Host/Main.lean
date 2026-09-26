@@ -19,6 +19,7 @@ import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnPortableSource
 import Host.Json
+import Host.FnInboxView
 import Lean.Data.Json
 
 open Lean
@@ -150,6 +151,12 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
   pure settings
+
+/-- Human-readable fn inbox projection is a pure presentation of the exact
+native view bytes. Query authority remains with the signed native read. -/
+def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :=
+  if kind == "fn-inbox-resource" then FnInboxView.render bytes
+  else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
 this reads neither storage nor protected resource values. Full-width integers
@@ -317,7 +324,7 @@ def dispatchSession (config : NativeHost.Config)
       return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value))
   | 8 =>
       let (kind, source) ← splitKind payload
-      let value ← IO.ofExcept (Minidregg.Host.Json.inspect kind source)
+      let value ← IO.ofExcept (inspectHost kind source)
       return (8, value.compress.toUTF8.toList)
   | 9 =>
       let some text := String.fromUTF8? payload.toByteArray
@@ -1818,7 +1825,9 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
-          let value ← IO.ofExcept (Minidregg.Host.Json.inspect kind (← readBytes input))
+          let bytes ← if kind == "fn-inbox-resource" then
+              readBoundedBytes input maxFrame else readBytes input
+          let value ← IO.ofExcept (inspectHost kind bytes)
           writeJson output value
           pure 0
       | "derive", [kind, input, output] =>
