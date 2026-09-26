@@ -444,20 +444,41 @@ comm -23 "$package_required" "$output_dir/package-object-modules.txt" \
   > "$output_dir/missing-package-objects.txt"
 missing_package_c="$output_dir/missing-package-c-paths.nul"
 : > "$missing_package_c"
-while IFS= read -r module; do
-  [[ -n "$module" ]] || continue
-  relative=${module//./\/}
-  c_matches="$output_dir/candidates-${module//./_}.txt"
-  find .lake/packages -type f -path "*/.lake/build/ir/$relative.c" -print > "$c_matches"
-  count=$(wc -l < "$c_matches" | tr -d ' ')
-  if [[ "$count" != 1 ]]; then
-    printf 'build-native-host: %s generated-C candidates for missing object %s; see %s\n' \
-      "$count" "$module" "$c_matches" >&2
+if [[ -s "$output_dir/missing-package-objects.txt" ]]; then
+  # Index the package tree once. A per-module find walks the same large tree
+  # thousands of times on a cold native build.
+  package_c_index="$output_dir/package-c-index.tsv"
+  find .lake/packages -type f -path '*/.lake/build/ir/*.c' -print | awk '
+    {
+      path=$0
+      marker="/.lake/build/ir/"
+      pos=index(path, marker)
+      if (!pos) next
+      rel=substr(path, pos + length(marker))
+      sub(/\.c$/, "", rel)
+      module=rel
+      gsub(/\//, ".", module)
+      print module "\t" path
+    }
+  ' | sort > "$package_c_index"
+  cut -f1 "$package_c_index" | sort -u > "$output_dir/package-c-modules.txt"
+  comm -23 "$output_dir/missing-package-objects.txt" "$output_dir/package-c-modules.txt" \
+    > "$output_dir/unresolved-package-c-modules.txt"
+  comm -12 "$output_dir/missing-package-objects.txt" \
+    <(cut -f1 "$package_c_index" | uniq -d) \
+    > "$output_dir/ambiguous-package-c-modules.txt"
+  if [[ -s "$output_dir/unresolved-package-c-modules.txt" ||
+        -s "$output_dir/ambiguous-package-c-modules.txt" ]]; then
+    printf 'build-native-host: missing or ambiguous package generated C; see %s and %s\n' \
+      "$output_dir/unresolved-package-c-modules.txt" \
+      "$output_dir/ambiguous-package-c-modules.txt" >&2
     exit 66
   fi
-  c_path=$(sed -n '1p' "$c_matches")
-  printf '%s\0' "$c_path" >> "$missing_package_c"
-done < "$output_dir/missing-package-objects.txt"
+  join -t $'\t' -1 1 -2 1 "$output_dir/missing-package-objects.txt" \
+    "$package_c_index" | cut -f2 | while IFS= read -r c_path; do
+      printf '%s\0' "$c_path"
+    done > "$missing_package_c"
+fi
 if [[ -s "$missing_package_c" ]]; then
   # The single-quoted child body expands task-specific variables in bash.
   # shellcheck disable=SC2016
