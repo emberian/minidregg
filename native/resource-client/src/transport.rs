@@ -28,6 +28,10 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && (digits.len() == 1 || digits[0] != b'0')
         }
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
+        [17, pair @ ..] if pair.len() >= 6 => {
+            let call_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            call_length > 0 && call_length < pair.len() - 4 && pair.len() - 4 - call_length <= 1024
+        }
         [18, digits @ ..] => {
             ORIGIN_EXPORT_READY
                 && catalog_enabled
@@ -626,6 +630,9 @@ mod tests {
         assert!(allowed_operation(&[16, b'R'], true));
         assert!(!allowed_operation(&[18, b'1'], true));
         assert!(!allowed_operation(&[18, b'/'], true));
+        assert!(allowed_operation(&[17, 1, 0, 0, 0, b'C', b'O'], false));
+        assert!(!allowed_operation(&[17, 0, 0, 0, 0, b'O'], false));
+        assert!(!allowed_operation(&[17, 1, 0, 0, 0, b'C'], false));
         let mut oversized = vec![b'R'; 1_516_386];
         oversized[0] = 16;
         assert!(!allowed_operation(&oversized, true));

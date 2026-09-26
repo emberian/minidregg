@@ -166,6 +166,26 @@ source-green but has not yet been linked and probed in a source-matched native
 image. The Rust broker also refuses public op18 until that gate is lifted.
 No end-to-end native `origin-publish` run is claimed yet.
 
+For a provider reserve already confirmed by Mini, the read-only continuity
+route keeps the original call and canonical confirmed outcome as its inputs:
+
+```sh
+mini continuity --host HOST --config PROVIDER-CONFIG.json \
+  --socket /private/path/provider-session/host.sock \
+  --call RESERVE/call.bin --outcome RESERVE/outcome.bin \
+  --dir /private/path/continuity-check-1
+```
+
+The attempt retains exact `call.bin`, `outcome.bin`, and `reply.frame` before
+decoding `continuity.json`. Host op17 uses the operator-pinned provider
+resource, refreshes the verifier-minted session, and returns a typed current
+confirmation or refusal. A refusal is retained and exits nonzero. The client
+does not renew a reserve, change the accepted journal, or create a new call.
+This observation is not an atomic lease across a later external send; the
+runtime must compare its anchor and provider identity with the retained
+reserve and check fresh parent/provider state. This v1 route requires the
+persistent `--socket`; no direct one-shot Host fallback is inferred.
+
 `consumer-drain-once` runs one bounded B consumer wake through that same
 socket. It holds a single private, owner-locked durable state directory:
 

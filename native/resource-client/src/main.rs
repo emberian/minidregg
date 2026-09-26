@@ -44,6 +44,7 @@ usage:
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
+  mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
@@ -1226,6 +1227,112 @@ fn origin_outbox_prepare(
     }
 }
 
+#[cfg(unix)]
+fn continuity_reply(value: &Value) -> Result<bool> {
+    if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-continuity-v1") {
+        return Err("unexpected provider continuity reply type; complete frame retained".into());
+    }
+    let canonical = |text: &str| -> bool {
+        !text.is_empty()
+            && text.len() <= 80
+            && text.bytes().all(|byte| byte.is_ascii_digit())
+            && (text.len() == 1 || !text.starts_with('0'))
+    };
+    let decimal = |object: &Value, name: &str| -> Result<()> {
+        if object
+            .get(name)
+            .and_then(Value::as_str)
+            .is_some_and(canonical)
+        {
+            Ok(())
+        } else {
+            Err(format!("provider continuity reply lacks canonical {name}"))
+        }
+    };
+    decimal(value, "providerResourceId")?;
+    if value.get("providerResourceId").and_then(Value::as_str) == Some("0") {
+        return Err("provider continuity reply names no provider resource".into());
+    }
+    decimal(value, "checkedImageBoundary")?;
+    decimal(value, "checkedAcceptedCount")?;
+    let anchor = value
+        .get("anchor")
+        .ok_or("provider continuity reply lacks anchor")?;
+    if anchor.get("type").and_then(Value::as_str) != Some("verified-mini-native-prefix-v1") {
+        return Err("provider continuity anchor has unexpected type".into());
+    }
+    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+        decimal(anchor, name)?;
+    }
+    let reason = value
+        .get("reason")
+        .and_then(Value::as_str)
+        .ok_or("provider continuity reply lacks reason")?;
+    match (
+        value.get("status").and_then(Value::as_str),
+        value.get("continuous").and_then(Value::as_bool),
+    ) {
+        (Some("confirmed"), Some(true)) if reason.is_empty() => Ok(true),
+        (Some("refused"), Some(false)) if !reason.is_empty() => Ok(false),
+        _ => Err("inconsistent provider continuity status and verdict".into()),
+    }
+}
+
+#[cfg(unix)]
+fn continuity(
+    host: &Path,
+    config: &Path,
+    call: &Path,
+    outcome: &Path,
+    directory: &Path,
+) -> Result<()> {
+    let socket = SOCKET.get().ok_or("continuity requires --socket")?;
+    let mut call_bytes = Vec::new();
+    File::open(call)
+        .map_err(|e| format!("cannot open original reserve call: {e}"))?
+        .take((transport::HOST_MAX_FRAME + 1) as u64)
+        .read_to_end(&mut call_bytes)
+        .map_err(|e| format!("cannot read original reserve call: {e}"))?;
+    let mut outcome_bytes = Vec::new();
+    File::open(outcome)
+        .map_err(|e| format!("cannot open original reserve outcome: {e}"))?
+        .take(1025)
+        .read_to_end(&mut outcome_bytes)
+        .map_err(|e| format!("cannot read original reserve outcome: {e}"))?;
+    if call_bytes.is_empty()
+        || outcome_bytes.is_empty()
+        || outcome_bytes.len() > 1024
+        || call_bytes.len() + outcome_bytes.len() + 5 > transport::HOST_MAX_FRAME
+    {
+        return Err(
+            "original reserve call/outcome exceeds provider continuity frame bounds".into(),
+        );
+    }
+    let retained_config = private_consumer_attempt(host, config, directory, "continuity")?;
+    create_private(&directory.join("call.bin"), &call_bytes)?;
+    create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
+    sync_directory_ancestors(directory)?;
+    let mut payload = Vec::with_capacity(4 + call_bytes.len() + outcome_bytes.len());
+    payload.extend_from_slice(&(call_bytes.len() as u32).to_le_bytes());
+    payload.extend_from_slice(&call_bytes);
+    payload.extend_from_slice(&outcome_bytes);
+    let frame = transport::invoke(socket, &retained_config, 17, &payload)?;
+    write_new(&directory.join("reply.frame"), &frame)?;
+    if frame[0] == 255 {
+        return Err("Host refused provider continuity; complete frame retained".into());
+    }
+    let value: Value = serde_json::from_slice(&frame[1..])
+        .map_err(|e| format!("invalid provider continuity JSON; complete frame retained: {e}"))?;
+    write_new(&directory.join("continuity.json"), &frame[1..])?;
+    let continuous = continuity_reply(&value)?;
+    print_json(&value)?;
+    if continuous {
+        Ok(())
+    } else {
+        Err("provider continuity refused; typed reply and exact inputs retained".into())
+    }
+}
+
 fn run(mut args: Args) -> Result<()> {
     if let Some(socket) = args.optional("socket") {
         let _ = SOCKET.set(path(socket));
@@ -1340,6 +1447,22 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("origin-publish requires Unix sockets".to_owned())
+            }
+        }
+        "continuity" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let call = path(args.required("call")?);
+            let outcome = path(args.required("outcome")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                continuity(&host, &config, &call, &outcome, &directory)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("provider continuity requires Unix sockets".to_owned())
             }
         }
         "consumer-drain-once" => {
@@ -1634,6 +1757,23 @@ mod tests {
             &json!({"decision": {"decision": "proposed-fresh"}}),
             A_REPLY_CONSUMER,
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn continuity_reply_needs_typed_matching_verdict_and_anchor_shape() {
+        let mut value = json!({"type":"minidregg-provider-continuity-v1",
+            "status":"confirmed", "continuous":true, "providerResourceId":"7",
+            "checkedImageBoundary":"12", "checkedAcceptedCount":"3", "reason":"",
+            "anchor":{"type":"verified-mini-native-prefix-v1", "transactionId":"1",
+                "eventId":"2", "acceptedCount":"3", "imageBoundary":"4"}});
+        assert!(continuity_reply(&value).unwrap());
+        value["status"] = json!("refused");
+        value["continuous"] = json!(false);
+        value["reason"] = json!("provider history changed");
+        assert!(!continuity_reply(&value).unwrap());
+        value["anchor"]["transactionId"] = json!("01");
+        assert!(continuity_reply(&value).is_err());
     }
 
     #[cfg(unix)]
