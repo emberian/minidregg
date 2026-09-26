@@ -16,6 +16,7 @@ refinement in addition to the one-native-cell/one-physical-cell lift here.
 import Compiler.ResourceBirthCodec
 import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialAuthorityDomainReceiver
+import Compiler.GrainResourceBirthAuthority
 import Theory.ResourceBirthAuthority
 import Kernel.CanonicalResourceEffect
 import Kernel.MultiCellHyperedge
@@ -620,12 +621,28 @@ private def fromOption {α : Type} (value : Option α) (reason : PreparationReje
   | none => .error reason
   | some result => .ok result
 
-/-- The actual fail-closed receiving preparation. Even the auxiliary create
-list and every final payload are checked before policy evaluation. No step
-mutates the source image or installs a prefix of the birth. -/
-def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (descriptor : Descriptor Registry) :
-    Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
+/-- Common old-image preparation for bare and grain-backed births. This ends
+before authority edits, so neither route may use newly created grants to
+authorize its own source. The existing bare receiver retains its exact check
+order and rejection meanings. -/
+structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
+    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (descriptor : Descriptor Registry) where
+  private mk ::
+  deploymentValid : deployment.Valid
+  pinsBound : PinsBound deployment pins
+  profileBound : ProfileBound profile pins
+  identityBound : IdentityBound profile deployment descriptor
+  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
+  policiesBound : descriptor.InitialPoliciesBound
+  factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
+  book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
+
+def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) :
+    Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
@@ -639,30 +656,141 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     (observeCell deployment directory.directory deployment.resourceBookId .resourceBook) .resourceBook
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
-  let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment directory authority descriptor)
-    .authorityBatch
-  let aux ← requirePreparation
-    (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
-    .auxiliaryCreates
-  let allocated ← match allocate? Registry directory.directory descriptor with
+  .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
+    initials.down, policiesBound.down, factory, book, authority⟩
+
+/-- Common post-authority physical checks. The authority route supplies only
+its already checked physical writes; allocation, conserved Book application,
+old-root equality and final cell law stay identical for both birth modes. -/
+structure PreparedPostAuthority {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry}
+    (pre : PreparedPreAuthority profile deployment pins durable descriptor)
+    (authorityWrites : List DataWrite) where
+  private mk ::
+  allocated : Allocated Registry pre.directory.directory descriptor
+  resources : CanonicalResourceKernel.AcceptedBatch pre.book.payload descriptor.resourceBatch
+  writesUnique : ((planWrites deployment descriptor pre.factory.payload pre.book.payload
+    resources.post authorityWrites).map DataWrite.cellId).Nodup
+  writePreExact : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+      resources.post authorityWrites,
+    write.expectedPre = durable.snapshot.model.roots write.cellId
+  finalCells : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+      resources.post authorityWrites, PhysicalPostLaw deployment write
+
+def preparePostAuthority {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry}
+    (pre : PreparedPreAuthority profile deployment pins durable descriptor)
+    (authorityWrites : List DataWrite) :
+    Except PreparationReject (PreparedPostAuthority pre authorityWrites) := do
+  let allocated ← match allocate? Registry pre.directory.directory descriptor with
     | .error _ => .error PreparationReject.allocation
     | .ok allocated => .ok allocated
   let admission ← requirePreparation
-    (descriptor.resourceBatch.Admission (CanonicalResourceKernel.logicalBook book.payload.logical))
+    (descriptor.resourceBatch.Admission (CanonicalResourceKernel.logicalBook pre.book.payload.logical))
     .resourceBatch
   let resources := CanonicalResourceKernel.AcceptedBatch.ofAdmission admission.down
-  let writes := planWrites deployment descriptor factory.payload book.payload
-    resources.post grants.physical.writes
+  let writes := planWrites deployment descriptor pre.factory.payload pre.book.payload
+    resources.post authorityWrites
   let shape ← requirePreparation
     ((writes.map DataWrite.cellId).Nodup ∧
       ∀ write ∈ writes, write.expectedPre = durable.snapshot.model.roots write.cellId)
     .physicalShape
   let finalCells ← requirePreparation (∀ write ∈ writes, PhysicalPostLaw deployment write) .finalCellLaw
-  .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory, initials.down,
-    policiesBound.down, factory, book, authority,
-    grants, (sameCreates_iff _ _).mp aux.down, allocated, resources,
-    shape.down.1, shape.down.2, finalCells.down⟩
+  .ok ⟨allocated, resources, shape.down.1, shape.down.2, finalCells.down⟩
+
+/-- The actual fail-closed receiving preparation. Even the auxiliary create
+list and every final payload are checked before policy evaluation. No step
+mutates the source image or installs a prefix of the birth. -/
+def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
+    (durable : Durable) (descriptor : Descriptor Registry) :
+    Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
+  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let grants ← fromOption
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment pre.directory
+      pre.authority descriptor)
+    .authorityBatch
+  let aux ← requirePreparation
+    (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
+    .auxiliaryCreates
+  let post ← preparePostAuthority pre grants.physical.writes
+  .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
+    pre.directory, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
+    grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
+    post.writesUnique, post.writePreExact, post.finalCells⟩
+
+/-- Preparation for the composite route retains a single old-image authority
+post covering initial grants and both replay markers. `operationMarker` here is
+only a preparation coordinate; the receiving source must prove it equals the
+canonical signed grain command's marker before any admission or commit. -/
+structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
+    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (descriptor : Descriptor Registry) (operationMarker : Nat) where
+  private mk ::
+  pre : PreparedPreAuthority profile deployment pins durable descriptor
+  authorityCombined : GrainResourceBirthAuthority.Prepared profile deployment pre.directory
+    pre.authority descriptor operationMarker
+  auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
+  post : PreparedPostAuthority pre authorityCombined.physical.writes
+
+def prepareGrainBirth (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
+    (operationMarker : Nat) :
+    Except PreparationReject
+      (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
+  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let combined ← fromOption
+    (GrainResourceBirthAuthority.prepare profile deployment pre.directory pre.authority
+      descriptor operationMarker) .authorityBatch
+  let aux ← requirePreparation
+    (sameCreates descriptor.auxiliaryCreates combined.auxiliaryCreates = true)
+    .auxiliaryCreates
+  let post ← preparePostAuthority pre combined.physical.writes
+  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post⟩
+
+def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
+    List DataWrite :=
+  planWrites deployment descriptor prepared.pre.factory.payload prepared.pre.book.payload
+    prepared.post.resources.post prepared.authorityCombined.physical.writes
+
+def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
+    List ReadGuard :=
+  CredentialAuthorityDomainReceiver.readonlyGuards
+    prepared.authorityCombined.physical.readGuards prepared.writes
+
+/-- The user draft has no authority-allocated shard creates. The complete
+descriptor returned here is the one that must be signed. -/
+structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
+    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (draft : Descriptor Registry) (operationMarker : Nat) where
+  private mk ::
+  noAuxiliaryInput : draft.auxiliaryCreates = []
+  descriptor : Descriptor Registry
+  sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
+  prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker
+
+def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployment)
+    (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
+    (operationMarker : Nat) :
+    Except PreparationReject
+      (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
+  let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
+  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let authority ← fromOption
+    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  let combined ← fromOption
+    (GrainResourceBirthAuthority.prepare profile deployment directory authority
+      draft operationMarker) .authorityBatch
+  let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
+  let prepared ← prepareGrainBirth profile deployment pins durable descriptor operationMarker
+  .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}

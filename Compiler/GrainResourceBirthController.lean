@@ -10,6 +10,7 @@ the tool's permission-unit charge.
 -/
 import Kernel.AgentGrain
 import Kernel.ResourceBirthReceiver
+import Compiler.GrainResourceBirthAuthority
 import Compiler.Tower256ConcreteBackend
 
 namespace Minidregg.Compiler.GrainResourceBirthController
@@ -136,6 +137,13 @@ def Source.authorityEdits (snapshot : CredentialAuthorityDomain.Snapshot)
   CredentialAuthorityDomainReceiver.grantEdits snapshot source.birth ++
     DeclaredResourceController.markerEdits snapshot semantics (source.grainCommand tariff)
 
+theorem Source.authorityEdits_eq_combined (snapshot : CredentialAuthorityDomain.Snapshot)
+    (semantics : Digest) (tariff : Tariff) (source : Source) :
+    source.authorityEdits snapshot semantics tariff =
+      GrainResourceBirthAuthority.edits snapshot source.birth
+        (DeclaredResourceController.operationMarker snapshot.domain semantics
+          (source.grainCommand tariff)) := rfl
+
 theorem Source.authorityEdits_auxiliary_independent
     (snapshot : CredentialAuthorityDomain.Snapshot) (semantics : Digest)
     (tariff : Tariff) (source : Source)
@@ -222,7 +230,7 @@ operation marker. This also lowers physical authority writes and derives any
 source-owned shard creates before the complete descriptor is signed. It is
 preparation only: current policy, capability, signature, factory and grain
 incidences still need admission over the same durable image. -/
-structure PreparedAuthority {F : Type} [Field F]
+structure PreparedSourceAuthority {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
@@ -231,51 +239,64 @@ structure PreparedAuthority {F : Type} [Field F]
     (semantics : Digest) (tariff : Tariff) (source : Source) where
   private mk ::
   shape : SourceShape loaded.snapshot.domain semantics tariff source
-  initialSources : PolicySourceCell.CheckedInitials deployment.domain profile
-    source.birth.initialPolicies
-  birthReady : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot source.birth
-  operationMarkerFresh : CredentialAuthorityState.isNullified loaded.snapshot.cell
-    (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
-      (source.grainCommand tariff)) = false
-  checked : CredentialAuthorityDomain.Prepared loaded.snapshot
-    (source.authorityEdits loaded.snapshot semantics tariff)
-  physical : CredentialAuthorityDomainReceiver.Lowered directory loaded
-    (source.authorityEdits loaded.snapshot semantics tariff) checked
-    (CredentialAuthorityDomainReceiver.allocationReservedIds deployment source.birth)
+  combined : GrainResourceBirthAuthority.Prepared profile deployment directory loaded
+    source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+      (source.grainCommand tariff))
 
-def prepareAuthorityPhysical {F : Type} [Field F]
+def prepareSourceAuthority {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
     (loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
-    Option (PreparedAuthority profile deployment directory loaded semantics tariff source) := do
+    Option (PreparedSourceAuthority profile deployment directory loaded semantics tariff source) := do
   if shape : SourceShape loaded.snapshot.domain semantics tariff source then
-    let initialSources ← PolicySourceCell.checkInitials deployment.domain profile
-      source.birth.initialPolicies
-    if ready : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot source.birth then
-      if fresh : CredentialAuthorityState.isNullified loaded.snapshot.cell
-          (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
-            (source.grainCommand tariff)) = false then
-        let checked ← source.prepareAuthority loaded.snapshot semantics tariff
-        let physical ← CredentialAuthorityDomainReceiver.lower directory loaded checked
-          (CredentialAuthorityDomainReceiver.allocationReservedIds deployment source.birth)
-        some ⟨shape, initialSources, ready, fresh, checked, physical⟩
-      else none
-    else none
+    let combined ← GrainResourceBirthAuthority.prepare profile deployment directory loaded
+      source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+        (source.grainCommand tariff))
+    some ⟨shape, combined⟩
   else none
 
-def PreparedAuthority.auxiliaryCreates {F : Type} [Field F]
+def PreparedSourceAuthority.auxiliaryCreates {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment}
     {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
     {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedAuthority profile deployment directory loaded semantics tariff source) :
+    (prepared : PreparedSourceAuthority profile deployment directory loaded semantics tariff source) :
     List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry) :=
-  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records ++
-    prepared.physical.placement.auxiliaryCreates
+  prepared.combined.auxiliaryCreates
+
+/-- The only high-level preparation entry fixes the operation marker from the
+source-derived grain command. The lower controller's Nat parameter is never
+an independent ingress field here. This is still preparation, not signature
+or current-law admission. -/
+structure PreparedSourceBirth {F : Type} [Field F]
+    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
+    (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
+    (durable : ResourceBirthController.Concrete.Durable)
+    (semantics : Digest) (tariff : Tariff) (source : Source) where
+  private mk ::
+  shape : SourceShape deployment.domain semantics tariff source
+  prepared : ResourceBirthController.Concrete.PreparedGrainBirth profile deployment pins
+    durable source.birth (DeclaredResourceController.operationMarker deployment.domain semantics
+      (source.grainCommand tariff))
+
+def prepareSourceBirth {F : Type} [Field F]
+    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
+    (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
+    (durable : ResourceBirthController.Concrete.Durable)
+    (semantics : Digest) (tariff : Tariff) (source : Source) :
+    Except ResourceBirthController.Concrete.PreparationReject
+      (PreparedSourceBirth profile deployment pins durable semantics tariff source) := do
+  if shape : SourceShape deployment.domain semantics tariff source then
+    let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile deployment
+      pins durable source.birth
+      (DeclaredResourceController.operationMarker deployment.domain semantics
+        (source.grainCommand tariff))
+    .ok ⟨shape, prepared⟩
+  else .error .authorityBatch
 
 end Minidregg.Compiler.GrainResourceBirthController
