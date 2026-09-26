@@ -23,6 +23,7 @@ are far inside the standard bound.
 -/
 
 import Init.Data.BitVec
+import Init.Data.UInt.Bitwise
 import Mathlib.Data.Nat.Digits.Defs
 
 namespace Minidregg.Compiler.Sp800185Cshake256
@@ -171,6 +172,178 @@ def round (state : State) (constant : Lane) : State :=
 /-- The exact twenty-four-round Keccak-f[1600] permutation. -/
 def keccakF1600 (state : State) : State :=
   roundConstants.foldl round state
+
+private abbrev UState := Array UInt64
+
+private def toU (state : State) : UState := state.map UInt64.ofBitVec
+private def toB (state : UState) : State := state.map UInt64.toBitVec
+
+private theorem toB_setIfInBounds (state : UState) (i : Nat) (value : UInt64) :
+    toB (state.setIfInBounds i value) =
+      (toB state).setIfInBounds i value.toBitVec := by
+  exact Array.map_setIfInBounds
+
+private theorem toB_toU (state : State) : toB (toU state) = state := by
+  simp [toB, toU, Array.map_map, Function.comp_def]
+
+private def uZeroState : UState := Array.replicate 25 0
+
+private theorem toB_uZeroState : toB uZeroState = zeroState := by
+  simp [toB, uZeroState, zeroState, zeroLane]
+
+private def uLane (state : UState) (x y : Nat) : UInt64 :=
+  state.getD (x % 5 + 5 * (y % 5)) 0
+
+private theorem uLane_toBitVec (state : UState) (x y : Nat) :
+    (uLane state x y).toBitVec = lane (toB state) x y := by
+  simp only [uLane, lane, toB, Array.getD, Array.size_map]
+  split_ifs <;> simp [zeroLane]
+
+private def uXorColumn (state : UState) (x : Nat) : UInt64 :=
+  (List.range 5).foldl (fun acc y => acc ^^^ uLane state x y) 0
+
+private theorem uXorColumn_toBitVec (state : UState) (x : Nat) :
+    (uXorColumn state x).toBitVec = xorColumn (toB state) x := by
+  have hfold (l : List Nat) (a : UInt64) :
+      (l.foldl (fun acc y => acc ^^^ uLane state x y) a).toBitVec =
+        l.foldl (fun acc y => acc ^^^ lane (toB state) x y) a.toBitVec := by
+    induction l generalizing a with
+    | nil => rfl
+    | cons y ys ih =>
+        simp only [List.foldl_cons, ih, UInt64.toBitVec_xor, uLane_toBitVec]
+  simpa [uXorColumn, xorColumn, zeroLane] using hfold (List.range 5) 0
+
+private def uRotl (x : UInt64) (r : Nat) : UInt64 :=
+  let n := r % 64
+  if n = 0 then x
+  else (x <<< UInt64.ofNat n) ||| (x >>> UInt64.ofNat (64 - n))
+
+private theorem uRotl_toBitVec (x : UInt64) (r : Nat) :
+    (uRotl x r).toBitVec = x.toBitVec.rotateLeft r := by
+  simp only [uRotl, BitVec.rotateLeft_def]
+  split_ifs with h
+  · simp [h, BitVec.ushiftRight_eq_zero]
+  · simp [UInt64.toBitVec_or, UInt64.toBitVec_shiftLeft,
+      UInt64.toBitVec_shiftRight]
+    have hlt : r % 64 < 64 := Nat.mod_lt _ (by decide)
+    have hrange : 64 - r % 64 < 64 := by omega
+    rw [Nat.mod_eq_of_lt hrange]
+
+private def uTheta (state : UState) : UState :=
+  let columns := Array.ofFn fun x : Fin 5 => uXorColumn state x.val
+  let deltas := Array.ofFn fun x : Fin 5 =>
+    columns[(x.val + 4) % 5]'(by simp [columns]; exact Nat.mod_lt _ (by decide)) ^^^
+      uRotl (columns[(x.val + 1) % 5]'(by simp [columns]; exact Nat.mod_lt _ (by decide))) 1
+  Array.ofFn fun index : Fin 25 =>
+    uLane state (index.val % 5) (index.val / 5) ^^^
+      deltas[index.val % 5]'(by simp [deltas]; exact Nat.mod_lt _ (by decide))
+
+private theorem uTheta_toB (state : UState) :
+    toB (uTheta state) = thetaCached (toB state) := by
+  simp only [uTheta, thetaCached, toB, Array.map_ofFn]
+  congr 1
+  funext index
+  simpa [toB] using
+    (show (uLane state (index.val % 5) (index.val / 5) ^^^
+        (uXorColumn state ((index.val + 4) % 5) ^^^
+          uRotl (uXorColumn state ((index.val + 1) % 5)) 1)).toBitVec =
+        lane (toB state) (index.val % 5) (index.val / 5) ^^^
+          (xorColumn (toB state) ((index.val + 4) % 5) ^^^
+            (xorColumn (toB state) ((index.val + 1) % 5)).rotateLeft 1) by
+      simp [uXorColumn_toBitVec, uRotl_toBitVec, uLane_toBitVec])
+
+private def uRhoPi (state : UState) : UState :=
+  (List.range 25).foldl (fun output source =>
+    let x := source % 5
+    let y := source / 5
+    let target := y + 5 * ((2 * x + 3 * y) % 5)
+    output.setIfInBounds target (uRotl (uLane state x y) (rotationOffset x y)))
+    uZeroState
+
+private def uRhoPiStep (state : UState) (output : UState) (source : Nat) : UState :=
+  let x := source % 5
+  let y := source / 5
+  let target := y + 5 * ((2 * x + 3 * y) % 5)
+  output.setIfInBounds target (uRotl (uLane state x y) (rotationOffset x y))
+
+private def bRhoPiStep (state : State) (output : State) (source : Nat) : State :=
+  let x := source % 5
+  let y := source / 5
+  let target := y + 5 * ((2 * x + 3 * y) % 5)
+  output.setIfInBounds target ((lane state x y).rotateLeft (rotationOffset x y))
+
+private theorem uRhoPiStep_toB (state output : UState) (source : Nat) :
+    toB (uRhoPiStep state output source) =
+      bRhoPiStep (toB state) (toB output) source := by
+  simp [uRhoPiStep, bRhoPiStep, toB, Array.map_setIfInBounds,
+    uLane_toBitVec, uRotl_toBitVec]
+
+private theorem uRhoPi_toB (state : UState) :
+    toB (uRhoPi state) = rhoPi (toB state) := by
+  have hfold := List.foldl_hom toB (l := List.range 25) (init := uZeroState)
+    (g₁ := uRhoPiStep state) (g₂ := bRhoPiStep (toB state))
+    (fun output source => (uRhoPiStep_toB state output source).symm)
+  simpa only [uRhoPi, rhoPi, uRhoPiStep, bRhoPiStep, toB_uZeroState]
+    using hfold.symm
+
+private def uChi (state : UState) : UState :=
+  Array.ofFn fun index : Fin 25 =>
+    let x := index.val % 5
+    let y := index.val / 5
+    uLane state x y ^^^ ((~~~uLane state (x + 1) y) &&& uLane state (x + 2) y)
+
+private theorem uChi_toB (state : UState) :
+    toB (uChi state) = chi (toB state) := by
+  simp only [uChi, chi, toB, Array.map_ofFn]
+  congr 1
+  funext index
+  simpa [toB] using
+    (show (uLane state (index.val % 5) (index.val / 5) ^^^
+        ((~~~uLane state (index.val % 5 + 1) (index.val / 5)) &&&
+          uLane state (index.val % 5 + 2) (index.val / 5))).toBitVec =
+        lane (toB state) (index.val % 5) (index.val / 5) ^^^
+          ((~~~lane (toB state) (index.val % 5 + 1) (index.val / 5)) &&&
+            lane (toB state) (index.val % 5 + 2) (index.val / 5)) by
+      simp [uLane_toBitVec])
+
+private def uRound (state : UState) (constant : UInt64) : UState :=
+  let mixed := uChi (uRhoPi (uTheta state))
+  mixed.setIfInBounds 0 (uLane mixed 0 0 ^^^ constant)
+
+private theorem uRound_toB (state : UState) (constant : UInt64) :
+    toB (uRound state constant) = round (toB state) constant.toBitVec := by
+  have hm : toB (uChi (uRhoPi (uTheta state))) =
+      chi (rhoPi (thetaCached (toB state))) := by
+    rw [uChi_toB, uRhoPi_toB, uTheta_toB]
+  simp only [uRound, round]
+  rw [toB_setIfInBounds, UInt64.toBitVec_xor, uLane_toBitVec, hm]
+  rw [theta_eq_thetaCached]
+
+private def uRoundConstants : List UInt64 := roundConstants.map UInt64.ofBitVec
+
+private def keccakF1600UInt64 (state : State) : State :=
+  toB (uRoundConstants.foldl uRound (toU state))
+
+private theorem keccakF1600UInt64_eq (state : State) :
+    keccakF1600UInt64 state = keccakF1600 state := by
+  have hfold (constants : List Lane) (initial : UState) :
+      toB ((constants.map UInt64.ofBitVec).foldl uRound initial) =
+        constants.foldl round (toB initial) := by
+    induction constants generalizing initial with
+    | nil => rfl
+    | cons constant rest ih =>
+        simp only [List.map_cons, List.foldl_cons]
+        rw [ih, uRound_toB, UInt64.toBitVec_ofBitVec]
+  simp only [keccakF1600UInt64, uRoundConstants, keccakF1600, hfold,
+    toB_toU]
+
+@[csimp] theorem keccakF1600_eqUInt64 : keccakF1600 = keccakF1600UInt64 := by
+  funext state
+  exact (keccakF1600UInt64_eq state).symm
+
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.keccakF1600_eqUInt64' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms keccakF1600_eqUInt64
 
 /-! ## The 1088-bit-rate sponge and cSHAKE256 -/
 
