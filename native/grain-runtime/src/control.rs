@@ -9,11 +9,11 @@ use std::net::Shutdown;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_LINE: u64 = 16_384;
 const QUEUE: usize = 128;
@@ -29,6 +29,128 @@ pub enum Event {
     Attached { id: u64, soft: bool },
     Line { id: u64, text: String },
     Detached { id: u64, hard: bool },
+}
+
+pub struct AdminRequest {
+    pub command: String,
+    pub reply: mpsc::Sender<String>,
+    pub deadline: Instant,
+    pub phase: Arc<AtomicU8>,
+}
+
+pub struct AdminServer {
+    pub requests: Receiver<AdminRequest>,
+    stop: Arc<AtomicBool>,
+    path: PathBuf,
+    socket_identity: (u64, u64),
+}
+
+impl Drop for AdminServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Ok(meta) = fs::symlink_metadata(&self.path) {
+            if meta.file_type().is_socket() && (meta.dev(), meta.ino()) == self.socket_identity {
+                let _ = fs::remove_file(&self.path);
+            }
+        }
+    }
+}
+
+/// Separate local operator socket. The SSH forced-command connector never
+/// opens this path and ordinary attachments cannot submit AdminRequest events.
+pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
+    if !path.is_absolute() {
+        return Err("admin socket path must be absolute".into());
+    }
+    let listener = UnixListener::bind(path).map_err(|e| format!("admin bind: {e}"))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("admin socket mode: {e}"))?;
+    let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let (tx, requests) = mpsc::sync_channel(8);
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop.clone();
+    let active = Arc::new(AtomicUsize::new(0));
+    thread::spawn(move || {
+        while !thread_stop.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if active.fetch_add(1, Ordering::SeqCst) >= 4 {
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        continue;
+                    }
+                    let tx = tx.clone();
+                    let active = active.clone();
+                    thread::spawn(move || {
+                        serve_admin_connection(stream, tx);
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    Ok(AdminServer {
+        requests,
+        stop,
+        path: path.to_owned(),
+        socket_identity: (meta.dev(), meta.ino()),
+    })
+}
+
+fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let response = match read_line(&mut stream) {
+        Ok(command) => {
+            let (reply, recv) = mpsc::channel();
+            let phase = Arc::new(AtomicU8::new(0));
+            let deadline = Instant::now() + Duration::from_secs(300);
+            if tx
+                .try_send(AdminRequest {
+                    command,
+                    reply,
+                    deadline,
+                    phase: phase.clone(),
+                })
+                .is_err()
+            {
+                "admin queue full".to_owned()
+            } else {
+                match recv.recv_timeout(Duration::from_secs(300)) {
+                    Ok(value) => value,
+                    Err(_)
+                        if phase
+                            .compare_exchange(0, 3, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok() =>
+                    {
+                        "admin action expired before dispatch".to_owned()
+                    }
+                    Err(_) => {
+                        "admin action may have begun; inspect durable journal and exact attempt"
+                            .to_owned()
+                    }
+                }
+            }
+        }
+        Err(error) => format!("invalid admin request: {error}"),
+    };
+    let _ = writeln!(stream, "{response}");
+}
+
+pub fn admin_call(path: &Path, command: &str) -> Result<String, String> {
+    if !path.is_absolute() || command.contains('\n') || command.len() > MAX_LINE as usize {
+        return Err("admin socket/command invalid".into());
+    }
+    let mut stream = UnixStream::connect(path).map_err(|e| format!("admin connect: {e}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(310)))
+        .map_err(|e| e.to_string())?;
+    writeln!(stream, "{command}").map_err(|e| e.to_string())?;
+    read_line(&mut stream).map_err(|e| e.to_string())
 }
 
 struct Attachment {
@@ -392,6 +514,42 @@ mod tests {
 
         drop(server);
         assert!(!socket.exists());
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn admin_requests_use_a_separate_socket() {
+        let dir = PathBuf::from("/tmp").join(format!("ga-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let ordinary_path = dir.join("control.sock");
+        let admin_path = dir.join("admin.sock");
+        let ordinary = start(&ordinary_path, Arc::new(|_| {})).unwrap();
+        let admin = start_admin(&admin_path).unwrap();
+        let mut connection = UnixStream::connect(&ordinary_path).unwrap();
+        connection
+            .write_all(b"attach soft\nreconcile effects\n")
+            .unwrap();
+        assert!(matches!(
+            ordinary
+                .events
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+            Event::Attached { soft: true, .. }
+        ));
+        assert!(
+            matches!(ordinary.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Line { text, .. } if text == "reconcile effects")
+        );
+        assert!(admin.requests.try_recv().is_err());
+        let path = admin_path.clone();
+        let caller = thread::spawn(move || admin_call(&path, "reconcile effects"));
+        let request = admin.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(request.command, "reconcile effects");
+        request.reply.send("ok".into()).unwrap();
+        assert_eq!(caller.join().unwrap().unwrap(), "ok");
+        drop(connection);
+        drop(admin);
+        drop(ordinary);
         fs::remove_dir(dir).unwrap();
     }
 }

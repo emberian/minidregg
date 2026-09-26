@@ -2,6 +2,7 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod control;
 mod mcp;
+mod resource_tools;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
@@ -18,7 +19,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -61,6 +62,8 @@ struct ToolTask {
     reserve: String,
     charge: String,
     allowed_publications: Vec<PublicationGrant>,
+    #[serde(default)]
+    allowed_reads: Vec<resource_tools::AllowedResourceRead>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -82,7 +85,7 @@ struct Authority {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AllowedCommand {
     name: String,
     program: PathBuf,
@@ -107,8 +110,16 @@ struct Journal {
     pending: Option<Pending>,
     #[serde(default)]
     tool_pending: Option<Pending>,
+    #[serde(default)]
+    hard_reconnect_pending: bool,
     child: Option<ChildRecord>,
     settlement_due: Option<String>,
+    #[serde(default)]
+    parent_hold: Option<HeldCharge>,
+    #[serde(default)]
+    tool_hold: Option<HeldCharge>,
+    #[serde(default)]
+    reconciliation_log: Vec<Value>,
     #[serde(default)]
     prompt_witness: Option<Value>,
     unresolved_external: Vec<String>,
@@ -147,6 +158,19 @@ struct ChildRecord {
     unit: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HeldCharge {
+    reserve: String,
+    charge: String,
+    before_generation: String,
+    before_target_root: String,
+    reserve_attempt: Option<PathBuf>,
+    reserve_confirmed: bool,
+    reserve_refused: bool,
+    reserve_boundary: Option<String>,
+}
+
 impl Journal {
     fn fresh(binding: Value) -> Self {
         Self {
@@ -156,8 +180,12 @@ impl Journal {
             connection: Connection::Detached,
             pending: None,
             tool_pending: None,
+            hard_reconnect_pending: false,
             child: None,
             settlement_due: None,
+            parent_hold: None,
+            tool_hold: None,
+            reconciliation_log: Vec::new(),
             prompt_witness: None,
             unresolved_external: Vec::new(),
         }
@@ -175,6 +203,17 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)
         .and_then(|_| file.sync_all())
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn next_retry_json(attempt: &Path) -> Result<PathBuf> {
+    for index in 1..=9999 {
+        let binary = attempt.join(format!("retry-{index:04}.bin"));
+        let json = attempt.join(format!("retry-{index:04}.json"));
+        if !binary.exists() && !json.exists() {
+            return Ok(json);
+        }
+    }
+    Err("attempt exhausted native retry evidence names".into())
 }
 
 fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -306,6 +345,7 @@ fn validate(c: &Config) -> Result<()> {
             decimal(&grant.capability, "publication capability")?;
             decimal(&grant.observe_capability, "publication observe capability")?;
         }
+        resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
     }
     Ok(())
 }
@@ -322,6 +362,7 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     current_unit: Arc<Mutex<Option<String>>>,
+    prompt_active: bool,
     output: Option<control::OutputHandle>,
 }
 
@@ -434,6 +475,7 @@ impl Runtime {
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
             current_unit: Arc::new(Mutex::new(None)),
+            prompt_active: false,
             output: None,
         };
         // We have no live Child handle after a controller crash. A recycled
@@ -441,7 +483,7 @@ impl Runtime {
         if rt.journal.child.is_some() {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
-        } else if rt.journal.connection == Connection::Hard {
+        } else if rt.journal.connection == Connection::Hard || rt.journal.hard_reconnect_pending {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
         }
@@ -525,7 +567,8 @@ impl Runtime {
         }
         Ok(
             json!({"grain":grain, "targetRoot":view.pointer("/page/root"),
-            "authorityRoot":challenge.pointer("/signing/0/authorityRoot")}),
+            "authorityRoot":challenge.pointer("/signing/0/authorityRoot"),
+            "imageBoundary":challenge.get("imageBoundary")}),
         )
     }
     fn query_policy(&mut self) -> Result<Value> {
@@ -672,6 +715,34 @@ impl Runtime {
         let authority = self.parent();
         self.transition_as(&authority, op, label, payload, vec![])
     }
+    fn mark_hold(&mut self, tool: bool, reserve: &str, charge: &str) -> Result<()> {
+        let authority = if tool { self.tool()? } else { self.parent() };
+        let observed = self.query_as(&authority)?;
+        let hold = HeldCharge {
+            reserve: reserve.to_owned(),
+            charge: charge.to_owned(),
+            before_generation: observed
+                .pointer("/grain/generation")
+                .and_then(Value::as_str)
+                .ok_or("pre-reserve generation absent")?
+                .to_owned(),
+            before_target_root: observed
+                .get("targetRoot")
+                .and_then(Value::as_str)
+                .ok_or("pre-reserve target root absent")?
+                .to_owned(),
+            reserve_attempt: None,
+            reserve_confirmed: false,
+            reserve_refused: false,
+            reserve_boundary: None,
+        };
+        if tool {
+            self.journal.tool_hold = Some(hold);
+        } else {
+            self.journal.parent_hold = Some(hold);
+        }
+        self.save()
+    }
     fn transition_as(
         &mut self,
         authority: &Authority,
@@ -692,6 +763,23 @@ impl Runtime {
         }
         let observed = self.query_as(authority)?;
         let before = observed.get("grain").ok_or("missing observed grain")?;
+        let reserving = op.get("type").and_then(Value::as_str) == Some("reserve");
+        if reserving {
+            let hold = (if tool_authority {
+                &self.journal.tool_hold
+            } else {
+                &self.journal.parent_hold
+            })
+            .as_ref()
+            .ok_or("reserve has no durable charge marker")?;
+            if observed.get("targetRoot").and_then(Value::as_str)
+                != Some(hold.before_target_root.as_str())
+                || before.get("generation").and_then(Value::as_str)
+                    != Some(hold.before_generation.as_str())
+            {
+                return Err("signed pre-reserve grain differs from held operation origin".into());
+            }
+        }
         let id = self.next_id()?;
         let joint = !publications.is_empty();
         let mut grants = vec![json!({"kind":"object","target":authority.task,
@@ -757,6 +845,16 @@ impl Runtime {
         } else {
             self.journal.pending = pending;
         }
+        if reserving {
+            let hold = if tool_authority {
+                &mut self.journal.tool_hold
+            } else {
+                &mut self.journal.parent_hold
+            };
+            hold.as_mut()
+                .ok_or("reserve marker disappeared")?
+                .reserve_attempt = Some(attempt.clone());
+        }
         self.save()?;
         let cfg = &self.config;
         let mut args = vec![
@@ -780,13 +878,41 @@ impl Runtime {
         let result = self.command_output(&cfg.mini, &args);
         match result {
             Ok(()) => {
+                if reserving {
+                    let receipt: Value = serde_json::from_slice(
+                        &fs::read(attempt.join("outcome.json"))
+                            .map_err(|e| format!("reserve receipt missing: {e}"))?,
+                    )
+                    .map_err(|e| format!("reserve receipt invalid: {e}"))?;
+                    if receipt.get("type").and_then(Value::as_str) != Some("confirmed") {
+                        return Err("native reserve returned without confirmed receipt".into());
+                    }
+                    let boundary = receipt
+                        .get("imageBoundary")
+                        .and_then(Value::as_str)
+                        .ok_or("reserve receipt lacks image boundary")?
+                        .to_owned();
+                    let hold = if tool_authority {
+                        &mut self.journal.tool_hold
+                    } else {
+                        &mut self.journal.parent_hold
+                    };
+                    let hold = hold.as_mut().ok_or("reserve marker disappeared")?;
+                    hold.reserve_confirmed = true;
+                    hold.reserve_boundary = Some(boundary);
+                }
                 if tool_authority {
                     self.journal.tool_pending = None;
                 } else {
                     self.journal.pending = None;
                 }
-                if label == "settle" && !tool_authority {
-                    self.journal.settlement_due = None;
+                if op.get("type").and_then(Value::as_str) == Some("settle") {
+                    if tool_authority {
+                        self.journal.tool_hold = None;
+                    } else {
+                        self.journal.parent_hold = None;
+                        self.journal.settlement_due = None;
+                    }
                 }
                 self.save()?;
                 Ok(())
@@ -804,6 +930,16 @@ impl Runtime {
                     .and_then(Value::as_str)
                     == Some("refused")
                 {
+                    if reserving {
+                        let hold = if tool_authority {
+                            &mut self.journal.tool_hold
+                        } else {
+                            &mut self.journal.parent_hold
+                        };
+                        hold.as_mut()
+                            .ok_or("reserve marker disappeared")?
+                            .reserve_refused = true;
+                    }
                     if tool_authority {
                         self.journal.tool_pending = None;
                     } else {
@@ -821,6 +957,16 @@ impl Runtime {
                         self.journal.tool_pending = None;
                     } else {
                         self.journal.pending = None;
+                    }
+                    if reserving {
+                        let hold = if tool_authority {
+                            &mut self.journal.tool_hold
+                        } else {
+                            &mut self.journal.parent_hold
+                        };
+                        hold.as_mut()
+                            .ok_or("reserve marker disappeared")?
+                            .reserve_refused = true;
                     }
                     self.save()?;
                     return Err(format!("{label} did not produce a signed call: {e}"));
@@ -841,6 +987,11 @@ impl Runtime {
         }
     }
     fn handle_tool(&mut self, request: mcp::BrokerRequest) {
+        if request.prompt_epoch != 1 {
+            let _ = request.reply.send(json!({"isError":true,
+                "text":"tool request was queued outside the active prompt"}));
+            return;
+        }
         let outcome = self.tool_call(&request.name, &request.arguments);
         let response = match outcome {
             Ok(value) => json!({"isError":false,"text":value.to_string()}),
@@ -854,6 +1005,8 @@ impl Runtime {
             || self.journal.child.is_none()
             || self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || !self.prompt_active
         {
             return Err("Hermes task is not running under this controller".into());
         }
@@ -866,6 +1019,18 @@ impl Runtime {
                 let parent = self.query()?;
                 let tool = self.query_as(&authority)?;
                 Ok(json!({"parent":parent,"tool":tool}))
+            }
+            "mini_read_resource" => {
+                let configured = self
+                    .config
+                    .tool_task
+                    .as_ref()
+                    .ok_or("toolTask is not configured")?
+                    .clone();
+                let read =
+                    resource_tools::select_read(&configured.allowed_reads, arguments)?.clone();
+                let nonce = self.next_id()?;
+                resource_tools::read_resource(&self.config, &configured, &read, nonce)
             }
             "mini_publish" => {
                 let supplied = arguments
@@ -947,6 +1112,7 @@ impl Runtime {
                     return Err(format!("tool task status {status} needs reconciliation"));
                 }
                 self.check_not_cancelled()?;
+                self.mark_hold(true, &tool.reserve, &tool.charge)?;
                 self.transition_as(
                     &authority,
                     json!({"type":"reserve","amount":tool.reserve}),
@@ -1008,12 +1174,43 @@ impl Runtime {
             Ok(())
         }
     }
+    fn finish_reconnected_mode(&mut self) -> Result<()> {
+        if self.journal.connection == Connection::Soft
+            && self.journal.hard_reconnect_pending
+            && self.hard_connection.load(Ordering::SeqCst)
+        {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return self.disconnect();
+            }
+            self.transition(
+                json!({"type":"mode","soft":false}),
+                "mode",
+                "hard connector reattached after soft reservation",
+            )?;
+            self.journal.connection = Connection::Hard;
+            self.journal.hard_reconnect_pending = false;
+            self.save()?;
+            if self.cancelled.load(Ordering::SeqCst) {
+                return self.disconnect();
+            }
+        }
+        Ok(())
+    }
+    fn note_hard_reconnect(&mut self) -> Result<()> {
+        self.journal.hard_reconnect_pending = true;
+        self.save()?;
+        self.hard_connection.store(true, Ordering::SeqCst);
+        self.emit("hard transport attached to soft reservation; loss will cancel the task\n");
+        Ok(())
+    }
     fn attach(&mut self, soft: bool) -> Result<()> {
         if self.journal.connection == Connection::Fenced
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.settlement_due.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_hold.is_some()
             || !self.journal.unresolved_external.is_empty()
         {
             return Err("task is fenced or unresolved; cannot attach".into());
@@ -1145,6 +1342,7 @@ impl Runtime {
         match (stopped, fenced, tool_fenced) {
             (Ok(()), Ok(()), Ok(())) => {
                 self.journal.connection = Connection::Detached;
+                self.journal.hard_reconnect_pending = false;
                 self.journal.prompt_witness = None;
                 self.save()
             }
@@ -1198,6 +1396,8 @@ impl Runtime {
             || self.journal.tool_pending.is_some()
             || self.journal.child.is_some()
             || self.journal.settlement_due.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_hold.is_some()
         {
             return Err("task has unresolved work".into());
         }
@@ -1208,6 +1408,10 @@ impl Runtime {
             .find(|c| c.name == name)
             .ok_or_else(|| format!("command {name} is not configured"))?
             .clone();
+        if spec.systemd_scope {
+            prove_controller_unit(&self.config.task)?;
+        }
+        self.mark_hold(false, &spec.reserve, &spec.charge)?;
         self.transition(
             json!({"type":"reserve","amount":spec.reserve}),
             "reserve",
@@ -1226,6 +1430,9 @@ impl Runtime {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.stdin_gone = true;
                     return self.disconnect();
+                }
+                Ok(Input::Admin(request)) => {
+                    let _ = request.reply.send("worker reservation in progress".into());
                 }
                 _ => {}
             }
@@ -1317,6 +1524,7 @@ impl Runtime {
                 )?;
                 self.journal.settlement_due = None;
                 self.save()?;
+                self.finish_reconnected_mode()?;
                 self.emit(format!("command {name} exited {status}\n"));
                 return Ok(());
             }
@@ -1341,12 +1549,14 @@ impl Runtime {
                 Ok(Input::Line(line))
                     if line == "attach hard" && self.journal.connection == Connection::Soft =>
                 {
-                    self.hard_connection.store(true, Ordering::SeqCst);
-                    self.emit(
-                        "hard transport attached to soft reservation; loss will cancel the task\n",
-                    );
+                    self.note_hard_reconnect()?;
                 }
                 Ok(Input::Line(_)) => eprintln!("command running; only disconnect is accepted"),
+                Ok(Input::Admin(request)) => {
+                    let _ = request
+                        .reply
+                        .send("worker is running; stop and fence it first".into());
+                }
                 Ok(Input::SoftDetach) => {
                     self.stdin_gone = true;
                 }
@@ -1376,6 +1586,8 @@ impl Runtime {
             || self.journal.tool_pending.is_some()
             || self.journal.child.is_some()
             || self.journal.settlement_due.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_hold.is_some()
         {
             return Err("task has unresolved work".into());
         }
@@ -1397,6 +1609,10 @@ impl Runtime {
         if !spec.args.iter().any(|s| s.ends_with("hermes-acp")) {
             return Err("Hermes wrapper must launch the upstream hermes-acp executable".into());
         }
+        if spec.systemd_scope {
+            prove_controller_unit(&self.config.task)?;
+        }
+        self.mark_hold(false, &spec.reserve, &spec.charge)?;
         self.transition(
             json!({"type":"reserve","amount":spec.reserve}),
             "reserve",
@@ -1427,6 +1643,9 @@ impl Runtime {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.stdin_gone = true;
                     return self.disconnect();
+                }
+                Ok(Input::Admin(request)) => {
+                    let _ = request.reply.send("Hermes reservation in progress".into());
                 }
                 _ => {}
             }
@@ -1512,14 +1731,23 @@ impl Runtime {
             let _ = self.kill_child();
             return Err(e);
         }
-        let (tx, rx) = mpsc::channel::<Result<Value>>();
+        let (tx, rx) = mpsc::sync_channel::<Result<Value>>(8);
         thread::spawn(move || {
-            for line in io::BufReader::new(child_stdout).lines() {
-                let msg = line
-                    .map_err(|e| e.to_string())
-                    .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()));
-                if tx.send(msg).is_err() {
-                    return;
+            let mut reader = io::BufReader::new(child_stdout);
+            loop {
+                match read_acp_frame(&mut reader) {
+                    Ok(Some(frame)) => {
+                        let msg =
+                            serde_json::from_slice::<Value>(&frame).map_err(|e| e.to_string());
+                        if tx.send(msg).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => return,
+                    Err(error) => {
+                        let _ = tx.send(Err(format!("ACP frame refused: {error}")));
+                        return;
+                    }
                 }
             }
         });
@@ -1566,17 +1794,27 @@ impl Runtime {
                 .ok_or("Hermes omitted session ID".into())
         })();
         let outcome = match session {
-            Ok(session_id) => acp_send(
-                &mut child_stdin,
-                3,
-                "session/prompt",
-                json!({
-                    "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
-                }),
-            )
-            .and_then(|_| self.acp_response(3, &rx, input, &mut child_stdin, &display_tx, &broker)),
+            Ok(session_id) => {
+                self.prompt_active = true;
+                let prompt_sent = acp_send(
+                    &mut child_stdin,
+                    3,
+                    "session/prompt",
+                    json!({
+                        "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
+                    }),
+                );
+                if prompt_sent.is_ok() {
+                    broker.activate_prompt();
+                }
+                prompt_sent.and_then(|_| {
+                    self.acp_response(3, &rx, input, &mut child_stdin, &display_tx, &broker)
+                })
+            }
             Err(e) => Err(e),
         };
+        self.prompt_active = false;
+        broker.deactivate_prompt();
         if self.journal.connection == Connection::Fenced {
             return outcome.map(|_| ());
         }
@@ -1608,6 +1846,7 @@ impl Runtime {
         self.journal.settlement_due = None;
         self.journal.prompt_witness = None;
         self.save()?;
+        self.finish_reconnected_mode()?;
         outcome.map(|_| ())
     }
     fn acp_response(
@@ -1620,8 +1859,11 @@ impl Runtime {
         broker: &mcp::BrokerEndpoint,
     ) -> Result<Value> {
         loop {
-            while let Ok(request) = broker.requests.try_recv() {
-                self.handle_tool(request);
+            for _ in 0..4 {
+                match broker.requests.try_recv() {
+                    Ok(request) => self.handle_tool(request),
+                    Err(_) => break,
+                }
             }
             match input.try_recv() {
                 Ok(Input::Disconnect) => {
@@ -1646,13 +1888,15 @@ impl Runtime {
                 Ok(Input::Line(line))
                     if line == "attach hard" && self.journal.connection == Connection::Soft =>
                 {
-                    self.hard_connection.store(true, Ordering::SeqCst);
-                    self.emit(
-                        "hard transport attached to soft reservation; loss will cancel the task\n",
-                    );
+                    self.note_hard_reconnect()?;
                 }
                 Ok(Input::Line(_)) => {
                     eprintln!("Hermes prompt running; only disconnect is accepted")
+                }
+                Ok(Input::Admin(request)) => {
+                    let _ = request
+                        .reply
+                        .send("Hermes is running; stop and fence it first".into());
                 }
                 Ok(Input::SoftDetach) => {
                     self.stdin_gone = true;
@@ -1709,6 +1953,10 @@ impl Runtime {
         }
         self.retry_pending(true)?;
         self.retry_pending(false)?;
+        if self.journal.hard_reconnect_pending {
+            self.journal.connection = Connection::Fenced;
+            self.save()?;
+        }
         if let Some(charge) = self.journal.settlement_due.clone() {
             let state = self.query()?;
             let status = state
@@ -1743,6 +1991,12 @@ impl Runtime {
                     "disconnect",
                     "recovered hard connection loss",
                 )?;
+            } else if matches!(status, "2" | "4") {
+                self.transition(
+                    json!({"type":"cancel"}),
+                    "cancel",
+                    "recovered hard transport loss during soft reservation",
+                )?;
             } else if !matches!(status, "0" | "5" | "6" | "7") {
                 return Err(format!(
                     "fenced recovery has unexpected grain status {status}"
@@ -1750,10 +2004,260 @@ impl Runtime {
             }
             tool_fence?;
             self.journal.connection = Connection::Detached;
+            self.journal.hard_reconnect_pending = false;
             self.journal.prompt_witness = None;
             self.save()?;
         }
         Ok(())
+    }
+    fn reconcile_hold(&mut self, tool: bool, audited: bool) -> Result<()> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some()
+        {
+            return Err(
+                "reconciliation requires no live worker or unresolved custody attempt".into(),
+            );
+        }
+        let hold = (if tool {
+            &self.journal.tool_hold
+        } else {
+            &self.journal.parent_hold
+        })
+        .clone()
+        .ok_or("no durable held allowance for this authority")?;
+        let authority = if tool { self.tool()? } else { self.parent() };
+        let label = if tool { "tool" } else { "parent" };
+        let decision = self.next_id()?;
+        self.journal
+            .reconciliation_log
+            .push(json!({"decisionId":decision.to_string(),
+            "authority":label,"action":"settle-held-allowance","charge":hold.charge,
+            "reserveAttempt":hold.reserve_attempt,"originAudited":audited,
+            "stage":"requested","externalEffectsAcknowledged":false}));
+        self.save()?;
+        let observed = self.query_as(&authority)?;
+        let mut status = observed
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("reconciliation grain status absent")?
+            .to_owned();
+        if !matches!(status.as_str(), "3" | "4" | "5" | "7") {
+            if !matches!(status.as_str(), "0" | "1" | "2" | "6") {
+                return Err(format!("unexpected reconciliation status {status}"));
+            }
+            if !hold.reserve_confirmed
+                && !hold.reserve_refused
+                && (hold.reserve_attempt.is_some()
+                    || observed.get("targetRoot").and_then(Value::as_str)
+                        != Some(hold.before_target_root.as_str()))
+            {
+                return Err(
+                    "unconfirmed reserve origin changed; exact attempt audit required".into(),
+                );
+            }
+            if hold.reserve_confirmed {
+                let effects = format!("{label} confirmed reservation was externally settled; explicit effects acknowledgement required");
+                if !self.journal.unresolved_external.contains(&effects) {
+                    self.journal.unresolved_external.push(effects);
+                }
+            }
+            if tool {
+                self.journal.tool_hold = None;
+            } else {
+                self.journal.parent_hold = None;
+            }
+            self.journal
+                .reconciliation_log
+                .push(json!({"decisionId":decision.to_string(),
+                "authority":label,"stage":"confirmed-no-active-reservation",
+                "signedStatus":status}));
+            return self.save();
+        }
+        if observed.pointer("/grain/reserved").and_then(Value::as_str)
+            != Some(hold.reserve.as_str())
+        {
+            return Err("signed reserved allowance differs from durable configured hold".into());
+        }
+        if !hold.reserve_confirmed || hold.reserve_refused {
+            return Err("held allowance has no confirmed exact reserve attempt; refusing to settle another operation".into());
+        }
+        let before_gen = hold
+            .before_generation
+            .parse::<u64>()
+            .map_err(|_| "held generation invalid")?;
+        let current_gen = observed
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("signed generation absent")?
+            .parse::<u64>()
+            .map_err(|_| "signed generation invalid")?;
+        let expected_gen = before_gen
+            .checked_add(u64::from(matches!(status.as_str(), "5" | "7")))
+            .ok_or("held generation overflow")?;
+        if current_gen != expected_gen {
+            return Err("signed reservation generation differs from confirmed origin".into());
+        }
+        if !audited
+            && observed.get("imageBoundary").and_then(Value::as_str)
+                != hold.reserve_boundary.as_deref()
+        {
+            return Err("intervening Mini events prevent automatic reservation identity proof; use audited admin reconciliation after reviewing exact attempts".into());
+        }
+        let effects = format!("{label} reserved operation may have external effects; explicit operator acknowledgement required");
+        if !self.journal.unresolved_external.contains(&effects) {
+            self.journal.unresolved_external.push(effects);
+            self.save()?;
+        }
+        if matches!(status.as_str(), "3" | "4") {
+            let op = if status == "3" {
+                json!({"type":"disconnect"})
+            } else {
+                json!({"type":"cancel"})
+            };
+            self.transition_as(
+                &authority,
+                op,
+                "reconcile fence",
+                "operator fenced held allowance",
+                vec![],
+            )?;
+            let observed = self.query_as(&authority)?;
+            status = observed
+                .pointer("/grain/status")
+                .and_then(Value::as_str)
+                .ok_or("fenced reconciliation status absent")?
+                .to_owned();
+        }
+        if !matches!(status.as_str(), "5" | "7") {
+            return Err(format!(
+                "reconciliation fence did not hold allowance: status {status}"
+            ));
+        }
+        self.transition_as(
+            &authority,
+            json!({"type":"settle","charge":hold.charge}),
+            "reconcile settle",
+            "operator fixed-charge settlement",
+            vec![],
+        )?;
+        self.journal
+            .reconciliation_log
+            .push(json!({"decisionId":decision.to_string(),
+            "authority":label,"stage":"signed-settlement-confirmed",
+            "charge":hold.charge}));
+        self.save()
+    }
+    fn abort_unsubmitted_hold(&mut self, tool: bool) -> Result<()> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some()
+        {
+            return Err("cannot abort a hold with a child or unresolved native attempt".into());
+        }
+        let hold = (if tool {
+            &self.journal.tool_hold
+        } else {
+            &self.journal.parent_hold
+        })
+        .clone()
+        .ok_or("no held marker to abort")?;
+        if hold.reserve_confirmed || (hold.reserve_attempt.is_some() && !hold.reserve_refused) {
+            return Err("a reserve may have committed; use signed settlement, not abort".into());
+        }
+        let authority = if tool { self.tool()? } else { self.parent() };
+        let observed = self.query_as(&authority)?;
+        let id = self.next_id()?;
+        self.journal.reconciliation_log.push(json!({"decisionId":id.to_string(),
+            "authority":if tool {"tool"} else {"parent"},
+            "action":"abort-unsubmitted-hold","stage":"no-reserve-dispatched-or-definitively-refused",
+            "reserveAttempt":hold.reserve_attempt,"signedStatus":observed.pointer("/grain/status"),
+            "signedTargetRoot":observed.get("targetRoot")}));
+        if tool {
+            self.journal.tool_hold = None;
+        } else {
+            self.journal.parent_hold = None;
+        }
+        self.save()
+    }
+    fn acknowledge_effects(&mut self) -> Result<()> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_hold.is_some()
+            || self.journal.settlement_due.is_some()
+        {
+            return Err(
+                "settle and reconcile every held operation before acknowledging external effects"
+                    .into(),
+            );
+        }
+        if self.journal.unresolved_external.is_empty() {
+            return Err("no external-effect uncertainty needs acknowledgement".into());
+        }
+        for authority in [
+            Some(self.parent()),
+            self.config
+                .tool_task
+                .as_ref()
+                .map(|_| self.tool())
+                .transpose()?,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let state = self.query_as(&authority)?;
+            let status = state
+                .pointer("/grain/status")
+                .and_then(Value::as_str)
+                .ok_or("grain status absent during external-effect acknowledgement")?;
+            if matches!(status, "3" | "4" | "5" | "7") {
+                return Err(format!(
+                    "{} still has an unresolved reserved allowance",
+                    authority.task
+                ));
+            }
+        }
+        let id = self.next_id()?;
+        let acknowledged = std::mem::take(&mut self.journal.unresolved_external);
+        self.journal
+            .reconciliation_log
+            .push(json!({"decisionId":id.to_string(),
+            "action":"acknowledge-external-effects","stage":"acknowledged",
+            "externalEffectsAcknowledged":true,"details":acknowledged}));
+        self.save()
+    }
+    fn reconcile_worker_audited(&mut self) -> Result<()> {
+        if self.child.is_some() {
+            return Err("this controller still owns a live child handle".into());
+        }
+        let record = self
+            .journal
+            .child
+            .clone()
+            .ok_or("no stranded child record")?;
+        let evidence = match &record.unit {
+            Some(unit) => {
+                prove_worker_unit_stopped(&self.config.task, &record, unit)?;
+                "operator asserted no late wrapper/start request; unit currently inactive, empty cgroup, controller MainPID verified"
+            }
+            None => "explicit operator assertion of physical process audit; no machine proof",
+        };
+        let id = self.next_id()?;
+        self.journal
+            .reconciliation_log
+            .push(json!({"decisionId":id.to_string(),
+            "action":"clear-stranded-child-after-physical-audit",
+            "stage":"physical-audit-recorded","operationId":record.operation_id.to_string(),
+            "recordedPid":record.pid,"recordedPgid":record.pgid,"recordedUnit":record.unit,
+            "machineProven":false,"operatorAudited":true,"evidence":evidence}));
+        self.journal.child = None;
+        self.journal.connection = Connection::Fenced;
+        self.save()
     }
     fn retry_pending(&mut self, tool: bool) -> Result<()> {
         let pending = if tool {
@@ -1768,18 +2272,53 @@ impl Runtime {
                 return Err("pending custody attempt has no call.bin; child lifetime is uncertain; manual reconciliation required".into());
             }
             let attempt = p.attempt.to_str().ok_or("attempt path UTF-8")?;
+            let retry_result = next_retry_json(&p.attempt)?;
             let mut args = vec!["retry", "--attempt", attempt, "--mode", "lookup"];
             if let Some(socket) = &self.config.host_socket {
                 args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
             }
+            // A refused lookup describes the current image, not necessarily
+            // the original submit. A prior branch may have committed this
+            // exact call before a fork was replaced. Keep the pending attempt.
             self.command_output(&self.config.mini, &args)?;
+            if matches!(p.operation.as_str(), "reserve" | "tool reserve") {
+                let receipt: Value =
+                    serde_json::from_slice(&fs::read(&retry_result).map_err(|e| e.to_string())?)
+                        .map_err(|e| e.to_string())?;
+                if receipt.get("type").and_then(Value::as_str) != Some("confirmed") {
+                    return Err("reserve lookup did not confirm exact attempt".into());
+                }
+                let boundary = receipt
+                    .get("imageBoundary")
+                    .and_then(Value::as_str)
+                    .ok_or("reserve lookup lacks image boundary")?
+                    .to_owned();
+                let hold = if tool {
+                    &mut self.journal.tool_hold
+                } else {
+                    &mut self.journal.parent_hold
+                };
+                let hold = hold
+                    .as_mut()
+                    .ok_or("reserve lookup has no held-charge marker")?;
+                hold.reserve_confirmed = true;
+                hold.reserve_boundary = Some(boundary);
+            }
             if tool {
                 self.journal.tool_pending = None;
             } else {
                 self.journal.pending = None;
             }
-            if p.operation == "settle" && !tool {
-                self.journal.settlement_due = None;
+            if matches!(
+                p.operation.as_str(),
+                "settle" | "tool settle" | "tool release" | "reconcile settle"
+            ) {
+                if tool {
+                    self.journal.tool_hold = None;
+                } else {
+                    self.journal.parent_hold = None;
+                    self.journal.settlement_due = None;
+                }
             }
             if p.operation == "disconnect" && !tool {
                 self.journal.connection = Connection::Detached;
@@ -1794,6 +2333,7 @@ enum Input {
     Line(String),
     Disconnect,
     SoftDetach,
+    Admin(control::AdminRequest),
 }
 
 fn signal_group(pgid: i32, signal: i32) -> Result<()> {
@@ -1806,6 +2346,37 @@ fn signal_group(pgid: i32, signal: i32) -> Result<()> {
     } else {
         Err(format!("signal {signal} to group {pgid}: {error}"))
     }
+}
+
+fn prove_controller_unit(task: &str) -> Result<()> {
+    let unit = format!("mini-grain-controller@{task}.service");
+    let output = Command::new("/usr/bin/systemctl")
+        .args([
+            "--user",
+            "show",
+            "-p",
+            "MainPID",
+            "-p",
+            "ActiveState",
+            &unit,
+        ])
+        .output()
+        .map_err(|e| format!("controller service proof: {e}"))?;
+    if !output.status.success() {
+        return Err("controller service is unavailable".into());
+    }
+    let source = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+    let main_pid = source
+        .lines()
+        .find_map(|line| line.strip_prefix("MainPID="))
+        .and_then(|value| value.parse::<u32>().ok());
+    let active = source.lines().any(|line| line == "ActiveState=active");
+    if main_pid != Some(std::process::id()) || !active {
+        return Err(format!(
+            "systemdScope requires this controller to be active MainPID of {unit}"
+        ));
+    }
+    Ok(())
 }
 
 fn kill_unit(unit: &str) -> Result<()> {
@@ -1847,6 +2418,84 @@ fn unit_inactive(unit: &str) -> Result<bool> {
     Ok(matches!(state.trim(), "inactive" | "failed" | "dead"))
 }
 
+fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Result<()> {
+    prove_controller_unit(task)?;
+    if unit != format!("mini-grain-t{task}-o{}", record.operation_id) {
+        return Err("saved worker unit does not match its durable operation ID".into());
+    }
+    if !unit_inactive(unit)? {
+        return Err("recorded worker unit remains active".into());
+    }
+    let name = format!("{unit}.service");
+    let output = Command::new("/usr/bin/systemctl")
+        .args([
+            "--user",
+            "show",
+            "-p",
+            "ControlGroup",
+            "-p",
+            "MainPID",
+            &name,
+        ])
+        .output()
+        .map_err(|e| format!("worker cgroup observation: {e}"))?;
+    if !output.status.success() {
+        return Err("worker cgroup observation failed".into());
+    }
+    let view = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+    let main_pid = view
+        .lines()
+        .find_map(|s| s.strip_prefix("MainPID="))
+        .ok_or("worker MainPID observation absent")?;
+    if main_pid != "0" {
+        return Err("recorded worker unit still has a MainPID".into());
+    }
+    let control_group = view
+        .lines()
+        .find_map(|s| s.strip_prefix("ControlGroup="))
+        .ok_or("worker ControlGroup observation absent")?;
+    if !control_group.is_empty() {
+        let relative = Path::new(control_group)
+            .strip_prefix("/")
+            .map_err(|_| "worker ControlGroup is not absolute")?;
+        if relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err("worker ControlGroup has invalid components".into());
+        }
+        let cgroup = Path::new("/sys/fs/cgroup").join(relative);
+        let mut pending = vec![cgroup];
+        let mut visited = 0usize;
+        while let Some(path) = pending.pop() {
+            visited += 1;
+            if visited > 4096 {
+                return Err("worker cgroup tree exceeds audit bound".into());
+            }
+            let entries = match fs::read_dir(&path) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(format!("worker cgroup inspect: {error}")),
+            };
+            let procs = fs::read_to_string(path.join("cgroup.procs"))
+                .map_err(|e| format!("worker cgroup.procs inspect: {e}"))?;
+            if !procs.trim().is_empty() {
+                return Err("recorded worker cgroup still contains processes".into());
+            }
+            for entry in entries {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                    pending.push(entry.path());
+                }
+            }
+        }
+    }
+    if !unit_inactive(unit)? {
+        return Err("worker unit became active during physical audit".into());
+    }
+    Ok(())
+}
+
 /// Read-only process table inspection. This counts all non-zombie members,
 /// including grandchildren after the leader exits. The child leader stays
 /// unreaped until this count reaches zero, keeping its PGID unavailable for
@@ -1886,6 +2535,41 @@ fn child_exited_unreaped(child: &Child) -> Result<bool> {
         ));
     }
     Ok(unsafe { info.si_pid() } != 0)
+}
+
+const MAX_ACP_FRAME: usize = 1_048_576;
+
+fn read_acp_frame(reader: &mut impl BufRead) -> io::Result<Option<Vec<u8>>> {
+    let mut frame = Vec::new();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return if frame.is_empty() {
+                Ok(None)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "ACP frame lacks newline",
+                ))
+            };
+        }
+        let count = available
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        if frame.len().saturating_add(count) > MAX_ACP_FRAME {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "ACP frame exceeds 1 MiB",
+            ));
+        }
+        let complete = available[count - 1] == b'\n';
+        frame.extend_from_slice(&available[..count]);
+        reader.consume(count);
+        if complete {
+            return Ok(Some(frame));
+        }
+    }
 }
 
 fn acp_send(writer: &mut impl Write, id: i64, method: &str, params: Value) -> Result<()> {
@@ -1955,8 +2639,20 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     clear_stale_control_socket(&rt.config.control_socket)?;
     let server = control::start(&rt.config.control_socket, interrupt)?;
+    let admin_path = rt.config.state_dir.join("admin.sock");
+    clear_stale_control_socket(&admin_path)?;
+    let admin = control::start_admin(&admin_path)?;
     rt.output = Some(server.output_handle());
     let (tx, input) = mpsc::channel();
+    let admin_tx = tx.clone();
+    thread::spawn(move || {
+        let _admin = &admin;
+        while let Ok(request) = admin.requests.recv() {
+            if admin_tx.send(Input::Admin(request)).is_err() {
+                break;
+            }
+        }
+    });
     thread::spawn(move || {
         let _server = &server;
         let mut current = None;
@@ -1995,6 +2691,36 @@ fn serve(mut rt: Runtime) -> Result<()> {
                 Ok(())
             }
             Input::Line(line) if line == "recover" => rt.recover(),
+            Input::Admin(request) => {
+                if Instant::now() >= request.deadline
+                    || request
+                        .phase
+                        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_err()
+                {
+                    let _ = request
+                        .reply
+                        .send("admin action expired before dispatch".into());
+                    continue;
+                }
+                let outcome = match request.command.as_str() {
+                    "reconcile parent" => rt.reconcile_hold(false, false),
+                    "reconcile tool" => rt.reconcile_hold(true, false),
+                    "reconcile parent audited" => rt.reconcile_hold(false, true),
+                    "reconcile tool audited" => rt.reconcile_hold(true, true),
+                    "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
+                    "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
+                    "reconcile effects" => rt.acknowledge_effects(),
+                    "reconcile worker audited" => rt.reconcile_worker_audited(),
+                    _ => Err("unknown admin reconciliation action".into()),
+                };
+                request.phase.store(2, Ordering::SeqCst);
+                let _ = request.reply.send(match &outcome {
+                    Ok(()) => "ok".into(),
+                    Err(error) => format!("error: {error}"),
+                });
+                outcome
+            }
             Input::Line(line) if line == "disconnect" => rt.disconnect(),
             Input::Line(line) if line.starts_with("run ") => {
                 let result = rt.run(&line[4..], &input);
@@ -2008,9 +2734,10 @@ fn serve(mut rt: Runtime) -> Result<()> {
             }
             Input::Disconnect => rt.disconnect(),
             Input::SoftDetach => Ok(()),
-            Input::Line(_) => {
-                Err("expected attach hard|soft, run NAME, status, recover, disconnect".into())
-            }
+            Input::Line(_) => Err(
+                "expected attach hard|soft, run NAME, hermes PROMPT, status, recover, disconnect"
+                    .into(),
+            ),
         };
         if let Err(e) = result {
             eprintln!("grain-runtime: {e}");
@@ -2057,8 +2784,31 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.len() == 4 && args[1] == "admin" {
+        let command = match args[3].to_str() {
+            Some(command) => command,
+            None => {
+                eprintln!("grain-runtime admin: command must be UTF-8");
+                return ExitCode::from(2);
+            }
+        };
+        return match control::admin_call(&PathBuf::from(&args[2]), command) {
+            Ok(response) if response == "ok" => {
+                println!("{response}");
+                ExitCode::SUCCESS
+            }
+            Ok(response) => {
+                eprintln!("grain-runtime admin: {response}");
+                ExitCode::from(1)
+            }
+            Err(error) => {
+                eprintln!("grain-runtime admin: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -2079,6 +2829,40 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_systemd_scope_uses_camel_case() {
+        let command: AllowedCommand = serde_json::from_value(json!({
+            "name":"hermes-acp","program":"/opt/mini/bwrap",
+            "args":["--","/agent/hermes-acp"],"systemdScope":true,
+            "reserve":"5","charge":"5"
+        }))
+        .unwrap();
+        assert!(command.systemd_scope);
+        assert!(serde_json::to_value(command)
+            .unwrap()
+            .get("systemdScope")
+            .is_some());
+    }
+
+    #[test]
+    fn acp_frame_refuses_oversized_line_before_json_allocation() {
+        let bytes = vec![b'x'; MAX_ACP_FRAME + 1];
+        let mut reader = io::BufReader::new(io::Cursor::new(bytes));
+        let error = read_acp_frame(&mut reader).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeds 1 MiB"));
+    }
+
+    #[test]
+    fn retained_lookup_uses_next_native_retry_result() {
+        let dir = std::env::temp_dir().join(format!("grain-retry-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        assert_eq!(next_retry_json(&dir).unwrap(), dir.join("retry-0001.json"));
+        fs::write(dir.join("retry-0001.bin"), b"partial native retry").unwrap();
+        assert_eq!(next_retry_json(&dir).unwrap(), dir.join("retry-0002.json"));
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn hard_stop_reaps_a_descendant_after_the_group_leader_exits() {

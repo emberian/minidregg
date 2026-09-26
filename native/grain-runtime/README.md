@@ -21,8 +21,16 @@ native/grain-runtime/target/debug/grain-runtime connect /absolute/controller.soc
 ```
 
 The connector's first line must be `attach hard` or `attach soft`. The line
-interface then accepts `run NAME`,
-`hermes PROMPT`, `status`, `recover`, and `disconnect`. Hard EOF or explicit
+interface then accepts `run NAME`, `hermes PROMPT`, `status`, `recover`, and
+`disconnect`. Local operator reconciliation uses a separate private admin
+socket, inaccessible through the forced-command connector:
+
+```sh
+grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile parent audited'
+grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile effects'
+```
+
+Hard EOF or explicit
 disconnect signals the owned process group immediately; the persistent
 controller then stops its remaining members and sends Mini a signed generation
 fence. A soft attachment lets the current reserved command or Hermes prompt
@@ -55,6 +63,10 @@ bootstrapped native Mini deployment):
     "reserve":"100", "charge":"10",
     "allowedPublications":[
       {"kind":"object","target":"8001","capability":"88","observeCapability":"89"}
+    ],
+    "allowedReads":[
+      {"name":"inbox","kind":"object","target":"8002",
+       "observeCapability":"90","maxResultBytes":4194304}
     ]
   },
   "commands": [
@@ -69,7 +81,9 @@ bootstrapped native Mini deployment):
 
 `hermes PROMPT` speaks ACP JSON-RPC to the actual upstream `hermes-acp`
 process and registers the keyless `mini-grain` MCP proxy. Its
-`mini_grain_status` tool reads a signed tool-task view. Its `mini_publish` tool
+`mini_grain_status` tool reads signed grain views. `mini_read_resource` reads
+only an operator-named allowlisted resource using a separate observe grant;
+it returns the complete bounded native view. Its `mini_publish` tool
 uses a separate signed tool task, reserves allowance, and atomically settles
 that task with allowlisted resource publications and a pinned parent-grain
 no-op witness. The parent witness is authored by Lean and checked in the same
@@ -82,6 +96,10 @@ and an operator-selected OS confinement wrapper is mandatory. The Linux
 cgroup, mounts a single broker socket into the sandbox, and withholds Mini
 keys and controller state. The controller signals the process group first,
 kills the unit, and observes it inactive before clearing the child record.
+Set a command's `systemdScope` to `true` only when its program is the
+`deploy/grain-host/bwrap` launcher and `serve` runs as the matching active
+`mini-grain-controller@TASK.service`; the runtime checks that unit's MainPID
+before admitting a scoped worker.
 
 The controller journals separate parent and tool pending operations before invoking `mini submit` and
 a pre-spawn child marker before creating a worker. A successful `mini submit`
@@ -92,6 +110,17 @@ the number may have been recycled. If a custody subprocess might still create
 no operation occurred from a missing file. Both conditions need an operator
 process audit and reconciliation before the task can be relaunched. A settled
 local command leaves its charge in the journal until Mini confirms settlement.
+The controller also journals the fixed charge before every reserve. After a
+hard fence, admin `reconcile parent` or `reconcile tool` verifies the signed
+held amount, reserve receipt, generation, and event boundary before settling
+through Mini at the fixed configured charge. If later Mini events make origin
+proof ambiguous, the operator must use the explicit `audited` form after
+reviewing the exact retained attempt. A post-crash unit check alone cannot
+exclude a delayed `systemd-run` start. Admin `reconcile worker audited`
+therefore records a physical-process assertion; for a scoped worker it also
+checks the controller MainPID, unique unit, and currently empty cgroup. Admin
+`reconcile effects` separately acknowledges external uncertainty after all
+signed holds resolve. All decisions and results remain in the journal.
 
 The process-group test proves a normal descendant in the same session stops;
 the Linux launcher has a separate host probe for a descendant escaping with
