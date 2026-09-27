@@ -18,3 +18,5 @@ mod rpc_adapter;
 mod http_response;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
+#[cfg(target_os = "linux")]
+mod native_dispatch;

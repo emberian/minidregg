@@ -21,7 +21,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const VERSION: u32 = 1;
 const MAX_RECORD_BYTES: u64 = 16 * 1024;
-const MAX_DISPATCH_PERMIT_BYTES: usize = 12_102_760;
+// Native Host's max frame includes its op34 byte; this file captures only payload.
+const MAX_DISPATCH_PERMIT_BYTES: usize = 12_102_759;
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -185,12 +186,19 @@ fn canonical_decimal(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+fn canonical_digest_decimal(value: &str) -> bool {
+    const MAX_256: &str =
+        "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+    canonical_decimal(value)
+        && (value.len() < MAX_256.len() || (value.len() == MAX_256.len() && value <= MAX_256))
+}
+
 impl DispatchIdentity {
     fn validate(&self) -> io::Result<()> {
         if !hex64(&self.permit_sha256)
-            || !hex64(&self.request_digest)
-            || !hex64(&self.dispatch_transaction)
-            || !hex64(&self.dispatch_event)
+            || !canonical_digest_decimal(&self.request_digest)
+            || !canonical_digest_decimal(&self.dispatch_transaction)
+            || !canonical_digest_decimal(&self.dispatch_event)
             || self.app_generation == 0
             || self.invocation_id.len() != 32
             || !self.invocation_id.bytes().all(|b| b.is_ascii_hexdigit())
@@ -1135,15 +1143,19 @@ mod tests {
     fn dispatch_identity(digit: char) -> DispatchIdentity {
         DispatchIdentity {
             permit_sha256: format!("{:x}", Sha256::digest(committed_permit())),
-            request_digest: digit.to_string().repeat(64),
+            request_digest: if digit == '0' {
+                "0".into()
+            } else {
+                digit.to_string().repeat(64)
+            },
             app: 91,
             app_generation: 2,
             invocation_id: "f".repeat(32),
             operation_id: "0".into(),
             session_resource: "6208".into(),
             session_generation: "0".into(),
-            dispatch_transaction: "b".repeat(64),
-            dispatch_event: "c".repeat(64),
+            dispatch_transaction: "2".repeat(64),
+            dispatch_event: "3".repeat(64),
         }
     }
 
@@ -1290,6 +1302,25 @@ mod tests {
     }
 
     #[test]
+    fn source_digest_and_receipt_ids_are_canonical_decimal_nats() {
+        let identity = dispatch_identity('1');
+        assert!(identity.validate().is_ok());
+        assert!(canonical_digest_decimal("0"));
+        assert!(canonical_digest_decimal(
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+        ));
+        assert!(!canonical_digest_decimal(
+            "115792089237316195423570985008687907853269984665640564039457584007913129639936"
+        ));
+        let mut hex_id = identity.clone();
+        hex_id.dispatch_event = "a".repeat(64);
+        assert!(hex_id.validate().is_err());
+        let mut leading_zero = identity;
+        leading_zero.request_digest = "01".into();
+        assert!(leading_zero.validate().is_err());
+    }
+
+    #[test]
     fn dispatch_tombstone_is_per_session_operation_not_http_digest() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('9');
@@ -1300,8 +1331,8 @@ mod tests {
 
         // Same operation coordinate with changed HTTP bytes and receipt is a
         // replay, even though its request digest points elsewhere.
-        let mut changed = dispatch_identity('a');
-        changed.dispatch_transaction = "d".repeat(64);
+        let mut changed = dispatch_identity('8');
+        changed.dispatch_transaction = "4".repeat(64);
         assert_eq!(first.operation_key(), changed.operation_key());
         assert!(journal
             .request_dispatch(changed.clone(), committed_permit())
