@@ -32,6 +32,9 @@ static RESPONSE_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy)]
 enum Mode {
     Scalar,
+    MeteredUsage,
+    MeteredMissingUsage,
+    MeteredHttp422,
     ContentWorkroom,
     ContentPeerA,
     ContentPeerB,
@@ -633,7 +636,7 @@ fn write_http(stream: &mut TcpStream, status: &str, content_type: &str, body: &[
     stream.flush()
 }
 
-fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str) -> io::Result<()> {
+fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str, metered_usage: bool) -> io::Result<()> {
     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")?;
     let mut delta = json!({"role":"assistant"});
     if let Some(content) = message.get("content").and_then(Value::as_str) {
@@ -649,7 +652,13 @@ fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str)
         "choices":[{"index":0,"delta":delta,"finish_reason":null}]});
     let last = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
         "choices":[{"index":0,"delta":{},"finish_reason":finish}]});
-    write!(stream, "data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n")?;
+    write!(stream, "data: {first}\n\ndata: {last}\n\n")?;
+    if metered_usage {
+        let terminal = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
+            "choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}});
+        write!(stream, "data: {terminal}\n\n")?;
+    }
+    write!(stream, "data: [DONE]\n\n")?;
     stream.flush()
 }
 
@@ -728,9 +737,18 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let mut body = vec![0; size];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    if matches!(mode, Mode::MeteredHttp422) {
+        let error = json!({"error":{"message":"stream_options is unsupported by this local fixture","type":"invalid_request_error"}}).to_string();
+        write_http(&mut stream, "422 Unprocessable Entity", "application/json", error.as_bytes())
+            .map_err(|e| e.to_string())?;
+        log_event(log, &format!("metered-422 bytes={size}"))
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
     let mut projection = None;
     let (message, finish, stage) = match match mode {
-        Mode::Scalar => reply_for(&request),
+        Mode::Scalar | Mode::MeteredUsage | Mode::MeteredMissingUsage => reply_for(&request),
+        Mode::MeteredHttp422 => unreachable!("handled before response generation"),
         Mode::ContentWorkroom => content_reply_for(&request),
         Mode::ContentPeerA => peer_reply_for(&request, true),
         Mode::ContentPeerB => peer_reply_for(&request, false),
@@ -755,12 +773,24 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let id = format!("chatcmpl-mini-fixture-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
     let streaming = request.get("stream").and_then(Value::as_bool) == Some(true);
     if streaming {
-        write_stream(&mut stream, &id, &message, finish).map_err(|e| e.to_string())?;
+        write_stream(&mut stream, &id, &message, finish, matches!(mode, Mode::MeteredUsage))
+            .map_err(|e| e.to_string())?;
     } else {
-        let response = json!({"id":id,"object":"chat.completion","created":1,"model":MODEL,
+        let (prompt_tokens, completion_tokens, total_tokens) =
+            if matches!(mode, Mode::MeteredUsage | Mode::MeteredMissingUsage) {
+                (1, 2, 3)
+            } else {
+                (1, 1, 2)
+            };
+        let mut response = json!({"id":id,"object":"chat.completion","created":1,"model":MODEL,
             "choices":[{"index":0,"message":message,"finish_reason":finish}],
-            "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}).to_string();
-        write_http(&mut stream, "200 OK", "application/json", response.as_bytes()).map_err(|e| e.to_string())?;
+            "usage":{"prompt_tokens":prompt_tokens,"completion_tokens":completion_tokens,
+                "total_tokens":total_tokens}});
+        if matches!(mode, Mode::MeteredMissingUsage) {
+            response.as_object_mut().unwrap().remove("usage");
+        }
+        let body = response.to_string();
+        write_http(&mut stream, "200 OK", "application/json", body.as_bytes()).map_err(|e| e.to_string())?;
     }
     log_event(log, &format!("completion bytes={size} stream={streaming} stage={stage}"))
         .map_err(|e| e.to_string())?;
@@ -779,6 +809,9 @@ fn main() -> Result<(), String> {
     let log = args.next().ok_or("log path absent")?;
     let mode = match args.next().as_deref() {
         None => Mode::Scalar,
+        Some("--metered-usage") => Mode::MeteredUsage,
+        Some("--metered-missing-usage") => Mode::MeteredMissingUsage,
+        Some("--metered-http-422") => Mode::MeteredHttp422,
         Some("--content-workroom") => Mode::ContentWorkroom,
         Some("--content-peer-a") => Mode::ContentPeerA,
         Some("--content-peer-b") => Mode::ContentPeerB,
@@ -809,6 +842,26 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metered_stream_has_one_terminal_usage_event_before_done() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_stream(&mut server, "fixture-id", &json!({"content":"ok"}), "stop", true)
+            .unwrap();
+        drop(server);
+        let mut reader = BufReader::new(client);
+        let mut bytes = String::new();
+        reader.read_to_string(&mut bytes).unwrap();
+        let body = bytes.split_once("\r\n\r\n").unwrap().1;
+        let events: Vec<_> = body.split("\n\n").filter(|frame| !frame.is_empty()).collect();
+        assert_eq!(events.len(), 4);
+        let terminal: Value = serde_json::from_str(events[2].strip_prefix("data: ").unwrap()).unwrap();
+        assert_eq!(terminal["choices"], json!([]));
+        assert_eq!(terminal["usage"], json!({"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}));
+        assert_eq!(events[3], "data: [DONE]");
+    }
 
     fn request(messages: Value) -> Value {
         json!({"model":MODEL,"messages":messages,"tools":[
