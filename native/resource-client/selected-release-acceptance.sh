@@ -27,6 +27,15 @@ case ${SELECTED_RELEASE_STOP_AFTER_ORIGINAL:-0} in
   0|1) ;;
   *) echo "SELECTED_RELEASE_STOP_AFTER_ORIGINAL must be 0 or 1" >&2; exit 2 ;;
 esac
+MESSAGE_SUFFIX=${SELECTED_RELEASE_MESSAGE_ID_SUFFIX:-}
+if [ -n "$MESSAGE_SUFFIX" ]; then
+  case $MESSAGE_SUFFIX in
+    *[!A-Za-z0-9-]*) echo "invalid selected release Message-ID suffix" >&2; exit 2 ;;
+  esac
+  [ "${#MESSAGE_SUFFIX}" -le 64 ] || {
+    echo "selected release Message-ID suffix exceeds 64 bytes" >&2; exit 2;
+  }
+fi
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
@@ -223,7 +232,8 @@ build_candidate() {
   mkdir -m 700 "$root"
   jq -n --arg query "$SIGNED_SOURCE_HEX" --arg atom "$atom" \
     --arg semantics "$RECIPIENT_SEMANTICS" --arg policy "$POLICY_ADDRESS" \
-    --arg nonce "$owner_nonce" --arg message "<$label@mini.invalid>" \
+    --arg nonce "$owner_nonce" \
+    --arg message "<${label}${MESSAGE_SUFFIX:+-$MESSAGE_SUFFIX}@mini.invalid>" \
     '{signedQueryHex:$query,atom:$atom,destinationDomain:"8612",
       destinationSemantics:$semantics,destinationTarget:"600",
       group:"fn.test",messageId:$message,policyRoot:$policy,
