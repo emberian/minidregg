@@ -84,14 +84,24 @@ pub(super) struct ExactReceiptPin {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ShareIssuePin {
-    /// Only the source-authored exact ingress is staged here. Native op29
-    /// replays the event/nullifier; no issuer approval or attempt is imported.
+    /// The carrier determines which distinct native historical lookup may
+    /// interpret these exact bytes. No default maps event 22 to event 15.
+    pub kind: ShareIssueKind,
+    /// Only the source-authored exact ingress is staged here. Native op29 or
+    /// op55 replays its own event/nullifier; no issuer attempt is imported.
     pub ingress: PathBuf,
     pub ingress_sha256: String,
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
     pub image_boundary: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum ShareIssueKind {
+    BareEvent15,
+    GrainBackedEvent22,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -266,12 +276,14 @@ pub(super) fn validate_refs(refs: &[SharedApplicationRef], tool: &ToolTask) -> R
 /// A callback must use a supervised native client/Host route, retain the exact
 /// input and binary reply, and return only the Host-inspected JSON. In
 /// particular, `BirthLookup` is native op3 over the exact signed call and
-/// `IssueLookup` is op29 over exact ingress. Neither may resubmit a transition.
+/// `IssueLookup` selects op29 or op55 by an explicit pinned carrier kind over
+/// exact ingress. Neither may resubmit a transition.
 pub(super) enum NativeOperation {
     BirthLookup {
         call: PathBuf,
     },
     IssueLookup {
+        kind: ShareIssueKind,
         ingress: PathBuf,
     },
     SignedRead {
@@ -397,6 +409,7 @@ pub(super) fn resolve_with(
         return Err("shared application exact birth call changed during lookup".into());
     }
     let issue_receipt = run(NativeOperation::IssueLookup {
+        kind: reference.issue.kind,
         ingress: issue_ingress.clone(),
     })?;
     receipt_matches(
@@ -524,6 +537,7 @@ mod tests {
             ticket_observe_capability: "203".into(),
             birth: pin("/private/birth-call.bin", &"a".repeat(64)),
             issue: ShareIssuePin {
+                kind: ShareIssueKind::BareEvent15,
                 ingress: PathBuf::from("/private/issue-ingress.bin"),
                 ingress_sha256: "b".repeat(64),
                 transaction_id: "5".into(),
@@ -610,6 +624,19 @@ mod tests {
         let mut invalid = reference();
         invalid.application_family = "other".into();
         assert!(validate_refs(&[invalid], &tool()).is_err());
+    }
+
+    #[test]
+    fn issue_carrier_kind_is_required_and_cannot_fall_back_to_event15() {
+        let mut encoded = serde_json::to_value(reference().issue).unwrap();
+        assert_eq!(encoded["kind"], json!("bareEvent15"));
+        encoded.as_object_mut().unwrap().remove("kind");
+        assert!(serde_json::from_value::<ShareIssuePin>(encoded.clone()).is_err());
+        encoded["kind"] = json!("unknownEvent");
+        assert!(serde_json::from_value::<ShareIssuePin>(encoded.clone()).is_err());
+        encoded["kind"] = json!("grainBackedEvent22");
+        let grain: ShareIssuePin = serde_json::from_value(encoded).unwrap();
+        assert_eq!(grain.kind, ShareIssueKind::GrainBackedEvent22);
     }
 
     #[test]
@@ -711,6 +738,7 @@ mod tests {
         }))
         .unwrap();
         let pin = ShareIssuePin {
+            kind: ShareIssueKind::BareEvent15,
             ingress: ingress_path.clone(),
             ingress_sha256: format!("{:x}", Sha256::digest(ingress)),
             transaction_id: "1".into(),

@@ -16,7 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_REQUEST: usize = 22 * 1024 * 1024;
-const MAX_RESPONSE: usize = 16 * 1024;
+// A 24 KiB forward HTTP body is hex-encoded in fixedRequestHex. Include the
+// source context and receipt without truncating or silently failing at 16 KiB.
+const MAX_RESPONSE: usize = 262_144;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
@@ -25,6 +27,22 @@ pub enum Command {
         http_operation_id: String,
         source_request_digest: String,
         canonical_request_hex: String,
+    },
+    ReserveV2 {
+        route_name: String,
+        forward_operation_id: String,
+        fixed_request: Value,
+    },
+    InspectV2 {
+        route_name: String,
+        forward_operation_id: String,
+    },
+    SignPayerV2 {
+        route_name: String,
+        forward_operation_id: String,
+        attempt_id: String,
+        paid_plan_hex: String,
+        source_inspection_json: Value,
     },
     MarkSend {
         attempt_id: String,
@@ -324,6 +342,23 @@ mod tests {
         assert!(decode_hex("AA").is_err());
         assert!(decode_hex("0").is_err());
         assert!(decode_hex("").is_err());
+    }
+
+    #[test]
+    fn v2_reserve_reply_carries_max_profile_body_without_truncation() {
+        let body_hex = "ab".repeat(24 * 1024);
+        let response = json!({"type":"dispatch-reserved-v2",
+            "fixedRequestHex":body_hex,"contextHex":"00",
+            "reserveReceipt":{"transactionId":"1","eventId":"2",
+                "acceptedCount":"3","imageBoundary":"4"}});
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let response_for_writer = response.clone();
+        let send = thread::spawn(move || write_frame(&mut writer, &response_for_writer));
+        let bytes = read_frame(&mut reader).unwrap();
+        send.join().unwrap().unwrap();
+        let decoded: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, response);
+        assert!(bytes.len() > 16 * 1024);
     }
 
     #[cfg(target_os = "linux")]

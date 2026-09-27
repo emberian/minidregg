@@ -299,7 +299,7 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
     }
     if !catalog.api_applications.is_empty() {
         tools.push(json!({"name":"mini_application_api",
-            "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input.",
+            "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input. Path is relative to the signed /repo.git/ API prefix (for example git-receive-pack or info/refs); do not include that prefix in the path.",
             "inputSchema":{"type":"object","properties":{
                 "application":{"type":"string","enum":catalog.api_applications},
                 "method":{"type":"string","enum":["GET","HEAD","POST","PUT","PATCH","DELETE"]},

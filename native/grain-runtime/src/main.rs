@@ -125,6 +125,23 @@ struct DispatchTask {
     charge: String,
     socket_path: PathBuf,
     host_uid: u32,
+    /// Controller-private Mini operator socket for source-owned v2 reserve
+    /// planning/assembly. The ordinary hostSocket remains public receipt IO.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operator_socket: Option<PathBuf>,
+    /// Pinned enrolled identity for the controller's private purse signer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_signer: Option<DispatchSignerPin>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchSignerPin {
+    role: String,
+    index: String,
+    public_key: String,
+    key_id: String,
+    key_epoch: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -727,6 +744,14 @@ struct DispatchAttempt {
     source_request_digest: String,
     reserve_operation_id: Option<u64>,
     #[serde(default)]
+    reserve_v2_dir: Option<PathBuf>,
+    #[serde(default)]
+    reserve_v2_request_sha256: Option<String>,
+    #[serde(default)]
+    reserve_v2_plan_sha256: Option<String>,
+    #[serde(default)]
+    reserve_v2_source_sha256: Option<String>,
+    #[serde(default)]
     dispatch_generation: Option<String>,
     #[serde(default)]
     dispatch_post_root: Option<String>,
@@ -1216,6 +1241,23 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Re-enter a private pre-send artifact only if its entire retained byte
+/// sequence is unchanged. A partial prior write stays explicit and cannot
+/// silently become a new approval on retry.
+fn retain_exact_private(path: &Path, bytes: &[u8], limit: usize) -> Result<()> {
+    if bytes.is_empty() || bytes.len() > limit {
+        return Err("private custody artifact exceeds its bound".into());
+    }
+    if path.exists() {
+        if bounded_regular_file(path, limit)? != bytes {
+            return Err("retained private custody artifact differs from prior attempt".into());
+        }
+        Ok(())
+    } else {
+        write_new(path, bytes)
+    }
+}
+
 fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 131_072 {
@@ -1487,6 +1529,27 @@ fn decimal(s: &str, label: &str) -> Result<()> {
     }
 }
 
+fn previous_accepted_index(accepted: &str) -> Result<String> {
+    decimal(accepted, "accepted count")?;
+    if accepted == "0" || accepted.len() > 80 {
+        return Err("accepted count cannot identify a preceding history index".into());
+    }
+    let mut digits = accepted.as_bytes().to_vec();
+    for digit in digits.iter_mut().rev() {
+        if *digit == b'0' {
+            *digit = b'9';
+        } else {
+            *digit -= 1;
+            break;
+        }
+    }
+    let first = digits
+        .iter()
+        .position(|digit| *digit != b'0')
+        .unwrap_or(digits.len() - 1);
+    String::from_utf8(digits[first..].to_vec()).map_err(|error| error.to_string())
+}
+
 fn grain_observation_grants(
     authority: &Authority,
     parent: Option<(&str, &str)>,
@@ -1704,6 +1767,47 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("dispatchTask requires a distinct absolute custody key path".into());
         }
+        if let Some(operator_socket) = &d.operator_socket {
+            if !operator_socket.is_absolute()
+                || c.host_socket.as_ref() == Some(operator_socket)
+                || operator_socket == &d.socket_path
+                || operator_socket == &c.control_socket
+            {
+                return Err("dispatchTask operatorSocket must be distinct and absolute".into());
+            }
+            let parent = operator_socket
+                .parent()
+                .ok_or("dispatchTask operatorSocket parent absent")?;
+            let directory = fs::symlink_metadata(parent)
+                .map_err(|error| format!("dispatchTask operatorSocket parent: {error}"))?;
+            let named = fs::symlink_metadata(operator_socket)
+                .map_err(|error| format!("dispatchTask operatorSocket: {error}"))?;
+            if !directory.file_type().is_dir()
+                || directory.uid() != unsafe { libc::geteuid() }
+                || directory.mode() & 0o077 != 0
+                || !named.file_type().is_socket()
+                || named.uid() != unsafe { libc::geteuid() }
+                || named.mode() & 0o077 != 0
+            {
+                return Err("dispatchTask operatorSocket must be owner-private".into());
+            }
+        }
+        if let Some(signer) = &d.reserve_signer {
+            decimal(&signer.role, "dispatchTask.reserveSigner.role")?;
+            decimal(&signer.index, "dispatchTask.reserveSigner.index")?;
+            decimal(&signer.key_id, "dispatchTask.reserveSigner.keyId")?;
+            decimal(&signer.key_epoch, "dispatchTask.reserveSigner.keyEpoch")?;
+            if signer.public_key.len() != 64
+                || !signer
+                    .public_key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(
+                    "dispatchTask.reserveSigner.publicKey must be lowercase Ed25519 hex".into(),
+                );
+            }
+        }
         if !d.socket_path.is_absolute()
             || d.socket_path.starts_with(&c.state_dir)
             || d.socket_path == c.control_socket
@@ -1839,8 +1943,15 @@ fn validate(c: &Config) -> Result<()> {
                 .dispatch_task
                 .as_ref()
                 .ok_or("application API routes require a distinct dispatchTask")?;
+            if dispatch.operator_socket.is_none() {
+                return Err("application API routes require dispatchTask.operatorSocket".into());
+            }
+            if dispatch.reserve_signer.is_none() {
+                return Err("application API routes require dispatchTask.reserveSigner".into());
+            }
             application_api_tools::validate_routes(
                 &t.allowed_application_api_routes,
+                &c.task,
                 &dispatch.task,
                 &dispatch.subject,
                 dispatch.host_uid,
@@ -2257,7 +2368,8 @@ impl Runtime {
             .config
             .dispatch_task
             .as_ref()
-            .ok_or("dispatchTask absent")?;
+            .ok_or("dispatchTask absent")?
+            .clone();
         if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
             || source
                 .pointer("/grain/operation/type")
@@ -2350,6 +2462,113 @@ impl Runtime {
         attempt: &DispatchAttempt,
         hold: &HeldCharge,
     ) -> Result<(u64, ReserveAnchor)> {
+        if let Some(directory) = &attempt.reserve_v2_dir {
+            let id = attempt
+                .reserve_operation_id
+                .ok_or("v2 reserve operation ID absent")?;
+            if *directory
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("agent-reserve-{:016}", attempt.id))
+                || !hold.reserve_confirmed
+                || hold.reserve_refused
+                || hold.reserve_attempt.as_ref() != Some(directory)
+                || hold.reserve
+                    != self
+                        .config
+                        .dispatch_task
+                        .as_ref()
+                        .ok_or("dispatchTask absent")?
+                        .reserve
+                || sha256_file(&directory.join("request.bin"))?
+                    != attempt
+                        .reserve_v2_request_sha256
+                        .as_deref()
+                        .ok_or("v2 reserve request digest absent")?
+                || sha256_file(&directory.join("plan.bin"))?
+                    != attempt
+                        .reserve_v2_plan_sha256
+                        .as_deref()
+                        .ok_or("v2 reserve plan digest absent")?
+                || sha256_file(&directory.join("call.bin"))?
+                    != hold
+                        .reserve_call_sha256
+                        .as_deref()
+                        .ok_or("v2 reserve call digest absent")?
+                || sha256_file(
+                    &self
+                        .config
+                        .state_dir
+                        .join(format!("dispatch-reserve-source-{id:016}.json")),
+                )? != hold
+                    .reserve_source_sha256
+                    .as_deref()
+                    .ok_or("v2 reserve source digest absent")?
+                || hold.reserve_source_sha256 != attempt.reserve_v2_source_sha256
+            {
+                return Err("v2 reserve retained custody differs from journal".into());
+            }
+            let outcome_path = hold
+                .reserve_outcome_path
+                .as_ref()
+                .ok_or("v2 reserve outcome path absent")?;
+            if outcome_path.parent() != Some(directory.as_path())
+                || !outcome_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name == "submit.outcome.bin"
+                            || name.starts_with("lookup-") && name.ends_with(".outcome.bin")
+                    })
+                || sha256_file(outcome_path)?
+                    != hold
+                        .reserve_outcome_sha256
+                        .as_deref()
+                        .ok_or("v2 reserve outcome digest absent")?
+            {
+                return Err("v2 reserve retained outcome differs from journal".into());
+            }
+            let anchor = hold
+                .reserve_anchor
+                .as_ref()
+                .ok_or("v2 reserve original anchor absent")?;
+            let original: Value = serde_json::from_slice(&bounded_regular_file(
+                &outcome_path.with_extension("json"),
+                131_072,
+            )?)
+            .map_err(|error| format!("v2 original outcome JSON: {error}"))?;
+            if ReserveAnchor::from_confirmed(&original)? != *anchor {
+                return Err("v2 original outcome differs from held anchor".into());
+            }
+            // Exact public op3 is the only permissible recovery probe.
+            self.command_output(
+                &self.config.mini,
+                &[
+                    "agent-reserve-lookup",
+                    "--attempt",
+                    directory.to_str().ok_or("v2 reserve directory UTF-8")?,
+                ],
+            )?;
+            let receipt: Value = serde_json::from_slice(&bounded_regular_file(
+                &directory.join("receipt.json"),
+                4096,
+            )?)
+            .map_err(|error| format!("v2 retained receipt JSON: {error}"))?;
+            if receipt.get("transactionId").and_then(Value::as_str)
+                != Some(anchor.transaction_id.as_str())
+                || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
+                || receipt.get("acceptedCount").and_then(Value::as_str)
+                    != Some(anchor.accepted_count.as_str())
+                || receipt.get("imageBoundary").and_then(Value::as_str)
+                    != Some(anchor.image_boundary.as_str())
+                || receipt.get("reserveIndex").and_then(Value::as_str)
+                    != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
+            {
+                return Err("v2 current historical receipt differs from original".into());
+            }
+            return Ok((id, anchor.clone()));
+        }
         if !hold.reserve_confirmed
             || hold.reserve_refused
             || hold.reserve
@@ -2494,6 +2713,835 @@ impl Runtime {
     /// paid AgentGrain reserve. The source digest is checked against the full
     /// request again by Mini's v2 dispatch admission; this receipt alone is
     /// never permission to send to fd3.
+    fn verified_reverse_fixed_request(
+        &self,
+        route_name: &str,
+        forward_operation_id: &str,
+        fixed_request: &Value,
+    ) -> Result<(application_api_tools::RoutePin, Value)> {
+        decimal(forward_operation_id, "forward HTTP operation ID")?;
+        let forward_id = forward_operation_id
+            .parse::<u64>()
+            .map_err(|_| "forward HTTP operation ID exceeds u64")?;
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("no retained forward API attempt")?;
+        if !self.prompt_active
+            || self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || attempt.operation_id != forward_id
+            || attempt.route_name != route_name
+            || attempt.phase != ApplicationApiPhase::DispatchStarted
+            || sha256_file(&attempt.request_path)? != attempt.request_sha256
+        {
+            return Err("reverse reserve differs from active retained forward API call".into());
+        }
+        let route = self
+            .config
+            .tool_task
+            .as_ref()
+            .and_then(|task| {
+                task.allowed_application_api_routes
+                    .iter()
+                    .find(|route| route.name == route_name)
+            })
+            .ok_or("reverse reserve route is not operator-pinned")?
+            .clone();
+        let dispatch = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?;
+        if dispatch.operator_socket.is_none() || dispatch.reserve_signer.is_none() {
+            return Err("reverse reserve lacks private operator socket or signer pin".into());
+        }
+        let retained: Value =
+            serde_json::from_slice(&bounded_regular_file(&attempt.request_path, 262_144)?)
+                .map_err(|error| format!("retained forward API request JSON: {error}"))?;
+        if retained.get("operation_id").and_then(Value::as_str) != Some(forward_operation_id) {
+            return Err("retained forward API operation ID changed".into());
+        }
+        let expected = json!({
+            "base": {
+                "issueIndex":route.dispatch_selectors.issue_index,
+                "ticketResource":route.ticket_resource,
+                "packageManifest":route.dispatch_selectors.package_manifest,
+                "snapshotManifest":route.dispatch_selectors.snapshot_manifest,
+                "sessionObserveCapability":route.dispatch_selectors.session_observe,
+                "manifestObserveCapability":route.dispatch_selectors.manifest_observe,
+                "enrollmentObserveCapability":route.dispatch_selectors.enrollment_observe,
+                "http":application_api_tools::routed_reserve_http(
+                    &retained, &route.signed_api_path)?,
+            },
+            "parentTask":self.config.task,
+            "parentCapability":dispatch.parent_capability,
+            "parentObserve":dispatch.parent_observe_capability,
+            "purseTask":dispatch.task,
+            "purseCapability":dispatch.capability,
+            "purseObserve":dispatch.query_capability,
+            "payerSubject":dispatch.subject,
+            "reserveAmount":dispatch.reserve,
+            "maximumCharge":dispatch.charge,
+            "reserveOperationId":"0",
+        });
+        if fixed_request != &expected {
+            return Err(
+                "reverse reserve selectors or routed HTTP differ from operator intent".into(),
+            );
+        }
+        Ok((route, retained))
+    }
+
+    /// Source-owned v2 reserve for exactly the active forward API call. The
+    /// private op58/59 phases expose and seal a plan; only the marked public
+    /// op2 phase can mutate Mini. A lost op2 reply remains in custody for op3
+    /// lookup and never triggers a second submit.
+    fn dispatch_reserve_v2(
+        &mut self,
+        route_name: &str,
+        forward_operation_id: &str,
+        fixed_request: &Value,
+    ) -> Result<Value> {
+        let (route, retained_forward) =
+            self.verified_reverse_fixed_request(route_name, forward_operation_id, fixed_request)?;
+        if self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+        {
+            return Err("dispatch reserve has an unresolved prior custody attempt".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let operator_socket = task
+            .operator_socket
+            .as_ref()
+            .ok_or("operator socket absent")?;
+        let public_socket = self
+            .config
+            .host_socket
+            .clone()
+            .ok_or("public socket absent")?;
+        let signer = task
+            .reserve_signer
+            .as_ref()
+            .ok_or("reserve signer absent")?;
+        let parent = self.query()?;
+        let parent_generation = parent
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("parent generation absent")?
+            .to_owned();
+        let parent_root = parent
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("parent root absent")?
+            .to_owned();
+        if route.parent_task != self.config.task || route.parent_generation != parent_generation {
+            return Err("v2 reserve parent differs from the operator route".into());
+        }
+        if !matches!(
+            parent.pointer("/grain/status").and_then(Value::as_str),
+            Some("3" | "4")
+        ) || self.journal.prompt_witness.is_none()
+        {
+            return Err("parent prompt is not reserved for API dispatch".into());
+        }
+        let authority = self.dispatch()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("dispatch purse status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "dispatch attach",
+                "agent app dispatch attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err("dispatch purse is not available for a fresh reserve".into());
+        }
+        let reserve_operation_id = self.next_id()?;
+        let attempt_id = self.next_id()?;
+        let mut source = fixed_request.clone();
+        source["reserveOperationId"] = json!(reserve_operation_id.to_string());
+        let source_path = self.config.state_dir.join(format!(
+            "dispatch-reserve-source-{reserve_operation_id:016}.json"
+        ));
+        write_new(
+            &source_path,
+            &serde_json::to_vec(&source)
+                .map_err(|error| format!("dispatch reserve source JSON: {error}"))?,
+        )?;
+        let directory = self
+            .config
+            .state_dir
+            .join(format!("agent-reserve-{attempt_id:016}"));
+        fn string(path: &Path) -> Result<&str> {
+            path.to_str()
+                .ok_or_else(|| format!("{} is not UTF-8", path.display()))
+        }
+        self.check_not_cancelled()?;
+        let plan_stdout = self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-reserve-plan",
+                "--host",
+                string(&self.config.host)?,
+                "--config",
+                string(&self.config.host_config)?,
+                "--operator-socket",
+                string(operator_socket)?,
+                "--public-socket",
+                string(&public_socket)?,
+                "--request",
+                string(&source_path)?,
+                "--dir",
+                string(&directory)?,
+            ]);
+            command
+        })?;
+        let read_json = |name: &str| -> Result<Value> {
+            serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
+                .map_err(|error| format!("retained {name} JSON: {error}"))
+        };
+        let request_view = read_json("request-inspected.json")?;
+        let plan_view = read_json("plan-inspected.json")?;
+        if plan_stdout != plan_view
+            || request_view.get("type").and_then(Value::as_str)
+                != Some("application-agent-reserve-request-v2")
+            || plan_view.get("type").and_then(Value::as_str)
+                != Some("application-agent-reserve-plan-v2")
+            || request_view.get("base") != source.get("base")
+            || request_view.get("reserveOperationId") != source.get("reserveOperationId")
+            || request_view.get("parentTask") != source.get("parentTask")
+            || request_view.get("parentCapability") != source.get("parentCapability")
+            || request_view.get("parentObserve") != source.get("parentObserve")
+            || request_view.get("purseTask") != source.get("purseTask")
+            || request_view.get("purseCapability") != source.get("purseCapability")
+            || request_view.get("purseObserve") != source.get("purseObserve")
+            || request_view.get("payerSubject") != source.get("payerSubject")
+            || request_view.get("reserveAmount") != source.get("reserveAmount")
+            || request_view.get("maximumCharge") != source.get("maximumCharge")
+            || request_view.get("canonicalRequestHex") != plan_view.get("canonicalRequestHex")
+        {
+            return Err("source reserve plan differs from exact protected request".into());
+        }
+        application_api_tools::verify_routed_reserve_http(
+            &retained_forward,
+            &route.signed_api_path,
+            &request_view,
+        )?;
+        let context = plan_view
+            .get("context")
+            .ok_or("source reserve context absent")?;
+        let same = |name: &str, expected: &str| -> Result<()> {
+            if context.get(name).and_then(Value::as_str) != Some(expected) {
+                return Err(format!(
+                    "source reserve {name} differs from operator/current pin"
+                ));
+            }
+            Ok(())
+        };
+        same("appResource", &route.app_resource)?;
+        same("appGeneration", &route.app_generation)?;
+        same("sessionResource", &route.session_resource)?;
+        same("sessionGeneration", &route.session_generation)?;
+        same("participantSubject", &route.participant_subject)?;
+        same("ticketResource", &route.ticket_resource)?;
+        same("parentTask", &self.config.task)?;
+        same("parentGeneration", &parent_generation)?;
+        same("purseTask", &task.task)?;
+        same("payerSubject", &task.subject)?;
+        same("reserveAmount", &task.reserve)?;
+        same("maximumCharge", &task.charge)?;
+        same("reserveOperationId", &reserve_operation_id.to_string())?;
+        same("httpOperationId", forward_operation_id)?;
+        if context.get("requestDigest") != request_view.get("httpRequestDigest") {
+            return Err("source reserve context changed exact HTTP digest".into());
+        }
+        let expected_selectors = json!({
+            "issueIndex":route.dispatch_selectors.issue_index,
+            "ticketResource":route.ticket_resource,
+            "packageManifest":route.dispatch_selectors.package_manifest,
+            "snapshotManifest":route.dispatch_selectors.snapshot_manifest,
+            "sessionObserve":route.dispatch_selectors.session_observe,
+            "manifestObserve":route.dispatch_selectors.manifest_observe,
+            "enrollmentObserve":route.dispatch_selectors.enrollment_observe,
+            "parentTask":self.config.task,
+            "parentCapability":task.parent_capability,
+            "parentObserve":task.parent_observe_capability,
+            "purseTask":task.task,
+            "purseCapability":task.capability,
+            "purseObserve":task.query_capability,
+            "payerSubject":task.subject,
+            "reserveAmount":task.reserve,
+            "maximumCharge":task.charge,
+        });
+        if plan_view.get("fixedSelectors") != Some(&expected_selectors) {
+            return Err("source reserve selectors differ from operator pins".into());
+        }
+        let canonical_http_hex = plan_view
+            .get("canonicalHttpHex")
+            .and_then(Value::as_str)
+            .ok_or("source canonical HTTP absent")?;
+        let canonical_http = dispatch_custody::decode_hex(canonical_http_hex)?;
+        if canonical_http.is_empty() || canonical_http.len() > 10 * 1024 * 1024 {
+            return Err("source canonical HTTP exceeds retained bound".into());
+        }
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
+        write_new(&request_path, &canonical_http)?;
+        let slots = plan_view
+            .get("slots")
+            .and_then(Value::as_array)
+            .ok_or("source reserve slots absent")?;
+        if slots.len() != 1 {
+            return Err("first agent purse profile requires exactly one reserve signer".into());
+        }
+        let slot = &slots[0];
+        let slot_field = |key: &str| -> Result<&str> {
+            slot.get(key)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("source reserve slot lacks {key}"))
+        };
+        let signing = slot
+            .get("signing")
+            .ok_or("source reserve signing header absent")?;
+        if slot_field("role")? != signer.role
+            || slot_field("index")? != signer.index
+            || signing.get("decoded").and_then(Value::as_bool) != Some(true)
+            || signing.get("keyId").and_then(Value::as_str) != Some(&signer.key_id)
+            || signing.get("keyEpoch").and_then(Value::as_str) != Some(&signer.key_epoch)
+            || signing.get("algorithm").and_then(Value::as_str) != Some("1")
+        {
+            return Err("source reserve signer differs from operator enrollment pin".into());
+        }
+        let header = dispatch_custody::decode_hex(slot_field("headerHex")?)?;
+        let approval = json!({
+            "type":"minidregg-agent-reserve-approval-v1",
+            "requestSha256":sha256_file(&directory.join("request.bin"))?,
+            "planSha256":sha256_file(&directory.join("plan.bin"))?,
+            "fixedSelectors":expected_selectors,
+            "signers":[{"role":signer.role,"index":signer.index,
+                "keyId":signer.key_id,"keyEpoch":signer.key_epoch,
+                "publicKey":signer.public_key,"headerSha256":sha256_bytes(&header)?,
+                "keyPath":task.custody_key}],
+        });
+        let approval_path = self.config.state_dir.join(format!(
+            "dispatch-reserve-approval-{reserve_operation_id:016}.json"
+        ));
+        write_new(
+            &approval_path,
+            &serde_json::to_vec(&approval)
+                .map_err(|error| format!("reserve approval JSON: {error}"))?,
+        )?;
+        self.journal.dispatch_attempt = Some(DispatchAttempt {
+            id: attempt_id,
+            http_operation_id: forward_operation_id.into(),
+            parent_generation: parent_generation.clone(),
+            parent_root: parent_root.clone(),
+            request_path: request_path.clone(),
+            request_bytes: canonical_http.len(),
+            request_sha256: sha256_file(&request_path)?,
+            source_request_digest: context
+                .get("requestDigest")
+                .and_then(Value::as_str)
+                .ok_or("source request digest absent")?
+                .into(),
+            reserve_operation_id: Some(reserve_operation_id),
+            reserve_v2_dir: Some(directory.clone()),
+            reserve_v2_request_sha256: Some(sha256_file(&directory.join("request.bin"))?),
+            reserve_v2_plan_sha256: Some(sha256_file(&directory.join("plan.bin"))?),
+            reserve_v2_source_sha256: Some(sha256_file(&source_path)?),
+            dispatch_generation: None,
+            dispatch_post_root: None,
+            no_send_release_started: false,
+            audited_charge: None,
+            settlement: None,
+            send_started: false,
+            committed_dispatch_transaction: None,
+            committed_dispatch_event: None,
+            committed_permit_sha256: None,
+            response_sha256: None,
+        });
+        self.save()?;
+        self.mark_hold_as(
+            AuthoritySlot::Dispatch,
+            &authority,
+            &task.reserve,
+            &task.charge,
+        )?;
+        self.check_not_cancelled()?;
+        self.work_output(
+            &self.config.mini,
+            &[
+                "agent-reserve-seal",
+                "--attempt",
+                string(&directory)?,
+                "--approval",
+                string(&approval_path)?,
+            ],
+        )
+        .map_err(|error| format!("agent reserve seal: {error}"))?;
+        // The op2 marker is written by the client before any public send. A
+        // failure after this point is uncertain and can only use exact op3.
+        self.check_not_cancelled()?;
+        self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args(["agent-reserve-submit", "--attempt", string(&directory)?]);
+            command
+        })?;
+        let receipt = read_json("receipt.json")?;
+        let original = read_json("submit.outcome.json")?;
+        let anchor = ReserveAnchor::from_confirmed(&original)?;
+        if receipt.get("transactionId").and_then(Value::as_str)
+            != Some(anchor.transaction_id.as_str())
+            || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
+            || receipt.get("acceptedCount").and_then(Value::as_str)
+                != Some(anchor.accepted_count.as_str())
+            || receipt.get("imageBoundary").and_then(Value::as_str)
+                != Some(anchor.image_boundary.as_str())
+        {
+            return Err("v2 reserve custody receipt differs from original native outcome".into());
+        }
+        let reserve_index = receipt
+            .get("reserveIndex")
+            .and_then(Value::as_str)
+            .ok_or("reserve receipt index absent")?;
+        if previous_accepted_index(&anchor.accepted_count)?.as_str() != reserve_index {
+            return Err("reserve receipt history index differs from accepted count".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_mut()
+            .ok_or("v2 reserve hold disappeared")?;
+        hold.reserve_attempt = Some(directory.clone());
+        hold.reserve_confirmed = true;
+        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
+        hold.reserve_source_sha256 = Some(sha256_file(&source_path)?);
+        hold.reserve_outcome_path = Some(directory.join("submit.outcome.bin"));
+        hold.reserve_outcome_sha256 = Some(sha256_file(&directory.join("submit.outcome.bin"))?);
+        hold.reserve_anchor = Some(anchor.clone());
+        self.save()?;
+        // This op3 is receipt-only. It cannot submit a second reserve, and
+        // the client requires the exact historical anchor.
+        self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args(["agent-reserve-lookup", "--attempt", string(&directory)?]);
+            command
+        })?;
+        let state = self.query_as(&authority)?;
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+        {
+            return Err("confirmed v2 reserve lacks signed held purse".into());
+        }
+        let dispatch_generation = state
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("v2 purse generation absent")?
+            .to_owned();
+        let dispatch_post_root = state
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("v2 purse root absent")?
+            .to_owned();
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("v2 reserve attempt disappeared")?;
+        attempt.dispatch_generation = Some(dispatch_generation);
+        attempt.dispatch_post_root = Some(dispatch_post_root);
+        self.save()?;
+        let fixed_request_hex = request_view
+            .get("canonicalRequestHex")
+            .and_then(Value::as_str)
+            .ok_or("v2 canonical fixed request absent")?;
+        let context_hex = context
+            .get("canonicalHex")
+            .and_then(Value::as_str)
+            .ok_or("v2 canonical context absent")?;
+        Ok(
+            json!({"type":"dispatch-reserved-v2", "attemptId":attempt_id.to_string(),
+            "httpOperationId":forward_operation_id,
+            "reserveOperationId":reserve_operation_id.to_string(),
+            "fixedRequestHex":fixed_request_hex,
+            "contextHex":context_hex,
+            "reserveIndex":reserve_index,"reserveReceipt":anchor}),
+        )
+    }
+
+    fn dispatch_inspect_v2(&self, route_name: &str, forward_operation_id: &str) -> Result<Value> {
+        decimal(forward_operation_id, "forward HTTP operation ID")?;
+        let forward_id = forward_operation_id
+            .parse::<u64>()
+            .map_err(|_| "forward HTTP operation ID exceeds u64")?;
+        let forward = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("no retained forward API attempt")?;
+        if forward.operation_id != forward_id
+            || forward.route_name != route_name
+            || sha256_file(&forward.request_path)? != forward.request_sha256
+        {
+            return Err("reverse inspection differs from retained forward call".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("no retained v2 dispatch attempt")?;
+        let directory = attempt
+            .reserve_v2_dir
+            .as_ref()
+            .ok_or("retained dispatch is not a v2 reserve")?;
+        if attempt.http_operation_id != forward_operation_id {
+            return Err("v2 dispatch attempt differs from forward operation".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .ok_or("v2 dispatch hold absent")?;
+        if !hold.reserve_confirmed || attempt.dispatch_generation.is_none() {
+            return Ok(json!({"type":"dispatch-reserve-uncertain-v2",
+                "httpOperationId":forward_operation_id,
+                "attemptId":attempt.id.to_string()}));
+        }
+        let (reserve_id, anchor) = self.verified_dispatch_reserve_hold(attempt, hold)?;
+        let request: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("request-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("v2 inspected request JSON: {error}"))?;
+        let plan: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("v2 inspected plan JSON: {error}"))?;
+        if sha256_file(&directory.join("request.bin"))?
+            != attempt
+                .reserve_v2_request_sha256
+                .as_deref()
+                .ok_or("v2 request hash absent")?
+            || sha256_file(&directory.join("plan.bin"))?
+                != attempt
+                    .reserve_v2_plan_sha256
+                    .as_deref()
+                    .ok_or("v2 plan hash absent")?
+            || request.get("canonicalRequestHex") != plan.get("canonicalRequestHex")
+            || request
+                .pointer("/base/http/operationId")
+                .and_then(Value::as_str)
+                != Some(forward_operation_id)
+            || plan
+                .pointer("/context/reserveOperationId")
+                .and_then(Value::as_str)
+                != Some(reserve_id.to_string().as_str())
+        {
+            return Err("v2 inspected request or plan differs from custody".into());
+        }
+        Ok(json!({"type":"dispatch-reserved-v2",
+            "attemptId":attempt.id.to_string(),
+            "httpOperationId":forward_operation_id,
+            "reserveOperationId":reserve_id.to_string(),
+            "fixedRequestHex":request.get("canonicalRequestHex")
+                .and_then(Value::as_str).ok_or("v2 fixed request absent")?,
+            "contextHex":plan.pointer("/context/canonicalHex")
+                .and_then(Value::as_str).ok_or("v2 context absent")?,
+            "reserveIndex":previous_accepted_index(&anchor.accepted_count)?,
+            "reserveReceipt":anchor}))
+    }
+
+    /// The resident supplies an op48 paid plan, but only the controller's
+    /// retained reserve, protected signer pin, and a fresh source inspection
+    /// can approve use of the private purse key. The Mini client independently
+    /// reauthors op48 from the original confirmed reserve before signing.
+    fn dispatch_sign_payer_v2(
+        &mut self,
+        route_name: &str,
+        forward_operation_id: &str,
+        attempt_id: &str,
+        paid_plan_hex: &str,
+        resident_inspection: &Value,
+    ) -> Result<Value> {
+        let confirmed = self.dispatch_inspect_v2(route_name, forward_operation_id)?;
+        if confirmed.get("type").and_then(Value::as_str) != Some("dispatch-reserved-v2")
+            || confirmed.get("attemptId").and_then(Value::as_str) != Some(attempt_id)
+        {
+            return Err("payer request lacks exact confirmed v2 reserve".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || !self.prompt_active
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("agent parent no longer permits payer signing".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("payer reserve attempt absent")?;
+        if attempt.send_started
+            || attempt.no_send_release_started
+            || attempt.audited_charge.is_some()
+        {
+            return Err("payer reserve is no longer available for paid dispatch".into());
+        }
+        let reserve_dir = attempt
+            .reserve_v2_dir
+            .as_ref()
+            .ok_or("payer reserve custody directory absent")?
+            .clone();
+        let task = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?;
+        let operator_socket = task
+            .operator_socket
+            .as_ref()
+            .ok_or("private operator socket absent")?;
+        let signer = task
+            .reserve_signer
+            .as_ref()
+            .ok_or("protected purse signer pin absent")?;
+        if paid_plan_hex.len() > 2 * 10 * 1024 * 1024 {
+            return Err("paid plan exceeds native custody bound".into());
+        }
+        let plan_bytes = dispatch_custody::decode_hex(paid_plan_hex)?;
+        if plan_bytes.is_empty() {
+            return Err("paid plan is empty".into());
+        }
+        let plan_sha = sha256_bytes(&plan_bytes)?;
+        let plan_path = self
+            .config
+            .state_dir
+            .join(format!("agent-payer-plan-{attempt_id}.bin"));
+        retain_exact_private(&plan_path, &plan_bytes, 10 * 1024 * 1024)?;
+        let inspected_path = self
+            .config
+            .state_dir
+            .join(format!("agent-payer-inspection-{attempt_id}.json"));
+        if !inspected_path.exists() {
+            let strings = [
+                self.config
+                    .host_config
+                    .to_str()
+                    .ok_or("Host config path UTF-8")?,
+                plan_path.to_str().ok_or("paid plan path UTF-8")?,
+                inspected_path
+                    .to_str()
+                    .ok_or("paid inspection path UTF-8")?,
+            ];
+            self.work_output(
+                &self.config.host,
+                &[
+                    strings[0],
+                    "inspect",
+                    "application-agent-paid-dispatch-plan",
+                    strings[1],
+                    strings[2],
+                ],
+            )
+            .map_err(|error| format!("paid plan source inspection: {error}"))?;
+        }
+        let paid: Value =
+            serde_json::from_slice(&bounded_regular_file(&inspected_path, 2_097_152)?)
+                .map_err(|error| format!("source paid plan inspection JSON: {error}"))?;
+        if &paid != resident_inspection
+            || paid.get("type").and_then(Value::as_str)
+                != Some("application-agent-paid-dispatch-plan-v2")
+            || paid.get("canonicalPlanHex").and_then(Value::as_str) != Some(paid_plan_hex)
+        {
+            return Err("resident paid plan differs from pinned Host inspection".into());
+        }
+        let original: Value = serde_json::from_slice(&bounded_regular_file(
+            &reserve_dir.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("original reserve inspection JSON: {error}"))?;
+        let receipt: Value = serde_json::from_slice(&bounded_regular_file(
+            &reserve_dir.join("receipt.json"),
+            4096,
+        )?)
+        .map_err(|error| format!("original reserve receipt JSON: {error}"))?;
+        if paid.get("fixedSelectors") != original.get("fixedSelectors")
+            || paid.get("context") != original.get("context")
+            || paid.get("canonicalHttpHex") != original.get("canonicalHttpHex")
+            || paid.get("reserveIndex") != receipt.get("reserveIndex")
+            || confirmed.get("reserveReceipt")
+                != Some(&json!({
+                    "transactionId": receipt.get("transactionId"),
+                    "eventId": receipt.get("eventId"),
+                    "acceptedCount": receipt.get("acceptedCount"),
+                    "imageBoundary": receipt.get("imageBoundary"),
+                }))
+        {
+            return Err("paid plan differs from exact confirmed reserve".into());
+        }
+        let compact = paid
+            .get("compactSelectorRequestHex")
+            .and_then(Value::as_str)
+            .ok_or("paid compact selector request absent")?;
+        let compact_sha = sha256_bytes(&dispatch_custody::decode_hex(compact)?)?;
+        let slots = paid
+            .get("payerSlots")
+            .and_then(Value::as_array)
+            .ok_or("paid payer slots absent")?;
+        if slots.len() != 1 {
+            return Err("first purse profile requires exactly one payer slot".into());
+        }
+        let slot = &slots[0];
+        let signing = slot.get("signing").ok_or("payer signing header absent")?;
+        if slot.get("role").and_then(Value::as_str) != Some(&signer.role)
+            || slot.get("index").and_then(Value::as_str) != Some(&signer.index)
+            || signing.get("decoded").and_then(Value::as_bool) != Some(true)
+            || signing.get("keyId").and_then(Value::as_str) != Some(&signer.key_id)
+            || signing.get("keyEpoch").and_then(Value::as_str) != Some(&signer.key_epoch)
+            || signing.get("algorithm").and_then(Value::as_str) != Some("1")
+        {
+            return Err("paid payer slot differs from protected signer pin".into());
+        }
+        let header = dispatch_custody::decode_hex(
+            slot.get("headerHex")
+                .and_then(Value::as_str)
+                .ok_or("payer signing header hex absent")?,
+        )?;
+        let approval = json!({
+            "type":"minidregg-agent-payer-approval-v1",
+            "planSha256":plan_sha,
+            "compactSelectorRequestSha256":compact_sha,
+            "fixedSelectors":original.get("fixedSelectors"),
+            "context":original.get("context"),
+            "canonicalHttpHex":original.get("canonicalHttpHex"),
+            "reserveIndex":receipt.get("reserveIndex"),
+            "reserveReceipt":receipt,
+            "signers":[{
+                "role":signer.role,"index":signer.index,
+                "publicKey":signer.public_key,"keyId":signer.key_id,
+                "keyEpoch":signer.key_epoch,"headerSha256":sha256_bytes(&header)?,
+            }],
+        });
+        let approval_path = self
+            .config
+            .state_dir
+            .join(format!("agent-payer-approval-{attempt_id}.json"));
+        let approval_bytes = serde_json::to_vec(&approval)
+            .map_err(|error| format!("payer approval JSON: {error}"))?;
+        retain_exact_private(&approval_path, &approval_bytes, 2_097_152)?;
+        // A helper crash can leave a private directory without its final
+        // signature artifact. The helper performs no native mutation. Preserve
+        // that directory, and on a later exact-plan request use a fresh one;
+        // never reinterpret a partial directory as a completed approval.
+        let payer_base = self
+            .config
+            .state_dir
+            .join(format!("agent-payer-{attempt_id}"));
+        let mut payer_dir = None;
+        for retry in 0..=9999 {
+            let candidate = if retry == 0 {
+                payer_base.clone()
+            } else {
+                self.config
+                    .state_dir
+                    .join(format!("agent-payer-{attempt_id}-retry-{retry:04}"))
+            };
+            if !candidate.exists() || candidate.join("payer-signatures.json").exists() {
+                payer_dir = Some(candidate);
+                break;
+            }
+        }
+        let payer_dir = payer_dir.ok_or("payer signing retry directory limit reached")?;
+        if !payer_dir.exists() {
+            let args = [
+                "agent-payer-sign",
+                "--host",
+                self.config.host.to_str().ok_or("Host path UTF-8")?,
+                "--config",
+                self.config
+                    .host_config
+                    .to_str()
+                    .ok_or("Host config path UTF-8")?,
+                "--operator-socket",
+                operator_socket
+                    .to_str()
+                    .ok_or("operator socket path UTF-8")?,
+                "--reserve-attempt",
+                reserve_dir.to_str().ok_or("reserve path UTF-8")?,
+                "--plan",
+                plan_path.to_str().ok_or("payer plan path UTF-8")?,
+                "--approval",
+                approval_path.to_str().ok_or("payer approval path UTF-8")?,
+                "--key",
+                task.custody_key.to_str().ok_or("payer key path UTF-8")?,
+                "--dir",
+                payer_dir.to_str().ok_or("payer directory UTF-8")?,
+            ];
+            self.work_output(&self.config.mini, &args)
+                .map_err(|error| format!("agent payer source signing: {error}"))?;
+        }
+        let signatures: Value = serde_json::from_slice(&bounded_regular_file(
+            &payer_dir.join("payer-signatures.json"),
+            65_536,
+        )?)
+        .map_err(|error| format!("retained payer signatures JSON: {error}"))?;
+        if signatures.get("type").and_then(Value::as_str)
+            != Some("minidregg-agent-payer-signatures-v1")
+            || signatures.get("paidPlanSha256").and_then(Value::as_str) != Some(&plan_sha)
+            || signatures
+                .get("compactSelectorRequestSha256")
+                .and_then(Value::as_str)
+                != Some(&compact_sha)
+            || signatures
+                .get("originalRequestSha256")
+                .and_then(Value::as_str)
+                != Some(&sha256_file(&reserve_dir.join("request.bin"))?)
+            || signatures.get("reserveReceipt") != approval.get("reserveReceipt")
+        {
+            return Err("retained payer signatures differ from exact approved plan".into());
+        }
+        let values = signatures
+            .get("signatures")
+            .and_then(Value::as_array)
+            .ok_or("retained payer signatures absent")?;
+        if values.len() != 1
+            || values[0].as_str().is_none_or(|signature| {
+                signature.len() != 128
+                    || !signature
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        {
+            return Err("retained payer signature has invalid shape".into());
+        }
+        self.check_not_cancelled()?;
+        if !self.prompt_active
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("agent parent disconnected before payer signature reply".into());
+        }
+        Ok(json!({"type":"payer-signatures-v2","attemptId":attempt_id,
+            "planSha256":plan_sha,"signatures":values}))
+    }
+
     fn dispatch_reserve(
         &mut self,
         canonical_request: &[u8],
@@ -2557,6 +3605,10 @@ impl Runtime {
             request_sha256: sha256_file(&request_path)?,
             source_request_digest: source_request_digest.into(),
             reserve_operation_id: None,
+            reserve_v2_dir: None,
+            reserve_v2_request_sha256: None,
+            reserve_v2_plan_sha256: None,
+            reserve_v2_source_sha256: None,
             dispatch_generation: None,
             dispatch_post_root: None,
             no_send_release_started: false,
@@ -2745,6 +3797,15 @@ impl Runtime {
         }
         if sha256_file(&attempt.request_path)? != request_sha256 {
             return Err("retained dispatch request bytes changed".into());
+        }
+        if attempt.reserve_v2_dir.is_some() {
+            self.verified_dispatch_reserve_hold(
+                &attempt,
+                self.journal
+                    .dispatch_hold
+                    .as_ref()
+                    .ok_or("v2 reserve hold absent")?,
+            )?;
         }
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
@@ -2941,6 +4002,28 @@ impl Runtime {
                 let request = dispatch_custody::decode_hex(&canonical_request_hex)?;
                 self.dispatch_reserve(&request, &source_request_digest, &http_operation_id)
             }
+            C::ReserveV2 {
+                route_name,
+                forward_operation_id,
+                fixed_request,
+            } => self.dispatch_reserve_v2(&route_name, &forward_operation_id, &fixed_request),
+            C::InspectV2 {
+                route_name,
+                forward_operation_id,
+            } => self.dispatch_inspect_v2(&route_name, &forward_operation_id),
+            C::SignPayerV2 {
+                route_name,
+                forward_operation_id,
+                attempt_id,
+                paid_plan_hex,
+                source_inspection_json,
+            } => self.dispatch_sign_payer_v2(
+                &route_name,
+                &forward_operation_id,
+                &attempt_id,
+                &paid_plan_hex,
+                &source_inspection_json,
+            ),
             C::MarkSend {
                 attempt_id: id,
                 request_sha256,
@@ -3852,7 +4935,13 @@ impl Runtime {
                         );
                     self.supervised_json_command(command)
                 }
-                shared_app_refs::NativeOperation::IssueLookup { ingress } => {
+                shared_app_refs::NativeOperation::IssueLookup { kind, ingress } => {
+                    if kind != shared_app_refs::ShareIssueKind::BareEvent15 {
+                        return Err(
+                            "grain-backed share issue requires the qualified public op55 receipt route"
+                                .into(),
+                        );
+                    }
                     let socket = self
                         .config
                         .host_socket
@@ -4786,6 +5875,17 @@ impl Runtime {
         {
             return Err("application API route has no confirmed local session birth".into());
         }
+        let parent = self.query()?;
+        if route.parent_task != self.config.task
+            || parent.pointer("/grain/generation").and_then(Value::as_str)
+                != Some(route.parent_generation.as_str())
+            || !matches!(
+                parent.pointer("/grain/status").and_then(Value::as_str),
+                Some("3" | "4")
+            )
+        {
+            return Err("application API route differs from current signed parent".into());
+        }
         let operation_id = self.next_id()?;
         self.application_api_send_gate.reset()?;
         let dispatch = application_api_tools::dispatch_request(operation_id, &input);
@@ -4995,9 +6095,10 @@ impl Runtime {
         Ok(())
     }
 
-    /// After a crash, inspect the exact operation ID on the same host
-    /// invocation. Inspection is read-only and never constructs a dispatch
-    /// request or clears an unresolved purse hold.
+    /// After a crash, inspect the exact operation ID under the original saved
+    /// binding. The current protected socket may belong to a new invocation;
+    /// the host must match its historical received.json anchor. Inspection is
+    /// read-only and never constructs a dispatch request or clears a hold.
     fn inspect_application_api(&self) -> Result<Value> {
         let attempt = self
             .journal
@@ -5017,46 +6118,29 @@ impl Runtime {
                     .find(|route| route.name == attempt.route_name)
             })
             .ok_or("retained application API route is absent")?;
+        let Some(binding) = attempt.binding_sha256.as_deref() else {
+            // No forward dispatch frame can begin before a checked binding
+            // is durably saved. This is a local read-only custody report.
+            return Ok(json!({"operationId":attempt.operation_id.to_string(),
+                "phase":attempt.phase,"host":null,"recoveredHttp":null}));
+        };
         let deadline = Instant::now() + Duration::from_secs(30);
-        let hello = application_api_tools::exchange_once(
-            &route.socket_path,
-            route.host_uid,
-            &application_api_tools::hello_request(),
-            deadline,
-        )
-        .map_err(|error| format!("application API read-only hello: {error:?}"))?;
-        let (binding, invocation) = application_api_tools::verify_binding(
-            application_api_tools::parse_host_reply(hello)?,
-            route,
-        )?;
-        if attempt
-            .binding_sha256
-            .as_deref()
-            .is_some_and(|saved| saved != binding)
-            || attempt
-                .host_invocation
-                .as_deref()
-                .is_some_and(|saved| saved != invocation)
-        {
-            return Err(
-                "application API host invocation or binding changed; operator audit required"
-                    .into(),
-            );
-        }
         let response = application_api_tools::exchange_once(
             &route.socket_path,
             route.host_uid,
-            &application_api_tools::inspect_request(attempt.operation_id),
+            &application_api_tools::inspect_historical_request(attempt.operation_id, binding)?,
             deadline,
         )
         .map_err(|error| format!("application API read-only inspect: {error:?}"))?;
         let reply = application_api_tools::parse_host_reply(response)?;
-        application_api_tools::verify_operation_reply(&reply, attempt.operation_id, &binding)?;
+        application_api_tools::verify_operation_reply(&reply, attempt.operation_id, binding)?;
         if !matches!(reply, application_api_tools::HostReply::Inspection { .. }) {
             return Err("application API inspect returned a non-inspection reply".into());
         }
+        let recovered =
+            application_api_tools::recovered_definite_http(&reply, attempt.operation_id, binding)?;
         Ok(json!({"operationId":attempt.operation_id.to_string(),
-            "phase":attempt.phase,"host":reply}))
+            "phase":attempt.phase,"host":reply,"recoveredHttp":recovered}))
     }
     fn provider_lease_current(&self, lease: &provider::LeaseId) -> Result<()> {
         if self.provider_lease.as_ref() != Some(lease)
@@ -8614,6 +9698,268 @@ impl Runtime {
             }
         }
     }
+    fn recover_v2_dispatch_reserve(&mut self) -> Result<()> {
+        let Some(attempt) = self.journal.dispatch_attempt.clone() else {
+            return Ok(());
+        };
+        let Some(directory) = attempt.reserve_v2_dir.as_ref() else {
+            return Ok(());
+        };
+        // The first post-op2 save records the confirmed hold and anchor.
+        // A later save records signed purse generation/root after exact op3.
+        // Crashing between those saves must resume lookup, not mistake the
+        // first phase for a fully reconstructed reserve.
+        if self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .is_some_and(|hold| hold.reserve_confirmed)
+            && attempt.dispatch_generation.is_some()
+            && attempt.dispatch_post_root.is_some()
+        {
+            return Ok(());
+        }
+        let id = attempt.reserve_operation_id.ok_or("v2 reserve ID absent")?;
+        if *directory
+            != self
+                .config
+                .state_dir
+                .join(format!("agent-reserve-{:016}", attempt.id))
+            || sha256_file(&directory.join("request.bin"))?
+                != attempt
+                    .reserve_v2_request_sha256
+                    .as_deref()
+                    .ok_or("v2 reserve request hash absent")?
+            || sha256_file(&directory.join("plan.bin"))?
+                != attempt
+                    .reserve_v2_plan_sha256
+                    .as_deref()
+                    .ok_or("v2 reserve plan hash absent")?
+            || sha256_file(
+                &self
+                    .config
+                    .state_dir
+                    .join(format!("dispatch-reserve-source-{id:016}.json")),
+            )? != attempt
+                .reserve_v2_source_sha256
+                .as_deref()
+                .ok_or("v2 reserve source hash absent")?
+        {
+            return Err("v2 reserve source custody changed during recovery".into());
+        }
+        let authority = self.dispatch()?;
+        if !directory.join("submit-marker.json").exists() {
+            // Seal and plan are read-only. The client writes this marker
+            // durably before it can issue public op2, so its absence proves
+            // no native reserve was dispatched from this attempt.
+            let hold = self.journal.dispatch_hold.clone();
+            let state = self.query_as(&authority)?;
+            if state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                || hold.as_ref().is_some_and(|hold| {
+                    state.pointer("/grain/generation").and_then(Value::as_str)
+                        != Some(hold.before_generation.as_str())
+                        || state.get("targetRoot").and_then(Value::as_str)
+                            != Some(hold.before_target_root.as_str())
+                })
+            {
+                return Err("v2 no-submit recovery differs from signed purse origin".into());
+            }
+            self.journal.dispatch_hold = None;
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+            return Ok(());
+        }
+        // A submit marker means op2 may have crossed. Public op3 is the
+        // only recovery action, including when the original reply was lost.
+        self.command_output(
+            &self.config.mini,
+            &[
+                "agent-reserve-lookup",
+                "--attempt",
+                directory.to_str().ok_or("v2 reserve path UTF-8")?,
+            ],
+        )?;
+        let original: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("receipt.json"),
+            4096,
+        )?)
+        .map_err(|error| format!("v2 recovered receipt JSON: {error}"))?;
+        let anchor = ReserveAnchor {
+            transaction_id: original
+                .get("transactionId")
+                .and_then(Value::as_str)
+                .ok_or("v2 receipt transaction absent")?
+                .into(),
+            event_id: original
+                .get("eventId")
+                .and_then(Value::as_str)
+                .ok_or("v2 receipt event absent")?
+                .into(),
+            accepted_count: original
+                .get("acceptedCount")
+                .and_then(Value::as_str)
+                .ok_or("v2 receipt accepted count absent")?
+                .into(),
+            image_boundary: original
+                .get("imageBoundary")
+                .and_then(Value::as_str)
+                .ok_or("v2 receipt boundary absent")?
+                .into(),
+        };
+        for field in [
+            &anchor.transaction_id,
+            &anchor.event_id,
+            &anchor.accepted_count,
+            &anchor.image_boundary,
+        ] {
+            decimal(field, "recovered v2 reserve receipt")?;
+        }
+        if original.get("reserveIndex").and_then(Value::as_str)
+            != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
+        {
+            return Err("v2 recovered receipt index differs from accepted count".into());
+        }
+        let call_hash = sha256_file(&directory.join("call.bin"))?;
+        if let Some(held) = self.journal.dispatch_hold.as_ref() {
+            if held.reserve_confirmed
+                && (held.reserve_anchor.as_ref() != Some(&anchor)
+                    || held.reserve_attempt.as_ref() != Some(directory)
+                    || held.reserve_call_sha256.as_deref() != Some(call_hash.as_str()))
+            {
+                return Err("v2 confirmed hold differs from exact recovered receipt".into());
+            }
+        }
+        let plan: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("v2 reserve source plan inspection: {error}"))?;
+        let task = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?
+            .clone();
+        if plan
+            .pointer("/context/reserveOperationId")
+            .and_then(Value::as_str)
+            != Some(id.to_string().as_str())
+            || plan.pointer("/context/purseTask").and_then(Value::as_str)
+                != Some(task.task.as_str())
+            || plan
+                .pointer("/context/reserveAmount")
+                .and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+            || plan
+                .pointer("/context/requestDigest")
+                .and_then(Value::as_str)
+                != Some(attempt.source_request_digest.as_str())
+            || plan
+                .pointer("/context/parentGeneration")
+                .and_then(Value::as_str)
+                != Some(attempt.parent_generation.as_str())
+            || self.journal.dispatch_hold.as_ref().is_some_and(|held| {
+                plan.pointer("/context/purseGeneration")
+                    .and_then(Value::as_str)
+                    != Some(held.before_generation.as_str())
+                    || held.reserve != task.reserve
+            })
+        {
+            return Err("v2 recovered source plan differs from held purse origin".into());
+        }
+        let state = self.query_as(&authority)?;
+        let before_generation = self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .ok_or("v2 reserve hold absent")?
+            .before_generation
+            .parse::<u64>()
+            .map_err(|_| "v2 held purse generation invalid")?;
+        let expected_generation = before_generation
+            .checked_add(1)
+            .ok_or("v2 held purse generation overflow")?
+            .to_string();
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+            || state.pointer("/grain/generation").and_then(Value::as_str)
+                != Some(expected_generation.as_str())
+            || attempt
+                .dispatch_generation
+                .as_ref()
+                .is_some_and(|generation| {
+                    state.pointer("/grain/generation").and_then(Value::as_str)
+                        != Some(generation.as_str())
+                })
+            || attempt.dispatch_post_root.as_ref().is_some_and(|root| {
+                state.get("targetRoot").and_then(Value::as_str) != Some(root.as_str())
+            })
+        {
+            return Err("v2 recovered reserve lacks signed held purse".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_mut()
+            .ok_or("v2 recovered hold disappeared")?;
+        hold.reserve_attempt = Some(directory.clone());
+        hold.reserve_confirmed = true;
+        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
+        hold.reserve_source_sha256 = attempt.reserve_v2_source_sha256.clone();
+        let outcome = directory.join("submit.outcome.bin");
+        if outcome.exists() && outcome.with_extension("json").exists() {
+            let observed: Value = serde_json::from_slice(&bounded_regular_file(
+                &outcome.with_extension("json"),
+                131_072,
+            )?)
+            .map_err(|error| format!("v2 original outcome JSON: {error}"))?;
+            if ReserveAnchor::from_confirmed(&observed)? != anchor {
+                return Err("v2 original outcome differs from recovered receipt".into());
+            }
+            hold.reserve_outcome_path = Some(outcome.clone());
+            hold.reserve_outcome_sha256 = Some(sha256_file(&outcome)?);
+        } else {
+            // A lost original op2 reply can still be proven by op3; retain
+            // its exact bytes as the durable original for later audits.
+            let mut index = 0u16;
+            while directory
+                .join(format!("lookup-{index:04}.outcome.bin"))
+                .exists()
+            {
+                index += 1;
+            }
+            if index == 0 {
+                return Err("v2 reserve lookup yielded no retained outcome".into());
+            }
+            let recovered = directory.join(format!("lookup-{:04}.outcome.bin", index - 1));
+            hold.reserve_outcome_sha256 = Some(sha256_file(&recovered)?);
+            hold.reserve_outcome_path = Some(recovered);
+        }
+        hold.reserve_anchor = Some(anchor);
+        let saved = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("v2 recovered attempt disappeared")?;
+        saved.dispatch_generation = Some(
+            state
+                .pointer("/grain/generation")
+                .and_then(Value::as_str)
+                .ok_or("v2 recovered generation absent")?
+                .into(),
+        );
+        saved.dispatch_post_root = Some(
+            state
+                .get("targetRoot")
+                .and_then(Value::as_str)
+                .ok_or("v2 recovered root absent")?
+                .into(),
+        );
+        self.save()
+    }
+
     fn recover(&mut self) -> Result<()> {
         if let Some(record) = self.journal.child.clone() {
             let unit = record.unit.as_deref().ok_or(
@@ -8649,6 +9995,7 @@ impl Runtime {
             ));
             self.save()?;
         }
+        self.recover_v2_dispatch_reserve()?;
         self.retry_pending_slot(AuthoritySlot::Dispatch)?;
         if self.journal.dispatch_pending.is_none()
             && self.journal.dispatch_hold.as_ref().is_some_and(|hold| {
@@ -10511,6 +11858,31 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_payer_approval_reenters_with_exact_bytes_only() {
+        let path = std::env::temp_dir().join(format!(
+            "mini-payer-approval-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // A permitted full HTTP projection can make approval JSON larger than
+        // the old 64 KiB retry cap even though it fits the source profile.
+        let mut approval = b"{\"canonicalHttpHex\":\"".to_vec();
+        approval.extend(std::iter::repeat_n(b'a', 80_000));
+        approval.extend_from_slice(b"\"}");
+        assert!(approval.len() > 65_536);
+        retain_exact_private(&path, &approval, 2_097_152).unwrap();
+        retain_exact_private(&path, &approval, 2_097_152).unwrap();
+        let mut changed = approval.clone();
+        changed[32] = b'b';
+        assert!(retain_exact_private(&path, &changed, 2_097_152).is_err());
+        assert_eq!(fs::read(&path).unwrap(), approval);
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn application_api_journal_rejects_changed_request_and_repeated_id() {

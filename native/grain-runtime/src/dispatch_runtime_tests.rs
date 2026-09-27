@@ -3,6 +3,173 @@ use super::*;
 
 #[cfg(target_os = "linux")]
 #[test]
+fn confirmed_v2_reserve_recovers_missing_signed_purse_coordinate_after_crash() {
+    let root = std::env::temp_dir().join(format!(
+        "mini-v2-reserve-crash-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let state = root.join("state");
+    fs::create_dir_all(&state).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o711)).unwrap();
+    let mini = root.join("mock-mini");
+    let script = r#"#!/bin/sh
+set -eu
+state='__STATE__'
+case "$1" in
+  agent-reserve-lookup)
+    printf looked-up > "$state/lookup-called"
+    ;;
+  query)
+    shift
+    dir=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --dir) dir=$2; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    mkdir -p "$dir"
+    printf '%s\n' '{"page":{"root":"200","grain":{"task":"7103","generation":"2","status":"3","remaining":"5","reserved":"5"}}}' > "$dir/view.json"
+    printf '%s\n' '{"signing":[{"authorityRoot":"300"}],"imageBoundary":"400"}' > "$dir/challenge.json"
+    ;;
+  *) exit 40 ;;
+esac
+"#
+    .replace("__STATE__", state.to_str().unwrap());
+    fs::write(&mini, script).unwrap();
+    fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = Config {
+        mini,
+        host: root.join("host"),
+        host_config: root.join("host-config.json"),
+        host_socket: Some(root.join("mini.sock")),
+        control_socket: state.join("control.sock"),
+        custody_key: root.join("parent.key"),
+        state_dir: state.clone(),
+        cwd: root.clone(),
+        task: "7101".into(),
+        subject: "7".into(),
+        capability: "71".into(),
+        query_capability: "74".into(),
+        policy_control_capability: Some("72".into()),
+        tool_task: None,
+        dispatch_task: Some(DispatchTask {
+            task: "7103".into(),
+            subject: "9".into(),
+            capability: "91".into(),
+            query_capability: "92".into(),
+            custody_key: root.join("dispatch.key"),
+            parent_capability: "73".into(),
+            parent_observe_capability: "75".into(),
+            reserve: "5".into(),
+            charge: "2".into(),
+            socket_path: root.join("dispatch.sock"),
+            host_uid: unsafe { libc::geteuid() } + 1,
+            operator_socket: None,
+            reserve_signer: None,
+        }),
+        provider_task: None,
+        commands: vec![],
+    };
+    let directory = state.join("agent-reserve-0000000000000007");
+    fs::create_dir(&directory).unwrap();
+    let source = state.join("dispatch-reserve-source-0000000000000008.json");
+    let request_path = state.join("dispatch-0000000000000007.canonical-request");
+    fs::write(&source, b"source").unwrap();
+    fs::write(&request_path, b"http").unwrap();
+    fs::write(directory.join("request.bin"), b"request").unwrap();
+    fs::write(directory.join("plan.bin"), b"plan").unwrap();
+    fs::write(directory.join("call.bin"), b"call").unwrap();
+    fs::write(directory.join("submit-marker.json"), b"{}").unwrap();
+    fs::write(directory.join("submit.outcome.bin"), b"outcome").unwrap();
+    fs::write(
+        directory.join("submit.outcome.json"),
+        br#"{"type":"confirmed","confirmation":"installed","transactionId":"11","eventId":"12","acceptedCount":"13","imageBoundary":"300"}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.join("receipt.json"),
+        br#"{"transactionId":"11","eventId":"12","acceptedCount":"13","imageBoundary":"300","reserveIndex":"12"}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.join("plan-inspected.json"),
+        br#"{"context":{"reserveOperationId":"8","purseTask":"7103","reserveAmount":"5","requestDigest":"1234","parentGeneration":"1","purseGeneration":"1"}}"#,
+    )
+    .unwrap();
+    let anchor = ReserveAnchor {
+        transaction_id: "11".into(),
+        event_id: "12".into(),
+        accepted_count: "13".into(),
+        image_boundary: "300".into(),
+    };
+    let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
+    runtime.journal.dispatch_attempt = Some(DispatchAttempt {
+        id: 7,
+        http_operation_id: "50".into(),
+        parent_generation: "1".into(),
+        parent_root: "100".into(),
+        request_path: request_path.clone(),
+        request_bytes: 4,
+        request_sha256: sha256_file(&request_path).unwrap(),
+        source_request_digest: "1234".into(),
+        reserve_operation_id: Some(8),
+        reserve_v2_dir: Some(directory.clone()),
+        reserve_v2_request_sha256: Some(sha256_file(&directory.join("request.bin")).unwrap()),
+        reserve_v2_plan_sha256: Some(sha256_file(&directory.join("plan.bin")).unwrap()),
+        reserve_v2_source_sha256: Some(sha256_file(&source).unwrap()),
+        dispatch_generation: None,
+        dispatch_post_root: None,
+        no_send_release_started: false,
+        audited_charge: None,
+        settlement: None,
+        send_started: false,
+        committed_dispatch_transaction: None,
+        committed_dispatch_event: None,
+        committed_permit_sha256: None,
+        response_sha256: None,
+    });
+    runtime.journal.dispatch_hold = Some(HeldCharge {
+        reserve: "5".into(),
+        charge: "2".into(),
+        before_generation: "1".into(),
+        before_target_root: "100".into(),
+        reserve_attempt: Some(directory.clone()),
+        reserve_confirmed: true,
+        reserve_refused: false,
+        reserve_boundary: Some("300".into()),
+        reserve_call_sha256: Some(sha256_file(&directory.join("call.bin")).unwrap()),
+        reserve_source_sha256: Some(sha256_file(&source).unwrap()),
+        reserve_outcome_path: Some(directory.join("submit.outcome.bin")),
+        reserve_outcome_sha256: Some(sha256_file(&directory.join("submit.outcome.bin")).unwrap()),
+        reserve_anchor: Some(anchor.clone()),
+    });
+    runtime.save().unwrap();
+    // This is exactly the first post-op2 save: confirmed hold, no copied
+    // generation/post-root yet. Recovery must perform lookup, not return.
+    runtime.recover_v2_dispatch_reserve().unwrap();
+    assert!(state.join("lookup-called").exists());
+    let repaired = runtime.journal.dispatch_attempt.as_ref().unwrap();
+    assert_eq!(repaired.dispatch_generation.as_deref(), Some("2"));
+    assert_eq!(repaired.dispatch_post_root.as_deref(), Some("200"));
+    assert_eq!(
+        runtime
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .unwrap()
+            .reserve_anchor,
+        Some(anchor)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn separate_dispatch_reserve_is_one_shot_and_cannot_abort_after_send() {
     let root = std::env::temp_dir().join(format!(
         "mini-dispatch-runtime-{}-{}",
@@ -114,6 +281,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             charge: "2".into(),
             socket_path: socket_dir.join("dispatch.sock"),
             host_uid: unsafe { libc::geteuid() } + 1,
+            operator_socket: None,
+            reserve_signer: None,
         }),
         provider_task: None,
         commands: vec![],

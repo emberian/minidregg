@@ -25,6 +25,7 @@ const MAX_BODY_BYTES: usize = 24 * 1024;
 const MAX_PATH_QUERY_BYTES: usize = 8192;
 const MAX_HEADERS: usize = 128;
 const MAX_FORWARD_FRAME: usize = 262_144;
+const MAX_INSPECT_REPLY_FRAME: usize = 1_048_576;
 const PROTOCOL: &str = "mini-spk-agent-api-v1";
 
 const ORDINARY_HEADERS: &[&str] = &[
@@ -76,12 +77,101 @@ pub(crate) fn inspect_request(operation_id: u64) -> Value {
     json!({"type":"inspect","protocol":PROTOCOL,"operation_id":operation_id.to_string()})
 }
 
+pub(crate) fn inspect_historical_request(
+    operation_id: u64,
+    binding_sha256: &str,
+) -> Result<Value, String> {
+    if !lowercase_hex64(binding_sha256) {
+        return Err("application API historical binding digest is invalid".into());
+    }
+    let mut request = inspect_request(operation_id);
+    request["binding_sha256"] = json!(binding_sha256);
+    Ok(request)
+}
+
 pub(crate) fn dispatch_request(operation_id: u64, input: &HttpInput) -> Value {
     json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":operation_id.to_string(),
         "method":input.method,"path":input.path,"query":input.query,
         "headers":input.ordered_headers.iter().map(|(name,value)|
             json!({"name":name,"value":value})).collect::<Vec<_>>(),
         "body_hex":hex(&input.body)})
+}
+
+/// Compare the Host's source-decoded reserve request with the exact forward
+/// call retained before socket I/O. The only routing transform permitted by
+/// the first SPK API bridge is its operator-pinned signed `/repo.git/` prefix.
+/// The model may choose a path relative to that prefix and ordinary headers, but may not substitute any
+/// different bytes when asking the controller to spend its purse.
+pub(crate) fn routed_reserve_http(
+    retained_forward: &Value,
+    signed_api_path: &str,
+) -> Result<Value, String> {
+    // The first application profile has one native GitWeb API bridge. Future
+    // prefixes need a separately qualified source/host mapping, not a generic
+    // string concatenation rule chosen by the model.
+    if signed_api_path != "/repo.git/" {
+        return Err("signed API prefix differs from the first native bridge".into());
+    }
+    let operation_id = retained_forward
+        .get("operation_id")
+        .and_then(Value::as_str)
+        .ok_or("retained forward operation ID absent")?;
+    if !canonical_decimal(operation_id) {
+        return Err("retained forward operation ID is not canonical".into());
+    }
+    let field = |key: &str| -> Result<&str, String> {
+        retained_forward
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("retained forward {key} absent"))
+    };
+    let method = field("method")?;
+    let path = field("path")?;
+    let query = field("query")?;
+    let body_hex = field("body_hex")?;
+    if path.starts_with('/') || path.contains(['?', '#']) || query.contains('#') {
+        return Err("retained forward path or query differs from API profile".into());
+    }
+    let headers = retained_forward
+        .get("headers")
+        .and_then(Value::as_array)
+        .ok_or("retained forward ordered headers absent")?
+        .iter()
+        .map(|header| {
+            let name = header
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("retained forward header name absent")?;
+            let value = header
+                .get("value")
+                .and_then(Value::as_str)
+                .ok_or("retained forward header value absent")?;
+            Ok(
+                json!({"nameHex":hex(name.as_bytes()),"valueHex":hex(value.as_bytes()),
+                "generated":false}),
+            )
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(json!({
+        "operationId": operation_id,
+        "methodHex": hex(method.as_bytes()),
+        "pathHex": hex(format!("{}{path}", &signed_api_path[1..]).as_bytes()),
+        "queryHex": hex(query.as_bytes()),
+        "headers": headers,
+        "bodyHex": body_hex,
+    }))
+}
+
+pub(crate) fn verify_routed_reserve_http(
+    retained_forward: &Value,
+    signed_api_path: &str,
+    source_inspection: &Value,
+) -> Result<(), String> {
+    let expected = routed_reserve_http(retained_forward, signed_api_path)?;
+    if source_inspection.pointer("/base/http") != Some(&expected) {
+        return Err("source reserve HTTP differs from retained forward call".into());
+    }
+    Ok(())
 }
 
 /// An operator-selected forward route to one fixed resident API session.
@@ -100,8 +190,26 @@ pub(crate) struct RoutePin {
     pub session_generation: String,
     pub ticket_resource: String,
     pub participant_subject: String,
+    pub parent_task: String,
+    pub parent_generation: String,
     pub purse_resource: String,
     pub dispatch_generation: String,
+    pub signed_api_path: String,
+    pub dispatch_selectors: DispatchSelectorPin,
+}
+
+/// Operator pins for every selection field the source reserve plan exposes.
+/// These are compared byte-for-byte with the source inspection before the
+/// controller approves purse signing; native op46 remains the authority.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DispatchSelectorPin {
+    pub issue_index: String,
+    pub package_manifest: String,
+    pub snapshot_manifest: String,
+    pub session_observe: String,
+    pub manifest_observe: String,
+    pub enrollment_observe: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -114,8 +222,11 @@ pub(crate) struct FixedBinding {
     pub session_generation: String,
     pub subject: String,
     pub ticket: String,
-    pub dispatch_task: String,
-    pub dispatch_generation: String,
+    pub parent_task: String,
+    pub parent_generation: String,
+    pub purse_task: String,
+    pub purse_generation: String,
+    pub signed_api_path: String,
     pub host_unit: String,
     pub host_invocation: String,
 }
@@ -125,7 +236,7 @@ pub(crate) struct FixedBinding {
 pub(crate) enum HostReply {
     Binding {
         protocol: String,
-        binding: FixedBinding,
+        binding: Box<FixedBinding>,
         binding_sha256: String,
     },
     Http {
@@ -153,6 +264,12 @@ pub(crate) enum HostReply {
         operation_id: String,
         binding_sha256: String,
         state: String,
+        #[serde(default)]
+        definite_reply_json_hex: Option<String>,
+        #[serde(default)]
+        definite_reply_sha256: Option<String>,
+        #[serde(default)]
+        retention_error: Option<String>,
     },
 }
 
@@ -180,11 +297,15 @@ impl FixedBinding {
                 &self.session_generation,
                 &self.subject,
                 &self.ticket,
-                &self.dispatch_task,
-                &self.dispatch_generation,
+                &self.parent_task,
+                &self.parent_generation,
+                &self.purse_task,
+                &self.purse_generation,
             ]
             .iter()
             .all(|value| canonical_decimal(value))
+            || self.parent_task == self.purse_task
+            || self.signed_api_path != "/repo.git/"
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || !clean_text(&self.host_unit)
@@ -225,8 +346,11 @@ pub(crate) fn verify_binding(
         || binding.session_generation != route.session_generation
         || binding.subject != route.participant_subject
         || binding.ticket != route.ticket_resource
-        || binding.dispatch_task != route.purse_resource
-        || binding.dispatch_generation != route.dispatch_generation
+        || binding.parent_task != route.parent_task
+        || binding.parent_generation != route.parent_generation
+        || binding.purse_task != route.purse_resource
+        || binding.purse_generation != route.dispatch_generation
+        || binding.signed_api_path != route.signed_api_path
         || binding.host_unit != route.host_unit
         || !lowercase_hex64(&binding_sha256)
         || binding.fingerprint()? != binding_sha256
@@ -303,12 +427,23 @@ pub(crate) fn verify_operation_reply(
             operation_id,
             binding_sha256,
             state,
+            definite_reply_json_hex,
+            definite_reply_sha256,
+            retention_error,
         } => {
             if !matches!(
                 state.as_str(),
                 "not-seen" | "received" | "delivery-requested" | "definite" | "uncertain"
             ) {
                 return Err("application API inspection state is invalid".into());
+            }
+            if definite_reply_json_hex.is_some() != definite_reply_sha256.is_some()
+                || (state != "definite" && definite_reply_json_hex.is_some())
+                || retention_error.as_deref().is_some_and(|error| {
+                    state != "uncertain" || error != "definite-reply-unverified"
+                })
+            {
+                return Err("application API recovered reply fields are inconsistent".into());
             }
             (protocol, operation_id, binding_sha256)
         }
@@ -318,6 +453,68 @@ pub(crate) fn verify_operation_reply(
         return Err("application API operation reply identity differs".into());
     }
     Ok(())
+}
+
+/// Recover only exact retained HTTP bytes from read-only inspection. A host
+/// which cannot verify its retained definite reply reports an explicit
+/// uncertain retention error; that remains terminal without a result.
+pub(crate) fn recovered_definite_http(
+    inspection: &HostReply,
+    operation_id: u64,
+    binding_sha256: &str,
+) -> Result<Option<HostReply>, String> {
+    verify_operation_reply(inspection, operation_id, binding_sha256)?;
+    let HostReply::Inspection {
+        state,
+        definite_reply_json_hex,
+        definite_reply_sha256,
+        ..
+    } = inspection
+    else {
+        return Err("application API recovery requires an inspection".into());
+    };
+    let (Some(encoded), Some(expected)) = (definite_reply_json_hex, definite_reply_sha256) else {
+        return Ok(None);
+    };
+    if state != "definite"
+        || !lowercase_hex64(expected)
+        || encoded.len() > MAX_FORWARD_FRAME * 2
+        || !encoded.len().is_multiple_of(2)
+    {
+        return Err("application API recovered definite bytes exceed bound".into());
+    }
+    let bytes = decode_hex_bounded(encoded, MAX_FORWARD_FRAME)?;
+    let digest = hex(&Sha256::digest(&bytes));
+    if &digest != expected {
+        return Err("application API recovered definite reply digest differs".into());
+    }
+    let reply: HostReply = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("application API exact definite reply JSON: {error}"))?;
+    if !matches!(reply, HostReply::Http { .. }) {
+        return Err("application API retained definite reply is not HTTP".into());
+    }
+    verify_operation_reply(&reply, operation_id, binding_sha256)?;
+    Ok(Some(reply))
+}
+
+fn decode_hex_bounded(value: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
+    if !value.len().is_multiple_of(2) || value.len() > 2 * max_bytes {
+        return Err("application API recovered hex exceeds byte bound".into());
+    }
+    let mut decoded = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let digit = |byte| match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        };
+        let value = digit(pair[0])
+            .zip(digit(pair[1]))
+            .map(|(high, low)| high * 16 + low)
+            .ok_or("application API recovered hex is not lowercase")?;
+        decoded.push(value);
+    }
+    Ok(decoded)
 }
 
 fn canonical_decimal(value: &str) -> bool {
@@ -330,11 +527,13 @@ fn canonical_decimal(value: &str) -> bool {
 
 pub(crate) fn validate_routes(
     routes: &[RoutePin],
+    parent_task: &str,
     purse_resource: &str,
     participant_subject: &str,
     host_uid: u32,
 ) -> Result<(), String> {
     if routes.len() > 16
+        || !canonical_decimal(parent_task)
         || !canonical_decimal(purse_resource)
         || !canonical_decimal(participant_subject)
     {
@@ -356,7 +555,10 @@ pub(crate) fn validate_routes(
             || route.host_unit.len() > 256
             || !clean_text(&route.host_unit)
             || route.purse_resource != purse_resource
+            || route.parent_task != parent_task
+            || route.parent_task == route.purse_resource
             || route.participant_subject != participant_subject
+            || route.signed_api_path != "/repo.git/"
         {
             return Err("application API route differs from operator dispatch binding".into());
         }
@@ -366,15 +568,25 @@ pub(crate) fn validate_routes(
             &route.ticket_resource,
             &route.participant_subject,
             &route.purse_resource,
+            &route.parent_task,
+            &route.dispatch_selectors.package_manifest,
+            &route.dispatch_selectors.snapshot_manifest,
+            &route.dispatch_selectors.session_observe,
+            &route.dispatch_selectors.manifest_observe,
+            &route.dispatch_selectors.enrollment_observe,
         ] {
             if !canonical_decimal(value) || value == "0" {
                 return Err("application API route resource identity is not canonical".into());
             }
         }
+        if !canonical_decimal(&route.dispatch_selectors.issue_index) {
+            return Err("application API issue history index is not canonical".into());
+        }
         if [
             &route.app_generation,
             &route.session_generation,
             &route.dispatch_generation,
+            &route.parent_generation,
         ]
         .iter()
         .any(|generation| !canonical_decimal(generation))
@@ -849,7 +1061,12 @@ fn exchange_once_guarded(
         .1
         .map_err(|error| TransportError::Uncertain(format!("host reply header: {error}")))?;
     let size = u32::from_be_bytes(size) as usize;
-    if size == 0 || size > MAX_FORWARD_FRAME {
+    let max_reply = if request.get("type").and_then(Value::as_str) == Some("inspect") {
+        MAX_INSPECT_REPLY_FRAME
+    } else {
+        MAX_FORWARD_FRAME
+    };
+    if size == 0 || size > max_reply {
         return Err(TransportError::Uncertain(
             "host reply exceeds frame bound".into(),
         ));
@@ -1096,7 +1313,7 @@ mod tests {
     }
 
     fn request() -> Value {
-        json!({"application":"workroom", "method":"POST", "path":"repo.git/git-receive-pack",
+        json!({"application":"workroom", "method":"POST", "path":"git-receive-pack",
             "query":"service=git-receive-pack", "headers":[{"name":"content-type","value":"application/x-git-receive-pack-request"}],
             "bodyHex":"000102ff"})
     }
@@ -1106,7 +1323,7 @@ mod tests {
         let parsed = parse_input(&request(), &["workroom".into()]).unwrap();
         assert_eq!(parsed.body, [0, 1, 2, 255]);
         assert_eq!(parsed.ordered_headers[0].0, "content-type");
-        assert_eq!(parsed.path, "repo.git/git-receive-pack");
+        assert_eq!(parsed.path, "git-receive-pack");
         assert!(parse_input(&request(), &["other".into()]).is_err());
         let mut extra = request();
         extra["ticketResource"] = json!("17");
@@ -1119,6 +1336,127 @@ mod tests {
         assert!(wire.get("ticket").is_none());
         assert_eq!(hello_request()["type"], "hello");
         assert_eq!(inspect_request(7)["operation_id"], "7");
+        assert_eq!(
+            inspect_historical_request(7, &"a".repeat(64)).unwrap()["binding_sha256"],
+            "a".repeat(64)
+        );
+        assert!(inspect_historical_request(7, "A").is_err());
+    }
+
+    #[test]
+    fn reserve_http_requires_exact_forward_bytes_under_fixed_app_prefix() {
+        let parsed = parse_input(&request(), &["workroom".into()]).unwrap();
+        let retained = dispatch_request(37, &parsed);
+        let expected = json!({"base":{"http":{
+            "operationId":"37",
+            "methodHex":"504f5354",
+            "pathHex":hex(b"repo.git/git-receive-pack"),
+            "queryHex":hex(b"service=git-receive-pack"),
+            "headers":[{"nameHex":hex(b"content-type"),
+                "valueHex":hex(b"application/x-git-receive-pack-request"),
+                "generated":false}],
+            "bodyHex":"000102ff"}}});
+        verify_routed_reserve_http(&retained, "/repo.git/", &expected).unwrap();
+        for key in ["methodHex", "pathHex", "queryHex", "bodyHex", "operationId"] {
+            let mut changed = expected.clone();
+            changed["base"]["http"][key] = json!("00");
+            assert!(
+                verify_routed_reserve_http(&retained, "/repo.git/", &changed).is_err(),
+                "{key}"
+            );
+        }
+        let mut changed = expected.clone();
+        changed["base"]["http"]["headers"][0]["generated"] = json!(true);
+        assert!(verify_routed_reserve_http(&retained, "/repo.git/", &changed).is_err());
+        let mut changed = expected.clone();
+        changed["base"]["http"]["headers"][0]["valueHex"] = json!("00");
+        assert!(verify_routed_reserve_http(&retained, "/repo.git/", &changed).is_err());
+        let mut changed = expected.clone();
+        changed["base"]["http"]["headers"] = json!([]);
+        assert!(verify_routed_reserve_http(&retained, "/repo.git/", &changed).is_err());
+        assert!(verify_routed_reserve_http(&retained, "/other/", &expected).is_err());
+    }
+
+    #[test]
+    fn read_only_inspection_recovers_only_exact_hashed_http_reply() {
+        let binding = "a".repeat(64);
+        let original = HostReply::Http {
+            protocol: PROTOCOL.into(),
+            operation_id: "37".into(),
+            binding_sha256: binding.clone(),
+            status: 200,
+            headers: vec![HostHeader {
+                name: "content-type".into(),
+                value: "text/plain".into(),
+            }],
+            body_hex: "00ff".into(),
+        };
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let exact_hex = hex(&bytes);
+        let digest = hex(&Sha256::digest(&bytes));
+        let inspection = HostReply::Inspection {
+            protocol: PROTOCOL.into(),
+            operation_id: "37".into(),
+            binding_sha256: binding.clone(),
+            state: "definite".into(),
+            definite_reply_json_hex: Some(exact_hex.clone()),
+            definite_reply_sha256: Some(digest.clone()),
+            retention_error: None,
+        };
+        assert_eq!(
+            recovered_definite_http(&inspection, 37, &binding).unwrap(),
+            Some(original)
+        );
+        let corrupt = HostReply::Inspection {
+            protocol: PROTOCOL.into(),
+            operation_id: "37".into(),
+            binding_sha256: binding.clone(),
+            state: "definite".into(),
+            definite_reply_json_hex: Some(exact_hex.clone()),
+            definite_reply_sha256: Some("0".repeat(64)),
+            retention_error: None,
+        };
+        assert!(recovered_definite_http(&corrupt, 37, &binding).is_err());
+        let missing = HostReply::Inspection {
+            protocol: PROTOCOL.into(),
+            operation_id: "37".into(),
+            binding_sha256: binding.clone(),
+            state: "definite".into(),
+            definite_reply_json_hex: None,
+            definite_reply_sha256: None,
+            retention_error: None,
+        };
+        assert_eq!(
+            recovered_definite_http(&missing, 37, &binding).unwrap(),
+            None
+        );
+        let mismatched = HostReply::Inspection {
+            protocol: PROTOCOL.into(),
+            operation_id: "38".into(),
+            binding_sha256: binding.clone(),
+            state: "definite".into(),
+            definite_reply_json_hex: Some(exact_hex),
+            definite_reply_sha256: Some(digest),
+            retention_error: None,
+        };
+        assert!(recovered_definite_http(&mismatched, 37, &binding).is_err());
+        let unverified = HostReply::Inspection {
+            protocol: PROTOCOL.into(),
+            operation_id: "37".into(),
+            binding_sha256: binding.clone(),
+            state: "uncertain".into(),
+            definite_reply_json_hex: None,
+            definite_reply_sha256: None,
+            retention_error: Some("definite-reply-unverified".into()),
+        };
+        assert_eq!(
+            recovered_definite_http(&unverified, 37, &binding).unwrap(),
+            None
+        );
+        let mut invalid = serde_json::to_value(&unverified).unwrap();
+        invalid["state"] = json!("definite");
+        let invalid = parse_host_reply(invalid).unwrap();
+        assert!(verify_operation_reply(&invalid, 37, &binding).is_err());
     }
 
     #[test]
@@ -1150,15 +1488,41 @@ mod tests {
             session_generation: "3".into(),
             ticket_resource: "6408".into(),
             participant_subject: "8".into(),
+            parent_task: "6000".into(),
+            parent_generation: "5".into(),
             purse_resource: "6500".into(),
             dispatch_generation: "4".into(),
+            signed_api_path: "/repo.git/".into(),
+            dispatch_selectors: DispatchSelectorPin {
+                issue_index: "9".into(),
+                package_manifest: "6101".into(),
+                snapshot_manifest: "6102".into(),
+                session_observe: "81".into(),
+                manifest_observe: "82".into(),
+                enrollment_observe: "83".into(),
+            },
         };
-        assert!(validate_routes(std::slice::from_ref(&route), "6500", "8", 1001).is_ok());
-        assert!(validate_routes(&[route.clone(), route.clone()], "6500", "8", 1001).is_err());
-        assert!(validate_routes(std::slice::from_ref(&route), "6501", "8", 1001).is_err());
+        assert!(validate_routes(std::slice::from_ref(&route), "6000", "6500", "8", 1001).is_ok());
+        assert!(
+            validate_routes(&[route.clone(), route.clone()], "6000", "6500", "8", 1001).is_err()
+        );
+        assert!(validate_routes(std::slice::from_ref(&route), "6000", "6501", "8", 1001).is_err());
         let mut changed = route;
         changed.ticket_resource = "06408".into();
-        assert!(validate_routes(&[changed], "6500", "8", 1001).is_err());
+        assert!(validate_routes(&[changed.clone()], "6000", "6500", "8", 1001).is_err());
+        let mut changed = RoutePin {
+            dispatch_selectors: DispatchSelectorPin {
+                issue_index: "00".into(),
+                package_manifest: "6101".into(),
+                snapshot_manifest: "6102".into(),
+                session_observe: "81".into(),
+                manifest_observe: "82".into(),
+                enrollment_observe: "83".into(),
+            },
+            ..changed
+        };
+        changed.ticket_resource = "6408".into();
+        assert!(validate_routes(&[changed], "6000", "6500", "8", 1001).is_err());
     }
 
     #[test]
@@ -1250,8 +1614,19 @@ mod tests {
             session_generation: "3".into(),
             ticket_resource: "6408".into(),
             participant_subject: "8".into(),
+            parent_task: "6000".into(),
+            parent_generation: "5".into(),
             purse_resource: "6500".into(),
             dispatch_generation: "4".into(),
+            signed_api_path: "/repo.git/".into(),
+            dispatch_selectors: DispatchSelectorPin {
+                issue_index: "9".into(),
+                package_manifest: "6101".into(),
+                snapshot_manifest: "6102".into(),
+                session_observe: "81".into(),
+                manifest_observe: "82".into(),
+                enrollment_observe: "83".into(),
+            },
         };
         let binding = FixedBinding {
             protocol: "mini-spk-agent-binding-v1".into(),
@@ -1261,8 +1636,11 @@ mod tests {
             session_generation: "3".into(),
             subject: "8".into(),
             ticket: "6408".into(),
-            dispatch_task: "6500".into(),
-            dispatch_generation: "4".into(),
+            parent_task: "6000".into(),
+            parent_generation: "5".into(),
+            purse_task: "6500".into(),
+            purse_generation: "4".into(),
+            signed_api_path: "/repo.git/".into(),
             host_unit: "spk-host@example.service".into(),
             host_invocation: "0123456789abcdef0123456789abcdef".into(),
         };
@@ -1270,13 +1648,28 @@ mod tests {
         assert_eq!(digest.len(), 64);
         let reply = HostReply::Binding {
             protocol: PROTOCOL.into(),
-            binding: binding.clone(),
+            binding: Box::new(binding.clone()),
             binding_sha256: digest.clone(),
         };
         assert_eq!(
             verify_binding(reply, &route).unwrap(),
             (digest.clone(), binding.host_invocation.clone())
         );
+        assert_ne!(binding.parent_task, binding.purse_task);
+        let wrong_prefix = HostReply::Binding {
+            protocol: PROTOCOL.into(),
+            binding: Box::new(FixedBinding {
+                signed_api_path: "/other/".into(),
+                ..binding.clone()
+            }),
+            binding_sha256: digest.clone(),
+        };
+        assert!(verify_binding(wrong_prefix, &route).is_err());
+        let conflated = FixedBinding {
+            purse_task: binding.parent_task.clone(),
+            ..binding.clone()
+        };
+        assert!(conflated.fingerprint().is_err());
         let reply = parse_host_reply(json!({"type":"inspection","protocol":PROTOCOL,
             "operation_id":"7","binding_sha256":digest,"state":"delivery-requested"}))
         .unwrap();
@@ -1284,10 +1677,10 @@ mod tests {
         assert!(verify_operation_reply(&reply, 8, &binding.fingerprint().unwrap()).is_err());
         let wrong = HostReply::Binding {
             protocol: PROTOCOL.into(),
-            binding: FixedBinding {
+            binding: Box::new(FixedBinding {
                 session_generation: "4".into(),
                 ..binding
-            },
+            }),
             binding_sha256: digest,
         };
         assert!(verify_binding(wrong, &route).is_err());
