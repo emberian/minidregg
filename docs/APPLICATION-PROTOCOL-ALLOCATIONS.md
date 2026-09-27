@@ -17,6 +17,7 @@ reservation does not establish an implemented or accepted native path.
 | 16 | Application lifecycle current claim | Reserved for durable claim admission |
 | 17 | Selected fn poll coverage | Reserved for bounded local scan coverage tied to an admitted selected release; no remote completeness claim |
 | 18 | Checked application lifecycle completion | Reserved for configured-host attestation and atomic app/manifest completion |
+| 19 | Ordered empty-page consumer progress | Reserved for v2 special admission sharing the selected-coverage frontier; legacy content atom tag 9 remains a distinct namespace |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
