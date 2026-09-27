@@ -1,0 +1,11 @@
+# Callable v3 INSTALL consumer, component gate
+
+The existing `spk-host install-prepare PRIVATE_CONFIG` and `install-complete PRIVATE_CONFIG` entry points now use the v2 launch descriptor and event23–25 lifecycle for `mini-spk-resident-install-v2`. The historical v1 path and artifacts remain separate. Prepare checks the signed SPK and protected launch qualifier from one parse, obtains source-authored op66/67 BEGIN and op68/69 claim plans, then accepts fresh op22 and op26 results before retaining `install-prepared-v2.json`. It never materializes an image or starts an app process.
+
+Complete independently reparses the protected, root-published image, compares its raw identity and launch root to the retained source/claim, and asks Mini to author and inspect the v2 materialized physical report. It signs Mini's exact physical frame with the separate custodian, assembles op70/71, and submits the exact event25 ingress once through op38. A retained op38 submit marker permits only read-only op39 recovery of that original ingress. After a fresh or recovered receipt is durably recorded, exact parent BEGIN/claim/completion markers are retired; per-attempt evidence remains. A later call can complete an interrupted marker retirement.
+
+Op70/71 preparation has no Store acceptance or physical effect. An interrupted preparation before op38 is archived with its exact active marker and reauthored from the same protected image and original BEGIN/claim. The marker is moved inside its still-named attempt before the attempt directory is archived, so either rename crash boundary is recoverable. A saved op71 ingress without an op38 marker is submitted once, while an op38 marker forces lookup. An uncertain op22/op26 in prepare still holds its one-shot markers and requires a separate exact receipt recovery path; it is never resubmitted here.
+
+This is a Rust component gate. No source-matched linked v3 Host/SPK-host pair, Store, root image publication, live INSTALL, or START/STOP physical journey was used. The `prepare-install-config.sh` v3 Host upgrade gate and resident START cut remain separate.
+
+Isolated hbox snapshot `/tank/dregg-build/mini-spk-v3-agent/native/spk-host`, `CARGO_BUILD_JOBS=2`, `MemoryMax=4G`: [focused.log](focused.log) 10/10 scoped tests; [clippy.log](clippy.log) strict all-targets PASS. Exact hashes are in [SHA256SUMS](SHA256SUMS).

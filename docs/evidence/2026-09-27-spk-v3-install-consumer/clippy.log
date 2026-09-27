@@ -1,0 +1,3 @@
+Running as unit: run-re2638496f3d247a397bf4dfdf20a1cce.scope; invocation ID: 1652de6f39a742b881ec3ee6814334fc
+    Checking minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.86s

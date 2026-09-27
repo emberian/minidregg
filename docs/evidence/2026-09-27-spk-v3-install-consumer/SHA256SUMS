@@ -1,0 +1,6 @@
+b6096b0dc65d7fea4973e5d744001f97fe9a81f87f882edab12db57eed26a5ef  native/spk-host/src/install_service.rs
+e8f68397b00d0892f320e95c82f4baca479022698ba2ed6857087f98c76c3c2b  native/spk-host/src/install_v3.rs
+d365e9b668d41bf441a877a9c604039f11a981695e93959bf3ed7ff995fefe53  native/spk-host/src/lifecycle_v3_completion_native.rs
+4d8587a1f7324a52847debc7ef305b246e20f8aa369be7f0be0e6808f529b9a5  native/spk-host/src/lifecycle_v3_report_native.rs
+83cef839bca35458a3bfc0d7b3b5f90ad0b703a9bb7b3e687104746af0241a1d  docs/evidence/2026-09-27-spk-v3-install-consumer/focused.log
+869289d0ee5121ce69fdb579c0a0636d0f0c59c8f8e117eb7d1d0d6a8625e1a0  docs/evidence/2026-09-27-spk-v3-install-consumer/clippy.log

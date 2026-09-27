@@ -1,0 +1,18 @@
+Running as unit: run-r5dfbae31fe13402db3e5b27ec5d07c9b.scope; invocation ID: 7596b68060044b569834ba19b74ee35a
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.03s
+────────────
+ Nextest run ID c4b25d39-ac55-4d41-a7a8-90d21d6feb37 with nextest profile: default
+    Starting 10 tests across 1 binary (127 tests skipped)
+        PASS [   0.007s] ( 1/10) minidregg-spk-host install_service::install_v3::tests::deployment_and_host_pins_are_required_only_for_v2_install
+        PASS [   0.009s] ( 2/10) minidregg-spk-host install_service::install_v3::tests::confirmed_install_retires_only_exact_lifecycle_markers
+        PASS [   0.008s] ( 3/10) minidregg-spk-host install_service::install_v3::tests::incomplete_op70_archive_recovers_each_rename_boundary
+        PASS [   0.007s] ( 4/10) minidregg-spk-host install_service::install_v3::tests::retained_qualifier_must_equal_entire_source_authored_launch
+        PASS [   0.007s] ( 5/10) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_plan_pins_exact_begin_claim_report_and_volume
+        PASS [   0.008s] ( 6/10) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.007s] ( 7/10) minidregg-spk-host lifecycle_v3_completion_native::tests::event25_ingress_and_fresh_outcome_tags_do_not_alias
+        PASS [   0.007s] ( 8/10) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_receipt_order_and_historical_kind_are_distinct
+        PASS [   0.007s] ( 9/10) minidregg-spk-host lifecycle_v3_report_native::tests::report_inspection_requires_exact_observation_and_source_volume
+        PASS [   0.008s] (10/10) minidregg-spk-host lifecycle_v3_completion_native::tests::retained_completion_recovery_requires_exact_originals_and_submit_marker
+────────────
+     Summary [   0.038s] 10 tests run: 10 passed, 127 skipped
