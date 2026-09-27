@@ -11,7 +11,7 @@ use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::dispatch_web_input::physical_web_input;
 use crate::hostd::{DispatchIdentity, Journal};
 use crate::http_response;
-use crate::rpc_adapter::RpcDriver;
+use crate::rpc_adapter::{PrequeueGuard, RpcDriver};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -662,20 +662,18 @@ impl ResidentAgent<'_> {
             &identity.permit_sha256,
             cancelled,
         )?;
+        let prequeue = self.rpc.prepare_cancellable(identity.clone())?;
         self.journal
             .request_dispatch(identity.clone(), &committed.permit)?;
-        write_new(
-            &client_dir,
-            "delivery-requested.json",
-            b"fd3-delivery-requested",
-        )?;
-        record.verify_running_instance()?;
-        let (web_reply, success_fence) = match self.rpc.dispatch_cancellable(
+        let prequeue =
+            write_agent_delivery_marker(prequeue, self.journal, &identity, &client_dir, || {
+                record.verify_running_instance()
+            })?;
+        let (web_reply, success_fence) = match prequeue.dispatch(
             physical.binding,
             physical.request,
             MAX_APP_RESPONSE,
             Duration::from_secs(30),
-            identity.clone(),
             Arc::clone(cancelled),
         ) {
             Ok(reply) => reply,
@@ -723,6 +721,34 @@ impl ResidentAgent<'_> {
                     .finish_dispatch_uncertain_released(&identity, success_fence);
                 Err(error)
             }
+        }
+    }
+}
+
+/// This exact prequeue branch is shared with the hostd A/B regression fixture.
+/// A failed durable marker or liveness check can release the shared slot only
+/// while the linear RPC guard still proves this command was never enqueued.
+pub(crate) fn write_agent_delivery_marker<'a>(
+    prequeue: PrequeueGuard<'a>,
+    journal: &Journal,
+    identity: &DispatchIdentity,
+    client_dir: &Path,
+    verify_running: impl FnOnce() -> io::Result<()>,
+) -> io::Result<PrequeueGuard<'a>> {
+    let outcome = (|| {
+        write_new(
+            client_dir,
+            "delivery-requested.json",
+            b"fd3-delivery-requested",
+        )?;
+        verify_running()
+    })();
+    match outcome {
+        Ok(()) => Ok(prequeue),
+        Err(error) => {
+            let fence = prequeue.abort_no_enqueue();
+            let _ = journal.finish_dispatch_uncertain_released(identity, fence);
+            Err(error)
         }
     }
 }

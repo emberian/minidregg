@@ -191,6 +191,42 @@ pub(crate) struct CancellableFailure {
     fence: Option<Box<DispatchFence>>,
 }
 
+/// Exclusive prequeue custody for one physical operation. A failed host-side
+/// marker write may consume this guard to prove no command was enqueued; once
+/// `dispatch` consumes it, only the worker's release ACK can clear the shared
+/// app slot. Dropping the guard produces no witness.
+pub(crate) struct PrequeueGuard<'a> {
+    driver: &'a mut RpcDriver,
+    identity: DispatchIdentity,
+}
+
+impl PrequeueGuard<'_> {
+    pub(crate) fn abort_no_enqueue(self) -> DispatchFence {
+        DispatchFence {
+            identity: self.identity,
+            worker_released: false,
+        }
+    }
+
+    pub(crate) fn dispatch(
+        self,
+        binding: SessionBinding,
+        request: WebRequest,
+        max_response_bytes: usize,
+        timeout: Duration,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
+        self.driver.dispatch_cancellable(
+            binding,
+            request,
+            max_response_bytes,
+            timeout,
+            self.identity,
+            cancelled,
+        )
+    }
+}
+
 impl CancellableFailure {
     fn no_enqueue(error: io::Error, identity: DispatchIdentity) -> Self {
         Self {
@@ -234,6 +270,20 @@ pub(crate) struct RpcDriver {
 }
 
 impl RpcDriver {
+    pub(crate) fn prepare_cancellable(
+        &mut self,
+        identity: DispatchIdentity,
+    ) -> io::Result<PrequeueGuard<'_>> {
+        if self.uncertain || identity.app != self.app || identity.app_generation != self.generation
+        {
+            return Err(invalid("SPK RPC prequeue identity or driver state refused"));
+        }
+        Ok(PrequeueGuard {
+            driver: self,
+            identity,
+        })
+    }
+
     pub(crate) fn from_connected_stream(
         app: u64,
         generation: u64,
@@ -845,6 +895,22 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(!driver.uncertain);
         assert_eq!(driver.stats().unwrap().cached_sessions, 0);
+    }
+
+    #[test]
+    fn prequeue_guard_abort_mints_only_exact_no_enqueue_witness() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let identity = dispatch_identity();
+        let guard = driver.prepare_cancellable(identity.clone()).unwrap();
+        let fence = guard.abort_no_enqueue();
+        assert!(!fence.worker_released());
+        assert!(fence.matches_and_consume(&identity));
+        assert_eq!(driver.stats().unwrap().cached_sessions, 0);
+
+        let mut wrong = identity;
+        wrong.app_generation = 3;
+        assert!(driver.prepare_cancellable(wrong).is_err());
     }
 
     #[test]

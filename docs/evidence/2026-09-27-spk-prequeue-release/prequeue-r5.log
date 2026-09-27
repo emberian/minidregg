@@ -1,0 +1,34 @@
+Running as unit: mini-spk-prequeue-r5.service; invocation ID: a17f70526e2a485db3962e6f592cfa91
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 5db2bec7-9db0-4611-b6ec-0d2944905eec with nextest profile: default
+    Starting 22 tests across 1 binary (84 tests skipped)
+        PASS [   0.028s] ( 1/22) minidregg-spk-host agent_api_native::tests::committed_agent_requires_exact_op46_and_distinct_tag
+        PASS [   0.018s] ( 2/22) minidregg-spk-host agent_api_native::tests::committed_marker_clear_refuses_replaced_inode_with_same_bytes
+        PASS [   0.054s] ( 3/22) minidregg-spk-host agent_api_custody::tests::controller_payer_signature_must_cover_exact_current_source_header
+        PASS [   0.025s] ( 4/22) minidregg-spk-host agent_api_native::tests::lost_reserve_reply_uses_only_read_only_inspect_v2
+        PASS [   0.050s] ( 5/22) minidregg-spk-host agent_api_native::tests::concrete_reverse_client_preserves_forward_and_paid_plan_identity
+        PASS [   0.016s] ( 6/22) minidregg-spk-host agent_api_server::tests::binary_git_reply_keeps_status_headers_and_body
+        PASS [   0.037s] ( 7/22) minidregg-spk-host agent_api_native::tests::saturated_reverse_listener_fails_before_send_without_waiting_for_deadline
+        PASS [   0.043s] ( 8/22) minidregg-spk-host agent_api_server::tests::definite_recovery_requires_exact_saved_reply_digest_operation_and_binding
+        PASS [   0.015s] ( 9/22) minidregg-spk-host agent_api_server::tests::event21_projection_requires_original_reserve_and_exact_request
+        PASS [   0.016s] (10/22) minidregg-spk-host agent_api_server::tests::inspect_observes_native_uncertainty_before_client_marker
+        PASS [   0.072s] (11/22) minidregg-spk-host agent_api_server::tests::distinct_controller_uid_gets_exact_traverse_and_socket_acl
+        PASS [   0.013s] (12/22) minidregg-spk-host agent_api_server::tests::preflight_refuses_dangling_socket_symlink_before_one_shot_start
+        PASS [   0.023s] (13/22) minidregg-spk-host agent_api_server::tests::listener_drops_only_the_socket_inode_it_bound
+        PASS [   0.014s] (14/22) minidregg-spk-host agent_api_wire::tests::binding_fingerprint_changes_with_session_and_invocation
+        PASS [   0.013s] (15/22) minidregg-spk-host agent_api_wire::tests::fixed_agent_wire_refuses_caller_subject_headers_and_alias_ids
+        PASS [   0.015s] (16/22) minidregg-spk-host agent_api_wire::tests::historical_inspect_requires_exact_lowercase_binding_pin
+        PASS [   0.030s] (17/22) minidregg-spk-host hostd::tests::concurrent_app_fence_serializes_with_exact_worker_release
+        PASS [   0.024s] (18/22) minidregg-spk-host hostd::tests::real_prequeue_guard_releases_only_its_unqueued_operation
+        PASS [   0.024s] (19/22) minidregg-spk-host hostd::tests::worker_release_after_uncertain_tombstone_can_finish_same_live_operation
+        PASS [   0.027s] (20/22) minidregg-spk-host hostd::tests::worker_release_keeps_uncertain_operation_terminal_but_allows_other_session
+        PASS [   0.016s] (21/22) minidregg-spk-host rpc_adapter::tests::prequeue_guard_abort_mints_only_exact_no_enqueue_witness
+        PASS [   0.026s] (22/22) minidregg-spk-host hostd::tests::worker_release_rejects_wrong_identity_and_fenced_or_restarted_app
+────────────
+     Summary [   0.310s] 22 tests run: 22 passed, 84 skipped
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 2.057s
+CPU time consumed: 1.427s
+Memory peak: 144.7M (swap: 0B)

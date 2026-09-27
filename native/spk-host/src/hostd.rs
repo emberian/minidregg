@@ -1292,8 +1292,11 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_api_server::write_agent_delivery_marker;
+    use crate::rpc_adapter::RpcDriver;
     use minidregg_spk_rpc::{Header, WebResponse, WebResult};
     use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::net::UnixStream;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Barrier};
     use std::thread;
@@ -1526,6 +1529,51 @@ mod tests {
             .request_dispatch(other.clone(), committed_permit())
             .unwrap();
         journal.finish_dispatch(&other, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn real_prequeue_guard_releases_only_its_unqueued_operation() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('9');
+        let mut second = dispatch_identity('1');
+        second.session_resource = "6209".into();
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+
+        let wrong_guard = driver.prepare_cancellable(first.clone()).unwrap();
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        assert!(journal
+            .finish_dispatch_uncertain_released(&second, wrong_guard.abort_no_enqueue())
+            .is_err());
+        assert!(journal.active_dispatch_path().exists());
+
+        let guard = driver.prepare_cancellable(first.clone()).unwrap();
+        let client_dir = path.join("agent-client-op-9");
+        fs::create_dir(&client_dir).unwrap();
+        let marker = client_dir.join("delivery-requested.json");
+        let native_marker = path.join("native-agent-dispatch-active.json");
+        fs::write(&native_marker, b"retained native attempt").unwrap();
+        fs::write(&marker, b"prior marker").unwrap();
+        assert!(
+            write_agent_delivery_marker(guard, &journal, &first, &client_dir, || Ok(())).is_err()
+        );
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        assert!(journal.request_dispatch(first, committed_permit()).is_err());
+        assert_eq!(fs::read(&marker).unwrap(), b"prior marker");
+        assert_eq!(
+            fs::read(&native_marker).unwrap(),
+            b"retained native attempt"
+        );
+        journal
+            .request_dispatch(second.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&second, true).unwrap();
         fs::remove_dir_all(path).unwrap();
     }
 
