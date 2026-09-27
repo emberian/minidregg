@@ -41,6 +41,8 @@ pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod launch_descriptor_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_v3_claim_native;
+#[cfg(target_os = "linux")]
 mod lifecycle_v3_native;
 #[cfg(target_os = "linux")]
 pub mod materialize;

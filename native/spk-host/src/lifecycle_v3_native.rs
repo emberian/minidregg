@@ -24,7 +24,7 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     let mut result = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         use std::fmt::Write as _;
@@ -33,21 +33,21 @@ fn hex(bytes: &[u8]) -> String {
     result
 }
 
-fn decimal(value: &str) -> bool {
+pub(crate) fn decimal(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && (value == "0" || !value.starts_with('0'))
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn lowercase_hex(value: &str) -> bool {
+pub(crate) fn lowercase_hex(value: &str) -> bool {
     value.len().is_multiple_of(2)
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn unhex(value: &str) -> io::Result<Vec<u8>> {
+pub(crate) fn unhex(value: &str) -> io::Result<Vec<u8>> {
     if !lowercase_hex(value) {
         return Err(invalid("v3 BEGIN noncanonical hexadecimal"));
     }
@@ -63,7 +63,7 @@ fn unhex(value: &str) -> io::Result<Vec<u8>> {
         .collect()
 }
 
-fn text<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
+pub(crate) fn text<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
     value
         .get(field)
         .and_then(Value::as_str)
@@ -94,7 +94,7 @@ fn checked_physical_identity(view: &Value, launch: &SourceBoundLaunch<'_>) -> io
     Ok(())
 }
 
-fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io::Result<&'a [u8]> {
+pub(crate) fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io::Result<&'a [u8]> {
     if reply.len() < 6 {
         return Err(invalid("v3 BEGIN native reply truncated"));
     }
@@ -113,6 +113,44 @@ fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io::Result<&'a
 fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
     write_new(parent, "lifecycle-begin-v3-active.json", active)?;
     Ok(())
+}
+
+/// Sign only source-inspected, ordered Ed25519 headers pinned to exact
+/// operator custody. Both v3 BEGIN and v3 claim plans use this slot grammar.
+pub(crate) fn sign_pinned_slots(slots: &[Value], pins: &[SignerPin]) -> io::Result<Value> {
+    if slots.len() != pins.len() {
+        return Err(invalid("v3 lifecycle signing slot count differs"));
+    }
+    let mut signatures = Vec::with_capacity(slots.len());
+    for (slot, pin) in slots.iter().zip(pins) {
+        let signing = slot
+            .get("signing")
+            .ok_or_else(|| invalid("v3 lifecycle signing decode absent"))?;
+        let header = text(slot, "headerHex")?;
+        if text(slot, "role")? != pin.role
+            || text(slot, "index")? != pin.index
+            || signing.get("decoded").and_then(Value::as_bool) != Some(true)
+            || text(signing, "keyId")? != pin.key_id
+            || text(signing, "keyEpoch")? != pin.key_epoch
+            || text(signing, "algorithm")? != "1"
+            || !decimal(text(signing, "authorityRoot")?)
+            || !decimal(text(signing, "nullifier")?)
+            || !lowercase_hex(text(signing, "domainHex")?)
+            || !lowercase_hex(text(signing, "messageHex")?)
+        {
+            return Err(invalid("v3 lifecycle slot differs from pinned signer"));
+        }
+        let bytes = unhex(header)?;
+        if bytes.is_empty() || bytes.len() > 65_536 {
+            return Err(invalid("v3 lifecycle signing header bound refused"));
+        }
+        let key = private_signing_key(&pin.seed_path)?;
+        if hex(&key.verifying_key().to_bytes()) != pin.public_key_hex {
+            return Err(invalid("v3 lifecycle signer private/public pin differs"));
+        }
+        signatures.push(Value::String(hex(&key.sign(&bytes).to_bytes())));
+    }
+    Ok(Value::Array(signatures))
 }
 
 #[derive(Clone, Copy)]
@@ -306,41 +344,13 @@ impl FixedLaunchBeginSigners {
     ) -> io::Result<Value> {
         let slots =
             self.checked_plan_slots(view, plan, request, action, client_operation_id, launch)?;
-        let mut signatures = Vec::with_capacity(slots.len());
-        for (slot, pin) in slots.iter().zip(&self.signers) {
-            let signing = slot
-                .get("signing")
-                .ok_or_else(|| invalid("v3 BEGIN signing decode absent"))?;
-            let header = text(slot, "headerHex")?;
-            if text(slot, "role")? != pin.role
-                || text(slot, "index")? != pin.index
-                || signing.get("decoded").and_then(Value::as_bool) != Some(true)
-                || text(signing, "keyId")? != pin.key_id
-                || text(signing, "keyEpoch")? != pin.key_epoch
-                || text(signing, "algorithm")? != "1"
-                || !decimal(text(signing, "authorityRoot")?)
-                || !decimal(text(signing, "nullifier")?)
-                || !lowercase_hex(text(signing, "domainHex")?)
-                || !lowercase_hex(text(signing, "messageHex")?)
-            {
-                return Err(invalid("v3 BEGIN slot differs from pinned signer"));
-            }
-            let bytes = unhex(header)?;
-            if bytes.is_empty() || bytes.len() > 65_536 {
-                return Err(invalid("v3 BEGIN signing header bound refused"));
-            }
-            let key = private_signing_key(&pin.seed_path)?;
-            if hex(&key.verifying_key().to_bytes()) != pin.public_key_hex {
-                return Err(invalid("v3 BEGIN signer private/public pin differs"));
-            }
-            signatures.push(Value::String(hex(&key.sign(&bytes).to_bytes())));
-        }
-        Ok(Value::Array(signatures))
+        sign_pinned_slots(slots, &self.signers)
     }
 }
 
 pub(crate) struct AcceptedLaunchBegin {
     pub ingress: Vec<u8>,
+    pub action: LaunchBeginAction,
     pub client_operation_id: String,
     pub authorization_operation_id: String,
     pub volume_id_hex: String,
@@ -382,9 +392,10 @@ pub(crate) fn submit_once(
         "requestSha256":hex(&Sha256::digest(&request)),
     }))?;
     write_new(attempt_dir, "op66-requested.json", &active)?;
-    // A different attempt directory in this journal cannot mint a new client
-    // ID after an uncertain current-image or submit response. Recovery must
-    // inspect the original ingress/receipt and never call submit_once again.
+    // A different attempt directory in this journal cannot invoke op66/67/22
+    // after an uncertain current-image or submit response. A local ID has
+    // already been allocated; recovery must inspect the original attempt and
+    // never call submit_once again.
     hold_begin_attempt(parent, &active)?;
     let reply = operator.invoke(66, &request)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
@@ -454,6 +465,7 @@ pub(crate) fn submit_once(
     };
     Ok(AcceptedLaunchBegin {
         ingress,
+        action,
         client_operation_id,
         authorization_operation_id: text(&view, "authorizationOperationId")?.to_owned(),
         volume_id_hex: text(&view, "volumeIdHex")?.to_owned(),

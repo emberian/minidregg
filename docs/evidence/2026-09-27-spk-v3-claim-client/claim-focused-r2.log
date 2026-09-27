@@ -1,0 +1,21 @@
+Running as unit: run-r41c9af5ad75c4a3ab1f4d0b5eb6e5c78.scope; invocation ID: b503eca4414d45619f2bf0e47ef3025e
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.50s
+────────────
+ Nextest run ID 3b69b58c-ddfc-4cfa-bc22-98ac6c9650b5 with nextest profile: default
+    Starting 13 tests across 1 binary (112 tests skipped)
+        PASS [   0.007s] ( 1/13) minidregg-spk-host install_service::install_v3::tests::retained_qualifier_must_equal_entire_source_authored_launch
+        PASS [   0.007s] ( 2/13) minidregg-spk-host install_service::install_v3::tests::deployment_and_host_pins_are_required_only_for_v2_install
+        PASS [   0.006s] ( 3/13) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_frame_cannot_be_v2_or_wrong_opcode
+        PASS [   0.007s] ( 4/13) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.007s] ( 5/13) minidregg-spk-host lifecycle_v3_claim_native::tests::original_index_carries_full_nat_without_u64_truncation
+        PASS [   0.008s] ( 6/13) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_plan_joins_original_receipt_volume_and_selected_command
+        PASS [   0.006s] ( 7/13) minidregg-spk-host lifecycle_v3_native::tests::inspected_unit_and_image_are_joined_to_signed_spk
+        PASS [   0.006s] ( 8/13) minidregg-spk-host lifecycle_v3_native::tests::plan_pin_uses_launch_root_for_installed_package_and_exact_request
+        PASS [   0.005s] ( 9/13) minidregg-spk-host lifecycle_v3_native::tests::uncertain_begin_attempt_blocks_new_client_id_in_same_journal
+        PASS [   0.005s] (10/13) minidregg-spk-host lifecycle_v3_native::tests::request_requires_source_owned_launch_and_exact_create_selection
+        PASS [   0.006s] (11/13) minidregg-spk-host lifecycle_v3_native::tests::v3_plan_and_ingress_reply_tags_cannot_accept_historical_payload
+        PASS [   0.006s] (12/13) minidregg-spk-host resident_launch::tests::inspected_create_index_and_digest_select_exact_signed_action
+        PASS [   0.005s] (13/13) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+────────────
+     Summary [   0.044s] 13 tests run: 13 passed, 112 skipped

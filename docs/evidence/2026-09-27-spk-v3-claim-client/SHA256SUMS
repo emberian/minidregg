@@ -1,0 +1,5 @@
+deae09ac0230946507d45856cb0b8671b8dba1e4caafbc64363e07ef32a92d80  native/spk-host/src/lifecycle_v3_native.rs
+b6aa93eab822e1b62cf057ba5b31134c971bb425060b10dae83f9c9e7a0b70b4  native/spk-host/src/lifecycle_v3_claim_native.rs
+e35bed12426e54771e6809fa111750cbaaf6bf991ed83949414e17cd4ce0c603  native/spk-host/src/lib.rs
+12779f1015902c5844ec8d498496069cbdfe77b49160f214625cc2fbd314977b  docs/evidence/2026-09-27-spk-v3-claim-client/claim-focused-r2.log
+b4aaa3a63477aa2e6717dbd53f4e89d5c1dc709fbc29d870e529634d53bc8665  docs/evidence/2026-09-27-spk-v3-claim-client/claim-clippy-r4.log
