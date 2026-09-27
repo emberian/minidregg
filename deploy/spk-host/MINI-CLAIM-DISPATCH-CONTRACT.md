@@ -74,20 +74,30 @@ permission headers by passing ordinary HTTP headers. The final wire schema and
 these exact request bounds must be rechecked against the frozen source before
 turning on dispatch.
 
-Mini's `ApplicationDispatchAdmission.CheckedCurrent.sessionFingerprint` is a
-32-byte cSHAKE256 value under
-`DREGG/APPLICATION/DISPATCH-SESSION-FINGERPRINT/v1`. Its typed preimage includes
-current authority root; checked App, Session and Identity; ordered effective
-bits; ticket resource; app, session, manifest, enrollment and ticket roots;
-and exact share-issue ingress bytes. It excludes per-request operation/body
-and the durable image tip. The physical fd 3 driver caches an app-side session
+Mini must supply a stable, source-owned 32-byte session fingerprint that
+changes when app-side identity or effective authority changes, but remains
+stable across ordinary requests under the same authority. The current
+source-only `ApplicationDispatchAdmission.CheckedCurrent.sessionFingerprint`
+uses cSHAKE256 under
+`DREGG/APPLICATION/DISPATCH-SESSION-FINGERPRINT/v2`. Its narrow-compiled
+source is `Kernel/ApplicationDispatchAdmission.lean` SHA-256
+`7ca185ef954169da45dcc4b6c09bf6a0022ec60e68a9fe409c5cbb7bd67c878e`.
+The
+typed preimage includes the current authority root, checked app with snapshot
+version set to zero, checked session and identity, ordered effective bits,
+ticket resource/root, enrollment resource/root, and exact selected issue
+ingress bytes. It excludes the request, session root, app root and durable tip.
+This source-only definition still needs an accepted two-request integration
+gate and a frozen Host wire; no Rust wire parser assumes the composition. The physical fd 3
+driver caches an app-side session
 by app, process generation, session resource, subject and Web/API kind, and
 reuses it only while this source fingerprint and every app-visible session
 parameter match. Any drift drops the old capability before another request.
 The cache is bounded to 32 live entries and selects its least recently used
-entry for eviction when a 33rd app-side session is created. A focused test
-checks the eviction ordering; physical 33-session behavior has not yet been
-qualified against a packaged bridge.
+entry for eviction when a 33rd app-side session is created. A private GitWeb
+component run created 33 distinct read-only sessions, then revisited the
+oldest and observed a new app-side session with the cache still at 32. That
+run used synthetic projections and does not qualify Mini dispatch admission.
 
 The pending native wire codec, Host opcode and CLI projection filenames remain
 to be frozen by the Mini owners. The Rust parser and endpoint connection are

@@ -1,0 +1,18 @@
+Persvati private source /tmp/minidregg-gitweb-smoke-20260927/source/native/spk-host
+http_entrance.rs sha256 67b620449225b761c6d01aa9e85a45d484c0c3d7a30ea78d3cf1146cb5e0e398
+
+command: CARGO_BUILD_JOBS=2 cargo nextest run --locked --lib -E 'test(http_entrance)'
+Compiling minidregg-spk-host v0.1.0
+Nextest run ID 47cf7026-ef68-4ef7-8576-3c1ae8c424fd
+PASS http_entrance::tests::transport_deadline_and_unavailable_response_do_not_deliver_app_call
+PASS http_entrance::tests::direct_bookmark_navigation_is_safe_but_cross_site_and_unsafe_none_are_refused
+PASS http_entrance::tests::api_bearer_is_separate_and_security_headers_never_reach_app
+PASS http_entrance::tests::browser_unsafe_requires_same_origin_and_strips_session_cookie
+PASS http_entrance::tests::owner_private_socket_binds_one_fixed_custodian_and_refuses_second_instance
+PASS http_entrance::tests::incomplete_http_frame_expires_on_one_absolute_deadline
+Summary: 6 tests run, 6 passed, 22 skipped
+
+command: CARGO_BUILD_JOBS=2 cargo clippy --locked --all-targets -- -D warnings
+Finished dev profile, exit 0
+
+No SPK, Mini Store, public listener or live service was changed.
