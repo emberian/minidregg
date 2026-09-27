@@ -65,9 +65,13 @@ asserted by these preparation scripts.
    a full canonical JSON comparison with the pre-Store offline Host config
    must pass **before bootstrap**. This catches any drift in the duplicate
    preflight settings producer, rather than comparing just the custody fields.
-   Only then does it run the reviewed birth scripts in a **new** Store, ending
-   at app/package/snapshot and Alice's Web session. It checks the pinned
-   completion key and management config.
+   Only then does it run the reviewed birth scripts in a **new** Store. The
+   integrated source overlay adds eight independently enrolled agent
+   signers/accounts, eight grains, six source-admitted parent witness
+   delegations, and distinct Bob Web, Alice API, and two agent API sessions
+   alongside the original app/package/snapshot and Alice Web session. It
+   retains exact birth/delegation receipts and participant-signed resource
+   readbacks. It checks the pinned completion key and management config.
 3. With a protected live Mini operator socket under `/run`, call
    `prepare-install-config.sh PREPARED_ROOT QUALIFIED_HOST OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL`.
    The image path is exactly
@@ -94,6 +98,13 @@ own one-target completion signer file and resident config, after the final
 physical `agents: Vec` route schema freezes. The shared app process must offer
 independent Alice/Bob Web entrances, Alice's separate API entrance, and two
 distinct Hermes agent routes; no singular agent or shared token is sufficient.
+The integrated parent birth pins each tool, dispatch payer and provider as a
+generation-1 no-op witness worker, with distinct child capabilities delegated
+by its controller after birth. `grain-runtime` already renews managed worker
+policies before a later hard attach, but its current worker list omits the
+dispatch payer. That controller renewal must be extended and qualified before
+a restarted agent route can claim a fresh parent witness; a static
+generation-1 capability is not lifetime authority.
 
 ## Bounded checks in this cut
 
@@ -124,7 +135,7 @@ dangling output symlink, a group-writable parent and a symlinked parent. A
 and no Store, refused trailing `/..`, a dangling INSTALL journal symlink and
 a group-writable journal parent. None created a Store or submitted an event.
 
-The fresh Store, INSTALL custody JSON, actual lifecycle plans, signed
+The fresh Store, these new agent/session births, INSTALL custody JSON, actual lifecycle plans, signed
 source inspections, post-CAS receipts, physical image comparison, two human
 sessions, direct API and two agent routes have **not** been run in this cut.
 Those are the next acceptance steps after the qualified Host and final

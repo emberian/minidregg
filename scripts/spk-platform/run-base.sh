@@ -1,7 +1,7 @@
 #!/bin/sh
 # Execute only the reviewed fresh birth chain with a source-qualified Host.
-# This ends at app8401/package8402/snapshot8403 and Alice's Web session8404;
-# INSTALL/START and v1 share tickets are separate later operations.
+# This ends at app8401/package8402/snapshot8403 and five source-born sessions;
+# INSTALL/START, enrollment and share tickets are separate later operations.
 set -eu
 umask 077
 
@@ -200,9 +200,31 @@ awk '
   END { if (matches != 1) exit 2 }
 ' "$ROOT/source-stage/provision-spk.sh" >"$PROVISION_SOURCE"
 chmod 700 "$PROVISION_SOURCE"
-sha256sum "$PROVISION_SOURCE" >"$ROOT/source-stage/provision-checked-sha256.txt"
+ALLOCATION_SOURCE="$REPO/scripts/spk-platform/allocation-v1.json"
+AGENT_OVERLAY="$REPO/scripts/spk-platform/agent-genesis-overlay.sh"
+SPK_AGENT_ALLOCATION="$ROOT/source-stage/agent-allocation.json"
+AGENT_SOURCE="$ROOT/source-stage/provision-agents.sh"
+for input in "$ALLOCATION_SOURCE" "$AGENT_OVERLAY"; do
+  [ -f "$input" ] || { echo "agent source input unavailable" >&2; exit 2; }
+done
+[ ! -e "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || exit 2
+install -m 600 "$ALLOCATION_SOURCE" "$SPK_AGENT_ALLOCATION"
+"$AGENT_OVERLAY" "$PROVISION_SOURCE" "$SPK_AGENT_ALLOCATION" "$AGENT_SOURCE"
+sha256sum "$ALLOCATION_SOURCE" "$AGENT_OVERLAY" "$SPK_AGENT_ALLOCATION" \
+  "$PROVISION_SOURCE" "$AGENT_SOURCE" \
+  >"$ROOT/source-stage/provision-agent-input-sha256.txt"
+sha256sum -c "$ROOT/source-stage/provision-agent-input-sha256.txt" >/dev/null
+PROVISION_SOURCE=$AGENT_SOURCE
+export SPK_AGENT_ALLOCATION
 MEMBER_SOURCE="$REPO/scripts/grain-birth/native-share-member.sh"
-APP_SOURCE="$REPO/scripts/application-current-birth/native-share-base.sh"
+APP_BASE_SOURCE="$REPO/scripts/application-current-birth/native-share-base.sh"
+APP_OVERLAY="$REPO/scripts/spk-platform/agent-session-overlay.sh"
+APP_SOURCE="$ROOT/source-stage/application-sessions.sh"
+[ -f "$APP_OVERLAY" ] || { echo "agent session overlay unavailable" >&2; exit 2; }
+"$APP_OVERLAY" "$APP_BASE_SOURCE" "$SPK_AGENT_ALLOCATION" "$APP_SOURCE"
+sha256sum "$APP_BASE_SOURCE" "$APP_OVERLAY" "$APP_SOURCE" \
+  >"$ROOT/source-stage/application-session-input-sha256.txt"
+sha256sum -c "$ROOT/source-stage/application-session-input-sha256.txt" >/dev/null
 export PROVISION_SOURCE MEMBER_SOURCE APP_SOURCE
 
 /bin/sh "$REPO/scripts/application-share-issue/native-positive-base.sh" \
@@ -211,6 +233,43 @@ export PROVISION_SOURCE MEMBER_SOURCE APP_SOURCE
 
 CONFIG="$ROOT/base/workroom/deployment/pinned-config.json"
 test -s "$CONFIG"
+AGENT_BIRTH="$ROOT/base/workroom/agents/verified/birth-evidence.json"
+jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
+  .type == "mini-spk-agent-genesis-birth-evidence-v1" and
+  (.birthReceipt | [.acceptedCount,.transactionId,.eventId,.imageBoundary] |
+    all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
+  ([.resources[].route] == [$allocation[0].agents[].route]) and
+  ([.resources[] | .controller,.tool,.dispatch,.provider] ==
+    [$allocation[0].agents[] | .controller.task,.tool.task,
+      .dispatch.task,.provider.task]) and
+  (.bornViews | length == 8) and
+  (.parentDelegations | length == 6) and
+  ([.bornViews[].task] ==
+    [$allocation[0].agents[] | .controller.task,.tool.task,
+      .dispatch.task,.provider.task]) and
+  ([.parentDelegations[].capability] ==
+    [$allocation[0].agents[] | .plannedCaps.parentToolWitness,
+      .plannedCaps.parentDispatchWitness,
+      .plannedCaps.parentProviderWitness]) and
+  ([.parentDelegations[].receipt |
+      .acceptedCount,.transactionId,.eventId,.imageBoundary] |
+    all(.[]; type == "string" and test("^[1-9][0-9]*$")))' \
+  "$AGENT_BIRTH" >/dev/null
+ADDITIONAL_SESSIONS="$ROOT/base/additional-sessions.json"
+jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
+  .type == "mini-spk-additional-session-births-v1" and
+  ([.sessions[].route] == ["bob-web","alice-api","hermes-a","hermes-b"]) and
+  ([.sessions[].session] ==
+    [$allocation[0].humans[1].session,$allocation[0].humans[2].session,
+      $allocation[0].agents[0].session,$allocation[0].agents[1].session]) and
+  ([.sessions[].descriptor] ==
+    [$allocation[0].humans[1].descriptor,$allocation[0].humans[2].descriptor,
+      $allocation[0].agents[0].descriptor,$allocation[0].agents[1].descriptor]) and
+  ([.sessions[].participant] == ["9","8","10","20"]) and
+  ([.sessions[].birthReceipt |
+      .acceptedCount,.transactionId,.eventId,.imageBoundary] |
+    all(.[]; type == "string" and test("^[1-9][0-9]*$")))' \
+  "$ADDITIONAL_SESSIONS" >/dev/null
 jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
   .completionCustodianKey == $key and
   .completionManagement == {app:8401,packageManifest:8402,
@@ -222,6 +281,27 @@ jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
   .residentClaimManagement == {app:8401,packageManifest:8402,
     managementSubject:8,managementKeyId:8008,appCapability:141,
     appObserveCapability:141,packageObserveCapability:143}' "$CONFIG" >/dev/null
+# This is a source-qualified lifecycle handoff, not an installed manifest.
+# The app birth leaves package/snapshot pages empty; BEGIN-v3 and completion
+# must bind the retained v2 launchRoot and canonical descriptor later.
+jq -n --slurpfile qualified "$QUALIFY_RESULT" \
+  --slurpfile birth "$ROOT/base/app-attempt/outcome.json" \
+  --slurpfile package "$ROOT/base/package-born/view.json" \
+  --slurpfile snapshot "$ROOT/base/snapshot-born/view.json" '
+  {type:"mini-spk-v2-install-handoff-v1",
+   rawSha256:$qualified[0].rawSha256,
+   embeddedPackageRoot:$qualified[0].packageRoot,
+   launchRoot:$qualified[0].launchRoot,
+   launchCanonicalSha256:$qualified[0].launchCanonicalSha256,
+   appBirth:($birth[0] | {acceptedCount,transactionId,eventId,imageBoundary}),
+   packageBornRoot:$package[0].page.root,
+   snapshotBornRoot:$snapshot[0].page.root,
+   packageEmpty:($package[0].page.entries == []),
+   snapshotEmpty:($snapshot[0].page.entries == [])}' \
+  >"$ROOT/source-stage/install-v2-handoff.json"
+jq -e '.packageEmpty and .snapshotEmpty and
+  (.launchRoot | type == "string" and test("^[1-9][0-9]*$"))' \
+  "$ROOT/source-stage/install-v2-handoff.json" >/dev/null
 sha256sum "$HOST" "$SPK_HOST" "$MINI" "$STORE_BINARY" \
   "$SIGNATURE_BINARY" "$CONFIG" \
   >"$ROOT/source-stage/base-executable-sha256.txt"

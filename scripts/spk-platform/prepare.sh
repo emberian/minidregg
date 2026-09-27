@@ -119,7 +119,7 @@ sha256sum "$PROVISION" "$MEMBER" "$APP" "$POSITIVE" "$ROOTS" "$PACKAGE" \
   >"$ROOT/source-stage/input-sha256.txt"
 jq -n --arg root "$ROOT" --arg spkSha \
     2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa \
-  --arg descriptorRoot "$(jq -er .packageRoot "$ROOTS")" \
+  --arg embeddedPackageRoot "$(jq -er .packageRoot "$ROOTS")" \
   --arg completionKey "$COMPLETION_PUBLIC" \
   '{protocol:"mini-spk-integrated-fixture-preparation-v1",root:$root,
     app:"8401",packageManifest:"8402",snapshotManifest:"8403",
@@ -127,7 +127,7 @@ jq -n --arg root "$ROOT" --arg spkSha \
     bobWebSession:"8406",bobWebDescriptor:"8407",
     aliceApiSession:"8410",aliceApiDescriptor:"8411",
     aliceWebTicket:"8500",bobWebTicket:"8501",aliceApiTicket:"8510",
-    spkRawSha256:$spkSha,descriptorRoot:$descriptorRoot,
+    spkRawSha256:$spkSha,embeddedPackageRoot:$embeddedPackageRoot,
     completionCustodianKey:$completionKey}' \
   >"$ROOT/source-stage/fixture-public.json"
 echo "prepared fresh private fixture source at $ROOT; no Store or lifecycle event submitted"
