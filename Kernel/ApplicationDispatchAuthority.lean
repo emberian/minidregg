@@ -71,6 +71,7 @@ structure Participant where
   origin : Origin
   sessionCapability : CapabilityId
   appObserveCapability : CapabilityId
+  ticketObserveCapability : CapabilityId
   deriving DecidableEq, Repr
 
 def participantStream : StreamCodec Participant :=
@@ -81,13 +82,15 @@ def participantStream : StreamCodec Participant :=
             (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
               (StreamCodec.product originStream
                 (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-                  CredentialAuthorityEntryCodec.capabilityIdStream))))))
+                  (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+                    CredentialAuthorityEntryCodec.capabilityIdStream)))))))
     (fun p => (p.session, p.descriptorResource, p.kind,
-      p.subject, p.origin, p.sessionCapability, p.appObserveCapability))
+      p.subject, p.origin, p.sessionCapability, p.appObserveCapability,
+      p.ticketObserveCapability))
     (fun (session, descriptorResource, kind, subject,
-          origin, sessionCapability, appObserveCapability) =>
+          origin, sessionCapability, appObserveCapability, ticketObserveCapability) =>
       ⟨session, descriptorResource, kind, subject,
-        origin, sessionCapability, appObserveCapability⟩)
+        origin, sessionCapability, appObserveCapability, ticketObserveCapability⟩)
     (by intro p; cases p; rfl)
 
 /-- A single-share ticket. `resource` is a distinct content resource born by
@@ -115,7 +118,7 @@ def ticketStream : StreamCodec Ticket :=
     (by intro t; cases t; rfl)
 
 private def ticketFrame : List UInt8 :=
-  "DREGG/APPLICATION/SHARE-TICKET/v1".toUTF8.toList
+  "DREGG/APPLICATION/SHARE-TICKET/v2".toUTF8.toList
 
 private def rawTicketCodec : LawfulCodec Ticket where
   encode ticket := ticketFrame ++ ticketStream.encode ticket
@@ -144,7 +147,7 @@ replacement must be independently checked by the receiving selector. -/
 def ticketAtom (domain : Digest) (resource : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, resource)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-TICKET-ATOM/v1".toUTF8.toList preimage).digest.value⟩⟩
+    "DREGG/APPLICATION/SHARE-TICKET-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (resource : Nat)
     (page : HyperdocumentContentPageMaterializer.Page) : Option Ticket := do
@@ -239,7 +242,9 @@ def eligibleBits (ticket : Ticket) (dispatch : Dispatch)
   if ticket.matches dispatch enrollment schema then
     match schema.resolve enrollment.role, schema.resolve ticket.ceiling with
     | some requested, some ceiling =>
-        if withinCeilingCheck requested ceiling then some requested else none
+        if withinCeilingCheck requested ceiling &&
+            decide (ApplicationPermissionSchema.bitsToNat requested =
+              dispatch.identity.permissionBits) then some requested else none
     | _, _ => none
   else none
 
@@ -258,7 +263,28 @@ theorem eligibleBits_within (ticket : Ticket) (dispatch : Dispatch)
         | some ceiling =>
             simp [hrequested, hceiling] at accepted
             rcases accepted with ⟨hwithin, rfl⟩
-            exact ⟨ceiling, rfl, withinCeilingCheck_sound hwithin⟩
+            exact ⟨ceiling, rfl, withinCeilingCheck_sound hwithin.1⟩
+  · contradiction
+
+/-- The native receiver may use this named consequence rather than re-reading
+the executable Boolean: the app-facing Nat is exactly the resolved ordered
+permission vector, with permission index `i` encoded at bit `2^i`. -/
+theorem eligibleBits_permission_identity (ticket : Ticket) (dispatch : Dispatch)
+    (enrollment : Enrollment) (schema : Schema) (requested : List Bool)
+    (accepted : eligibleBits ticket dispatch enrollment schema = some requested) :
+    ApplicationPermissionSchema.bitsToNat requested =
+      dispatch.identity.permissionBits := by
+  unfold eligibleBits at accepted
+  split at accepted
+  · cases hrequested : schema.resolve enrollment.role with
+    | none => simp [hrequested] at accepted
+    | some selected =>
+        cases hceiling : schema.resolve ticket.ceiling with
+        | none => simp [hrequested, hceiling] at accepted
+        | some ceiling =>
+            simp [hrequested, hceiling] at accepted
+            rcases accepted with ⟨checks, rfl⟩
+            exact checks.2
   · contradiction
 
 theorem self_escalation_refused (ticket : Ticket) (dispatch : Dispatch)
