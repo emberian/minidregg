@@ -1,0 +1,10 @@
+2026-09-27 independent Persvati narrow gate
+source_root=/home/ember/build/minidregg-overnight-20260927-fn-adapter-narrow
+command=env LEAN_NUM_THREADS=2 lake env lean -o .lake/build/lib/lean/<Module>.olean <Module>.lean
+PASS Host.FnSelectiveReleaseFnReceiving fd84f8fe
+PASS Host.FnSelectiveReleaseFnAck fa8eca60
+PASS Host.Main 4cd996ea
+receiving_log=/home/ember/build/minidregg-overnight-20260927-fn-adapter-FnSelectiveReleaseFnReceiving.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 (empty)
+ack_log=/home/ember/build/minidregg-overnight-20260927-fn-adapter-FnSelectiveReleaseFnAck.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 (empty)
+main_log=/home/ember/build/minidregg-overnight-20260927-fn-adapter-Main-4cd9.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 (empty)
+scope=source/OLean only; no native link, poll, projection, ACK, or fn receiving acceptance

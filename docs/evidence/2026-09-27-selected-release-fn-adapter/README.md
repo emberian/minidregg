@@ -1,0 +1,5 @@
+# Selected-fn Host adapter: narrow source gate
+
+The [source manifest](source-sha256.txt) pins `Host.FnSelectiveReleaseFnReceiving` (`fd84f8fe`), `Host.FnSelectiveReleaseFnAck` (`fa8eca60`), and final `Host.Main` (`4cd996ea`). In an independent Persvati snapshot, the two new modules compiled serially with Lean 4.30.0; then `Host.Main` compiled against their source-matched OLeans. All three commands exited 0; their individual output logs are empty (each SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). The earlier combined physical-root/share-issue dependency suffix was qualified [separately](../2026-09-27-application-share-issue-custody-physical/README.md). An earlier `Host.Main` cut (`d71e2c60`) passed but was superseded by the caller-cursor race fix; this manifest and verdict use only `4cd996ea`.
+
+This is a source/OLean gate only. No new native Host was linked and no fn poll, projection, ACK, or receiving behavior was exercised through a live endpoint. Qualified registration/frontier may need separate neutral progress; the candidate CLI can deliberately refuse a valid later article until that progress is available.

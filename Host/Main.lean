@@ -32,6 +32,8 @@ import Kernel.ApplicationShareIssueAuthoring
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
+import Host.FnSelectiveReleaseFnReceiving
+import Host.FnSelectiveReleaseFnAck
 import Host.Json
 import Host.ApplicationCurrentBirthAuthoring
 import Host.FnInboxView
@@ -1833,6 +1835,159 @@ def readJson (path : String) : IO Lean.Json :=
 def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
 
+/-- Selected release keeps fn transport and owner-signed Mini admission
+separate. The caller chooses an operator-pinned local fn executable/scope, but
+cannot turn a projected article into a receipt or ACK without Mini. -/
+def selectedFnScope (scopePath : String) : IO FnPollScopePin := do
+  let bytes ← readBoundedBytes scopePath 8192
+  let some source := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "fn selected-release scope is not UTF-8")
+  let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
+  IO.ofExcept (requireExactFields "fn selected-release scope"
+    ["history", "incarnation", "consumer", "principal", "query",
+     "queryVersion", "viewVersion", "registrationEpoch"] json)
+  IO.ofExcept (fromJson? json)
+
+def selectedFnNewPaths (paths : List String) : IO Unit := do
+  unless paths.all (·.startsWith "/") && paths.eraseDups.length == paths.length do
+    throw (IO.userError "selected-release fn paths must be distinct absolute paths")
+  for path in paths do
+    if ← (System.FilePath.mk path).pathExists then
+      throw (IO.userError s!"selected-release fn output already exists: {path}")
+
+/-- One native fn poll and projection. The owner signature and current
+recipient law are checked later by Mini op20; this route never ACKs. -/
+def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
+    authoritySource targetSource cursorPath reportPath sourcePath packetPath
+    ingressPath resultPath : String) : IO Unit := do
+  unless [fnBinary, scopePath, controlPath].all (·.startsWith "/") do
+    throw (IO.userError "selected-release fn operator paths must be absolute")
+  selectedFnNewPaths [cursorPath, reportPath, sourcePath, packetPath,
+    ingressPath, resultPath]
+  let capability : Minidregg.Theory.TypedAuthorization.CapabilityId :=
+    ⟨← IO.ofExcept (exactDecimal "recipient capability" capabilitySource)⟩
+  let authorityRoot : Minidregg.Theory.TypedAuthorization.Digest :=
+    ⟨← IO.ofExcept (exactDecimal "recipient authority root" authoritySource)⟩
+  let targetRoot : Minidregg.Theory.TypedAuthorization.Digest :=
+    ⟨← IO.ofExcept (exactDecimal "recipient target root" targetSource)⟩
+  let scope ← selectedFnScope scopePath
+  IO.FS.withTempDir fun directory => do
+    let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
+      fnBinary (64 * 1024 * 1024) "0500"
+    let (fromPosition, before) ← queryFnConsumerPosition executable scope controlPath
+    unless fromPosition == before.committedAck do
+      throw (IO.userError "selected-release fn poll lacks an exact durable start position")
+    let (cursor, report) ← invokeFnConsumerPollRaw executable scope
+      controlPath cursorPath reportPath
+    let (selectedCursor, selectedReport, projection) ←
+      projectFnPoll executable scope cursorPath reportPath
+    unless cursor == selectedCursor && sameBytes report selectedReport do
+      throw (IO.userError "selected-release fn poll changed during projection")
+    -- Qualified fn can scan past unrelated committed records before returning
+    -- an article. Only the immediately adjacent record may be ACKed here.
+    unless projection.sequence == fromPosition &&
+        projection.position == fromPosition + 1 do
+      throw (IO.userError "selected-release fn poll crossed unrelated backlog")
+    let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
+    unless afterPosition == fromPosition && after.committedAck == before.committedAck do
+      throw (IO.userError "selected-release fn poll position changed before candidate")
+    let candidate ← IO.ofExcept <| FnSelectiveReleaseFnReceiving.derive
+      projection.source projection.messageId capability authorityRoot targetRoot
+    writeBytes sourcePath projection.source
+    writeBytes packetPath candidate.packetBytes
+    writeBytes ingressPath candidate.ingressBytes
+    writeJson resultPath <| Lean.Json.mkObj
+      [("type", toJson "selected-release-fn-poll-v1"),
+       ("status", toJson "candidate-unacknowledged"),
+       ("fnPosition", toJson (toString projection.position)),
+       ("fnStoreSequence", toJson (toString projection.sequence)),
+       ("fnStoreTransactionId", toJson (toString projection.transactionId)),
+       ("fnSourceIdentity", toJson (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
+       ("messageId", toJson (Minidregg.Host.Json.encodeHex projection.messageId)),
+       ("sourceBytes", toJson (toString projection.source.length)),
+       ("packetBytes", toJson (toString candidate.packetBytes.length)),
+       ("ingressBytes", toJson (toString candidate.ingressBytes.length))]
+
+/-- Reproject the exact retained cursor/event and select the original accepted
+Mini event 13 from a fresh verifier-opened Store. Before a new ACK, repeat the
+authenticated local poll and require the fn Store to return those same bytes. -/
+def selectedReleaseFnAck (config : NativeHost.Config) (fnBinary scopePath controlPath
+    cursorPath reportPath transaction resultPath : String) : IO UInt32 := do
+  unless [fnBinary, scopePath, controlPath, cursorPath, reportPath, resultPath].all
+      (·.startsWith "/") && cursorPath != reportPath &&
+      resultPath != cursorPath && resultPath != reportPath do
+    throw (IO.userError "selected-release fn ACK paths must be distinct absolute paths")
+  selectedFnNewPaths [resultPath]
+  let transactionId : Minidregg.Theory.TypedAuthorization.Digest :=
+    ⟨← IO.ofExcept (exactDecimal "accepted Mini transaction" transaction)⟩
+  let scope ← selectedFnScope scopePath
+  IO.FS.withTempDir fun directory => do
+    let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
+      fnBinary (64 * 1024 * 1024) "0500"
+    let (cursor, report, projection) ← projectFnPoll executable scope cursorPath reportPath
+    let target ← IO.ofExcept (← DurableReceiverIO.load config.storage.transport
+      ResourceBirthCodec.rootBytes)
+    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+      | .ok verified => pure verified
+      | .error failure =>
+          throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
+    let selected ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal config
+      target verified transactionId projection.source projection.messageId
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition executable scope controlPath
+    unless currentPosition == currentStatus.committedAck do
+      throw (IO.userError "selected-release fn ACK lacks an exact durable position")
+    unless currentStatus.committedAck ≥ projection.position ||
+        currentStatus.committedAck + 1 == projection.position do
+      throw (IO.userError "selected-release fn ACK would cross unrelated backlog")
+    let mut status := "covered-by-durable-frontier"
+    let mut committedAck := currentStatus.committedAck
+    if committedAck < projection.position then do
+      let liveCursorPath := (directory / "current-cursor.fncu").toString
+      let liveReportPath := (directory / "current-report.fn-e").toString
+      let (liveCursor, liveReport) ← invokeFnConsumerPollRaw executable scope
+        controlPath liveCursorPath liveReportPath
+      unless cursor == liveCursor && sameBytes report liveReport do
+        throw (IO.userError "selected-release fn ACK poll differs from retained event")
+      let child ← IO.Process.spawn
+        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+          stdin := .null, stdout := .piped, stderr := .null }
+      let output ← try readBoundedLoop child.stdout 128
+        catch error =>
+          child.kill
+          discard <| child.wait
+          throw error
+      let exitCode ← child.wait
+      unless cursor == (← readBoundedBytes cursorPath 346) &&
+          sameBytes report (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
+        throw (IO.userError "selected-release fn ACK inputs changed during local call")
+      status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+          "durable-accepted"
+        else if exitCode == 2 then "refused"
+        else if exitCode == 3 then "uncertain"
+        else "transport-fault"
+      let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
+      unless afterPosition == after.committedAck do
+        throw (IO.userError "selected-release fn ACK changed consumer scope")
+      committedAck := after.committedAck
+      if status == "durable-accepted" && committedAck < projection.position then
+        throw (IO.userError "fn accepted selected-release ACK without durable cursor")
+      if status == "refused" && committedAck ≥ projection.position then
+        status := "covered-by-durable-frontier"
+    writeJson resultPath <| Lean.Json.mkObj
+      [("type", toJson "selected-release-fn-ack-v1"),
+       ("miniTransactionId", toJson transaction),
+       ("miniReceipt", evidenceReceiptJson selected.receipt),
+       ("fnStoreSequence", toJson (toString projection.sequence)),
+       ("fnStoreTransactionId", toJson (toString projection.transactionId)),
+       ("fnPosition", toJson (toString projection.position)),
+       ("fnCommittedAck", toJson (toString committedAck)),
+       ("fnAck", toJson status)]
+    if status == "durable-accepted" || status == "covered-by-durable-frontier" then pure 0
+    else if status == "refused" then pure 2
+    else if status == "uncertain" then pure 3
+    else pure 1
+
 /-- This is the only Mini decision body for both file-only and observed
 polls. Only the caller that actually invokes fn's control route can set the
 local observation bit retained in the signed inbox atom. -/
@@ -3078,7 +3233,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack FN-BINARY SCOPE.json CONTROL.sock CURSOR.fncu REPORT.fn-e MINI-TRANSACTION RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -3408,6 +3563,20 @@ def run (arguments : List String) : IO UInt32 := do
             (FnSelectiveReleaseAuthoring.assembleIngress packet ⟨capability⟩ ⟨authority⟩ ⟨target⟩)
           writeBytes output ingress
           pure 0
+      | "selected-release-fn-poll",
+          [fnBinary, scopePath, controlPath, capabilityText, authorityText,
+           targetText, cursorPath, reportPath, sourcePath, packetPath,
+           ingressPath, resultPath] =>
+          selectedReleaseFnPoll fnBinary scopePath controlPath capabilityText
+            authorityText targetText cursorPath reportPath sourcePath packetPath
+            ingressPath resultPath
+          pure 0
+      | "selected-release-fn-ack",
+          [fnBinary, scopePath, controlPath, cursorPath, reportPath,
+           transaction, resultPath] =>
+          withPinnedSignature config fun pinnedConfig =>
+            selectedReleaseFnAck pinnedConfig fnBinary scopePath controlPath
+              cursorPath reportPath transaction resultPath
       | "export-evidence", [input, output] =>
           let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
           let package ← IO.ofExcept (← FnEvidence.exportPackage config call)
