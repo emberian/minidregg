@@ -1,0 +1,14 @@
+cea94600555f3dc05f834bffcea03eb49e38b7ff60a3472a5ec817aa6ef03601  scripts/spk-platform/prepare-resident-config.sh
+bacfb486a305a309b65d553b8d1a6574cfa440bfe7006974a355c9197ec5e9c1  docs/evidence/2026-09-27-spk-resident-config-preparation/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/syntax.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/shellcheck.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/refusal.stdout
+a4c225b2e8b3667158e6f183bd50aaff2bca24beeee0be66b4d0af5efde31777  docs/evidence/2026-09-27-spk-resident-config-preparation/refusal.stderr
+775040778c11d83547076435687822878e8418857f197a331a081ced7f25b299  docs/evidence/2026-09-27-spk-resident-config-preparation/checks.txt
+40a6d9c4c69dde3be5b54b63bdcee96e92462144d11183b1f6ae9ffb42266e50  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-continue.json
+c9d43a2a07ab671c5eef5d2418f42dea146ac3ac644d8609c18ec2daea70bc47  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-create.json
+d54102fe3b5f6d0a6b1e6fe6513564c07f44472160191d1a1a93424b1fca71ca  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-unknown.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-continue.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-create.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-unknown.stdout
+7cf601fb6d4671a31833e7eb1ff54be6406cf36e8fac7723befc768a0d5e9e60  docs/evidence/2026-09-27-spk-resident-config-preparation/schema-unknown.stderr

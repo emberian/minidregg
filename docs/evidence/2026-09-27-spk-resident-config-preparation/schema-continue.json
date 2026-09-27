@@ -1,0 +1,23 @@
+{
+  "protocol": "mini-spk-resident-config-request-v1",
+  "spkHost": "/opt/qualified/spk-host",
+  "spkHostSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bwrap": "/usr/bin/bwrap",
+  "bwrapSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "appGid": 2401,
+  "unit": "mini-spk-a8401-g2.service",
+  "startAction": {
+    "kind": "continue",
+    "createdIndex": "5"
+  },
+  "entrances": [
+    {
+      "directory": "/run/mini-spk/alice",
+      "dispatchCustody": "/run/mini-spk/alice/dispatch.json",
+      "displayName": "Alice",
+      "preferredHandle": "alice"
+    }
+  ],
+  "agents": [],
+  "createdJournal": "/var/lib/minidregg/spk/resident-ops/prior-create"
+}

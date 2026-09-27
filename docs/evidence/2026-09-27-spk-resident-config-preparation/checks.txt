@@ -1,0 +1,6 @@
+sh -n: exit 0
+shellcheck -S warning: exit 0
+exact create request parser: exit 0
+exact continue request parser: exit 0
+unknown top-level field: exit 2
+invalid prepared root: exit 2; no output
