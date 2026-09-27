@@ -38,6 +38,12 @@ The daemon passes a private launch copy of that config to the host and
 requires each client request to present identical config bytes. The local
 socket rejects unknown operation codes. Fn poll accepts only an empty request;
 fn ACK accepts only a canonical decimal Mini transaction ID, never paths.
+Every current `mini` socket request also hashes its selected `--host`
+executable and sends that image digest in the v2 envelope. A service running
+different Host bytes refuses before forwarding the operation; the client does
+not fall back to the legacy v1 envelope. Consumer workers additionally check
+the selected image against their durable v2 worker pin. This is a local
+owner-controlled executable identity check, not remote attestation.
 
 The transport covers profile, description, author, inspect, signatures,
 observation challenge/assembly, prepare, call assembly, submit, lookup, and
@@ -91,9 +97,10 @@ not ACK fn or submit to Mini. Submit retains its exact signed `call.bin` before
 publication. ACK retains `transaction-id.txt`, `reply.frame`, and `ack.json`;
 only `fnAck: "durable-accepted"` reports success. An exact repeat of the
 current article or skip cursor has passed native validation without a new fn
-Store event. The worker can retry one uncertain ACK using the same retained
-Mini transaction ID; a second uncertainty holds for operator reconciliation. An older
-cursor can instead return `covered-by-durable-frontier`, which proves scoped
+Store event. A missing, uncertain, or transport-fault ACK reply permits one
+automatic exact transaction retry with a durable one-shot marker; a second
+uncertainty holds. A refusal, malformed reply, or older cursor coverage holds
+for operator review. An older cursor can instead return `covered-by-durable-frontier`, which proves scoped
 cursor coverage but not the exact old ACK event. The worker does not retry an
 old covered cursor. Coverage is retained and reported distinctly from exact
 durable acceptance.
@@ -197,6 +204,26 @@ runtime must compare its anchor and provider identity with the retained
 reserve and check fresh parent/provider state. This v1 route requires the
 persistent `--socket`; no direct one-shot Host fallback is inferred.
 
+`meter` asks the operator-pinned Host for a read-only quote over exact retained
+provider request and response bytes:
+
+```sh
+mini meter --host HOST --config CONFIG.json --socket SOCKET \
+  --metadata META.json --request REQUEST.bin --response RESPONSE.bin \
+  --dir /private/path/new-meter-attempt
+```
+
+`META.json` contains exactly `status`, `contentType`, and `reserve` as strings;
+the status and reserve use canonical decimal spelling. The client retains the
+exact metadata, request, response, and full Host `reply.frame` in a new private
+directory before decoding `meter.json` or a refusal. The source Host, using the
+configured provider resource and tariff, checks the provider-reported usage
+and returns a typed quote with its provenance limitation. The quote is not a
+Mini settlement, provider invoice attestation, or permission to release a
+held reservation. The controller must bind it to its own retained request,
+response, and confirmed reserve before constructing a separate signed settle
+call. This route requires the persistent `--socket`.
+
 `consumer-drain-once` runs one bounded B consumer wake through that same
 socket. It holds a single private, owner-locked durable state directory:
 
@@ -214,14 +241,17 @@ uses the original receipt; definitive absence permits one resubmission of the
 same retained bytes under Mini's replay and current-authority checks. An
 uncertain lookup or resubmission holds the call for reconciliation. Once Mini confirms, the worker
 persists its transaction ID and the confirmed receipt before fn ACK. A durable
-accepted ACK frame can finish archival after a crash. A refused or missing ACK
-reply leaves the worker Held for explicit recovery; it does not create a new
-intent or submit another Mini call. The operator must keep the same host, config bytes, socket,
+accepted ACK frame can finish archival after a crash. A missing, uncertain, or
+transport-fault reply allows one automatic retry of the same ACK transaction;
+another unresolved result holds. A typed refusal, cursor coverage, or malformed
+reply holds for operator review. None of these paths creates a new intent or
+submits another Mini call. The operator must keep the same host, config bytes, socket,
 and signing key; a changed pin refuses. The worker archives successful
 attempts by Mini transaction ID and removes idle poll attempts.
 
-After diagnosing a Held ACK and correcting the operator-controlled fn bridge,
-an operator can run one bounded retry of the same transaction:
+After diagnosing a Held typed fn-session refusal and correcting the
+operator-controlled fn bridge, an operator can run one bounded retry of the
+same transaction:
 
 ```sh
 mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json \
@@ -231,8 +261,8 @@ mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json \
 
 This requires the worker's v2 Host-image pin, an anchored confirmed receipt,
 and an existing Held publication or neutral-page skip with a complete typed
-fn-session refusal frame. A missing reply or other failure remains Held for
-operator diagnosis. The command preserves the prior ACK frame, checks the retained
+fn-session refusal frame. A missing reply, exhausted automatic retry, or other
+failure remains Held for operator diagnosis. The command preserves the prior ACK frame, checks the retained
 signed call and confirmed receipt, performs a read-only lookup under the pinned
 Host, and compares all four receipt fields before marking the one-shot retry
 durable and sending the exact typed fn ACK. If the reply is lost again, the
