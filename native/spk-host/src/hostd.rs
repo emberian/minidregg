@@ -469,6 +469,39 @@ pub(crate) struct UnitStopAudit {
     exact_cgroup_empty: bool,
 }
 
+/// Exact running incarnation selected by the source-inspected STOP witness.
+/// Its prior completion receipt remains in the lifecycle attempt; this local
+/// identity is rechecked under the journal lock before any manager action.
+#[derive(Clone)]
+#[allow(dead_code)] // STOP caller is gated on the source-inspected prior-running witness.
+pub(crate) struct StopIdentity {
+    pub app: u64,
+    pub generation: u64,
+    pub unit: String,
+    pub image_identity: String,
+    pub invocation_id: String,
+    pub control_group: String,
+}
+
+#[allow(dead_code)]
+impl StopIdentity {
+    fn matches(&self, record: &Record) -> io::Result<()> {
+        if record.app() != self.app
+            || record.generation() != self.generation
+            || record.unit() != self.unit
+            || record.image_identity() != self.image_identity
+            || record.invocation_id() != Some(self.invocation_id.as_str())
+            || record.control_group() != Some(self.control_group.as_str())
+            || !matches!(record.phase, Phase::Running | Phase::Fenced)
+        {
+            return Err(invalid(
+                "STOP source running incarnation differs from journal",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl UnitStopAudit {
     fn before_stop(record: &Record) -> io::Result<()> {
         let output = systemd_show(record.unit())?;
@@ -1312,6 +1345,75 @@ impl Journal {
             UnitStopAudit::inspect,
         )
     }
+
+    /// Source-bound STOP uses the exact retained running incarnation and a
+    /// root volume recheck while holding the journal lock. Fenced is durable
+    /// before systemd stop; a crash after the manager acts can only resume by
+    /// auditing that same unit, never by a second Mini claim.
+    pub(crate) fn fence_and_stop_manager_checked(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+    ) -> io::Result<UnitStopAudit> {
+        self.fence_and_stop_checked_with(
+            expected,
+            verify_volume,
+            UnitStopAudit::before_stop,
+            |unit| {
+                let output =
+                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(invalid("exact systemd stop failed"))
+                }
+            },
+            UnitStopAudit::inspect,
+        )
+    }
+
+    fn fence_and_stop_checked_with(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+        before_stop: impl Fn(&Record) -> io::Result<()>,
+        stop: impl Fn(&str) -> io::Result<()>,
+        inspect: impl Fn(&Record) -> io::Result<UnitStopAudit>,
+    ) -> io::Result<UnitStopAudit> {
+        self.with_lock(|this| {
+            let mut record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing running STOP journal"))?;
+            expected.matches(&record)?;
+            verify_volume()?;
+            if record.phase == Phase::Running {
+                before_stop(&record)?;
+                record.phase = Phase::Fenced;
+                this.write_unlocked(&record)?;
+            }
+            // On recovery, a prior stop may have succeeded before the final
+            // fsync. A complete exact post-stop audit retires Fenced without
+            // another manager command. Otherwise verify the same incarnation
+            // again, then invoke the manager while retaining the lock.
+            if let Ok(audit) = inspect(&record) {
+                if audit.prove(&record).is_ok() {
+                    record.phase = Phase::Stopped;
+                    record.child_pid = None;
+                    this.write_unlocked(&record)?;
+                    return Ok(audit);
+                }
+            }
+            verify_volume()?;
+            before_stop(&record)?;
+            stop(record.unit())?;
+            let audit = inspect(&record)?;
+            audit.prove(&record)?;
+            record.phase = Phase::Stopped;
+            record.child_pid = None;
+            this.write_unlocked(&record)?;
+            Ok(audit)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1941,6 +2043,79 @@ mod tests {
             queued_job: false,
             exact_cgroup_empty: true,
         })
+    }
+
+    #[test]
+    fn source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence() {
+        use std::sync::atomic::AtomicUsize;
+
+        let (path, journal, begin) = running_journal();
+        let expected = StopIdentity {
+            app: begin.app,
+            generation: begin.generation,
+            unit: begin.unit.clone(),
+            image_identity: begin.image_identity.clone(),
+            invocation_id: instance().invocation_id,
+            control_group: instance().control_group,
+        };
+        let stops = AtomicUsize::new(0);
+        let volume_checks = AtomicUsize::new(0);
+        let mut wrong = expected.clone();
+        wrong.invocation_id = "e".repeat(32);
+        let inspect = |record: &Record| {
+            if stops.load(Ordering::SeqCst) == 0 {
+                Err(invalid("injected manager still active"))
+            } else {
+                stopped(record)
+            }
+        };
+        assert!(journal
+            .fence_and_stop_checked_with(&wrong, || Ok(()), |_| Ok(()), |_| Ok(()), inspect)
+            .is_err());
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Running);
+        wrong.invocation_id = expected.invocation_id.clone();
+        assert!(journal
+            .fence_and_stop_checked_with(
+                &wrong,
+                || Err(invalid("injected volume drift")),
+                |_| Ok(()),
+                |_| Ok(()),
+                inspect,
+            )
+            .is_err());
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Running);
+        assert!(journal
+            .fence_and_stop_checked_with(
+                &expected,
+                || {
+                    volume_checks.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                |_| Ok(()),
+                |_| Err(invalid("injected uncertain manager reply")),
+                inspect,
+            )
+            .is_err());
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
+        journal
+            .fence_and_stop_checked_with(
+                &expected,
+                || {
+                    volume_checks.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                |_| Ok(()),
+                |_| {
+                    stops.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                inspect,
+            )
+            .unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(volume_checks.load(Ordering::SeqCst) >= 2);
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

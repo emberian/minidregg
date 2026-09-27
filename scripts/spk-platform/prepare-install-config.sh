@@ -1,6 +1,7 @@
 #!/bin/sh
-# After run-base.sh and operator socket setup, construct private INSTALL
-# custody/config only. It does not invoke SPK ingestion or submit Mini events.
+# After run-base.sh and operator socket setup, verify a separately qualified
+# v3 Host against the existing Store, then construct private INSTALL custody.
+# This does not invoke SPK ingestion or submit Mini events.
 set -eu
 umask 077
 
@@ -55,12 +56,29 @@ case "$APP_UID" in ''|0*|*[!0-9]*) echo "app UID must be canonical nonzero decim
 }
 case "$HOST" in /*) ;; *) exit 2 ;; esac
 case "$HOST" in /tmp/*|/var/tmp/*) exit 2 ;; esac
-PREPARED_HOST_SHA=$(awk -v path="$HOST" '$2 == path {print $1}' \
-  "$ROOT/source-stage/base-executable-sha256.txt")
-[ -n "$PREPARED_HOST_SHA" ] &&
-  [ "$(sha256sum "$HOST" | cut -d ' ' -f 1)" = "$PREPARED_HOST_SHA" ] || {
-  echo "Host differs from fresh base Host" >&2; exit 2;
+BASE_MANIFEST="$ROOT/source-stage/base-executable-sha256.txt"
+[ -s "$BASE_MANIFEST" ] && [ ! -L "$BASE_MANIFEST" ] || {
+  echo "base executable manifest absent" >&2; exit 2;
 }
+BASE_HOST=$(awk 'NR == 1 && NF == 2 {print $2}' "$BASE_MANIFEST")
+BASE_HOST_SHA=$(awk 'NR == 1 && NF == 2 {print $1}' "$BASE_MANIFEST")
+canonical_absolute "$BASE_HOST"
+case "$BASE_HOST_SHA" in *[!0-9a-f]*|'') exit 2 ;; esac
+[ "${#BASE_HOST_SHA}" = 64 ] || exit 2
+protected_dir_chain "${BASE_HOST%/*}"
+[ -x "$BASE_HOST" ] && [ ! -L "$BASE_HOST" ] &&
+  [ "$(sha256sum "$BASE_HOST" | cut -d ' ' -f 1)" = "$BASE_HOST_SHA" ] || {
+  echo "fresh base Host differs from retained binary pin" >&2; exit 2;
+}
+: "${QUALIFIED_INSTALL_HOST_SHA256:?set the separately source-qualified v3 Host SHA-256}"
+case "$QUALIFIED_INSTALL_HOST_SHA256" in
+  *[!0-9a-f]*|'') echo "v3 Host SHA must be lowercase hex" >&2; exit 2 ;;
+esac
+[ "${#QUALIFIED_INSTALL_HOST_SHA256}" = 64 ] && [ ! -L "$HOST" ] &&
+  [ "$(sha256sum "$HOST" | cut -d ' ' -f 1)" = "$QUALIFIED_INSTALL_HOST_SHA256" ] || {
+  echo "v3 Host differs from its exact source-qualified pin" >&2; exit 2;
+}
+protected_dir_chain "${HOST%/*}"
 [ ! -e "$JOURNAL" ] && [ ! -L "$JOURNAL" ] || {
   echo "INSTALL journal already exists" >&2; exit 2;
 }
@@ -70,13 +88,51 @@ for directory in "$ROOT" "$ROOT/custody" "$ROOT/packages" \
   protected_dir_chain "$directory"
 done
 CONFIG="$ROOT/base/workroom/deployment/pinned-config.json"
+PROFILE="$ROOT/base/workroom/operator-profile.json"
+SETTINGS="$ROOT/base/workroom/operator.json"
+QUALIFICATION="$ROOT/source-stage/launch-qualified/qualification.json"
+HANDOFF="$ROOT/source-stage/install-v2-handoff.json"
+BASE_CALL="$ROOT/base/app-attempt/call.bin"
+BASE_OUTCOME="$ROOT/base/app-attempt/outcome.json"
 SEED="$ROOT/base/workroom/tool.key"
 PUBLIC="$ROOT/base/workroom/tool.pub"
 COMPLETION="$ROOT/custody/completion.seed"
 SPK="$ROOT/packages/gitweb.spk"
-for file in "$CONFIG" "$SEED" "$PUBLIC" "$COMPLETION" "$SPK"; do
-  [ -s "$file" ] || { echo "missing fresh protected fixture input" >&2; exit 2; }
+for file in "$CONFIG" "$PROFILE" "$SETTINGS" "$QUALIFICATION" "$HANDOFF" \
+    "$BASE_CALL" "$BASE_OUTCOME" "$SEED" "$PUBLIC" "$COMPLETION" "$SPK"; do
+  [ -s "$file" ] && [ ! -L "$file" ] || {
+    echo "missing fresh protected fixture input" >&2; exit 2;
+  }
 done
+protected_dir_chain "$ROOT/source-stage/launch-qualified"
+jq -e --slurpfile handoff "$HANDOFF" '
+  .protocol == "mini-spk-launch-qualified-v2" and
+  .rawSha256 == $handoff[0].rawSha256 and
+  .packageRoot == $handoff[0].embeddedPackageRoot and
+  .launchRoot == $handoff[0].launchRoot and
+  .launchCanonicalSha256 == $handoff[0].launchCanonicalSha256 and
+  $handoff[0].packageEmpty == true and
+  $handoff[0].snapshotEmpty == true' "$QUALIFICATION" >/dev/null
+test "$(sha256sum "$ROOT/source-stage/launch-qualified/launch-descriptor.bin" | cut -d ' ' -f 1)" = \
+  "$(jq -er .launchCanonicalSha256 "$QUALIFICATION")"
+CONFIG_SHA=$(sha256sum "$CONFIG" | cut -d ' ' -f 1)
+PINNED_CONFIG_SHA=$(awk -v path="$CONFIG" '$2 == path {print $1}' "$BASE_MANIFEST")
+[ "$CONFIG_SHA" = "$PINNED_CONFIG_SHA" ] && [ "${#PINNED_CONFIG_SHA}" = 64 ] || {
+  echo "Store Settings differ from base pin" >&2; exit 2;
+}
+STORE_BINARY=$(jq -er '.storageBinary | select(type == "string")' "$SETTINGS")
+STORE_ROOT=$(jq -er '.storageRoot | select(type == "string")' "$SETTINGS")
+canonical_absolute "$STORE_BINARY"
+canonical_absolute "$STORE_ROOT"
+[ "$STORE_ROOT" = "$ROOT/base/workroom/store" ] && [ -x "$STORE_BINARY" ] || {
+  echo "base Store helper/root changed" >&2; exit 2;
+}
+STORE_SHA=$(awk -v path="$STORE_BINARY" '$2 == path {print $1}' "$BASE_MANIFEST")
+[ "${#STORE_SHA}" = 64 ] &&
+  [ "$(sha256sum "$STORE_BINARY" | cut -d ' ' -f 1)" = "$STORE_SHA" ] || {
+  echo "base Store helper differs from retained pin" >&2; exit 2;
+}
+protected_dir_chain "${STORE_BINARY%/*}"
 test "$(sha256sum "$SPK" | cut -d ' ' -f 1)" = \
   2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa
 test "$(od -An -tx1 -v "$ROOT/custody/completion.pub" | tr -d ' \n')" = \
@@ -86,9 +142,109 @@ jq -e '.completionManagement.app == 8401 and
   .residentClaimManagement.app == 8401 and
   .grainBirthTariff == {base:2,perBirth:1}' "$CONFIG" >/dev/null
 SEMANTICS=$(jq -er '.semantics | tostring | select(test("^[1-9][0-9]*$"))' \
-  "$ROOT/base/workroom/operator-profile.json")
+  "$PROFILE")
 MANAGEMENT_PUBLIC=$(od -An -tx1 -v "$PUBLIC" | tr -d ' \n')
 test "${#MANAGEMENT_PUBLIC}" = 64
+
+# Both immutable Host binaries reopen and replay the exact same protected
+# Settings/Store. A read-only lookup of the original base call under the new
+# image must yield its original four-field receipt; no successor can mint a
+# fresh base Store or silently replace its executable pin.
+UPGRADE="$ROOT/source-stage/install-host-upgrade"
+[ ! -e "$UPGRADE" ] && [ ! -L "$UPGRADE" ] || {
+  echo "Host upgrade attempt already exists" >&2; exit 2;
+}
+mkdir -m 700 "$UPGRADE"
+"$STORE_BINARY" read-to "$STORE_ROOT" "$UPGRADE/store-before.bin"
+"$BASE_HOST" "$CONFIG" describe >"$UPGRADE/base-description.json"
+"$HOST" "$CONFIG" describe >"$UPGRADE/successor-description.json"
+for description in "$UPGRADE/base-description.json" \
+    "$UPGRADE/successor-description.json"; do
+  jq -e --arg semantics "$SEMANTICS" '
+    .runtime == "minidregg-native" and .semantics == $semantics and
+    .nativeChecked == true and .succinctProofDeployment == false and
+    (.domain | type == "string" and test("^[1-9][0-9]*$"))' \
+    "$description" >/dev/null
+done
+jq -S '{runtime,semantics,domain,fieldModulus,orderDifferenceWidth,
+  nativeChecked,succinctProofDeployment}' "$UPGRADE/base-description.json" \
+  >"$UPGRADE/base-identity.json"
+jq -S '{runtime,semantics,domain,fieldModulus,orderDifferenceWidth,
+  nativeChecked,succinctProofDeployment}' "$UPGRADE/successor-description.json" \
+  >"$UPGRADE/successor-identity.json"
+cmp "$UPGRADE/base-identity.json" "$UPGRADE/successor-identity.json"
+"$BASE_HOST" "$CONFIG" lookup "$BASE_CALL" "$UPGRADE/base-outcome.bin"
+"$BASE_HOST" "$CONFIG" inspect outcome "$UPGRADE/base-outcome.bin" \
+  "$UPGRADE/base-outcome.json"
+"$HOST" "$CONFIG" lookup "$BASE_CALL" "$UPGRADE/successor-outcome.bin"
+"$HOST" "$CONFIG" inspect outcome "$UPGRADE/successor-outcome.bin" \
+  "$UPGRADE/successor-outcome.json"
+for outcome in "$BASE_OUTCOME" "$UPGRADE/base-outcome.json" \
+    "$UPGRADE/successor-outcome.json"; do
+  jq -e '.type == "confirmed" and
+    (.transactionId|type == "string" and test("^(0|[1-9][0-9]*)$")) and
+    (.eventId|type == "string" and test("^(0|[1-9][0-9]*)$")) and
+    (.acceptedCount|type == "string" and test("^[1-9][0-9]*$")) and
+    (.imageBoundary|type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+    "$outcome" >/dev/null
+done
+jq -e '.confirmation == "replayed"' "$UPGRADE/base-outcome.json" >/dev/null
+jq -e '.confirmation == "replayed"' "$UPGRADE/successor-outcome.json" >/dev/null
+jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' "$BASE_OUTCOME" \
+  >"$UPGRADE/original-receipt.json"
+jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+  "$UPGRADE/base-outcome.json" >"$UPGRADE/base-receipt.json"
+jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+  "$UPGRADE/successor-outcome.json" >"$UPGRADE/successor-receipt.json"
+cmp "$UPGRADE/original-receipt.json" "$UPGRADE/base-receipt.json"
+cmp "$UPGRADE/original-receipt.json" "$UPGRADE/successor-receipt.json"
+"$STORE_BINARY" read-to "$STORE_ROOT" "$UPGRADE/store-after.bin"
+cmp "$UPGRADE/store-before.bin" "$UPGRADE/store-after.bin"
+UPGRADE_STORE_SHA=$(sha256sum "$UPGRADE/store-before.bin" | cut -d ' ' -f 1)
+jq -n --arg base "$BASE_HOST" --arg baseSha "$BASE_HOST_SHA" \
+  --arg successor "$HOST" --arg successorSha "$QUALIFIED_INSTALL_HOST_SHA256" \
+  --arg config "$CONFIG" --arg configSha "$CONFIG_SHA" \
+  --arg profile "$PROFILE" --arg profileSha "$(sha256sum "$PROFILE" | cut -d ' ' -f 1)" \
+  --argjson reusedHost "$([ "$BASE_HOST_SHA" = "$QUALIFIED_INSTALL_HOST_SHA256" ] && echo true || echo false)" \
+  --arg storeSha "$UPGRADE_STORE_SHA" \
+  --slurpfile receipt "$UPGRADE/successor-receipt.json" '
+  {protocol:"mini-spk-install-host-upgrade-v1",reusedHost:$reusedHost,
+   baseHost:$base,baseHostSha256:$baseSha,
+   successorHost:$successor,successorHostSha256:$successorSha,
+   miniConfig:$config,miniConfigSha256:$configSha,profile:$profile,
+   profileSha256:$profileSha,storeImageSha256:$storeSha,
+   originalAppReceipt:$receipt[0]}' >"$UPGRADE/host-upgrade.json"
+chmod 600 "$UPGRADE"/*
+
+DEPLOYMENT_ID_FILE="$ROOT/custody/deployment-id.hex"
+HOST_ID_FILE="$ROOT/custody/host-id.hex"
+for file in "$DEPLOYMENT_ID_FILE" "$HOST_ID_FILE"; do
+  [ ! -e "$file" ] && [ ! -L "$file" ] || {
+    echo "protected host identity already exists" >&2; exit 2;
+  }
+done
+HOST_IDENTITY=/etc/minidregg/spk/host-identity
+protected_dir_chain "${HOST_IDENTITY%/*}"
+[ -f "$HOST_IDENTITY" ] && [ ! -L "$HOST_IDENTITY" ] &&
+  [ "$(stat -c '%u:%a:%h' "$HOST_IDENTITY")" = '0:600:1' ] || {
+  echo "registered root host identity absent or changed" >&2; exit 2;
+}
+HOST_IDENTITY_BEFORE=$(stat -c '%d:%i:%s:%Y:%Z' "$HOST_IDENTITY")
+[ "$(wc -l <"$HOST_IDENTITY" | tr -d ' ')" = 2 ] || exit 2
+DEPLOYMENT_ID=$(sed -n '1s/^deployment_id=//p' "$HOST_IDENTITY")
+HOST_ID=$(sed -n '2s/^host_id=//p' "$HOST_IDENTITY")
+[ "$(stat -c '%d:%i:%s:%Y:%Z' "$HOST_IDENTITY")" = "$HOST_IDENTITY_BEFORE" ] || {
+  echo "root host identity changed during read" >&2; exit 2;
+}
+case "$DEPLOYMENT_ID" in *[!0-9a-f]*|'') exit 2 ;; esac
+case "$HOST_ID" in *[!0-9a-f]*|'') exit 2 ;; esac
+[ "${#DEPLOYMENT_ID}" = 64 ] && [ "${#HOST_ID}" = 64 ] &&
+  [ "$DEPLOYMENT_ID" != "$HOST_ID" ] || exit 2
+printf '%s' "$DEPLOYMENT_ID" >"$DEPLOYMENT_ID_FILE"
+printf '%s' "$HOST_ID" >"$HOST_ID_FILE"
+DEPLOYMENT_ID=$(cat "$DEPLOYMENT_ID_FILE")
+HOST_ID=$(cat "$HOST_ID_FILE")
+chmod 600 "$DEPLOYMENT_ID_FILE" "$HOST_ID_FILE"
 
 BEGIN="$ROOT/custody/begin-management.json"
 CLAIM="$ROOT/custody/claim-management.json"
@@ -124,24 +280,29 @@ chmod 600 "$BEGIN" "$CLAIM" "$INSTALL_COMPLETION"
 
 mkdir -m 700 "$JOURNAL"
 protected_dir_chain "$JOURNAL"
-HOST_SHA=$(sha256sum "$HOST" | cut -d ' ' -f 1)
-CONFIG_SHA=$(sha256sum "$CONFIG" | cut -d ' ' -f 1)
 jq -n --arg journal "$JOURNAL" --arg spk "$SPK" --arg image "$IMAGE_DIR" \
-  --arg uid "$APP_UID" --arg host "$HOST" --arg hostSha "$HOST_SHA" \
+  --arg uid "$APP_UID" --arg host "$HOST" \
+  --arg hostSha "$QUALIFIED_INSTALL_HOST_SHA256" \
   --arg config "$CONFIG" --arg configSha "$CONFIG_SHA" --arg socket "$SOCKET" \
+  --arg deployment "$DEPLOYMENT_ID" --arg hostId "$HOST_ID" \
+  --arg launch "$QUALIFICATION" \
   --arg begin "$BEGIN" --arg claim "$CLAIM" \
   --arg completion "$INSTALL_COMPLETION" --arg seed "$COMPLETION" \
   --arg semantics "$SEMANTICS" '
-  {protocol:"mini-spk-resident-install-v1",journalDir:$journal,
+  {protocol:"mini-spk-resident-install-v2",journalDir:$journal,
     sourceSpk:$spk,imageDir:$image,
     expectedRawSha256:"2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa",
-    appUid:($uid|tonumber),miniHost:$host,miniHostSha256:$hostSha,
+    appUid:($uid|tonumber),deploymentId:$deployment,hostId:$hostId,
+    launchQualification:$launch,miniHost:$host,miniHostSha256:$hostSha,
     miniConfig:$config,miniConfigSha256:$configSha,miniOperatorSocket:$socket,
     beginManagementCustody:$begin,claimManagementCustody:$claim,
     completionManagementCustody:$completion,completionCustodianSeed:$seed,
     completionSemantics:$semantics}' >"$JOURNAL/install.json"
 chmod 600 "$JOURNAL/install.json"
-sha256sum "$HOST" "$CONFIG" "$SPK" "$BEGIN" "$CLAIM" \
+sha256sum "$BASE_HOST" "$HOST" "$CONFIG" "$PROFILE" "$SPK" \
+  "$QUALIFICATION" "$HANDOFF" "$HOST_IDENTITY" \
+  "$UPGRADE/host-upgrade.json" \
+  "$DEPLOYMENT_ID_FILE" "$HOST_ID_FILE" "$BEGIN" "$CLAIM" \
   "$INSTALL_COMPLETION" "$JOURNAL/install.json" \
   >"$JOURNAL/fixture-input-sha256.txt"
 echo "private INSTALL config prepared at $JOURNAL/install.json; no lifecycle event submitted"

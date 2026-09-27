@@ -1,0 +1,8 @@
+337ffd5d6c5ceb94c7535b62f899c146b01e92eda9fe107af4e948efef5bdf84  scripts/spk-platform/prepare-install-config.sh
+03c1847ebeef03cc7b92b787c8fb6ea4035cfdc6ef4fc1acf70d9cd5fd3136ae  native/spk-host/src/hostd.rs
+e419d2a7644d9e183d23448cd407026e5063c9aecc8a1e17d3daeb68be357cdd  native/spk-host/src/lib.rs
+a6382c8a7c1171a09e1a01e4bb34d9fe91484c17d74ea5032330ef615f68fbf1  docs/evidence/2026-09-27-spk-install-upgrade-stop-hook/README.md
+e411bc096cb5b863f04da84329ed589ce1a6ff06970bde33d67ccfa0f9f3ddbf  docs/evidence/2026-09-27-spk-install-upgrade-stop-hook/hostd-focused.log
+5e88f36718191fe8037625522694113381dfe8e776caf4dc9f38264108d2c0c3  docs/evidence/2026-09-27-spk-install-upgrade-stop-hook/hostd-clippy.log
+f43a44679319dc65b630631a4745fe2dc3c7e82c55b6ebfbe0d3be94d35a538f  docs/evidence/2026-09-27-spk-install-upgrade-stop-hook/script-syntax.log
+e68ba73c25496aef8201223d079f65cb7b07448060d3c76f09615f6301c02e19  docs/evidence/2026-09-27-spk-install-upgrade-stop-hook/script-shellcheck.log

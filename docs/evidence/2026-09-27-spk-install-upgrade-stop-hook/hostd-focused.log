@@ -1,0 +1,8 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.04s
+────────────
+ Nextest run ID 97c6a48f-7c0b-44f3-946a-b67b9089afd6 with nextest profile: default
+    Starting 1 test across 1 binary (137 tests skipped)
+        PASS [   0.006s] (1/1) minidregg-spk-host hostd::tests::source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence
+────────────
+     Summary [   0.006s] 1 test run: 1 passed, 137 skipped
