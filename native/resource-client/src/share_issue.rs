@@ -9,6 +9,51 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt}
 const REQUEST_LIMIT: usize = 256 * 1024;
 const FORMAT: &str = "minidregg-application-share-issue-custody-v1";
 
+// The operator socket admits only the private checked share operations.
+// Source-authored request/signature codecs and read-only presentation run
+// against the same pinned Host executable directly; routing them through the
+// process-global SOCKET would tunnel public author/inspect op7/8/9 into the
+// operator service and be refused before the checked op32 plan.
+fn source_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
+    let output = Command::new(host)
+        .arg(config)
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{} exited {}; source operation refused: {}",
+            host.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+fn source_inspect(
+    host: &Path,
+    config: &Path,
+    kind: &str,
+    input: &Path,
+    output: &Path,
+) -> Result<Value> {
+    source_process(
+        host,
+        config,
+        &[
+            OsStr::new("inspect"),
+            OsStr::new(kind),
+            input.as_os_str(),
+            output.as_os_str(),
+        ],
+    )?;
+    let bytes =
+        fs::read(output).map_err(|error| format!("cannot read {}: {error}", output.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid host JSON {}: {error}", output.display()))
+}
+
 fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
@@ -276,7 +321,7 @@ fn outcome_at(
     let presentation = directory.join(format!("{name}.outcome.json"));
     create_private(&binary, body)?;
     sync_directory_ancestors(directory)?;
-    inspect(
+    source_inspect(
         &state.host,
         &state.config,
         "outcome",
@@ -379,7 +424,7 @@ fn reinspect(directory: &Path, state: &Retained, stem: &str) -> Result<Option<Va
         .map(|index| directory.join(format!("{stem}.reinspect-{index:04}.json")))
         .find(|path| !path.exists())
         .ok_or("share issue reinspection names exhausted")?;
-    let observed = inspect(&state.host, &state.config, "outcome", &binary, &path)?;
+    let observed = source_inspect(&state.host, &state.config, "outcome", &binary, &path)?;
     let cached = directory.join(format!("{stem}.outcome.json"));
     if cached.exists() {
         let saved: Value = serde_json::from_slice(&bounded(&cached, 65_536)?)
@@ -554,7 +599,7 @@ pub(super) fn prepare(
     create_private(&directory.join("approval.json"), &approval_bytes)?;
     create_private(&directory.join("config.json"), &initial_config)?;
     let request_bin = directory.join("request.bin");
-    process(
+    source_process(
         &host,
         &config,
         &[
@@ -566,7 +611,7 @@ pub(super) fn prepare(
     )?;
     sync_retained_call(&directory, &request_bin)?;
     let request = bounded(&request_bin, REQUEST_LIMIT)?;
-    let inspected_request = inspect(
+    let inspected_request = source_inspect(
         &host,
         &config,
         "application-share-issue-request",
@@ -586,7 +631,7 @@ pub(super) fn prepare(
     let plan = expect_reply(&frame, 32)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
-    let inspected_plan = inspect(
+    let inspected_plan = source_inspect(
         &host,
         &config,
         "application-share-issue-plan",
@@ -627,7 +672,7 @@ pub(super) fn prepare(
     let signatures_json = directory.join("signatures.json");
     retain_json(&signatures_json, &Value::Array(signatures))?;
     let signatures_path = directory.join("signatures.bin");
-    process(
+    source_process(
         &host,
         &config,
         &[
@@ -662,6 +707,49 @@ pub(super) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_helper_ignores_operator_socket() {
+        const CHILD: &str = "MINI_SHARE_SOURCE_HELPER_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // Isolate the process-global SOCKET pin from other parallel tests.
+            let output = Command::new(std::env::current_exe().unwrap())
+                .arg("source_helper_ignores_operator_socket")
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "child: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("mini-share-source-helper-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let script = directory.join("fake-host.sh");
+        let authored = directory.join("authored.bin");
+        fs::write(
+            &script,
+            "test \"$1\" = author && printf source-owned >\"$2\"\n",
+        )
+        .unwrap();
+        let unavailable_socket = directory.join("unavailable.sock");
+        SOCKET.set(unavailable_socket.clone()).unwrap();
+        assert_eq!(SOCKET.get(), Some(&unavailable_socket));
+        source_process(
+            Path::new("/bin/sh"),
+            &script,
+            &[OsStr::new("author"), authored.as_os_str()],
+        )
+        .unwrap();
+        assert_eq!(fs::read(authored).unwrap(), b"source-owned");
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn approval_binds_complete_canonical_request() {
