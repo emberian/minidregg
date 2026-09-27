@@ -1,0 +1,51 @@
+{
+  "providerAttempt": {
+    "id": 13,
+    "promptOperationId": 11,
+    "parentGeneration": "1",
+    "model": "mini-hermes-protocol-fixture",
+    "requestPath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-0000000000000013.controller-request",
+    "requestBytes": 37069,
+    "requestSha256": "e96c821a4f616a74ae71fe6654bd5995d8a69567a8dea35c38010734893f92d4",
+    "sendStarted": true,
+    "outcomePath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-0000000000000013.controller-outcome",
+    "outcomeBytes": 775,
+    "outcomeSha256": "67493405007adbb32e96e81a235db4953a33ae1929e31fdc84b1843a7670389c",
+    "outcome": "received:200:text/event-stream",
+    "responseStatus": 200,
+    "responseContentType": "text/event-stream",
+    "responseHeadersPath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-0000000000000013.controller-response-headers",
+    "responseHeadersBytes": 96,
+    "responseHeadersSha256": "b9d7344f1668c081101e579f2f633455e4e79fed9e86f6d48a6f5a6f04dc0d6c",
+    "meteringPin": {
+      "providerResourceId": "7204",
+      "model": "mini-hermes-protocol-fixture",
+      "tariffVersion": "1",
+      "tariffDigest": "53031313001255559760487189251062546394318675101431160549090574078503637496084"
+    },
+    "meterReportPath": null,
+    "meterReportSha256": null,
+    "meteredCharge": null
+  },
+  "providerHold": {
+    "reserve": "3",
+    "charge": "0",
+    "beforeGeneration": "1",
+    "beforeTargetRoot": "3687137569198262869667744521674178965518437106912092889164652157227542688385",
+    "reserveAttempt": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/attempt-0000000000000019",
+    "reserveConfirmed": true,
+    "reserveRefused": false,
+    "reserveBoundary": "20486931878664933474761689321595185245879907448140373003536430532113354791714",
+    "reserveCallSha256": "ee5aa4991d9fdb3882b3e4bfeec34ea048671aade2265bfa3ddd775fe9be9863",
+    "reserveOutcomePath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/attempt-0000000000000019/outcome.bin",
+    "reserveOutcomeSha256": "845b103fd463fad062fe48172ce6bfc2d895200ff8f10e9e39fb0adfc940d8ce",
+    "reserveAnchor": {
+      "transactionId": "97375348232341396678244348366366412359772252704797061101849793508471129707993",
+      "eventId": "64435115868218898885886553422758108618247031797568491511048043889104934646885",
+      "acceptedCount": "10",
+      "imageBoundary": "20486931878664933474761689321595185245879907448140373003536430532113354791714"
+    }
+  },
+  "providerSettlement": null,
+  "providerReplays": []
+}

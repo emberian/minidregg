@@ -76,7 +76,8 @@ def bindFamily (prepared : PreparedInvocation deployment profile ambient durable
         outcome := (prepared.targets i).post
         preExact := rfl
         requestExact := rfl
-        effectsExact := by simp only [rawLeg, targetFamily, requestFor, id_eq]
+        effectsExact := by simp only [rawLeg, targetFamily, requestFor_eq_reference,
+          requestForReference, id_eq]
         patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
   | none =>

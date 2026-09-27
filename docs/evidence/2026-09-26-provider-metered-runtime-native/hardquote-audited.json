@@ -1,0 +1,62 @@
+{
+  "providerAttempt": null,
+  "providerHold": null,
+  "providerSettlement": {
+    "providerAttemptId": 13,
+    "operationId": 42,
+    "operation": "provider audit settle",
+    "attempt": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/attempt-0000000000000042",
+    "charge": "3",
+    "sourceSha256": "c2ea4c928cd565201f04697e8076f48061648be0b91899d8f9b1e9cb6955c629",
+    "callSha256": "8c3042afc569fc4450368d5c7e38fc36ccb38d7835fb418238fd7849e614f9fd",
+    "outcomePath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/attempt-0000000000000042/outcome.json",
+    "outcomeSha256": "3ea1ed64b1945a2f8cdf946d847ab6a9d09fcae157520d8277a280202b2c4076",
+    "receipt": {
+      "transactionId": "42676920765515209599727797253795709522718731205190715634067549786718946843290",
+      "eventId": "2021170560864757434429471167320486962781450385707712646233907912251911898385",
+      "acceptedCount": "13",
+      "imageBoundary": "11200523205111881251841573508353549728704792716022382410357910651439074933181"
+    }
+  },
+  "providerReplays": [],
+  "reconciliationLog": [
+    {
+      "action": "settle-provider-source-metered-charge",
+      "auditedCharge": "3",
+      "authority": "provider",
+      "decisionId": "39",
+      "externalEffectsAcknowledged": false,
+      "meterReportPath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-meter-0000000000000038/meter.json",
+      "meterReportSha256": "107f868e547e1f12d207e385f06b3bc01a21f88e7c67840888e01786c24535a3",
+      "meteringPin": {
+        "model": "mini-hermes-protocol-fixture",
+        "providerResourceId": "7204",
+        "tariffDigest": "53031313001255559760487189251062546394318675101431160549090574078503637496084",
+        "tariffVersion": "1"
+      },
+      "outcome": "received:200:text/event-stream",
+      "outcomeBytes": 775,
+      "outcomePath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-0000000000000013.controller-outcome",
+      "outcomeSha256": "67493405007adbb32e96e81a235db4953a33ae1929e31fdc84b1843a7670389c",
+      "providerAttemptId": "13",
+      "requestBytes": 37069,
+      "requestPath": "/tmp/mga-meter-native-20260926/provision-provider-hard-quote/runtime-state/provider-0000000000000013.controller-request",
+      "requestSha256": "e96c821a4f616a74ae71fe6654bd5995d8a69567a8dea35c38010734893f92d4",
+      "sendBoundaryDurable": true,
+      "settlementReceipt": null,
+      "stage": "operator-audited-requested"
+    },
+    {
+      "authority": "provider",
+      "decisionId": "39",
+      "externalEffectsAcknowledged": false,
+      "providerAttemptId": "13",
+      "stage": "signed-settlement-confirmed"
+    }
+  ],
+  "unresolvedExternal": [
+    "metered provider request 13 retained a response without a valid Lean quote; held allowance needs reconciliation",
+    "provider reservation fenced; external send/response requires exact audit",
+    "provider request 13 external effects require explicit acknowledgement"
+  ]
+}
