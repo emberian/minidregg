@@ -4893,7 +4893,12 @@ impl Runtime {
                 .host_socket
                 .as_ref()
                 .ok_or("current birth socket absent")?;
-            self.command_output(
+            // Current-author is read-only, but a hard connector break must
+            // still stop and reap its Mini child before settlement begins.
+            // The durable birth_operation already precedes this step; no
+            // birth_pending or signed call exists until authoring completes.
+            self.check_not_cancelled()?;
+            self.work_output(
                 &cfg.mini,
                 &[
                     command,
@@ -4908,7 +4913,9 @@ impl Runtime {
                     "--dir",
                     author.to_str().ok_or("author path UTF-8")?,
                 ],
-            )?;
+            )
+            .map_err(|error| format!("current birth authoring interrupted or refused: {error}"))?;
+            self.check_not_cancelled()?;
             let intent = author.join("intent.bin");
             let digest = sha256_bytes(&bounded_regular_file(&intent, 4_194_304)?)?;
             (intent, Some(digest))
