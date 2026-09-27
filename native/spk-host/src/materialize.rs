@@ -20,6 +20,13 @@ const MAX_DEPTH: usize = 64;
 pub struct InstalledPackage {
     pub directory: PathBuf,
     pub raw_sha256: String,
+    /// Identity inputs from the same signature-verified Bread parse that
+    /// produced the immutable image. These are hashes of exact signed bytes,
+    /// not a Mini descriptor root or an admission decision.
+    pub raw_sha256_bytes: [u8; 32],
+    pub raw_length: u64,
+    pub signed_manifest_sha256: [u8; 32],
+    pub signed_bridge_config_sha256: Option<[u8; 32]>,
     pub manifest: SpkManifest,
 }
 
@@ -174,10 +181,22 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
     if raw.len() as u64 > MAX_SPK_BYTES {
         return Err(invalid("SPK input grew past limit"));
     }
-    let raw_sha256 = format!("{:x}", Sha256::digest(&raw));
+    let raw_sha256_bytes: [u8; 32] = Sha256::digest(&raw).into();
+    let mut raw_sha256 = String::with_capacity(64);
+    for byte in raw_sha256_bytes {
+        raw_sha256.push_str(&format!("{byte:02x}"));
+    }
+    let raw_length = raw.len() as u64;
     let spk = Spk::parse(&raw).map_err(|e| invalid(format!("SPK verification failed: {e}")))?;
     let manifest = SpkManifest::from_spk(&spk)
         .map_err(|e| invalid(format!("SPK manifest failed: {e}")))?;
+    let signed_manifest_sha256: [u8; 32] = Sha256::digest(
+        spk.archive.find("sandstorm-manifest")
+            .ok_or_else(|| invalid("verified SPK lacks signed manifest bytes"))?
+    ).into();
+    let signed_bridge_config_sha256 = spk.archive
+        .find("sandstorm-http-bridge-config")
+        .map(|bytes| -> [u8; 32] { Sha256::digest(bytes).into() });
     let mut count = 0;
     validate_tree(&spk.archive.files, Path::new(""), 0, &mut count)?;
 
@@ -236,7 +255,15 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
         cleanup_staging(&stage);
     }
     installed?;
-    Ok(InstalledPackage { directory: final_dir, raw_sha256, manifest })
+    Ok(InstalledPackage {
+        directory: final_dir,
+        raw_sha256,
+        raw_sha256_bytes,
+        raw_length,
+        signed_manifest_sha256,
+        signed_bridge_config_sha256,
+        manifest,
+    })
 }
 
 #[cfg(test)]
