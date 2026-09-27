@@ -18,11 +18,28 @@ reservation does not establish an implemented or accepted native path.
 | 17 | Selected fn poll coverage | Reserved for bounded local scan coverage tied to an admitted selected release; no remote completeness claim |
 | 18 | Checked application lifecycle completion | Reserved for configured-host attestation and atomic app/manifest completion |
 | 19 | Ordered empty-page consumer progress | Reserved for v2 special admission sharing the selected-coverage frontier; legacy content atom tag 9 remains a distinct namespace |
+| 20 | Consumer namespace registration | Reserved for a gateway-authorized durable namespace, gateway-independent uniqueness nullifier, and explicit authenticated initial anchor; not native-qualified |
+| 21 | Agent dispatch with a claimed reservation | Reserved for replayable dispatch binding the exact delegated purse reservation and consuming its one-use claim; not native-qualified |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
 incrementing its event tag into another family's allocation. Each family must
 retain its domain-separated canonical bytes and exact decoding checks.
+
+Event 21 is distinct from ordinary event 11: a private physical permit cannot
+add payment authority absent from the admitted durable intent. Its claim must
+bind the full application/session/ticket/parent/request context, current signed
+payer authority, original admitted reserve, physical purse guard, and a one-use
+reserve-claim nullifier. Charging remains deferred until a definite application
+response or explicit audited reconciliation; admission does not imply delivery
+or automatic settlement. Hard disconnect fences the caller, not the shared app.
+
+Event 20 selects a consumer lineage explicitly. Unrelated historical tag-9
+records cannot claim or poison another namespace through copied scope fields.
+Fresh registration starts at zero; adopting legacy progress requires the exact
+authenticated receipt named by the signed registration. A transport ACK is not
+an initial authority witness. Gateway rotation requires a new registered
+namespace or a separate authorized migration, never a silent cursor reset.
 
 ## Native stdio operations
 
