@@ -1,0 +1,8 @@
+Source: native/resource-client/src/transport.rs
+Target isolation: CARGO_TARGET_DIR=/tmp/minidregg-fn-operator-transport-target
+Command: cargo nextest run --manifest-path native/resource-client/Cargo.toml -E 'test(namespace_and_completion_authoring_routes_stay_private_and_bounded)'
+Verdict: PASS 1/1 (64 skipped)
+Command: cargo nextest run --manifest-path native/resource-client/Cargo.toml -E 'test(lifecycle_and_dispatch_routes_are_bounded_and_operator_only)'
+Verdict: PASS 1/1 (64 skipped)
+Command: cargo fmt --manifest-path native/resource-client/Cargo.toml -- --check
+Verdict: PASS, exit 0

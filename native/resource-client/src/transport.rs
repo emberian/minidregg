@@ -134,13 +134,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     }
 }
 
-// These lifecycle, dispatch, and share-issue routes carry operator custody
+// These lifecycle, dispatch, share-issue, and fn namespace routes carry operator custody
 // selectors or may commit writes. They are available only on the separately
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
+        }
+        [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
+        // Op42 obtains all selectors from pinned operator settings and a live
+        // local fn status/position call. No caller field enters its plan.
+        [42] => true,
+        [43, pair @ ..] if pair.len() >= 6 && pair.len() <= 16 * 1024 => {
+            let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            plan_length > 0
+                && plan_length <= 8192
+                && plan_length < pair.len() - 4
+                && pair.len() - 4 - plan_length <= 4096
         }
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
@@ -152,6 +163,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         // Only the complete native Host frame limits this private author route.
         [36, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [37, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+            let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            plan_length > 0 && plan_length < pair.len() - 4
+        }
+        [45, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -1044,6 +1059,45 @@ mod tests {
         for operation in [0, 1, 7, 8, 20, 21, 24, 25, 30, 31] {
             assert!(!allowed_operator_operation(&[operation, 1]));
         }
+    }
+
+    #[test]
+    fn namespace_and_completion_authoring_routes_stay_private_and_bounded() {
+        for operation in [40, 41] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operation(&[operation, 1], true));
+            assert!(!allowed_operator_operation(&[operation]));
+            let mut too_large = vec![operation];
+            too_large.extend(vec![1; 8193]);
+            assert!(!allowed_operator_operation(&too_large));
+        }
+
+        assert!(allowed_operator_operation(&[42]));
+        assert!(!allowed_operator_operation(&[42, 1]));
+        assert!(!allowed_operation(&[42], true));
+
+        let mut namespace_assembly = vec![43];
+        namespace_assembly.extend(1u32.to_le_bytes());
+        namespace_assembly.extend(*b"PE");
+        assert!(allowed_operator_operation(&namespace_assembly));
+        assert!(!allowed_operation(&namespace_assembly, true));
+        assert!(!allowed_operator_operation(&[43, 1, 0, 0, 0, b'P']));
+        let mut empty_plan = namespace_assembly.clone();
+        empty_plan[1..5].copy_from_slice(&0u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&empty_plan));
+        let mut missing_envelope = namespace_assembly;
+        missing_envelope[1..5].copy_from_slice(&2u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&missing_envelope));
+
+        assert!(allowed_operator_operation(&[44, 1]));
+        assert!(!allowed_operator_operation(&[44]));
+        assert!(!allowed_operation(&[44, 1], true));
+        let mut completion_assembly = vec![45];
+        completion_assembly.extend(1u32.to_le_bytes());
+        completion_assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&completion_assembly));
+        assert!(!allowed_operation(&completion_assembly, true));
+        assert!(!allowed_operator_operation(&[45, 1, 0, 0, 0, b'P']));
     }
 
     #[test]

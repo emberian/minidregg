@@ -13,7 +13,10 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 29=app share issue lookup, 34=fresh checked dispatch permit,
 35=historical dispatch receipt-only lookup, 36=private dispatch signing plan,
 37=private detached dispatch assembly, 38=checked lifecycle completion submit,
-39=lifecycle completion receipt-only lookup. Op34 success uses a distinct
+39=lifecycle completion receipt-only lookup, 40=fn consumer namespace submit,
+41=fn consumer namespace receipt-only lookup, 42=operator-private namespace plan,
+43=operator-private namespace assembly, 44=operator-private completion plan,
+45=operator-private completion assembly. Op34 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -25,6 +28,7 @@ import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnConsumerProgress
+import Kernel.FnConsumerNamespaceReceiver
 import Kernel.FnCatalogOwnRProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
@@ -43,6 +47,8 @@ import Kernel.ApplicationLifecycleCompletionReceiver
 import Kernel.ApplicationLifecycleCompletionLookup
 import Host.ApplicationDispatchInspection
 import Host.ApplicationLifecycleClaimInspection
+import Host.ApplicationLifecycleCompletionOperator
+import Host.FnConsumerNamespacePlan
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -204,6 +210,49 @@ instance : FromJson CompletionCustodianKeySettings where
 instance : ToJson CompletionCustodianKeySettings where
   toJson value := .str (Minidregg.Host.Json.encodeHex value.bytes)
 
+/-- Fixed operator custody for source-derived lifecycle completion signing.
+Incoming op44 requests contain only exact BEGIN, claim and physical report
+bytes; they cannot select this management identity or capabilities. -/
+structure CompletionManagementSettings where
+  app : Nat
+  packageManifest : Nat
+  managementSubject : Nat
+  managementKeyId : Nat
+  appCapability : Nat
+  appObserveCapability : Nat
+  packageCapability : Nat
+  packageObserveCapability : Nat
+  deriving ToJson
+
+instance : FromJson CompletionManagementSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["app", "packageManifest", "managementSubject",
+      "managementKeyId", "appCapability", "appObserveCapability",
+      "packageCapability", "packageObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "completionManagement has missing or unknown fields"
+    return ⟨← json.getObjValAs? Nat "app",
+      ← json.getObjValAs? Nat "packageManifest",
+      ← json.getObjValAs? Nat "managementSubject",
+      ← json.getObjValAs? Nat "managementKeyId",
+      ← json.getObjValAs? Nat "appCapability",
+      ← json.getObjValAs? Nat "appObserveCapability",
+      ← json.getObjValAs? Nat "packageCapability",
+      ← json.getObjValAs? Nat "packageObserveCapability"⟩
+
+def CompletionManagementSettings.pin (settings : CompletionManagementSettings) :
+    ApplicationLifecycleCompletionOperator.Pin :=
+  { app := settings.app
+    packageManifest := settings.packageManifest
+    managementSubject := settings.managementSubject
+    managementKeyId := settings.managementKeyId
+    appCapability := ⟨settings.appCapability⟩
+    appObserveCapability := ⟨settings.appObserveCapability⟩
+    packageCapability := ⟨settings.packageCapability⟩
+    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -232,6 +281,7 @@ structure Settings where
   providerMetering : Option ProviderMeteringSettings := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
+  completionManagement : Option CompletionManagementSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -279,6 +329,8 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
     ApplicationLifecycleClaimInspection.inspect bytes
+  else if kind == "fn-consumer-namespace-plan" then
+    FnConsumerNamespacePlan.inspectPlanBytes bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -542,6 +594,41 @@ def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original lifecycle completion receipt unavailable".toUTF8.toList
 
+/-- Event20 activates one gateway-bound consumer namespace. The receiver
+rechecks current gateway authority, performs the native CAS, then reopens a
+verified physical tip before returning its original receipt. -/
+def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← FnConsumerNamespaceReceiver.receiveVerified session.verified payload
+  let outcome ← match result with
+  | .confirmed kind receipt =>
+      sessionConfirmed config state kind receipt.transactionId receipt.eventId
+  | .rejected _ =>
+      pure (.refused "fn-consumer-namespace".toUTF8.toList
+        "request refused".toUTF8.toList)
+  | .transactionConflict =>
+      pure (.refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList)
+  | .contention => pure .contention
+  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+/-- Op41 is receipt-only. A missing original is never resubmitted. -/
+def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode payload
+    | return .refused "fn-consumer-namespace".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  match FnConsumerNamespaceReceiver.lookupVerified session.verified ingress with
+  | none => return .absent
+  | some (.ok receipt) => return .confirmed .replayed receipt
+  | some (.error detail) => return .uncertain detail.toUTF8.toList
+
 /-- This records current source authorization for one selected content version.
 External fn delivery is a separate effect with its own uncertain outcome. -/
 def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
@@ -798,6 +885,9 @@ def dispatchSession (config : NativeHost.Config)
   | 39 =>
       return (39, outcomeCodec.encode
         (← applicationLifecycleCompletionLookupSession config state payload))
+  | 41 =>
+      return (41, outcomeCodec.encode
+        (← fnConsumerNamespaceLookupSession config state payload))
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -2077,6 +2167,30 @@ def selectedFnScope (scopePath : String) : IO FnPollScopePin := do
     ["history", "incarnation", "consumer", "principal", "query",
      "queryVersion", "viewVersion", "registrationEpoch"] json)
   IO.ofExcept (fromJson? json)
+
+/-- The registration author uses only lifetime-pinned operator manifests and
+the qualified local fn position/status call. No stdio frame selects a binary,
+control endpoint, consumer scope, or gateway. -/
+def fnNamespaceLocalZero (config : NativeHost.Config)
+    (service : FnPollService) : IO (FnConsumerScope.Scope × List UInt8) := do
+  let gateway ← requireGateway config
+  let pinJson ← readJson service.fnPinPath
+  IO.ofExcept (requireExactFields "fn namespace binary pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let policyJson ← readJson service.policyPath
+  IO.ofExcept (requireExactFields "fn namespace gateway policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let policy : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  unless policy.policy.matchesGateway gateway do
+    throw (IO.userError "fn namespace operator policy differs from configured gateway")
+  let scopePin ← selectedFnScope service.scopePath
+  let scope ← IO.ofExcept scopePin.progressScope
+  let (position, status) ← queryFnConsumerPosition service.fnExecutable
+    scopePin service.controlPath
+  unless position == 0 && status.committedAck == 0 do
+    throw (IO.userError "fn namespace activation requires native ACK zero")
+  return (scope, FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath)
 
 def selectedFnNewPaths (paths : List String) : IO Unit := do
   unless paths.all (·.startsWith "/") && paths.eraseDups.length == paths.length do
@@ -3484,12 +3598,14 @@ def run (arguments : List String) : IO UInt32 := do
           let bytes ← if kind == "fn-inbox-resource" ||
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
+              kind == "fn-consumer-namespace-plan" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
           if kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
+              kind == "fn-consumer-namespace-plan" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
             let serialized := value.compress
@@ -3617,6 +3733,79 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "share issue ingress exceeds host frame bound")
                             return ((33 : UInt8), ingress)
+                        | 40 =>
+                            let some selected := service
+                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                                  "fn consumer service is not configured")
+                            let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode
+                                payload
+                              | return ((40 : UInt8), outcomeCodec.encode <|
+                                  .refused "fn-consumer-namespace".toUTF8.toList
+                                    "noncanonical ingress".toUTF8.toList)
+                            let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
+                            unless ingress.spec.consumerNamespace.scope == scope &&
+                                ingress.spec.consumerNamespace.controlBinding == binding do
+                              throw (IO.userError "fn namespace ingress differs from local consumer")
+                            let outcome ← fnConsumerNamespaceSubmitSession
+                              pinnedConfig state payload
+                            return ((40 : UInt8), outcomeCodec.encode outcome)
+                        | 42 =>
+                            unless payload.isEmpty do
+                              throw (IO.userError "fn namespace plan takes no caller selectors")
+                            let some selected := service
+                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                                  "fn consumer service is not configured")
+                            let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
+                            let gateway ← requireGateway pinnedConfig
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept <| FnConsumerNamespacePlan.prepare
+                              pinnedConfig opened gateway scope binding 0 0
+                            let after ← fnNamespaceLocalZero pinnedConfig selected
+                            unless after == (scope, binding) do
+                              throw (IO.userError "fn namespace local status changed during plan")
+                            return ((42 : UInt8), FnConsumerNamespacePlan.planCodec.encode plan)
+                        | 43 =>
+                            let some selected := service
+                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                                  "fn consumer service is not configured")
+                            let (planBytes, gatewayEnvelope) ← splitPair payload
+                            let some plan := FnConsumerNamespacePlan.planCodec.decode planBytes
+                              | throw (IO.userError "noncanonical fn namespace plan")
+                            let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
+                            unless plan.spec.consumerNamespace.scope == scope &&
+                                plan.spec.consumerNamespace.controlBinding == binding do
+                              throw (IO.userError "fn namespace plan differs from local consumer")
+                            let opened ← sessionOpened pinnedConfig state
+                            let ingress ← IO.ofExcept <| FnConsumerNamespacePlan.assemble
+                              pinnedConfig opened plan gatewayEnvelope
+                            let after ← fnNamespaceLocalZero pinnedConfig selected
+                            unless after == (scope, binding) do
+                              throw (IO.userError "fn namespace local status changed during assembly")
+                            return ((43 : UInt8),
+                              FnConsumerNamespaceRegistration.ingressCodec.encode ingress)
+                        | 44 =>
+                            let some custody := settings.completionManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-completion-author"
+                                  "completion management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              (← ApplicationLifecycleCompletionOperator.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload)
+                            let bytes := ApplicationLifecycleCompletionOperator.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "lifecycle completion plan exceeds host frame bound")
+                            return ((44 : UInt8), bytes)
+                        | 45 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleCompletionOperator.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical lifecycle completion plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleCompletionOperator.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "lifecycle completion ingress exceeds host frame bound")
+                            return ((45 : UInt8), ingress)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
