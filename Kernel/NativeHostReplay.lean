@@ -258,16 +258,54 @@ theorem AdmittedReplay.append {config : Config}
   | cons step tail ih =>
       simpa only [List.cons_append] using AdmittedReplay.cons step (ih right)
 
+/-- One executable checkpoint in the same native-admitted replay walk. It
+retains only this selected prefix, not every full prefix image. The prior,
+selected and later traces reconstruct the exact verified records and receipts.
+No caller may construct this value from a bare record index. -/
+structure SelectedStep (config : Config) (origin tip : Opened config)
+    (records : List DurableReceiver.IntentRecord)
+    (receipts : List NativeHostCodec.Receipt) where
+  priorRecords : List DurableReceiver.IntentRecord
+  record : DurableReceiver.IntentRecord
+  laterRecords : List DurableReceiver.IntentRecord
+  priorReceipts : List NativeHostCodec.Receipt
+  receipt : NativeHostCodec.Receipt
+  laterReceipts : List NativeHostCodec.Receipt
+  before : Opened config
+  after : Opened config
+  recordsExact : records = priorRecords ++ record :: laterRecords
+  receiptsExact : receipts = priorReceipts ++ receipt :: laterReceipts
+  priorAdmitted : AdmittedReplay config origin priorRecords before priorReceipts
+  selectedAdmitted : AdmittedStep config before after record receipt
+  laterAdmitted : AdmittedReplay config after laterRecords tip laterReceipts
+
+private def SelectedStep.prepend {config : Config} {origin middle tip : Opened config}
+    {record : DurableReceiver.IntentRecord}
+    {later : List DurableReceiver.IntentRecord}
+    {receipt : NativeHostCodec.Receipt}
+    {laterReceipts : List NativeHostCodec.Receipt}
+    (step : AdmittedStep config origin middle record receipt)
+    (selected : SelectedStep config middle tip later laterReceipts) :
+    SelectedStep config origin tip (record :: later) (receipt :: laterReceipts) :=
+  ⟨record :: selected.priorRecords, selected.record, selected.laterRecords,
+    receipt :: selected.priorReceipts, selected.receipt, selected.laterReceipts,
+    selected.before, selected.after,
+    by simpa only [List.cons_append] using congrArg (record :: ·) selected.recordsExact,
+    by simpa only [List.cons_append] using congrArg (receipt :: ·) selected.receiptsExact,
+    .cons step selected.priorAdmitted, selected.selectedAdmitted,
+    selected.laterAdmitted⟩
+
 private structure Walked (config : Config) (start : Opened config)
     (records : List DurableReceiver.IntentRecord) where
   final : Opened config
   receipts : List NativeHostCodec.Receipt
   trace : AdmittedReplay config start records final receipts
+  selected : Option (SelectedStep config start final records receipts)
 
-private def walk (config : Config) (opened : Opened config) :
+private def walk (config : Config) (opened : Opened config) (selectIndex : Option Nat) :
     (records : List DurableReceiver.IntentRecord) →
     IO (Except Failure (Walked config opened records))
-  | [] => pure (.ok ⟨opened, [], .nil opened⟩)
+  | [] => pure (.ok ⟨opened, [], .nil opened, none⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
       match ← derive config opened record.event.canonicalBytes with
@@ -283,11 +321,21 @@ private def walk (config : Config) (opened : Opened config) :
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
                   index + 1, imageBoundary config next.image⟩
-              match ← walk config after rest with
+              match ← walk config after selectIndex rest with
               | .error failure => return .error failure
               | .ok tail =>
+                let step : AdmittedStep config opened after record receipt :=
+                  ⟨derived, matched, next, advanced, validated, rfl⟩
+                let selectedAt :=
+                  if selectIndex == some index then
+                    let selected : SelectedStep config opened tail.final
+                        (record :: rest) (receipt :: tail.receipts) :=
+                      ⟨[], record, rest, [], receipt, tail.receipts, opened, after,
+                        by simp, by simp, .nil opened, step, tail.trace⟩
+                    some selected
+                  else tail.selected.map (SelectedStep.prepend step)
                 return .ok ⟨tail.final, receipt :: tail.receipts,
-                  .cons ⟨derived, matched, next, advanced, validated, rfl⟩ tail.trace⟩
+                  .cons step tail.trace, selectedAt⟩
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 
@@ -487,13 +535,71 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened target.image.accepted with
+      match ← walk config opened none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactBytes : walked.final.durable.bytes = target.bytes then
           if countExact : walked.receipts.length = target.image.accepted.length then
             return .ok ⟨opened, walked.final, exactBytes, walked.receipts,
               countExact, walked.trace⟩
+          else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+        else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
+
+/-- A single verified replay pass retains exactly one executable historical
+checkpoint. Its `before` is the actual admitted prefix consumed by `derive`,
+not an independently reconstructed physically valid image. The selected
+record and receipt are included in the exact verified tip. -/
+structure VerifiedSelection (config : Config) (target : Durable) (index : Nat) where
+  private mk ::
+  verified : Verified config target
+  selected : SelectedStep config verified.origin verified.opened
+    target.image.accepted verified.receipts
+  indexExact : selected.priorRecords.length = index
+
+theorem VerifiedSelection.record_at {config : Config} {target : Durable} {index : Nat}
+    (selection : VerifiedSelection config target index) :
+    target.image.accepted[index]? = some selection.selected.record := by
+  calc
+    target.image.accepted[index]? =
+        (selection.selected.priorRecords ++
+          selection.selected.record :: selection.selected.laterRecords)[index]? :=
+      congrArg (fun records : List DurableReceiver.IntentRecord => records[index]?)
+        selection.selected.recordsExact
+    _ = some selection.selected.record := by
+      have atPrior :
+          (selection.selected.priorRecords ++
+            selection.selected.record :: selection.selected.laterRecords)[selection.selected.priorRecords.length]? =
+            some selection.selected.record := by simp
+      simpa only [selection.indexExact] using atPrior
+
+/-- A requested checkpoint outside the verified history refuses. No replay
+prefixes other than this one are retained; ordinary `verifyLoaded` and suffix
+verification continue without a selected checkpoint. -/
+def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
+    IO (Except Failure (VerifiedSelection config target index)) := do
+  if !(index < target.image.accepted.length) then
+    return .error ⟨index, "selected accepted history index unavailable"⟩
+  let genesis : DurableReceiver.Image := ⟨target.image.seed, []⟩
+  match DurableReceiverIO.loadBytes rootBytes (DurableReceiverCodec.encode genesis) with
+  | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
+  | .ok initial =>
+    match validateLoaded config initial with
+    | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
+    | .ok opened =>
+      match ← walk config opened (some index) target.image.accepted with
+      | .error failure => return .error failure
+      | .ok walked =>
+        if exactBytes : walked.final.durable.bytes = target.bytes then
+          if countExact : walked.receipts.length = target.image.accepted.length then
+            match walked.selected with
+            | none => return .error ⟨index, "selected native checkpoint unavailable"⟩
+            | some selected =>
+              if indexExact : selected.priorRecords.length = index then
+                let verified : Verified config target :=
+                  ⟨opened, walked.final, exactBytes, walked.receipts,
+                    countExact, walked.trace⟩
+                return .ok ⟨verified, selected, indexExact⟩
+              else return .error ⟨index, "selected native checkpoint index mismatch"⟩
           else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
         else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
 
@@ -516,7 +622,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
       (StreamCodec.list DurableReceiverCodec.intentStream).encode
         oldTarget.image.accepted then
     let suffix := target.image.accepted.drop count
-    match ← walk config old.opened suffix with
+    match ← walk config old.opened none suffix with
     | .error failure => return .error failure
     | .ok walked =>
       if exactBytes : walked.final.durable.bytes = target.bytes then

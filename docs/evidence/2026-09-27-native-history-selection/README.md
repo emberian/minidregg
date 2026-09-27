@@ -1,0 +1,7 @@
+# One-index native history selection
+
+`Kernel/NativeHostReplay.lean` SHA-256 `1c4522541e1bd9092f83606c1d3f65b4429697f2decd7ccbf302163b03fd76f7` adds `verifyLoadedSelected`. It replays the exact target once and retains the requested admitted `before`/`after` checkpoint, selected record and receipt, and proofs that the prior, selected, and later steps compose the verified target history. The returned `VerifiedSelection` constructor is private. Ordinary verification selects no checkpoint.
+
+The [narrow Lean log](narrow.log) SHA-256 `129a55b9bc9bac462f26b9caeafce652aab4a0e6176ca250730faf49c7ebd65e` records a successful direct typecheck with no errors. It used an independent Persvati copy of `/home/ember/build/minidregg-overnight-20260927-currentbirth-narrow` at `/home/ember/build/minidregg-overnight-20260927-selected-prefix-codec`, with only the Replay source overlaid. The source-matched repaired `GrainResourceBirthTransaction.lean` SHA-256 was `4357ac48894c89937870753607d7f2d7be34657fcfbf13e921bef1a376e249eb` and its imported OLean SHA-256 was `a045f5559770226da3d53266f5d7443a4c9db45bc4d41451362dfb04b527009a`.
+
+Command: `LEAN_NUM_THREADS=2 lake env lean Kernel/NativeHostReplay.lean`, under a user scope limited to 2 CPUs and 16 GiB. This is a source check of the selector, not a native Host build or a permit to launch an application. Upper issue, claim, and dispatch admission must still select the relevant historical record, re-admit its exact original ingress at `selected.before`, and compare the full intent before any fresh operation.
