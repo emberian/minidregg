@@ -7,6 +7,60 @@ if [ "$#" -ne 2 ]; then
   exit 2
 fi
 
+# A hosted bootstrap may supply the exact task namespace, provider capacity,
+# tariff, and genesis policy as one operator-owned profile.  This mode stops
+# before the historical 700x end-to-end journey below.
+PROFILE=${BIRTH_BOOTSTRAP_PROFILE:-}
+CONTROLLER_TASK=7001
+TOOL_TASK=7002
+PUBLICATION_TARGET=7003
+PROVIDER_TASK=7004
+PROVIDER_BUDGET=50
+if [ -n "$PROFILE" ]; then
+  [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
+    echo 'profiled bootstrap requires BOOTSTRAP_ONLY=1 PROVIDER_BOOTSTRAP=1' >&2
+    exit 2
+  }
+  [ -f "$PROFILE" ] || { echo 'bootstrap profile is absent' >&2; exit 2; }
+  jq -e '
+    type == "object" and
+    (((keys - ["miniWrapper"]) | sort) == ["controllerTask","factoryPredicate","operator","providerBudget",
+                       "providerTask","publicationTarget","runtimeTemplate","toolTask"]) and
+    (.miniWrapper == null or
+      (.miniWrapper | type == "string" and test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$") and . != "..")) and
+    ([.controllerTask,.toolTask,.publicationTarget,.providerTask] |
+      all(type == "string" and test("^[1-9][0-9]{0,8}$")) and (unique | length) == 4) and
+    (.providerBudget | type == "string" and test("^[1-9][0-9]{0,8}$")) and
+    (.providerBudget | tonumber >= 67) and
+    (.factoryPredicate | type == "object") and
+    (.operator | type == "object" and
+      ((keys | sort) == ["continuityProviderResourceId","grainBirthTariff","providerMetering"])) and
+    (.operator.providerMetering.providerResourceId | tostring) == .providerTask and
+    (.operator.continuityProviderResourceId | tostring) == .providerTask and
+    (.operator.grainBirthTariff.base | type == "number" and . >= 0 and . == floor) and
+    (.operator.grainBirthTariff.perBirth | type == "number" and . >= 0 and . == floor) and
+    (.runtimeTemplate | type == "string" and startswith("/"))
+  ' "$PROFILE" >/dev/null || { echo 'bootstrap profile is invalid' >&2; exit 2; }
+  CONTROLLER_TASK=$(jq -er .controllerTask "$PROFILE")
+  TOOL_TASK=$(jq -er .toolTask "$PROFILE")
+  PUBLICATION_TARGET=$(jq -er .publicationTarget "$PROFILE")
+  PROVIDER_TASK=$(jq -er .providerTask "$PROFILE")
+  PROVIDER_BUDGET=$(jq -er .providerBudget "$PROFILE")
+  [ -f "$(jq -er .runtimeTemplate "$PROFILE")" ] || {
+    echo 'runtime template is absent' >&2; exit 2;
+  }
+  jq -e --slurpfile p "$PROFILE" '
+    .task == $p[0].controllerTask and
+    .toolTask.task == $p[0].toolTask and
+    .providerTask.task == $p[0].providerTask and
+    (.toolTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= 50) and
+    (.providerTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= ($p[0].providerBudget | tonumber)) and
+    (.stateDir | type == "string" and test("^/.+/runtime-state$"))
+  ' "$(jq -er .runtimeTemplate "$PROFILE")" >/dev/null || {
+    echo 'runtime template task IDs or reserve disagree with bootstrap profile' >&2; exit 2;
+  }
+fi
+
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 HOST=$1
@@ -34,6 +88,11 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
+if [ -n "$PROFILE" ]; then
+  cp "$PROFILE" "$EVIDENCE/bootstrap-profile.json"
+  chmod 600 "$EVIDENCE/bootstrap-profile.json"
+  PROFILE="$EVIDENCE/bootstrap-profile.json"
+fi
 SERVICE_PID=
 GRAIN_SERVICE_PID=
 RUNTIME_PID=
@@ -119,6 +178,11 @@ cat >"$EVIDENCE/operator.json" <<EOF
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
  "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
 EOF
+if [ -n "$PROFILE" ]; then
+  jq --slurpfile profile "$PROFILE" '. + $profile[0].operator' \
+    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-profiled.json"
+  mv "$EVIDENCE/operator-profiled.json" "$EVIDENCE/operator.json"
+fi
 "$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
 SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
 cat >"$EVIDENCE/genesis.json" <<EOF
@@ -156,6 +220,11 @@ if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
     "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-provider.json"
   mv "$EVIDENCE/genesis-provider.json" "$EVIDENCE/genesis.json"
 fi
+if [ -n "$PROFILE" ]; then
+  jq --slurpfile profile "$PROFILE" '.factoryPredicate = $profile[0].factoryPredicate' \
+    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-profiled.json"
+  mv "$EVIDENCE/genesis-profiled.json" "$EVIDENCE/genesis.json"
+fi
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
 CONFIG="$EVIDENCE/deployment/pinned-config.json"
@@ -181,12 +250,12 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
  "birth":{"genesis":$(cat "$EVIDENCE/genesis.json"),
   "template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
   "creator":"7","nonce":"22000","resources":[
-   {"kind":"object","storage":"grain","target":"7001","owner":"7",
+   {"kind":"object","storage":"grain","target":"$CONTROLLER_TASK","owner":"7",
     "ownerCapability":"71","controlCapability":"72","budget":"100",
     "workerSubject":"8","workerGeneration":"1"},
-   {"kind":"object","storage":"grain","target":"7002","owner":"8",
+   {"kind":"object","storage":"grain","target":"$TOOL_TASK","owner":"8",
     "ownerCapability":"81","controlCapability":"82","budget":"50"},
-   {"kind":"object","storage":"declared","target":"7003","owner":"7",
+   {"kind":"object","storage":"declared","target":"$PUBLICATION_TARGET","owner":"7",
     "ownerCapability":"91","controlCapability":"92",
     "predicate":{"type":"all","predicates":[]}}],
   "sourceCapabilities":["41"],"funding":[],"feePayer":"7"},
@@ -194,39 +263,50 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
    {"kind":"account","target":"7","capability":"41"}]}
 EOF
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  jq '(.birth.resources[0] |= (del(.workerSubject) +
+  jq --arg providerTask "$PROVIDER_TASK" --arg providerBudget "$PROVIDER_BUDGET" \
+    '(.birth.resources[0] |= (del(.workerSubject) +
        {workerSubjects:["8","9"]})) |
-      .birth.resources += [{kind:"object",storage:"grain",target:"7004",
-        owner:"9",ownerCapability:"101",controlCapability:"102",budget:"50"}]' \
+      .birth.resources += [{kind:"object",storage:"grain",target:$providerTask,
+        owner:"9",ownerCapability:"101",controlCapability:"102",budget:$providerBudget}]' \
     "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-provider-intent.json"
   mv "$EVIDENCE/birth-provider-intent.json" "$EVIDENCE/birth-intent.json"
+fi
+if [ -n "$PROFILE" ]; then
+  jq --slurpfile profile "$PROFILE" \
+    '.birth.grainBirthTariff = ($profile[0].operator.grainBirthTariff |
+      with_entries(.value |= tostring))' \
+    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-profiled-intent.json"
+  mv "$EVIDENCE/birth-profiled-intent.json" "$EVIDENCE/birth-intent.json"
 fi
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
   --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/birth-attempt" >"$EVIDENCE/birth.stdout"
 confirmed "$EVIDENCE/birth-attempt/outcome.json"
-query_task controller-born 7 7001 71 "$EVIDENCE/controller.key" 30001
-query_task tool-born 8 7002 81 "$EVIDENCE/tool.key" 30002
-query_task publication-born 7 7003 91 "$EVIDENCE/controller.key" 30009
+query_task controller-born 7 "$CONTROLLER_TASK" 71 "$EVIDENCE/controller.key" 30001
+query_task tool-born 8 "$TOOL_TASK" 81 "$EVIDENCE/tool.key" 30002
+query_task publication-born 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key" 30009
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  query_task provider-born 9 7004 101 "$EVIDENCE/provider.key" 30010
-  jq -e '.page.grain == {task:"7004",generation:"0",status:"0",
-    remaining:"50",reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
+  query_task provider-born 9 "$PROVIDER_TASK" 101 "$EVIDENCE/provider.key" 30010
+  jq -e --arg task "$PROVIDER_TASK" --arg remaining "$PROVIDER_BUDGET" \
+    '.page.grain == {task:$task,generation:"0",status:"0",
+      remaining:$remaining,reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
 fi
-jq -e '.page.grain == {task:"7001",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+jq -e --arg task "$CONTROLLER_TASK" \
+  '.page.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/controller-born/view.json" >/dev/null
-jq -e '.page.grain == {task:"7002",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+jq -e --arg task "$TOOL_TASK" \
+  '.page.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/tool-born/view.json" >/dev/null
 
 grain_names='controller tool'
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then grain_names="$grain_names provider"; fi
 for name in $grain_names; do
   if [ "$name" = controller ]; then
-    owner=7 task=7001 capability=71 key=controller.key nonce=30003
+    owner=7 task=$CONTROLLER_TASK capability=71 key=controller.key nonce=30003
   elif [ "$name" = tool ]; then
-    owner=8 task=7002 capability=81 key=tool.key nonce=30004
+    owner=8 task=$TOOL_TASK capability=81 key=tool.key nonce=30004
   else
-    owner=9 task=7004 capability=101 key=provider.key nonce=30011
+    owner=9 task=$PROVIDER_TASK capability=101 key=provider.key nonce=30011
   fi
   query_policy "$name-policy" "$owner" "$task" "$capability" "$EVIDENCE/$key" "$nonce"
   if [ "$name" = controller ]; then
@@ -266,50 +346,50 @@ cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
 {"subject":"7","nonce":"31000","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
  "semantics":"$SEMANTICS","subject":"7","nonce":"31001",
- "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"7001",
+ "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"$CONTROLLER_TASK",
  "expectedPreRoot":"$PARENT_AUTHORITY",
  "child":{"id":"73","root":"71","parent":"71","issuer":"5",
-  "holder":{"type":"subject","subject":"8"},"targets":["7001"],
+  "holder":{"type":"subject","subject":"8"},"targets":["$CONTROLLER_TASK"],
   "verbs":["observe","mutate"],"maxCost":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
-  "policyId":"7001","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
- "grants":[{"kind":"object","target":"7001","capability":"71"}]}
+  "policyId":"$CONTROLLER_TASK","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
+ "grants":[{"kind":"object","target":"$CONTROLLER_TASK","capability":"71"}]}
 EOF
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/parent-witness-delegation.json" --key "$EVIDENCE/controller.key" \
   --dir "$EVIDENCE/delegation-attempt" >"$EVIDENCE/delegation.stdout"
 confirmed "$EVIDENCE/delegation-attempt/outcome.json"
-query_task delegated-parent 8 7001 73 "$EVIDENCE/tool.key" 31002
+query_task delegated-parent 8 "$CONTROLLER_TASK" 73 "$EVIDENCE/tool.key" 31002
 test "$(jq -er '.page.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  query_task parent-for-provider 7 7001 71 "$EVIDENCE/controller.key" 31003
+  query_task parent-for-provider 7 "$CONTROLLER_TASK" 71 "$EVIDENCE/controller.key" 31003
   PROVIDER_PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
     "$EVIDENCE/parent-for-provider/challenge.json")
   cat >"$EVIDENCE/provider-parent-delegation.json" <<EOF
 {"subject":"7","nonce":"31004","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
  "semantics":"$SEMANTICS","subject":"7","nonce":"31005",
- "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"7001",
+ "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"$CONTROLLER_TASK",
  "expectedPreRoot":"$PROVIDER_PARENT_AUTHORITY",
  "child":{"id":"75","root":"71","parent":"71","issuer":"5",
-  "holder":{"type":"subject","subject":"9"},"targets":["7001"],
+  "holder":{"type":"subject","subject":"9"},"targets":["$CONTROLLER_TASK"],
   "verbs":["observe","mutate"],"maxCost":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
-  "policyId":"7001","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
- "grants":[{"kind":"object","target":"7001","capability":"71"}]}
+  "policyId":"$CONTROLLER_TASK","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
+ "grants":[{"kind":"object","target":"$CONTROLLER_TASK","capability":"71"}]}
 EOF
   "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     --intent "$EVIDENCE/provider-parent-delegation.json" \
     --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/provider-parent-delegation-attempt" \
     >"$EVIDENCE/provider-parent-delegation.stdout"
   confirmed "$EVIDENCE/provider-parent-delegation-attempt/outcome.json"
-  query_task delegated-provider-parent 9 7001 75 "$EVIDENCE/provider.key" 31006
+  query_task delegated-provider-parent 9 "$CONTROLLER_TASK" 75 "$EVIDENCE/provider.key" 31006
   test "$(jq -er '.page.root' "$EVIDENCE/delegated-provider-parent/view.json")" = "$PARENT_ROOT"
 fi
 
 PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/publication-born/view.json")
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  query_task publication-for-delegation 7 7003 91 "$EVIDENCE/controller.key" 31007
+  query_task publication-for-delegation 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key" 31007
   PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
     "$EVIDENCE/publication-for-delegation/challenge.json")
 else
@@ -320,20 +400,20 @@ cat >"$EVIDENCE/publication-delegation.json" <<EOF
 {"subject":"7","nonce":"31010","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
  "semantics":"$SEMANTICS","subject":"7","nonce":"31011",
- "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"7003",
+ "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"$PUBLICATION_TARGET",
  "expectedPreRoot":"$PUBLICATION_AUTHORITY",
  "child":{"id":"93","root":"91","parent":"91","issuer":"5",
-  "holder":{"type":"subject","subject":"8"},"targets":["7003"],
+  "holder":{"type":"subject","subject":"8"},"targets":["$PUBLICATION_TARGET"],
   "verbs":["observe","mutate"],"maxCost":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
-  "policyId":"7003","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
- "grants":[{"kind":"object","target":"7003","capability":"91"}]}
+  "policyId":"$PUBLICATION_TARGET","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
+ "grants":[{"kind":"object","target":"$PUBLICATION_TARGET","capability":"91"}]}
 EOF
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/publication-delegation.json" --key "$EVIDENCE/controller.key" \
   --dir "$EVIDENCE/publication-delegation-attempt" >"$EVIDENCE/publication-delegation.stdout"
 confirmed "$EVIDENCE/publication-delegation-attempt/outcome.json"
-query_task delegated-publication 8 7003 93 "$EVIDENCE/tool.key" 31012
+query_task delegated-publication 8 "$PUBLICATION_TARGET" 93 "$EVIDENCE/tool.key" 31012
 test "$(jq -er '.page.root' "$EVIDENCE/delegated-publication/view.json")" = "$PUBLICATION_ROOT"
 
 # Reads use a separate observe-only sibling grant. The MCP reader cannot use
@@ -344,24 +424,58 @@ cat >"$EVIDENCE/publication-read-delegation.json" <<EOF
 {"subject":"7","nonce":"31020","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
  "semantics":"$SEMANTICS","subject":"7","nonce":"31021",
- "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"7003",
+ "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"$PUBLICATION_TARGET",
  "expectedPreRoot":"$PUBLICATION_AUTHORITY",
  "child":{"id":"94","root":"91","parent":"91","issuer":"5",
-  "holder":{"type":"subject","subject":"8"},"targets":["7003"],
+  "holder":{"type":"subject","subject":"8"},"targets":["$PUBLICATION_TARGET"],
   "verbs":["observe"],"maxCost":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
-  "policyId":"7003","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
- "grants":[{"kind":"object","target":"7003","capability":"91"}]}
+  "policyId":"$PUBLICATION_TARGET","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
+ "grants":[{"kind":"object","target":"$PUBLICATION_TARGET","capability":"91"}]}
 EOF
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/publication-read-delegation.json" --key "$EVIDENCE/controller.key" \
   --dir "$EVIDENCE/publication-read-delegation-attempt" \
   >"$EVIDENCE/publication-read-delegation.stdout"
 confirmed "$EVIDENCE/publication-read-delegation-attempt/outcome.json"
-query_task delegated-read 8 7003 94 "$EVIDENCE/tool.key" 31022
+query_task delegated-read 8 "$PUBLICATION_TARGET" 94 "$EVIDENCE/tool.key" 31022
 test "$(jq -er '.page.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
 
 if [ "${BOOTSTRAP_ONLY:-0}" = 1 ]; then
+  if [ -n "$PROFILE" ]; then
+    template=$(jq -er .runtimeTemplate "$PROFILE")
+    template_root=$(jq -er '.stateDir | sub("/runtime-state$"; "")' "$template")
+    case "$template_root" in
+      /*) [ "$template_root" != / ] || { echo 'runtime template root is empty' >&2; exit 2; } ;;
+      *) echo 'runtime template root is not absolute' >&2; exit 2 ;;
+    esac
+    mini_wrapper=$(jq -r '.miniWrapper // empty' "$PROFILE")
+    derived_mini=$MINI
+    if [ -n "$mini_wrapper" ]; then derived_mini=$EVIDENCE/$mini_wrapper; fi
+    jq -e --arg old "$template_root" --arg new "$EVIDENCE" \
+      --arg host "$HOST" --arg mini "$derived_mini" --arg newTask "$CONTROLLER_TASK" \
+      --arg newTool "$TOOL_TASK" --arg newProvider "$PROVIDER_TASK" \
+      --slurpfile genesis "$EVIDENCE/genesis.json" '
+      def replace_root:
+        if type == "string" and (. == $old or startswith($old + "/")) then
+          $new + .[($old | length):]
+        else . end;
+      walk(replace_root) |
+      .mini = $mini |
+      .host = $host |
+      .toolTask.allowedApplicationFamilies |= map(.profile.genesis = $genesis[0]) |
+      .toolTask.allowedSessionFamilies |= map(.profile.genesis = $genesis[0]) |
+      select(.task == $newTask and .toolTask.task == $newTool and
+        .providerTask.task == $newProvider)
+    ' "$template" \
+      >"$EVIDENCE/runtime-config.json" || {
+        echo 'derived runtime config does not match bootstrap tasks' >&2
+        exit 2
+      }
+    test -s "$EVIDENCE/runtime-config.json" || {
+      echo 'derived runtime config is empty' >&2; exit 2;
+    }
+  fi
   printf 'signed grain bootstrap ready: %s\n' "$EVIDENCE"
   exit 0
 fi
