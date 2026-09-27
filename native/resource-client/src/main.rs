@@ -20,6 +20,8 @@ mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
+mod selected_publisher;
+#[cfg(unix)]
 mod selected_release;
 #[cfg(unix)]
 mod transport;
@@ -125,6 +127,8 @@ usage:
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
+  mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
+  mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
   mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
@@ -2283,6 +2287,31 @@ fn run(mut args: Args) -> Result<()> {
             let output = path(args.required("output")?);
             args.finish()?;
             selected_release_sign(&host, &config, &preimage, &key, &output)
+        }
+        #[cfg(unix)]
+        "selected-source-sign" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let packet = path(args.required("packet")?);
+            let capability = args.required("delegate-capability")?;
+            let key = path(args.required("key")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let capability = capability
+                .to_str()
+                .ok_or("delegate capability must be UTF-8")?;
+            selected_publisher::sign_source(&host, &config, &packet, capability, &key, &directory)
+        }
+        #[cfg(unix)]
+        "selected-source-publish" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let ingress = path(args.required("ingress")?);
+            let article = path(args.required("article")?);
+            let state = path(args.required("state-dir")?);
+            let post_config = path(args.required("post-config")?);
+            args.finish()?;
+            selected_publisher::publish(&host, &config, &ingress, &article, &state, &post_config)
         }
         #[cfg(unix)]
         "selected-release-lookup" => {

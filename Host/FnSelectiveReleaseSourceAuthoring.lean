@@ -6,6 +6,7 @@ admission. The source receiver checks the native signature, `.delegateObject`
 capability, installed law, selected content and root before durable settlement.
 -/
 import Kernel.FnSelectiveReleaseSourceAuthority
+import Kernel.FnSelectiveReleaseArticle
 import Kernel.NativeHostContext
 
 namespace Minidregg.Host.FnSelectiveReleaseSourceAuthoring
@@ -54,5 +55,22 @@ def assemble (specBytes headerBytes signatureBytes : List UInt8) :
   let envelopeBytes := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode
     ⟨header, signatureBytes⟩
   pure <| ingressCodec.encode ⟨spec, envelopeBytes⟩
+
+/-- A source authorization event binds the packet, not arbitrary fn bytes.
+Check the exact canonical article before custody transfers it to fn. -/
+def checkArticle (packetBytes articleBytes : List UInt8) : Except String Unit := do
+  let some packet := packetCodec.decode packetBytes
+    | throw "selected source packet is noncanonical"
+  let article ← FnSelectiveReleaseArticle.extract articleBytes
+  unless article.packet == packet do
+    throw "selected source article carries a different packet"
+  let canonical ← article.render
+  unless canonical == articleBytes do
+    throw "selected source article bytes are noncanonical"
+
+def checkIngressArticle (ingressBytes articleBytes : List UInt8) : Except String Unit := do
+  let some ingress := ingressCodec.decode ingressBytes
+    | throw "selected source ingress is noncanonical"
+  checkArticle (packetCodec.encode ingress.spec.packet) articleBytes
 
 end Minidregg.Host.FnSelectiveReleaseSourceAuthoring
