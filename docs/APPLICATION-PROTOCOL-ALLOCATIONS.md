@@ -65,6 +65,10 @@ namespace or a separate authorized migration, never a silent cursor reset.
 | 37 | Application dispatch detached signature assembly (reserved private authoring; no commit) |
 | 38 | Checked lifecycle completion submit (reserved) |
 | 39 | Checked lifecycle completion receipt-only lookup (reserved) |
+| 40 | Consumer namespace registration submit (reserved) |
+| 41 | Consumer namespace registration receipt-only lookup (reserved) |
+| 42 | Consumer namespace registration signing plan (reserved private authoring; no commit) |
+| 43 | Consumer namespace registration detached signature assembly (reserved private authoring; no commit) |
 
 Selected fn coverage must bind the configured local consumer scope, prior ACK,
 bounded first-match scan, exact projected article and an originally admitted
