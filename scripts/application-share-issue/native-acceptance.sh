@@ -184,7 +184,8 @@ if "$MINI" share-issue-prepare --host "$HOST" --config "$CONFIG" \
   echo "participant service admitted op32" >&2; exit 1
 fi
 [ ! -e "$EVIDENCE/public-refusal/ingress.bin" ]
-rg -q 'share issue Host refused op32' "$EVIDENCE/public-refusal.stderr"
+rg -q 'operation unavailable on selected socket' \
+  "$EVIDENCE/public-refusal.stderr"
 stop_service
 
 start_service serve-operator operator-service

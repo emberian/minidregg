@@ -296,7 +296,7 @@ fn install_host_acl(_path: &Path, _host_uid: u32) -> Result<(), String> {
 }
 
 pub fn decode_hex(bytes: &str) -> Result<Vec<u8>, String> {
-    if bytes.is_empty() || bytes.len() > MAX_REQUEST || bytes.len() % 2 != 0 {
+    if bytes.is_empty() || bytes.len() > MAX_REQUEST || !bytes.len().is_multiple_of(2) {
         return Err("dispatch request hex bound".into());
     }
     let mut out = Vec::with_capacity(bytes.len() / 2);
