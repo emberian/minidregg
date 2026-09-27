@@ -10,3 +10,5 @@ pub mod materialize;
 pub mod hostd;
 #[cfg(target_os = "linux")]
 pub mod endpoint;
+#[cfg(target_os = "linux")]
+mod spawn_gate;

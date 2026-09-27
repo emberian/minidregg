@@ -6,6 +6,7 @@
 //! resource transaction or caller JSON is never enough to start an app.
 
 use crate::sandbox::open_protected_directory;
+use crate::spawn_gate::{self, BoundedChild, SpawnSpec};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -118,6 +119,26 @@ impl Record {
 #[derive(Clone, Debug)]
 pub struct Journal {
     directory: PathBuf,
+}
+
+trait ChildHandle {
+    fn pid(&self) -> u32;
+    fn abort_under_lock(&mut self) -> io::Result<()>;
+}
+
+impl ChildHandle for BoundedChild {
+    fn pid(&self) -> u32 {
+        self.pid()
+    }
+    fn abort_under_lock(&mut self) -> io::Result<()> {
+        if self.kill_and_reap() {
+            Ok(())
+        } else {
+            Err(invalid(
+                "spawned child could not be reaped under journal lock",
+            ))
+        }
+    }
 }
 
 // The mutators are intentionally unreachable from the public binary until
@@ -292,14 +313,28 @@ impl Journal {
     }
 
     /// Called as the exact service ExecStart, not as an out-of-unit preflight.
-    /// `spawn` must verify the pinned command and UID/GID drop, then return only
-    /// after the child is in this systemd unit's cgroup. On any error the
-    /// durable Entered state remains uncertain and is never automatically run.
+    /// The bounded fork/exec handshake occurs under the same lock as the
+    /// Entered and Running fsyncs. On a Running write failure, the direct child
+    /// is killed and reaped before releasing the lock. The journal remains
+    /// uncertain and never grants an automatic retry.
     pub(crate) fn enter_and_spawn(
         &self,
         begin: &VerifiedBegin,
-        spawn: impl FnOnce() -> io::Result<u32>,
-    ) -> io::Result<u32> {
+        spec: &SpawnSpec,
+    ) -> io::Result<BoundedChild> {
+        self.enter_and_spawn_with(
+            begin,
+            || spawn_gate::spawn_bounded(spec),
+            Self::write_unlocked,
+        )
+    }
+
+    fn enter_and_spawn_with<H: ChildHandle>(
+        &self,
+        begin: &VerifiedBegin,
+        spawn: impl FnOnce() -> io::Result<H>,
+        persist_running: impl FnOnce(&Self, &Record) -> io::Result<()>,
+    ) -> io::Result<H> {
         self.with_lock(|this| {
             let mut record = this
                 .read_unlocked()?
@@ -309,14 +344,19 @@ impl Journal {
             }
             record.phase = Phase::Entered;
             this.write_unlocked(&record)?;
-            let pid = spawn()?;
+            let mut child = spawn()?;
+            let pid = child.pid();
             if pid == 0 {
+                child.abort_under_lock()?;
                 return Err(invalid("spawn returned invalid PID"));
             }
             record.phase = Phase::Running;
             record.child_pid = Some(pid);
-            this.write_unlocked(&record)?;
-            Ok(pid)
+            if let Err(error) = persist_running(this, &record) {
+                child.abort_under_lock()?;
+                return Err(error);
+            }
+            Ok(child)
         })
     }
 
@@ -363,8 +403,29 @@ impl Journal {
 mod tests {
     use super::*;
     use std::os::unix::fs::DirBuilderExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Barrier};
     use std::thread;
+
+    struct MockChild {
+        pid: u32,
+        aborted: Arc<AtomicBool>,
+    }
+    impl ChildHandle for MockChild {
+        fn pid(&self) -> u32 {
+            self.pid
+        }
+        fn abort_under_lock(&mut self) -> io::Result<()> {
+            self.aborted.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    fn child(pid: u32) -> MockChild {
+        MockChild {
+            pid,
+            aborted: Arc::new(AtomicBool::new(false)),
+        }
+    }
 
     fn scratch() -> PathBuf {
         let runtime = std::env::var("XDG_RUNTIME_DIR").expect("Linux user runtime dir");
@@ -411,7 +472,9 @@ mod tests {
             Journal::open(&path).unwrap().read().unwrap().unwrap().phase,
             Phase::Stopped
         );
-        assert!(journal.enter_and_spawn(&identity, || Ok(123)).is_err());
+        assert!(journal
+            .enter_and_spawn_with(&identity, || Ok(child(123)), Journal::write_unlocked)
+            .is_err());
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -423,10 +486,16 @@ mod tests {
         journal.arm(identity.clone()).unwrap();
         journal.request_launch(&identity).unwrap();
         assert!(journal
-            .enter_and_spawn(&identity, || Err(invalid("injected start fault")))
+            .enter_and_spawn_with(
+                &identity,
+                || Err::<MockChild, _>(invalid("injected start fault")),
+                Journal::write_unlocked
+            )
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
-        assert!(journal.enter_and_spawn(&identity, || Ok(124)).is_err());
+        assert!(journal
+            .enter_and_spawn_with(&identity, || Ok(child(124)), Journal::write_unlocked)
+            .is_err());
         assert!(journal
             .fence_and_stop(|_| Err(invalid("injected stop fault")), |_| Ok(true))
             .is_err());
@@ -452,11 +521,15 @@ mod tests {
             let entered = entered.clone();
             let release = release.clone();
             thread::spawn(move || {
-                journal.enter_and_spawn(&identity, || {
-                    entered.wait();
-                    release.wait();
-                    Ok(456)
-                })
+                journal.enter_and_spawn_with(
+                    &identity,
+                    || {
+                        entered.wait();
+                        release.wait();
+                        Ok(child(456))
+                    },
+                    Journal::write_unlocked,
+                )
             })
         };
         entered.wait();
@@ -473,9 +546,33 @@ mod tests {
             })
         };
         release.wait();
-        assert_eq!(worker.join().unwrap().unwrap(), 456);
+        assert_eq!(worker.join().unwrap().unwrap().pid(), 456);
         stopper.join().unwrap().unwrap();
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn running_fsync_failure_aborts_spawn_before_unlock() {
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        let identity = begin();
+        journal.arm(identity.clone()).unwrap();
+        journal.request_launch(&identity).unwrap();
+        let aborted = Arc::new(AtomicBool::new(false));
+        let observed = aborted.clone();
+        assert!(journal
+            .enter_and_spawn_with(
+                &identity,
+                || Ok(MockChild { pid: 457, aborted }),
+                |_, _| Err(invalid("injected Running fsync failure"))
+            )
+            .is_err());
+        assert!(observed.load(Ordering::SeqCst));
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
+        assert!(journal
+            .enter_and_spawn_with(&identity, || Ok(child(458)), Journal::write_unlocked)
+            .is_err());
         fs::remove_dir_all(path).unwrap();
     }
 }
