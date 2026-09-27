@@ -469,6 +469,13 @@ pub(crate) struct UnitStopAudit {
     exact_cgroup_empty: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PriorUnitState {
+    RunningExact,
+    StoppedExact,
+    Uncertain,
+}
+
 /// Exact running incarnation selected by the source-inspected STOP witness.
 /// Its prior completion receipt remains in the lifecycle attempt; this local
 /// identity is rechecked under the journal lock before any manager action.
@@ -608,6 +615,58 @@ impl ChildHandle for BoundedChild {
 // separately testable without exposing an operator-minted launch command.
 #[allow(dead_code)]
 impl Journal {
+    /// Read-only classification of a retained START incarnation after the
+    /// supervisor restarts. This cannot recover fd3, authorize HTTP, or
+    /// change the Mini lifecycle phase. An exact stopped audit requires a
+    /// separate source STOP transition before another START.
+    pub(crate) fn audit_prior_running(
+        &self,
+        expected: &VerifiedBegin,
+    ) -> io::Result<PriorUnitState> {
+        self.with_lock(|this| {
+            let record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("prior START journal absent"))?;
+            if &record.identity != expected
+                || !matches!(
+                    record.phase,
+                    Phase::Running | Phase::Fenced | Phase::Stopped
+                )
+            {
+                return Err(invalid("prior START identity differs from retained claim"));
+            }
+            if UnitStopAudit::inspect(&record)
+                .and_then(|audit| audit.prove(&record))
+                .is_ok()
+            {
+                return Ok(PriorUnitState::StoppedExact);
+            }
+            let manager = systemd_show(record.unit())?;
+            let child_group = record
+                .child_pid
+                .and_then(|pid| fs::read_to_string(format!("/proc/{pid}/cgroup")).ok());
+            let running = property(&manager, "Id")? == record.unit()
+                && property(&manager, "LoadState")? == "loaded"
+                && property(&manager, "ActiveState")? == "active"
+                && matches!(property(&manager, "Job")?, "0" | "")
+                && property(&manager, "InvocationID")? == record.invocation_id().unwrap_or("")
+                && property(&manager, "ControlGroup")? == record.control_group().unwrap_or("")
+                && property(&manager, "MainPID")?
+                    .parse::<u32>()
+                    .ok()
+                    .is_some_and(|pid| pid > 0)
+                && child_group.as_deref().is_some_and(|group| {
+                    group
+                        .lines()
+                        .any(|line| line == format!("0::{}", record.control_group().unwrap_or("")))
+                });
+            Ok(if running {
+                PriorUnitState::RunningExact
+            } else {
+                PriorUnitState::Uncertain
+            })
+        })
+    }
     /// Refuse a misinstalled resident unit before consuming a one-shot Mini
     /// claim. The spawn path repeats this check under the journal lock.
     pub(crate) fn preflight_current_unit(unit: &str) -> io::Result<()> {

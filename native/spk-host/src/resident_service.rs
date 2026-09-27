@@ -7,32 +7,46 @@
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_native::ReverseCustodyClient;
 use crate::agent_api_server::{AgentApiListener, ResidentAgent};
-use crate::claim_native::{match_signed_package, submit_once};
-use crate::completion_native::{
-    assemble_current_completion, preflight_custodian, prepare_running_report,
-    submit_completion_once, FixedCompletionSigners,
-};
-use crate::descriptor_native::author_signed_package;
+use crate::completion_native::preflight_custodian;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_delivery::ResidentHuman;
 use crate::dispatch_inspection::{HttpProjection, Route};
-use crate::dispatch_native::{private_dir, PrivateOperator};
-use crate::hostd::Journal;
+use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
+use crate::hostd::{Journal, PriorUnitState, VerifiedBegin};
 use crate::http_entrance::{CustodianPolicy, EntranceKind, PrivateHttpEntrance, ReceivedRequest};
-use crate::materialize::verify_installed_spk;
-use crate::resident_begin_native::{
-    assemble_current_claim, submit_once as submit_begin_once, FixedBeginSigners, FixedClaimSigners,
+use crate::lifecycle_v3_claim_native::{
+    assemble_once as assemble_v3_claim, submit_fresh_once as submit_v3_claim, CommittedLaunchClaim,
+    FixedLaunchClaimSigners,
 };
+use crate::lifecycle_v3_completion_native::{
+    assemble_once as assemble_v3_completion, checked_receipt as checked_v3_completion_receipt,
+    load_retained as load_v3_completion, recover_receipt_only as recover_v3_completion,
+    submit_fresh_once as submit_v3_completion, CompletionInput, ConfirmedLaunchCompletion,
+    FixedLaunchCompletionSigners,
+};
+use crate::lifecycle_v3_native::{
+    submit_once as submit_v3_begin, AcceptedLaunchBegin, CreatedWitness, FixedLaunchBeginSigners,
+};
+use crate::lifecycle_v3_report_native::{
+    prepare_once as prepare_v3_running_report, PhysicalMode, ReportInput,
+};
+use crate::materialize::verify_installed_spk;
 use crate::resident_launch::PreparedResident;
+use crate::resident_launch::SourceBoundLaunch;
 use crate::sandbox::{open_protected_directory, SandboxSpec};
-use serde::Deserialize;
-use std::fs::OpenOptions;
+use crate::volume_custody::read_attested_volume;
+use minidregg_spk_rpc::decode_bridge_config;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MAX_CONFIG: u64 = 16 * 1024;
+const MAX_LIFECYCLE: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -95,6 +109,10 @@ struct ResidentConfig {
     journal_dir: PathBuf,
     image_dir: PathBuf,
     expected_raw_sha256: String,
+    launch_qualification: PathBuf,
+    start_action: StartAction,
+    volume_resource: u64,
+    expected_volume_id: String,
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
     deployment_id: String,
@@ -128,6 +146,115 @@ struct ResidentConfig {
     agents: Vec<FixedAgentConfig>,
 }
 
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+enum StartAction {
+    Create { index: usize },
+    Continue { created_index: String },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SavedCreatedWitness {
+    receipt_hex: String,
+    custody_hex: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SavedStartBegin {
+    client_operation_id: String,
+    authorization_operation_id: String,
+    volume_id_hex: String,
+    snapshot_manifest: String,
+    process_generation: String,
+    process_identity_hex: String,
+    transaction_id: String,
+    event_id: String,
+    accepted_count: String,
+    image_boundary: String,
+    prior_create: Option<SavedCreatedWitness>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SavedStartClaim {
+    physical_begin: VerifiedBegin,
+    transaction_id: String,
+    event_id: String,
+    accepted_count: String,
+    image_boundary: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SavedStartStage {
+    protocol: String,
+    raw_sha256: String,
+    launch_root: String,
+    start_action: StartAction,
+    begin_sha256: String,
+    claim_ingress_sha256: String,
+    committed_claim_sha256: String,
+    claim_inspection_sha256: String,
+    begin: SavedStartBegin,
+    claim: SavedStartClaim,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QualifiedLaunch {
+    protocol: String,
+    raw_sha256: String,
+    package_root: String,
+    launch_root: String,
+    launch_canonical_sha256: String,
+    create_count: String,
+    create_digests: Vec<String>,
+    continue_digest: String,
+}
+
+impl QualifiedLaunch {
+    fn matches(config: &ResidentConfig, launch: &SourceBoundLaunch<'_>) -> io::Result<()> {
+        let qualified: Self =
+            serde_json::from_slice(&private_file(&config.launch_qualification, MAX_CONFIG)?)?;
+        let descriptor = launch.descriptor();
+        if qualified.protocol != "mini-spk-launch-qualified-v2"
+            || qualified.raw_sha256 != config.expected_raw_sha256
+            || qualified.raw_sha256 != launch.signed_package_sha256()
+            || qualified.package_root != descriptor.package.root
+            || qualified.launch_root != descriptor.root
+            || qualified.launch_canonical_sha256
+                != format!("{:x}", Sha256::digest(&descriptor.canonical))
+            || qualified.create_count != descriptor.create_digests.len().to_string()
+            || qualified.create_digests != descriptor.create_digests
+            || qualified.continue_digest != descriptor.continue_digest
+        {
+            return Err(invalid(
+                "signed START launch differs from retained qualifier",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl StartAction {
+    fn native(&self) -> io::Result<crate::lifecycle_v3_native::LaunchBeginAction> {
+        use crate::lifecycle_v3_native::LaunchBeginAction;
+        match self {
+            Self::Create { index } => Ok(LaunchBeginAction::Create(*index)),
+            Self::Continue { created_index }
+                if crate::lifecycle_v3_native::decimal(created_index) =>
+            {
+                Ok(LaunchBeginAction::Continue {
+                    created_index: created_index.clone(),
+                })
+            }
+            Self::Continue { .. } => Err(invalid("START created index noncanonical")),
+        }
+    }
+}
+
 fn hex64(value: &str) -> bool {
     value.len() == 64
         && value
@@ -147,13 +274,405 @@ fn agent_socket_parent_overlap(earlier: &[FixedAgentConfig], socket: &Path) -> b
     })
 }
 
-fn require_source_bound_start_action() -> io::Result<()> {
-    // BEGIN-v2/CLAIM-v2 identifies the signed package, but does not select
-    // its first-create action versus continue for a retained grain volume.
-    // Keep this physical entry closed until a versioned Mini claim binds the
-    // exact signed command and volume identity. An operator config or /var
-    // contents must not supply that authority.
-    Err(invalid("source-bound START action selection unavailable"))
+fn retire_start_markers(
+    config: &ResidentConfig,
+    _completion: &ConfirmedLaunchCompletion,
+) -> io::Result<()> {
+    let mut present = Vec::new();
+    for (active, retained, retained_name) in [
+        (
+            "lifecycle-completion-v2-active.json",
+            &config.completion_sign_attempt_dir,
+            "op70-requested.json",
+        ),
+        (
+            "lifecycle-claim-v3-active.json",
+            &config.claim_author_attempt_dir,
+            "op68-requested.json",
+        ),
+        (
+            "lifecycle-begin-v3-active.json",
+            &config.begin_attempt_dir,
+            "op66-requested.json",
+        ),
+    ] {
+        let active_path = config.journal_dir.join(active);
+        match fs::symlink_metadata(&active_path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                if private_file(&active_path, MAX_CONFIG)?
+                    != private_file(&retained.join(retained_name), MAX_CONFIG)?
+                {
+                    return Err(invalid(
+                        "START success marker differs from retained attempt",
+                    ));
+                }
+                present.push(active_path);
+            }
+            Ok(_) => return Err(invalid("START success marker identity refused")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for path in present {
+        fs::remove_file(path)?;
+    }
+    File::open(&config.journal_dir)?.sync_all()
+}
+
+fn load_retained_start(
+    config: &ResidentConfig,
+) -> io::Result<(Vec<u8>, AcceptedLaunchBegin, CommittedLaunchClaim)> {
+    let admitted_bytes = private_file(
+        &config.journal_dir.join("start-admitted-v3.json"),
+        MAX_CONFIG,
+    )?;
+    let stage: SavedStartStage = serde_json::from_slice(&admitted_bytes)?;
+    let qualification: QualifiedLaunch =
+        serde_json::from_slice(&private_file(&config.launch_qualification, MAX_CONFIG)?)?;
+    let begin_ingress = private_file(
+        &config.begin_attempt_dir.join("begin-v3.bin"),
+        MAX_LIFECYCLE,
+    )?;
+    let claim_ingress = private_file(
+        &config.claim_author_attempt_dir.join("claim-v3.bin"),
+        MAX_LIFECYCLE,
+    )?;
+    let committed = private_file(
+        &config.claim_author_attempt_dir.join("committed-v3.bin"),
+        MAX_LIFECYCLE,
+    )?;
+    let sha = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+    if stage.protocol != "mini-spk-resident-start-admitted-v3"
+        || stage.raw_sha256 != config.expected_raw_sha256
+        || stage.launch_root != qualification.launch_root
+        || stage.start_action != config.start_action
+        || stage.begin_sha256 != sha(&begin_ingress)
+        || stage.claim_ingress_sha256 != sha(&claim_ingress)
+        || stage.committed_claim_sha256 != sha(&committed)
+    {
+        return Err(invalid(
+            "retained START stage differs from exact native artifacts",
+        ));
+    }
+    let saved = stage.begin;
+    let original_fields = [
+        &saved.client_operation_id,
+        &saved.authorization_operation_id,
+        &saved.snapshot_manifest,
+        &saved.process_generation,
+        &saved.transaction_id,
+        &saved.event_id,
+        &saved.accepted_count,
+        &saved.image_boundary,
+    ];
+    if original_fields
+        .iter()
+        .any(|field| !crate::lifecycle_v3_native::decimal(field))
+        || saved.volume_id_hex != config.expected_volume_id
+        || !hex64(&saved.volume_id_hex)
+        || saved.process_identity_hex.is_empty()
+        || !crate::lifecycle_v3_native::lowercase_hex(&saved.process_identity_hex)
+    {
+        return Err(invalid("retained START BEGIN identity malformed"));
+    }
+    let action = stage.start_action.native()?;
+    let prior_create = saved.prior_create.map(|witness| CreatedWitness {
+        receipt_hex: witness.receipt_hex,
+        custody_hex: witness.custody_hex,
+    });
+    if matches!(
+        action,
+        crate::lifecycle_v3_native::LaunchBeginAction::Create(_)
+    ) != prior_create.is_none()
+    {
+        return Err(invalid("retained START prior create witness shape differs"));
+    }
+    let begin = AcceptedLaunchBegin {
+        ingress: begin_ingress,
+        action,
+        prior_create,
+        client_operation_id: saved.client_operation_id,
+        authorization_operation_id: saved.authorization_operation_id,
+        volume_id_hex: saved.volume_id_hex,
+        snapshot_manifest: saved.snapshot_manifest,
+        process_generation: saved.process_generation,
+        process_identity_hex: saved.process_identity_hex,
+        transaction_id: saved.transaction_id,
+        event_id: saved.event_id,
+        accepted_count: saved.accepted_count,
+        image_boundary: saved.image_boundary,
+    };
+    let saved_claim = stage.claim;
+    if saved_claim.physical_begin.operation_id != begin.authorization_operation_id
+        || saved_claim.physical_begin.package_sha256 != config.expected_raw_sha256
+        || saved_claim.physical_begin.app != config.volume_resource
+        || saved_claim.physical_begin.unit != config.unit
+        || saved_claim.physical_begin.transaction_id != saved_claim.transaction_id
+        || saved_claim.physical_begin.event_id != saved_claim.event_id
+        || begin.process_identity_hex
+            != crate::lifecycle_v3_native::hex(saved_claim.physical_begin.unit.as_bytes())
+        || !crate::lifecycle_v3_claim_native::later_decimal(
+            &saved_claim.accepted_count,
+            &begin.accepted_count,
+        )
+    {
+        return Err(invalid("retained START claim differs from BEGIN or unit"));
+    }
+    let inspection = private_file(
+        &config.claim_author_attempt_dir.join("committed-v3.json"),
+        8 * MAX_LIFECYCLE,
+    )?;
+    if stage.claim_inspection_sha256 != sha(&inspection) {
+        return Err(invalid("retained START source inspection hash changed"));
+    }
+    let source: Value = serde_json::from_slice(&inspection)?;
+    let source_field = |name| -> io::Result<&str> {
+        source
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("retained START source claim field absent"))
+    };
+    let receipt = source
+        .get("receipt")
+        .ok_or_else(|| invalid("retained START source claim receipt absent"))?;
+    if source_field("type")? != "application-lifecycle-claim-committed-v3"
+        || source_field("frameHex")? != crate::lifecycle_v3_native::hex(&committed)
+        || source_field("originalClaimHex")? != crate::lifecycle_v3_native::hex(&claim_ingress)
+        || source_field("originalBeginHex")? != crate::lifecycle_v3_native::hex(&begin.ingress)
+        || source_field("descriptorRoot")? != stage.launch_root
+        || source_field("volumeIdHex")? != begin.volume_id_hex
+        || source_field("authorizationOperationId")? != begin.authorization_operation_id
+        || source_field("processIdentityHex")? != begin.process_identity_hex
+        || source_field("imageIdentityHex")? != saved_claim.physical_begin.image_identity
+        || receipt.get("transactionId").and_then(Value::as_str)
+            != Some(saved_claim.transaction_id.as_str())
+        || receipt.get("eventId").and_then(Value::as_str) != Some(saved_claim.event_id.as_str())
+        || receipt.get("acceptedCount").and_then(Value::as_str)
+            != Some(saved_claim.accepted_count.as_str())
+        || receipt.get("imageBoundary").and_then(Value::as_str)
+            != Some(saved_claim.image_boundary.as_str())
+    {
+        return Err(invalid("retained START source inspection differs"));
+    }
+    let claim = CommittedLaunchClaim {
+        committed,
+        inspection,
+        claim_ingress,
+        physical_begin: saved_claim.physical_begin,
+        transaction_id: saved_claim.transaction_id,
+        event_id: saved_claim.event_id,
+        accepted_count: saved_claim.accepted_count,
+        image_boundary: saved_claim.image_boundary,
+    };
+    Ok((admitted_bytes, begin, claim))
+}
+
+fn checked_completion_evidence(
+    attempt_dir: &Path,
+    saved: &Value,
+    prior_accepted_count: &str,
+) -> io::Result<ConfirmedLaunchCompletion> {
+    let field = |object: &Value, name: &str| -> io::Result<String> {
+        let value = object
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("retained START completion field absent"))?;
+        if !crate::lifecycle_v3_native::decimal(value) {
+            return Err(invalid("retained START completion receipt noncanonical"));
+        }
+        Ok(value.to_owned())
+    };
+    let receipt = saved
+        .get("completionReceipt")
+        .ok_or_else(|| invalid("retained START completion receipt absent"))?;
+    let completed = ConfirmedLaunchCompletion {
+        transaction_id: field(receipt, "transactionId")?,
+        event_id: field(receipt, "eventId")?,
+        accepted_count: field(receipt, "acceptedCount")?,
+        image_boundary: field(receipt, "imageBoundary")?,
+    };
+    if !crate::lifecycle_v3_claim_native::later_decimal(
+        &completed.accepted_count,
+        prior_accepted_count,
+    ) {
+        return Err(invalid("retained START completion does not follow claim"));
+    }
+    let evidence_name = saved
+        .get("evidenceName")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("retained START completion evidence name absent"))?;
+    let confirmation = if evidence_name == "op38-outcome.json" {
+        "installed"
+    } else if let Some(suffix) = evidence_name.strip_prefix("op39-lookup-") {
+        let nonce = suffix
+            .strip_suffix("/outcome.json")
+            .ok_or_else(|| invalid("retained START lookup evidence path malformed"))?;
+        if nonce.len() != 32
+            || !nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(invalid("retained START lookup evidence nonce malformed"));
+        }
+        "replayed"
+    } else {
+        return Err(invalid("retained START completion evidence path refused"));
+    };
+    let evidence = private_file(&attempt_dir.join(evidence_name), MAX_CONFIG)?;
+    if saved.get("evidenceSha256").and_then(Value::as_str)
+        != Some(format!("{:x}", Sha256::digest(&evidence)).as_str())
+    {
+        return Err(invalid("retained START completion evidence hash changed"));
+    }
+    let source: Value = serde_json::from_slice(&evidence)?;
+    let source_receipt =
+        checked_v3_completion_receipt(&source, confirmation, prior_accepted_count)?;
+    if source_receipt.transaction_id != completed.transaction_id
+        || source_receipt.event_id != completed.event_id
+        || source_receipt.accepted_count != completed.accepted_count
+        || source_receipt.image_boundary != completed.image_boundary
+    {
+        return Err(invalid(
+            "retained START completion differs from source receipt",
+        ));
+    }
+    Ok(completed)
+}
+
+fn read_completed_start(
+    config: &ResidentConfig,
+    admitted_bytes: &[u8],
+    claim: &CommittedLaunchClaim,
+) -> io::Result<ConfirmedLaunchCompletion> {
+    let saved: Value = serde_json::from_slice(&private_file(
+        &config.journal_dir.join("start-completed-v3.json"),
+        MAX_CONFIG,
+    )?)?;
+    if saved.get("protocol").and_then(Value::as_str) != Some("mini-spk-resident-start-completed-v3")
+        || saved.get("admittedSha256").and_then(Value::as_str)
+            != Some(format!("{:x}", Sha256::digest(admitted_bytes)).as_str())
+    {
+        return Err(invalid(
+            "retained START completion differs from admitted claim",
+        ));
+    }
+    checked_completion_evidence(
+        &config.completion_sign_attempt_dir,
+        &saved,
+        &claim.accepted_count,
+    )
+}
+
+fn reconcile_prior_start(
+    config: &ResidentConfig,
+    operator: &PrivateOperator,
+    journal: &Journal,
+) -> io::Result<()> {
+    let (admitted_bytes, begin, claim) = load_retained_start(config)?;
+    let record = journal
+        .read()?
+        .ok_or_else(|| invalid("prior START journal absent"))?;
+    if record.app() != claim.physical_begin.app
+        || record.generation() != claim.physical_begin.generation
+        || record.unit() != claim.physical_begin.unit
+        || record.operation_id() != claim.physical_begin.operation_id
+        || record.transaction_id() != claim.physical_begin.transaction_id
+        || record.event_id() != claim.physical_begin.event_id
+        || record.image_identity() != claim.physical_begin.image_identity
+    {
+        return Err(invalid(
+            "prior START journal differs from retained fresh claim",
+        ));
+    }
+    let op38_marker = config
+        .completion_sign_attempt_dir
+        .join("op38-requested.json");
+    let submitted = match fs::symlink_metadata(&op38_marker) {
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => true,
+        Ok(_) => return Err(invalid("retained START op38 marker identity refused")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    let completed_marker = config.journal_dir.join("start-completed-v3.json");
+    let completed = match fs::symlink_metadata(&completed_marker) {
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
+            if !submitted {
+                return Err(invalid(
+                    "START completion has no original op38 submit marker",
+                ));
+            }
+            Some(read_completed_start(config, &admitted_bytes, &claim)?)
+        }
+        Ok(_) => return Err(invalid("START completion marker identity refused")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let completed = if submitted && completed.is_none() {
+        let signed_report = private_file(
+            &config.completion_attempt_dir.join("signed-report.bin"),
+            MAX_LIFECYCLE,
+        )?;
+        let assembled = load_v3_completion(
+            &config.completion_sign_attempt_dir,
+            &begin,
+            &claim,
+            &signed_report,
+        )?;
+        let recovered =
+            recover_v3_completion(operator, &assembled, &begin, &claim, &signed_report)?;
+        write_new(
+            &config.journal_dir,
+            "start-completed-v3.json",
+            &serde_json::to_vec(&json!({
+                "protocol":"mini-spk-resident-start-completed-v3",
+                "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
+                "evidenceName":recovered.inspection_name,
+                "evidenceSha256":recovered.inspection_sha256,
+                "completionReceipt":{
+                    "transactionId":recovered.receipt.transaction_id,
+                    "eventId":recovered.receipt.event_id,
+                    "acceptedCount":recovered.receipt.accepted_count,
+                    "imageBoundary":recovered.receipt.image_boundary,
+                },
+            }))?,
+        )?;
+        Some(recovered.receipt)
+    } else {
+        completed
+    };
+    if let Some(receipt) = &completed {
+        retire_start_markers(config, receipt)?;
+    }
+    let physical = journal.audit_prior_running(&claim.physical_begin)?;
+    let physical_label = match physical {
+        PriorUnitState::RunningExact => "running-exact-without-fd3-owner",
+        PriorUnitState::StoppedExact => "stopped-exact-needs-source-stop",
+        PriorUnitState::Uncertain => "uncertain-unit-incarnation",
+    };
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    write_new(
+        &config.journal_dir,
+        &format!(
+            "start-reconciliation-{}.json",
+            crate::lifecycle_v3_native::hex(&random)
+        ),
+        &serde_json::to_vec(&json!({
+            "protocol":"mini-spk-resident-start-reconciliation-v3",
+            "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
+            "completion":completed.as_ref().map(|receipt| json!({
+                "transactionId":receipt.transaction_id,
+                "eventId":receipt.event_id,
+                "acceptedCount":receipt.accepted_count,
+                "imageBoundary":receipt.image_boundary,
+            })),
+            "physicalState":physical_label,
+            "noRelaunch":true,
+        }))?,
+    )?;
+    Err(invalid(
+        "prior START reconciled without fd3; source STOP is required",
+    ))
 }
 
 impl ResidentConfig {
@@ -173,6 +692,10 @@ impl ResidentConfig {
             || config.completion_sign_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_submit_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || !hex64(&config.expected_raw_sha256)
+            || !config.launch_qualification.is_absolute()
+            || config.volume_resource == 0
+            || !hex64(&config.expected_volume_id)
+            || config.start_action.native().is_err()
             || !hex64(&config.bwrap_sha256)
             || !hex64(&config.mini_host_sha256)
             || !hex64(&config.mini_config_sha256)
@@ -191,6 +714,7 @@ impl ResidentConfig {
             || config.completion_semantics.is_empty()
             || ![
                 &config.image_dir,
+                &config.launch_qualification,
                 &config.persistent_var,
                 &config.bwrap,
                 &config.mini_host,
@@ -262,12 +786,18 @@ impl ResidentConfig {
 /// choose a package, task UID, Mini signer, command, or app generation.
 pub fn run(config_path: &Path) -> io::Result<()> {
     let config = ResidentConfig::load(config_path)?;
-    require_source_bound_start_action()?;
     let journal = Journal::open(&config.journal_dir)?;
-    Journal::preflight_current_unit(&config.unit)?;
+    let operator = PrivateOperator {
+        host: config.mini_host.clone(),
+        config: config.mini_config.clone(),
+        socket: config.mini_operator_socket.clone(),
+        host_sha256: config.mini_host_sha256.clone(),
+        config_sha256: config.mini_config_sha256.clone(),
+    };
     if journal.read()?.is_some() {
-        return Err(invalid("resident generation journal is already occupied"));
+        return reconcile_prior_start(&config, &operator, &journal);
     }
+    Journal::preflight_current_unit(&config.unit)?;
     match std::fs::symlink_metadata(config.journal_dir.join("lifecycle-begin-v3-active.json")) {
         Ok(_) => return Err(invalid("resident launch BEGIN attempt already active")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -283,6 +813,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         &config.completion_attempt_dir,
         &config.completion_sign_attempt_dir,
         &config.completion_submit_attempt_dir,
+        &config.journal_dir.join("start-admitted-v3.json"),
+        &config.journal_dir.join("start-completed-v3.json"),
     ] {
         match std::fs::symlink_metadata(path) {
             Ok(_) => return Err(invalid("resident lifecycle attempt already exists")),
@@ -309,34 +841,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if package.raw_sha256 != config.expected_raw_sha256 {
         return Err(invalid("resident signed package pin drift"));
     }
-    // Staged v2 code below remains unreachable under the action guard above.
-    // The v3 claim must replace this with its signed create/continue selection.
-    let command = &package.manifest.continue_command;
-    let spec = SandboxSpec {
-        bwrap: config.bwrap.clone(),
-        image_root: package.directory.join("root"),
-        persistent_var: config.persistent_var.clone(),
-        persistent_var_max_bytes: config.persistent_var_max_bytes,
-        argv: command.argv.clone(),
-        environ: command.environ.clone(),
-    };
-    // Preopen physical custody and its exact fd3/4/5 before consuming the
-    // one-shot Mini claim. No app child exists yet.
-    let prepared =
-        PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
-    let operator = PrivateOperator {
-        host: config.mini_host,
-        config: config.mini_config,
-        socket: config.mini_operator_socket,
-        host_sha256: config.mini_host_sha256,
-        config_sha256: config.mini_config_sha256,
-    };
     preflight_custodian(
         &operator,
         &config.completion_custodian_seed,
         &config.completion_semantics,
     )?;
-    let signers: FixedCompletionSigners = serde_json::from_slice(&private_file(
+    let signers: FixedLaunchCompletionSigners = serde_json::from_slice(&private_file(
         &config.completion_management_custody,
         MAX_CONFIG,
     )?)?;
@@ -415,46 +925,100 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         )?;
         agent_preflights.push((custody, reverse));
     }
-    let descriptor = author_signed_package(&operator, &package, &config.descriptor_attempt_dir)?;
+    let launch = SourceBoundLaunch::author(&operator, &package, &config.descriptor_attempt_dir)?;
+    QualifiedLaunch::matches(&config, &launch)?;
+    let descriptor = launch.descriptor();
+    let bridge = decode_bridge_config(
+        package
+            .signed_bridge_config
+            .as_deref()
+            .ok_or_else(|| invalid("signed START bridge absent"))?,
+    )
+    .map_err(io::Error::other)?;
+    if bridge.api_path != descriptor.package.api_path {
+        return Err(invalid("signed START bridge differs from Mini descriptor"));
+    }
     if (!config.agents.is_empty()
         || policies
             .iter()
             .any(|policy| policy.fixed_session_kind == EntranceKind::Api))
-        && descriptor.api_path.is_none()
+        && descriptor.package.api_path.is_none()
     {
         return Err(invalid("signed package has no configured API interface"));
     }
-    let begin_signers: FixedBeginSigners =
+    let begin_signers: FixedLaunchBeginSigners =
         serde_json::from_slice(&private_file(&config.begin_management_custody, MAX_CONFIG)?)?;
-    let claim_signers: FixedClaimSigners =
+    let claim_signers: FixedLaunchClaimSigners =
         serde_json::from_slice(&private_file(&config.claim_management_custody, MAX_CONFIG)?)?;
-    let begin = submit_begin_once(
+    begin_signers.validate(&operator, config.app_uid)?;
+    claim_signers.validate(&operator, config.app_uid)?;
+    // The volume registration is a root-published physical witness, not a
+    // source permit. Preflight it before consuming the one-shot BEGIN, then
+    // require its volume ID to equal Mini's exact source projection.
+    let volume = read_attested_volume(
+        config.volume_resource,
+        config.app_uid,
+        config.persistent_var_max_bytes,
+        &config.deployment_id,
+        &config.host_id,
+        &config.expected_volume_id,
+    )?;
+    if volume.mount != config.persistent_var {
+        return Err(invalid("START mount differs from root volume registration"));
+    }
+    volume.recheck_handoff()?;
+    let begin = submit_v3_begin(
         &operator,
         &begin_signers,
         config.app_uid,
-        &descriptor.canonical,
-        "start",
+        &launch,
+        config.start_action.native()?,
         &config.begin_operation_ledger,
         &config.begin_attempt_dir,
     )?;
-    let ingress = assemble_current_claim(
+    if begin.volume_id_hex != volume.volume_id {
+        return Err(invalid("root volume differs from source BEGIN volume ID"));
+    }
+    let command = match &begin.action {
+        crate::lifecycle_v3_native::LaunchBeginAction::Create(index) => {
+            let digest = descriptor
+                .create_digests
+                .get(*index)
+                .ok_or_else(|| invalid("source create digest absent"))?;
+            launch.source_selected_create(*index, digest)?
+        }
+        crate::lifecycle_v3_native::LaunchBeginAction::Continue { .. } => {
+            launch.source_selected_continue(&descriptor.continue_digest)?
+        }
+        crate::lifecycle_v3_native::LaunchBeginAction::Install => {
+            return Err(invalid("INSTALL action cannot enter resident START"));
+        }
+    };
+    let spec = SandboxSpec {
+        bwrap: config.bwrap.clone(),
+        image_root: package.directory.join("root"),
+        persistent_var: config.persistent_var.clone(),
+        persistent_var_max_bytes: config.persistent_var_max_bytes,
+        argv: command.argv.clone(),
+        environ: command.environ.clone(),
+    };
+    let prepared =
+        PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
+    let assembled = assemble_v3_claim(
         &operator,
         &claim_signers,
         config.app_uid,
         &begin,
+        &launch,
         &config.claim_nonce_ledger,
         &config.claim_author_attempt_dir,
     )?;
-    let captured = submit_once(&operator, &ingress, &config.claim_attempt_dir)?;
-    let matched = match_signed_package(&operator, &package, &captured, &config.claim_attempt_dir)?;
-    if matched.descriptor_root != descriptor.root
-        || matched.begin.image_identity != hex_bytes(&descriptor.image_identity)
+    let claim = submit_v3_claim(&operator, assembled, &begin, &launch, &claim_signers)?;
+    if claim.physical_begin.unit != config.unit
+        || claim.physical_begin.app != config.volume_resource
+        || claim.physical_begin.image_identity
+            != crate::lifecycle_v3_native::hex(&descriptor.package.image_identity)
     {
-        return Err(invalid(
-            "native claim differs from pre-BEGIN signed descriptor",
-        ));
-    }
-    if matched.begin.unit != config.unit {
         return Err(invalid(
             "source lifecycle unit differs from installed service",
         ));
@@ -462,59 +1026,133 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if policies
         .iter()
         .any(|policy| policy.fixed_session_kind == EntranceKind::Api)
-        && matched.bridge.api_path.is_none()
+        && bridge.api_path.is_none()
     {
         return Err(invalid("signed package has no configured API interface"));
     }
     if custodies
         .iter()
-        .any(|custody| custody.app != matched.begin.app.to_string())
+        .any(|custody| custody.app != claim.physical_begin.app.to_string())
     {
         return Err(invalid(
             "fixed participant custody differs from claimed shared app",
         ));
     }
     for (custody, _) in &agent_preflights {
-        if custody.app != matched.begin.app.to_string()
-            || custody.app_generation != matched.begin.generation.to_string()
-            || matched.bridge.api_path.is_none()
+        if custody.app != claim.physical_begin.app.to_string()
+            || custody.app_generation != claim.physical_begin.generation.to_string()
+            || bridge.api_path.is_none()
         {
             return Err(invalid("agent custody differs from claimed shared app"));
         }
     }
-    journal.arm(matched.begin.clone())?;
-    journal.request_launch(&matched.begin)?;
-    let mut resident = prepared.start(&journal, &matched.begin)?;
+    let admitted = json!({
+        "protocol":"mini-spk-resident-start-admitted-v3",
+        "rawSha256":package.raw_sha256,
+        "launchRoot":descriptor.root,
+        "startAction":config.start_action,
+        "beginSha256":format!("{:x}", Sha256::digest(&begin.ingress)),
+        "claimIngressSha256":format!("{:x}", Sha256::digest(&claim.claim_ingress)),
+        "committedClaimSha256":format!("{:x}", Sha256::digest(&claim.committed)),
+        "claimInspectionSha256":format!("{:x}", Sha256::digest(&claim.inspection)),
+        "begin":{
+            "clientOperationId":begin.client_operation_id,
+            "authorizationOperationId":begin.authorization_operation_id,
+            "volumeIdHex":begin.volume_id_hex,
+            "snapshotManifest":begin.snapshot_manifest,
+            "processGeneration":begin.process_generation,
+            "processIdentityHex":begin.process_identity_hex,
+            "transactionId":begin.transaction_id,
+            "eventId":begin.event_id,
+            "acceptedCount":begin.accepted_count,
+            "imageBoundary":begin.image_boundary,
+            "priorCreate":begin.prior_create.as_ref().map(|prior| json!({
+                "receiptHex":prior.receipt_hex,
+                "custodyHex":prior.custody_hex,
+            })),
+        },
+        "claim":{
+            "physicalBegin":claim.physical_begin,
+            "transactionId":claim.transaction_id,
+            "eventId":claim.event_id,
+            "acceptedCount":claim.accepted_count,
+            "imageBoundary":claim.image_boundary,
+        },
+    });
+    // After this fsync a restarted supervisor can look up only the retained
+    // completion ingress. It cannot convert these old bytes into another
+    // physical launch or ask Mini for a second fresh claim.
+    let admitted_bytes = serde_json::to_vec(&admitted)?;
+    write_new(
+        &config.journal_dir,
+        "start-admitted-v3.json",
+        &admitted_bytes,
+    )?;
+    journal.arm(claim.physical_begin.clone())?;
+    journal.request_launch(&claim.physical_begin)?;
+    let mut resident = prepared.start(&journal, &claim.physical_begin)?;
     let view = resident.rpc.get_view_info(Duration::from_secs(300))?;
-    if view != matched.bridge.view_info {
+    if view != bridge.view_info {
         return Err(invalid(
             "running app ViewInfo differs from signed bridge schema",
         ));
     }
-    let report = prepare_running_report(
+    let report = prepare_v3_running_report(
         &operator,
-        &journal,
-        &begin.ingress,
-        &captured.payload,
+        ReportInput {
+            begin: &begin,
+            claim: &claim,
+            launch: &launch,
+            mode: PhysicalMode::Running {
+                journal: &journal,
+                volume: &volume,
+            },
+        },
         &config.completion_custodian_seed,
         &config.completion_semantics,
         &config.completion_attempt_dir,
     )?;
-    let completion_ingress = assemble_current_completion(
+    let completion_ingress = assemble_v3_completion(
         &operator,
-        &begin.ingress,
-        &ingress,
-        &report.signed_report,
         &signers,
         config.app_uid,
+        CompletionInput {
+            begin: &begin,
+            claim: &claim,
+            launch: &launch,
+            signed_report: &report.signed_report,
+        },
         &config.completion_sign_attempt_dir,
     )?;
-    let _receipt = submit_completion_once(
+    let _receipt = submit_v3_completion(
         &operator,
-        &journal,
         &completion_ingress,
-        &config.completion_submit_attempt_dir,
+        &begin,
+        &claim,
+        &report.signed_report,
+        Some(&journal),
     )?;
+    let outcome_inspection = private_file(
+        &config.completion_sign_attempt_dir.join("op38-outcome.json"),
+        MAX_CONFIG,
+    )?;
+    write_new(
+        &config.journal_dir,
+        "start-completed-v3.json",
+        &serde_json::to_vec(&json!({
+            "protocol":"mini-spk-resident-start-completed-v3",
+            "admittedSha256":format!("{:x}", Sha256::digest(&admitted_bytes)),
+            "evidenceName":"op38-outcome.json",
+            "evidenceSha256":format!("{:x}", Sha256::digest(&outcome_inspection)),
+            "completionReceipt":{
+                "transactionId":_receipt.transaction_id,
+                "eventId":_receipt.event_id,
+                "acceptedCount":_receipt.accepted_count,
+                "imageBoundary":_receipt.image_boundary,
+            },
+        }))?,
+    )?;
+    retire_start_markers(&config, &_receipt)?;
     // A START completion is the first state that may expose transport. Native
     // admission remains decisive for every later HTTP request as well.
     let entrances = config
@@ -522,7 +1160,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .iter()
         .map(|entry| PrivateHttpEntrance::bind(&entry.directory))
         .collect::<io::Result<Vec<_>>>()?;
-    let api_path = matched.bridge.api_path;
+    let api_path = bridge.api_path;
     let mut agent_routes = config
         .agents
         .iter()
@@ -642,6 +1280,49 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn retained_completion_requires_exact_source_evidence_after_restart() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mini-spk-start-evidence-{}-{nonce}",
+            std::process::id()
+        ));
+        DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let evidence = serde_json::to_vec(&json!({
+            "type":"confirmed", "confirmation":"installed",
+            "transactionId":"7", "eventId":"8", "acceptedCount":"10",
+            "imageBoundary":"11",
+        }))
+        .unwrap();
+        write_new(&dir, "op38-outcome.json", &evidence).unwrap();
+        let mut saved = json!({
+            "evidenceName":"op38-outcome.json",
+            "evidenceSha256":format!("{:x}", Sha256::digest(&evidence)),
+            "completionReceipt":{
+                "transactionId":"7", "eventId":"8",
+                "acceptedCount":"10", "imageBoundary":"11",
+            },
+        });
+        assert_eq!(
+            checked_completion_evidence(&dir, &saved, "9")
+                .unwrap()
+                .accepted_count,
+            "10"
+        );
+        saved["completionReceipt"]["eventId"] = json!("9");
+        assert!(checked_completion_evidence(&dir, &saved, "9").is_err());
+        saved["completionReceipt"]["eventId"] = json!("8");
+        saved["evidenceName"] = json!("../op38-outcome.json");
+        assert!(checked_completion_evidence(&dir, &saved, "9").is_err());
+        saved["evidenceName"] = json!("op38-outcome.json");
+        saved["evidenceSha256"] = json!("0".repeat(64));
+        assert!(checked_completion_evidence(&dir, &saved, "9").is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn distinct_agent_uids_need_disjoint_socket_parent_acl_scopes() {
         let first = FixedAgentConfig {
             socket: PathBuf::from("/run/mini-spk/agent-a/api.sock"),
@@ -730,6 +1411,11 @@ mod tests {
             }],
             "agents": [agent("agent-a", 1001), agent("agent-b", 1002)]
         });
+        config["launchQualification"] =
+            json!("/var/lib/mini-spk/launch-qualified/qualification.json");
+        config["startAction"] = json!({"kind":"create","index":0});
+        config["volumeResource"] = json!(8401);
+        config["expectedVolumeId"] = json!("9".repeat(64));
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -740,10 +1426,6 @@ mod tests {
             .unwrap();
         file.sync_all().unwrap();
         assert!(ResidentConfig::load(&path).is_ok());
-        assert_eq!(
-            run(&path).unwrap_err().to_string(),
-            "source-bound START action selection unavailable"
-        );
         assert_eq!(fs::read_dir(&journal).unwrap().count(), 1);
         config["agents"][1]["socket"] = json!("/run/mini-spk/agent-a/other.sock");
         fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();

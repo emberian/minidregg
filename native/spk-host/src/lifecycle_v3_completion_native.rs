@@ -173,9 +173,11 @@ pub(crate) struct ConfirmedLaunchCompletion {
 /// Historical evidence only. This cannot authorize a second physical launch.
 pub(crate) struct RecoveredLaunchCompletion {
     pub receipt: ConfirmedLaunchCompletion,
+    pub inspection_name: String,
+    pub inspection_sha256: String,
 }
 
-fn checked_receipt(
+pub(crate) fn checked_receipt(
     view: &Value,
     confirmation: &str,
     prior_accepted_count: &str,
@@ -513,8 +515,14 @@ pub(crate) fn recover_receipt_only(
         &lookup_dir.join("outcome.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspected)?;
+    let lookup_name = lookup_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| invalid("v3 completion lookup name absent"))?;
     Ok(RecoveredLaunchCompletion {
         receipt: checked_receipt(&view, "replayed", &claim.accepted_count)?,
+        inspection_name: format!("{lookup_name}/outcome.json"),
+        inspection_sha256: hex(&Sha256::digest(&inspected)),
     })
 }
 

@@ -1,0 +1,41 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.40s
+────────────
+ Nextest run ID fb436bea-8f5f-4fe4-988a-c25395283756 with nextest profile: default
+    Starting 34 tests across 1 binary (111 tests skipped)
+        PASS [   0.008s] ( 1/34) minidregg-spk-host hostd::tests::crash_after_active_marker_fsync_blocks_new_dispatch
+        PASS [   0.008s] ( 2/34) minidregg-spk-host hostd::tests::dispatch_refuses_wrong_permit_hash_without_marking_in_flight
+        PASS [   0.008s] ( 3/34) minidregg-spk-host hostd::tests::crash_between_record_clear_and_active_unlink_stays_fail_closed
+        PASS [   0.008s] ( 4/34) minidregg-spk-host hostd::tests::changed_captured_permit_cannot_be_marked_delivered
+        PASS [   0.008s] ( 5/34) minidregg-spk-host hostd::tests::fence_waits_for_spawn_linearization_then_stops_exact_unit
+        PASS [   0.008s] ( 6/34) minidregg-spk-host hostd::tests::completed_worker_invalid_http_response_retains_uncertainty_and_frees_other_session
+        PASS [   0.008s] ( 7/34) minidregg-spk-host hostd::tests::dispatch_refuses_other_app_generation_or_unit_invocation_before_marker
+        PASS [   0.009s] ( 8/34) minidregg-spk-host hostd::tests::dispatch_operation_ids_are_fsynced_and_never_reused_after_reopen
+        PASS [   0.009s] ( 9/34) minidregg-spk-host hostd::tests::dispatch_tombstone_is_per_session_operation_not_http_digest
+        PASS [   0.009s] (10/34) minidregg-spk-host hostd::tests::dispatch_delivered_is_one_shot_and_next_distinct_request_can_run
+        PASS [   0.010s] (11/34) minidregg-spk-host hostd::tests::concurrent_app_fence_serializes_with_exact_worker_release
+        PASS [   0.007s] (12/34) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_receipt_order_and_historical_kind_are_distinct
+        PASS [   0.006s] (13/34) minidregg-spk-host resident_service::tests::parsed_api_root_and_discovery_keep_one_canonical_prefix
+        PASS [   0.006s] (14/34) minidregg-spk-host resident_service::tests::retained_completion_requires_exact_source_evidence_after_restart
+        PASS [   0.007s] (15/34) minidregg-spk-host lifecycle_v3_completion_native::tests::event25_ingress_and_fresh_outcome_tags_do_not_alias
+        PASS [   0.007s] (16/34) minidregg-spk-host resident_service::tests::distinct_agent_uids_need_disjoint_socket_parent_acl_scopes
+        PASS [   0.006s] (17/34) minidregg-spk-host resident_service::tests::resident_config_refuses_two_agent_sockets_under_one_acl_parent
+        PASS [   0.008s] (18/34) minidregg-spk-host lifecycle_v3_completion_native::tests::retained_completion_recovery_requires_exact_originals_and_submit_marker
+        PASS [   0.009s] (19/34) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_plan_pins_exact_begin_claim_report_and_volume
+        PASS [   0.009s] (20/34) minidregg-spk-host hostd::tests::worker_release_keeps_uncertain_operation_terminal_but_allows_other_session
+        PASS [   0.019s] (21/34) minidregg-spk-host hostd::tests::proven_no_enqueue_releases_slot_without_rearming_operation
+        PASS [   0.019s] (22/34) minidregg-spk-host hostd::tests::unit_process_matches_manager_invocation_probe
+        PASS [   0.007s] (23/34) minidregg-spk-host hostd::tests::installed_system_unit_stop_audit_probe
+        PASS [   0.014s] (24/34) minidregg-spk-host hostd::tests::worker_release_rejects_wrong_identity_and_fenced_or_restarted_app
+        PASS [   0.010s] (25/34) minidregg-spk-host hostd::tests::running_fsync_failure_aborts_spawn_before_unlock
+        PASS [   0.009s] (26/34) minidregg-spk-host hostd::tests::source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence
+        PASS [   0.010s] (27/34) minidregg-spk-host hostd::tests::real_prequeue_guard_releases_only_its_unqueued_operation
+        PASS [   0.011s] (28/34) minidregg-spk-host hostd::tests::duplicate_conflict_and_fence_are_durable
+        PASS [   0.010s] (29/34) minidregg-spk-host hostd::tests::worker_release_after_uncertain_tombstone_can_finish_same_live_operation
+        PASS [   0.009s] (30/34) minidregg-spk-host hostd::tests::physical_journal_retains_full_native_operation_id_and_reads_historical_number
+        PASS [   0.010s] (31/34) minidregg-spk-host hostd::tests::mismatched_or_missing_unit_audit_retains_fence
+        PASS [   0.011s] (32/34) minidregg-spk-host hostd::tests::source_digest_and_receipt_ids_are_canonical_decimal_nats
+        PASS [   0.012s] (33/34) minidregg-spk-host hostd::tests::uncertain_start_and_stop_never_clear_tombstone_early
+        PASS [   0.027s] (34/34) minidregg-spk-host hostd::tests::hard_fence_between_rpc_send_and_reply_retains_uncertain_one_shot
+────────────
+     Summary [   0.027s] 34 tests run: 34 passed, 111 skipped
