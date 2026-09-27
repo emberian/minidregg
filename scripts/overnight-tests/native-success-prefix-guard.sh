@@ -18,6 +18,8 @@ sed -n '/^module_checkpoint_paths() {/,/^}/p' \
   "$repo_root/scripts/build-native-host.sh" > "$functions"
 sed -n '/^select_qualified_success_prefix() {/,/^}/p' \
   "$repo_root/scripts/build-native-host.sh" >> "$functions"
+sed -n '/^package_artifact_symlinks() {/,/^}/p' \
+  "$repo_root/scripts/build-native-host.sh" >> "$functions"
 # shellcheck source=/dev/null
 source "$functions"
 
@@ -95,4 +97,36 @@ if (cd "$current" && select_qualified_success_prefix \
   exit 1
 fi
 grep -q 'linked prefix artifact:.*Base.olean.server' "$scratch/link.err"
-printf 'PASS identical=3 dependency-change=0 middle-change=1 final-change=2 insertion=1 artifact-drift=refused artifact-symlink=refused\n'
+mkdir -p "$current/.lake/packages/pkg/docs" \
+  "$current/.lake/packages/pkg/.lake/build/lib/lean"
+ln -s ../README.md "$current/.lake/packages/pkg/docs/README.md"
+[[ -z "$(cd "$current" && package_artifact_symlinks)" ]]
+ln -s Missing.olean "$current/.lake/packages/pkg/.lake/build/lib/lean/Imported.olean"
+[[ "$(cd "$current" && package_artifact_symlinks)" == \
+  '.lake/packages/pkg/.lake/build/lib/lean/Imported.olean' ]]
+rm "$current/.lake/packages/pkg/.lake/build/lib/lean/Imported.olean"
+ln -s pkg "$current/.lake/packages/root-link"
+[[ "$(cd "$current" && package_artifact_symlinks)" == \
+  '.lake/packages/root-link' ]]
+rm "$current/.lake/packages/root-link"
+mv "$current/.lake/packages" "$current/.lake/packages.saved"
+ln -s packages.saved "$current/.lake/packages"
+if (cd "$current" && package_artifact_symlinks > "$scratch/root.out" 2> "$scratch/root.err"); then
+  printf 'linked package root was accepted\n' >&2
+  exit 1
+fi
+grep -q 'package root is linked or missing' "$scratch/root.err"
+rm "$current/.lake/packages"
+mv "$current/.lake/packages.saved" "$current/.lake/packages"
+if (
+  cd "$current"
+  # Invoked indirectly by the sourced production function.
+  # shellcheck disable=SC2329
+  find() { return 7; }
+  package_artifact_symlinks > "$scratch/find.out" 2> "$scratch/find.err"
+); then
+  printf 'failed package enumeration was accepted\n' >&2
+  exit 1
+fi
+grep -q 'package symlink enumeration failed' "$scratch/find.err"
+printf 'PASS identical=3 dependency-change=0 middle-change=1 final-change=2 insertion=1 artifact-drift=refused artifact-symlink=refused doc-symlink=ignored library/root-symlink=refused find-failure=refused\n'

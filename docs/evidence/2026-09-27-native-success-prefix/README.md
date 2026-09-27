@@ -6,4 +6,6 @@ The baseline must itself have been built with this script revision and `--checkp
 
 The isolated fixture invokes the production prefix selector on three fake modules. It checks identical reuse, changed dependency and later-source suffix boundaries, insertion, altered private OLean bytes, and an optional generated-artifact symlink. It does not invoke Lean or the native linker.
 
+A qualification preflight found that the current Linux warm package tree contains three symlinks in documentation or benchmark scripts. The builder now rejects symlinks in the package root and imported library/generated native-object ancestry; those three paths are outside the build artifact closure. Package enumeration failure is a refusal. The fixture confirms accepted documentation and refused library/root symlinks and enumeration failure. A read-only check of the current Linux warm tree found no symlink in the guarded artifact ancestry.
+
 Validation: `bash -n` and `shellcheck` on the builder and fixture, the fixture itself, and `git diff --check` all passed. Exact outputs and hashes are in `validation.log`. No running build snapshot was modified.

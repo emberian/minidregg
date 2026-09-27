@@ -433,6 +433,26 @@ select_qualified_success_prefix() {
   printf '%s\n' "$index"
 }
 
+package_artifact_symlinks() {
+  # Package documentation/benchmark symlinks are not compiler inputs. Roots
+  # and every imported library or generated native-object ancestor must be
+  # real so find/hash cannot silently skip a dereferenced artifact tree.
+  local links link
+  if [[ -L .lake || -L .lake/packages || ! -d .lake/packages ]]; then
+    printf 'build-native-host: package root is linked or missing\n' >&2
+    return 65
+  fi
+  links=$(find .lake/packages -type l -print) || {
+    printf 'build-native-host: package symlink enumeration failed\n' >&2
+    return 65
+  }
+  while IFS= read -r link; do
+    if [[ "$link" =~ ^\.lake/packages/[^/]+(/\.lake(/build(/(lib|ir)(/.*)?)?)?)?$ ]]; then
+      printf '%s\n' "$link"
+    fi
+  done <<< "$links"
+}
+
 resume_prefix=0
 resume_checkpoint_dir="$output_dir/resume-checkpoints"
 if [[ "$checkpoint_resume" == 1 ]]; then
@@ -445,7 +465,7 @@ if [[ "$checkpoint_resume" == 1 ]]; then
   toolchain=$(lake env lean --print-prefix)
   toolchain=$(cd "$toolchain" && pwd -P)
   package_links="$output_dir/package-symlinks-recursive.txt"
-  find .lake/packages -type l -print > "$package_links"
+  package_artifact_symlinks > "$package_links" || exit 65
   if [[ -s "$package_links" ]]; then
     printf 'build-native-host: checkpoint mode refuses nested package symlinks; see %s\n' \
       "$package_links" >&2
