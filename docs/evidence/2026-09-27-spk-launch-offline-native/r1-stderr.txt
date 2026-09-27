@@ -1,0 +1,1 @@
+spk-host: launch qualification refused: offline Mini Host image identity refused
