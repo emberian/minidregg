@@ -619,15 +619,31 @@ if [[ "$checkpoint_resume" == 1 ]]; then
       printf 'build-native-host: post-Lean checkpoint count is incomplete\n' >&2
       exit 65
     }
+    prior_verified_prefix=0
+    if [[ -f "$resume_complete_output/resume-validation.txt" ]]; then
+      [[ "$(grep -c '^verified_prefix_modules=' \
+          "$resume_complete_output/resume-validation.txt")" == 1 ]] || exit 65
+      prior_verified_prefix=$(sed -n 's/^verified_prefix_modules=//p' \
+        "$resume_complete_output/resume-validation.txt")
+      [[ "$prior_verified_prefix" =~ ^[0-9]+$ &&
+         "$prior_verified_prefix" -le "$total" ]] || exit 65
+      grep -qxF "failed-build resume check PASS $prior_verified_prefix compiled prefix modules" \
+        "$resume_complete_output/build.log" || {
+        printf 'build-native-host: post-Lean predecessor prefix lacks PASS record\n' >&2
+        exit 65
+      }
+    fi
     index=0
     while IFS= read -r module; do
       index=$((index + 1))
-      awk -v want="lean[$index/$total] $module PASS " \
-        'index($0, want) == 1 { found = 1 } END { exit !found }' \
-        "$resume_complete_output/build.log" || {
-        printf 'build-native-host: post-Lean module lacks PASS: %s\n' "$module" >&2
-        exit 65
-      }
+      if [[ "$index" -gt "$prior_verified_prefix" ]]; then
+        awk -v want="lean[$index/$total] $module PASS " \
+          'index($0, want) == 1 { found = 1 } END { exit !found }' \
+          "$resume_complete_output/build.log" || {
+          printf 'build-native-host: post-Lean module lacks PASS: %s\n' "$module" >&2
+          exit 65
+        }
+      fi
       stem=${module//./\/}
       checkpoint="$resume_complete_output/resume-checkpoints/$(printf '%04d' "$index")-${module//./_}.sha256"
       [[ -f "$checkpoint" ]] || exit 65
