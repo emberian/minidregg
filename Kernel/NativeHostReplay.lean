@@ -17,6 +17,7 @@ import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Kernel.ApplicationLifecycleBeginReceiver
+import Kernel.ApplicationShareIssueReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -73,6 +74,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
+  | applicationShareIssue {ingress : ApplicationShareIssueSource.Ingress}
+      (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
+        opened.pins opened.durable (logicalHeight config opened.durable) ingress) :
+      NativeAdmission config opened (ApplicationShareIssueReceiver.intent accepted)
   | selectedSourcePublication {ingress : FnSelectiveReleaseSourcePublication.Ingress}
       (accepted : FnSelectiveReleaseSourceReceiver.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -101,6 +106,13 @@ def derive (config : Config) (opened : Opened config) (bytes : List UInt8) :
     | .error _ => return .error "historical selected release admission refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted⟩
+  if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
+    match ← ApplicationShareIssueAdmission.admitNative config.profile config opened.pins
+        config.signature opened.durable height bytes with
+    | .error _ => return .error "historical application share issue admission refused"
+    | .ok ⟨_, accepted⟩ =>
+        return .ok ⟨ApplicationShareIssueReceiver.intent accepted,
+          .applicationShareIssue accepted⟩
   if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
     | .error _ => return .error "historical selected source publication admission refused"

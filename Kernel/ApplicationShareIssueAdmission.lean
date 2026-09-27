@@ -19,7 +19,7 @@ set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
 variable {profile : CanonicalRuntimeProfile.Profile F}
-variable {config : NativeHostGenesis.Config} {pins : FactoryPins}
+variable {config : NativeHost.Config} {pins : FactoryPins}
 variable {durable : ResourceBirthController.Concrete.Durable} {height : Height}
 
 /-- All components are minted by native verification on one `durable` and one
@@ -27,7 +27,7 @@ authority directory. The source descriptor equation rules out a bare birth of
 caller-chosen ticket-looking bytes. A separate receiver must install a distinct
 event and app read guard before this can authorize any dispatch. -/
 structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (pins : FactoryPins)
+    (config : NativeHost.Config) (pins : FactoryPins)
     (durable : ResourceBirthController.Concrete.Durable) (height : Height)
     (ingress : ApplicationShareIssueSource.Ingress) where
   private mk ::
@@ -37,8 +37,10 @@ structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
   birth : AcceptedBirth profile config.deployment pins durable height
   birthBytes : birth.ingress.bytes = ingress.birthIngress
   sourceDescriptor : birth.descriptor =
-    sourceReady.expectedDescriptor profile config height
-      birth.descriptor.fee.payer birth.descriptor.funding
+    { sourceReady.expectedDescriptor profile config
+        birth.prepared.authority.snapshot.authState height
+        birth.descriptor.fee.payer birth.descriptor.funding with
+      auxiliaryCreates := birth.prepared.grants.auxiliaryCreates }
   appPrepared : ApplicationShareIssueDelegation.Prepared
     ⟨birth.prepared.directory, birth.prepared.authority⟩ profile config.federation
       height ingress.spec birth.descriptor
@@ -57,7 +59,7 @@ private theorem descriptorBytes_injective : Function.Injective
     simpa only [CanonicalCellRegistry.sourceEncoding.codec.decode_encode] using decoded)
 
 def admitNative (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (pins : FactoryPins)
+    (config : NativeHost.Config) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig)
     (durable : ResourceBirthController.Concrete.Durable) (height : Height)
     (bytes : List UInt8) : IO (Except String
@@ -68,39 +70,35 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
   let .ok ready := prepare profile config ingress.spec | return .error refused
   let some decoded := ResourceBirthPolicyController.Concrete.decodeIngress
       ingress.birthIngress | return .error refused
-  let expected := ready.expectedDescriptor profile config height
-    decoded.descriptor.fee.payer decoded.descriptor.funding
-  if sourceBytesExact :
-      CanonicalCellRegistry.sourceEncoding.codec.encode decoded.descriptor =
-        CanonicalCellRegistry.sourceEncoding.codec.encode expected then
-    have sourceExact : decoded.descriptor = expected :=
-      descriptorBytes_injective sourceBytesExact
-    let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
-      profile config.deployment pins native durable height decoded
-      | return .error refused
-    if birthBytes : birth.ingress.bytes = ingress.birthIngress then
-      if sourceDescriptorBytes :
-          CanonicalCellRegistry.sourceEncoding.codec.encode birth.descriptor =
-            CanonicalCellRegistry.sourceEncoding.codec.encode
-              (ready.expectedDescriptor profile config height
-                birth.descriptor.fee.payer birth.descriptor.funding) then
-        have sourceDescriptor : birth.descriptor =
-            ready.expectedDescriptor profile config height
-              birth.descriptor.fee.payer birth.descriptor.funding :=
-          descriptorBytes_injective sourceDescriptorBytes
-        let context : ApplicationShareIssueDelegation.Context config.deployment durable :=
-          ⟨birth.prepared.directory, birth.prepared.authority⟩
-        let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
-          profile config.federation height ingress.spec birth.descriptor
-          | return .error refused
-        let .ok appChecked ← ApplicationShareIssueDelegation.check native appPrepared
-          ingress.appEnvelope | return .error refused
-        if appReadOnly : (ApplicationShareIssueDelegation.readGuard appPrepared).cellId ∉
-            birth.prepared.writes.map DurableDataIntent.DataWrite.cellId then
-          return .ok ⟨ingress,
-            ⟨ready, birth, birthBytes, sourceDescriptor, appPrepared,
-              appChecked, appReadOnly⟩⟩
-        else return .error refused
+  let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
+    profile config.deployment pins native durable height decoded
+    | return .error refused
+  if birthBytes : birth.ingress.bytes = ingress.birthIngress then
+    if sourceDescriptorBytes :
+        CanonicalCellRegistry.sourceEncoding.codec.encode birth.descriptor =
+          CanonicalCellRegistry.sourceEncoding.codec.encode
+            { ready.expectedDescriptor profile config
+                birth.prepared.authority.snapshot.authState height
+                birth.descriptor.fee.payer birth.descriptor.funding with
+              auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } then
+      have sourceDescriptor : birth.descriptor =
+          { ready.expectedDescriptor profile config
+              birth.prepared.authority.snapshot.authState height
+              birth.descriptor.fee.payer birth.descriptor.funding with
+            auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } :=
+        descriptorBytes_injective sourceDescriptorBytes
+      let context : ApplicationShareIssueDelegation.Context config.deployment durable :=
+        ⟨birth.prepared.directory, birth.prepared.authority⟩
+      let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
+        profile config.federation height ingress.spec birth.descriptor
+        | return .error refused
+      let .ok appChecked ← ApplicationShareIssueDelegation.check native appPrepared
+        ingress.appEnvelope | return .error refused
+      if appReadOnly : (ApplicationShareIssueDelegation.readGuard appPrepared).cellId ∉
+          birth.prepared.writes.map DurableDataIntent.DataWrite.cellId then
+        return .ok ⟨ingress,
+          ⟨ready, birth, birthBytes, sourceDescriptor, appPrepared,
+            appChecked, appReadOnly⟩⟩
       else return .error refused
     else return .error refused
   else return .error refused

@@ -8,7 +8,7 @@ never a dispatch share.
 -/
 import Kernel.ApplicationDispatchAuthority
 import Kernel.ApplicationGrain
-import Kernel.NativeHostGenesis
+import Kernel.NativeHostContext
 import Kernel.ResourceBirthController
 
 namespace Minidregg.Kernel.ApplicationShareIssueSource
@@ -153,7 +153,7 @@ structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
 
 def prepare {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (spec : Spec) :
+    (config : NativeHost.Config) (spec : Spec) :
     Except String (Ready config.deployment.domain spec
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value) := do
@@ -184,31 +184,47 @@ def Ready.births (ready : Ready domain spec operation) :
 theorem Ready.one_birth (ready : Ready domain spec operation) :
     ready.births.length = 1 := rfl
 
+private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
+    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
+    (height : Nat) (identifier : CapabilityId) (subject : SubjectId)
+    (target : Nat) (verbs : Finset (Verb kind)) : Capability kind where
+  id := identifier
+  root := identifier
+  parent := none
+  issuer := profile.template.issuer
+  holder := .subject subject
+  scope := ⟨{⟨target⟩}, verbs, profile.template.ownerBudget⟩
+  notBefore := height
+  notAfter := height + profile.template.lifetime
+  issuerEpoch := authority.issuerEpoch profile.template.issuer
+  policyId := ⟨target⟩
+  policyEpoch := authority.policyEpoch ⟨target⟩
+  ancestors := ∅
+  channels := ∅
+
 private def ownerGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
     (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.object, ⟨{ NativeHostGenesis.rootCapability profile config .object
+  ⟨.object, ⟨rootCapability .object profile authority height
       spec.ticketOwnerCapability spec.issuer spec.ticket.resource
-      (ResourceBirthPolicyController.Concrete.ownerVerbs .object) with
-      notBefore := height, notAfter := height + profile.template.lifetime }, []⟩⟩
+      (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
 
 private def controlGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
     (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.program, ⟨{ NativeHostGenesis.rootCapability profile config .program
+  ⟨.program, ⟨rootCapability .program profile authority height
       spec.ticketControlCapability spec.issuer spec.ticket.resource
-      {.installPolicy, .revokeCapability} with
-      notBefore := height, notAfter := height + profile.template.lifetime }, []⟩⟩
+      {.installPolicy, .revokeCapability}, []⟩⟩
 
 def Ready.grants {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat) : List AuthorityGrant :=
-  [ownerGrant profile config height spec, controlGrant profile config height spec]
+    (authority : AuthState) (height : Nat) : List AuthorityGrant :=
+  [ownerGrant profile authority height spec, controlGrant profile authority height spec]
 
 theorem Ready.two_grants {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat) :
-    (ready.grants profile config height).length = 2 := rfl
+    (authority : AuthState) (height : Nat) :
+    (ready.grants profile authority height).length = 2 := rfl
 
 /-- A v2 share ticket is immutable as content. Even if a factory caller names
 its own subject as the born resource owner, a later ordinary content edit
@@ -222,12 +238,13 @@ def ticketPolicy (owner : SubjectId) : Pred := .any [
 
 def Ready.policyRecord {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) : PolicyRecord :=
-  NativeHostGenesis.policy profile config spec.ticket.resource (ticketPolicy spec.issuer)
+    (config : NativeHost.Config) : PolicyRecord :=
+  ⟨⟨spec.ticket.resource⟩, 0, config.deployment.domain, profile.semantics,
+    none, ticketPolicy spec.issuer⟩
 
 def Ready.initialPolicies {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) : List InitialPolicy :=
+    (config : NativeHost.Config) : List InitialPolicy :=
   let record := ready.policyRecord profile config
   [⟨record.policyId, PolicyRecordCodec.digest record, PolicyRecordCodec.encode record⟩]
 
@@ -236,7 +253,7 @@ page and owner-locked policy. A later receiving step must additionally check
 the app delegation branch; this descriptor can never prove that by itself. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat)
+    (config : NativeHost.Config) (authority : AuthState) (height : Nat)
     (domainBound : domain = config.deployment.domain)
     (operationBound : operation =
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
@@ -249,7 +266,7 @@ def Ready.descriptor {F : Type} [Field F]
     { factory := ⟨config.deployment.factoryId⟩, creator := spec.issuer,
       transactionId := identity, nonce := spec.ticket.issueNonce,
       births := ready.births, auxiliaryCreates := [],
-      grants := ready.grants profile config height,
+      grants := ready.grants profile authority height,
       initialPolicies := ready.initialPolicies profile config,
       authorityNullifier := identity.value,
       funding := funding,
@@ -262,14 +279,14 @@ receiver compares this whole value with the decoded, natively admitted birth;
 the source builder alone is not issue authority. -/
 def Ready.expectedDescriptor {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config)
+    (config : NativeHost.Config)
     (ready : Ready config.deployment.domain spec
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
-    (height payer : Nat)
+    (authority : AuthState) (height payer : Nat)
     (funding : List InitialFunding := []) :
     Descriptor CanonicalCellRegistry.registry :=
-  ready.descriptor profile config height rfl rfl payer funding
+  ready.descriptor profile config authority height rfl rfl payer funding
 
 /-- The app delegation request commits to the exact complete source draft
 under an independent domain. Hash collision resistance is an external crypto

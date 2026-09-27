@@ -8,7 +8,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 5=authorized query, 20=owner-signed selected-public-release submit,
 21=selected-release lookup, 22=application lifecycle begin submit,
 23=application lifecycle begin lookup, 24=selected source publication submit,
-25=selected source publication lookup. Reply operation byte matches; failures use 255 plus a
+25=selected source publication lookup, 28=app share issue submit,
+29=app share issue lookup. Reply operation byte matches; failures use 255 plus a
 strict Outcome. The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
@@ -26,6 +27,7 @@ import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
 import Kernel.FnSelectiveReleaseReceiver
 import Kernel.ApplicationLifecycleBeginReceiver
+import Kernel.ApplicationShareIssueReceiver
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -470,6 +472,50 @@ def selectedSourcePublicationLookupSession (config : NativeHost.Config)
   | none => return .absent
   | some (.error _) =>
       return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+  | some (.ok receipt) =>
+      match NativeHost.historicalReceipt config opened.durable
+          receipt.transactionId receipt.eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some historical => return .confirmed .replayed historical
+
+/-- An issuer's signed app delegation and a factory ticket birth are admitted
+from one verified current image. Existing exact issue receipts recover from
+verified history without requiring the issuer still to hold that grant. -/
+def applicationShareIssueSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let result ← ApplicationShareIssueReceiver.receiveLoaded config opened.pins
+    config.signature config.storage.transport opened.durable
+    (NativeHost.logicalHeight config opened.durable) payload
+  let outcome ← match result with
+    | .historical receipt =>
+        sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
+    | .confirmed kind receipt =>
+        sessionConfirmed config state kind receipt.transactionId receipt.eventId
+    | .rejected _ => pure (.refused "application-share-issue".toUTF8.toList
+        "request refused".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+def applicationShareIssueLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let some ingress := ApplicationShareIssueSource.ingressCodec.decode payload
+    | return .refused "application-share-issue".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  let some birth := ResourceBirthPolicyController.Concrete.decodeIngress ingress.birthIngress
+    | return .refused "application-share-issue".toUTF8.toList
+        "noncanonical birth ingress".toUTF8.toList
+  match ApplicationShareIssueReceiver.replay opened.durable config.deployment.domain
+      ingress birth with
+  | none => return .absent
+  | some (.error _) =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
       match NativeHost.historicalReceipt config opened.durable
           receipt.transactionId receipt.eventId with
@@ -3116,6 +3162,14 @@ def run (arguments : List String) : IO UInt32 := do
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
                             | .error reason =>
                                 return ((255 : UInt8), failure "provider-metering" reason)
+                        | 28 =>
+                            let outcome ← applicationShareIssueSubmitSession
+                              pinnedConfig state payload
+                            return ((28 : UInt8), outcomeCodec.encode outcome)
+                        | 29 =>
+                            let outcome ← applicationShareIssueLookupSession
+                              pinnedConfig state payload
+                            return ((29 : UInt8), outcomeCodec.encode outcome)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
@@ -3209,6 +3263,22 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedSourcePublicationLookupSession pinnedConfig state ingress))
             pure 0
+      | "application-share-issue-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationShareIssueSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "application-share-issue-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationShareIssueLookupSession pinnedConfig state ingress))
+            pure 0
       | "selected-release-source-plan", [packetPath, capabilityText, specPath,
           headerPath, rootPath] =>
           withPinnedSignature config fun pinnedConfig => do
@@ -3227,6 +3297,11 @@ def run (arguments : List String) : IO UInt32 := do
           let signature ← readBoundedBytes signaturePath 64
           let ingress ← IO.ofExcept (FnSelectiveReleaseSourceAuthoring.assemble spec header signature)
           writeBytes output ingress
+          pure 0
+      | "selected-release-source-check", [ingressPath, articlePath] =>
+          let ingress ← readBoundedBytes ingressPath maxFrame
+          let article ← readBoundedBytes articlePath FnEvidenceCodec.maxSourceBytes
+          IO.ofExcept (FnSelectiveReleaseSourceAuthoring.checkIngressArticle ingress article)
           pure 0
       | "selected-release-check-preimage", [input, output] =>
           let preimage ← readBoundedBytes input (FnEvidenceCodec.maxCarrierBytes + 4096)
