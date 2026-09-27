@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod prepare_refusal;
+#[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
 mod transport;
@@ -334,6 +336,10 @@ fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<
     };
     let reply = session_invoke(socket, config, operation, &payload)?;
     if reply[0] == 255 {
+        if command == "prepare" {
+            let destination = Path::new(arguments[2]);
+            prepare_refusal::retain(destination, &payload, config, &reply)?;
+        }
         return Err(format!(
             "host refused {command}; encoded refusal: {}",
             hex(&reply[1..])
