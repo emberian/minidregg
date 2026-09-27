@@ -660,6 +660,7 @@ fn serve_client(
             ProviderOutcome::NotSent {
                 reason: "send boundary not acknowledged".into(),
             },
+            None,
         );
         error_reply(stream, 503, "provider send boundary was not acknowledged");
         return;
@@ -674,7 +675,13 @@ fn serve_client(
         } => Some((*status, content_type.clone(), exact_body.clone())),
         _ => None,
     };
-    if !report_outcome(commands, attempt_id, outcome) {
+    let wait_for_live_lease = matches!(outcome, ProviderOutcome::Received { .. });
+    if !report_outcome(
+        commands,
+        attempt_id,
+        outcome,
+        wait_for_live_lease.then_some((&control, &lease)),
+    ) {
         error_reply(
             stream,
             503,
@@ -722,6 +729,7 @@ fn report_outcome(
     commands: &SyncSender<ProviderCommand>,
     attempt_id: u64,
     outcome: ProviderOutcome,
+    live_lease: Option<(&GatewayControl, &LeaseId)>,
 ) -> bool {
     let (tx, rx) = mpsc::channel();
     let mut command = ProviderCommand::Outcome {
@@ -730,12 +738,20 @@ fn report_outcome(
         reply: tx,
     };
     let started = Instant::now();
+    let waiting = || match live_lease {
+        // A complete response must wait for the source-owned quote and
+        // durable Outcome ack, potentially longer than the old fixed 30s.
+        // The active worker deadline (at most 1800s after activation) bounds
+        // this wait and hard revoke interrupts it without waiting for Mini.
+        Some((control, lease)) => control.still_active(lease),
+        None => started.elapsed() < Duration::from_secs(30),
+    };
     loop {
         match commands.try_send(command) {
             Ok(()) => break,
             Err(TrySendError::Full(remaining)) => {
                 command = remaining;
-                if started.elapsed() >= Duration::from_secs(30) {
+                if !waiting() {
                     return false;
                 }
                 thread::sleep(Duration::from_millis(20));
@@ -743,8 +759,16 @@ fn report_outcome(
             Err(TrySendError::Disconnected(_)) => return false,
         }
     }
-    rx.recv_timeout(Duration::from_secs(30))
-        .is_ok_and(|result| result.is_ok())
+    loop {
+        if !waiting() {
+            return false;
+        }
+        match rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(result) => return waiting() && result.is_ok(),
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+        }
+    }
 }
 
 /// A response is not considered delivered merely because its upstream bytes
@@ -815,7 +839,10 @@ fn read_bounded(path: &Path, bound: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
+/// Re-derive metering metadata from the exact retained header spool after
+/// journal recovery. The controller must compare this result with its durable
+/// Received fields before presenting bytes to the source-owned quote route.
+pub(crate) fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "provider headers are not UTF-8")?;
     let normalized = text.replace("\r\n", "\n");
     if normalized.contains('\r') || !normalized.ends_with("\n\n") {
@@ -1843,6 +1870,86 @@ mod tests {
             upstream.accept().unwrap_err().kind(),
             io::ErrorKind::WouldBlock
         );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hard_revoke_during_slow_outcome_ack_never_delivers_response() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread = fake_upstream(
+            upstream.try_clone().unwrap(),
+            deliveries.clone(),
+            false,
+            br#"{"id":"local-provider"}"#.to_vec(),
+        );
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let controller = thread::spawn(move || {
+            let ProviderCommand::Reserve { request, reply } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("reserve absent");
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 41,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            let ProviderCommand::BeforeSend { reply, .. } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("send boundary absent");
+            };
+            reply.send(Ok(())).unwrap();
+            let ProviderCommand::Outcome { outcome, reply, .. } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("received outcome absent");
+            };
+            assert!(matches!(outcome, ProviderOutcome::Received { .. }));
+            seen_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let _ = reply.send(Ok(()));
+            assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        });
+        let address = gateway.local_addr();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let body = br#"{"model":"operator-model","messages":[]}"#;
+            write!(stream, "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+            let mut received = Vec::new();
+            let _ = stream.read_to_end(&mut received);
+            received
+        });
+        seen_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let stopped_at = Instant::now();
+        gateway.control().revoke();
+        release_tx.send(()).unwrap();
+        let received = client.join().unwrap();
+        assert!(stopped_at.elapsed() < Duration::from_secs(1));
+        assert!(!received
+            .windows(b"local-provider".len())
+            .any(|window| window == b"local-provider"));
+        controller.join().unwrap();
+        upstream_thread.join().unwrap();
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
         drop(gateway);
         fs::remove_dir_all(dir).unwrap();
     }

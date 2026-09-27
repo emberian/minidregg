@@ -84,6 +84,10 @@ struct ProviderTask {
     parent_observe_capability: String,
     reserve: String,
     charge: String,
+    /// Opt into source-owned, reported-usage settlement. The legacy fixed
+    /// charge remains available only when this is absent or false.
+    #[serde(default)]
+    metering: bool,
     model: String,
     upstream_url: String,
     provider_key_file: PathBuf,
@@ -154,6 +158,8 @@ struct Journal {
     provider_hold: Option<HeldCharge>,
     #[serde(default)]
     provider_attempt: Option<ProviderAttempt>,
+    #[serde(default)]
+    provider_settlement: Option<ProviderSettlement>,
     /// Bounded exact-body replay for completed responses in the current ACP
     /// prompt. SDK retries receive these bytes without another upstream send.
     #[serde(default)]
@@ -365,6 +371,126 @@ struct ProviderAttempt {
     response_status: Option<u16>,
     #[serde(default)]
     response_content_type: Option<String>,
+    #[serde(default)]
+    response_headers_path: Option<PathBuf>,
+    #[serde(default)]
+    response_headers_bytes: Option<usize>,
+    #[serde(default)]
+    response_headers_sha256: Option<String>,
+    #[serde(default)]
+    metering_pin: Option<ProviderMeteringPin>,
+    #[serde(default)]
+    meter_report_path: Option<PathBuf>,
+    #[serde(default)]
+    meter_report_sha256: Option<String>,
+    #[serde(default)]
+    metered_charge: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderSettlement {
+    provider_attempt_id: u64,
+    operation_id: u64,
+    operation: String,
+    attempt: PathBuf,
+    charge: String,
+    source_sha256: String,
+    call_sha256: String,
+    outcome_path: PathBuf,
+    outcome_sha256: String,
+    receipt: ReserveAnchor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MeteredAuditPath {
+    ProvenNoSend,
+    CompleteResponse,
+}
+
+fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<MeteredAuditPath> {
+    if outcome.is_some_and(|kind| kind.starts_with("not-sent:"))
+        || (!send_started && outcome.is_none())
+    {
+        Ok(MeteredAuditPath::ProvenNoSend)
+    } else if send_started && outcome.is_some_and(|kind| kind.starts_with("received:")) {
+        Ok(MeteredAuditPath::CompleteResponse)
+    } else {
+        Err("metered provider audit has no complete retained response or proven no-send".into())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderMeteringPin {
+    provider_resource_id: String,
+    model: String,
+    tariff_version: String,
+    tariff_digest: String,
+}
+
+fn provider_quote_charge(
+    report: &Value,
+    pin: &ProviderMeteringPin,
+    reserve: &str,
+    request_bytes: usize,
+    response_bytes: usize,
+) -> Result<String> {
+    if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v1")
+        || report.get("status").and_then(Value::as_str) != Some("quoted-reported-usage")
+        || report.get("model").and_then(Value::as_str) != Some(pin.model.as_str())
+        || report.get("providerResourceId").and_then(Value::as_str)
+            != Some(pin.provider_resource_id.as_str())
+        || report.get("tariffVersion").and_then(Value::as_str) != Some(pin.tariff_version.as_str())
+        || report.get("tariffDigest").and_then(Value::as_str) != Some(pin.tariff_digest.as_str())
+        || report.get("reserve").and_then(Value::as_str) != Some(reserve)
+        || report.get("requestBytes").and_then(Value::as_str)
+            != Some(request_bytes.to_string().as_str())
+        || report.get("responseBytes").and_then(Value::as_str)
+            != Some(response_bytes.to_string().as_str())
+        || report.get("claim").and_then(Value::as_str)
+            != Some("provider-reported usage under operator tariff; not invoice-verified")
+    {
+        return Err(
+            "provider quote differs from pinned task, tariff, hold, or exact byte lengths".into(),
+        );
+    }
+    let charge = report
+        .get("charge")
+        .and_then(Value::as_str)
+        .ok_or("provider quote has no charge")?;
+    if charge.len() > 20 {
+        return Err("provider quote charge exceeds decimal width".into());
+    }
+    decimal(charge, "provider quote charge")?;
+    if charge
+        .parse::<u64>()
+        .map_err(|_| "provider quote charge exceeds u64")?
+        > reserve
+            .parse::<u64>()
+            .map_err(|_| "provider reserve exceeds u64")?
+        || report.pointer("/operation/type").and_then(Value::as_str) != Some("settle")
+        || report.pointer("/operation/charge").and_then(Value::as_str) != Some(charge)
+    {
+        return Err("provider quote settlement exceeds the signed reserve".into());
+    }
+    for name in [
+        "requestDigest",
+        "responseDigest",
+        "promptTokens",
+        "completionTokens",
+        "totalTokens",
+    ] {
+        let value = report
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("provider quote lacks {name}"))?;
+        if value.len() > 80 {
+            return Err(format!("provider quote {name} exceeds decimal bound"));
+        }
+        decimal(value, name)?;
+    }
+    Ok(charge.to_owned())
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -380,6 +506,18 @@ struct ProviderReplay {
     response_sha256: String,
     status: u16,
     content_type: String,
+    #[serde(default)]
+    response_headers_path: Option<PathBuf>,
+    #[serde(default)]
+    response_headers_bytes: Option<usize>,
+    #[serde(default)]
+    response_headers_sha256: Option<String>,
+    #[serde(default)]
+    meter_report_path: Option<PathBuf>,
+    #[serde(default)]
+    meter_report_sha256: Option<String>,
+    #[serde(default)]
+    metered_charge: Option<String>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -452,6 +590,7 @@ impl Journal {
             tool_hold: None,
             provider_hold: None,
             provider_attempt: None,
+            provider_settlement: None,
             provider_replays: Vec::new(),
             publication_receipts: Vec::new(),
             reconciliation_log: Vec::new(),
@@ -499,6 +638,86 @@ fn sha256_file(path: &Path) -> Result<String> {
         return Err("file digest is not SHA-256 hex".into());
     }
     Ok(digest.to_ascii_lowercase())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> Result<String> {
+    let mut child = Command::new("/usr/bin/openssl")
+        .args(["dgst", "-sha256"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("byte digest: {e}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or("byte digest stdin absent")?
+        .write_all(bytes)
+        .map_err(|e| format!("byte digest input: {e}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("byte digest result: {e}"))?;
+    if !output.status.success() {
+        return Err("byte digest refused".into());
+    }
+    let line = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+    let digest = line.split_whitespace().last().ok_or("byte digest absent")?;
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("byte digest is not SHA-256 hex".into());
+    }
+    Ok(digest.to_ascii_lowercase())
+}
+
+fn retained_exact(
+    path: &Path,
+    expected_len: usize,
+    digest: &str,
+    maximum: usize,
+) -> Result<Vec<u8>> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("retained {}: {e}", path.display()))?;
+    if !metadata.file_type().is_file()
+        || metadata.len() != expected_len as u64
+        || expected_len > maximum
+    {
+        return Err(format!(
+            "retained {} has the wrong type or length",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    File::open(path)
+        .map_err(|e| format!("retained {}: {e}", path.display()))?
+        .take((maximum + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("retained {}: {e}", path.display()))?;
+    if bytes.len() != expected_len || sha256_bytes(&bytes)? != digest {
+        return Err(format!(
+            "retained {} differs from its journaled bytes",
+            path.display()
+        ));
+    }
+    Ok(bytes)
+}
+
+fn bounded_regular_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("bounded {}: {e}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum as u64 {
+        return Err(format!(
+            "bounded {} has the wrong type or length",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    File::open(path)
+        .map_err(|e| format!("bounded {}: {e}", path.display()))?
+        .take((maximum + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("bounded {}: {e}", path.display()))?;
+    if bytes.len() > maximum {
+        return Err(format!("bounded {} changed during read", path.display()));
+    }
+    Ok(bytes)
 }
 
 /// A socket prepare refusal is definitive only when the custody client
@@ -701,6 +920,29 @@ fn provider_reserve_coordinates(state: &Value, hold: &HeldCharge) -> bool {
         && state.pointer("/grain/reserved").and_then(Value::as_str) == Some(hold.reserve.as_str())
         && state.pointer("/grain/generation").and_then(Value::as_str)
             == Some(hold.before_generation.as_str())
+}
+
+fn provider_audit_coordinates(state: &Value, hold: &HeldCharge) -> bool {
+    if provider_reserve_coordinates(state, hold) {
+        return true;
+    }
+    if !hold.reserve_confirmed
+        || !matches!(
+            state.pointer("/grain/status").and_then(Value::as_str),
+            Some("5" | "7")
+        )
+        || state.pointer("/grain/reserved").and_then(Value::as_str) != Some(hold.reserve.as_str())
+    {
+        return false;
+    }
+    hold.before_generation
+        .parse::<u64>()
+        .ok()
+        .and_then(|generation| generation.checked_add(1))
+        .is_some_and(|generation| {
+            state.pointer("/grain/generation").and_then(Value::as_str)
+                == Some(generation.to_string().as_str())
+        })
 }
 
 fn hermes_workspace_home(cwd: &Path) -> Result<(PathBuf, PathBuf)> {
@@ -949,6 +1191,12 @@ fn validate(c: &Config) -> Result<()> {
             .is_none_or(|(reserve, charge)| charge > reserve)
         {
             return Err("providerTask charge exceeds reserve".into());
+        }
+        if p.metering && p.charge != "0" {
+            return Err(
+                "metered providerTask requires charge 0; only the Lean quote may settle usage"
+                    .into(),
+            );
         }
         let bind = p
             .gateway_bind
@@ -1329,6 +1577,128 @@ impl Runtime {
             image_boundary: field("imageBoundary")?,
             reported: false,
         }))
+    }
+    fn provider_settlement_record(
+        &self,
+        pending: &Pending,
+        outcome_path: &Path,
+    ) -> Result<ProviderSettlement> {
+        let task = self
+            .config
+            .provider_task
+            .as_ref()
+            .ok_or("providerTask absent")?;
+        let provider_attempt = self
+            .journal
+            .provider_attempt
+            .as_ref()
+            .ok_or("provider settlement has no retained request")?;
+        if !matches!(
+            pending.operation.as_str(),
+            "provider settle" | "provider audit settle"
+        ) || pending.attempt
+            != self
+                .config
+                .state_dir
+                .join(format!("attempt-{:016}", pending.operation_id))
+        {
+            return Err("provider settlement has no exact pending operation".into());
+        }
+        let source_path = self
+            .config
+            .state_dir
+            .join(format!("source-{:016}.json", pending.operation_id));
+        let source_bytes = bounded_regular_file(&source_path, 131_072)?;
+        let source: Value = serde_json::from_slice(&source_bytes)
+            .map_err(|e| format!("provider settlement source: {e}"))?;
+        let charge = source
+            .pointer("/grain/operation/charge")
+            .and_then(Value::as_str)
+            .ok_or("provider settlement charge absent")?;
+        decimal(charge, "provider settlement charge")?;
+        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
+            || source.pointer("/grain/subject").and_then(Value::as_str)
+                != Some(task.subject.as_str())
+            || source
+                .pointer("/grain/operation/type")
+                .and_then(Value::as_str)
+                != Some("settle")
+            || source
+                .pointer("/grain/context/operationId")
+                .and_then(Value::as_str)
+                != Some(pending.operation_id.to_string().as_str())
+        {
+            return Err("provider settlement source differs from pinned operation".into());
+        }
+        let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
+        let outcome: Value = serde_json::from_slice(&outcome_bytes)
+            .map_err(|e| format!("provider settlement outcome: {e}"))?;
+        if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
+            || !matches!(
+                outcome.get("confirmation").and_then(Value::as_str),
+                Some("installed" | "replayed")
+            )
+        {
+            return Err("provider settlement has no confirmed native outcome".into());
+        }
+        let call = pending.attempt.join("call.bin");
+        let outcome_binary = outcome_path.with_extension("bin");
+        Ok(ProviderSettlement {
+            provider_attempt_id: provider_attempt.id,
+            operation_id: pending.operation_id,
+            operation: pending.operation.clone(),
+            attempt: pending.attempt.clone(),
+            charge: charge.to_owned(),
+            source_sha256: sha256_bytes(&source_bytes)?,
+            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+            outcome_path: outcome_path.to_owned(),
+            outcome_sha256: sha256_bytes(&bounded_regular_file(&outcome_binary, 4_194_304)?)?,
+            receipt: ReserveAnchor::from_confirmed(&outcome)?,
+        })
+    }
+    fn verified_provider_settlement(
+        &self,
+        provider_attempt: &ProviderAttempt,
+    ) -> Result<ProviderSettlement> {
+        let settled = self
+            .journal
+            .provider_settlement
+            .as_ref()
+            .ok_or("provider has no retained exact settlement receipt")?;
+        if settled.provider_attempt_id != provider_attempt.id {
+            return Err("provider settlement names another request".into());
+        }
+        let pending = Pending {
+            operation_id: settled.operation_id,
+            operation: settled.operation.clone(),
+            attempt: settled.attempt.clone(),
+            uncertain: false,
+            publication: None,
+        };
+        let actual = self.provider_settlement_record(&pending, &settled.outcome_path)?;
+        if actual != *settled {
+            return Err("provider settlement differs from its retained native evidence".into());
+        }
+        let task = self
+            .config
+            .provider_task
+            .as_ref()
+            .ok_or("providerTask absent")?;
+        if task.metering {
+            match metered_audit_path(
+                provider_attempt.send_started,
+                provider_attempt.outcome.as_deref(),
+            )? {
+                MeteredAuditPath::ProvenNoSend if settled.charge == "0" => {}
+                MeteredAuditPath::CompleteResponse
+                    if self.validated_metered_charge_for_reserve(
+                        provider_attempt,
+                        &task.reserve,
+                    )? == settled.charge => {}
+                _ => return Err("provider settlement differs from retained Lean quote".into()),
+            }
+        }
+        Ok(actual)
     }
     fn verified_publication_report(&self, session_id: &str) -> Result<(String, Vec<u64>)> {
         let pending: Vec<_> = self
@@ -2075,6 +2445,18 @@ impl Runtime {
                         &attempt.join("outcome.json"),
                     )?;
                 }
+                if slot == AuthoritySlot::Provider
+                    && op.get("type").and_then(Value::as_str) == Some("settle")
+                {
+                    let pending = self
+                        .journal
+                        .pending_for(slot)
+                        .as_ref()
+                        .ok_or("provider settlement pending disappeared")?;
+                    self.journal.provider_settlement = Some(
+                        self.provider_settlement_record(pending, &attempt.join("outcome.json"))?,
+                    );
+                }
                 *self.journal.pending_for_mut(slot) = None;
                 if op.get("type").and_then(Value::as_str) == Some("settle") {
                     *self.journal.hold_for_mut(slot) = None;
@@ -2193,7 +2575,43 @@ impl Runtime {
                 outcome,
                 reply,
             } => {
-                let recorded = self.provider_record_outcome(attempt_id, outcome);
+                let recorded =
+                    self.provider_record_outcome(attempt_id, outcome)
+                        .and_then(|charge| {
+                            if charge == Some("configured")
+                                && self
+                                    .config
+                                    .provider_task
+                                    .as_ref()
+                                    .is_some_and(|task| task.metering)
+                            {
+                                self.provider_meter_quote(attempt_id)?;
+                            }
+                            Ok(charge)
+                        });
+                if recorded.is_err()
+                    && self
+                        .config
+                        .provider_task
+                        .as_ref()
+                        .is_some_and(|task| task.metering)
+                    && self
+                        .journal
+                        .provider_attempt
+                        .as_ref()
+                        .is_some_and(|attempt| {
+                            attempt.id == attempt_id
+                                && attempt.outcome.as_deref().is_some_and(|kind| {
+                                    kind.starts_with("received:") || kind.starts_with("uncertain:")
+                                })
+                        })
+                {
+                    let note = format!("metered provider request {attempt_id} retained a response without a valid Lean quote; held allowance needs reconciliation");
+                    if !self.journal.unresolved_external.contains(&note) {
+                        self.journal.unresolved_external.push(note);
+                        let _ = self.save();
+                    }
+                }
                 let not_sent = recorded.as_ref().ok().copied().flatten() == Some("0");
                 let acknowledged = reply.send(recorded.map(|_| ())).is_ok();
                 // A Received response is not a delivered response. Keep its
@@ -2201,7 +2619,7 @@ impl Runtime {
                 // an SDK retry cannot be allowed to reserve again here.
                 if not_sent && acknowledged {
                     if let Err(error) = self.provider_settle("0") {
-                        eprintln!("provider fixed-charge settlement unresolved: {error}");
+                        eprintln!("provider settlement unresolved: {error}");
                     }
                 }
             }
@@ -2211,11 +2629,11 @@ impl Runtime {
                 reply,
             } => {
                 let result = self.provider_delivery(attempt_id, local_write_success);
-                let settle = result.as_ref().is_ok_and(|delivered| *delivered);
+                let settle = result.as_ref().ok().and_then(|charge| charge.clone());
                 let _ = reply.send(result.map(|_| ()));
-                if settle {
-                    if let Err(error) = self.provider_settle("configured") {
-                        eprintln!("provider fixed-charge settlement unresolved: {error}");
+                if let Some(charge) = settle {
+                    if let Err(error) = self.provider_settle(&charge) {
+                        eprintln!("provider settlement unresolved: {error}");
                     }
                 }
             }
@@ -2271,6 +2689,7 @@ impl Runtime {
         {
             return Err("provider request differs from pinned model or size".into());
         }
+        let metering_pin = self.provider_metering_pin(&task)?;
         if self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
@@ -2317,6 +2736,7 @@ impl Runtime {
             .join(format!("provider-{id:016}.controller-request"));
         write_new(&request_path, &request.exact_body)?;
         let request_sha256 = sha256_file(&request_path)?;
+        self.journal.provider_settlement = None;
         self.journal.provider_attempt = Some(ProviderAttempt {
             id,
             prompt_operation_id: request.lease.prompt_operation_id,
@@ -2332,6 +2752,13 @@ impl Runtime {
             outcome: None,
             response_status: None,
             response_content_type: None,
+            response_headers_path: None,
+            response_headers_bytes: None,
+            response_headers_sha256: None,
+            metering_pin,
+            meter_report_path: None,
+            meter_report_sha256: None,
+            metered_charge: None,
         });
         self.save()?;
         let authority = self.provider()?;
@@ -2378,6 +2805,57 @@ impl Runtime {
             exact_body: request.exact_body,
         })
     }
+    fn provider_metering_pin(&self, task: &ProviderTask) -> Result<Option<ProviderMeteringPin>> {
+        if !task.metering {
+            return Ok(None);
+        }
+        let output = Command::new(&self.config.mini)
+            .arg("profile")
+            .arg("--host")
+            .arg(&self.config.host)
+            .arg("--config")
+            .arg(&self.config.host_config)
+            .output()
+            .map_err(|e| format!("provider metering profile: {e}"))?;
+        if !output.status.success() || output.stdout.len() > 16_384 {
+            return Err("pinned Host provider metering profile unavailable".into());
+        }
+        let profile: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("invalid provider metering profile: {e}"))?;
+        let metering = profile
+            .get("providerMetering")
+            .ok_or("pinned Host profile has no provider metering tariff")?;
+        let field = |name: &str| -> Result<String> {
+            let value = metering
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("provider metering profile lacks {name}"))?;
+            if value.len() > 80 {
+                return Err(format!("provider metering {name} exceeds decimal bound"));
+            }
+            decimal(value, name)?;
+            Ok(value.to_owned())
+        };
+        let pin = ProviderMeteringPin {
+            provider_resource_id: field("providerResourceId")?,
+            model: metering
+                .get("model")
+                .and_then(Value::as_str)
+                .ok_or("provider metering model absent")?
+                .to_owned(),
+            tariff_version: field("tariffVersion")?,
+            tariff_digest: field("tariffDigest")?,
+        };
+        if pin.provider_resource_id != task.task
+            || pin.model != task.model
+            || pin.tariff_version == "0"
+        {
+            return Err(
+                "provider task differs from the operator-pinned Host metering tariff".into(),
+            );
+        }
+        Ok(Some(pin))
+    }
     fn provider_replay(
         replays: &[ProviderReplay],
         request: &provider::ProviderRequest,
@@ -2389,22 +2867,62 @@ impl Runtime {
             {
                 continue;
             }
-            let exact_request = fs::read(&prior.request_path)
-                .map_err(|e| format!("retained provider replay request absent: {e}"))?;
-            if exact_request.len() != prior.request_bytes
-                || sha256_file(&prior.request_path)? != prior.request_sha256
-            {
-                return Err("provider replay request differs from durable exact bytes".into());
-            }
+            let exact_request = retained_exact(
+                &prior.request_path,
+                prior.request_bytes,
+                &prior.request_sha256,
+                1_048_576,
+            )?;
             if exact_request != request.exact_body {
                 continue;
             }
-            let exact_response = fs::read(&prior.response_path)
-                .map_err(|e| format!("retained provider replay response absent: {e}"))?;
-            if exact_response.len() != prior.response_bytes
-                || sha256_file(&prior.response_path)? != prior.response_sha256
+            let exact_response = retained_exact(
+                &prior.response_path,
+                prior.response_bytes,
+                &prior.response_sha256,
+                8_388_608,
+            )?;
+            if let (Some(path), Some(bytes), Some(digest)) = (
+                &prior.response_headers_path,
+                prior.response_headers_bytes,
+                &prior.response_headers_sha256,
+            ) {
+                let headers = retained_exact(path, bytes, digest, 131_072)?;
+                if provider::response_headers(&headers)
+                    .map_err(|e| format!("retained provider replay headers invalid: {e}"))?
+                    != (prior.status, prior.content_type.clone())
+                {
+                    return Err("provider replay headers differ from durable response".into());
+                }
+            } else if prior.response_headers_path.is_some()
+                || prior.response_headers_bytes.is_some()
+                || prior.response_headers_sha256.is_some()
             {
-                return Err("provider replay response differs from durable exact bytes".into());
+                return Err("provider replay headers have incomplete custody".into());
+            }
+            if let (Some(path), Some(digest), Some(charge)) = (
+                &prior.meter_report_path,
+                &prior.meter_report_sha256,
+                &prior.metered_charge,
+            ) {
+                let length = fs::symlink_metadata(path)
+                    .map_err(|e| format!("retained provider quote: {e}"))?
+                    .len() as usize;
+                let bytes = retained_exact(path, length, digest, 16_384)?;
+                let report: Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("retained provider quote: {e}"))?;
+                if report.get("charge").and_then(Value::as_str) != Some(charge.as_str())
+                    || report.pointer("/operation/type").and_then(Value::as_str) != Some("settle")
+                    || report.pointer("/operation/charge").and_then(Value::as_str)
+                        != Some(charge.as_str())
+                {
+                    return Err("provider replay quote differs from retained charge".into());
+                }
+            } else if prior.meter_report_path.is_some()
+                || prior.meter_report_sha256.is_some()
+                || prior.metered_charge.is_some()
+            {
+                return Err("provider replay quote has incomplete custody".into());
             }
             return Ok(Some(provider::ForwardPermit::Replay {
                 lease: request.lease.clone(),
@@ -2603,47 +3121,67 @@ impl Runtime {
         if attempt.id != attempt_id || attempt.outcome.is_some() {
             return Err("provider outcome differs from durable attempt".into());
         }
-        let (kind, bytes, charge, response_status, response_content_type) = match outcome {
-            provider::ProviderOutcome::Received {
-                status,
-                content_type,
-                exact_body,
-            } => {
-                if !attempt.send_started {
-                    return Err("provider response without durable send boundary".into());
-                }
-                (
-                    format!("received:{status}:{content_type}"),
+        let (kind, bytes, headers, charge, response_status, response_content_type, headers_valid) =
+            match outcome {
+                provider::ProviderOutcome::Received {
+                    status,
+                    content_type,
+                    exact_headers,
                     exact_body,
-                    Some("configured"),
-                    Some(status),
-                    Some(content_type),
-                )
-            }
-            provider::ProviderOutcome::NotSent { reason } => (
-                format!("not-sent:{reason}"),
-                Vec::new(),
-                Some("0"),
-                None,
-                None,
-            ),
-            provider::ProviderOutcome::Uncertain {
-                partial_body,
-                reason,
-            } => (
-                format!("uncertain:{reason}"),
-                partial_body,
-                None,
-                None,
-                None,
-            ),
-        };
+                } => {
+                    if !attempt.send_started {
+                        return Err("provider response without durable send boundary".into());
+                    }
+                    let headers_valid = provider::response_headers(&exact_headers)
+                        .is_ok_and(|parsed| parsed == (status, content_type.clone()));
+                    (
+                        format!("received:{status}:{content_type}"),
+                        exact_body,
+                        Some(exact_headers),
+                        Some("configured"),
+                        Some(status),
+                        Some(content_type),
+                        headers_valid,
+                    )
+                }
+                provider::ProviderOutcome::NotSent { reason } => (
+                    format!("not-sent:{reason}"),
+                    Vec::new(),
+                    None,
+                    Some("0"),
+                    None,
+                    None,
+                    true,
+                ),
+                provider::ProviderOutcome::Uncertain {
+                    partial_body,
+                    reason,
+                } => (
+                    format!("uncertain:{reason}"),
+                    partial_body,
+                    None,
+                    None,
+                    None,
+                    None,
+                    true,
+                ),
+            };
         let path = self
             .config
             .state_dir
             .join(format!("provider-{attempt_id:016}.controller-outcome"));
         write_new(&path, &bytes)?;
         let digest = sha256_file(&path)?;
+        let retained_headers = if let Some(headers) = headers {
+            let path = self.config.state_dir.join(format!(
+                "provider-{attempt_id:016}.controller-response-headers"
+            ));
+            write_new(&path, &headers)?;
+            let digest = sha256_file(&path)?;
+            Some((path, headers.len(), digest))
+        } else {
+            None
+        };
         let attempt = self
             .journal
             .provider_attempt
@@ -2655,15 +3193,332 @@ impl Runtime {
         attempt.outcome = Some(kind.clone());
         attempt.response_status = response_status;
         attempt.response_content_type = response_content_type;
+        if let Some((path, len, digest)) = retained_headers {
+            attempt.response_headers_path = Some(path);
+            attempt.response_headers_bytes = Some(len);
+            attempt.response_headers_sha256 = Some(digest);
+        }
         if charge.is_none() {
             self.journal.unresolved_external.push(format!(
                 "provider request {attempt_id} may have reached upstream; exact response uncertain"
             ));
         }
+        if !headers_valid {
+            attempt.outcome = Some("uncertain:raw-header-metadata-mismatch".into());
+            self.journal.unresolved_external.push(format!(
+                "provider request {attempt_id} returned raw headers inconsistent with reported metadata"
+            ));
+            self.save()?;
+            return Err("provider response metadata differs from retained raw headers".into());
+        }
         self.save()?;
         Ok(charge)
     }
-    fn provider_delivery(&mut self, attempt_id: u64, local_write_success: bool) -> Result<bool> {
+    fn provider_meter_quote(&mut self, attempt_id: u64) -> Result<()> {
+        self.provider_meter_quote_inner(attempt_id, true)
+    }
+    fn provider_meter_quote_inner(
+        &mut self,
+        attempt_id: u64,
+        require_live_lease: bool,
+    ) -> Result<()> {
+        let task = self
+            .config
+            .provider_task
+            .clone()
+            .ok_or("providerTask absent")?;
+        if !task.metering {
+            return Err("provider metering is not enabled".into());
+        }
+        let attempt = self
+            .journal
+            .provider_attempt
+            .clone()
+            .ok_or("provider attempt absent")?;
+        let lease = provider::LeaseId {
+            prompt_operation_id: attempt.prompt_operation_id,
+            parent_generation: attempt.parent_generation.clone(),
+        };
+        if require_live_lease {
+            self.provider_lease_current(&lease)?;
+        }
+        let pin = attempt
+            .metering_pin
+            .as_ref()
+            .ok_or("provider tariff pin absent")?;
+        let hold = self
+            .journal
+            .provider_hold
+            .clone()
+            .ok_or("provider signed hold absent")?;
+        if attempt.id != attempt_id
+            || !attempt.send_started
+            || !attempt
+                .outcome
+                .as_deref()
+                .is_some_and(|value| value.starts_with("received:"))
+            || attempt.meter_report_path.is_some()
+            || !hold.reserve_confirmed
+            || hold.reserve != task.reserve
+            || pin.provider_resource_id != task.task
+            || pin.model != task.model
+        {
+            return Err("provider metering lacks the exact held request and response".into());
+        }
+        let provider_authority = self.provider()?;
+        let signed_provider = self.query_as(&provider_authority)?;
+        if !(if require_live_lease {
+            provider_reserve_coordinates(&signed_provider, &hold)
+        } else {
+            provider_audit_coordinates(&signed_provider, &hold)
+        }) {
+            return Err("signed provider state differs from the held metering reserve".into());
+        }
+        let request = retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            task.max_request_bytes,
+        )?;
+        let response_path = attempt
+            .outcome_path
+            .as_ref()
+            .ok_or("provider response absent")?;
+        let response = retained_exact(
+            response_path,
+            attempt
+                .outcome_bytes
+                .ok_or("provider response byte count absent")?,
+            attempt
+                .outcome_sha256
+                .as_deref()
+                .ok_or("provider response digest absent")?,
+            task.max_response_bytes,
+        )?;
+        let headers = retained_exact(
+            attempt
+                .response_headers_path
+                .as_deref()
+                .ok_or("metered provider headers absent")?,
+            attempt
+                .response_headers_bytes
+                .ok_or("metered provider header length absent")?,
+            attempt
+                .response_headers_sha256
+                .as_deref()
+                .ok_or("metered provider header digest absent")?,
+            131_072,
+        )?;
+        let (status, content_type) = provider::response_headers(&headers)
+            .map_err(|e| format!("metered response headers invalid: {e}"))?;
+        if Some(status) != attempt.response_status
+            || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
+        {
+            return Err("metering metadata differs from the retained raw headers".into());
+        }
+        let socket = self
+            .config
+            .host_socket
+            .clone()
+            .ok_or("metering requires pinned Host socket")?;
+        let id = self.next_id()?;
+        let metadata_path = self
+            .config
+            .state_dir
+            .join(format!("provider-meter-{id:016}.metadata.json"));
+        let metadata = json!({"status":status.to_string(),"contentType":content_type,
+            "reserve":hold.reserve.clone()});
+        write_new(&metadata_path, metadata.to_string().as_bytes())?;
+        let directory = self
+            .config
+            .state_dir
+            .join(format!("provider-meter-{id:016}"));
+        let cfg = &self.config;
+        self.command_output(
+            &cfg.mini,
+            &[
+                "meter",
+                "--host",
+                cfg.host.to_str().ok_or("host path UTF-8")?,
+                "--config",
+                cfg.host_config.to_str().ok_or("config path UTF-8")?,
+                "--socket",
+                socket.to_str().ok_or("Host socket path UTF-8")?,
+                "--metadata",
+                metadata_path.to_str().ok_or("meter metadata path UTF-8")?,
+                "--request",
+                attempt.request_path.to_str().ok_or("request path UTF-8")?,
+                "--response",
+                response_path.to_str().ok_or("response path UTF-8")?,
+                "--dir",
+                directory.to_str().ok_or("meter attempt path UTF-8")?,
+            ],
+        )
+        .map_err(|e| {
+            format!(
+                "provider Lean quote retained at {}: {e}",
+                directory.display()
+            )
+        })?;
+        let report_path = directory.join("meter.json");
+        let report_bytes = bounded_regular_file(&report_path, 16_384)?;
+        let report: Value = serde_json::from_slice(&report_bytes)
+            .map_err(|e| format!("provider Lean quote JSON: {e}"))?;
+        let charge =
+            provider_quote_charge(&report, pin, &hold.reserve, request.len(), response.len())?;
+        if require_live_lease {
+            self.provider_lease_current(&lease)?;
+        }
+        let digest = sha256_bytes(&report_bytes)?;
+        let mut current = self
+            .journal
+            .provider_attempt
+            .clone()
+            .ok_or("provider attempt disappeared")?;
+        if current.id != attempt_id || current.meter_report_path.is_some() {
+            return Err("provider attempt changed during read-only quote".into());
+        }
+        current.meter_report_path = Some(report_path);
+        current.meter_report_sha256 = Some(digest);
+        current.metered_charge = Some(charge);
+        self.validated_metered_charge(&current)?;
+        self.journal.provider_attempt = Some(current);
+        self.save()
+    }
+    fn validated_metered_charge(&self, attempt: &ProviderAttempt) -> Result<String> {
+        let hold = self
+            .journal
+            .provider_hold
+            .as_ref()
+            .ok_or("metered provider hold absent")?;
+        if !hold.reserve_confirmed {
+            return Err("metered provider reserve lacks confirmed receipt".into());
+        }
+        self.validated_metered_charge_for_reserve(attempt, &hold.reserve)
+    }
+    fn validated_metered_charge_for_reserve(
+        &self,
+        attempt: &ProviderAttempt,
+        reserve: &str,
+    ) -> Result<String> {
+        let task = self
+            .config
+            .provider_task
+            .as_ref()
+            .ok_or("providerTask absent")?;
+        let pin = attempt
+            .metering_pin
+            .as_ref()
+            .ok_or("metered tariff pin absent")?;
+        if !task.metering
+            || reserve != task.reserve
+            || pin.provider_resource_id != task.task
+            || pin.model != task.model
+        {
+            return Err("metered quote differs from configured task or signed hold".into());
+        }
+        let request = retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            task.max_request_bytes,
+        )?;
+        let response = retained_exact(
+            attempt
+                .outcome_path
+                .as_deref()
+                .ok_or("metered response absent")?,
+            attempt
+                .outcome_bytes
+                .ok_or("metered response length absent")?,
+            attempt
+                .outcome_sha256
+                .as_deref()
+                .ok_or("metered response digest absent")?,
+            task.max_response_bytes,
+        )?;
+        let headers = retained_exact(
+            attempt
+                .response_headers_path
+                .as_deref()
+                .ok_or("metered raw headers absent")?,
+            attempt
+                .response_headers_bytes
+                .ok_or("metered raw headers length absent")?,
+            attempt
+                .response_headers_sha256
+                .as_deref()
+                .ok_or("metered raw headers digest absent")?,
+            131_072,
+        )?;
+        let (status, content_type) = provider::response_headers(&headers)
+            .map_err(|e| format!("metered raw headers invalid: {e}"))?;
+        if Some(status) != attempt.response_status
+            || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
+        {
+            return Err("metered status or Content-Type differs from raw headers".into());
+        }
+        let report_path = attempt
+            .meter_report_path
+            .as_ref()
+            .ok_or("metered report absent")?;
+        let report_digest = attempt
+            .meter_report_sha256
+            .as_deref()
+            .ok_or("metered report digest absent")?;
+        let directory = report_path
+            .parent()
+            .ok_or("metered report directory absent")?;
+        let report_len = fs::symlink_metadata(report_path)
+            .map_err(|e| format!("metered report: {e}"))?
+            .len() as usize;
+        let report_bytes = retained_exact(report_path, report_len, report_digest, 16_384)?;
+        let frame = bounded_regular_file(&directory.join("reply.frame"), 16_385)?;
+        if frame.len() != report_bytes.len() + 1
+            || frame.first() != Some(&19)
+            || frame.get(1..) != Some(report_bytes.as_slice())
+            || retained_exact(
+                &directory.join("request.bin"),
+                request.len(),
+                &attempt.request_sha256,
+                task.max_request_bytes,
+            )? != request
+            || retained_exact(
+                &directory.join("response.bin"),
+                response.len(),
+                attempt
+                    .outcome_sha256
+                    .as_deref()
+                    .ok_or("metered response digest absent")?,
+                task.max_response_bytes,
+            )? != response
+        {
+            return Err(
+                "metered Host frame or copied inputs differ from the retained attempt".into(),
+            );
+        }
+        let metadata = json!({"status":status.to_string(),"contentType":content_type,
+            "reserve":reserve});
+        if bounded_regular_file(&directory.join("metadata.json"), 4096)?
+            != metadata.to_string().as_bytes()
+            || bounded_regular_file(&directory.join("config.json"), 131_072)?
+                != bounded_regular_file(&self.config.host_config, 131_072)?
+        {
+            return Err("metered metadata or config differs from pinned evidence".into());
+        }
+        let report: Value = serde_json::from_slice(&report_bytes)
+            .map_err(|e| format!("metered report JSON: {e}"))?;
+        let charge = provider_quote_charge(&report, pin, reserve, request.len(), response.len())?;
+        if attempt.metered_charge.as_deref() != Some(charge.as_str()) {
+            return Err("metered charge differs from source-authored retained report".into());
+        }
+        Ok(charge)
+    }
+    fn provider_delivery(
+        &mut self,
+        attempt_id: u64,
+        local_write_success: bool,
+    ) -> Result<Option<String>> {
         let attempt = self
             .journal
             .provider_attempt
@@ -2687,7 +3542,7 @@ impl Runtime {
                 self.journal.unresolved_external.push(note);
                 self.save()?;
             }
-            return Ok(false);
+            return Ok(None);
         }
         let response_path = attempt
             .outcome_path
@@ -2707,6 +3562,40 @@ impl Runtime {
             .response_content_type
             .clone()
             .ok_or("provider response content type absent")?;
+        let charge = if self
+            .config
+            .provider_task
+            .as_ref()
+            .is_some_and(|task| task.metering)
+        {
+            self.validated_metered_charge(&attempt)?
+        } else {
+            "configured".to_owned()
+        };
+        let response_headers_path = attempt.response_headers_path.clone();
+        let response_headers_bytes = attempt.response_headers_bytes;
+        let response_headers_sha256 = attempt.response_headers_sha256.clone();
+        if let (Some(path), Some(bytes), Some(digest)) = (
+            &response_headers_path,
+            response_headers_bytes,
+            &response_headers_sha256,
+        ) {
+            let headers =
+                fs::read(path).map_err(|e| format!("provider response headers absent: {e}"))?;
+            if headers.len() != bytes
+                || sha256_file(path)? != *digest
+                || provider::response_headers(&headers)
+                    .map_err(|e| format!("provider response headers invalid: {e}"))?
+                    != (status, content_type.clone())
+            {
+                return Err("provider response headers differ from durable metadata".into());
+            }
+        } else if response_headers_path.is_some()
+            || response_headers_bytes.is_some()
+            || response_headers_sha256.is_some()
+        {
+            return Err("provider response headers have incomplete custody".into());
+        }
         if fs::metadata(&response_path)
             .map_err(|e| format!("provider response evidence absent: {e}"))?
             .len()
@@ -2734,25 +3623,71 @@ impl Runtime {
             response_sha256,
             status,
             content_type,
+            response_headers_path,
+            response_headers_bytes,
+            response_headers_sha256,
+            meter_report_path: attempt.meter_report_path,
+            meter_report_sha256: attempt.meter_report_sha256,
+            metered_charge: attempt.metered_charge,
         });
         // Save the replay entry before settlement may clear the hold. If a
         // response reached the local socket but the SDK retries the same body,
         // it can never trigger another upstream send in this prompt.
         self.save()?;
-        Ok(true)
+        Ok(Some(charge))
     }
     fn provider_settle(&mut self, charge: &str) -> Result<()> {
         let authority = self.provider()?;
         let configured = self
             .config
             .provider_task
-            .as_ref()
+            .clone()
             .ok_or("providerTask absent")?;
         let charge = if charge == "configured" {
+            if configured.metering {
+                return Err("metered provider cannot use configured fixed charge".into());
+            }
             configured.charge.clone()
         } else {
             charge.to_owned()
         };
+        if configured.metering {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return Err("metered provider interruption requires audited settlement".into());
+            }
+            let hold = self
+                .journal
+                .provider_hold
+                .clone()
+                .ok_or("metered provider hold absent")?;
+            let attempt = self
+                .journal
+                .provider_attempt
+                .as_ref()
+                .ok_or("metered provider attempt absent")?;
+            let quote_matches = if attempt
+                .outcome
+                .as_deref()
+                .is_some_and(|kind| kind.starts_with("received:"))
+            {
+                self.validated_metered_charge(attempt)? == charge
+            } else {
+                attempt
+                    .outcome
+                    .as_deref()
+                    .is_some_and(|kind| kind.starts_with("not-sent:"))
+                    && charge == "0"
+            };
+            if !quote_matches || !hold.reserve_confirmed || hold.reserve != configured.reserve {
+                return Err(
+                    "metered provider settlement lacks retained quote and exact hold".into(),
+                );
+            }
+            let signed = self.query_as(&authority)?;
+            if !provider_reserve_coordinates(&signed, &hold) {
+                return Err("metered provider signed hold changed before settlement".into());
+            }
+        }
         if self.journal.provider_pending.is_some() {
             return Err("provider transition needs exact retry".into());
         }
@@ -2760,7 +3695,11 @@ impl Runtime {
             &authority,
             json!({"type":"settle","charge":charge}),
             "provider settle",
-            "gateway fixed-charge settlement",
+            if configured.metering {
+                "gateway source-quoted provider settlement"
+            } else {
+                "gateway fixed-charge settlement"
+            },
             vec![],
         )?;
         let after = self.query_as(&authority)?;
@@ -4581,37 +5520,109 @@ impl Runtime {
             .clone()
             .ok_or("providerTask absent")?;
         let authority = self.provider()?;
-        let attempt = self
+        let mut attempt = self
             .journal
             .provider_attempt
             .clone()
             .ok_or("no durable provider request for audit")?;
-        let request = fs::read(&attempt.request_path)
-            .map_err(|e| format!("retained provider request absent: {e}"))?;
-        if request.is_empty()
-            || request.len() > task.max_request_bytes
-            || request.len() != attempt.request_bytes
-            || sha256_file(&attempt.request_path)? != attempt.request_sha256
-        {
-            return Err("retained provider request differs from durable exact bytes".into());
+        let request = retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            task.max_request_bytes,
+        )?;
+        if request.is_empty() {
+            return Err("retained provider request is empty".into());
         }
         if attempt.outcome.is_some() != attempt.outcome_path.is_some() {
             return Err("provider outcome journal has incomplete evidence binding".into());
         }
         if let Some(path) = &attempt.outcome_path {
-            let meta =
-                fs::metadata(path).map_err(|e| format!("provider outcome evidence absent: {e}"))?;
-            if meta.len() > task.max_response_bytes as u64
-                || Some(meta.len() as usize) != attempt.outcome_bytes
-                || Some(sha256_file(path)?) != attempt.outcome_sha256
-            {
-                return Err("provider outcome evidence differs from durable exact bytes".into());
-            }
+            retained_exact(
+                path,
+                attempt
+                    .outcome_bytes
+                    .ok_or("provider outcome length absent")?,
+                attempt
+                    .outcome_sha256
+                    .as_deref()
+                    .ok_or("provider outcome digest absent")?,
+                task.max_response_bytes,
+            )?;
         }
+        let already_settled = if task.metering && self.journal.provider_hold.is_none() {
+            let settled = self.verified_provider_settlement(&attempt)?;
+            let retry_result = next_retry_json(&settled.attempt)?;
+            let mut args = vec![
+                "retry",
+                "--attempt",
+                settled
+                    .attempt
+                    .to_str()
+                    .ok_or("provider settlement attempt path UTF-8")?,
+                "--mode",
+                "lookup",
+            ];
+            if let Some(socket) = &self.config.host_socket {
+                args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
+            }
+            self.command_output(&self.config.mini, &args)?;
+            let lookup: Value =
+                serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
+                    .map_err(|e| format!("provider settlement lookup: {e}"))?;
+            if lookup.get("type").and_then(Value::as_str) != Some("confirmed")
+                || !matches!(
+                    lookup.get("confirmation").and_then(Value::as_str),
+                    Some("installed" | "replayed")
+                )
+                || ReserveAnchor::from_confirmed(&lookup)? != settled.receipt
+            {
+                return Err(
+                    "provider settlement is not confirmed on the current native image".into(),
+                );
+            }
+            Some(settled)
+        } else {
+            None
+        };
+        let audited_charge = if let Some(settled) = &already_settled {
+            settled.charge.clone()
+        } else if task.metering {
+            match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
+                MeteredAuditPath::ProvenNoSend => "0".to_owned(),
+                MeteredAuditPath::CompleteResponse => {
+                    if attempt.meter_report_path.is_none()
+                        && attempt.meter_report_sha256.is_none()
+                        && attempt.metered_charge.is_none()
+                    {
+                        // Audited recovery may run after the prompt lease ended. This
+                        // read-only native quote uses the exact retained response and
+                        // signed hold; it never authorizes another upstream send.
+                        self.provider_meter_quote_inner(attempt.id, false)?;
+                        attempt = self
+                            .journal
+                            .provider_attempt
+                            .clone()
+                            .ok_or("metered provider attempt disappeared after quote")?;
+                    }
+                    self.validated_metered_charge(&attempt)?
+                }
+            }
+        } else if !attempt.send_started
+            || attempt
+                .outcome
+                .as_deref()
+                .is_some_and(|kind| kind.starts_with("not-sent:"))
+        {
+            "0".to_owned()
+        } else {
+            task.charge.clone()
+        };
         let id = self.next_id()?;
         self.journal.reconciliation_log.push(json!({
             "decisionId":id.to_string(), "authority":"provider",
-            "action":"settle-provider-fixed-charge", "stage":"operator-audited-requested",
+            "action":if task.metering {"settle-provider-source-metered-charge"} else {"settle-provider-fixed-charge"},
+            "stage":"operator-audited-requested",
             "providerAttemptId":attempt.id.to_string(),
             "requestPath":attempt.request_path,
             "requestBytes":attempt.request_bytes,
@@ -4621,7 +5632,11 @@ impl Runtime {
             "outcomeSha256":attempt.outcome_sha256,
             "sendBoundaryDurable":attempt.send_started,
             "outcome":attempt.outcome,
-            "configuredCharge":task.charge,
+            "auditedCharge":audited_charge,
+            "meterReportPath":attempt.meter_report_path,
+            "meterReportSha256":attempt.meter_report_sha256,
+            "meteringPin":attempt.metering_pin,
+            "settlementReceipt":already_settled,
             "externalEffectsAcknowledged":false
         }));
         self.save()?;
@@ -4669,21 +5684,15 @@ impl Runtime {
                         vec![],
                     )?;
                 }
-                let charge = if !attempt.send_started
-                    || attempt
-                        .outcome
-                        .as_deref()
-                        .is_some_and(|kind| kind.starts_with("not-sent:"))
-                {
-                    "0".to_owned()
-                } else {
-                    task.charge.clone()
-                };
                 self.transition_as(
                     &authority,
-                    json!({"type":"settle","charge":charge}),
+                    json!({"type":"settle","charge":audited_charge}),
                     "provider audit settle",
-                    "operator audited fixed provider charge",
+                    if task.metering {
+                        "operator audited source-quoted provider charge"
+                    } else {
+                        "operator audited fixed provider charge"
+                    },
                     vec![],
                 )?;
                 settlement_confirmed_here = true;
@@ -4695,6 +5704,13 @@ impl Runtime {
                     "signed provider status {status} cannot identify the held reservation's settlement"
                 ));
             }
+        } else if already_settled.is_some() {
+            if !matches!(status.as_str(), "0" | "1" | "6")
+                || observed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err("provider exact settlement has no signed terminal state".into());
+            }
+            settlement_confirmed_here = true;
         } else if !matches!(status.as_str(), "0" | "1" | "6") {
             return Err("provider attempt has no hold but signed grain remains reserved".into());
         }
@@ -4983,6 +5999,15 @@ impl Runtime {
             // the original submit. A prior branch may have committed this
             // exact call before a fork was replaced. Keep the pending attempt.
             self.command_output(&self.config.mini, &args)?;
+            let provider_settlement = if slot == AuthoritySlot::Provider
+                && matches!(
+                    p.operation.as_str(),
+                    "provider settle" | "provider audit settle"
+                ) {
+                Some(self.provider_settlement_record(&p, &retry_result)?)
+            } else {
+                None
+            };
             if let Some(record) = self.confirmed_publication_receipt(&p, &retry_result)? {
                 while self.journal.publication_receipts.len() >= 32 {
                     let Some(index) = self
@@ -5005,7 +6030,6 @@ impl Runtime {
             ) {
                 self.record_reserve_confirmation(slot, &p.attempt, &retry_result)?;
             }
-            *self.journal.pending_for_mut(slot) = None;
             if matches!(
                 p.operation.as_str(),
                 "settle"
@@ -5015,6 +6039,9 @@ impl Runtime {
                     | "provider settle"
                     | "provider audit settle"
             ) {
+                if let Some(record) = provider_settlement {
+                    self.journal.provider_settlement = Some(record);
+                }
                 *self.journal.hold_for_mut(slot) = None;
                 if slot == AuthoritySlot::Parent {
                     self.journal.settlement_due = None;
@@ -5023,6 +6050,7 @@ impl Runtime {
             if p.operation == "disconnect" && slot == AuthoritySlot::Parent {
                 self.journal.connection = Connection::Detached;
             }
+            *self.journal.pending_for_mut(slot) = None;
             self.save()?;
         }
         Ok(())
@@ -5898,10 +6926,13 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         fs::create_dir(&dir).unwrap();
         let request_path = dir.join("request");
         let response_path = dir.join("response");
+        let headers_path = dir.join("response-headers");
         let request_bytes = br#"{"model":"local","messages":[]}"#;
         let response_bytes = br#"{"choices":[]}"#;
+        let headers = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
         write_new(&request_path, request_bytes).unwrap();
         write_new(&response_path, response_bytes).unwrap();
+        write_new(&headers_path, headers).unwrap();
         let retained = ProviderReplay {
             prompt_operation_id: 42,
             parent_generation: "3".into(),
@@ -5913,6 +6944,12 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             response_sha256: sha256_file(&response_path).unwrap(),
             status: 200,
             content_type: "application/json".into(),
+            response_headers_path: Some(headers_path.clone()),
+            response_headers_bytes: Some(headers.len()),
+            response_headers_sha256: Some(sha256_file(&headers_path).unwrap()),
+            meter_report_path: None,
+            meter_report_sha256: None,
+            metered_charge: None,
         };
         let request = provider::ProviderRequest {
             lease: provider::LeaseId {
@@ -5948,9 +6985,98 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 .unwrap()
                 .is_none()
         );
+        fs::write(
+            &headers_path,
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
+        )
+        .unwrap();
+        assert!(Runtime::provider_replay(std::slice::from_ref(&retained), &request).is_err());
+        fs::write(&headers_path, headers).unwrap();
         fs::write(&response_path, b"changed").unwrap();
         assert!(Runtime::provider_replay(&[retained], &request).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn metered_quote_binds_tariff_hold_and_source_settle_charge() {
+        let pin = ProviderMeteringPin {
+            provider_resource_id: "7004".into(),
+            model: "fixture".into(),
+            tariff_version: "1".into(),
+            tariff_digest: "123".into(),
+        };
+        let mut report = json!({
+            "type":"minidregg-provider-metering-v1", "status":"quoted-reported-usage",
+            "providerResourceId":"7004", "model":"fixture", "tariffVersion":"1",
+            "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
+            "requestBytes":"20", "responseBytes":"30", "promptTokens":"2",
+            "completionTokens":"3", "totalTokens":"5", "reserve":"10", "charge":"7",
+            "operation":{"type":"settle","charge":"7"},
+            "claim":"provider-reported usage under operator tariff; not invoice-verified"
+        });
+        assert_eq!(
+            provider_quote_charge(&report, &pin, "10", 20, 30).unwrap(),
+            "7"
+        );
+        report["charge"] = json!("11");
+        report["operation"]["charge"] = json!("11");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["charge"] = json!("7");
+        report["operation"]["charge"] = json!("6");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["operation"]["charge"] = json!("7");
+        report["tariffDigest"] = json!("124");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["tariffDigest"] = json!("123");
+        report["responseBytes"] = json!("31");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+    }
+
+    #[test]
+    fn metered_audit_never_turns_uncertain_send_into_zero_charge() {
+        assert_eq!(
+            metered_audit_path(false, None).unwrap(),
+            MeteredAuditPath::ProvenNoSend
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("not-sent:before-upstream")).unwrap(),
+            MeteredAuditPath::ProvenNoSend
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("received:200:application/json")).unwrap(),
+            MeteredAuditPath::CompleteResponse
+        );
+        assert!(metered_audit_path(true, None).is_err());
+        assert!(metered_audit_path(true, Some("uncertain:lost-reply")).is_err());
+        assert!(metered_audit_path(false, Some("received:200:application/json")).is_err());
+    }
+
+    #[test]
+    fn metered_recovery_accepts_only_the_exact_fenced_reservation() {
+        let hold = HeldCharge {
+            reserve: "3".into(),
+            charge: "0".into(),
+            before_generation: "8".into(),
+            before_target_root: "17".into(),
+            reserve_attempt: None,
+            reserve_confirmed: true,
+            reserve_refused: false,
+            reserve_boundary: None,
+            reserve_call_sha256: None,
+            reserve_outcome_path: None,
+            reserve_outcome_sha256: None,
+            reserve_anchor: None,
+        };
+        let fenced = json!({"grain":{"status":"5","generation":"9","reserved":"3"}});
+        assert!(!provider_reserve_coordinates(&fenced, &hold));
+        assert!(provider_audit_coordinates(&fenced, &hold));
+        for changed in [
+            json!({"grain":{"status":"5","generation":"8","reserved":"3"}}),
+            json!({"grain":{"status":"5","generation":"9","reserved":"2"}}),
+            json!({"grain":{"status":"6","generation":"9","reserved":"3"}}),
+        ] {
+            assert!(!provider_audit_coordinates(&changed, &hold));
+        }
     }
 
     #[test]

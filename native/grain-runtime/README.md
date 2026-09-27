@@ -123,6 +123,21 @@ a definitively unreserved, unsent attempt. External effects require separate
 `reconcile effects` acknowledgement. These are configured allowance units,
 not a measured provider invoice.
 
+Set `"metering":true` and `"charge":"0"` on `providerTask` to use the pinned
+Host provider tariff instead of the configured fixed charge. Before reserve,
+the controller checks the signed provider resource and the Host profile's
+provider resource and model. After an actual response, it retains the exact
+request, body, and raw final-response headers, including one upstream
+`Content-Type`. Read-only `mini meter` asks the Host to quote the retained
+bytes and signed reserve; only the source-authored charge may be signed into
+settlement. A missing terminal usage report, malformed headers, or uncertain
+send keeps the allowance held and prevents another upstream request. Audited
+recovery can quote a complete retained response after a worker fence, then
+settle that charge; a confirmed settlement's exact Mini receipt is retained
+before the hold is cleared. A proven no-send can settle zero. Provider usage
+is a provider-reported claim under the operator tariff, not an invoice or an
+atomic lease over external delivery.
+
 For a scoped worker, optional command `wallTimeSeconds` is a fixed integer
 from 1 to 1800; omission retains the launcher's 600-second cap. A hosted
 provider's `hermes-acp` command requires at least 120 seconds. The generated
