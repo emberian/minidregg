@@ -1,0 +1,31 @@
+Persvati Linux component gate, installer source SHA256 85a96c681e2c002b7c6e788a9cd6cd2bd44d0eeadaf4fc6c5b99f405befc553d.
+bash -n: PASS
+shellcheck: PASS
+quiescence: mini-grain-controller@7801.service UID1001 exact active/clean, no worker PID/cgroup: PASS
+quiescence: mini-grain-controller@7803.service UID1002 exact active/clean, no worker PID/cgroup: PASS
+Live operator Host after read-only gate: mini-offer-host-20260926.service active MainPID948950.
+
+Earlier installer SHA256 0e3dabd91eeb682d528562be2c6bc8e49a24e3c654c05a56c61ebd51380bf63b, unique inactive scratch units, no Mini/socket execution:
+  mini-opstack-check-host-20260926.service
+  mini-opstack-check-front-a-20260926.service
+  mini-opstack-check-front-b-20260926.service
+  mini-opstack-check-provider-a-20260926.service
+  mini-opstack-check-provider-b-20260926.service
+Install: PASS; exact rerun: idempotent PASS; systemd-analyze --user verify: PASS.
+Deliberate helper SHA mismatch: install-operator-stack: SHA-256 drift: /tmp/mini-cross-account-bin-20260926/store
+Deliberate unit-file change: install-operator-stack: unit content drift: /home/ember/.config/systemd/user/mini-opstack-check-host-20260926.service
+Scratch unit files removed, daemon reloaded.
+
+Actual systemd NoNewPrivileges=yes ExecStartPre gate with a separate harmless pinned `/usr/bin/gnutrue` main:
+  mini-opstack-guard-host-20260926.service first start: Result=success; ExecMainStatus=0.
+  Manifest retained both selected task controllers; guard performed operator-readable checks without sudo.
+  Deliberate scratch Store-helper SHA mismatch; second `systemctl --user start`: refused.
+  Result=exit-code; ExecStartPre status=65; ExecMainStatus=0 (main was not run).
+  Original scratch manifest restored; all five guard-probe units removed; daemon reloaded.
+
+Final-source start gate with the same separate harmless scratch units:
+  install: PASS; `start` refused before mutation because selected @7801 controller was active.
+  Refusal: task controller active during initial operator start: mini-grain-controller@7801.service
+  Scratch Host MainPID=0; no second Mini socket opened; scratch unit files removed.
+
+This log contains only paths, hashes, unit identifiers and status, not keys, Store contents, journal contents, or signed calls.

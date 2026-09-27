@@ -1,0 +1,561 @@
+#!/usr/bin/env bash
+# Install one operator-owned private Mini Host with UID-scoped Unix frontends.
+# Optional providers are deterministic loopback fixtures, never a paid endpoint.
+set -euo pipefail
+umask 077
+
+usage() {
+  echo 'usage: install-operator-stack --manifest ABS_JSON --unit-dir ABS_DIR render|install|status|quiescence|start|restart|enable|guard [UNIT]' >&2
+  exit 64
+}
+[[ ($# == 5 || $# == 6) && $1 == --manifest && $3 == --unit-dir ]] || usage
+manifest=$2 unit_dir=$4 action=$5
+guard_unit=${6:-}
+case $action in
+  render|install|status|quiescence|start|restart|enable) [[ $# == 5 ]] || usage ;;
+  guard) [[ $# == 6 ]] || usage ;;
+  *) usage ;;
+esac
+[[ $(uname -s) == Linux ]] || { echo 'Linux user systemd required' >&2; exit 69; }
+for tool in jq realpath stat sha256sum systemctl cmp mktemp ln flock readlink ss loginctl sudo getfacl; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "install-operator-stack: $*" >&2; exit 65; }
+safe_path() {
+  [[ $1 == / ]] && return 0
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsupported absolute path: $1"
+}
+existing() {
+  safe_path "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] || fail "missing or noncanonical path: $1"
+}
+operator_owned() { [[ $(stat -c %u -- "$1") == "$(id -u)" ]] || fail "not operator-owned: $1"; }
+protected_path() {
+  local path=$1 owner mode
+  while :; do
+    existing "$path"
+    owner=$(stat -c %u -- "$path")
+    [[ $owner == 0 || $owner == "$(id -u)" ]] || fail "pinned path is task-owned: $path"
+    mode=$(stat -c %a -- "$path")
+    if [[ $path == /tmp && $owner == 0 && $mode == 1777 ]]; then
+      : # sticky root-owned scratch; descendants still need protected ownership
+    else
+      (( (8#$mode & 0022) == 0 )) || fail "pinned path is group/world writable: $path"
+    fi
+    [[ $path == / ]] && break
+    path=${path%/*}; [[ -n $path ]] || path=/
+  done
+}
+sha_pin() {
+  existing "$1"
+  [[ -f $1 && -r $1 ]] || fail "not readable regular file: $1"
+  protected_path "$1"
+  [[ $2 =~ ^[0-9a-f]{64}$ ]] || fail "invalid SHA-256 pin: $1"
+  local actual
+  actual=$(sha256sum -- "$1"); [[ ${actual%% *} == "$2" ]] || fail "SHA-256 drift: $1"
+}
+private_file() {
+  existing "$1"; operator_owned "$1"
+  [[ -f $1 && $(stat -c %a -- "$1") == 600 ]] || fail "expected operator mode-0600 file: $1"
+}
+unit_name() { [[ $1 =~ ^mini-[a-z0-9-]+\.service$ ]] || fail "unsupported unit name: $1"; }
+
+existing "$manifest"; private_file "$manifest"; protected_path "$manifest"
+installer=$(realpath -e -- "$0"); existing "$installer"; protected_path "$installer"
+[[ -f $installer && -x $installer ]] || fail 'installer must be an executable protected regular file'
+installer_selected=$(jq -er .installer.path "$manifest")
+installer_sha=$(jq -er .installer.sha256 "$manifest")
+[[ $installer == "$installer_selected" ]] || fail 'invoked installer differs from manifest'
+sha_pin "$installer" "$installer_sha"
+existing "$unit_dir"; operator_owned "$unit_dir"; protected_path "$unit_dir"
+[[ -d $unit_dir && -w $unit_dir ]] || fail 'unit directory must be writable'
+[[ $(stat -c %a -- "$unit_dir") =~ ^(700|750|755)$ ]] || fail 'unexpected unit directory mode'
+jq -e '
+ .version == "mini-grain-operator-stack-v1" and
+ (.host | type == "object") and
+ (.frontends | type == "array" and length > 0) and
+ ((.providers // []) | type == "array") and
+ ([.host.unit, .frontends[].unit, (.providers // [])[].unit] | length == (unique | length)) and
+ ([.frontends[].uid] | length == (unique | length)) and
+ ([.frontends[].socket] | length == (unique | length)) and
+ ([.frontends[].config.path] | length == (unique | length)) and
+ ([(.providers // [])[].address] | length == (unique | length)) and
+ ((.controllers // []) | type == "array") and
+ ([(.controllers // [])[].uid] | length == (unique | length)) and
+ ([(.controllers // [])[].task] | length == (unique | length))
+' "$manifest" >/dev/null || fail 'invalid stack manifest version/shape or duplicate unit'
+
+host_unit=$(jq -er .host.unit "$manifest"); unit_name "$host_unit"
+mini=$(jq -er .host.mini.path "$manifest")
+mini_sha=$(jq -er .host.mini.sha256 "$manifest")
+host=$(jq -er .host.image.path "$manifest")
+host_sha=$(jq -er .host.image.sha256 "$manifest")
+host_config=$(jq -er .host.config.path "$manifest")
+host_config_sha=$(jq -er .host.config.sha256 "$manifest")
+host_socket=$(jq -er .host.socket "$manifest")
+storage_binary=$(jq -er .host.storageBinary.path "$manifest")
+storage_sha=$(jq -er .host.storageBinary.sha256 "$manifest")
+signature_binary=$(jq -er .host.signatureBinary.path "$manifest")
+signature_sha=$(jq -er .host.signatureBinary.sha256 "$manifest")
+sha_pin "$mini" "$mini_sha"; sha_pin "$host" "$host_sha"; sha_pin "$host_config" "$host_config_sha"
+sha_pin "$storage_binary" "$storage_sha"; sha_pin "$signature_binary" "$signature_sha"
+[[ -x $mini && -x $host && -x $storage_binary && -x $signature_binary ]] || fail 'Mini/Host/helper artifacts must be executable'
+[[ $(jq -er .storageBinary "$host_config") == "$storage_binary" &&
+   $(jq -er .signatureBinary "$host_config") == "$signature_binary" ]] ||
+  fail 'Host config helper closure differs from pinned helpers'
+private_file "$host_config"
+safe_path "$host_socket"
+host_dir=${host_socket%/*}; existing "$host_dir"; operator_owned "$host_dir"; protected_path "$host_dir"
+[[ -d $host_dir && $(stat -c %a -- "$host_dir") == 700 ]] || fail 'private host socket directory must be 0700'
+[[ ! -e $host_socket || -S $host_socket ]] || fail 'private host socket path is occupied'
+[[ ! -L $host_socket ]] || fail 'private host socket is a symlink'
+storage_root=$(jq -er .storageRoot "$host_config") || fail 'host config has no storageRoot'
+existing "$storage_root"; operator_owned "$storage_root"; protected_path "$storage_root"
+[[ -d $storage_root && $(stat -c %a -- "$storage_root") == 700 ]] || fail 'Store directory must be operator-owned 0700'
+
+declare -a units=() texts=() binaries=() argvs=() endpoints=() endpoint_kinds=() task_uids=() task_configs=()
+add_unit() {
+  units+=("$1"); texts+=("$2"); binaries+=("$3"); argvs+=("$4")
+  endpoints+=("$5"); endpoint_kinds+=("$6"); task_uids+=("$7"); task_configs+=("$8")
+}
+host_text=$(cat <<EOF
+[Unit]
+Description=Private Mini Host for grain operator stack
+After=network.target
+StartLimitIntervalSec=30s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+ExecStartPre=$installer --manifest $manifest --unit-dir $unit_dir guard $host_unit
+ExecStart=$mini serve --host $host --config $host_config --socket $host_socket
+UMask=0077
+NoNewPrivileges=yes
+LimitCORE=0
+TasksMax=128
+MemoryMax=8G
+CPUQuota=200%
+
+EOF
+)
+add_unit "$host_unit" "$host_text" "$mini" "$(printf '%s\n' "$mini" serve --host "$host" --config "$host_config" --socket "$host_socket")" "$host_socket" unix '' ''
+
+front_count=$(jq -r '.frontends | length' "$manifest")
+for ((i=0; i<front_count; i++)); do
+  base=".frontends[$i]"
+  unit=$(jq -er "$base.unit" "$manifest"); unit_name "$unit"
+  binary=$(jq -er "$base.binary.path" "$manifest")
+  binary_sha=$(jq -er "$base.binary.sha256" "$manifest")
+  uid=$(jq -er "$base.uid" "$manifest")
+  public_socket=$(jq -er "$base.socket" "$manifest")
+  public_config=$(jq -er "$base.config.path" "$manifest")
+  config_sha=$(jq -er "$base.config.sha256" "$manifest")
+  [[ $uid =~ ^[1-9][0-9]*$ ]] || fail 'frontend UID must be nonzero decimal'
+  [[ $uid != "$(id -u)" ]] || fail 'frontend UID must be distinct from operator'
+  id -u "$uid" >/dev/null || fail "frontend UID does not exist: $uid"
+  sha_pin "$binary" "$binary_sha"; [[ -x $binary ]] || fail 'frontend is not executable'
+  sha_pin "$public_config" "$config_sha"; operator_owned "$public_config"
+  [[ $config_sha == "$host_config_sha" ]] || fail 'public config must equal private pinned Host config'
+  safe_path "$public_socket"
+  public_dir=${public_socket%/*}; existing "$public_dir"; operator_owned "$public_dir"; protected_path "$public_dir"
+  [[ $public_dir != "$host_dir" ]] || fail 'public frontend cannot share private host socket directory'
+  [[ -d $public_dir && -f $public_config && $public_config == "$public_dir/host.json" &&
+     $public_socket == "$public_dir/host.sock" ]] || fail 'frontend must have dedicated public directory'
+  [[ $(stat -c %a -- "$public_dir") =~ ^(700|710)$ &&
+     $(stat -c %a -- "$public_config") =~ ^(600|640)$ ]] || fail 'unexpected frontend directory/config mode'
+  [[ ! -e $public_socket || -S $public_socket ]] || fail 'public socket path is occupied'
+  [[ ! -L $public_socket ]] || fail 'public socket is a symlink'
+  front_text=$(cat <<EOF
+[Unit]
+Description=UID $uid Mini Host Unix frontend
+BindsTo=$host_unit
+After=$host_unit
+PartOf=$host_unit
+
+[Service]
+Type=exec
+ExecStartPre=$installer --manifest $manifest --unit-dir $unit_dir guard $unit
+ExecStart=$binary $host_socket $public_socket $public_config $uid $host_sha
+UMask=0077
+NoNewPrivileges=yes
+LimitCORE=0
+TasksMax=16
+MemoryMax=128M
+CPUQuota=100%
+
+EOF
+)
+  add_unit "$unit" "$front_text" "$binary" "$(printf '%s\n' "$binary" "$host_socket" "$public_socket" "$public_config" "$uid" "$host_sha")" "$public_socket" unix "$uid" "$public_config"
+done
+
+provider_count=$(jq -r '(.providers // []) | length' "$manifest")
+for ((i=0; i<provider_count; i++)); do
+  base=".providers[$i]"
+  unit=$(jq -er "$base.unit" "$manifest"); unit_name "$unit"
+  binary=$(jq -er "$base.binary.path" "$manifest")
+  binary_sha=$(jq -er "$base.binary.sha256" "$manifest")
+  address=$(jq -er "$base.address" "$manifest")
+  log_file=$(jq -er "$base.log" "$manifest")
+  mode=$(jq -er "$base.mode" "$manifest")
+  [[ $address =~ ^127\.0\.0\.1:([0-9]{1,5})$ ]] || fail 'fixture provider must bind loopback'
+  (( 10#${BASH_REMATCH[1]} > 0 && 10#${BASH_REMATCH[1]} <= 65535 )) || fail 'invalid fixture port'
+  [[ $mode == --content-peer-a || $mode == --content-peer-b ]] || fail 'only reviewed deterministic peer modes are supported'
+  safe_path "$log_file"; existing "${log_file%/*}"; operator_owned "${log_file%/*}"; protected_path "${log_file%/*}"
+  [[ -d ${log_file%/*} && $(stat -c %a -- "${log_file%/*}") == 700 ]] || fail 'fixture log directory must be private'
+  if [[ -e $log_file ]]; then existing "$log_file"; operator_owned "$log_file"; [[ -f $log_file ]] || fail 'fixture log is not a file'; fi
+  sha_pin "$binary" "$binary_sha"; [[ -x $binary ]] || fail 'fixture binary is not executable'
+  provider_text=$(cat <<EOF
+[Unit]
+Description=Deterministic loopback Mini fixture provider
+After=network.target
+
+[Service]
+Type=exec
+ExecStartPre=$installer --manifest $manifest --unit-dir $unit_dir guard $unit
+ExecStart=$binary $address $log_file $mode
+UMask=0077
+NoNewPrivileges=yes
+LimitCORE=0
+TasksMax=16
+MemoryMax=128M
+CPUQuota=100%
+
+EOF
+)
+  add_unit "$unit" "$provider_text" "$binary" "$(printf '%s\n' "$binary" "$address" "$log_file" "$mode")" "$address" tcp '' ''
+done
+
+controller_count=$(jq -r '(.controllers // []) | length' "$manifest")
+declare -a controller_uids=() controller_tasks=() controller_units=() controller_configs=() controller_runtimes=() controller_fragments=()
+for ((i=0; i<controller_count; i++)); do
+  base=".controllers[$i]"
+  uid=$(jq -er "$base.uid" "$manifest")
+  task=$(jq -er "$base.task" "$manifest")
+  unit=$(jq -er "$base.unit" "$manifest")
+  config=$(jq -er "$base.config.path" "$manifest")
+  config_sha=$(jq -er "$base.config.sha256" "$manifest")
+  runtime=$(jq -er "$base.runtime.path" "$manifest")
+  runtime_sha=$(jq -er "$base.runtime.sha256" "$manifest")
+  fragment=$(jq -er "$base.fragment.path" "$manifest")
+  fragment_sha=$(jq -er "$base.fragment.sha256" "$manifest")
+  [[ $uid =~ ^[1-9][0-9]*$ && $task =~ ^[1-9][0-9]*$ &&
+     $unit == "mini-grain-controller@$task.service" ]] || fail 'invalid controller UID/task/unit'
+  jq -e --argjson uid "$uid" '[.frontends[].uid] | index($uid) != null' "$manifest" >/dev/null ||
+    fail 'controller UID has no frontend'
+  sha_pin "$runtime" "$runtime_sha"; [[ -x $runtime ]] || fail 'controller runtime not executable'
+  safe_path "$config"
+  if [[ $action != guard ]]; then
+    user=$(id -nu "$uid")
+    sudo -n -u "$user" /usr/bin/test -r "$config" || fail 'task controller config is unreadable or sudo needs a password'
+    actual=$(sudo -n -u "$user" sha256sum -- "$config")
+    [[ ${actual%% *} == "$config_sha" ]] || fail 'task controller config SHA drift'
+    safe_path "$fragment"
+    sudo -n -u "$user" /usr/bin/test -r "$fragment" || fail 'task controller unit fragment is unreadable or sudo needs a password'
+    actual=$(sudo -n -u "$user" sha256sum -- "$fragment")
+    [[ ${actual%% *} == "$fragment_sha" ]] || fail 'task controller unit fragment SHA drift'
+    [[ $(sudo -n -u "$user" jq -er .task "$config") == "$task" ]] || fail 'task controller config task mismatch'
+    [[ $(sudo -n -u "$user" jq -er .hostSocket "$config") == "$(jq -er --argjson uid "$uid" '.frontends[] | select(.uid == $uid) | .socket' "$manifest")" ]] ||
+      fail 'task controller hostSocket differs from frontend'
+    [[ $(sudo -n -u "$user" jq -er .hostConfig "$config") == "$(jq -er --argjson uid "$uid" '.frontends[] | select(.uid == $uid) | .config.path' "$manifest")" ]] ||
+      fail 'task controller hostConfig differs from frontend'
+  fi
+  controller_uids+=("$uid"); controller_tasks+=("$task"); controller_units+=("$unit")
+  controller_configs+=("$config"); controller_runtimes+=("$runtime"); controller_fragments+=("$fragment")
+done
+
+check_bin=$(jq -r '.signedCheck.binary.path // empty' "$manifest")
+if [[ -n $check_bin ]]; then
+  check_sha=$(jq -er .signedCheck.binary.sha256 "$manifest")
+  sha_pin "$check_bin" "$check_sha"; operator_owned "$check_bin"
+  [[ -x $check_bin ]] || fail 'signed check is not executable'
+fi
+
+if [[ $action == guard ]]; then
+  unit_name "$guard_unit"
+  found=0
+  for ((i=0; i<${#units[@]}; i++)); do
+    [[ ${units[i]} == "$guard_unit" ]] || continue
+    target=$unit_dir/$guard_unit
+    existing "$target"; operator_owned "$target"
+    [[ -f $target && $(stat -c %a -- "$target") == 644 ]] || fail 'unit file mode/owner drift'
+    cmp -s "$target" <(printf '%s\n' "${texts[i]}") || fail 'loaded unit source drift'
+    [[ $(systemctl --user show "$guard_unit" -p FragmentPath --value) == "$target" ]] || fail 'foreign unit fragment'
+    [[ $(systemctl --user show "$guard_unit" -p NeedDaemonReload --value) == no ]] || fail 'stale loaded unit'
+    [[ -z $(systemctl --user show "$guard_unit" -p DropInPaths --value) ]] || fail 'unreviewed unit drop-in'
+    if ((i > 0 && i <= front_count)); then
+      host_ready=0
+      for ((n=0; n<100; n++)); do
+        host_pid=$(systemctl --user show "$host_unit" -p MainPID --value 2>/dev/null || :)
+        if [[ $host_pid =~ ^[1-9][0-9]*$ && -S $host_socket ]] &&
+           ss -xlnp | awk -v e="$host_socket" -v p="pid=$host_pid," '$5 == e && index($0,p) {found=1} END {exit !found}'; then
+          host_ready=1; break
+        fi
+        sleep 0.1
+      done
+      ((host_ready)) || fail 'private Host listener not ready for frontend'
+    fi
+    found=1
+    break
+  done
+  ((found)) || fail 'unit absent from pinned stack'
+  exit 0
+fi
+
+if [[ $action == render ]]; then
+  for ((i=0; i<${#units[@]}; i++)); do
+    printf '# %s\n%s\n' "${units[i]}" "${texts[i]}"
+  done
+  exit 0
+fi
+
+systemctl --user show-environment >/dev/null || fail 'operator user manager unavailable'
+load_paths=$(systemctl --user show -p UnitPath --value)
+[[ " $load_paths " == *" $unit_dir "* ]] || fail 'unit directory is not in the actual user manager load path'
+lock=$unit_dir/.mini-grain-operator-stack.lock
+[[ ! -L $lock ]] || fail 'unit lock is a symlink'
+exec 9>"$lock"; chmod 600 "$lock"; flock -n 9 || fail 'another stack operation owns the lock'
+
+if [[ $action != quiescence ]]; then
+for ((i=0; i<${#units[@]}; i++)); do
+  unit=${units[i]}; target=$unit_dir/$unit
+  fragment=$(systemctl --user show "$unit" -p FragmentPath --value 2>/dev/null || :)
+  [[ -z $fragment || $fragment == "$target" ]] || fail "foreign unit fragment: $unit ($fragment)"
+  if [[ -e $target || -L $target ]]; then
+    existing "$target"; operator_owned "$target"
+    [[ -f $target && $(stat -c %a -- "$target") == 644 ]] || fail "unexpected unit file: $target"
+    cmp -s "$target" <(printf '%s\n' "${texts[i]}") || fail "unit content drift: $target"
+  elif [[ $action != install ]]; then
+    fail "unit is not installed: $target"
+  fi
+  if [[ $action != install ]]; then
+    [[ $(systemctl --user show "$unit" -p LoadState --value) == loaded ]] || fail "unit is not loaded: $unit"
+    [[ $(systemctl --user show "$unit" -p NeedDaemonReload --value) == no ]] || fail "unit manager has stale loaded properties: $unit"
+    [[ -z $(systemctl --user show "$unit" -p DropInPaths --value) ]] || fail "unit has an unreviewed drop-in: $unit"
+    [[ $(systemctl --user show "$unit" -p Transient --value) == no ]] || fail "unit is transient: $unit"
+    [[ -z $(systemctl --user show "$unit" -p User --value) ]] || fail "unit changed execution UID: $unit"
+  fi
+done
+fi
+
+if [[ $action == install ]]; then
+  for ((i=0; i<${#units[@]}; i++)); do
+    unit=${units[i]}; target=$unit_dir/$unit
+    active=$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || :)
+    pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || :)
+    case $active in active|activating|deactivating|reloading) fail "running unit cannot be installed: $unit" ;; esac
+    [[ -z $pid || $pid == 0 ]] || fail "unit has MainPID: $unit"
+  done
+  for ((i=0; i<${#units[@]}; i++)); do
+    target=$unit_dir/${units[i]}
+    [[ -e $target ]] && continue
+    tmp=$(mktemp "$target.tmp.XXXXXX")
+    printf '%s\n' "${texts[i]}" >"$tmp"; chmod 644 "$tmp"
+    ln -T -- "$tmp" "$target" || fail "unit appeared during install: $target"
+    rm -f -- "$tmp"
+    printf 'installed %s\n' "$target"
+  done
+  systemctl --user daemon-reload
+  exit 0
+fi
+
+verify_process() {
+  local idx=$1 unit=${units[$1]} pid actual expected
+  [[ $(systemctl --user show "$unit" -p ActiveState --value) == active ]] || fail "unit not active: $unit"
+  pid=$(systemctl --user show "$unit" -p MainPID --value)
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || fail "unit has no MainPID: $unit"
+  [[ $(stat -c %u -- "/proc/$pid") == "$(id -u)" ]] || fail "running process is not operator-owned: $unit"
+  [[ $(readlink -e -- "/proc/$pid/exe") == "${binaries[idx]}" ]] || fail "running executable path drift: $unit"
+  actual=$(sha256sum -- "/proc/$pid/exe"); expected=$(sha256sum -- "${binaries[idx]}")
+  [[ ${actual%% *} == "${expected%% *}" ]] || fail "running executable SHA drift: $unit"
+  actual=$(tr '\0' '\n' <"/proc/$pid/cmdline")
+  [[ $actual == "${argvs[idx]}" ]] || fail "running arguments drift: $unit"
+  [[ $(systemctl --user show "$unit" -p MainPID --value) == "$pid" ]] || fail "MainPID changed during inspection: $unit"
+  [[ $(systemctl --user show "$unit" -p ActiveState --value) == active ]] || fail "unit stopped during inspection: $unit"
+}
+endpoint_ready() {
+  local idx=$1 unit=${units[$1]} pid endpoint uid user acl expected
+  pid=$(systemctl --user show "$unit" -p MainPID --value)
+  endpoint=${endpoints[idx]}
+  case ${endpoint_kinds[idx]} in
+    unix)
+      [[ -S $endpoint && ! -L $endpoint && $(stat -c %u -- "$endpoint") == "$(id -u)" ]] || return 1
+      ss -xlnp | awk -v e="$endpoint" -v p="pid=$pid," '$5 == e && index($0,p) {found=1} END {exit !found}' || return 1
+      uid=${task_uids[idx]}
+      if [[ -n $uid ]]; then
+        user=$(id -nu "$uid")
+        sudo -n -u "$user" /usr/bin/test -r "${task_configs[idx]}" || return 1
+        sudo -n -u "$user" /usr/bin/test -w "$endpoint" || return 1
+        sudo -n -u "$user" /usr/bin/test ! -e "$host_socket" || return 1
+        printf -v expected 'user::rwx\nuser:%s:--x\ngroup::---\nmask::--x\nother::---' "$uid"
+        acl=$(getfacl -cnp -- "${endpoint%/*}")
+        [[ $acl == "$expected" ]] || return 1
+        printf -v expected 'user::rw-\nuser:%s:r--\ngroup::---\nmask::r--\nother::---' "$uid"
+        acl=$(getfacl -cnp -- "${task_configs[idx]}")
+        [[ $acl == "$expected" ]] || return 1
+        printf -v expected 'user::rw-\nuser:%s:rw-\ngroup::---\nmask::rw-\nother::---' "$uid"
+        acl=$(getfacl -cnp -- "$endpoint")
+        [[ $acl == "$expected" ]] || return 1
+      fi ;;
+    tcp)
+      ss -ltnp | awk -v e="$endpoint" -v p="pid=$pid," '$4 == e && index($0,p) {found=1} END {exit !found}' || return 1 ;;
+  esac
+}
+wait_ready() {
+  local idx=$1
+  for ((n=0; n<50; n++)); do
+    if endpoint_ready "$idx"; then verify_process "$idx"; return 0; fi
+    sleep 0.1
+  done
+  fail "unit endpoint not ready or wrongly owned: ${units[idx]}"
+}
+if [[ $action == status ]]; then
+  for ((i=0; i<${#units[@]}; i++)); do
+    verify_process "$i"; wait_ready "$i"
+    printf 'active exact %s MainPID=%s\n' "${units[i]}" "$(systemctl --user show "${units[i]}" -p MainPID --value)"
+  done
+  exit 0
+fi
+
+taskctl() {
+  local uid=$1 user
+  shift
+  user=$(id -nu "$uid")
+  sudo -n -u "$user" /usr/bin/env "XDG_RUNTIME_DIR=/run/user/$uid" \
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" systemctl --user "$@"
+}
+controller_clean() {
+  local idx=$1 uid=${controller_uids[$1]} task=${controller_tasks[$1]} config=${controller_configs[$1]}
+  local allow_new=${2:-0} user state journal worker_units worker_unit active pid group
+  user=$(id -nu "$uid")
+  state=$(sudo -n -u "$user" jq -er .stateDir "$config") || return 1
+  safe_path "$state"
+  journal=$state/journal.json
+  if sudo -n -u "$user" /usr/bin/test -e "$journal"; then
+    sudo -n -u "$user" jq -e '
+    (.connection == "soft" or .connection == "detached") and
+    .child == null and .pending == null and .toolPending == null and
+    .providerPending == null and .toolHold == null and .parentHold == null and
+    .providerHold == null and .providerAttempt == null and .settlementDue == null and
+    (.hardReconnectPending == null or .hardReconnectPending == false) and
+    (.hermesSession.pendingPrompt == null or .hermesSession.pendingPrompt == false) and
+    .unresolvedExternal == []
+    ' "$journal" >/dev/null || return 1
+  else
+    [[ $allow_new == 1 ]] || return 1
+  fi
+  worker_units=$(taskctl "$uid" list-units --all --type=service --no-legend --plain "mini-grain-t$task-o*.service" | awk '{print $1}') || return 1
+  while IFS= read -r worker_unit; do
+    [[ -n $worker_unit ]] || continue
+    [[ $worker_unit =~ ^mini-grain-t${task}-o[0-9]+\.service$ ]] || return 1
+    active=$(taskctl "$uid" show "$worker_unit" -p ActiveState --value) || return 1
+    pid=$(taskctl "$uid" show "$worker_unit" -p MainPID --value) || return 1
+    group=$(taskctl "$uid" show "$worker_unit" -p ControlGroup --value) || return 1
+    [[ $active == inactive || $active == failed ]] || return 1
+    [[ $pid == 0 && -z $group ]] || return 1
+  done <<< "$worker_units"
+}
+verify_controller() {
+  local idx=$1 uid=${controller_uids[$1]} unit=${controller_units[$1]}
+  local pid actual expected user
+  user=$(id -nu "$uid")
+  [[ $(taskctl "$uid" show "$unit" -p ActiveState --value) == active ]] || fail "task controller inactive: $unit"
+  [[ $(taskctl "$uid" show "$unit" -p FragmentPath --value) == "${controller_fragments[idx]}" &&
+     $(taskctl "$uid" show "$unit" -p NeedDaemonReload --value) == no &&
+     -z $(taskctl "$uid" show "$unit" -p DropInPaths --value) ]] || fail "task controller loaded-unit drift: $unit"
+  pid=$(taskctl "$uid" show "$unit" -p MainPID --value)
+  [[ $pid =~ ^[1-9][0-9]*$ && $(stat -c %u -- "/proc/$pid") == "$uid" ]] || fail "task controller PID/UID drift: $unit"
+  [[ $(sudo -n -u "$user" readlink -e -- "/proc/$pid/exe") == "${controller_runtimes[idx]}" ]] || fail "task controller executable path drift: $unit"
+  actual=$(sudo -n -u "$user" sha256sum -- "/proc/$pid/exe")
+  expected=$(sha256sum -- "${controller_runtimes[idx]}")
+  [[ ${actual%% *} == "${expected%% *}" ]] || fail "task controller executable SHA drift: $unit"
+  actual=$(tr '\0' '\n' <"/proc/$pid/cmdline")
+  [[ $actual == "$(printf '%s\n' "${controller_runtimes[idx]}" serve "${controller_configs[idx]}")" ]] ||
+    fail "task controller arguments drift: $unit"
+  [[ $(taskctl "$uid" show "$unit" -p MainPID --value) == "$pid" ]] || fail "task controller PID changed: $unit"
+}
+if [[ $action == quiescence ]]; then
+  ((controller_count == front_count)) || fail 'quiescence requires one controller per frontend'
+  for ((i=0; i<controller_count; i++)); do
+    verify_controller "$i"
+    controller_clean "$i" || fail "controller not physically quiescent: ${controller_units[i]}"
+    printf 'quiescent exact %s UID=%s\n' "${controller_units[i]}" "${controller_uids[i]}"
+  done
+  exit 0
+fi
+if [[ $action == enable ]]; then
+  fail 'boot enable is not qualified: cross-user manager ordering and durable path migration require a separate acceptance'
+fi
+
+wait_active() {
+  local unit=$1
+  for ((n=0; n<50; n++)); do
+    [[ $(systemctl --user show "$unit" -p ActiveState --value) == active ]] && return 0
+    sleep 0.1
+  done
+  fail "unit did not become active: $unit"
+}
+operation_incomplete=0
+safe_abort() {
+  ((operation_incomplete)) || return 0
+  # An incomplete transition must leave no task controller or public frontend
+  # running against a partially restarted private Host.
+  for ((j=0; j<controller_count; j++)); do
+    taskctl "${controller_uids[j]}" stop "${controller_units[j]}" >/dev/null 2>&1 || :
+  done
+  for ((j=${#units[@]}-1; j>=0; j--)); do
+    systemctl --user stop "${units[j]}" >/dev/null 2>&1 || :
+  done
+}
+if [[ $action == start ]]; then
+  for unit in "${units[@]}"; do
+    [[ $(systemctl --user show "$unit" -p ActiveState --value) != active ]] || fail "unit already active: $unit"
+  done
+  for ((i=0; i<controller_count; i++)); do
+    unit=${controller_units[i]}; uid=${controller_uids[i]}
+    [[ $(taskctl "$uid" show "$unit" -p ActiveState --value) != active &&
+       $(taskctl "$uid" show "$unit" -p MainPID --value) == 0 ]] ||
+      fail "task controller active during initial operator start: $unit"
+    controller_clean "$i" 1 || fail "task controller has an unresolved journal or worker during initial start: $unit"
+  done
+  operation_incomplete=1; trap safe_abort EXIT
+  systemctl --user start "$host_unit"; wait_active "$host_unit"; wait_ready 0
+  for ((i=1; i<${#units[@]}; i++)); do systemctl --user start "${units[i]}"; wait_active "${units[i]}"; wait_ready "$i"; done
+  for ((i=0; i<${#units[@]}; i++)); do verify_process "$i"; wait_ready "$i"; done
+  operation_incomplete=0; trap - EXIT
+  printf 'started exact operator stack\n'
+  exit 0
+fi
+
+[[ -n $check_bin ]] || fail 'restart requires a pinned private signedCheck.binary'
+((controller_count == front_count)) || fail 'restart requires one exact task controller per frontend'
+for ((i=0; i<${#units[@]}; i++)); do verify_process "$i"; wait_ready "$i"; done
+for ((i=0; i<controller_count; i++)); do
+  verify_controller "$i"
+  controller_clean "$i" || fail "controller has a worker, pending effect, hold, or unresolved outcome: ${controller_units[i]}"
+done
+before=$($check_bin 2>/dev/null) || fail 'pre-restart signed read failed'
+[[ $before =~ ^(0|[1-9][0-9]*)$ ]] || fail 'signed check must emit one canonical decimal root'
+operation_incomplete=1; trap safe_abort EXIT
+for ((i=0; i<controller_count; i++)); do
+  taskctl "${controller_uids[i]}" stop "${controller_units[i]}"
+done
+for ((i=0; i<controller_count; i++)); do
+  [[ $(taskctl "${controller_uids[i]}" show "${controller_units[i]}" -p MainPID --value) == 0 ]] ||
+    fail "task controller still has a PID: ${controller_units[i]}"
+  controller_clean "$i" || fail "task controller became non-quiescent during maintenance: ${controller_units[i]}"
+done
+for ((i=${#units[@]}-1; i>=1; i--)); do systemctl --user stop "${units[i]}"; done
+systemctl --user restart "$host_unit"; wait_active "$host_unit"; wait_ready 0
+for ((i=1; i<${#units[@]}; i++)); do systemctl --user start "${units[i]}"; wait_active "${units[i]}"; wait_ready "$i"; done
+for ((i=0; i<${#units[@]}; i++)); do verify_process "$i"; wait_ready "$i"; done
+after=$($check_bin 2>/dev/null) || fail 'post-restart signed read failed'
+[[ $after == "$before" ]] || fail 'signed root changed across restart'
+for ((i=0; i<controller_count; i++)); do
+  taskctl "${controller_uids[i]}" start "${controller_units[i]}"
+  verify_controller "$i"
+  controller_clean "$i" || fail "task controller resumed with pending effects: ${controller_units[i]}"
+done
+operation_incomplete=0; trap - EXIT
+printf 'restarted exact operator stack; signed root unchanged: %s\n' "$after"
