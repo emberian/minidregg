@@ -1,0 +1,9 @@
+Running as unit: run-p1121294-i977996554.scope; invocation ID: ef0c33579f4043dfb66a1f0514207cb8
+'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes' depends on axioms: [propext, Classical.choice, Quot.sound]
