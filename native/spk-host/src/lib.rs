@@ -8,6 +8,16 @@ mod agent_api_custody;
 #[cfg(target_os = "linux")]
 mod agent_api_lifetime_v3;
 #[cfg(target_os = "linux")]
+mod agent_api_lifetime_reverse_v3;
+#[cfg(target_os = "linux")]
+mod agent_api_lifetime_custody_v3;
+#[cfg(target_os = "linux")]
+mod agent_api_lifetime_paid_native_v3;
+#[cfg(target_os = "linux")]
+mod agent_api_lifetime_dispatch_native_v3;
+#[cfg(target_os = "linux")]
+mod agent_api_lifetime_server_v3;
+#[cfg(target_os = "linux")]
 mod agent_api_lifetime_wire_v3;
 #[cfg(target_os = "linux")]
 mod agent_api_native;

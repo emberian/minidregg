@@ -3,6 +3,7 @@
 #![allow(dead_code)] // Shared resident v3 listener is wired in a later source cut.
 
 use crate::agent_api_lifetime_v3::LifetimeBinding;
+use crate::agent_api_lifetime_v3::ReceiptPin;
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -193,6 +194,10 @@ pub(crate) enum Reply {
         binding_sha256: String,
         #[serde(rename = "operationFingerprint")]
         operation_fingerprint: String,
+        #[serde(rename = "responseSha256")]
+        response_sha256: String,
+        #[serde(rename = "committedReceipt")]
+        committed_receipt: ReceiptPin,
         status: u16,
         headers: Vec<OrdinaryHeader>,
         #[serde(rename = "bodyHex")]

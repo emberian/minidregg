@@ -189,7 +189,19 @@ impl ReverseCustodyClient {
         })
     }
 
-    fn exchange(&self, request: &Value, cancelled: &AtomicBool) -> io::Result<Value> {
+    pub(crate) fn exchange(&self, request: &Value, cancelled: &AtomicBool) -> io::Result<Value> {
+        self.exchange_until(request, cancelled, Instant::now() + Duration::from_secs(30))
+    }
+
+    /// A caller-supplied absolute deadline permits long source/native v3
+    /// work without weakening the short v2 exchange. Cancellation remains
+    /// polled throughout and no request is retried after any write.
+    pub(crate) fn exchange_until(
+        &self,
+        request: &Value,
+        cancelled: &AtomicBool,
+        deadline: Instant,
+    ) -> io::Result<Value> {
         if cancelled.load(Ordering::Acquire) {
             return Err(invalid("caller cancelled before reverse custody"));
         }
@@ -219,7 +231,6 @@ impl ReverseCustodyClient {
         if !before.file_type().is_socket() || before.uid() != self.controller_uid {
             return Err(invalid("reverse custody socket owner/type drift"));
         }
-        let deadline = Instant::now() + Duration::from_secs(30);
         let mut stream = connect_cancelled(&self.socket, deadline, cancelled)?;
         let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
         let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
@@ -278,9 +289,10 @@ impl ReverseCustodyClient {
         let mut length = [0u8; 4];
         read_cancelled(&mut stream, &mut length, deadline, cancelled)?;
         let length = u32::from_be_bytes(length) as usize;
-        // The reserve reply returns the full source-authored Request as hex;
-        // even a bounded Git HTTP body can exceed a 16 KiB control reply.
-        if length == 0 || length > 262_144 {
+        // V3 also returns the exact op80 ReservePlan frame. A bounded Git
+        // body can appear twice as hex (Request and Plan), so keep the
+        // response bound separate from the smaller forward HTTP frame.
+        if length == 0 || length > 1_048_576 {
             return Err(invalid("reverse custody reply bound"));
         }
         let mut reply = vec![0u8; length];

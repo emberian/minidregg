@@ -81,7 +81,7 @@ pub(crate) struct ReceiptPin {
 }
 
 impl ReceiptPin {
-    fn validate(&self) -> io::Result<()> {
+    pub(crate) fn validate(&self) -> io::Result<()> {
         if [
             &self.transaction_id,
             &self.event_id,

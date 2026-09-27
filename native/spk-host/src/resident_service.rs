@@ -5,6 +5,9 @@
 #![allow(dead_code)] // Enabled only after root reviews the exact native cut.
 
 use crate::agent_api_custody::AgentCustody;
+use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
+use crate::agent_api_lifetime_reverse_v3::LifetimeReverseClient;
+use crate::agent_api_lifetime_server_v3::{self, ResidentLifetimeAgent};
 use crate::agent_api_native::ReverseCustodyClient;
 use crate::agent_api_server::{AgentApiListener, ResidentAgent};
 use crate::completion_native::preflight_custodian;
@@ -92,6 +95,12 @@ struct FixedEntranceConfig {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FixedAgentConfig {
+    #[serde(default)]
+    protocol: Option<String>,
+    #[serde(default)]
+    reverse_timeout_seconds: Option<u64>,
+    #[serde(default)]
+    controller_worker_wall_seconds: Option<u64>,
     socket: PathBuf,
     controller_uid: u32,
     custody: PathBuf,
@@ -100,6 +109,30 @@ struct FixedAgentConfig {
     attempt_dir: PathBuf,
     display_name: String,
     preferred_handle: String,
+}
+
+enum PreparedAgent {
+    V2(Box<AgentCustody>, ReverseCustodyClient),
+    V3(Box<LifetimeCustodyV3>, LifetimeReverseClient),
+}
+
+impl PreparedAgent {
+    fn coordinates(&self) -> (&str, &str, &str, &str) {
+        match self {
+            Self::V2(custody, _) => (
+                &custody.session,
+                &custody.ticket_resource,
+                &custody.parent_task,
+                &custody.purse_task,
+            ),
+            Self::V3(custody, _) => (
+                &custody.lineage.session_resource,
+                &custody.lineage.ticket_resource,
+                &custody.lineage.parent_task,
+                &custody.lineage.purse_task,
+            ),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -747,7 +780,21 @@ impl ResidentConfig {
             }
         }
         for (index, agent) in config.agents.iter().enumerate() {
-            if !agent.socket.is_absolute()
+            if !matches!(
+                agent.protocol.as_deref(),
+                None | Some("mini-spk-agent-api-v3")
+            ) || match agent.protocol.as_deref() {
+                None => agent.reverse_timeout_seconds.is_some(),
+                Some("mini-spk-agent-api-v3") => !matches!(
+                    (agent.reverse_timeout_seconds, agent.controller_worker_wall_seconds),
+                    (Some(timeout), Some(wall))
+                        if (60..=1740).contains(&timeout)
+                            && (120..=1800).contains(&wall)
+                            && timeout <= wall - 60
+                ),
+                _ => true,
+            } || (agent.protocol.is_none() && agent.controller_worker_wall_seconds.is_some())
+                || !agent.socket.is_absolute()
                 || agent.controller_uid == 0
                 || agent.controller_uid == config.app_uid
                 || !agent.custody.is_absolute()
@@ -900,30 +947,42 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             config.app_uid,
             false,
         )?;
-        let custody: AgentCustody =
-            serde_json::from_slice(&private_file(&agent.custody, MAX_CONFIG)?)?;
-        custody.validate()?;
-        if agent_preflights
+        let bytes = private_file(&agent.custody, MAX_CONFIG)?;
+        let prepared = match agent.protocol.as_deref() {
+            None => {
+                let custody: AgentCustody = serde_json::from_slice(&bytes)?;
+                custody.validate()?;
+                let reverse = ReverseCustodyClient::new(
+                    agent.reverse_socket.clone(),
+                    agent.controller_uid,
+                    agent.route_name.clone(),
+                )?;
+                PreparedAgent::V2(Box::new(custody), reverse)
+            }
+            Some("mini-spk-agent-api-v3") => {
+                let custody: LifetimeCustodyV3 = serde_json::from_slice(&bytes)?;
+                custody.validate()?;
+                let reverse = ReverseCustodyClient::new(
+                    agent.reverse_socket.clone(),
+                    agent.controller_uid,
+                    agent.route_name.clone(),
+                )?;
+                PreparedAgent::V3(Box::new(custody), LifetimeReverseClient::new(reverse))
+            }
+            _ => return Err(invalid("resident agent protocol refused")),
+        };
+        let (session, ticket, parent, purse) = prepared.coordinates();
+        if agent_preflights.iter().any(|prior: &PreparedAgent| {
+            let (s, t, p, q) = prior.coordinates();
+            s == session || t == ticket || p == parent || q == purse
+        }) || custodies
             .iter()
-            .any(|(prior, _): &(AgentCustody, ReverseCustodyClient)| {
-                prior.session == custody.session
-                    || prior.ticket_resource == custody.ticket_resource
-                    || prior.parent_task == custody.parent_task
-                    || prior.purse_task == custody.purse_task
-            })
-            || custodies.iter().any(|human| {
-                human.session == custody.session || human.ticket_resource == custody.ticket_resource
-            })
+            .any(|human| human.session == session || human.ticket_resource == ticket)
         {
             return Err(invalid("resident agent authority route duplicated"));
         }
         private_dir(&agent.attempt_dir)?;
-        let reverse = ReverseCustodyClient::new(
-            agent.reverse_socket.clone(),
-            agent.controller_uid,
-            agent.route_name.clone(),
-        )?;
-        agent_preflights.push((custody, reverse));
+        agent_preflights.push(prepared);
     }
     let launch = SourceBoundLaunch::author(&operator, &package, &config.descriptor_attempt_dir)?;
     QualifiedLaunch::matches(&config, &launch)?;
@@ -1038,11 +1097,17 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "fixed participant custody differs from claimed shared app",
         ));
     }
-    for (custody, _) in &agent_preflights {
-        if custody.app != claim.physical_begin.app.to_string()
-            || custody.app_generation != claim.physical_begin.generation.to_string()
-            || bridge.api_path.is_none()
-        {
+    for prepared in &agent_preflights {
+        let matches_app = match prepared {
+            PreparedAgent::V2(custody, _) => {
+                custody.app == claim.physical_begin.app.to_string()
+                    && custody.app_generation == claim.physical_begin.generation.to_string()
+            }
+            PreparedAgent::V3(custody, _) => {
+                custody.lineage.app_resource == claim.physical_begin.app.to_string()
+            }
+        };
+        if !matches_app || bridge.api_path.is_none() {
             return Err(invalid("agent custody differs from claimed shared app"));
         }
     }
@@ -1165,14 +1230,14 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .agents
         .iter()
         .zip(agent_preflights)
-        .map(|(agent, (custody, reverse))| {
+        .map(|(agent, prepared)| {
             AgentApiListener::bind(&agent.socket, agent.controller_uid)
-                .map(|listener| (listener, custody, reverse, agent))
+                .map(|listener| (listener, prepared, agent))
         })
         .collect::<io::Result<Vec<_>>>()?;
     let agent_fds: Vec<_> = agent_routes
         .iter()
-        .map(|(listener, _, _, _)| listener.as_raw_fd())
+        .map(|(listener, _, _)| listener.as_raw_fd())
         .collect();
     PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
         if let Ok((index, request, kind, policy)) = event {
@@ -1199,23 +1264,50 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             Err(index) => index,
             Ok(_) => unreachable!("HTTP branch returned above"),
         };
-        let (listener, custody, reverse, agent) = agent_routes
+        let (listener, prepared, agent) = agent_routes
             .get_mut(index)
             .ok_or_else(|| invalid("resident agent poll index drift"))?;
-        let mut context = ResidentAgent {
-            operator: &operator,
-            custody,
-            journal: &journal,
-            rpc: &mut resident.rpc,
-            reverse_reserve: reverse,
-            signed_api_path: api_path
-                .as_deref()
-                .ok_or_else(|| invalid("signed API path absent"))?,
-            display_name: &agent.display_name,
-            preferred_handle: &agent.preferred_handle,
-            attempt_parent: &agent.attempt_dir,
-        };
-        listener.poll_once(&mut context)?;
+        let signed_api_path = api_path
+            .as_deref()
+            .ok_or_else(|| invalid("signed API path absent"))?;
+        match prepared {
+            PreparedAgent::V2(custody, reverse) => {
+                let mut context = ResidentAgent {
+                    operator: &operator,
+                    custody,
+                    journal: &journal,
+                    rpc: &mut resident.rpc,
+                    reverse_reserve: reverse,
+                    signed_api_path,
+                    display_name: &agent.display_name,
+                    preferred_handle: &agent.preferred_handle,
+                    attempt_parent: &agent.attempt_dir,
+                };
+                listener.poll_once(&mut context)?;
+            }
+            PreparedAgent::V3(custody, reverse) => {
+                let mut context = ResidentLifetimeAgent {
+                    operator: &operator,
+                    custody,
+                    journal: &journal,
+                    rpc: &mut resident.rpc,
+                    reverse,
+                    signed_api_path,
+                    display_name: &agent.display_name,
+                    preferred_handle: &agent.preferred_handle,
+                    attempt_parent: &agent.attempt_dir,
+                    reverse_timeout: Duration::from_secs(
+                        agent
+                            .reverse_timeout_seconds
+                            .ok_or_else(|| invalid("lifetime reverse timeout absent"))?,
+                    ),
+                    controller_worker_wall_seconds: agent
+                        .controller_worker_wall_seconds
+                        .ok_or_else(|| invalid("lifetime worker wall pin absent"))?,
+                };
+                agent_api_lifetime_server_v3::poll_once(listener, &mut context)?;
+            }
+        }
         Ok(None)
     })
 }
@@ -1325,6 +1417,9 @@ mod tests {
     #[test]
     fn distinct_agent_uids_need_disjoint_socket_parent_acl_scopes() {
         let first = FixedAgentConfig {
+            protocol: None,
+            reverse_timeout_seconds: None,
+            controller_worker_wall_seconds: None,
             socket: PathBuf::from("/run/mini-spk/agent-a/api.sock"),
             controller_uid: 1001,
             custody: PathBuf::from("/var/lib/mini-spk/a-custody.json"),

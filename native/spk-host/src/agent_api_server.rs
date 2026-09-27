@@ -60,7 +60,7 @@ fn decimal<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
     Ok(text)
 }
 
-fn unhex32(value: &str) -> io::Result<[u8; 32]> {
+pub(crate) fn unhex32(value: &str) -> io::Result<[u8; 32]> {
     if value.len() != 64
         || !value
             .bytes()
@@ -76,7 +76,7 @@ fn unhex32(value: &str) -> io::Result<[u8; 32]> {
     Ok(output)
 }
 
-fn digest_nat(value: &str) -> io::Result<[u8; 32]> {
+pub(crate) fn digest_nat(value: &str) -> io::Result<[u8; 32]> {
     let mut bytes = [0u8; 32];
     for digit in value.bytes() {
         if !digit.is_ascii_digit() {
@@ -180,14 +180,14 @@ fn protected_agent_socket_parent(
     }
 }
 
-struct CallerWatch {
-    cancelled: Arc<AtomicBool>,
+pub(crate) struct CallerWatch {
+    pub(crate) cancelled: Arc<AtomicBool>,
     done: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl CallerWatch {
-    fn start(stream: &UnixStream) -> io::Result<Self> {
+    pub(crate) fn start(stream: &UnixStream) -> io::Result<Self> {
         let stream = stream.try_clone()?;
         let cancelled = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicBool::new(false));
@@ -317,41 +317,9 @@ impl AgentApiListener {
     /// One bounded accept. The resident event loop remains the sole owner of
     /// its mutable RpcDriver and calls this alongside human entrances.
     pub(crate) fn poll_once(&self, resident: &mut ResidentAgent<'_>) -> io::Result<bool> {
-        let (mut stream, _) = match self.listener.accept() {
-            Ok(pair) => pair,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
-            Err(error) => return Err(error),
+        let Some(mut stream) = self.accept_authenticated()? else {
+            return Ok(false);
         };
-        let metadata = fs::symlink_metadata(&self.socket)?;
-        if !metadata.file_type().is_socket()
-            || metadata.uid() != unsafe { libc::geteuid() }
-            || (metadata.dev(), metadata.ino()) != self.socket_identity
-            || metadata.permissions().mode() & 0o777
-                != if self.expected_uid == unsafe { libc::geteuid() } {
-                    0o600
-                } else {
-                    0o660
-                }
-        {
-            return Err(invalid("agent socket identity drift"));
-        }
-        exact_acl(&self.socket, self.expected_uid, false, false)?;
-        let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
-        let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-        if unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&mut credentials as *mut libc::ucred).cast(),
-                &mut size,
-            )
-        } != 0
-            || size as usize != std::mem::size_of::<libc::ucred>()
-            || credentials.uid != self.expected_uid
-        {
-            return Ok(true);
-        }
         let frame = match agent_api_wire::read_frame(&mut stream) {
             Ok(frame) => frame,
             Err(_) => return Ok(true),
@@ -390,6 +358,47 @@ impl AgentApiListener {
             let _ = agent_api_wire::write_frame(&mut stream, &bytes);
         }
         Ok(true)
+    }
+
+    /// Shared v2/v3 transport check. The protocol parser runs only after the
+    /// protected socket identity and exact controller UID have been checked.
+    pub(crate) fn accept_authenticated(&self) -> io::Result<Option<UnixStream>> {
+        let (stream, _) = match self.listener.accept() {
+            Ok(pair) => pair,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let metadata = fs::symlink_metadata(&self.socket)?;
+        if !metadata.file_type().is_socket()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || (metadata.dev(), metadata.ino()) != self.socket_identity
+            || metadata.permissions().mode() & 0o777
+                != if self.expected_uid == unsafe { libc::geteuid() } {
+                    0o600
+                } else {
+                    0o660
+                }
+        {
+            return Err(invalid("agent socket identity drift"));
+        }
+        exact_acl(&self.socket, self.expected_uid, false, false)?;
+        let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        if unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut credentials as *mut libc::ucred).cast(),
+                &mut size,
+            )
+        } != 0
+            || size as usize != std::mem::size_of::<libc::ucred>()
+            || credentials.uid != self.expected_uid
+        {
+            return Ok(None);
+        }
+        Ok(Some(stream))
     }
 }
 
@@ -832,7 +841,7 @@ fn read_saved_binding(attempt_parent: &Path, operation_id: &str) -> io::Result<S
     Ok(pin.to_owned())
 }
 
-fn read_private_recovery(path: &Path, max: usize) -> io::Result<Vec<u8>> {
+pub(crate) fn read_private_recovery(path: &Path, max: usize) -> io::Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)

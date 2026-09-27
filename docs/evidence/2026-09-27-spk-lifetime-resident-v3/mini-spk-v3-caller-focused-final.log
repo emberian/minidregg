@@ -1,0 +1,34 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.49s
+────────────
+ Nextest run ID 573113c0-6c26-4fcb-8475-0fe74accc340 with nextest profile: default
+    Starting 27 tests across 1 binary (143 tests skipped)
+        PASS [   0.014s] ( 1/27) minidregg-spk-host agent_api_lifetime_v3::tests::lineage_fingerprint_keeps_origin_and_current_generation_separate
+        PASS [   0.016s] ( 2/27) minidregg-spk-host agent_api_lifetime_dispatch_native_v3::tests::committed_receipt_order_uses_full_decimal_nat
+        PASS [   0.015s] ( 3/27) minidregg-spk-host agent_api_lifetime_paid_native_v3::tests::native_reply_must_be_exact_op_and_frame
+        PASS [   0.015s] ( 4/27) minidregg-spk-host agent_api_lifetime_custody_v3::tests::first_gitweb_http_has_exact_ordered_source_bytes_and_no_current_claims
+        PASS [   0.017s] ( 5/27) minidregg-spk-host agent_api_lifetime_dispatch_native_v3::tests::only_fresh_op76_payload_with_distinct_permit_tag_can_advance
+        PASS [   0.021s] ( 6/27) minidregg-spk-host hostd::tests::verified_settlement_reconciles_uncertain_a_without_clearing_b
+        PASS [   0.021s] ( 7/27) minidregg-spk-host agent_api_lifetime_v3::tests::committed_comparison_checks_exact_frame_receipt_and_original_descriptor
+        PASS [   0.027s] ( 8/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::initial_reserved_reply_requires_exact_source_plan_bytes
+        PASS [   0.026s] ( 9/27) minidregg-spk-host agent_api_lifetime_server_v3::tests::definite_http_hashes_exact_app_response_not_self_referential_json
+        PASS [   0.015s] (10/27) minidregg-spk-host agent_api_lifetime_wire_v3::tests::v3_forward_is_finite_and_does_not_accept_current_transport_claims
+        PASS [   0.012s] (11/27) minidregg-spk-host resident_service::tests::parsed_api_root_and_discovery_keep_one_canonical_prefix
+        PASS [   0.026s] (12/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::payer_callback_preserves_all_ordered_slots_and_operation_pins
+        PASS [   0.012s] (13/27) minidregg-spk-host resident_service::tests::retained_completion_requires_exact_source_evidence_after_restart
+        PASS [   0.027s] (14/27) minidregg-spk-host resident_service::tests::distinct_agent_uids_need_disjoint_socket_parent_acl_scopes
+        PASS [   0.014s] (15/27) minidregg-spk-host resident_service::tests::resident_config_refuses_two_agent_sockets_under_one_acl_parent
+        PASS [   0.018s] (16/27) minidregg-spk-host agent_api_lifetime_wire_v3::tests::pre_reserve_refusal_and_post_reserve_uncertainty_have_distinct_fingerprints
+        PASS [   0.031s] (17/27) minidregg-spk-host agent_api_lifetime_server_v3::tests::historical_inspect_requires_original_http_binding_settlement_and_exact_saved_reply
+        PASS [   0.032s] (18/27) minidregg-spk-host hostd::tests::recovered_delivered_dispatch_releases_exact_slot_and_is_idempotent
+        PASS [   0.022s] (19/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::reserve_index_matches_full_decimal_receipt_count
+        PASS [   0.034s] (20/27) minidregg-spk-host agent_api_lifetime_v3::tests::paid_comparison_keeps_history_and_checks_new_purse_root
+        PASS [   0.023s] (21/27) minidregg-spk-host agent_api_lifetime_v3::tests::reserve_comparison_rejects_changed_http_and_physical_root
+        PASS [   0.027s] (22/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::settlement_inspection_is_read_only_and_exactly_pinned
+        PASS [   0.039s] (23/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::mark_send_and_settle_use_distinct_durable_controller_acks
+        PASS [   0.048s] (24/27) minidregg-spk-host agent_api_lifetime_paid_native_v3::tests::op79_detached_signature_pair_keeps_grant_between_app_and_payer
+        PASS [   0.050s] (25/27) minidregg-spk-host agent_api_lifetime_custody_v3::tests::grant_observation_uses_its_own_exact_source_slot_and_seed
+        PASS [   0.054s] (26/27) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::reverse_transport_accepts_bounded_double_frame_reply
+        PASS [   0.071s] (27/27) minidregg-spk-host agent_api_lifetime_custody_v3::tests::payer_signatures_cover_every_exact_ordered_source_slot
+────────────
+     Summary [   0.072s] 27 tests run: 27 passed, 143 skipped

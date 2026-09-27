@@ -5,6 +5,7 @@
 //! receipt, exact event, and current pending query. In particular, a generic
 //! resource transaction or caller JSON is never enough to start an app.
 
+use crate::agent_api_lifetime_reverse_v3::VerifiedSettlementV3;
 use crate::rpc_adapter::DispatchFence;
 use crate::sandbox::open_protected_directory;
 use crate::spawn_gate::{self, BoundedChild, SpawnSpec};
@@ -1057,12 +1058,12 @@ impl Journal {
             return File::open(&self.directory)?.sync_all();
         }
         let old = self.read_dispatch_unlocked(&tombstone.identity)?;
-        if old.phase != DispatchPhase::DeliveryRequested
-            || !matches!(
-                tombstone.phase,
-                DispatchPhase::Delivered | DispatchPhase::Uncertain
-            )
-        {
+        if !matches!(
+            (old.phase, tombstone.phase),
+            (DispatchPhase::DeliveryRequested, DispatchPhase::Delivered)
+                | (DispatchPhase::DeliveryRequested, DispatchPhase::Uncertain)
+                | (DispatchPhase::Uncertain, DispatchPhase::Delivered)
+        ) {
             return Err(invalid("dispatch tombstone transition refused"));
         }
         let nonce = SystemTime::now()
@@ -1180,6 +1181,121 @@ impl Journal {
             } else {
                 Err(invalid("physical dispatch result uncertain or app fenced"))
             }
+        })
+    }
+
+    /// Finish an exact response already proven settled by the controller's
+    /// read-only native settlement inspection. This is idempotent across a
+    /// crash between the Delivered tombstone, record, and active-marker fsyncs.
+    /// It cannot establish settlement by itself or authorize another send.
+    pub(crate) fn finish_dispatch_recovered(
+        &self,
+        identity: &DispatchIdentity,
+        settlement: &VerifiedSettlementV3,
+    ) -> io::Result<()> {
+        identity.validate()?;
+        if settlement.committed_receipt().transaction_id != identity.dispatch_transaction
+            || settlement.committed_receipt().event_id != identity.dispatch_event
+        {
+            return Err(invalid(
+                "recovered settlement receipt differs from dispatch identity",
+            ));
+        }
+        self.with_lock(|this| {
+            let mut record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing BEGIN"))?;
+            if record.phase != Phase::Running
+                || record.identity.app != identity.app
+                || record.identity.generation != identity.app_generation
+                || record.invocation_id.as_deref() != Some(identity.invocation_id.as_str())
+            {
+                return Err(invalid("recovered dispatch app incarnation drift"));
+            }
+            this.verify_dispatch_permit_unlocked(identity)?;
+            let tombstone = this.read_dispatch_unlocked(identity)?;
+            if tombstone.phase != DispatchPhase::DeliveryRequested
+                && tombstone.phase != DispatchPhase::Delivered
+                && tombstone.phase != DispatchPhase::Uncertain
+            {
+                return Err(invalid("recovered dispatch tombstone is not deliverable"));
+            }
+            if tombstone.phase == DispatchPhase::Uncertain {
+                // A worker-release fence may already have freed the shared
+                // slot after a lost settle ACK. A separately verified native
+                // settlement can promote only this exact terminal tombstone;
+                // another participant's active slot is left untouched.
+                let same_active = record.dispatch_in_flight.as_ref() == Some(identity);
+                if same_active && this.read_active_dispatch_unlocked()? != *identity {
+                    return Err(invalid("recovered uncertain active marker drift"));
+                }
+                this.write_dispatch_unlocked(
+                    &DispatchTombstone {
+                        version: VERSION,
+                        identity: identity.clone(),
+                        phase: DispatchPhase::Delivered,
+                    },
+                    false,
+                )?;
+                if same_active {
+                    record.dispatch_in_flight = None;
+                    this.write_unlocked(&record)?;
+                    this.clear_active_dispatch_unlocked(identity)?;
+                }
+                return Ok(());
+            }
+            if tombstone.phase == DispatchPhase::Delivered {
+                if let Some(other) = record.dispatch_in_flight.as_ref() {
+                    if other != identity {
+                        if this.read_active_dispatch_unlocked()? != *other {
+                            return Err(invalid("other active dispatch marker drift"));
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+            if record
+                .dispatch_in_flight
+                .as_ref()
+                .is_some_and(|active| active != identity)
+            {
+                return Err(invalid("another dispatch owns the shared app slot"));
+            }
+            let active = match fs::symlink_metadata(this.active_dispatch_path()) {
+                Ok(_) => {
+                    if this.read_active_dispatch_unlocked()? != *identity {
+                        return Err(invalid("recovered active dispatch identity drift"));
+                    }
+                    true
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(error) => return Err(error),
+            };
+            if tombstone.phase == DispatchPhase::DeliveryRequested {
+                if !active || record.dispatch_in_flight.as_ref() != Some(identity) {
+                    return Err(invalid("recovered requested dispatch lacks active custody"));
+                }
+                this.write_dispatch_unlocked(
+                    &DispatchTombstone {
+                        version: VERSION,
+                        identity: identity.clone(),
+                        phase: DispatchPhase::Delivered,
+                    },
+                    false,
+                )?;
+            } else if !active && record.dispatch_in_flight.as_ref() == Some(identity) {
+                return Err(invalid(
+                    "delivered dispatch lost active marker before record release",
+                ));
+            }
+            if record.dispatch_in_flight.as_ref() == Some(identity) {
+                record.dispatch_in_flight = None;
+                this.write_unlocked(&record)?;
+            }
+            if active {
+                this.clear_active_dispatch_unlocked(identity)?;
+            }
+            Ok(())
         })
     }
 
@@ -1724,6 +1840,111 @@ mod tests {
         assert!(journal
             .request_dispatch(dispatch_identity('3'), committed_permit())
             .is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn recovered_delivered_dispatch_releases_exact_slot_and_is_idempotent() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('1');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        let reopened = Journal::open(&path).unwrap();
+        let settled = VerifiedSettlementV3::test_only();
+        assert!(reopened
+            .finish_dispatch_recovered(&first, &VerifiedSettlementV3::test_only_wrong_receipt())
+            .is_err());
+        assert!(reopened.active_dispatch_path().exists());
+        reopened
+            .finish_dispatch_recovered(&first, &settled)
+            .unwrap();
+        reopened
+            .finish_dispatch_recovered(&first, &settled)
+            .unwrap();
+        assert_eq!(
+            reopened.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Delivered
+        );
+        assert!(!reopened.active_dispatch_path().exists());
+        let mut wrong = first.clone();
+        wrong.app_generation += 1;
+        assert!(reopened
+            .finish_dispatch_recovered(&wrong, &settled)
+            .is_err());
+        assert!(reopened
+            .request_dispatch(first, committed_permit())
+            .is_err());
+        let mut second = dispatch_identity('2');
+        second.operation_id = "1".into();
+        reopened
+            .request_dispatch(second.clone(), committed_permit())
+            .unwrap();
+        reopened.finish_dispatch(&second, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn verified_settlement_reconciles_uncertain_a_without_clearing_b() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('1');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        journal
+            .finish_dispatch_uncertain_released(
+                &first,
+                DispatchFence::test_worker_released_for(first.clone()),
+            )
+            .unwrap();
+        let mut second = dispatch_identity('2');
+        second.operation_id = "1".into();
+        journal
+            .request_dispatch(second.clone(), committed_permit())
+            .unwrap();
+        journal
+            .finish_dispatch_recovered(&first, &VerifiedSettlementV3::test_only())
+            .unwrap();
+        journal
+            .finish_dispatch_recovered(&first, &VerifiedSettlementV3::test_only())
+            .unwrap();
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Delivered
+        );
+        assert_eq!(journal.read_active_dispatch_unlocked().unwrap(), second);
+        journal.finish_dispatch(&second, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn recovered_delivered_cleans_crash_between_tombstone_and_active_marker() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('1');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        journal
+            .write_dispatch_unlocked(
+                &DispatchTombstone {
+                    version: VERSION,
+                    identity: first.clone(),
+                    phase: DispatchPhase::Delivered,
+                },
+                false,
+            )
+            .unwrap();
+        assert!(journal.active_dispatch_path().exists());
+        journal
+            .finish_dispatch_recovered(&first, &VerifiedSettlementV3::test_only())
+            .unwrap();
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(journal
+            .read()
+            .unwrap()
+            .unwrap()
+            .dispatch_in_flight
+            .is_none());
         fs::remove_dir_all(path).unwrap();
     }
 
