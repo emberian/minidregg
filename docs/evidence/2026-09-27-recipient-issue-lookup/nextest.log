@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+────────────
+ Nextest run ID deba8148-3c1f-4882-8702-0ad506c185f2 with nextest profile: default
+    Starting 3 tests across 1 binary (65 tests skipped)
+        PASS [   0.009s] (1/3) minidregg-resource-client::bin/mini share_issue_receipt::tests::decimal_pins_reject_noncanonical_values
+        PASS [   0.009s] (2/3) minidregg-resource-client::bin/mini share_issue_receipt::tests::receipt_requires_native_replay_and_all_four_exact_fields
+        PASS [   0.011s] (3/3) minidregg-resource-client::bin/mini share_issue_receipt::tests::transport_sends_only_op29_with_exact_ingress_over_pinned_socket
+────────────
+     Summary [   0.011s] 3 tests run: 3 passed, 65 skipped
