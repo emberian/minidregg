@@ -13,6 +13,9 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::process::{Output, Stdio};
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const VERSION: u32 = 1;
@@ -80,6 +83,10 @@ pub struct Record {
     identity: VerifiedBegin,
     pub phase: Phase,
     pub child_pid: Option<u32>,
+    #[serde(default)]
+    invocation_id: Option<String>,
+    #[serde(default)]
+    control_group: Option<String>,
 }
 
 impl Record {
@@ -107,8 +114,222 @@ impl Record {
         if matches!(self.phase, Phase::Armed | Phase::LaunchRequested) && self.child_pid.is_some() {
             return Err(invalid("prelaunch journal has child PID"));
         }
+        if matches!(self.phase, Phase::Armed | Phase::LaunchRequested)
+            && (self.invocation_id.is_some() || self.control_group.is_some())
+        {
+            return Err(invalid("prelaunch journal has unit instance"));
+        }
+        if self.invocation_id.is_some() != self.control_group.is_some() {
+            return Err(invalid("partial unit instance identity"));
+        }
+        if let (Some(invocation_id), Some(control_group)) =
+            (&self.invocation_id, &self.control_group)
+        {
+            UnitInstance {
+                invocation_id: invocation_id.clone(),
+                control_group: control_group.clone(),
+            }
+            .validate(&self.identity.unit)?;
+        }
+        if matches!(self.phase, Phase::Entered | Phase::Running)
+            && self.invocation_id.is_none()
+        {
+            return Err(invalid("entered journal lacks unit instance"));
+        }
         if self.phase == Phase::Running && self.child_pid.is_none() {
             return Err(invalid("running journal lacks child PID"));
+        }
+        Ok(())
+    }
+}
+
+/// Captured by the exact systemd unit process, not caller JSON. Systemd's
+/// InvocationID and the unified cgroup path identify this execution instance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UnitInstance {
+    invocation_id: String,
+    control_group: String,
+}
+
+fn systemd_show(unit: &str) -> io::Result<String> {
+    let output = bounded_systemctl(
+        &[
+            "--system",
+            "show",
+            unit,
+            "--property=Id,LoadState,ActiveState,MainPID,Job,InvocationID,ControlGroup",
+            "--no-pager",
+        ],
+        Duration::from_secs(5),
+    )?;
+    if !output.status.success() || output.stdout.len() > 8192 {
+        return Err(invalid("exact systemd unit inspection unavailable"));
+    }
+    String::from_utf8(output.stdout).map_err(|_| invalid("systemd unit inspection is not UTF-8"))
+}
+
+fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
+    let mut child = Command::new("/usr/bin/systemctl")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let end = Instant::now() + deadline;
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if Instant::now() >= end {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "systemd manager response uncertain",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
+    let prefix = format!("{name}=");
+    let mut matches = output.lines().filter_map(|line| line.strip_prefix(&prefix));
+    let value = matches.next().ok_or_else(|| invalid("missing systemd property"))?;
+    if matches.next().is_some() {
+        return Err(invalid("duplicate systemd property"));
+    }
+    Ok(value)
+}
+
+impl UnitInstance {
+    fn current(unit: &str) -> io::Result<Self> {
+        let invocation_id = std::env::var("INVOCATION_ID")
+            .map_err(|_| invalid("missing systemd InvocationID"))?;
+        let cgroup = fs::read_to_string("/proc/self/cgroup")?;
+        let control_group = cgroup
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .ok_or_else(|| invalid("missing unified systemd cgroup"))?
+            .to_owned();
+        let instance = Self {
+            invocation_id,
+            control_group,
+        };
+        instance.validate(unit)?;
+        let manager = systemd_show(unit)?;
+        if property(&manager, "Id")? != unit
+            || property(&manager, "LoadState")? != "loaded"
+            || property(&manager, "InvocationID")? != instance.invocation_id
+            || property(&manager, "ControlGroup")? != instance.control_group
+        {
+            return Err(invalid("unit process identity differs from systemd manager"));
+        }
+        Ok(instance)
+    }
+
+    fn validate(&self, unit: &str) -> io::Result<()> {
+        if self.invocation_id.len() != 32
+            || !self
+                .invocation_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !self.control_group.starts_with('/')
+            || !self.control_group.ends_with(&format!("/{unit}"))
+            || self.control_group.contains("//")
+            || self.control_group.split('/').any(|component| component == "..")
+        {
+            return Err(invalid("unit InvocationID or cgroup identity refused"));
+        }
+        Ok(())
+    }
+}
+
+/// Source of truth is an exact systemd manager and cgroup inspection. A unit
+/// omitted by `list-units`, a mismatched invocation or an unknown cgroup is
+/// never interpreted as empty. The production inspector is still pending.
+#[derive(Clone, Debug)]
+pub(crate) struct UnitStopAudit {
+    unit: String,
+    invocation_id: Option<String>,
+    control_group: Option<String>,
+    unit_loaded: bool,
+    inactive: bool,
+    main_pid: u32,
+    queued_job: bool,
+    exact_cgroup_empty: bool,
+}
+
+impl UnitStopAudit {
+    fn before_stop(record: &Record) -> io::Result<()> {
+        let output = systemd_show(record.unit())?;
+        if property(&output, "Id")? != record.unit()
+            || property(&output, "LoadState")? != "loaded"
+        {
+            return Err(invalid("exact unit absent before stop"));
+        }
+        if let Some(expected) = record.invocation_id.as_deref() {
+            if property(&output, "InvocationID")? != expected
+                || property(&output, "ControlGroup")?
+                    != record.control_group.as_deref().unwrap_or("")
+            {
+                return Err(invalid("unit invocation/cgroup drift before stop"));
+            }
+        }
+        Ok(())
+    }
+
+    fn inspect(record: &Record) -> io::Result<Self> {
+        let output = systemd_show(record.unit())?;
+        let unit = property(&output, "Id")?.to_owned();
+        let invocation = property(&output, "InvocationID")?;
+        let manager_group = property(&output, "ControlGroup")?;
+        let recorded_group = record.control_group.as_deref();
+        if !manager_group.is_empty() && Some(manager_group) != recorded_group {
+            return Err(invalid("systemd cgroup differs from durable unit instance"));
+        }
+        let exact_cgroup_empty = if let Some(group) = recorded_group {
+            let path = Path::new("/sys/fs/cgroup").join(group.trim_start_matches('/'));
+            match fs::read_to_string(path.join("cgroup.events")) {
+                Ok(events) => {
+                    let populated = events
+                        .lines()
+                        .find_map(|line| line.strip_prefix("populated "))
+                        .ok_or_else(|| invalid("missing cgroup populated field"))?;
+                    populated == "0"
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+                Err(error) => return Err(error),
+            }
+        } else {
+            manager_group.is_empty()
+        };
+        let main_pid = property(&output, "MainPID")?
+            .parse::<u32>()
+            .map_err(|_| invalid("invalid systemd MainPID"))?;
+        Ok(Self {
+            unit,
+            invocation_id: (!invocation.is_empty()).then(|| invocation.to_owned()),
+            control_group: recorded_group.map(str::to_owned),
+            unit_loaded: property(&output, "LoadState")? == "loaded",
+            inactive: property(&output, "ActiveState")? == "inactive",
+            main_pid,
+            queued_job: !matches!(property(&output, "Job")?, "0" | ""),
+            exact_cgroup_empty,
+        })
+    }
+
+    fn prove(&self, record: &Record) -> io::Result<()> {
+        if self.unit != record.identity.unit
+            || self.invocation_id.is_some()
+            || self.control_group != record.control_group
+            || !self.unit_loaded
+            || !self.inactive
+            || self.main_pid != 0
+            || self.queued_job
+            || !self.exact_cgroup_empty
+        {
+            return Err(invalid("exact unit invocation/cgroup stop not proven"));
         }
         Ok(())
     }
@@ -293,6 +514,8 @@ impl Journal {
                 identity: begin,
                 phase: Phase::Armed,
                 child_pid: None,
+                invocation_id: None,
+                control_group: None,
             };
             this.write_unlocked(&record)?;
             Ok(record)
@@ -322,8 +545,10 @@ impl Journal {
         begin: &VerifiedBegin,
         spec: &SpawnSpec,
     ) -> io::Result<BoundedChild> {
+        let instance = UnitInstance::current(&begin.unit)?;
         self.enter_and_spawn_with(
             begin,
+            &instance,
             || spawn_gate::spawn_bounded(spec),
             Self::write_unlocked,
         )
@@ -332,6 +557,7 @@ impl Journal {
     fn enter_and_spawn_with<H: ChildHandle>(
         &self,
         begin: &VerifiedBegin,
+        instance: &UnitInstance,
         spawn: impl FnOnce() -> io::Result<H>,
         persist_running: impl FnOnce(&Self, &Record) -> io::Result<()>,
     ) -> io::Result<H> {
@@ -342,7 +568,10 @@ impl Journal {
             if &record.identity != begin || record.phase != Phase::LaunchRequested {
                 return Err(invalid("late or duplicate unit ExecStart refused"));
             }
+            instance.validate(&begin.unit)?;
             record.phase = Phase::Entered;
+            record.invocation_id = Some(instance.invocation_id.clone());
+            record.control_group = Some(instance.control_group.clone());
             this.write_unlocked(&record)?;
             let mut child = spawn()?;
             let pid = child.pid();
@@ -365,9 +594,9 @@ impl Journal {
     pub(crate) fn fence_and_stop(
         &self,
         stop: impl FnOnce(&str) -> io::Result<()>,
-        empty_cgroup: impl FnOnce(&str) -> io::Result<bool>,
+        inspect: impl FnOnce(&Record) -> io::Result<UnitStopAudit>,
     ) -> io::Result<()> {
-        let unit = self.with_lock(|this| {
+        let fenced_record = self.with_lock(|this| {
             let mut record = this
                 .read_unlocked()?
                 .ok_or_else(|| invalid("missing BEGIN"))?;
@@ -376,26 +605,52 @@ impl Journal {
             }
             record.phase = Phase::Fenced;
             this.write_unlocked(&record)?;
-            Ok(Some(record.identity.unit))
+            Ok(Some(record))
         })?;
-        let Some(unit) = unit else {
+        let Some(fenced_record) = fenced_record else {
             return Ok(());
         };
-        stop(&unit)?;
-        if !empty_cgroup(&unit)? {
-            return Err(invalid("exact unit cgroup still occupied"));
-        }
+        stop(&fenced_record.identity.unit)?;
+        inspect(&fenced_record)?.prove(&fenced_record)?;
         self.with_lock(|this| {
             let mut record = this
                 .read_unlocked()?
                 .ok_or_else(|| invalid("missing BEGIN"))?;
-            if record.phase != Phase::Fenced || record.identity.unit != unit {
+            if record.phase != Phase::Fenced
+                || record.identity != fenced_record.identity
+                || record.invocation_id != fenced_record.invocation_id
+                || record.control_group != fenced_record.control_group
+                || record.child_pid != fenced_record.child_pid
+            {
                 return Err(invalid("fence identity changed during stop"));
             }
             record.phase = Phase::Stopped;
             record.child_pid = None;
             this.write_unlocked(&record)
         })
+    }
+
+    /// Production stop path. The durable tombstone precedes the systemd stop;
+    /// a missing/mismatched unit or manager failure retains Fenced.
+    pub(crate) fn fence_and_stop_manager(&self) -> io::Result<()> {
+        self.fence_and_stop(
+            |unit| {
+                let record = self
+                    .read()?
+                    .ok_or_else(|| invalid("missing fenced record"))?;
+                UnitStopAudit::before_stop(&record)?;
+                let output = bounded_systemctl(
+                    &["--system", "stop", unit],
+                    Duration::from_secs(10),
+                )?;
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(invalid("exact systemd stop failed"))
+                }
+            },
+            UnitStopAudit::inspect,
+        )
     }
 }
 
@@ -455,6 +710,26 @@ mod tests {
         }
     }
 
+    fn instance() -> UnitInstance {
+        UnitInstance {
+            invocation_id: "f".repeat(32),
+            control_group: "/user.slice/mini-spk-a91-g2.service".into(),
+        }
+    }
+
+    fn stopped(record: &Record) -> io::Result<UnitStopAudit> {
+        Ok(UnitStopAudit {
+            unit: record.identity.unit.clone(),
+            invocation_id: None,
+            control_group: record.control_group.clone(),
+            unit_loaded: true,
+            inactive: true,
+            main_pid: 0,
+            queued_job: false,
+            exact_cgroup_empty: true,
+        })
+    }
+
     #[test]
     fn duplicate_conflict_and_fence_are_durable() {
         let path = scratch();
@@ -467,13 +742,13 @@ mod tests {
         assert!(journal.arm(conflict).is_err());
         journal.request_launch(&identity).unwrap();
         assert!(journal.request_launch(&identity).is_err());
-        journal.fence_and_stop(|_| Ok(()), |_| Ok(true)).unwrap();
+        journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
         assert_eq!(
             Journal::open(&path).unwrap().read().unwrap().unwrap().phase,
             Phase::Stopped
         );
         assert!(journal
-            .enter_and_spawn_with(&identity, || Ok(child(123)), Journal::write_unlocked)
+            .enter_and_spawn_with(&identity, &instance(), || Ok(child(123)), Journal::write_unlocked)
             .is_err());
         fs::remove_dir_all(path).unwrap();
     }
@@ -488,21 +763,28 @@ mod tests {
         assert!(journal
             .enter_and_spawn_with(
                 &identity,
+                &instance(),
                 || Err::<MockChild, _>(invalid("injected start fault")),
                 Journal::write_unlocked
             )
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
         assert!(journal
-            .enter_and_spawn_with(&identity, || Ok(child(124)), Journal::write_unlocked)
+            .enter_and_spawn_with(&identity, &instance(), || Ok(child(124)), Journal::write_unlocked)
             .is_err());
         assert!(journal
-            .fence_and_stop(|_| Err(invalid("injected stop fault")), |_| Ok(true))
+            .fence_and_stop(|_| Err(invalid("injected stop fault")), stopped)
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
-        assert!(journal.fence_and_stop(|_| Ok(()), |_| Ok(false)).is_err());
+        assert!(journal
+            .fence_and_stop(|_| Ok(()), |record| {
+                let mut audit = stopped(record)?;
+                audit.exact_cgroup_empty = false;
+                Ok(audit)
+            })
+            .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
-        journal.fence_and_stop(|_| Ok(()), |_| Ok(true)).unwrap();
+        journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -523,6 +805,7 @@ mod tests {
             thread::spawn(move || {
                 journal.enter_and_spawn_with(
                     &identity,
+                    &instance(),
                     || {
                         entered.wait();
                         release.wait();
@@ -541,7 +824,7 @@ mod tests {
                         assert_eq!(unit, "mini-spk-a91-g2.service");
                         Ok(())
                     },
-                    |_| Ok(true),
+                    stopped,
                 )
             })
         };
@@ -564,6 +847,7 @@ mod tests {
         assert!(journal
             .enter_and_spawn_with(
                 &identity,
+                &instance(),
                 || Ok(MockChild { pid: 457, aborted }),
                 |_, _| Err(invalid("injected Running fsync failure"))
             )
@@ -571,8 +855,108 @@ mod tests {
         assert!(observed.load(Ordering::SeqCst));
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
         assert!(journal
-            .enter_and_spawn_with(&identity, || Ok(child(458)), Journal::write_unlocked)
+            .enter_and_spawn_with(&identity, &instance(), || Ok(child(458)), Journal::write_unlocked)
             .is_err());
         fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn mismatched_or_missing_unit_audit_retains_fence() {
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        let identity = begin();
+        journal.arm(identity.clone()).unwrap();
+        journal.request_launch(&identity).unwrap();
+        let child = journal
+            .enter_and_spawn_with(
+                &identity,
+                &instance(),
+                || Ok(child(459)),
+                Journal::write_unlocked,
+            )
+            .unwrap();
+        assert_eq!(child.pid(), 459);
+        for changed in ["missing", "invocation", "cgroup", "job", "pid"] {
+            assert!(journal
+                .fence_and_stop(
+                    |_| Ok(()),
+                    |record| {
+                        let mut audit = stopped(record)?;
+                        match changed {
+                            "missing" => audit.unit_loaded = false,
+                            "invocation" => audit.invocation_id = Some("e".repeat(32)),
+                            "cgroup" => audit.control_group = Some("/other/unit".into()),
+                            "job" => audit.queued_job = true,
+                            "pid" => audit.main_pid = 459,
+                            _ => unreachable!(),
+                        }
+                        Ok(audit)
+                    },
+                )
+                .is_err());
+            assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
+        }
+        journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn installed_system_unit_stop_audit_probe() {
+        if std::env::var("MINI_SPK_SYSTEMD_AUDIT_PROBE").as_deref() != Ok("1") {
+            return;
+        }
+        assert_eq!(unsafe { libc::geteuid() }, 0);
+        let identity = VerifiedBegin {
+            app: 991005,
+            generation: 1,
+            operation_id: 1,
+            transaction_id: "a".repeat(64),
+            event_id: "b".repeat(64),
+            package_sha256: "c".repeat(64),
+            image_identity: "harmless-systemd-audit-probe".into(),
+            process_identity: "installed-unit".into(),
+            unit: "mini-spk-a991005-g1.service".into(),
+        };
+        let output = systemd_show(&identity.unit).unwrap();
+        assert_eq!(property(&output, "LoadState").unwrap(), "loaded");
+        assert_eq!(property(&output, "ActiveState").unwrap(), "active");
+        let instance = UnitInstance {
+            invocation_id: property(&output, "InvocationID").unwrap().to_owned(),
+            control_group: property(&output, "ControlGroup").unwrap().to_owned(),
+        };
+        instance.validate(&identity.unit).unwrap();
+        let record = Record {
+            version: VERSION,
+            identity,
+            phase: Phase::Fenced,
+            child_pid: Some(1),
+            invocation_id: Some(instance.invocation_id),
+            control_group: Some(instance.control_group),
+        };
+        UnitStopAudit::before_stop(&record).unwrap();
+        let status = Command::new("/usr/bin/systemctl")
+            .args(["--system", "stop", record.unit()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        UnitStopAudit::inspect(&record)
+            .unwrap()
+            .prove(&record)
+            .unwrap();
+    }
+
+    #[test]
+    fn unit_process_matches_manager_invocation_probe() {
+        if std::env::var("MINI_SPK_UNIT_INSTANCE_PROBE").as_deref() != Ok("1") {
+            return;
+        }
+        assert_eq!(unsafe { libc::geteuid() }, 0);
+        let instance = UnitInstance::current("mini-spk-a991006-g1.service").unwrap();
+        assert_eq!(instance.invocation_id.len(), 32);
+        assert_eq!(
+            instance.control_group,
+            "/system.slice/mini-spk-a991006-g1.service"
+        );
     }
 }

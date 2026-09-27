@@ -1,0 +1,18 @@
+# SPK hostd unit custody and fd3 adapter probe — 2026-09-27
+
+This is a bounded component qualification on Persvati. It executed only harmless test processes. The hostd private endpoint still returns `unavailable` for BEGIN and dispatch; no SPK app, Mini Store, public listener, or existing grain service was used.
+
+| Source in `native/spk-host` | SHA-256 |
+| --- | --- |
+| `Cargo.toml` | `9836ec6e65de368d5262d5c760f751d4e1b0baacf2f97e62dd33cb680ea43861` |
+| `src/hostd.rs` | `806c0d6c0c5eaa2a263721e900b1cf28d7c520128f907ed5d4a30b38e46b94dd` |
+| `src/lib.rs` | `7c699226e369be5d8d6d7c310956045f7ea0ce0d199e4c10eef4ae6694c497b4` |
+| `src/rpc_adapter.rs` | `ac75b051f63917e637c385ef1ee4621c950db243ad1d351f7380c98472cff8dd` |
+
+The exact copied sources in `/tmp/minidregg-gitweb-smoke-20260927/source/native/spk-host` matched those hashes. Its libtest ELF SHA-256 was `437205c60108f1665d73126f65e1c4a9e20238b6940a231a30b759d9f3ffc0e6`. With two Cargo jobs, `cargo nextest run --locked --lib` passed 19/19 and strict `cargo clippy --locked --lib --bin spk-hostd -- -D warnings` passed. The installed-unit probe tests return early in ordinary nextest; their physical runs are recorded below.
+
+An installed, root-owned `/run/systemd/system/mini-spk-a991005-g1.service` ran `/usr/bin/sleep 60` with PrivateNetwork, NoNewPrivileges, KillMode=control-group, MemoryMax=256M, TasksMax=16 and RuntimeMaxSec=90. While active, systemd reported MainPID 4163483, InvocationID `7b8e17dcc3414827b2f4db94e0fb0353`, and `ControlGroup=/system.slice/mini-spk-a991005-g1.service`. A separate bounded root test unit `mini-spk-stop-audit-20260927` compared those exact manager values to the durable-record shape before stopping the unit, then required loaded/inactive, MainPID 0, no queued job, cleared manager InvocationID, and the previously pinned cgroup absent or unpopulated. The test passed in 62 ms; the test unit returned Result=success, status 0, memory peak 2.9 MiB. Mismatched invocation, cgroup, missing unit, queued job and nonzero PID each retain `Fenced` in focused tests.
+
+A second installed unit `mini-spk-a991006-g1.service` ran the test binary as its ExecStart. Inside the unit, hostd read `INVOCATION_ID` and `/proc/self/cgroup`, then compared both to systemd's exact Id, LoadState, InvocationID and ControlGroup. The test passed; after exit, systemd reported Result=success, ExecMainStatus=0, inactive/MainPID0/empty ControlGroup. Both temporary installed unit files and staging copies were removed, `daemon-reload` ran, and the units remained inactive/MainPID0/empty ControlGroup. A separate transient unit test showed why absence is not a stop proof: systemd unloads its identity after stop, so this audit refuses to clear such a journal automatically.
+
+The new internal fd3 driver maintains a dedicated Tokio LocalSet for Cap'n Proto callbacks across requests. Session creation and typed WebSession dispatch share one absolute deadline; a stalled fd3 request times out and poisons the driver against resend. Its disconnected and stalled socketpair tests passed. It currently creates a fresh app-side WebSession per request, so generic stateful session continuity is not claimed. No current-session Mini projection exists yet; it must supply current app generation, subject-derived identity and checked effective permission bits before this driver can be called from an entrance. A pending lifecycle receipt alone is insufficient. Application readiness, exact installed-unit launch/recovery, and current Mini claim revalidation remain separate gates.

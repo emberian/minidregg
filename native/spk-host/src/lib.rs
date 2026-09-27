@@ -12,3 +12,5 @@ pub mod hostd;
 pub mod endpoint;
 #[cfg(target_os = "linux")]
 mod spawn_gate;
+#[cfg(target_os = "linux")]
+mod rpc_adapter;
