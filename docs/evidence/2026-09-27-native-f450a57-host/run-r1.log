@@ -1,0 +1,76 @@
+successful-prefix reuse check PASS 326 compiled prefix modules
+lean[327/353] Host.ApplicationAgentLifetimePaidIngressInspection start
+lean[327/353] Host.ApplicationAgentLifetimePaidIngressInspection PASS 3s
+lean[328/353] Host.ApplicationAgentLifetimeGrantAuthoring start
+lean[328/353] Host.ApplicationAgentLifetimeGrantAuthoring PASS 3s
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection start
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection PASS 2s
+lean[330/353] Host.FnConsumerNamespacePlan start
+lean[330/353] Host.FnConsumerNamespacePlan PASS 3s
+lean[331/353] Host.BirthRuntimeProfile start
+lean[331/353] Host.BirthRuntimeProfile PASS 2s
+lean[332/353] Host.CapabilityInspection start
+lean[332/353] Host.CapabilityInspection PASS 2s
+lean[333/353] Kernel.ApplicationGrainBirth start
+lean[333/353] Kernel.ApplicationGrainBirth PASS 2s
+lean[334/353] Kernel.ApplicationGrainSessionBirth start
+lean[334/353] Kernel.ApplicationGrainSessionBirth PASS 2s
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring start
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring PASS 2s
+lean[336/353] Host.ApplicationShareIssueGrainInspection start
+lean[336/353] Host.ApplicationShareIssueGrainInspection PASS 2s
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring start
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring PASS 2s
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring start
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring PASS 2s
+lean[339/353] Host.Json start
+lean[339/353] Host.Json PASS 7s
+lean[340/353] Host.FnConsumerFrontierPlan start
+lean[340/353] Host.FnConsumerFrontierPlan PASS 2s
+lean[341/353] Kernel.FnSelectiveReleaseArticle start
+lean[341/353] Kernel.FnSelectiveReleaseArticle PASS 2s
+lean[342/353] Host.FnSelectiveReleaseAuthoring start
+lean[342/353] Host.FnSelectiveReleaseAuthoring PASS 3s
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring start
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring PASS 2s
+lean[344/353] Host.FnSelectiveReleaseFnReceiving start
+lean[344/353] Host.FnSelectiveReleaseFnReceiving PASS 2s
+lean[345/353] Host.FnSelectiveReleaseFnAck start
+lean[345/353] Host.FnSelectiveReleaseFnAck PASS 2s
+lean[346/353] Host.ApplicationCurrentBirthAuthoring start
+lean[346/353] Host.ApplicationCurrentBirthAuthoring PASS 2s
+lean[347/353] Host.FnInboxView start
+lean[347/353] Host.FnInboxView PASS 2s
+lean[348/353] Host.GrainOriginSource start
+lean[348/353] Host.GrainOriginSource PASS 2s
+lean[349/353] Host.GrainOriginPreparation start
+lean[349/353] Host.GrainOriginPreparation PASS 2s
+lean[350/353] Host.GrainOriginCommand start
+lean[350/353] Host.GrainOriginCommand PASS 2s
+lean[351/353] Kernel.ProviderMetering start
+lean[351/353] Kernel.ProviderMetering PASS 2s
+lean[352/353] Host.ProviderUsage start
+lean[352/353] Host.ProviderUsage PASS 2s
+lean[353/353] Host.Main start
+lean[353/353] Host.Main PASS 18s
+end_utc=2026-09-27T15:59:53Z
+elapsed_seconds=280
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-capability-next-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=27
+resumed_prefix_modules=326
+source_modules=353
+package_modules=2933
+response_objects=3286
+reusable_artifact_manifest_sha256=87a795a644365c2b7923d429b84e9b7b994b93404d8bfed155aa028148933d44
+checkpointed_success=1
+successful_baseline=/home/ember/build/minidregg-2649f49-evidence/build-r3
+reused_success_prefix_modules=326
+recompiled_project_c_modules=27
+usage_exit=1
+binary=/home/ember/build/minidregg-f450a57-evidence/minidregg-host-f450a57-r1
+binary_sha256=e3d34875b5eee8c4d7623cc6bded28f8afab55e01e6ddf2798de53b894df87d8
