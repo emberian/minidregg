@@ -104,6 +104,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && digits.iter().all(u8::is_ascii_digit)
                 && (digits.len() == 1 || digits[0] != b'0')
         }
+        [19, payload @ ..] if payload.len() >= 10 => {
+            let metadata_length = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+            if metadata_length == 0 || metadata_length > 4096 || payload.len() < metadata_length + 9
+            {
+                return false;
+            }
+            let request_prefix = metadata_length + 4;
+            let request_length = u32::from_le_bytes(
+                payload[request_prefix..request_prefix + 4]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            if request_length == 0 || request_length > 1_048_576 {
+                return false;
+            }
+            let response_prefix = request_prefix + 4 + request_length;
+            response_prefix < payload.len() && payload.len() - response_prefix <= 8_388_608
+        }
         _ => false,
     }
 }
@@ -795,6 +813,24 @@ mod tests {
         let mut oversized = vec![b'R'; 1_516_386];
         oversized[0] = 16;
         assert!(!allowed_operation(&oversized, true));
+    }
+
+    #[test]
+    fn metering_requires_complete_bounded_byte_triple() {
+        let mut frame = vec![19];
+        frame.extend(2u32.to_le_bytes());
+        frame.extend(b"{}");
+        frame.extend(3u32.to_le_bytes());
+        frame.extend(b"req");
+        frame.extend(b"response");
+        assert!(allowed_operation(&frame, false));
+        assert!(!allowed_operation(&frame[..frame.len() - 8], false));
+        let mut oversized = frame.clone();
+        oversized[1..5].copy_from_slice(&4097u32.to_le_bytes());
+        assert!(!allowed_operation(&oversized, false));
+        let mut missing_request = frame;
+        missing_request[7..11].copy_from_slice(&0u32.to_le_bytes());
+        assert!(!allowed_operation(&missing_request, false));
     }
 
     #[test]

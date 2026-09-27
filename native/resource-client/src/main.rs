@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod meter;
+#[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
@@ -28,12 +30,56 @@ static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]
-fn session_invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
-    if let Some(sha) = EXPECTED_HOST_SHA.get() {
-        transport::invoke_pinned(socket, config, sha, operation, payload)
-    } else {
-        transport::invoke(socket, config, operation, payload)
+fn host_image_sha256(host: &Path) -> Result<String> {
+    let mut file = File::open(host).map_err(|error| {
+        format!(
+            "cannot open selected Host image {}: {error}",
+            host.display()
+        )
+    })?;
+    if !file
+        .metadata()
+        .map_err(|error| {
+            format!(
+                "cannot inspect selected Host image {}: {error}",
+                host.display()
+            )
+        })?
+        .is_file()
+    {
+        return Err("selected Host image is not a regular file".into());
     }
+    let mut digest = sha2::Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| {
+            format!(
+                "cannot hash selected Host image {}: {error}",
+                host.display()
+            )
+        })?;
+        if count == 0 {
+            return Ok(hex(&digest.finalize()));
+        }
+        digest.update(&buffer[..count]);
+    }
+}
+
+#[cfg(unix)]
+fn session_invoke(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    operation: u8,
+    payload: &[u8],
+) -> Result<Vec<u8>> {
+    let selected_sha = host_image_sha256(host)?;
+    if let Some(sha) = EXPECTED_HOST_SHA.get() {
+        if sha != &selected_sha {
+            return Err("selected Host image differs from durable worker pin".into());
+        }
+    }
+    transport::invoke_pinned(socket, config, &selected_sha, operation, payload)
 }
 
 #[cfg(unix)]
@@ -84,6 +130,7 @@ usage:
   mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
+  mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
   mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
@@ -252,7 +299,7 @@ fn keygen(secret: &Path, public: &Path) -> Result<()> {
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     if let Some(socket) = SOCKET.get() {
-        return socket_process(socket, config, arguments);
+        return socket_process(host, socket, config, arguments);
     }
     let output = Command::new(host)
         .arg(config)
@@ -271,7 +318,12 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
 }
 
 #[cfg(unix)]
-fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
+fn socket_process(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    arguments: &[&OsStr],
+) -> Result<Output> {
     let command = arguments
         .first()
         .and_then(|s| s.to_str())
@@ -334,7 +386,7 @@ fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<
             ))
         }
     };
-    let reply = session_invoke(socket, config, operation, &payload)?;
+    let reply = session_invoke(host, socket, config, operation, &payload)?;
     if reply[0] == 255 {
         if command == "prepare" {
             let destination = Path::new(arguments[2]);
@@ -357,7 +409,12 @@ fn socket_process(socket: &Path, config: &Path, arguments: &[&OsStr]) -> Result<
 }
 
 #[cfg(not(unix))]
-fn socket_process(_socket: &Path, _config: &Path, _arguments: &[&OsStr]) -> Result<Output> {
+fn socket_process(
+    _host: &Path,
+    _socket: &Path,
+    _config: &Path,
+    _arguments: &[&OsStr],
+) -> Result<Output> {
     Err("persistent host sessions require Unix sockets".to_owned())
 }
 
@@ -1090,7 +1147,7 @@ fn private_consumer_attempt(
 fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRoute) -> Result<()> {
     let socket = SOCKET.get().ok_or("consumer poll requires --socket")?;
     let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
-    let frame = session_invoke(socket, &retained_config, route.poll_opcode, &[])?;
+    let frame = session_invoke(host, socket, &retained_config, route.poll_opcode, &[])?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
@@ -1233,7 +1290,7 @@ fn consumer_ack(
     }
     let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
     write_new(&directory.join("transaction-id.txt"), bytes)?;
-    let frame = session_invoke(socket, &retained_config, route.ack_opcode, bytes)?;
+    let frame = session_invoke(host, socket, &retained_config, route.ack_opcode, bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err(format!(
@@ -1320,7 +1377,7 @@ fn origin_outbox_prepare(
         private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
     create_private(&directory.join("carrier.bin"), &bytes)?;
     sync_directory_ancestors(directory)?;
-    let frame = session_invoke(socket, &retained_config, 16, &bytes)?;
+    let frame = session_invoke(host, socket, &retained_config, 16, &bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused origin outbox preparation; complete frame retained".into());
@@ -1364,7 +1421,7 @@ fn origin_outbox_export(
         transaction.as_bytes(),
     )?;
     sync_directory_ancestors(directory)?;
-    let frame = session_invoke(socket, &retained_config, 18, transaction.as_bytes())?;
+    let frame = session_invoke(host, socket, &retained_config, 18, transaction.as_bytes())?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused origin outbox export; complete frame retained".into());
@@ -1522,7 +1579,7 @@ fn continuity(
     payload.extend_from_slice(&(call_bytes.len() as u32).to_le_bytes());
     payload.extend_from_slice(&call_bytes);
     payload.extend_from_slice(&outcome_bytes);
-    let frame = session_invoke(socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if frame[0] == 255 {
         return Err("Host refused provider continuity; complete frame retained".into());
@@ -1684,6 +1741,26 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("provider continuity requires Unix sockets".to_owned())
+            }
+        }
+        "meter" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let metadata = path(args.required("metadata")?);
+            let request = path(args.required("request")?);
+            let response = path(args.required("response")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                let socket = SOCKET.get().ok_or("meter requires --socket")?;
+                meter::meter(
+                    &host, &config, socket, &metadata, &request, &response, &directory,
+                )
+            }
+            #[cfg(not(unix))]
+            {
+                Err("provider metering requires Unix sockets".to_owned())
             }
         }
         "consumer-drain-once" => {
