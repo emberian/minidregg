@@ -1,0 +1,23 @@
+	Command being timed: "/usr/bin/timeout --signal=TERM --kill-after=20s 900 /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/continuations/first-birth-retry-0002/bin/minidregg-host-2649-fin-repair /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/base/workroom/birth-attempt/config.json lookup /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/base/workroom/birth-attempt/call.bin /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/continuations/first-birth-retry-0002/lookup-after-submit.bin"
+	User time (seconds): 102.65
+	System time (seconds): 7.72
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:50.53
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1971500
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1
+	Minor (reclaiming a frame) page faults: 1414055
+	Voluntary context switches: 363
+	Involuntary context switches: 2447
+	Swaps: 0
+	File system inputs: 206
+	File system outputs: 8
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

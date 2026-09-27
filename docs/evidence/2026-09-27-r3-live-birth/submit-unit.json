@@ -1,0 +1,8 @@
+{
+  "manager": "user",
+  "unit": "mini-spk-platform-r3-birth-successor-submit-client-session.service",
+  "invocation": "9043673f6b2149b5aa0e2a3eea94fbba",
+  "host": "hbox",
+  "uid": "1000",
+  "note": "Use systemctl --user; system manager does not own this unit. No registration race was observed."
+}

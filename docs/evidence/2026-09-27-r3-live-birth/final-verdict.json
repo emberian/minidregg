@@ -1,0 +1,32 @@
+{
+  "protocol": "mini-spk-r3-first-birth-accepted-v1",
+  "root": "/var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3",
+  "originalCallSha256": "1ff9d4ad41644a376884d13a6092787a2ca6a2a7d99c30659263f04221d8bdb7",
+  "originalConfigSha256": "c2c79aa69f66ecc7922f69f620a9dd9ca24cfea25cd94282fcb1a40c2b8296b8",
+  "successorHostSha256": "2c28356f8c59dc5ec4d17c594ed718bca3f73f336790c8eb30bb395557f28bf7",
+  "genesisStoreSha256": "8ce7e8e82cfd7b750bbfdebff10e477479212d253e2e02ae11f5117a183b4b29",
+  "acceptedStoreSha256": "e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5",
+  "submitBinarySha256": "21672e21e1caa002ad76e906542de4b5c77eabd73e6587180c046eb823d31c88",
+  "lookupBinarySha256": "4beb5fe21c57769135e848dc90f524a49f094dd49dd9cb189544069eb95b94b3",
+  "submitUnit": "mini-spk-platform-r3-birth-successor-submit-client-session.service",
+  "lookupUnit": "mini-spk-platform-r3-birth-receipt-lookup-client-session.service",
+  "manager": "user",
+  "installed": {
+    "type": "confirmed",
+    "transactionId": "21452126580387832849295759345841801346003355297904064439953413667585429370297",
+    "imageBoundary": "14446137707838494980671458133208750893239572581456245670174131992965079679473",
+    "eventId": "42274396663273669929974823207448344706044618477292890883734173696896699073815",
+    "confirmation": "installed",
+    "acceptedCount": "1"
+  },
+  "replayed": {
+    "type": "confirmed",
+    "transactionId": "21452126580387832849295759345841801346003355297904064439953413667585429370297",
+    "imageBoundary": "14446137707838494980671458133208750893239572581456245670174131992965079679473",
+    "eventId": "42274396663273669929974823207448344706044618477292890883734173696896699073815",
+    "confirmation": "replayed",
+    "acceptedCount": "1"
+  },
+  "fourFieldsEqual": true,
+  "laterBaseContinuationStarted": false
+}
