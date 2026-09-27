@@ -1,0 +1,13 @@
+warning: mathlib: repository '/private/tmp/minidregg-selected-historical-step/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-selected-historical-step/.lake/packages/batteries' has local changes
+'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.admitted_record' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.prefix_admitted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.signed_ingress_admitted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.FnSelectedHistoricalStep.select_at' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.FnSelectedHistoricalStep.select_verified' depends on axioms: [propext, Classical.choice, Quot.sound]

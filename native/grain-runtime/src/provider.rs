@@ -109,6 +109,8 @@ pub enum ProviderCommand {
         outcome: ProviderOutcome,
         reply: Sender<Result<(), String>>,
     },
+    /// `local_write_success` means the local socket write completed. TCP does
+    /// not establish whether the worker consumed the response bytes.
     Delivery {
         attempt_id: u64,
         local_write_success: bool,
@@ -1663,7 +1665,7 @@ mod tests {
     }
 
     #[test]
-    fn broken_local_reply_reports_failed_delivery_and_blocks_retry() {
+    fn client_reset_before_local_reply_never_retries_upstream() {
         let dir = test_dir();
         let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
         let deliveries = Arc::new(AtomicUsize::new(0));
@@ -1716,11 +1718,14 @@ mod tests {
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Delivery {
                     attempt_id,
-                    local_write_success,
+                    local_write_success: _,
                     reply,
                 } => {
                     assert_eq!(attempt_id, 22);
-                    assert!(!local_write_success);
+                    // The client requests RST before Outcome ack, but a
+                    // small write can still complete in the local kernel
+                    // before that reset becomes visible. Either result must
+                    // still make the next request consult this controller.
                     reply.send(Ok(())).unwrap();
                 }
                 _ => panic!("failed delivery must be retained"),
