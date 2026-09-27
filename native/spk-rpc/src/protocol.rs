@@ -284,6 +284,7 @@ mod tests {
         api_sessions: u32,
         identity_profile: String,
         paths: Vec<String>,
+        posts: Vec<(String, Vec<u8>, String, String)>,
     }
 
     struct FakeApp(Rc<RefCell<Observed>>);
@@ -357,6 +358,26 @@ mod tests {
             mut results: web_session_capnp::web_session::GetResults,
         ) -> capnp::Result<()> {
             let path = params.get()?.get_path()?.to_str()?.to_owned();
+            if path == "stream" || path == "overflow" {
+                let sink = params.get()?.get_context()?.get_response_stream()?;
+                let bytes: &'static [u8] = if path == "overflow" {
+                    b"too many bytes"
+                } else {
+                    b"streamed body"
+                };
+                tokio::task::spawn_local(async move {
+                    let mut write = sink.write_request();
+                    write.get().set_data(bytes);
+                    write.send().await.unwrap();
+                    let _ = sink.done_request().send().promise.await;
+                });
+                let mut content = results.get().init_content();
+                content.set_status_code(web_session_capnp::web_session::response::SuccessCode::Ok);
+                content.set_mime_type("text/plain");
+                let handle: crate::util_capnp::handle::Client = capnp_rpc::new_client(FakeHandle);
+                content.init_body().set_stream(handle);
+                return Ok(());
+            }
             self.0.borrow_mut().paths.push(path);
             let mut content = results.get().init_content();
             content.set_status_code(web_session_capnp::web_session::response::SuccessCode::Ok);
@@ -364,7 +385,58 @@ mod tests {
             content.init_body().set_bytes(b"from packaged app");
             Ok(())
         }
+
+        async fn post(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::PostParams,
+            mut results: web_session_capnp::web_session::PostResults,
+        ) -> capnp::Result<()> {
+            let params = params.get()?;
+            let context = params.get_context()?;
+            let cookie = context.get_cookies()?.get(0);
+            let header = context.get_additional_headers()?.get(0);
+            let content = params.get_content()?;
+            self.0.borrow_mut().posts.push((
+                params.get_path()?.to_str()?.to_owned(),
+                content.get_content()?.to_vec(),
+                format!(
+                    "{}={}",
+                    cookie.get_key()?.to_str()?,
+                    cookie.get_value()?.to_str()?
+                ),
+                format!(
+                    "{}={}",
+                    header.get_name()?.to_str()?,
+                    header.get_value()?.to_str()?
+                ),
+            ));
+            let mut response = results.get();
+            let mut headers = response.reborrow().init_additional_headers(1);
+            headers.reborrow().get(0).set_name("x-sandstorm-app-test");
+            headers.get(0).set_value("kept");
+            let mut content = response.init_content();
+            content.set_status_code(web_session_capnp::web_session::response::SuccessCode::Created);
+            content.set_mime_type("application/json");
+            content.init_body().set_bytes(br#"{"ok":true}"#);
+            Ok(())
+        }
+
+        async fn delete(
+            self: capnp::capability::Rc<Self>,
+            _: web_session_capnp::web_session::DeleteParams,
+            mut results: web_session_capnp::web_session::DeleteResults,
+        ) -> capnp::Result<()> {
+            let mut err = results.get().init_client_error();
+            err.set_status_code(
+                web_session_capnp::web_session::response::ClientErrorCode::Forbidden,
+            );
+            err.set_description_html("<p>denied</p>");
+            Ok(())
+        }
     }
+
+    struct FakeHandle;
+    impl crate::util_capnp::handle::Server for FakeHandle {}
 
     #[tokio::test(flavor = "current_thread")]
     async fn two_party_fd3_bootstrap_session_and_web_get() {
@@ -435,13 +507,41 @@ mod tests {
                         .await
                         .unwrap();
                 assert_eq!(api_response.body, b"from packaged app");
-                let seen = observed.borrow();
-                assert_eq!(seen.api_sessions, 1);
-                assert_eq!(
-                    seen.session_type,
-                    api_session_capnp::api_session::Client::TYPE_ID
-                );
-                assert_eq!(seen.paths, ["todos", "api/todos"]);
+                {
+                    let seen = observed.borrow();
+                    assert_eq!(seen.api_sessions, 1);
+                    assert_eq!(
+                        seen.session_type,
+                        api_session_capnp::api_session::Client::TYPE_ID
+                    );
+                    assert_eq!(seen.paths, ["todos", "api/todos"]);
+                }
+                use crate::web::{dispatch_web, Body, Cookie, Header, Method, RequestContext, WebRequest, WebResult};
+                use std::time::Duration;
+                let post = WebRequest {
+                    method: Method::Post,
+                    path_and_query: "todos?from=app%20view&n=2".into(),
+                    context: RequestContext {
+                        cookies: vec![Cookie { name: "session".into(), value: "abc".into() }],
+                        additional_headers: vec![Header { name: "x-sandstorm-app-test".into(), value: "yes".into() }],
+                        ..Default::default()
+                    },
+                    body: Some(Body { mime_type: "application/json".into(), encoding: String::new(), bytes: br#"{"task":"write"}"#.to_vec() }),
+                };
+                let reply = dispatch_web(&session, &post, 1024, Duration::from_secs(5)).await.unwrap();
+                assert_eq!(reply.headers, [Header { name: "x-sandstorm-app-test".into(), value: "kept".into() }]);
+                assert!(matches!(reply.result, WebResult::Content { status: 201, body, .. } if body == br#"{"ok":true}"#));
+                assert_eq!(observed.borrow().posts, [("todos?from=app%20view&n=2".into(), br#"{"task":"write"}"#.to_vec(), "session=abc".into(), "x-sandstorm-app-test=yes".into())]);
+                let delete = WebRequest { method: Method::Delete, path_and_query: "todos/1".into(), context: RequestContext::default(), body: None };
+                let reply = dispatch_web(&session, &delete, 1024, Duration::from_secs(5)).await.unwrap();
+                assert!(matches!(reply.result, WebResult::ClientError { status: 403, html, .. } if html == "<p>denied</p>"));
+                let get = |path: &str| WebRequest { method: Method::Get, path_and_query: path.into(), context: RequestContext::default(), body: None };
+                let reply = dispatch_web(&session, &get("stream"), 64, Duration::from_secs(5)).await.unwrap();
+                assert!(matches!(reply.result, WebResult::Content { body, .. } if body == b"streamed body"));
+                assert!(dispatch_web(&session, &get("overflow"), 4, Duration::from_secs(5)).await.is_err());
+                let mut forbidden = post.clone();
+                forbidden.context.additional_headers[0].name = "authorization".into();
+                assert!(dispatch_web(&session, &forbidden, 1024, Duration::from_secs(5)).await.is_err());
                 host_task.abort();
                 app_task.abort();
             })

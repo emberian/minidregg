@@ -26,13 +26,25 @@ app method. Every app delivery, including GET, is external execution. This
 crate does not offer a caller-facing authentication endpoint or synthesize
 permissions from a URL, HTTP header, or unverified role. Its current
 `SandstormApi` and `SessionContext` implementations fail closed on unsupported
-methods. The first typed operations are `getViewInfo`, `newSession` for
-`WebSession` or `ApiSession`, and a bounded inline `WebSession.get`. Streamed
-bodies, response variants beyond inline content, other methods, cookies,
-headers, WebSocket, persistence, and powerbox callbacks require explicit
-controller and transport work before use. An unsupported response is an error,
-not an HTTP fallback. Incoming Cap'n Proto traversal is capped at 16 MiB and
-64 nesting levels; each inline body also has a caller-supplied byte bound.
+methods. The typed operations are `getViewInfo`, `newSession` for `WebSession`
+or `ApiSession`, and `dispatch_web` for GET, HEAD, POST, PUT, PATCH, and DELETE.
+The latter sends exact typed request content, cookies, accept/encoding,
+ETag preconditions, and whitelisted additional headers. It returns the
+Sandstorm response union, status where the union defines one, response
+headers/cookies, and inline or bounded streamed body. Every dispatch needs a
+caller-supplied response bound and deadline; a deadline after send means
+delivery may be uncertain. The older `get_inline` remains for the initial
+fixture and rejects streamed/non-content replies.
+
+The bridge passes the `path` text, including a query suffix, to its HTTP
+upstream. The Cap'n Proto schema has no separate raw-query or arbitrary-header
+field: request/response additional headers are limited to Sandstorm's
+whitelists, and response status codes are limited by its response union. This
+crate rejects unsupported request headers rather than silently dropping them.
+WebSocket, streaming *request* bodies, WebDAV methods, persistence, powerbox,
+and Sandstorm API callbacks are not connected. There is no HTTP fallback.
+Incoming Cap'n Proto traversal is capped at 16 MiB and 64 nesting levels;
+request content and collected response content have explicit byte bounds.
 The identity capability attached to `UserInfo` answers `getProfile` from the
 same supplied session parameters; it does not authenticate those parameters.
 The pinned packaged HTTP bridge accepts `ApiSession` only when its
@@ -45,5 +57,7 @@ native/spk-rpc/Cargo.toml`. The interoperability test uses both ends of a real
 Unix socketpair and generated pinned interfaces: it bootstraps the supervisor
 capability, queries view metadata, starts Web and API sessions carrying identity
 and permission fields, calls the identity profile capability back across the
-socket, and sends a typed `WebSession.get` to a fake app server.
+socket, sends a typed `WebSession.get` and a body-carrying POST with query,
+cookie, and whitelisted header to a fake app server, then checks typed error,
+stream completion, overflow, and unsupported-header refusal.
 It does not run a third-party SPK, the packaged bridge, or the Mini controller.

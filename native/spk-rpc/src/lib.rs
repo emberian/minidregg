@@ -5,7 +5,12 @@
 //! giving it an approved session. There is no public listener here.
 
 mod protocol;
+mod web;
 pub use protocol::{InlineResponse, SessionParameters, SupervisorConnection, ViewInfo};
+pub use web::{
+    dispatch_web, Body, Cookie, CookieExpiry, ETag, ETagPrecondition, Header, Method,
+    RequestContext, SetCookie, WebRequest, WebResponse, WebResult,
+};
 
 #[allow(clippy::all)]
 pub mod util_capnp {
