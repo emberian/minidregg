@@ -25,6 +25,7 @@ structure SourceRef where
   semantics : Digest
   resource : Nat
   parent : Digest
+  atom : Nat
   deriving DecidableEq, Repr
 
 inductive Visibility where
@@ -73,9 +74,12 @@ def sourceRefStream : StreamCodec SourceRef :=
   StreamCodec.xmap
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream
-        (StreamCodec.product StreamCodec.nat digestStream)))
-    (fun value => (value.domain, value.semantics, value.resource, value.parent))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+        (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product digestStream StreamCodec.nat))))
+    (fun value => (value.domain, value.semantics, value.resource,
+      value.parent, value.atom))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1,
+      wire.2.2.2.1, wire.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def visibilityStream : StreamCodec Visibility :=
@@ -133,7 +137,7 @@ def releaseStream : StreamCodec Release :=
 /-- This is a new inner profile. Existing native-prefix packages and fn
 carriers retain their own codecs and meanings. -/
 def releaseCodec : LawfulCodec Release :=
-  NativeHostCodec.framed "DREGG/FN/SELECTIVE-RELEASE/v1".toUTF8.toList releaseStream
+  NativeHostCodec.framed "DREGG/FN/SELECTIVE-RELEASE/v2".toUTF8.toList releaseStream
 
 /-- The entire released content and every scope coordinate enter the message
 that a native signature verifier must check. No digest collision assumption is

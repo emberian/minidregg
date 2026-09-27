@@ -24,6 +24,13 @@ theorem signedPreimage_changes_owner (left right : Release)
   intro same
   exact changed (congrArg Release.owner (signedPreimage_injective same))
 
+theorem signedPreimage_changes_selected_atom (left right : Release)
+    (changed : left.source.atom ≠ right.source.atom) :
+    signedPreimage left ≠ signedPreimage right := by
+  intro same
+  exact changed (congrArg (fun release => release.source.atom)
+    (signedPreimage_injective same))
+
 theorem comparePrior_self (prior : Recorded) :
     comparePrior prior prior.release prior.signedCall = .exactRepeat := by
   simp [comparePrior]
@@ -57,4 +64,5 @@ end Minidregg.Kernel.FnSelectiveRelease
 #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_exactRepeat
 #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_conflict
 #print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_content
+#print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_selected_atom
 #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_changed_content

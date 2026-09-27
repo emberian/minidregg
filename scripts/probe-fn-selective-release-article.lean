@@ -10,7 +10,7 @@ private def sample : Article :=
     subject := "Selected public note"
     packet :=
       { release :=
-          { source := ⟨⟨1⟩, ⟨2⟩, 8001, ⟨3⟩⟩
+          { source := ⟨⟨1⟩, ⟨2⟩, 8001, ⟨3⟩, 7401⟩
             destination :=
               ⟨⟨4⟩, ⟨5⟩, 600, "fn.test".toUTF8.toList,
                 "<selected-1@mini.invalid>".toUTF8.toList,
@@ -35,6 +35,11 @@ def main : IO Unit := do
     | .ok article => pure article
     | .error reason => throw (IO.userError s!"extract: {reason}")
   require (recovered == sample) "selected article roundtrip changed packet"
+  let otherSource : SourceRef := { sample.packet.release.source with atom := 7402 }
+  let otherRelease : Release := { sample.packet.release with source := otherSource }
+  require (signedPreimage otherRelease !=
+      signedPreimage sample.packet.release)
+    "different selected atoms shared one owner preimage"
   let text := String.fromUTF8! source.toByteArray
   let duplicate := text.replace "Date: Sun, 27 Sep 2026 12:00:00 +0000\r\n"
     "Date: Sun, 27 Sep 2026 12:00:00 +0000\r\nDate: duplicate\r\n"

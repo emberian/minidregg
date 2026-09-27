@@ -86,7 +86,7 @@ def Article.render (article : Article) : Except String (List UInt8) := do
     "Newsgroups: " ++ group ++ "\r\n" ++
     "Subject: " ++ article.subject ++ "\r\n" ++
     "Message-ID: " ++ messageId ++ "\r\n" ++
-    "Content-Type: application/vnd.dregg.selective-release; version=1\r\n" ++
+    "Content-Type: application/vnd.dregg.selective-release; version=2\r\n" ++
     "Content-Transfer-Encoding: base64\r\n\r\n" ++
     base64Lines packetBytes.toByteArray).toUTF8.toList
   unless source.length ≤ FnEvidenceCodec.maxSourceBytes do
@@ -104,7 +104,7 @@ def extract (source : List UInt8) : Except String Article := do
   let (fromLine, dateLine, groupLine, subjectLine, messageLine) ←
     match headers.splitOn "\r\n" with
     | [fromLine, dateLine, groupLine, subjectLine, messageLine,
-       "Content-Type: application/vnd.dregg.selective-release; version=1",
+       "Content-Type: application/vnd.dregg.selective-release; version=2",
        "Content-Transfer-Encoding: base64"] =>
         pure (fromLine, dateLine, groupLine, subjectLine, messageLine)
     | _ => throw "selected release has unsupported or duplicate headers"

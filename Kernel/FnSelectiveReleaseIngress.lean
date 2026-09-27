@@ -42,14 +42,14 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v1".toUTF8.toList ingressStream)
+    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v2".toUTF8.toList ingressStream)
 
 theorem ingressCodec_accepted_bytes {bytes : List UInt8} {ingress : Ingress}
     (accepted : ingressCodec.decode bytes = some ingress) :
     ingressCodec.encode ingress = bytes := by
   unfold ingressCodec at accepted ⊢
   exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v1".toUTF8.toList ingressStream)
+    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v2".toUTF8.toList ingressStream)
     accepted
 
 /-- The release key excludes gateway witness choice and owner subject. It is
@@ -61,14 +61,14 @@ def keyBytes (release : Release) : List UInt8 :=
     (release.destination.domain, release.destination.target, release.owner.nonce)
 
 def keyDigest (release : Release) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/FN/SELECTIVE-RELEASE-KEY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG/FN/SELECTIVE-RELEASE-KEY/v2".toUTF8.toList
     (keyBytes release)).digest
 
 def releaseNullifier (release : Release) : StableNullifier where
-  codecVersion := 2
+  codecVersion := 13
   domain := release.destination.domain
   nullifierId := keyDigest release
-  canonicalBytes := "DREGG/FN/SELECTIVE-RELEASE-NULLIFIER/v1".toUTF8.toList ++
+  canonicalBytes := "DREGG/FN/SELECTIVE-RELEASE-NULLIFIER/v2".toUTF8.toList ++
     keyBytes release
 
 def atomId (release : Release) : AtomId :=
@@ -105,10 +105,10 @@ theorem command_payload_exact (ingress : Ingress) :
 def transactionId (ingress : Ingress) : Digest := keyDigest ingress.packet.release
 
 def event (ingress : Ingress) : StableEvent where
-  codecVersion := 10
+  codecVersion := 13
   domain := ingress.packet.release.destination.domain
   eventId := (Sp800185Cshake256.hash
-    "DREGG/FN/SELECTIVE-RELEASE-EVENT/v1".toUTF8.toList
+    "DREGG/FN/SELECTIVE-RELEASE-EVENT/v2".toUTF8.toList
     (ingressCodec.encode ingress)).digest
   canonicalBytes := ingressCodec.encode ingress
 
@@ -121,7 +121,7 @@ theorem releaseNullifier_ne_ordinary (release : Release) (marker : Nat) :
     releaseNullifier release ≠ CredentialAuthorityReplay.nullifier
       release.destination.domain marker := by
   intro same
-  have version : (2 : Nat) = 1 := congrArg StableNullifier.codecVersion same
+  have version : (13 : Nat) = 1 := congrArg StableNullifier.codecVersion same
   omega
 
 end Minidregg.Kernel.FnSelectiveReleaseIngress
