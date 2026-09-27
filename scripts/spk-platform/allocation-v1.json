@@ -1,0 +1,102 @@
+{
+  "protocol": "mini-spk-integrated-allocation-v1",
+  "status": "reserved-coordinates-only",
+  "app": "8401",
+  "packageManifest": "8402",
+  "snapshotManifest": "8403",
+  "humans": [
+    {
+      "route": "alice-web",
+      "subject": "8",
+      "sessionKind": "web",
+      "session": "8404",
+      "descriptor": "8405",
+      "ticket": "8500",
+      "plannedCaps": {
+        "sessionOwner": "147", "sessionControl": "148",
+        "descriptorOwner": "149", "descriptorControl": "150",
+        "ticketOwner": "171", "ticketControl": "172", "ticketObserve": "173"
+      }
+    },
+    {
+      "route": "bob-web",
+      "subject": "9",
+      "sessionKind": "web",
+      "session": "8406",
+      "descriptor": "8407",
+      "ticket": "8501",
+      "plannedCaps": {
+        "sessionOwner": "151", "sessionControl": "152",
+        "descriptorOwner": "153", "descriptorControl": "154",
+        "ticketOwner": "181", "ticketControl": "182", "ticketObserve": "183"
+      }
+    },
+    {
+      "route": "alice-api",
+      "subject": "8",
+      "sessionKind": "api",
+      "session": "8410",
+      "descriptor": "8411",
+      "ticket": "8510",
+      "plannedCaps": {
+        "sessionOwner": "161", "sessionControl": "162",
+        "descriptorOwner": "163", "descriptorControl": "164",
+        "ticketOwner": "191", "ticketControl": "192", "ticketObserve": "193"
+      }
+    }
+  ],
+  "agents": [
+    {
+      "route": "hermes-a",
+      "sessionKind": "api",
+      "session": "8420",
+      "descriptor": "8421",
+      "ticket": "8520",
+      "persistentGrant": "8530",
+      "controller": {"subject": "10", "keyId": "10010", "account": "10", "task": "7920"},
+      "tool": {"subject": "11", "keyId": "11011", "account": "11", "task": "7930"},
+      "dispatch": {"subject": "12", "keyId": "12012", "account": "12", "task": "7940"},
+      "provider": {"subject": "13", "keyId": "13013", "account": "13", "task": "7950"},
+      "plannedCaps": {
+        "controllerSpend": "410", "controllerControl": "510",
+        "parentOwner": "201", "parentControl": "202",
+        "toolSpend": "411", "toolControl": "511",
+        "toolOwner": "211", "toolTaskControl": "212",
+        "dispatchSpend": "412", "dispatchControl": "512",
+        "dispatchOwner": "221", "dispatchTaskControl": "222",
+        "providerSpend": "413", "providerControl": "513",
+        "providerOwner": "231", "providerTaskControl": "232",
+        "sessionOwner": "241", "sessionControl": "242",
+        "descriptorOwner": "243", "descriptorControl": "244",
+        "ticketOwner": "271", "ticketControl": "272", "ticketObserve": "273",
+        "grantOwner": "281", "grantControl": "282", "grantObserve": "283"
+      }
+    },
+    {
+      "route": "hermes-b",
+      "sessionKind": "api",
+      "session": "8422",
+      "descriptor": "8423",
+      "ticket": "8521",
+      "persistentGrant": "8531",
+      "controller": {"subject": "20", "keyId": "20020", "account": "20", "task": "7921"},
+      "tool": {"subject": "21", "keyId": "21021", "account": "21", "task": "7931"},
+      "dispatch": {"subject": "22", "keyId": "22022", "account": "22", "task": "7941"},
+      "provider": {"subject": "23", "keyId": "23023", "account": "23", "task": "7951"},
+      "plannedCaps": {
+        "controllerSpend": "420", "controllerControl": "520",
+        "parentOwner": "301", "parentControl": "302",
+        "toolSpend": "421", "toolControl": "521",
+        "toolOwner": "311", "toolTaskControl": "312",
+        "dispatchSpend": "422", "dispatchControl": "522",
+        "dispatchOwner": "321", "dispatchTaskControl": "322",
+        "providerSpend": "423", "providerControl": "523",
+        "providerOwner": "331", "providerTaskControl": "332",
+        "sessionOwner": "341", "sessionControl": "342",
+        "descriptorOwner": "343", "descriptorControl": "344",
+        "ticketOwner": "371", "ticketControl": "372", "ticketObserve": "373",
+        "grantOwner": "381", "grantControl": "382", "grantObserve": "383"
+      }
+    }
+  ]
+}
