@@ -25,6 +25,7 @@ reservation does not establish an implemented or accepted native path.
 | 24 | Source-bound launch claim v3 | Reserved for exact BEGIN/action claim and atomic first-create attempt marker; old event16 unchanged |
 | 25 | Source-bound launch completion v2 | Reserved for exact physical action/volume attestation and completed-create evidence; old event18 unchanged |
 | 26 | Paid agent dispatch under an explicit persistent agent grant | Reserved for current execution-generation witness joined to separately app-authorized task-level access; old event21 generation-bound semantics unchanged |
+| 27 | Persistent agent grant issuance | Reserved for atomic grant-content installation and current app delegation authorization, retained as an original-prefix certificate for event26 |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -33,19 +34,25 @@ retain its domain-separated canonical bytes and exact decoding checks.
 
 Event26 is reserved for persistent agent access across prompt generations.
 Existing ticket/enrollment origin equality and event21 replay remain unchanged.
-An ordinary resource may store the new grant, but its birth or payload alone
-does not authorize app access. The new admission must verify an explicit,
-domain-separated app delegation signature over the exact grant, its original
-admitted ticket provenance, bounded permission ceiling, fixed deployment and
-never-recycled parent task, current installed grant and current app delegation
-law/capability. Tombstones, invalid edits, revoked delegation and schema drift
+The new grant lives in an ordinary content resource, but its birth or payload
+alone does not authorize app access. Event27 must atomically join installation
+with explicit app delegation authorization at the original verified prefix,
+binding a domain-separated signature to the exact grant, original admitted
+ticket provenance, bounded permission ceiling, fixed deployment and
+never-recycled parent task. Event26 must obtain that issuance certificate
+through exact historical replay, then check the current installed grant and
+current app delegation law/capability. Tombstones, invalid edits, revoked delegation and schema drift
 must refuse. Current parent generation, reserved state, physical root and
 signed DRC witness remain per-dispatch fences, distinct from historical issue
 origin. Hard disconnect invalidates those in-flight witnesses without silently
 turning an old generation-bound ticket into a persistent grant. No new native
 opcode is allocated for this family yet; a host-side generation projection is
-not sufficient authority. This paragraph is a construction contract, not a
-qualified implementation.
+not sufficient authority. Issuance signatures retain their exact historical
+authority root, registry commitment, app root and policy revision. Do not
+recheck an old signature as if signed for the current snapshot, waive those
+equalities, or require a new owner signature on every ordinary prompt. Current
+rule checks are separate from historical signature verification. This is a
+construction contract, not a qualified implementation.
 
 Event 21 is distinct from ordinary event 11: a private physical permit cannot
 add payment authority absent from the admitted durable intent. Its claim must
