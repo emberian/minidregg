@@ -16,6 +16,7 @@ reservation does not establish an implemented or accepted native path.
 | 15 | Application share issuance | Reserved for special issuance admission |
 | 16 | Application lifecycle current claim | Reserved for durable claim admission |
 | 17 | Selected fn poll coverage | Reserved for bounded local scan coverage tied to an admitted selected release; no remote completeness claim |
+| 18 | Checked application lifecycle completion | Reserved for configured-host attestation and atomic app/manifest completion |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -44,6 +45,8 @@ retain its domain-separated canonical bytes and exact decoding checks.
 | 35 | Historical dispatch receipt-only lookup (never a delivery permit) |
 | 36 | Application dispatch signing plan (reserved private authoring; no commit) |
 | 37 | Application dispatch detached signature assembly (reserved private authoring; no commit) |
+| 38 | Checked lifecycle completion submit (reserved) |
+| 39 | Checked lifecycle completion receipt-only lookup (reserved) |
 
 Selected fn coverage must bind the configured local consumer scope, prior ACK,
 bounded first-match scan, exact projected article and an originally admitted
