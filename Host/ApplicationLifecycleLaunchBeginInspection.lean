@@ -40,6 +40,14 @@ private def requestJson (request : Request) : Json := .mkObj
    ("createIndex", match request.createIndex with
       | none => Json.null | some index => decimal index)]
 
+private def continueRequestJson (request : ContinueRequest) : Json := .mkObj
+  [("type", "application-lifecycle-launch-continue-request-v1"),
+   ("canonicalRequestHex", hex <| continueRequestCodec.encode request),
+   ("kind", "continue"),
+   ("clientOperationId", decimal request.clientOperationId),
+   ("descriptorHex", hex request.descriptorBytes),
+   ("createdIndex", decimal request.createdIndex)]
+
 private def slotJson (slot : SigningSlot) : Json :=
   let signing := match CredentialSignedEnvelopeController.headerCodec.decode
       slot.header with
@@ -74,6 +82,18 @@ def inspectRequest (bytes : List UInt8) : Except String Json := do
      ("descriptorRoot", decimal descriptor.root.value),
      ("descriptorCanonicalHex", hex descriptor.canonicalBytes)]
 
+def inspectContinueRequest (bytes : List UInt8) : Except String Json := do
+  let some request := continueRequestCodec.decode bytes
+    | throw "noncanonical launch continue request"
+  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+      request.descriptorBytes
+    | throw "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
+  pure <| .mkObj
+    [("request", continueRequestJson request),
+     ("descriptorRoot", decimal descriptor.root.value),
+     ("descriptorCanonicalHex", hex descriptor.canonicalBytes)]
+
 def inspectPlan (bytes : List UInt8) : Except String Json := do
   let some plan := planCodec.decode bytes
     | throw "noncanonical launch BEGIN plan"
@@ -84,18 +104,33 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
       (⟨[], [], [], []⟩ : DeclaredResourceController.SignedCommand) &&
       ingress.base.packageObservationEnvelope.isEmpty do
     throw "launch BEGIN plan is not unsigned"
-  let selected ← match ingress.base.source.kind, ingress.start with
-    | .install, none => pure none
+  let (requestProjection, requestBytes) ← match ingress.base.source.kind, ingress.start with
+    | .install, none =>
+        let request : Request :=
+          { kind := .install
+            clientOperationId := ingress.clientOperationId
+            descriptorBytes := ingress.descriptor.canonicalBytes
+            createIndex := none }
+        pure (requestJson request, requestCodec.encode request)
     | .start, some binding =>
         match binding.choice, binding.priorCreate with
-        | .create index, none => pure (some index)
-        | _, _ => throw "continue launch plan requires verified prior create"
-    | _, _ => throw "plan is not INSTALL or first-create START"
-  let request : Request :=
-    { kind := ingress.base.source.kind
-      clientOperationId := ingress.clientOperationId
-      descriptorBytes := ingress.descriptor.canonicalBytes
-      createIndex := selected }
+        | .create index, none =>
+            let request : Request :=
+              { kind := .start
+                clientOperationId := ingress.clientOperationId
+                descriptorBytes := ingress.descriptor.canonicalBytes
+                createIndex := some index }
+            pure (requestJson request, requestCodec.encode request)
+        | .continue, some (receipt, _) =>
+            unless receipt.acceptedCount > 0 do
+              throw "continue receipt has zero accepted count"
+            let request : ContinueRequest :=
+              { clientOperationId := ingress.clientOperationId
+                descriptorBytes := ingress.descriptor.canonicalBytes
+                createdIndex := receipt.acceptedCount - 1 }
+            pure (continueRequestJson request, continueRequestCodec.encode request)
+        | _, _ => throw "launch binding has invalid prior-create shape"
+    | _, _ => throw "plan is not INSTALL or START"
   let source := ingress.base.source
   unless plan.invocation.finalizedDraft == .invoke
       (DeclaredResourceController.commandCodec.encode
@@ -107,8 +142,8 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
   pure <| .mkObj
     [("type", "application-lifecycle-launch-begin-plan-v1"),
      ("canonicalPlanHex", hex bytes),
-     ("canonicalRequestHex", hex <| requestCodec.encode request),
-     ("request", requestJson request),
+     ("canonicalRequestHex", hex requestBytes),
+     ("request", requestProjection),
      ("unsignedIngressHex", hex ingress.canonicalBytes),
      ("domain", decimal ingress.base.domain.value),
      ("semantics", decimal ingress.base.semantics.value),
@@ -131,6 +166,12 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("selectedCommandDigest", match ingress.start with
        | none => Json.null
        | some binding => decimal binding.commandDigest.value),
+     ("priorCreate", match ingress.start with
+       | some { priorCreate := some (receipt, custody), .. } => .mkObj
+           [("receiptHex", hex <| NativeHostCodec.receiptStream.encode receipt),
+            ("custodyHex", hex <|
+              ApplicationLifecycleLaunchBinding.custodyStream.encode custody)]
+       | _ => Json.null),
      ("slots", .arr <| (plan.invocation.slots ++
        [plan.packageObservationSlot]).toArray.map slotJson)]
 

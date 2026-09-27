@@ -47,6 +47,29 @@ def requestCodec : LawfulCodec Request := NativeHostCodec.framed
   "DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-REQUEST/v1".toUTF8.toList
   requestStream
 
+/-- A continue request names a successful completed-create record by its
+accepted index. The receipt and physical custody are selected from Verified,
+never supplied by the caller. -/
+structure ContinueRequest where
+  clientOperationId : Nat
+  descriptorBytes : List UInt8
+  createdIndex : Nat
+  deriving DecidableEq
+
+def continueRequestStream : StreamCodec ContinueRequest :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream StreamCodec.nat))
+    (fun request => (request.clientOperationId, request.descriptorBytes,
+      request.createdIndex))
+    (fun (clientOperationId, descriptorBytes, createdIndex) =>
+      ⟨clientOperationId, descriptorBytes, createdIndex⟩)
+    (by intro request; cases request; rfl)
+
+def continueRequestCodec : LawfulCodec ContinueRequest := NativeHostCodec.framed
+  "DREGG/APPLICATION/LAUNCH-CONTINUE-OPERATOR-REQUEST/v1".toUTF8.toList
+  continueRequestStream
+
 structure Plan where
   unsigned : ApplicationLifecycleBeginV3Ingress.Ingress
   invocation : SigningPlan
@@ -98,13 +121,10 @@ private def startBinding (domain : Digest) (app : Nat)
   | .install, some _ => throw "launch INSTALL cannot select a create action"
   | _, _ => throw "launch BEGIN authoring supports INSTALL or first-create START only"
 
-def prepareVerified (config : Config) {target : Durable}
+private def prepareSelectedVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (request : Request) : Except String Plan := do
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
-      request.descriptorBytes
-    | throw "noncanonical signed-SPK launch descriptor"
-  unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
+    (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
+    (start : Option ApplicationLifecycleLaunchBinding.Binding) : Except String Plan := do
   let opened := verified.opened
   let some appCell := cellAt opened pin.app
     | throw "current launch application cell unavailable"
@@ -133,8 +153,6 @@ def prepareVerified (config : Config) {target : Durable}
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
         pin.app (before.generation + 1) }
-  let start ← startBinding config.deployment.domain pin.app descriptor
-    request.kind request.createIndex
   let base : ApplicationLifecycleBeginIngress.Ingress :=
     { domain := config.deployment.domain
       semantics := config.profile.semantics
@@ -192,6 +210,47 @@ def prepareVerified (config : Config) {target : Durable}
   for slot in invocation.slots do fixedHeader pin slot
   fixedHeader pin packageSlot
   return ⟨unsigned, invocation, packageSlot⟩
+
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) : Except String Plan := do
+  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+      request.descriptorBytes
+    | throw "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
+  let start ← startBinding config.deployment.domain pin.app descriptor
+    request.kind request.createIndex
+  prepareSelectedVerified config verified pin request descriptor start
+
+def prepareContinueRequestVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
+  let some request := continueRequestCodec.decode bytes
+    | return .error "noncanonical launch continue operator request"
+  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+      request.descriptorBytes
+    | return .error "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
+  let some prior := verified.createdV3.find? (fun prior => prior.index == request.createdIndex)
+    | return .error "selected successful create absent from verified history"
+  let some custody := prior.ingress.source.physical.report.volumeCustody
+    | return .error "selected successful create lacks volume custody"
+  let binding : ApplicationLifecycleLaunchBinding.Binding :=
+    { app := pin.app
+      volume := ApplicationLifecycleLaunchBinding.volumeId config.deployment.domain pin.app
+      packageRoot := descriptor.root
+      choice := .continue
+      priorCreate := some (prior.receipt, custody)
+      commandDigest := descriptor.continueCommand.digest }
+  match ← verified.selectCreated binding with
+  | .error detail => return .error detail
+  | .ok _ =>
+      let beginRequest : Request :=
+        { kind := .start
+          clientOperationId := request.clientOperationId
+          descriptorBytes := request.descriptorBytes
+          createIndex := none }
+      return prepareSelectedVerified config verified pin beginRequest descriptor (some binding)
 
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)

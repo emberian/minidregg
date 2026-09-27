@@ -16,6 +16,7 @@ import Host.ApplicationLifecycleCompletionAuthoring
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleLaunchBeginInspection
+import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationShareIssueGrainInspection
@@ -1797,12 +1798,30 @@ private def launchBeginOperatorRequest (json : Lean.Json) : Result (List UInt8) 
   let _ ← ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
   return bytes
 
+private def launchContinueOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["clientOperationId", "descriptor", "createdIndex"] json
+  let request : ApplicationLifecycleLaunchBeginAuthoring.ContinueRequest :=
+    { clientOperationId := ← nat "$.clientOperationId"
+        (← field "$" "clientOperationId" obj)
+      descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj)
+      createdIndex := ← nat "$.createdIndex" (← field "$" "createdIndex" obj) }
+  let bytes := ApplicationLifecycleLaunchBeginAuthoring.continueRequestCodec.encode request
+  let _ ← ApplicationLifecycleLaunchBeginInspection.inspectContinueRequest bytes
+  return bytes
+
 private def lifecycleClaimOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["originalIndex", "queryNonce"] json
   let request : ApplicationLifecycleClaimOperator.Request :=
     { originalIndex := ← nat "$.originalIndex" (← field "$" "originalIndex" obj)
       queryNonce := ← nat "$.queryNonce" (← field "$" "queryNonce" obj) }
   return ApplicationLifecycleClaimOperator.requestCodec.encode request
+
+private def launchClaimOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["originalIndex", "queryNonce"] json
+  let request : ApplicationLifecycleLaunchClaimAuthoring.Request :=
+    { originalIndex := ← nat "$.originalIndex" (← field "$" "originalIndex" obj)
+      queryNonce := ← nat "$.queryNonce" (← field "$" "queryNonce" obj) }
+  return ApplicationLifecycleLaunchClaimAuthoring.requestCodec.encode request
 
 /-- This authors Mini's fixed web/API mapping from the host's one verified
 signed-SPK parse. The caller supplies the signed ViewInfo projection, not Mini
@@ -1850,6 +1869,8 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-completion-operator-request" => completionOperatorRequest json
   | "application-lifecycle-resident-begin-operator-request" => residentBeginOperatorRequest json
   | "application-lifecycle-launch-begin-request" => launchBeginOperatorRequest json
+  | "application-lifecycle-launch-continue-request" => launchContinueOperatorRequest json
+  | "application-lifecycle-launch-claim-request" => launchClaimOperatorRequest json
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "application-spk-launch-descriptor" =>
@@ -2453,8 +2474,14 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       residentBeginOperatorPlanJson plan
   | "application-lifecycle-launch-begin-request" =>
       ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
+  | "application-lifecycle-launch-continue-request" =>
+      ApplicationLifecycleLaunchBeginInspection.inspectContinueRequest bytes
   | "application-lifecycle-launch-begin-plan" =>
       ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
+  | "application-lifecycle-launch-claim-request" =>
+      ApplicationLifecycleLaunchClaimInspection.inspectRequest bytes
+  | "application-lifecycle-launch-claim-plan" =>
+      ApplicationLifecycleLaunchClaimInspection.inspectPlan bytes
   | "application-lifecycle-claim-operator-plan" => do
       let plan ← decoded "application-lifecycle-claim-operator-plan"
         ApplicationLifecycleClaimOperator.planCodec bytes

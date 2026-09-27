@@ -25,7 +25,8 @@ plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch
 61=selected fn coverage receipt-only lookup, 62=empty fn progress submit,
 63=empty fn progress receipt-only lookup, 64=private fn frontier plan,
 65=private fn frontier detached assembly, 66=private source-bound launch BEGIN
-plan, 67=private source-bound launch BEGIN detached assembly. Op34/46 success uses a distinct
+plan, 67=private source-bound launch BEGIN detached assembly, 68=private launch
+claim plan, 69=private launch claim detached assembly. Op34/46 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -58,10 +59,15 @@ import Kernel.ApplicationDispatchAgentLookup
 import Kernel.ApplicationDispatchAgentPaidAuthoring
 import Kernel.ApplicationDispatchAuthoring
 import Kernel.ApplicationLifecycleBeginV2Receiver
+import Kernel.ApplicationLifecycleBeginV3Receiver
 import Kernel.ApplicationLifecycleClaimV2Receiver
+import Kernel.ApplicationLifecycleClaimV3Receiver
 import Kernel.ApplicationLifecycleV2Lookup
+import Kernel.ApplicationLifecycleV3Lookup
 import Kernel.ApplicationLifecycleCompletionReceiver
+import Kernel.ApplicationLifecycleCompletionV2Receiver
 import Kernel.ApplicationLifecycleCompletionLookup
+import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
@@ -70,6 +76,8 @@ import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
+import Host.ApplicationLifecycleLaunchClaimAuthoring
+import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Host.FnConsumerFrontierPlan
@@ -518,8 +526,14 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationDispatchAgentInspection.inspect bytes
   else if kind == "application-lifecycle-launch-begin-request" then
     ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
+  else if kind == "application-lifecycle-launch-continue-request" then
+    ApplicationLifecycleLaunchBeginInspection.inspectContinueRequest bytes
   else if kind == "application-lifecycle-launch-begin-plan" then
     ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
+  else if kind == "application-lifecycle-launch-claim-request" then
+    ApplicationLifecycleLaunchClaimInspection.inspectRequest bytes
+  else if kind == "application-lifecycle-launch-claim-plan" then
+    ApplicationLifecycleLaunchClaimInspection.inspectPlan bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -695,7 +709,10 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
-  let result ← ApplicationLifecycleBeginV2Receiver.receiveVerified config
+  let some _ := ApplicationLifecycleBeginV3Ingress.codec.decode payload
+    | return .refused "application-lifecycle-begin".toUTF8.toList
+        "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
+  let result ← ApplicationLifecycleBeginV3Receiver.receiveVerified config
     session.verified payload
   match result with
     | .confirmed confirmed =>
@@ -711,7 +728,12 @@ def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
-  let result := if (ApplicationLifecycleBeginV2Ingress.codec.decode payload).isSome then
+  let result := if (ApplicationLifecycleBeginV3Ingress.codec.decode payload).isSome then
+      (ApplicationLifecycleV3Lookup.beginVerified session.verified payload).mapError fun
+        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
+        | .transactionConflict => .transactionConflict
+        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
+    else if (ApplicationLifecycleBeginV2Ingress.codec.decode payload).isSome then
       ApplicationLifecycleV2Lookup.beginVerified session.verified payload
     else ApplicationLifecycleV2Lookup.beginLegacyVerified session.verified payload
   match result with
@@ -730,7 +752,12 @@ def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
-  let result := if (ApplicationLifecycleClaimV2Ingress.codec.decode payload).isSome then
+  let result := if (ApplicationLifecycleClaimV3Ingress.codec.decode payload).isSome then
+      (ApplicationLifecycleV3Lookup.claimVerified session.verified payload).mapError fun
+        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
+        | .transactionConflict => .transactionConflict
+        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
+    else if (ApplicationLifecycleClaimV2Ingress.codec.decode payload).isSome then
       ApplicationLifecycleV2Lookup.claimVerified session.verified payload
     else ApplicationLifecycleV2Lookup.claimLegacyVerified session.verified payload
   match result with
@@ -752,7 +779,10 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
-  let result ← ApplicationLifecycleCompletionReceiver.receiveVerified config
+  let some _ := ApplicationLifecycleCompletionV2Ingress.codec.decode payload
+    | return .refused "application-lifecycle-completion".toUTF8.toList
+        "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
+  let result ← ApplicationLifecycleCompletionV2Receiver.receiveVerified config
     session.verified payload
   match result with
   | .confirmed confirmed =>
@@ -771,7 +801,13 @@ def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
-  match ApplicationLifecycleCompletionLookup.verified session.verified payload with
+  let result := if (ApplicationLifecycleCompletionV2Ingress.codec.decode payload).isSome then
+      (ApplicationLifecycleCompletionV2Lookup.verified session.verified payload).mapError fun
+        | .malformed => ApplicationLifecycleCompletionLookup.Error.malformed
+        | .transactionConflict => .transactionConflict
+        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
+    else ApplicationLifecycleCompletionLookup.verified session.verified payload
+  match result with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
@@ -1376,17 +1412,36 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let session ← sessionCurrent config state
-  let result ← ApplicationLifecycleClaimV2Receiver.receiveVerified config
+  let some _ := ApplicationLifecycleClaimV3Ingress.codec.decode payload
+    | writeSessionFrame output 26 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused "application-lifecycle-claim".toUTF8.toList
+            "fresh claim requires canonical launch-bound v3 ingress".toUTF8.toList)
+      return
+  let result ← ApplicationLifecycleClaimV3Receiver.receiveVerified config
     session.verified payload
   match result with
   | .reserved reservation =>
-      let handed ← reservation.withFreshTip fun committedBytes =>
-        writeSessionFrame output 26 committedBytes
-      match handed with
-      | .ok _ => state.set (some ⟨_, reservation.verified⟩)
-      | .error detail =>
+      match reservation.confirmation with
+      | .installed =>
+          if reservation.freshCasWinner then
+            let handed ← reservation.withFreshTip fun committedBytes =>
+              writeSessionFrame output 26 committedBytes
+            match handed with
+            | .ok _ => state.set (some ⟨_, reservation.verified⟩)
+            | .error detail =>
+                writeSessionFrame output 26 <| outcomeCodec.encode <|
+                  NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+          else
+            state.set (some ⟨_, reservation.verified⟩)
+            writeSessionFrame output 26 <| outcomeCodec.encode <|
+              NativeHost.publicSubmissionOutcome
+                (.confirmed .replayed reservation.receipt)
+      | .recoveredAfterUncertainResponse | .replayed =>
+          state.set (some ⟨_, reservation.verified⟩)
           writeSessionFrame output 26 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+            NativeHost.publicSubmissionOutcome
+              (.confirmed .replayed reservation.receipt)
   | .rejected _ =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -4262,7 +4317,8 @@ def run (arguments : List String) : IO UInt32 := do
       | "author", [kind, input, output] =>
           let source ← if kind == "application-dispatch-request" ||
               kind == "application-share-issue-grain-request" ||
-              kind == "application-lifecycle-launch-begin-request" then
+              kind == "application-lifecycle-launch-begin-request" ||
+              kind == "application-lifecycle-launch-continue-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4276,7 +4332,10 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
               kind == "application-lifecycle-launch-begin-request" ||
+              kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
+              kind == "application-lifecycle-launch-claim-request" ||
+              kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4290,7 +4349,10 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
               kind == "application-lifecycle-launch-begin-request" ||
+              kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
+              kind == "application-lifecycle-launch-claim-request" ||
+              kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4617,9 +4679,14 @@ def run (arguments : List String) : IO UInt32 := do
                               | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
                                   "resident BEGIN management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
-                            let plan ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchBeginAuthoring.prepareRequestVerified
+                            let plan ← if let some request :=
+                                ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
+                              IO.ofExcept <| ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
+                                pinnedConfig session.verified custody.pin request
+                            else do
+                              let result ← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
                                 pinnedConfig session.verified custody.pin payload
+                              IO.ofExcept result
                             let bytes := ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN plan exceeds host frame bound")
@@ -4635,6 +4702,29 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
                             return ((67 : UInt8), ingress)
+                        | 68 =>
+                            let some custody := settings.residentClaimManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-launch-claim-author"
+                                  "resident claim management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload
+                            let bytes := ApplicationLifecycleLaunchClaimAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch claim plan exceeds host frame bound")
+                            return ((68 : UInt8), bytes)
+                        | 69 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical launch claim plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleLaunchClaimAuthoring.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch claim ingress exceeds host frame bound")
+                            return ((69 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"
