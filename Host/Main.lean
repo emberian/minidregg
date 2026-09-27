@@ -4329,7 +4329,10 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-share-issue-grain-request" ||
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
-              kind == "application-lifecycle-launch-completion-request" then
+              kind == "application-lifecycle-launch-completion-request" ||
+              kind == "application-lifecycle-launch-physical-report" ||
+              kind == "application-lifecycle-launch-physical-signing-frame" ||
+              kind == "application-lifecycle-launch-physical-signed-report" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4350,6 +4353,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-lifecycle-launch-completion-request" ||
               kind == "application-lifecycle-launch-completion-plan" ||
+              kind == "application-lifecycle-launch-physical-report" ||
+              kind == "application-lifecycle-launch-physical-signed-report" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4370,6 +4375,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-lifecycle-launch-completion-request" ||
               kind == "application-lifecycle-launch-completion-plan" ||
+              kind == "application-lifecycle-launch-physical-report" ||
+              kind == "application-lifecycle-launch-physical-signed-report" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||

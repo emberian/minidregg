@@ -18,6 +18,7 @@ import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleLaunchCompletionInspection
+import Host.ApplicationLifecycleLaunchReportAuthoring
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationShareIssueGrainInspection
@@ -1715,6 +1716,69 @@ private def completionSignedReport (json : Lean.Json) : Result (List UInt8) := d
     (← decodeHex "$.report" (← field "$" "report" obj))
     (← decodeHex "$.signature" (← field "$" "signature" obj))
 
+private def launchStopAudit (json : Lean.Json) : Result ApplicationLifecycleCompletionReport.StopAudit := do
+  let obj ← exactObject "$.stopAudit" ["unit", "recordedInvocationId",
+    "recordedControlGroup", "managerLoaded", "managerInactive", "managerMainPid",
+    "managerJobEmpty", "managerInvocationCleared", "cgroupUnpopulated",
+    "observationDigest"] json
+  return {
+    unit := ← decodeHex "$.stopAudit.unit" (← field "$.stopAudit" "unit" obj)
+    recordedInvocationId := ← decodeHex "$.stopAudit.recordedInvocationId"
+      (← field "$.stopAudit" "recordedInvocationId" obj)
+    recordedControlGroup := ← decodeHex "$.stopAudit.recordedControlGroup"
+      (← field "$.stopAudit" "recordedControlGroup" obj)
+    managerLoaded := ← bool "$.stopAudit.managerLoaded" (← field "$.stopAudit" "managerLoaded" obj)
+    managerInactive := ← bool "$.stopAudit.managerInactive" (← field "$.stopAudit" "managerInactive" obj)
+    managerMainPid := ← nat "$.stopAudit.managerMainPid" (← field "$.stopAudit" "managerMainPid" obj)
+    managerJobEmpty := ← bool "$.stopAudit.managerJobEmpty" (← field "$.stopAudit" "managerJobEmpty" obj)
+    managerInvocationCleared := ← bool "$.stopAudit.managerInvocationCleared"
+      (← field "$.stopAudit" "managerInvocationCleared" obj)
+    cgroupUnpopulated := ← bool "$.stopAudit.cgroupUnpopulated"
+      (← field "$.stopAudit" "cgroupUnpopulated" obj)
+    observationDigest := ← completionDigest "$.stopAudit.observationDigest"
+      (← field "$.stopAudit" "observationDigest" obj) }
+
+/-- Physical observations are supplied by the protected host. The source
+helper derives the volume identity and canonical v2 report. -/
+private def launchPhysicalReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "committedClaim", "nonce", "unit",
+    "materializedImage", "outcome", "invocationId", "controlGroup", "pid",
+    "stopAudit", "volumeWitness"] json
+  let outcome ← match ← string "$.outcome" (← field "$" "outcome" obj) with
+    | "materialized" => pure ApplicationLifecycleCompletionReport.Outcome.materialized
+    | "running" => pure .running
+    | "stopped" => pure .stopped
+    | _ => failAt "$.outcome" "expected materialized, running, or stopped"
+  let observed : ApplicationLifecycleLaunchReportAuthoring.PhysicalObservation := {
+    nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+    unit := ← decodeHex "$.unit" (← field "$" "unit" obj)
+    materializedImage := ← decodeHex "$.materializedImage" (← field "$" "materializedImage" obj)
+    outcome := outcome
+    invocationId := ← decodeHex "$.invocationId" (← field "$" "invocationId" obj)
+    controlGroup := ← decodeHex "$.controlGroup" (← field "$" "controlGroup" obj)
+    pid := ← nat "$.pid" (← field "$" "pid" obj)
+    stopAudit := ← optional "$.stopAudit" (fun _ value => launchStopAudit value)
+      (← field "$" "stopAudit" obj)
+    volumeWitness := ← optional "$.volumeWitness" decodeHex
+      (← field "$" "volumeWitness" obj) }
+  let report ← ApplicationLifecycleLaunchReportAuthoring.reportPlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.committedClaim" (← field "$" "committedClaim" obj)) observed
+  return ApplicationLifecycleCompletionV2Report.codec.encode report
+
+private def launchPhysicalSigningFrame (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "report"] json
+  ApplicationLifecycleLaunchReportAuthoring.signingPlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+
+private def launchPhysicalSignedReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "report", "signature"] json
+  ApplicationLifecycleLaunchReportAuthoring.signedReport
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+    (← decodeHex "$.signature" (← field "$" "signature" obj))
+
 private def completionSource (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["begin", "claimIngress", "signedReport", "authorityRoot",
     "appRoot", "packageRoot", "appCapability", "appObserveCapability",
@@ -1874,6 +1938,9 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-completion-report" => completionReport json
   | "application-lifecycle-completion-signing-frame" => completionSigningFrame json
   | "application-lifecycle-completion-signed-report" => completionSignedReport json
+  | "application-lifecycle-launch-physical-report" => launchPhysicalReport json
+  | "application-lifecycle-launch-physical-signing-frame" => launchPhysicalSigningFrame json
+  | "application-lifecycle-launch-physical-signed-report" => launchPhysicalSignedReport json
   | "application-lifecycle-completion-source" => completionSource json
   | "application-lifecycle-completion-command" => completionCommand json
   | "application-lifecycle-completion-signed-command" => completionSignedCommand json
@@ -2453,6 +2520,34 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   | some value => pure value
   | none => failAt path "noncanonical or wrong-family binary input"
 
+private def launchPhysicalReportJson
+    (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
+  let begin := report.claim.originalClaim.originalBegin
+  unless report.validFor begin do
+    throw "launch physical report differs from its BEGIN-v3/claim/volume"
+  let custody := match report.volumeCustody with
+    | none => Lean.Json.null
+    | some value => .mkObj [
+        ("volumeIdHex", hexJson (Sp800185Cshake256.digestBytesLE value.volume)),
+        ("physicalWitnessHex", hexJson value.physicalWitness)]
+  return .mkObj [
+    ("type", .str "application-lifecycle-launch-physical-report-v2"),
+    ("frameHex", hexJson report.canonicalBytes),
+    ("originalBeginHex", hexJson (ApplicationLifecycleBeginV3Ingress.codec.encode begin)),
+    ("committedClaimHex", hexJson
+      (ApplicationLifecycleClaimV3Projection.codec.encode report.claim)),
+    ("nonce", decimal report.nonce),
+    ("unitHex", hexJson report.unit),
+    ("materializedImageHex", hexJson report.materializedImage),
+    ("outcome", .str <| match report.outcome with
+      | .materialized => "materialized" | .running => "running" | .stopped => "stopped"),
+    ("invocationIdHex", hexJson report.invocationId),
+    ("controlGroupHex", hexJson report.controlGroup),
+    ("pid", decimal report.pid),
+    ("stopAuditHex", hexJson report.stopAudit),
+    ("installedManifestHex", hexJson report.installedManifest),
+    ("volumeCustody", custody)]
+
 /-- Inspect bounded public host products. Header/envelope bytes remain exact hex. -/
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
@@ -2499,6 +2594,21 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       ApplicationLifecycleLaunchCompletionInspection.inspectRequest bytes
   | "application-lifecycle-launch-completion-plan" =>
       ApplicationLifecycleLaunchCompletionInspection.inspectPlan bytes
+  | "application-lifecycle-launch-physical-report" => do
+      let report ← decoded "application-lifecycle-launch-physical-report"
+        ApplicationLifecycleCompletionV2Report.codec bytes
+      launchPhysicalReportJson report
+  | "application-lifecycle-launch-physical-signed-report" => do
+      let signed ← decoded "application-lifecycle-launch-physical-signed-report"
+        ApplicationLifecycleCompletionV2Report.signedCodec bytes
+      unless signed.signature.length == 64 do
+        throw "physical signature must be 64 bytes"
+      let report ← launchPhysicalReportJson signed.report
+      pure <| .mkObj [
+        ("type", .str "application-lifecycle-launch-physical-signed-report-v2"),
+        ("frameHex", hexJson bytes),
+        ("report", report),
+        ("signatureHex", hexJson signed.signature)]
   | "application-lifecycle-claim-operator-plan" => do
       let plan ← decoded "application-lifecycle-claim-operator-plan"
         ApplicationLifecycleClaimOperator.planCodec bytes
