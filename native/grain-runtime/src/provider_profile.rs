@@ -140,7 +140,7 @@ pub fn install_worker_profile(
         Err(error) => return Err(format!("Hermes config metadata: {error}")),
     }
     let text = format!(
-        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: 65536\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\ntimeouts:\n  mcp:\n    tool_call: {mcp_timeout_seconds}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nagent:\n  max_iterations: 6\ntools:\n  tool_search:\n    enabled: false\n"
+        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: 65536\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\ntimeouts:\n  mcp:\n    tool_call: {mcp_timeout_seconds}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nauxiliary:\n  title_generation:\n    enabled: false\nagent:\n  max_iterations: 6\ntools:\n  tool_search:\n    enabled: false\n"
     );
     let tmp = home.join(".config.yaml.tmp");
     let mut file = OpenOptions::new()
@@ -181,6 +181,7 @@ mod tests {
         assert!(text.contains("base_url: http://127.0.0.1:18761/v1"));
         assert!(text.contains(&format!("api_key: {token}")));
         assert!(text.contains("tool_call: 540"));
+        assert!(text.contains("auxiliary:\n  title_generation:\n    enabled: false"));
         assert!(!text.contains("BYO_PROVIDER_KEY"));
         require_worker_mcp_timeout(&home, 600).unwrap();
         assert!(install_worker_profile(

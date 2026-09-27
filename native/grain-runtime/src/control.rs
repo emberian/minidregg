@@ -3,6 +3,7 @@
 //! The socket belongs to the long-lived controller. A connector holds no Mini
 //! authority and may disappear at any point without taking the controller or
 //! its supervised child with it.
+use serde_json::{json, Value};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
@@ -156,7 +157,12 @@ pub fn admin_call(path: &Path, command: &str) -> Result<String, String> {
 struct Attachment {
     id: u64,
     mode: Mode,
-    output: SyncSender<String>,
+    framed: bool,
+    output: SyncSender<Outbound>,
+}
+enum Outbound {
+    Text(String),
+    Terminal(Value),
 }
 struct State {
     next_id: u64,
@@ -183,6 +189,15 @@ pub struct OutputHandle {
 }
 
 impl OutputHandle {
+    pub fn is_active_framed_attachment(&self, id: u64) -> bool {
+        self.state.lock().is_ok_and(|state| {
+            state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.framed && active.id == id)
+        })
+    }
+
     /// Drop display text if no frontend is attached or its output queue is full.
     pub fn try_output(&self, message: impl Into<String>) -> bool {
         let Ok(state) = self.state.lock() else {
@@ -191,7 +206,30 @@ impl OutputHandle {
         state
             .active
             .as_ref()
-            .is_some_and(|a| a.output.try_send(message.into()).is_ok())
+            .is_some_and(|a| a.output.try_send(Outbound::Text(message.into())).is_ok())
+    }
+
+    /// Send a source-owned presentation event only to the same framed
+    /// attachment. A completed old prompt cannot mark a new attachment ready.
+    pub fn try_terminal_event_for(&self, id: u64, event: Value) -> bool {
+        if !matches!(
+            event.get("type").and_then(Value::as_str),
+            Some("state" | "prompt-complete")
+        ) || !serde_json::to_vec(&event).is_ok_and(|bytes| bytes.len() <= 4096)
+        {
+            return false;
+        }
+        let Ok(state) = self.state.lock() else {
+            return false;
+        };
+        state.active.as_ref().is_some_and(|active| {
+            active.framed
+                && active.id == id
+                // A completion cannot be silently lost behind ACP output.
+                // The socket writer has a finite timeout, so backpressure
+                // either makes space or breaks the attachment.
+                && active.output.send(Outbound::Terminal(event)).is_ok()
+        })
     }
 }
 
@@ -294,15 +332,19 @@ fn serve_connection(
     let Ok(first) = read_line(&mut stream) else {
         return;
     };
-    let mode = match first.as_str() {
-        "attach hard" => Mode::Hard,
-        "attach soft" => Mode::Soft,
+    let (mode, framed) = match first.as_str() {
+        "attach hard" => (Mode::Hard, false),
+        "attach soft" => (Mode::Soft, false),
+        "attach terminal-v1 hard" => (Mode::Hard, true),
+        "attach terminal-v1 soft" => (Mode::Soft, true),
         _ => {
-            let _ = stream.write_all(b"first line must be attach hard|soft\n");
+            let _ = stream.write_all(
+                b"first line must be attach hard|soft or attach terminal-v1 hard|soft\n",
+            );
             return;
         }
     };
-    let (output, display) = mpsc::sync_channel::<String>(QUEUE);
+    let (output, display) = mpsc::sync_channel::<Outbound>(QUEUE);
     let id = {
         let Ok(mut state) = state.lock() else {
             return;
@@ -316,7 +358,12 @@ fn serve_connection(
             return;
         };
         state.next_id = next;
-        state.active = Some(Attachment { id, mode, output });
+        state.active = Some(Attachment {
+            id,
+            mode,
+            framed,
+            output,
+        });
         if events
             .try_send(Event::Attached {
                 id,
@@ -338,9 +385,28 @@ fn serve_connection(
         }
     };
     let _ = writer.set_write_timeout(Some(Duration::from_secs(2)));
+    if framed
+        && write_frame(
+            &mut writer,
+            &json!({"v":1,"type":"socket-attached",
+        "attachmentId":id,"mode":if mode == Mode::Soft { "soft" } else { "hard" }}),
+        )
+        .is_err()
+    {
+        detach(id, &state, &events, &hard_interrupt);
+        return;
+    }
     thread::spawn(move || {
-        for text in display {
-            if writer.write_all(text.as_bytes()).is_err() {
+        for message in display {
+            let result = match message {
+                Outbound::Text(text) if framed => {
+                    write_frame(&mut writer, &json!({"v":1,"type":"output","text":text}))
+                }
+                Outbound::Text(text) => writer.write_all(text.as_bytes()),
+                Outbound::Terminal(event) if framed => write_frame(&mut writer, &event),
+                Outbound::Terminal(_) => continue,
+            };
+            if result.is_err() {
                 break;
             }
         }
@@ -358,6 +424,11 @@ fn serve_connection(
         }
     }
     detach(id, &state, &events, &hard_interrupt);
+}
+
+fn write_frame(stream: &mut UnixStream, event: &Value) -> io::Result<()> {
+    serde_json::to_writer(&mut *stream, event).map_err(io::Error::other)?;
+    stream.write_all(b"\n")
 }
 
 fn detach(id: u64, state: &Mutex<State>, events: &SyncSender<Event>, interrupt: &HardInterrupt) {
@@ -472,6 +543,56 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn framed_attachment_escapes_model_text_and_binds_events_to_attachment() {
+        let dir = PathBuf::from("/tmp").join(format!("gf-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let socket = dir.join("control.sock");
+        let server = start(&socket, Arc::new(|_| {})).unwrap();
+        let mut stream = UnixStream::connect(&socket).unwrap();
+        stream.write_all(b"attach terminal-v1 soft\n").unwrap();
+        let id = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+            Event::Attached { id, soft: true } => id,
+            other => panic!("wrong framed attach: {other:?}"),
+        };
+        let first: Value = serde_json::from_str(&read_line(&mut stream).unwrap()).unwrap();
+        assert_eq!(first["type"], "socket-attached");
+        assert_eq!(first["attachmentId"], id);
+        let fake = "{\"v\":1,\"type\":\"prompt-complete\",\"outcome\":\"completed\"}\n";
+        assert!(server.try_output(fake));
+        let displayed: Value = serde_json::from_str(&read_line(&mut stream).unwrap()).unwrap();
+        assert_eq!(displayed["type"], "output");
+        assert_eq!(displayed["text"], fake);
+        let event = json!({"v":1,"type":"prompt-complete","attachmentId":id,
+            "requestId":7,"outcome":"completed"});
+        assert!(server
+            .output_handle()
+            .try_terminal_event_for(id, event.clone()));
+        assert_eq!(
+            serde_json::from_str::<Value>(&read_line(&mut stream).unwrap()).unwrap(),
+            event
+        );
+        drop(stream);
+        assert!(
+            matches!(server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Detached { id: event_id, hard: false } if event_id == id)
+        );
+        let mut newer = UnixStream::connect(&socket).unwrap();
+        newer.write_all(b"attach terminal-v1 soft\n").unwrap();
+        let next_id = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+            Event::Attached { id, soft: true } => id,
+            other => panic!("wrong second framed attach: {other:?}"),
+        };
+        assert!(next_id > id);
+        assert!(!server.output_handle().is_active_framed_attachment(id));
+        assert!(server.output_handle().is_active_framed_attachment(next_id));
+        assert!(!server.output_handle().try_terminal_event_for(id, event));
+        drop(newer);
+        let _ = server.events.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(server);
+        fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn hard_eof_interrupts_once_and_soft_reconnects() {

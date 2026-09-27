@@ -1,0 +1,19 @@
+{
+  "type": "minidregg-legacy-custody-no-dispatch-audit-v1",
+  "operationId": "44",
+  "promptOperationId": "36",
+  "operatorAuditedNoDispatch": true,
+  "custodyChildExited": true,
+  "workerPhysicalStopAudited": true,
+  "legacyClientSource": "/home/ember/build/minidregg-overnight-20260926/client-f089a71/native/resource-client/src/main.rs",
+  "legacyRuntimeSource": "/tmp/mini-grain-interrupt-ed8e5b3-src/native/grain-runtime/src/main.rs",
+  "legacyRuntimeBinary": "/tmp/mini-grain-interrupt-ed8e5b3-build/grain-runtime",
+  "sourceSha256": "071856b1536050c249491eb1177e03b96d9efd66e0ebb85bb885b8970ac7662e",
+  "intentSha256": "071856b1536050c249491eb1177e03b96d9efd66e0ebb85bb885b8970ac7662e",
+  "attemptManifestSha256": "3b29e46b11ba1ea0bb536d27ab4fde41db972f33f8d3bb1bf2a882822d52eb3b",
+  "copiedConfigSha256": "9ee6274296b27ebd8024fad83100e73bcb1d9ba2ed072f9b43baf7f8e17771f4",
+  "challengeBinSha256": "d9d0bbdd56ab3efccb83d32713fb76ed35949cec46fa5bd00e12003bd7f90918",
+  "challengeJsonSha256": "ba16cc35a164c457832f2b507e0b77f96f31ab8c43a16da4bfcb0fd5a76f9885",
+  "signedObservationSha256": "d701e3814bf3ce7da50e8fdba3af226fa81ba6e738ae36a4170b037d7e19abdf",
+  "reserveOutcomeSha256": "cf1b642be9b8bda3a808b719fc4df1f906aae29fa54ea7236ad662c0fb3a43af"
+}

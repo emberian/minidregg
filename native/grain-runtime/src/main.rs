@@ -1,12 +1,14 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
 mod control;
+mod legacy_custody_audit;
 mod mcp;
 mod provider;
 mod provider_profile;
 #[cfg(test)]
 mod publication_refusal_tests;
 mod resource_tools;
+mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
@@ -4516,7 +4518,9 @@ impl Runtime {
                 {
                     self.note_hard_reconnect()?;
                 }
-                Ok(Input::Line(_)) => eprintln!("command running; only disconnect is accepted"),
+                Ok(Input::Line(_) | Input::TerminalLine { .. }) => {
+                    eprintln!("command running; only disconnect is accepted")
+                }
                 Ok(Input::Admin(request)) => {
                     let _ = request
                         .reply
@@ -5183,7 +5187,7 @@ impl Runtime {
                 {
                     self.note_hard_reconnect()?;
                 }
-                Ok(Input::Line(_)) => {
+                Ok(Input::Line(_) | Input::TerminalLine { .. }) => {
                     eprintln!("Hermes prompt running; only disconnect is accepted")
                 }
                 Ok(Input::Admin(request)) => {
@@ -5363,6 +5367,9 @@ impl Runtime {
         Ok(())
     }
     fn reconcile_hold(&mut self, tool: bool, audited: bool) -> Result<()> {
+        if tool && legacy_custody_audit::zero_phase_active(self) {
+            return Err("legacy B44 audit requires its exact zero-charge settlement".into());
+        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -6059,6 +6066,7 @@ impl Runtime {
 
 enum Input {
     Line(String),
+    TerminalLine { attachment_id: u64, line: String },
     Disconnect,
     SoftDetach,
     Admin(control::AdminRequest),
@@ -6421,7 +6429,16 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     current = Some(id);
                     Input::Line(if soft { "attach soft" } else { "attach hard" }.into())
                 }
-                control::Event::Line { id, text } if current == Some(id) => Input::Line(text),
+                control::Event::Line { id, text } if current == Some(id) => {
+                    if text.starts_with("terminal ") {
+                        Input::TerminalLine {
+                            attachment_id: id,
+                            line: text,
+                        }
+                    } else {
+                        Input::Line(text)
+                    }
+                }
                 control::Event::Detached { id, hard } if current == Some(id) => {
                     current = None;
                     if hard {
@@ -6449,6 +6466,35 @@ fn serve(mut rt: Runtime) -> Result<()> {
                 ));
                 Ok(())
             }
+            Input::TerminalLine {
+                attachment_id,
+                line,
+            } if line.starts_with("terminal status ") => {
+                (|| -> Result<()> {
+                    let (attachment, request) = terminal::parse_status_command(&line)
+                        .ok_or("invalid terminal status command")?;
+                    if attachment != attachment_id
+                        || !rt.output.as_ref().is_some_and(|output| {
+                            output.is_active_framed_attachment(attachment_id)
+                        })
+                    {
+                        return Err("terminal status attachment changed".into());
+                    }
+                    let journal = serde_json::to_value(&rt.journal)
+                        .map_err(|e| format!("terminal status projection: {e}"))?;
+                    let delivered = rt.output.as_ref().is_some_and(|output| {
+                        output.try_terminal_event_for(
+                            attachment,
+                            terminal::state(&journal, attachment, request),
+                        )
+                    });
+                    if delivered {
+                        Ok(())
+                    } else {
+                        Err("terminal status delivery failed or attachment changed".into())
+                    }
+                })()
+            }
             Input::Line(line) if line == "recover" => rt.recover(),
             Input::Line(line) if line == "conversation new" => rt.conversation_new(),
             Input::Admin(request) => {
@@ -6472,6 +6518,8 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
+                    "reconcile tool legacy b44" => legacy_custody_audit::audit_b44(&mut rt),
+                    "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     _ => Err("unknown admin reconciliation action".into()),
@@ -6494,8 +6542,40 @@ fn serve(mut rt: Runtime) -> Result<()> {
                 rt.stdin_gone = false;
                 result
             }
+            Input::TerminalLine {
+                attachment_id,
+                line,
+            } if line.starts_with("terminal hermes ") => {
+                (|| -> Result<()> {
+                    let (attachment, request, prompt) = terminal::parse_prompt_command(&line)
+                        .ok_or("invalid terminal prompt command")?;
+                    if attachment != attachment_id
+                        || !rt.output.as_ref().is_some_and(|output| {
+                            output.is_active_framed_attachment(attachment_id)
+                        })
+                    {
+                        return Err("terminal prompt attachment changed before dispatch".into());
+                    }
+                    let result = rt.hermes(prompt, &input);
+                    rt.stdin_gone = false;
+                    let journal = serde_json::to_value(&rt.journal)
+                        .map_err(|e| format!("terminal completion projection: {e}"))?;
+                    let delivered = rt.output.as_ref().is_some_and(|output| {
+                        output.try_terminal_event_for(
+                            attachment,
+                            terminal::completion(&journal, attachment, request, result.is_ok()),
+                        )
+                    });
+                    if delivered {
+                        result
+                    } else {
+                        Err("terminal completion delivery failed or attachment changed".into())
+                    }
+                })()
+            }
             Input::Disconnect => rt.disconnect(),
             Input::SoftDetach => Ok(()),
+            Input::TerminalLine { .. } => Err("unknown terminal command".into()),
             Input::Line(_) => Err(
                 "expected attach hard|soft, run NAME, hermes PROMPT, conversation new, status, recover, disconnect"
                     .into(),
@@ -6546,6 +6626,27 @@ fn main() -> ExitCode {
             }
         };
     }
+    if (args.len() == 3 || args.len() == 4) && args[1] == "terminal" {
+        let mode = if args.len() == 4 {
+            match args[3].to_str() {
+                Some("hard") => "hard",
+                Some("soft") => "soft",
+                _ => {
+                    eprintln!("grain-runtime terminal: mode must be hard or soft");
+                    return ExitCode::from(2);
+                }
+            }
+        } else {
+            "hard"
+        };
+        return match terminal::connect(&PathBuf::from(&args[2]), mode) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("grain-runtime terminal: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() == 4 && args[1] == "connect" {
         let Some(mode) = args[3].to_str() else {
             eprintln!("grain-runtime connect: mode must be hard or soft");
@@ -6587,7 +6688,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
