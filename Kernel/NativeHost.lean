@@ -516,13 +516,23 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
           | some (.error _) => refused "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .birth bytes =>
-      match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
-      | none => refused "birth" "noncanonical ingress"
+      match GrainResourceBirthPolicyController.decodeIngress bytes with
       | some ingress =>
-          match ResourceBirthReceiver.replay config.deployment.domain opened.durable ingress with
+          match GrainResourceBirthReceiver.replay opened.durable ingress with
           | none => .absent
           | some (.error _) => refused "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
+      | none =>
+          if bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7 then
+            refused "grain-birth" "noncanonical ingress"
+          else
+            match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
+            | none => refused "birth" "noncanonical ingress"
+            | some ingress =>
+                match ResourceBirthReceiver.replay config.deployment.domain opened.durable ingress with
+                | none => .absent
+                | some (.error _) => refused "replay" "transaction identity conflict"
+                | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .install bytes =>
       match PolicyInstallReceiver.decodeIngress bytes with
       | none => refused "install" "noncanonical ingress"
@@ -540,6 +550,50 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
           | .error _ => refused "replay" "transaction identity conflict"
           | .ok none => .absent
           | .ok (some record) => finish record.transactionId record.event.event.eventId
+
+/-- Composite birth lookup is the same exact event-and-two-nullifier replay
+used by the receiving path. A historical receipt is selected from the
+original accepted prefix; current tariff and policy do not reauthorize it. -/
+theorem lookupLoaded_composite_exact (config : Config) (opened : Opened config)
+    (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
+    (receipt : GrainResourceBirthReceiver.Receipt) (historical : NativeHostCodec.Receipt)
+    (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
+    (replayed : GrainResourceBirthReceiver.replay opened.durable ingress = some (.ok receipt))
+    (selected : historicalReceipt config opened.durable receipt.transactionId receipt.eventId =
+      some historical) :
+    lookupLoaded config opened (.birth bytes) = .confirmed .replayed historical := by
+  simp [lookupLoaded, decoded, replayed, selected]
+
+theorem lookupLoaded_composite_absent (config : Config) (opened : Opened config)
+    (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
+    (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
+    (absent : GrainResourceBirthReceiver.replay opened.durable ingress = none) :
+    lookupLoaded config opened (.birth bytes) = .absent := by
+  simp [lookupLoaded, decoded, absent]
+
+theorem lookupLoaded_composite_conflict (config : Config) (opened : Opened config)
+    (bytes : List UInt8) (ingress : GrainResourceBirthPolicyController.DecodedIngress)
+    (reason : GrainResourceBirthReceiver.Reject)
+    (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
+    (conflict : GrainResourceBirthReceiver.replay opened.durable ingress = some (.error reason)) :
+    lookupLoaded config opened (.birth bytes) =
+      refused "replay" "transaction identity conflict" := by
+  simp [lookupLoaded, decoded, conflict]
+
+/-- Once the composite `DREGG/G` family prefix is present, malformed composite
+bytes cannot be reinterpreted by the legacy `DREGG/R` birth decoder. -/
+theorem lookupLoaded_malformed_composite (config : Config) (opened : Opened config)
+    (bytes : List UInt8)
+    (prefixExact : bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7)
+    (malformed : GrainResourceBirthPolicyController.decodeIngress bytes = none) :
+    lookupLoaded config opened (.birth bytes) =
+      refused "grain-birth" "noncanonical ingress" := by
+  simp [lookupLoaded, malformed, prefixExact]
+
+#print axioms lookupLoaded_composite_exact
+#print axioms lookupLoaded_composite_absent
+#print axioms lookupLoaded_composite_conflict
+#print axioms lookupLoaded_malformed_composite
 
 def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match callCodec.decode bytes with
