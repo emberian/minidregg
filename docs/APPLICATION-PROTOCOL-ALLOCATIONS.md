@@ -90,6 +90,21 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 57 | Grain-backed share-issue detached signature assembly (reserved private authoring) |
 | 58 | Current-image event21 full-context purse reserve signing plan (reserved private authoring) |
 | 59 | Event21 full-context purse reserve detached signature assembly (reserved private authoring) |
+| 60 | Event17 selected fn coverage submit (reserved operator-private admission) |
+| 61 | Event17 historical coverage receipt-only lookup (reserved operator-private) |
+| 62 | Event19 ordered empty fn progress submit (reserved operator-private admission) |
+| 63 | Event19 historical progress receipt-only lookup (reserved operator-private) |
+| 64 | Verified-current-image fn progress signing plan, selected or empty variant (reserved operator-private authoring) |
+| 65 | Fn progress detached gateway-signature assembly (reserved operator-private authoring) |
+
+Operations60–65 are reserved for the fn integration continuation. They are not
+implemented or native-qualified by this allocation. The selected variant must
+bind both the originally admitted event13 release and its event17 coverage;
+the empty variant uses event19 and the same verifier-derived frontier. ACK
+requires the accepted progress receipt and exact retained local poll evidence,
+with a fresh pinned-consumer check. Neither a historical lookup nor a transport
+cursor permits installation or physical delivery. Existing adjacent-only CLI
+behavior must not be relaxed before the coverage receiving path is connected.
 
 Operations58/59 author an ordinary signed reserve bound to the full event21
 context and a preallocated reserve operation ID. They do not submit it or
