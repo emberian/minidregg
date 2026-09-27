@@ -1,0 +1,4 @@
+cold_socket_ms=209
+read_1_wall_s=60.74
+read_2_wall_s=1.60
+read_3_wall_s=1.50
