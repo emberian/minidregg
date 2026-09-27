@@ -1431,10 +1431,54 @@ impl Journal {
         )
     }
 
+    /// Resume only an already-fsynced Fenced STOP for the same source-selected
+    /// incarnation. A historical receipt or marker can never fence Running.
+    pub(crate) fn resume_fenced_stop_manager_checked(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+    ) -> io::Result<UnitStopAudit> {
+        self.fence_and_stop_checked_with_mode(
+            expected,
+            verify_volume,
+            true,
+            UnitStopAudit::before_stop,
+            |unit| {
+                let output =
+                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(invalid("exact fenced systemd stop failed"))
+                }
+            },
+            UnitStopAudit::inspect,
+        )
+    }
+
     fn fence_and_stop_checked_with(
         &self,
         expected: &StopIdentity,
         verify_volume: impl Fn() -> io::Result<()>,
+        before_stop: impl Fn(&Record) -> io::Result<()>,
+        stop: impl Fn(&str) -> io::Result<()>,
+        inspect: impl Fn(&Record) -> io::Result<UnitStopAudit>,
+    ) -> io::Result<UnitStopAudit> {
+        self.fence_and_stop_checked_with_mode(
+            expected,
+            verify_volume,
+            false,
+            before_stop,
+            stop,
+            inspect,
+        )
+    }
+
+    fn fence_and_stop_checked_with_mode(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+        require_fenced: bool,
         before_stop: impl Fn(&Record) -> io::Result<()>,
         stop: impl Fn(&str) -> io::Result<()>,
         inspect: impl Fn(&Record) -> io::Result<UnitStopAudit>,
@@ -1445,6 +1489,12 @@ impl Journal {
                 .ok_or_else(|| invalid("missing running STOP journal"))?;
             expected.matches(&record)?;
             verify_volume()?;
+            if require_fenced && record.phase != Phase::Fenced {
+                return Err(invalid("STOP recovery requires fsynced Fenced journal"));
+            }
+            if !matches!(record.phase, Phase::Running | Phase::Fenced) {
+                return Err(invalid("STOP requires Running or Fenced journal"));
+            }
             if record.phase == Phase::Running {
                 before_stop(&record)?;
                 record.phase = Phase::Fenced;
@@ -2129,6 +2179,21 @@ mod tests {
             }
         };
         assert!(journal
+            .fence_and_stop_checked_with_mode(
+                &expected,
+                || Ok(()),
+                true,
+                |_| Ok(()),
+                |_| {
+                    stops.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                inspect,
+            )
+            .is_err());
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Running);
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert!(journal
             .fence_and_stop_checked_with(&wrong, || Ok(()), |_| Ok(()), |_| Ok(()), inspect)
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Running);
@@ -2157,12 +2222,13 @@ mod tests {
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
         journal
-            .fence_and_stop_checked_with(
+            .fence_and_stop_checked_with_mode(
                 &expected,
                 || {
                     volume_checks.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 },
+                true,
                 |_| Ok(()),
                 |_| {
                     stops.fetch_add(1, Ordering::SeqCst);

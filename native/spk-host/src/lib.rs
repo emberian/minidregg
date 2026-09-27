@@ -1,11 +1,14 @@
 //! Physical SPK execution primitives. Admission and RPC semantics belong to Mini
 //! and `spk-rpc`; this crate only prepares a confined process and an inherited
-//! Unix socketpair. The public binary deliberately has no app-launch command yet.
+//! Unix socketpair. The public resident command requires a fresh source-bound
+//! lifecycle claim before launching the app.
 
 #[cfg(target_os = "linux")]
 mod agent_api_custody;
 #[cfg(target_os = "linux")]
 mod agent_api_lifetime_v3;
+#[cfg(target_os = "linux")]
+mod agent_api_lifetime_wire_v3;
 #[cfg(target_os = "linux")]
 mod agent_api_native;
 #[cfg(target_os = "linux")]
@@ -54,6 +57,10 @@ mod lifecycle_v3_report_native;
 mod lifecycle_v3_stop_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_stop_claim_native;
+#[cfg(target_os = "linux")]
+mod lifecycle_v3_stop_begin_native;
+#[cfg(target_os = "linux")]
+mod lifecycle_v3_stop_assembly_native;
 #[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]

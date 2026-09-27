@@ -1,0 +1,14 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-fresh-stop-claim-fn/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.86s
+────────────
+ Nextest run ID e8235311-8ea9-41c0-919a-bb164b1f7b7d with nextest profile: default
+    Starting 7 tests across 7 binaries (152 tests skipped)
+        PASS [   0.007s] (1/7) minidregg-spk-host lifecycle_v3_stop_claim_native::tests::committed_inspection_binds_exact_originals
+        PASS [   0.008s] (2/7) minidregg-spk-host lifecycle_v3_stop_claim_native::tests::historical_outcome_cannot_be_fresh_callback
+        PASS [   0.009s] (3/7) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_requires_exact_source_echoes_and_running_incarnation
+        PASS [   0.010s] (4/7) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_rejects_inconsistent_receipt_or_generation
+        PASS [   0.010s] (5/7) minidregg-spk-host lifecycle_v3_stop_claim_native::tests::receipt_fields_require_canonical_positive_count
+        PASS [   0.010s] (6/7) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_marker_reopens_exactly_and_refuses_interrupted_write
+        PASS [   0.014s] (7/7) minidregg-spk-host lifecycle_v3_stop_assembly_native::tests::stop_original_index_is_canonical
+────────────
+     Summary [   0.015s] 7 tests run: 7 passed, 152 skipped

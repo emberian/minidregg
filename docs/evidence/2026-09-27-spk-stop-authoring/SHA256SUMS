@@ -1,0 +1,6 @@
+5b44f924aaefc6ab8f7a7734e3d7b3ebcb487dd0a977da007489b1eb882ba6a6  native/spk-host/src/lifecycle_v3_stop_begin_native.rs
+26a19bc612aed5c43e0509647e013745d0c2c2180155cc903932ce32e323da3f  native/spk-host/src/lifecycle_v3_stop_assembly_native.rs
+c67dc4764f10c4167d9fed90f4f57de2468d962d30039ea2ec59ddb373c699e3  native/spk-host/src/lib.rs
+d09287d179e0aa5060a6649c687d4b00a70fbbb2193039de9ceb140904db0d8f  docs/evidence/2026-09-27-spk-stop-authoring/README.md
+e61d4d0ec9116d97861bfd37c65b4218642598fc12c9535082d59133a64c3386  docs/evidence/2026-09-27-spk-stop-authoring/nextest.log
+36a0b8af34ad092c4ccb42df0f0a7de8dbf080916d9ff0d5f718b3eff23b7210  docs/evidence/2026-09-27-spk-stop-authoring/clippy.log
