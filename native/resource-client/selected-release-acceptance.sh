@@ -321,8 +321,16 @@ if "$MINI" selected-release-submit --host "$HOST" --config "$RECIPIENT_CONFIG" \
   echo "changed same-key release unexpectedly installed" >&2; exit 1
 fi
 refused "$EVIDENCE/recipient/conflict-attempt/request-0000.outcome.json"
-jq -e '.phase == "7265706c6179"' \
+jq -e '.phase == "61646d697373696f6e"' \
   "$EVIDENCE/recipient/conflict-attempt/request-0000.outcome.json" >/dev/null
+if "$MINI" selected-release-lookup --attempt "$EVIDENCE/recipient/conflict-attempt" \
+  --socket "$RECIPIENT_SOCKET" >"$EVIDENCE/recipient/conflict-lookup.stdout" \
+  2>"$EVIDENCE/recipient/conflict-lookup.stderr"; then
+  echo "changed same-key lookup unexpectedly found a receipt" >&2; exit 1
+fi
+refused "$EVIDENCE/recipient/conflict-attempt/request-0001.outcome.json"
+jq -e '.phase == "7265706c6179"' \
+  "$EVIDENCE/recipient/conflict-attempt/request-0001.outcome.json" >/dev/null
 logical_image after-conflict
 cmp "$EVIDENCE/recipient/after-original-image.bin" \
   "$EVIDENCE/recipient/after-conflict-image.bin"
@@ -337,7 +345,7 @@ if "$MINI" selected-release-submit --host "$HOST" --config "$RECIPIENT_CONFIG" \
   echo "wrong owner signer unexpectedly installed" >&2; exit 1
 fi
 refused "$EVIDENCE/recipient/wrong-signer-attempt/request-0000.outcome.json"
-jq -e '.phase == "73656c65637465642d72656c65617365"' \
+jq -e '.phase == "61646d697373696f6e"' \
   "$EVIDENCE/recipient/wrong-signer-attempt/request-0000.outcome.json" >/dev/null
 logical_image after-wrong-signer
 cmp "$EVIDENCE/recipient/after-original-image.bin" \
@@ -445,7 +453,7 @@ if "$MINI" selected-release-submit --host "$HOST" --config "$RECIPIENT_CONFIG" \
   echo "stale current-law release unexpectedly installed" >&2; exit 1
 fi
 refused "$EVIDENCE/recipient/stale-law-attempt/request-0000.outcome.json"
-jq -e '.phase == "73656c65637465642d72656c65617365"' \
+jq -e '.phase == "61646d697373696f6e"' \
   "$EVIDENCE/recipient/stale-law-attempt/request-0000.outcome.json" >/dev/null
 logical_image after-law-refusal
 cmp "$EVIDENCE/recipient/after-law-image.bin" \
