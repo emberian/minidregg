@@ -82,6 +82,7 @@ structure Selected (config : NativeHost.Config) (opened : NativeHost.Opened conf
 
 inductive Reject where
   | wrongDestination
+  | confidentialProfileUnavailable
   | unbounded
   | expired
   | missingCurrentKey
@@ -99,6 +100,8 @@ inductive Reject where
 
 def select (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (release : Release) : Except Reject (Selected config opened release) := do
+  if release.destination.audience.visibility != .publicPeerable then
+    throw .confidentialProfileUnavailable
   if destination : release.destination.domain = config.deployment.domain ∧
       release.destination.semantics = config.profile.semantics then
     if bounded : release.bounded = true then
