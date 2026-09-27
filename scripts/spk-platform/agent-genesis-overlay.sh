@@ -175,7 +175,7 @@ for route in hermes-a hermes-b; do
         "$EVIDENCE/agents/verified/$label/view.json" | cut -d ' ' -f 1)" \
       --slurpfile view "$EVIDENCE/agents/verified/$label/view.json" '
       {route:$route,role:$role,task:$task,subject:$subject,
-       capability:$cap,root:$view[0].page.root,viewSha256:$viewSha}' \
+       capability:$capability,root:$view[0].page.root,viewSha256:$viewSha}' \
       >>"$EVIDENCE/agents/verified/born-views.jsonl"
   done
 done
