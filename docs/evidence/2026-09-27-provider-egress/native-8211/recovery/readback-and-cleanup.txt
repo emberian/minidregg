@@ -1,0 +1,9 @@
+fb09563d247ef333ac1713a9ebde7283bd7720093f5779e364f39660ba87e959  /tmp/mini-provider-egress.HdVYET/fresh-8211/recovered-parent/signed-observation.bin
+a83c62f7602da581c44a393df7c10d7ad5d4fce67db8b331764b729f9e02b1a2  /tmp/mini-provider-egress.HdVYET/fresh-8211/recovered-parent/view.bin
+fa32d7b442f19675bb3a8a2e3c94d7bc43b160469a7a0dc18f26297a72918aea  /tmp/mini-provider-egress.HdVYET/fresh-8211/settled-parent/signed-observation.bin
+882a83008db855b8fad1d9e48b43051c405fd8bf5cd6347ebf70090cf54e0c90  /tmp/mini-provider-egress.HdVYET/fresh-8211/settled-parent/view.bin
+50192986e171c151674563bc8bd01824f03cef6a13200334117deb290640cac8  /tmp/mini-provider-egress.HdVYET/fresh-8211/provider-metered.log
+MainPID=0
+Result=success
+ActiveState=inactive
+bridge_processes=0

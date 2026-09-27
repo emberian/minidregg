@@ -130,3 +130,9 @@ one, retain the controller until a signed interrupt receipt and final signed
 parent state are observed, and perform any required audited settlement. A
 real-provider deployment also needs a separately pinned HTTPS origin/model,
 operator-custodied key and explicit spending cap before any paid call.
+
+The same private Store was later resumed. A separate
+[hard-EOF recovery continuation](native-8211/recovery/README.md) records a
+confirmed native interrupt, signed status-5 readback, operator-audited
+settlement, effects acknowledgement, and final signed status-0 readback. It
+does not change the first run's narrower immediate post-EOF observation.

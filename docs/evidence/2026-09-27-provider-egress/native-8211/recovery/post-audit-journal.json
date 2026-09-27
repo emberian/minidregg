@@ -1,0 +1,41 @@
+{
+  "connection": "detached",
+  "pending": null,
+  "toolPending": null,
+  "providerPending": null,
+  "child": null,
+  "settlementDue": null,
+  "parentHold": null,
+  "toolHold": null,
+  "providerHold": null,
+  "providerAttempt": null,
+  "unresolvedExternal": [],
+  "reconciliationLog": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "106",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "/tmp/mini-provider-egress.HdVYET/fresh-8211/runtime-state/attempt-0000000000000094",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "106",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "113",
+      "details": [
+        "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ]
+}
