@@ -111,3 +111,14 @@ source inspections, post-CAS receipts, physical image comparison, two human
 sessions, direct API and two agent routes have **not** been run in this cut.
 Those are the next acceptance steps after the qualified Host and final
 resident route schema are available.
+
+There is one concrete fresh-volume START gap in the current physical source.
+`native/spk-host/src/resident_service.rs` selects the signed
+`manifest.continue_command` for every resident launch. GitWeb's signed create
+action runs `start.sh`, which initializes `/var/repo.git`, configures the hook
+and receive-pack, then starts the continuing service. The isolated
+`gitweb-smoke` runner selects `manifest.actions[0].command` for create and
+`continue_command` for wake, but that choice is not yet integrated with the
+resident one-shot claim and fresh `/var` journal. A fresh platform deployment
+must initialize its own volume from the signed action with durable uncertainty
+handling; the old smoke volume is not an input to this fixture.

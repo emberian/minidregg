@@ -7,7 +7,7 @@ Frozen source SHA-256:
 | Path | SHA-256 |
 | --- | --- |
 | `native/resource-client/src/agent_payer.rs` | `ac8eb1723d50f9423fac5d50cb58ffd8f119c4b64a23840806e72c6e7c55e4cd` |
-| `native/resource-client/src/agent_reserve.rs` | `669d5a34c4b0832a886cd33151ac51d70600510efb71924417883ced9410fa79` |
+| `native/resource-client/src/agent_reserve.rs` | `2d65de29bb00e4dddefbbfa962a35dd001425a9b6bc4ab6c29338959c56b83a1` |
 | `native/resource-client/src/main.rs` | `ba6aa1e41743c9641d395807bf15953adef0fd9e233bc465b5cc53c97014f28b` |
 | `native/resource-client/README.md` | `b7313f3f7d562ee01be5f428b2eca6a540727982c48e1fbf1dbb80e217f90a8b` |
 
@@ -16,3 +16,11 @@ From the repository root, focused `CARGO_BUILD_JOBS=2 cargo nextest run --locked
 The helper rechecks the original reserve pin, selected Host image, config, paid Plan and approval after detached signing and before publishing `payer-signatures.json`. A partial payer directory has no native mutation and remains evidence; a retry uses a new directory and reselects op48 from the same exact retained inputs.
 
 This is a source and focused custody check. No linked Host op48 paid-plan fixture or actual payer signature was exercised. Current op48 re-selection is a required fail-closed step; a historical reserve receipt alone cannot authorize paid dispatch.
+
+After the initial source freeze, one test-only assertion was added to the
+existing reserve pin test: restoring its config then changing the retained
+receipt must make `payer_pin_still` refuse. Commit `c36ff17` captured this
+assertion; no production behavior changed. The original focused log above is
+preserved. A [committed-cut focused rerun](committed-cut-nextest.log) passed
+6/6 against that exact commit (SHA-256
+`10d6bbb8b1b28bc7d4e9b28b718787ade18e886eda8461aee9b868a534e1bc6c`).

@@ -1,0 +1,13 @@
+   Compiling minidregg-resource-client v0.1.0 (/Users/ember/dev/minidregg/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.11s
+────────────
+ Nextest run ID cded1088-7cfb-44b9-92bd-4d3c5336ca34 with nextest profile: default
+    Starting 6 tests across 1 binary (79 tests skipped)
+        PASS [   0.009s] (1/6) minidregg-resource-client::bin/mini agent_payer::tests::payer_signature_requires_exact_current_op48_plan
+        PASS [   0.009s] (2/6) minidregg-resource-client::bin/mini agent_payer::tests::payer_binding_requires_original_full_http_context_and_receipt
+        PASS [   0.009s] (3/6) minidregg-resource-client::bin/mini agent_reserve::tests::approval_requires_exact_plan_and_ordered_headers
+        PASS [   0.010s] (4/6) minidregg-resource-client::bin/mini agent_reserve::tests::confirmed_receipt_requires_all_four_canonical_fields
+        PASS [   0.080s] (5/6) minidregg-resource-client::bin/mini agent_reserve::tests::host_written_files_become_durable_owner_private_evidence
+        PASS [   1.568s] (6/6) minidregg-resource-client::bin/mini agent_reserve::tests::lost_op2_reply_keeps_one_shot_marker_and_exact_call
+────────────
+     Summary [   1.569s] 6 tests run: 6 passed, 79 skipped
