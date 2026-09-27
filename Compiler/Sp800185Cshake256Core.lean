@@ -357,6 +357,61 @@ def laneFromBlock (block : List UInt8) (laneIndex : Nat) : Lane :=
       ((block.getD (8 * laneIndex + offset) 0).toNat * 2 ^ (8 * offset)))
     zeroLane
 
+/-- Read one little-endian lane with machine-word shifts. The original
+`laneFromBlock` remains the specification for every block, including short
+blocks whose missing bytes are zero. -/
+private def shiftedByte (byte : UInt8) (offset : Nat) : UInt64 :=
+  UInt64.ofNat byte.toNat <<< UInt64.ofNat (8 * offset)
+
+private theorem shiftedByte_eq (byte : UInt8) (offset : Nat) (h : offset < 8) :
+    (shiftedByte byte offset).toBitVec =
+      BitVec.ofNat 64 (byte.toNat * 2 ^ (8 * offset)) := by
+  simp only [shiftedByte, UInt64.toBitVec_shiftLeft, UInt64.toBitVec_ofNat']
+  have hs : 8 * offset < 64 := by omega
+  have hs64 : 8 * offset < 2 ^ 64 := by omega
+  rw [BitVec.shiftLeft_eq']
+  simp only [BitVec.toNat_umod, BitVec.toNat_ofNat]
+  have h64 : (64 : BitVec 64).toNat = 64 := by decide
+  rw [h64, Nat.mod_eq_of_lt hs64, Nat.mod_eq_of_lt hs]
+  rw [BitVec.shiftLeft_eq_mul_twoPow]
+  have hpow : BitVec.twoPow 64 (8 * offset) =
+      BitVec.ofNat 64 (2 ^ (8 * offset)) := by
+    apply BitVec.eq_of_toNat_eq
+    simp only [BitVec.toNat_twoPow, BitVec.toNat_ofNat]
+  rw [hpow, ← BitVec.ofNat_mul]
+
+private def laneFromBlockUInt64 (block : List UInt8) (laneIndex : Nat) : Lane :=
+  ((List.range 8).foldl (fun acc offset =>
+    acc ^^^ shiftedByte (block.getD (8 * laneIndex + offset) 0) offset)
+    (0 : UInt64)).toBitVec
+
+private theorem laneFromBlockUInt64_eq (block : List UInt8) (laneIndex : Nat) :
+    laneFromBlockUInt64 block laneIndex = laneFromBlock block laneIndex := by
+  have hfold (offsets : List Nat) (h : ∀ offset ∈ offsets, offset < 8)
+      (acc : UInt64) :
+      (offsets.foldl (fun a offset =>
+        a ^^^ shiftedByte (block.getD (8 * laneIndex + offset) 0) offset)
+        acc).toBitVec =
+      offsets.foldl (fun a offset =>
+        a ^^^ BitVec.ofNat 64
+          ((block.getD (8 * laneIndex + offset) 0).toNat * 2 ^ (8 * offset)))
+        acc.toBitVec := by
+    induction offsets generalizing acc with
+    | nil => rfl
+    | cons offset rest ih =>
+      simp only [List.foldl_cons]
+      rw [ih (by intro x hx; exact h x (List.mem_cons_of_mem _ hx))]
+      rw [UInt64.toBitVec_xor, shiftedByte_eq _ _ (h offset (by simp))]
+  simpa [laneFromBlockUInt64, laneFromBlock, zeroLane] using
+    hfold (List.range 8) (by intro offset hmem; exact List.mem_range.mp hmem) 0
+
+@[csimp] theorem laneFromBlock_eqUInt64 : laneFromBlock = laneFromBlockUInt64 := by
+  funext block laneIndex
+  exact (laneFromBlockUInt64_eq block laneIndex).symm
+
+/-! The compiled substitution keeps the full little-endian lane law. -/
+#print axioms laneFromBlock_eqUInt64
+
 def xorRateBlock (state : State) (block : List UInt8) : State :=
   Array.ofFn fun index : Fin 25 =>
     if index.val < rateLanes then
@@ -419,6 +474,27 @@ theorem absorbPadded_eq_indexed (padded : List UInt8) :
 def stateByte (state : State) (index : Nat) : UInt8 :=
   UInt8.ofNat
     ((state.getD (index / 8) zeroLane).toNat / 2 ^ (8 * (index % 8)) % 256)
+
+private def stateByteUInt64 (state : State) (index : Nat) : UInt8 :=
+  ((UInt64.ofBitVec (state.getD (index / 8) zeroLane)) >>>
+    UInt64.ofNat (8 * (index % 8))).toUInt8
+
+private theorem stateByteUInt64_eq (state : State) (index : Nat) :
+    stateByteUInt64 state index = stateByte state index := by
+  apply UInt8.toNat_inj.mp
+  simp only [stateByteUInt64, stateByte, UInt64.toNat_toUInt8,
+    UInt64.toNat_shiftRight, UInt64.toNat_ofBitVec,
+    UInt64.toNat_ofNat', Nat.shiftRight_eq_div_pow, UInt8.toNat_ofNat']
+  have hs : 8 * (index % 8) < 64 := by omega
+  have hs64 : 8 * (index % 8) < 2 ^ 64 := by omega
+  rw [Nat.mod_eq_of_lt hs64, Nat.mod_eq_of_lt hs]
+  simp
+
+@[csimp] theorem stateByte_eqUInt64 : stateByte = stateByteUInt64 := by
+  funext state index
+  exact (stateByteUInt64_eq state index).symm
+
+#print axioms stateByte_eqUInt64
 
 /-- The first 256 output bits, in Keccak's little-endian lane convention. -/
 def squeeze32 (state : State) : List UInt8 :=
