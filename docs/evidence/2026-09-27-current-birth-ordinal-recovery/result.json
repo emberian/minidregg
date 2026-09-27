@@ -1,0 +1,212 @@
+{
+  "type": "mini-current-birth-ordinal-hard-eof-r6-v1",
+  "cutoff": {
+    "connection": "fenced",
+    "sessionId": "f2cb4f34-2ad4-433b-a00c-06d0c725a49a",
+    "sessionLoadVerified": false,
+    "pendingPrompt": true,
+    "birthNextOrdinal": {
+      "office": 1
+    },
+    "birthOperation": {
+      "family": "office",
+      "ordinal": 0,
+      "noNativeSubmit": true
+    },
+    "birthPending": false,
+    "bornCount": 0,
+    "bornBundle": [],
+    "bornReceipt": null,
+    "parentHold": true,
+    "toolHold": true,
+    "providerHold": false,
+    "unresolvedExternal": [
+      "delegated tool reservation fenced with uncertain external effects"
+    ]
+  },
+  "recovered": {
+    "connection": "detached",
+    "sessionId": "f2cb4f34-2ad4-433b-a00c-06d0c725a49a",
+    "sessionLoadVerified": false,
+    "pendingPrompt": true,
+    "birthNextOrdinal": {
+      "office": 0
+    },
+    "birthOperation": null,
+    "birthPending": false,
+    "bornCount": 0,
+    "bornBundle": [],
+    "bornReceipt": null,
+    "parentHold": false,
+    "toolHold": false,
+    "providerHold": false,
+    "unresolvedExternal": []
+  },
+  "confirmed": {
+    "connection": "soft",
+    "sessionId": "f2cb4f34-2ad4-433b-a00c-06d0c725a49a",
+    "sessionLoadVerified": true,
+    "pendingPrompt": false,
+    "birthNextOrdinal": {
+      "office": 1
+    },
+    "birthOperation": null,
+    "birthPending": false,
+    "bornCount": 1,
+    "bornBundle": [
+      {
+        "name": "office-0-app",
+        "target": "8401",
+        "ownerCapability": "141",
+        "controlCapability": "142"
+      },
+      {
+        "name": "office-0-package",
+        "target": "8402",
+        "ownerCapability": "143",
+        "controlCapability": "144"
+      },
+      {
+        "name": "office-0-snapshot",
+        "target": "8403",
+        "ownerCapability": "145",
+        "controlCapability": "146"
+      }
+    ],
+    "bornReceipt": {
+      "transactionId": "89425040310823959668030417105802354117524692948137825108405778797732706734889",
+      "eventId": "33939366897564230483957701512351905440584705058404452384796313819585032364407",
+      "acceptedCount": "28",
+      "imageBoundary": "23022319337774368669765575492579194620821142232014217140233881039568257639547",
+      "callSha256": "6e54ebcb110dabed8260a188ba84b3fa4ed2694ed57196dc04e087e78084bd42",
+      "outcomeSha256": "eac0b147f5ddf6fae9bddc2a22607bd1b34c5c71baa0e30437348538710e44e6"
+    },
+    "parentHold": false,
+    "toolHold": false,
+    "providerHold": false,
+    "unresolvedExternal": []
+  },
+  "reopened": {
+    "connection": "soft",
+    "sessionId": "f2cb4f34-2ad4-433b-a00c-06d0c725a49a",
+    "sessionLoadVerified": true,
+    "pendingPrompt": false,
+    "birthNextOrdinal": {
+      "office": 1
+    },
+    "birthOperation": null,
+    "birthPending": false,
+    "bornCount": 1,
+    "bornBundle": [
+      {
+        "name": "office-0-app",
+        "target": "8401",
+        "ownerCapability": "141",
+        "controlCapability": "142"
+      },
+      {
+        "name": "office-0-package",
+        "target": "8402",
+        "ownerCapability": "143",
+        "controlCapability": "144"
+      },
+      {
+        "name": "office-0-snapshot",
+        "target": "8403",
+        "ownerCapability": "145",
+        "controlCapability": "146"
+      }
+    ],
+    "bornReceipt": {
+      "transactionId": "89425040310823959668030417105802354117524692948137825108405778797732706734889",
+      "eventId": "33939366897564230483957701512351905440584705058404452384796313819585032364407",
+      "acceptedCount": "28",
+      "imageBoundary": "23022319337774368669765575492579194620821142232014217140233881039568257639547",
+      "callSha256": "6e54ebcb110dabed8260a188ba84b3fa4ed2694ed57196dc04e087e78084bd42",
+      "outcomeSha256": "eac0b147f5ddf6fae9bddc2a22607bd1b34c5c71baa0e30437348538710e44e6"
+    },
+    "parentHold": false,
+    "toolHold": false,
+    "providerHold": false,
+    "unresolvedExternal": []
+  },
+  "reconciliation": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "61",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "/tmp/mini-current-birth-ordinal-9601-r6-final2-20260927/runtime-state/attempt-0000000000000009",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "61",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "68",
+      "details": [
+        "delegated tool reservation fenced with uncertain external effects",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ],
+  "originalReceipt": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "transactionId": "89425040310823959668030417105802354117524692948137825108405778797732706734889",
+    "eventId": "33939366897564230483957701512351905440584705058404452384796313819585032364407",
+    "acceptedCount": "28",
+    "imageBoundary": "23022319337774368669765575492579194620821142232014217140233881039568257639547"
+  },
+  "reopenedLookup": {
+    "type": "confirmed",
+    "confirmation": "replayed",
+    "transactionId": "89425040310823959668030417105802354117524692948137825108405778797732706734889",
+    "eventId": "33939366897564230483957701512351905440584705058404452384796313819585032364407",
+    "acceptedCount": "28",
+    "imageBoundary": "23022319337774368669765575492579194620821142232014217140233881039568257639547"
+  },
+  "signedResources": {
+    "app": {
+      "task": "8401",
+      "root": "78273641394136004676841219073082787278948978249297758684781367055302557776492"
+    },
+    "package": {
+      "root": "46300027243521768844013651496807482006601181730936201825012132941522840901526"
+    },
+    "snapshot": {
+      "root": "78248462519471737347783430994966808460001049161645583977869033659707044088451"
+    }
+  },
+  "signedGrains": {
+    "parent": {
+      "generation": "3",
+      "remaining": "98",
+      "reserved": "0",
+      "status": "2",
+      "task": "9601"
+    },
+    "tool": {
+      "generation": "4",
+      "remaining": "45",
+      "reserved": "0",
+      "status": "0",
+      "task": "9602"
+    },
+    "provider": {
+      "generation": "6",
+      "remaining": "97",
+      "reserved": "0",
+      "status": "0",
+      "task": "9604"
+    }
+  }
+}
