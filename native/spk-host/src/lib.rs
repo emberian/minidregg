@@ -15,4 +15,6 @@ mod spawn_gate;
 #[cfg(target_os = "linux")]
 mod rpc_adapter;
 #[cfg(target_os = "linux")]
+mod http_response;
+#[cfg(target_os = "linux")]
 pub mod http_entrance;

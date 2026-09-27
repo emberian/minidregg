@@ -595,7 +595,8 @@ impl CustodianPolicy {
 }
 
 /// A same-UID, owner-private Unix entrance. No TCP listener or Mini signer is
-/// created here. A stale path is refused until an operator audits it.
+/// created here. Under the owner lock, an owned socket is removed only when
+/// connect reports ConnectionRefused and its device/inode are unchanged.
 pub struct PrivateHttpEntrance {
     listener: UnixListener,
     socket: PathBuf,
