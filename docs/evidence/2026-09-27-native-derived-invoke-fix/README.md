@@ -1,0 +1,9 @@
+# Native Host persistent invocation constructor repair
+
+`derived-of-invoke.patch` is the **standalone two-file patch against committed source**. It excludes the concurrent fn frontier worktree changes. Baseline `Kernel/NativeHostReplay.lean` SHA-256 `07820191f138e1040bd400adb03bf075352457f25d1c2dcfbd6c1d9a673e041a`; baseline `Kernel/NativeHost.lean` SHA-256 `b6636d36b727eba811d66d08f11d84358bee0f9eacd654110b37113406c91cd1`.
+
+The patch adds `NativeHostReplay.Derived.ofInvoke`, which accepts the already admitted typed current-image invocation and fills the private `Derived` record. The persistent Host call site uses it instead of the outdated two-field constructor. No fresh fn frontier or runtime behavior change is included.
+
+Patched Replay source SHA-256 `a22adda15727d239aaf8051196fe6f98e45f604aaf8948fc653b1f6de1d0187f`; patched NativeHost source SHA-256 `f4eae71cb97f2c38437134e9f9fcdf5e0f140d3331fcd5e20134f7014ba2292f`. They were compiled serially with `LEAN_NUM_THREADS=2` and direct `lean -o/-i/-c` in independent writable `/home/ember/build/mini-derived-fix-overlay`, using an ordinary byte copy of the exact committed-3a OLean closure from `/home/ember/build/minidregg-overnight-20260927-success-prefix-next`. The copied baseline Replay source/OLean were `07820191...`/`1b022bde8bb52bd6aa98239519874f028e1e0f2c9487fab0a77e18a0db118c54`. Patched Replay OLean SHA-256 `26286b5fa04d8418ca885be7df5ea9c746d3bd1e302050021f9b0a17a5117843`; patched NativeHost OLean SHA-256 `9e3be20dc3c8c76504e053175c6fe251ddec8640921836c26312a3193c922ffb`.
+
+Both direct Lean commands exited zero. The logs contain only axiom-readback messages. This is a source typecheck, not a linked native Host or physical acceptance result. The pre-patch committed native build failed at this constructor and its inherited NativeHost OLean was stale.

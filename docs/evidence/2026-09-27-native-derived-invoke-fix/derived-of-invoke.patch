@@ -1,0 +1,33 @@
+--- a/Kernel/NativeHostReplay.lean
++++ b/Kernel/NativeHostReplay.lean
+@@ -265,6 +265,19 @@
+         config.deployment config.profile
+         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress //
+       intent = accepted.intent })
++
++/-- Preserve the exact typed ordinary admission through persistent CAS readback. -/
++def Derived.ofInvoke {config : Config} {opened : Opened config}
++    {command : DeclaredResourceController.Command}
++    (prepared : DeclaredResourceController.PreparedInvocation config.deployment
++      config.profile ⟨config.federation, logicalHeight config opened.durable⟩
++      opened.durable command)
++    (signed : DeclaredResourceController.SignedCommand)
++    (shape : DeclaredResourceController.PhysicalShape prepared)
++    (accepted : DeclaredResourceController.AcceptedInvocation prepared signed) :
++    Derived config opened :=
++  ⟨accepted.dataIntent shape, .invoke prepared signed shape accepted,
++    none, none, none⟩
+ 
+ /-- Reuse the very same typed dispatch admission for the exact CAS readback
+ fast path. No second signature check or caller-created Derived is needed. -/
+--- a/Kernel/NativeHost.lean
++++ b/Kernel/NativeHost.lean
+@@ -424,7 +424,7 @@
+         (fun prepared shape accepted => do
+           let intent := accepted.dataIntent shape
+           let derived : NativeHostReplay.Derived config old.opened :=
+-            ⟨intent, .invoke prepared signed shape accepted⟩
++            NativeHostReplay.Derived.ofInvoke prepared signed shape accepted
+           let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+             ResourceBirthCodec.rootBytes old.opened.durable intent
+           match result with

@@ -424,7 +424,7 @@ def submitVerifiedLoadedWith (config : Config) {oldTarget : Durable}
         (fun prepared shape accepted => do
           let intent := accepted.dataIntent shape
           let derived : NativeHostReplay.Derived config old.opened :=
-            ⟨intent, .invoke prepared signed shape accepted⟩
+            NativeHostReplay.Derived.ofInvoke prepared signed shape accepted
           let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
             ResourceBirthCodec.rootBytes old.opened.durable intent
           match result with

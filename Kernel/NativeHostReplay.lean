@@ -266,6 +266,19 @@ structure Derived (config : Config) (opened : Opened config) where
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress //
       intent = accepted.intent })
 
+/-- Preserve the exact typed ordinary admission through persistent CAS readback. -/
+def Derived.ofInvoke {config : Config} {opened : Opened config}
+    {command : DeclaredResourceController.Command}
+    (prepared : DeclaredResourceController.PreparedInvocation config.deployment
+      config.profile ⟨config.federation, logicalHeight config opened.durable⟩
+      opened.durable command)
+    (signed : DeclaredResourceController.SignedCommand)
+    (shape : DeclaredResourceController.PhysicalShape prepared)
+    (accepted : DeclaredResourceController.AcceptedInvocation prepared signed) :
+    Derived config opened :=
+  ⟨accepted.dataIntent shape, .invoke prepared signed shape accepted,
+    none, none, none⟩
+
 /-- Reuse the very same typed dispatch admission for the exact CAS readback
 fast path. No second signature check or caller-created Derived is needed. -/
 def DispatchAt.toDerived {config : Config} {opened : Opened config}

@@ -1,0 +1,4 @@
+c3b5629d07de0caec0c78122fb6593f6da3df685acd15ad9aee82654f56bee68  README.md
+f9c988a8c15066232c20ff69d3614e3c5aa4fab0c99cb09e3b949b131d27ffce  derived-of-invoke.patch
+f8cae924f19b8c131664bfbe870d6ca4eb6e01825e204e562130326fa4357d1c  mini-derived-fix-NativeHost.log
+3466e88f21218fe7c070c50a9908a0d67b1b5c726a8280006163c771fdbcd1e3  mini-derived-fix-NativeHostReplay.log
