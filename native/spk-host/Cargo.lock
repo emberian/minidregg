@@ -391,6 +391,7 @@ dependencies = [
  "capnpc",
  "futures",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
 ]

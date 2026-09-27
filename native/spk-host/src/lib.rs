@@ -20,3 +20,7 @@ mod http_response;
 pub mod http_entrance;
 #[cfg(target_os = "linux")]
 mod native_dispatch;
+#[cfg(target_os = "linux")]
+mod dispatch_inspection;
+#[cfg(target_os = "linux")]
+mod dispatch_web_input;
