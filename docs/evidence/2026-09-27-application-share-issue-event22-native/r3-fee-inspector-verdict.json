@@ -1,0 +1,19 @@
+{
+  "type": "minidregg-event22-r3-fee-inspector-verdict-v1",
+  "scope": "read-only exact retained prepared Plan; no native submit in this check",
+  "sourcePlanSha256": "6a0287c77c82e32508ece21a826d0125902b244c10fbf12ab1c07dfa43421e36",
+  "feeInspectorLeanSourceSha256": "57102608ad0bf6afd470cd8cc74332edacf10c0cce0013cee74f7383cc1bfd88",
+  "planCodecLeanSourceSha256": "a25be2da5f70a9f81f2128c406b4caa39262bc679fe66a1023423bf20b14ca63",
+  "correctedShellSourceSha256": "7025ad96acb8d45e95236e8d8585401205b0f483a63faa666a137c3b3de358c3",
+  "toolchain": "Lean 4.30.0 via lake env lean --run in source-qualified prefix292 OLean root",
+  "priorError": "wrong bare Lean toolchain produced incompatible Init.olean header; preserved in private run-r1/signed-birth-fee.txt (252 bytes)",
+  "firstCorrectedAttempt": "bounded 180-second timeout during OLean import; no decoded output or Store action",
+  "successfulAttempt": {
+    "deadlineSeconds": 600,
+    "wallSecondsFromRetainedFileTimes": 466.10,
+    "exitStatus": 0,
+    "stderrBytes": 0,
+    "fee": "517",
+    "outputSha256": "0f8a3eec58c0e6ecc0c9fc9ab9092146b0d428853da1c9824ed6d7423fa5dfe2"
+  }
+}

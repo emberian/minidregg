@@ -25,9 +25,8 @@ case "$SEAT" in
   *) echo "Lean seat must be absolute" >&2; exit 2 ;;
 esac
 mkdir "$SEAT" || { echo "Lean seat unavailable" >&2; exit 75; }
-trap 'rmdir "$SEAT"' EXIT HUP INT TERM
+cleanup() { rmdir "$SEAT" 2>/dev/null || :; }
+trap cleanup EXIT
+trap 'exit 143' HUP INT TERM
 cd "$MINI_LEAN_ROOT"
-LEAN_IMPORT_PATH=$(lake env printenv LEAN_PATH)
-FEE_SOURCE_ROOT=$(CDPATH='' cd -- "$(dirname -- "$FEE_SOURCE")/../.." && pwd)
-cd "$FEE_SOURCE_ROOT"
-LEAN_NUM_THREADS=2 LEAN_PATH="$LEAN_IMPORT_PATH" lean --run "$FEE_SOURCE" "$PLAN"
+LEAN_NUM_THREADS=2 lake env lean --run "$FEE_SOURCE" "$PLAN"
