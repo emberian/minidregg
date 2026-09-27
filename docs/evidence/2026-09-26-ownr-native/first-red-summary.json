@@ -1,0 +1,17 @@
+{
+  "acceptedTag10TransactionId": "92570003295046408898231234575929281965187506423865668432502201907106117385438",
+  "authoredCarrierBytes": 351204,
+  "authoredCarrierSha256": "76455b2f566388ad399c9ef4146548cbb95a62b7e6b797347a300226cf10ac89",
+  "fnAckAttempted": false,
+  "fnInjectionPrefixBytes": 75,
+  "fnInjectionPrefixHex": "506174683a20666e2e6578616d706c652e696e76616c6964216e6f742d666f722d6d61696c0d0a496e6a656374696f6e2d496e666f3a20666e2e6578616d706c652e696e76616c69640d0a",
+  "fnSourceSha256": "31e2b475949eb80846d56b96631ab73a05bebbda43ae39ab129a45f1fcbee250",
+  "miniClientSha256": "9fc6a97ad5319e2d7f4c264ecfe40258e46d0c40ac077ec430106409ff28be8b",
+  "miniHostSha256": "031258701b7b9b51b218eb19186d0ca57c2468909bd0487913664a92388c0d0b",
+  "miniTag9Submitted": false,
+  "nativeProjectionSuffixEqualsAuthoredCarrier": true,
+  "projectedArticleBytes": 351279,
+  "projectedArticleSha256": "f4da52d4aa57e86df35a338d96cdc8a3acb8479d779cb49fd7ff3826f691a6cf",
+  "qualifiedFnImageSha256": "432622d29a28d59455e01f3e5b426036c5862db21d5f7d1205a9304ab11e3505",
+  "scope": "First physical A catalog own-R op14 on fresh private fn/Mini fixture; red before Mini tag9 or fn ACK"
+}

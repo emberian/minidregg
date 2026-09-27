@@ -1,0 +1,7 @@
+# Fresh A own-R native gate: first refusal
+
+A separate private A Mini deployment accepted one prepared R outbox (tag10; transaction in `first-red-summary.json`). The qualified fn A Store then held that R as its first matching article with consumer ACK at zero. On the certified own-R Mini Host, typed op14 refused before producing a Mini progress intent: `A own-R poll differs from exact accepted R carrier`. The exact 95-byte refusal frame is retained here. No tag9 Mini submit or fn ACK was attempted in this first gate.
+
+A read-only repeat fn poll and native `consumer-project` showed why. The fn Store article is **exactly** a 75-byte `Path` and `Injection-Info` prefix followed by the accepted authored carrier byte-for-byte. Both lengths and SHA-256 values, and the exact prefix hex, are in `first-red-summary.json`. The strict signed R source SHA remained unchanged. This establishes a transport-header representation difference, not authorization to discard arbitrary bytes. The raw carrier, projection, Mini Store, keys, and private fn node remain operator-private at `/tmp/mini-workroom-ownr-skip-20260926` and `/tank/fn/scratch/mini-workroom-ownr-skip-20260926-1`.
+
+`fn-a-status-before.txt` and `fn-a-status-after.txt` capture the unchanged committed ACK and frontier. A repaired source-owned verification must define and validate the exact qualified fn transport prefix before a new gate can claim a durable Mini skip/ACK.
