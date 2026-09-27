@@ -268,6 +268,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if journal.read()?.is_some() {
         return Err(invalid("resident generation journal is already occupied"));
     }
+    match std::fs::symlink_metadata(config.journal_dir.join("lifecycle-begin-v3-active.json")) {
+        Ok(_) => return Err(invalid("resident launch BEGIN attempt already active")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
     // An old one-shot attempt is an uncertainty or recovery record, not a
     // fresh destination. Check every later phase before consuming BEGIN.
     for path in [

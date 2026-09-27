@@ -32,6 +32,17 @@ pub(crate) struct SourceBoundLaunch<'a> {
 }
 
 impl<'a> SourceBoundLaunch<'a> {
+    #[cfg(test)]
+    pub(crate) fn test_pair(
+        package: &'a InstalledPackage,
+        descriptor: SourceLaunchDescriptor,
+    ) -> Self {
+        Self {
+            package,
+            descriptor,
+        }
+    }
+
     pub(crate) fn author(
         operator: &PrivateOperator,
         package: &'a InstalledPackage,

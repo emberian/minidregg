@@ -88,6 +88,7 @@ fn author_qualified_launch<'a>(
 
 const V3_ARTIFACTS: &[&str] = &[
     "launch-descriptor",
+    "lifecycle-begin-v3-active.json",
     "begin-v3",
     "claim-v3-author",
     "claim-v3",

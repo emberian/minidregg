@@ -1,0 +1,21 @@
+Running as unit: run-r39fdec6061f64f488bcca91dc8aac136.scope; invocation ID: 798c54d5aeed4a4c8956d32398513b22
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.93s
+────────────
+ Nextest run ID afade59d-4749-4580-9339-df3cc618d2f4 with nextest profile: default
+    Starting 13 tests across 1 binary (109 tests skipped)
+        PASS [   0.013s] ( 1/13) minidregg-spk-host install_service::install_v3::tests::deployment_and_host_pins_are_required_only_for_v2_install
+        PASS [   0.021s] ( 2/13) minidregg-spk-host install_service::install_v3::tests::retained_qualifier_must_equal_entire_source_authored_launch
+        PASS [   0.016s] ( 3/13) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.017s] ( 4/13) minidregg-spk-host lifecycle_v3_native::tests::inspected_unit_and_image_are_joined_to_signed_spk
+        PASS [   0.009s] ( 5/13) minidregg-spk-host lifecycle_v3_native::tests::plan_pin_uses_launch_root_for_installed_package_and_exact_request
+        PASS [   0.025s] ( 6/13) minidregg-spk-host lifecycle_v3_native::tests::uncertain_begin_attempt_blocks_new_client_id_in_same_journal
+        PASS [   0.027s] ( 7/13) minidregg-spk-host lifecycle_v3_native::tests::request_requires_source_owned_launch_and_exact_create_selection
+        PASS [   0.029s] ( 8/13) minidregg-spk-host lifecycle_v3_native::tests::v3_plan_and_ingress_reply_tags_cannot_accept_historical_payload
+        PASS [   0.037s] ( 9/13) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+        PASS [   0.009s] (10/13) minidregg-spk-host resident_service::tests::distinct_agent_uids_need_disjoint_socket_parent_acl_scopes
+        PASS [   0.080s] (11/13) minidregg-spk-host resident_launch::tests::inspected_create_index_and_digest_select_exact_signed_action
+        PASS [   0.015s] (12/13) minidregg-spk-host resident_service::tests::parsed_api_root_and_discovery_keep_one_canonical_prefix
+        PASS [   0.012s] (13/13) minidregg-spk-host resident_service::tests::resident_config_refuses_two_agent_sockets_under_one_acl_parent
+────────────
+     Summary [   0.158s] 13 tests run: 13 passed, 109 skipped

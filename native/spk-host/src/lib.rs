@@ -41,6 +41,8 @@ pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod launch_descriptor_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_v3_native;
+#[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]
 mod native_dispatch;
@@ -51,10 +53,10 @@ mod resident_launch;
 #[cfg(target_os = "linux")]
 pub mod resident_service;
 #[cfg(target_os = "linux")]
-mod volume_custody;
-#[cfg(target_os = "linux")]
 mod rpc_adapter;
 #[cfg(target_os = "linux")]
 pub mod sandbox;
 #[cfg(target_os = "linux")]
 mod spawn_gate;
+#[cfg(target_os = "linux")]
+mod volume_custody;
