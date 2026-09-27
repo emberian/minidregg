@@ -139,7 +139,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 50, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -166,7 +166,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+        [45 | 51, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -1062,7 +1062,7 @@ mod tests {
     }
 
     #[test]
-    fn namespace_and_completion_authoring_routes_stay_private_and_bounded() {
+    fn namespace_and_lifecycle_authoring_routes_stay_private_and_bounded() {
         for operation in [40, 41] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operation(&[operation, 1], true));
@@ -1098,6 +1098,16 @@ mod tests {
         assert!(allowed_operator_operation(&completion_assembly));
         assert!(!allowed_operation(&completion_assembly, true));
         assert!(!allowed_operator_operation(&[45, 1, 0, 0, 0, b'P']));
+
+        assert!(allowed_operator_operation(&[50, 1]));
+        assert!(!allowed_operator_operation(&[50]));
+        assert!(!allowed_operation(&[50, 1], true));
+        let mut begin_assembly = vec![51];
+        begin_assembly.extend(1u32.to_le_bytes());
+        begin_assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&begin_assembly));
+        assert!(!allowed_operation(&begin_assembly, true));
+        assert!(!allowed_operator_operation(&[51, 1, 0, 0, 0, b'P']));
     }
 
     #[test]

@@ -16,7 +16,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 39=lifecycle completion receipt-only lookup, 40=fn consumer namespace submit,
 41=fn consumer namespace receipt-only lookup, 42=operator-private namespace plan,
 43=operator-private namespace assembly, 44=operator-private completion plan,
-45=operator-private completion assembly. Op34 success uses a distinct
+45=operator-private completion assembly, 50=operator-private resident BEGIN plan,
+51=operator-private resident BEGIN assembly. Op34 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -48,6 +49,7 @@ import Kernel.ApplicationLifecycleCompletionLookup
 import Host.ApplicationDispatchInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
+import Host.ApplicationLifecycleBeginOperator
 import Host.FnConsumerNamespacePlan
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
@@ -253,6 +255,46 @@ def CompletionManagementSettings.pin (settings : CompletionManagementSettings) :
     packageCapability := ⟨settings.packageCapability⟩
     packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
 
+/-- Operator-pinned management identity for a current-image INSTALL/START
+BEGIN-v2 signing plan. Incoming op50 requests cannot select these resources,
+subject, key, or capabilities. -/
+structure ResidentBeginManagementSettings where
+  app : Nat
+  packageManifest : Nat
+  snapshotManifest : Nat
+  managementSubject : Nat
+  managementKeyId : Nat
+  appCapability : Nat
+  packageObserveCapability : Nat
+  deriving ToJson
+
+instance : FromJson ResidentBeginManagementSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["app", "packageManifest", "snapshotManifest",
+      "managementSubject", "managementKeyId", "appCapability",
+      "packageObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "residentBeginManagement has missing or unknown fields"
+    return ⟨← json.getObjValAs? Nat "app",
+      ← json.getObjValAs? Nat "packageManifest",
+      ← json.getObjValAs? Nat "snapshotManifest",
+      ← json.getObjValAs? Nat "managementSubject",
+      ← json.getObjValAs? Nat "managementKeyId",
+      ← json.getObjValAs? Nat "appCapability",
+      ← json.getObjValAs? Nat "packageObserveCapability"⟩
+
+def ResidentBeginManagementSettings.pin (settings : ResidentBeginManagementSettings) :
+    ApplicationLifecycleBeginOperator.Pin :=
+  { app := settings.app
+    packageManifest := settings.packageManifest
+    snapshotManifest := settings.snapshotManifest
+    managementSubject := settings.managementSubject
+    managementKeyId := settings.managementKeyId
+    appCapability := ⟨settings.appCapability⟩
+    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -282,6 +324,7 @@ structure Settings where
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   completionManagement : Option CompletionManagementSettings := none
+  residentBeginManagement : Option ResidentBeginManagementSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -3806,6 +3849,29 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle completion ingress exceeds host frame bound")
                             return ((45 : UInt8), ingress)
+                        | 50 =>
+                            let some custody := settings.residentBeginManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-resident-begin-author"
+                                  "resident BEGIN management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationLifecycleBeginOperator.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload
+                            let bytes := ApplicationLifecycleBeginOperator.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "resident BEGIN plan exceeds host frame bound")
+                            return ((50 : UInt8), bytes)
+                        | 51 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleBeginOperator.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical resident BEGIN plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleBeginOperator.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
+                            return ((51 : UInt8), ingress)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
