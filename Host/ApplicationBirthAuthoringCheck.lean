@@ -28,17 +28,23 @@ private def operator : NativeHost.Config := {
   storage := ⟨"", ""⟩
   signature := ⟨""⟩ }
 
-private def genesis : Json := object [
+private def grainOperator : NativeHost.Config :=
+  { operator with grainBirthTariff := some ⟨5, 2⟩ }
+
+private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("domain", number 8501), ("factoryId", number 10),
   ("resourceBookId", number 11), ("authorityCatalogueId", number 12),
   ("federation", number 9), ("tariffBase", number 3),
   ("tariffPerBirth", number 2), ("tariffPerGrant", number 1),
   ("tariffPerInitialPayloadByte", number 0), ("collector", number 99),
-  ("asset", number 0), ("expectedSemantics", number operator.profile.semantics.value),
+  ("asset", number 0), ("expectedSemantics", number semantics),
   ("issuerEpoch", number 2), ("genesisHeight", number 10),
   ("factoryPredicate", emptyRule), ("enrollments", .arr #[]),
   ("factoryControllerSubject", number 8),
   ("factoryControllerCapability", number 53), ("meterAllowance", meter)]
+
+private def genesis : Json := genesisWithSemantics operator.profile.semantics.value
+private def compositeGenesis : Json := genesisWithSemantics grainOperator.profile.semantics.value
 
 private def template : Json := object [
   ("issuer", number 5), ("ownerBudget", number 100000), ("lifetime", number 10000)]
@@ -66,6 +72,12 @@ private def requestWithSources (specField : String) (spec : Json)
 
 private def request (specField : String) (spec : Json) : Json :=
   requestWithSources specField spec #[number 42]
+
+private def compositeRequest (specField : String) (spec : Json) : Json := object [
+  ("genesis", compositeGenesis), ("template", template), ("creator", number 8),
+  ("nonce", number 41000), (specField, spec),
+  ("sourceCapabilities", .arr #[number 42]),
+  ("funding", .arr #[]), ("feePayer", number 8)]
 
 private def shape (kind : String) (source : Json)
     (births grants policies : Nat) : Bool :=
@@ -117,18 +129,74 @@ private def intentShape (kind fieldName : String) (birth : Json)
           | _ => false
       | none => false
 
+private def peer (task capability observe root : Nat) : Json := object [
+  ("task", number task), ("capability", number capability),
+  ("observeCapability", number observe), ("targetRoot", number root),
+  ("before", object [("generation", number 1), ("status", number 1),
+    ("remaining", number 100), ("reserved", number 3)])]
+
+private def composite (fieldName : String) (typedBirth : Json) : Json :=
+  let metered := object [
+    ("tariff", object [("base", number 5), ("perBirth", number 2)]),
+    (fieldName, typedBirth), ("authorityRoot", number 777),
+    ("tool", peer 6000 6001 6002 6003),
+    ("parent", peer 7000 7001 7002 7003)]
+  object [("subject", number 8), ("nonce", number 41000),
+    (if fieldName = "applicationBirth" then "applicationGrainBirth"
+      else "applicationSessionGrainBirth", metered), ("grants", .arr #[])]
+
+private def compositeShape (kind fieldName : String) (typedBirth : Json)
+    (expectedBirths expectedGrants : Nat) : Bool :=
+  match Minidregg.Host.Json.author kind (composite fieldName typedBirth) with
+  | .error _ => false
+  | .ok encoded =>
+      match NativeObservationCodec.intentCodec.decode encoded with
+      | some intent =>
+          match intent.purpose with
+          | .prepare (.birth bytes sourceCaps) =>
+              match GrainResourceBirthHostCodec.sourceCodec.decode bytes with
+              | some source =>
+                  intent.subject == ⟨8⟩ && sourceCaps == [⟨42⟩] &&
+                    source.birth.births.length == expectedBirths &&
+                    source.birth.grants.length == expectedGrants &&
+                    source.toolTask == 6000 && source.parentTask == 7000 &&
+                    source.authorityRoot.value == 777
+              | none => false
+          | _ => false
+      | none => false
+
+private def mismatchedCompositeTariff : Json :=
+  let mismatched := object [
+    ("genesis", compositeGenesis), ("template", template), ("creator", number 8),
+    ("nonce", number 41000), ("application", application),
+    ("sourceCapabilities", .arr #[number 42]), ("funding", .arr #[]),
+    ("feePayer", number 8),
+    ("grainBirthTariff", object [("base", number 6), ("perBirth", number 2)])]
+  composite "applicationBirth" mismatched
+
 def main : IO Unit := do
   let app := request "application" (application)
   let web := request "session" (session)
-  unless shape "application-birth" app 3 6 3 &&
-      shape "application-session-birth" web 2 4 2 &&
-      intentShape "application-birth-intent" "applicationBirth" app 3 &&
-      intentShape "application-session-birth-intent" "applicationSessionBirth" web 2 &&
-      repeatedSourceCapabilityPreserved &&
-      refused "application-birth" (request "application" (application true)) &&
-      refused "application-birth" (request "application" (application false true)) &&
-      refused "application-session-birth" (request "session" (session "invalid")) do
-    throw (IO.userError "application birth JSON authoring check failed")
+  let appComposite := composite "applicationBirth" (compositeRequest "application" (application))
+  match Minidregg.Host.Json.author "application-grain-birth-intent" appComposite with
+  | .error detail =>
+      throw (IO.userError s!"application composite source refused: {detail}")
+  | .ok _ => pure ()
+  for (label, passed) in [
+      ("application bare", shape "application-birth" app 3 6 3),
+      ("session bare", shape "application-session-birth" web 2 4 2),
+      ("application bare intent", intentShape "application-birth-intent" "applicationBirth" app 3),
+      ("session bare intent", intentShape "application-session-birth-intent" "applicationSessionBirth" web 2),
+      ("application composite", compositeShape "application-grain-birth-intent" "applicationBirth"
+        (compositeRequest "application" (application)) 3 6),
+      ("session composite", compositeShape "application-session-grain-birth-intent"
+        "applicationSessionBirth" (compositeRequest "session" (session)) 2 4),
+      ("composite tariff mismatch", refused "application-grain-birth-intent" mismatchedCompositeTariff),
+      ("repeated source capability", repeatedSourceCapabilityPreserved),
+      ("duplicate app target", refused "application-birth" (request "application" (application true))),
+      ("duplicate app capability", refused "application-birth" (request "application" (application false true))),
+      ("invalid session kind", refused "application-session-birth" (request "session" (session "invalid")))] do
+    unless passed do throw (IO.userError s!"application birth JSON authoring: {label} failed")
   IO.println "application birth JSON authoring: ok"
 
 end Minidregg.Host.ApplicationBirthAuthoringCheck
