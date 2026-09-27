@@ -27,7 +27,9 @@ plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch
 65=private fn frontier detached assembly, 66=private source-bound launch BEGIN
 plan, 67=private source-bound launch BEGIN detached assembly, 68=private launch
 claim plan, 69=private launch claim detached assembly, 70=private launch completion plan,
-71=private launch completion detached assembly. Op34/46 success uses a distinct
+71=private launch completion detached assembly, 72=grant issue submit,
+73=grant issue receipt-only lookup, 74=private grant issue plan,
+75=private grant issue detached assembly. Op34/46 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -53,6 +55,7 @@ import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationShareIssueGrainAuthoring
 import Kernel.ApplicationShareIssueGrainReceiver
 import Kernel.ApplicationShareIssueGrainLookup
+import Kernel.ApplicationAgentLifetimeGrantLookup
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
 import Kernel.ApplicationDispatchAgentReceiver
@@ -82,6 +85,7 @@ import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleLaunchCompletionAuthoring
 import Host.ApplicationLifecycleLaunchCompletionInspection
 import Host.ApplicationLifecycleClaimV3Inspection
+import Host.ApplicationAgentLifetimeGrantInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Host.FnConsumerFrontierPlan
@@ -1045,6 +1049,39 @@ def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
       return .uncertain "original grain share issue history unavailable".toUTF8.toList
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
+
+/-- Event27 grant installation is a durable Mini receipt, never a dispatch
+permit. The receiver re-derives its original event22 ticket and exact current
+app delegation before one CAS and verifies the recorded readback. -/
+def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationAgentLifetimeGrantReceiver.receiveVerified
+    session.verified payload
+  let outcome : NativeHostCodec.Outcome := match result with
+    | .confirmed kind receipt _ _ => .confirmed kind receipt
+    | .rejected _ => .refused "application-agent-lifetime-grant".toUTF8.toList
+        "request refused".toUTF8.toList
+    | .transactionConflict => .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+    | .contention => .contention
+    | .unavailable detail => .unavailable detail.toUTF8.toList
+    | .uncertain detail => .uncertain detail.toUTF8.toList
+  return NativeHost.publicSubmissionOutcome outcome
+
+/-- Grant recovery selects the exact event27 original from a verified walk.
+It returns its receipt only and cannot grant a later agent dispatch. -/
+def agentLifetimeGrantLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  match ApplicationAgentLifetimeGrantLookup.lookupVerified session.verified payload with
+  | .error _ =>
+      return .refused "application-agent-lifetime-grant".toUTF8.toList
+        "noncanonical or conflicting lookup ingress".toUTF8.toList
+  | .ok none => return .absent
+  | .ok (some original) => return .confirmed .replayed original.receipt
 
 /-- Historical dispatch lookup is receipt-only. It rechecks the original
 special event at its verifier-selected prefix and never mints a delivery
@@ -4332,7 +4369,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-completion-request" ||
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signing-frame" ||
-              kind == "application-lifecycle-launch-physical-signed-report" then
+              kind == "application-lifecycle-launch-physical-signed-report" ||
+              kind == "application-agent-lifetime-grant-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4355,6 +4393,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
+              kind == "application-agent-lifetime-grant-request" ||
+              kind == "application-agent-lifetime-grant-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4377,6 +4417,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
+              kind == "application-agent-lifetime-grant-request" ||
+              kind == "application-agent-lifetime-grant-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4487,6 +4529,14 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome ← applicationGrainShareIssueLookupSession
                               pinnedConfig state payload
                             return ((55 : UInt8), outcomeCodec.encode outcome)
+                        | 72 =>
+                            let outcome ← agentLifetimeGrantSubmitSession
+                              pinnedConfig state payload
+                            return ((72 : UInt8), outcomeCodec.encode outcome)
+                        | 73 =>
+                            let outcome ← agentLifetimeGrantLookupSession
+                              pinnedConfig state payload
+                            return ((73 : UInt8), outcomeCodec.encode outcome)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
@@ -4772,6 +4822,28 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch completion ingress exceeds host frame bound")
                             return ((71 : UInt8), ingress)
+                        | 74 =>
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationAgentLifetimeGrantAuthoring.prepareRequestLoaded
+                                session.verified payload
+                            let bytes := ApplicationAgentLifetimeGrantAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "agent lifetime grant plan exceeds host frame bound")
+                            return ((74 : UInt8), bytes)
+                        | 75 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationAgentLifetimeGrantAuthoring.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical agent lifetime grant plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let session ← sessionCurrent pinnedConfig state
+                            let ingress ← IO.ofExcept <|
+                              ApplicationAgentLifetimeGrantAuthoring.assembleCurrent
+                                session.verified plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
+                            return ((75 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"

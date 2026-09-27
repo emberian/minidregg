@@ -19,6 +19,7 @@ import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleLaunchCompletionInspection
 import Host.ApplicationLifecycleLaunchReportAuthoring
+import Host.ApplicationAgentLifetimeGrantInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationShareIssueGrainInspection
@@ -894,6 +895,82 @@ private def grainShareIssueRequest (json : Lean.Json) : Result (List UInt8) := d
       tool := ← grainShareSelector "$.tool" (← field "$" "tool" obj),
       parent := ← grainShareSelector "$.parent" (← field "$" "parent" obj) }
   return ApplicationShareIssueGrainAuthoring.requestCodec.encode request
+
+/-- Human-readable selectors for a lifetime grant. Every nested field is
+translated by Mini into its strict source codec; the birth and app signing
+headers still come only from the verified current image. -/
+private def agentLifetimeGrantRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["grant", "grantOwnerCapability",
+    "grantControlCapability", "payer", "funding", "sourceCapabilities"] json
+  let grantObj ← exactObject "$.grant" ["source", "participant", "approval"]
+    (← field "$" "grant" obj)
+  let sourceObj ← exactObject "$.grant.source"
+    ["resource", "issueIndex", "issueReceipt", "ticketResource", "ticketDigest"]
+    (← field "$.grant" "source" grantObj)
+  let receiptObj ← exactObject "$.grant.source.issueReceipt"
+    ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+    (← field "$.grant.source" "issueReceipt" sourceObj)
+  let receipt : NativeHostCodec.Receipt := {
+    transactionId := ⟨← nat "$.grant.source.issueReceipt.transactionId"
+      (← field "$.grant.source.issueReceipt" "transactionId" receiptObj)⟩
+    eventId := ⟨← nat "$.grant.source.issueReceipt.eventId"
+      (← field "$.grant.source.issueReceipt" "eventId" receiptObj)⟩
+    acceptedCount := ← nat "$.grant.source.issueReceipt.acceptedCount"
+      (← field "$.grant.source.issueReceipt" "acceptedCount" receiptObj)
+    imageBoundary := ⟨← nat "$.grant.source.issueReceipt.imageBoundary"
+      (← field "$.grant.source.issueReceipt" "imageBoundary" receiptObj)⟩ }
+  let participantObj ← exactObject "$.grant.participant"
+    ["app", "session", "subject", "parentTask", "originalGeneration",
+      "grantObserveCapability"] (← field "$.grant" "participant" grantObj)
+  let approvalObj ← exactObject "$.grant.approval"
+    ["issuer", "delegateCapability", "ceiling", "nonce"]
+    (← field "$.grant" "approval" grantObj)
+  let grant : ApplicationAgentLifetimeGrant.Grant := {
+    source := {
+      resource := ← nat "$.grant.source.resource" (← field "$.grant.source" "resource" sourceObj)
+      issueIndex := ← nat "$.grant.source.issueIndex" (← field "$.grant.source" "issueIndex" sourceObj)
+      issueReceipt := receipt
+      ticketResource := ← nat "$.grant.source.ticketResource"
+        (← field "$.grant.source" "ticketResource" sourceObj)
+      ticketDigest := ⟨← nat "$.grant.source.ticketDigest"
+        (← field "$.grant.source" "ticketDigest" sourceObj)⟩ }
+    participant := {
+      app := ← nat "$.grant.participant.app" (← field "$.grant.participant" "app" participantObj)
+      session := ← nat "$.grant.participant.session"
+        (← field "$.grant.participant" "session" participantObj)
+      subject := ⟨← nat "$.grant.participant.subject"
+        (← field "$.grant.participant" "subject" participantObj)⟩
+      parentTask := ← nat "$.grant.participant.parentTask"
+        (← field "$.grant.participant" "parentTask" participantObj)
+      originalGeneration := ← int "$.grant.participant.originalGeneration"
+        (← field "$.grant.participant" "originalGeneration" participantObj)
+      grantObserveCapability := ⟨← nat "$.grant.participant.grantObserveCapability"
+        (← field "$.grant.participant" "grantObserveCapability" participantObj)⟩ }
+    approval := {
+      issuer := ⟨← nat "$.grant.approval.issuer"
+        (← field "$.grant.approval" "issuer" approvalObj)⟩
+      delegateCapability := ⟨← nat "$.grant.approval.delegateCapability"
+        (← field "$.grant.approval" "delegateCapability" approvalObj)⟩
+      ceiling := ← shareIssueRole "$.grant.approval.ceiling"
+        (← field "$.grant.approval" "ceiling" approvalObj)
+      nonce := ← nat "$.grant.approval.nonce"
+        (← field "$.grant.approval" "nonce" approvalObj) } }
+  let spec : ApplicationAgentLifetimeGrantSource.Spec := {
+    grant := grant
+    grantOwnerCapability := ⟨← nat "$.grantOwnerCapability"
+      (← field "$" "grantOwnerCapability" obj)⟩
+    grantControlCapability := ⟨← nat "$.grantControlCapability"
+      (← field "$" "grantControlCapability" obj)⟩ }
+  unless decide spec.valid do
+    failAt "$.grant" "invalid lifetime grant selectors"
+  let request : ApplicationAgentLifetimeGrantAuthoring.Request := {
+    spec := spec
+    payer := ← nat "$.payer" (← field "$" "payer" obj)
+    funding := ← list "$.funding" funding (← field "$" "funding" obj)
+    sourceCapabilities := ← list "$.sourceCapabilities"
+      (fun path value => return ⟨← nat path value⟩)
+      (← field "$" "sourceCapabilities" obj) }
+  return ApplicationAgentLifetimeGrantAuthoring.requestCodec.encode request
 
 private structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
@@ -1960,6 +2037,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-agent-paid-request" => agentPaidRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "application-share-issue-grain-request" => grainShareIssueRequest json
+  | "application-agent-lifetime-grant-request" => agentLifetimeGrantRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
       let raw ← object "$" json
@@ -2561,6 +2639,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       ApplicationShareIssueGrainInspection.inspectRequest bytes
   | "application-share-issue-grain-plan" =>
       ApplicationShareIssueGrainInspection.inspectPlan bytes
+  | "application-agent-lifetime-grant-request" =>
+      ApplicationAgentLifetimeGrantInspection.inspectRequest bytes
+  | "application-agent-lifetime-grant-plan" =>
+      ApplicationAgentLifetimeGrantInspection.inspectPlan bytes
   | "application-dispatch-request" => dispatchRequestJson <$>
       decoded "application-dispatch-request" ApplicationDispatchAuthoring.requestCodec bytes
   | "application-agent-reserve-request" => agentPaidReserveRequestJson <$>
