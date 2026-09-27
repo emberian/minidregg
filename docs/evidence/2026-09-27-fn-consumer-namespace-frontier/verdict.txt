@@ -1,0 +1,11 @@
+Source-only independent Persvati narrow check: PASS
+Overlay: /home/ember/build/minidregg-frontier20-overlay
+Command form: lake env lean -o <private OLean path> Kernel/<module>.lean
+Serial lower modules: FnConsumerFrontierCore, FnConsumerNamespaceRegistration,
+  FnConsumerNamespaceHistory, FnConsumerNamespaceAdmissionAt,
+  FnSelectedPollCoverage, FnEmptyPollProgressV2,
+  FnSelectedPollAdmissionAt, FnEmptyPollAdmissionAtV2.
+Serial upper modules: FnConsumerFrontierReplay, NativeHostReplay, NativeHost.
+Every direct Lean command exited 0. No error diagnostics. NativeHostReplay and
+NativeHost emitted only existing #assert_axioms output, preserved in adjacent logs.
+No native link, physical receive, fn POST, or ACK run is established by this check.

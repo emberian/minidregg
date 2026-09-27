@@ -23,14 +23,54 @@ structure Key where
   application : List UInt8
   scope : FnConsumerScope.Scope
   controlBinding : List UInt8
+  gatewaySubject : SubjectId
+  gatewayTarget : Nat
+  gatewayCapability : CapabilityId
   deriving DecidableEq, Repr
+
+/-- Durable consumer identity is independent of the gateway signing grant.
+A grant rotation cannot mint a second registration for the same fn scope and
+control namespace; it requires an explicit migration or new registration. -/
+structure Namespace where
+  application : List UInt8
+  scope : FnConsumerScope.Scope
+  controlBinding : List UInt8
+  deriving DecidableEq, Repr
+
+def Key.namespace (key : Key) : Namespace :=
+  ⟨key.application, key.scope, key.controlBinding⟩
+
+def namespaceStream : StreamCodec Namespace :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream
+      (StreamCodec.product FnConsumerScope.scopeStream bytesStream))
+    (fun value => (value.application, value.scope, value.controlBinding))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+    (by intro value; cases value; rfl)
+
+def namespaceNullifier (domain semantics : Digest) (consumerNamespace : Namespace) :
+    StableNullifier :=
+  let bytes := (StreamCodec.product digestStream
+    (StreamCodec.product digestStream namespaceStream)).encode
+      (domain, semantics, consumerNamespace)
+  { codecVersion := 20
+    domain := domain
+    nullifierId := (Sp800185Cshake256.hash
+      "DREGG/FN/CONSUMER-NAMESPACE-CLAIM/v1".toUTF8.toList bytes).digest
+    canonicalBytes := "DREGG/FN/CONSUMER-NAMESPACE-CLAIM/v1".toUTF8.toList ++ bytes }
 
 def keyStream : StreamCodec Key :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
-      (StreamCodec.product FnConsumerScope.scopeStream bytesStream))
-    (fun key => (key.application, key.scope, key.controlBinding))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+      (StreamCodec.product FnConsumerScope.scopeStream
+        (StreamCodec.product bytesStream
+          (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
+            (StreamCodec.product StreamCodec.nat
+              CredentialAuthorityEntryCodec.capabilityIdStream)))))
+    (fun key => (key.application, key.scope, key.controlBinding,
+      key.gatewaySubject, key.gatewayTarget, key.gatewayCapability))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
+      wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
     (by intro key; cases key; rfl)
 
 /-- The same complete predecessor key is used by both new empty-page and
@@ -86,6 +126,21 @@ structure Transition where
   receipt : NativeHostCodec.Receipt
   deriving DecidableEq, Repr
 
+/-- Admission can check a prospective successor before the durable executor
+has produced its four-field same-walk receipt. -/
+structure Candidate where
+  key : Key
+  kind : Kind
+  fromPosition : Nat
+  toPosition : Nat
+  selectedSequence : Option Nat
+  predecessor : Option NativeHostCodec.Receipt
+  deriving DecidableEq, Repr
+
+def Transition.candidate (transition : Transition) : Candidate :=
+  ⟨transition.key, transition.kind, transition.fromPosition,
+    transition.toPosition, transition.selectedSequence, transition.predecessor⟩
+
 inductive Mode where
   | virgin
   | legacyAnchor
@@ -105,31 +160,36 @@ def initial : Cursor := ⟨0, none, .virgin⟩
 def lookup (state : State) (key : Key) : Cursor :=
   (state.find? (fun entry => entry.1 == key)).map Prod.snd |>.getD initial
 
-/-- This enforces an unambiguous admitted predecessor chain. It does not turn
-an arbitrary caller list into history authority; the replay walk supplies
-`Transition` only after the corresponding native admission and exact receipt.
-The fn poll scan bound is shared with the established empty-page protocol. -/
-def step (state : State) (transition : Transition) : Except String State := do
-  let prior := lookup state transition.key
-  unless transition.fromPosition == prior.position &&
-      transition.fromPosition < transition.toPosition &&
-      transition.toPosition ≤ transition.fromPosition + FnConsumerScope.maxPollScan &&
-      transition.toPosition ≤ 4294967295 do
+/-- This is a pure predecessor check. Only the verifier-minted frontier may
+supply `prior` for a live receiver; an arbitrary caller Cursor is not history
+authority. -/
+def checkAfter (prior : Cursor) (candidate : Candidate) : Except String Unit := do
+  unless candidate.fromPosition == prior.position &&
+      candidate.fromPosition < candidate.toPosition &&
+      candidate.toPosition ≤ candidate.fromPosition + FnConsumerScope.maxPollScan &&
+      candidate.toPosition ≤ 4294967295 do
     throw "fn consumer progress predecessor or scan window differs"
-  match transition.kind with
+  match candidate.kind with
   | .legacyEmpty =>
-      unless prior.mode != .orderedV2 && transition.predecessor.isNone &&
-          transition.selectedSequence.isNone do
+      unless prior.mode != .orderedV2 && candidate.predecessor.isNone &&
+          candidate.selectedSequence.isNone do
         throw "legacy empty-page progress cannot follow ordered progress"
   | .emptyV2 =>
-      unless transition.predecessor == prior.receipt &&
-          transition.selectedSequence.isNone do
+      unless candidate.predecessor == prior.receipt &&
+          candidate.selectedSequence.isNone do
         throw "fn consumer progress receipt predecessor differs"
   | .selectedV2 =>
-      unless transition.predecessor == prior.receipt &&
-          transition.selectedSequence.any (fun sequence =>
-            transition.fromPosition ≤ sequence && sequence + 1 == transition.toPosition) do
+      unless candidate.predecessor == prior.receipt &&
+          candidate.selectedSequence.any (fun sequence =>
+            candidate.fromPosition ≤ sequence && sequence + 1 == candidate.toPosition) do
         throw "fn selected progress sequence or receipt predecessor differs"
+  pure ()
+
+/-- The replay walk supplies `Transition` only after admitting the exact
+original Mini record and pairing it with that walk's four-field receipt. -/
+def step (state : State) (transition : Transition) : Except String State := do
+  let prior := lookup state transition.key
+  checkAfter prior transition.candidate
   let next : Cursor :=
     ⟨transition.toPosition, some transition.receipt,
       if transition.kind == .legacyEmpty then .legacyAnchor else .orderedV2⟩

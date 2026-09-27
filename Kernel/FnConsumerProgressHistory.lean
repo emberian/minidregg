@@ -165,9 +165,16 @@ theorem progressCommand_exact_action (domain semantics : Digest) (report : Repor
 /-- Historical recovery derives gateway identity from the signed original
 call, never a current mutable atom or an unauthenticated caller claim. The
 current law is intentionally not rechecked for a previously accepted skip. -/
-def originalSkip (pin : FnGatewayPolicy.Pin) (scope : Scope)
-    (domain semantics : Digest) (record : DurableReceiver.IntentRecord) :
-    Option Evidence := do
+structure OriginalGateway where
+  evidence : Evidence
+  subject : SubjectId
+  target : Nat
+  capability : CapabilityId
+  deriving DecidableEq, Repr
+
+def originalSkipAnyGatewayWithIdentity (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) :
+    Option OriginalGateway := do
   let (recordDomain, recordSemantics, signed) ←
     DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
   if recordDomain != domain || recordSemantics != semantics then none else
@@ -177,15 +184,69 @@ def originalSkip (pin : FnGatewayPolicy.Pin) (scope : Scope)
   let [.createAtom atom (.inlineObject ⟨9⟩) bytes] := content.actions | none
   if bytes.length > maxEvidenceBytes then none else
   let evidence ← evidenceCodec.decode bytes
-  if evidence.application == pin.application && evidence.scope == scope &&
-      evidence.valid && command.subject == pin.subject &&
-      target.target == pin.target && target.capability == pin.capability &&
+  if evidence.valid &&
       matchesSignedShape domain semantics signed.commandBytes command target evidence &&
       command.nonce == progressNonce domain semantics evidence &&
       atom == progressAtom domain semantics evidence &&
       record.transactionId == marker domain semantics command.subject evidence then
-    some evidence
+    some ⟨evidence, command.subject, target.target, target.capability⟩
   else none
+
+def originalSkipAnyGateway (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option Evidence :=
+  (originalSkipAnyGatewayWithIdentity domain semantics record).map
+    OriginalGateway.evidence
+
+/-- The configured gateway and exact scope are needed when a historical skip
+is selected for recovery. Replay can separately recognize an older gateway's
+strict command after an operator pin rotation. -/
+def originalSkip (pin : FnGatewayPolicy.Pin) (scope : Scope)
+    (domain semantics : Digest) (record : DurableReceiver.IntentRecord) :
+    Option Evidence := do
+  let original ← originalSkipAnyGatewayWithIdentity domain semantics record
+  let evidence := original.evidence
+  if evidence.application == pin.application && evidence.scope == scope then
+    if original.subject == pin.subject && original.target == pin.target &&
+        original.capability == pin.capability then some evidence else none
+  else none
+
+/-- Recognize a complete historical v1 skip without a fabricated receipt.
+This is a fresh-admission cutover classifier, not an authorization to admit a
+new v1 skip. Arbitrary DRC writes containing tag-9-looking bytes remain
+unrecognized unless the exact signed command, marker, and gateway all match. -/
+def recognizedLegacyRecord? (pin : FnGatewayPolicy.Pin)
+    (domain semantics : Digest) (record : DurableReceiver.IntentRecord) :
+    Option Evidence := do
+  let (_, _, signed) ←
+    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  let [target] := command.targets | none
+  let .content content := target.payload | none
+  let [.createAtom _ (.inlineObject ⟨9⟩) bytes] := content.actions | none
+  if bytes.length > maxEvidenceBytes then none else
+  let evidence ← evidenceCodec.decode bytes
+  originalSkip pin evidence.scope domain semantics record
+
+/-- Strictly classify v1 progress even when its historical gateway differs
+from the current operator pin. This does not authorize that old gateway now. -/
+def recognizedLegacyRecordAnyGateway? (domain semantics : Digest)
+    (record : DurableReceiver.IntentRecord) : Option Evidence :=
+  originalSkipAnyGateway domain semantics record
+
+/-- Fresh generic invoke must refuse exactly recognized old progress. Historical
+replay still calls `originalSkip` on its already accepted records. -/
+def recognizedLegacyIntent? (pin : FnGatewayPolicy.Pin)
+    (domain semantics : Digest)
+    (intent : DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes) :
+    Option Evidence :=
+  recognizedLegacyRecord? pin domain semantics
+    (DurableReceiver.IntentRecord.ofIntent intent)
+
+def recognizedLegacyIntentAnyGateway? (domain semantics : Digest)
+    (intent : DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes) :
+    Option Evidence :=
+  recognizedLegacyRecordAnyGateway? domain semantics
+    (DurableReceiver.IntentRecord.ofIntent intent)
 
 
 end Minidregg.Kernel.FnConsumerProgress

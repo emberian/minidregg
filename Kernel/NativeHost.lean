@@ -12,6 +12,7 @@ import Kernel.NativeHostGrainBirth
 import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
+import Kernel.FnConsumerProgressHistory
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -386,8 +387,16 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
       | none => return refused "invoke" "noncanonical command"
       | some command =>
-          match ← DeclaredResourceController.receiveLoaded config.deployment config.profile
-              ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable signed with
+          match ← DeclaredResourceController.withAcceptedLoaded config.deployment config.profile
+              ⟨config.federation, height⟩ config.signature opened.durable signed
+              (fun _ shape accepted => do
+                let intent := accepted.dataIntent shape
+                if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?
+                    config.deployment.domain config.profile.semantics intent).isSome then
+                  return .rejected .physicalPreparation
+                return .settlement (← DurableReceiverIO.receiveLoaded
+                  config.storage.transport ResourceBirthCodec.rootBytes opened.durable intent))
+              pure with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
           | .rejected reason => return refused "invoke" s!"{repr reason}"
           | .transactionConflict => return refused "replay" "transaction identity conflict"
@@ -423,6 +432,9 @@ def submitVerifiedLoadedWith (config : Config) {oldTarget : Durable}
         ⟨config.federation, height⟩ config.signature old.opened.durable signed
         (fun prepared shape accepted => do
           let intent := accepted.dataIntent shape
+          if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?
+              config.deployment.domain config.profile.semantics intent).isSome then
+            return refused "invoke" "v1 fn consumer progress is historical only"
           let derived : NativeHostReplay.Derived config old.opened :=
             NativeHostReplay.Derived.ofInvoke prepared signed shape accepted
           let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
