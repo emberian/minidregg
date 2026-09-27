@@ -174,6 +174,67 @@ private def mismatchedCompositeTariff : Json :=
     ("grainBirthTariff", object [("base", number 6), ("perBirth", number 2)])]
   composite "applicationBirth" mismatched
 
+private def custodyOperator : NativeHost.Config :=
+  { grainOperator with completionCustodianKey := some (List.replicate 32 7) }
+
+private def configuredRequest (fieldName : String) (spec : Json) : Json := object [
+  ("genesis", genesisWithSemantics custodyOperator.profile.semantics.value),
+  ("template", template), ("creator", number 8), ("nonce", number 41000),
+  (fieldName, spec), ("sourceCapabilities", .arr #[number 42]),
+  ("funding", .arr #[]), ("feePayer", number 8)]
+
+private def wrapIntent (fieldName : String) (source : Json) : Json := object [
+  ("subject", number 8), ("nonce", number 41000),
+  (fieldName, source), ("grants", .arr #[])]
+
+private def configuredChecks : IO Unit := do
+  let app := configuredRequest "application" (application)
+  let web := configuredRequest "session" (session)
+  let resource := object [("kind", .str "object"), ("storage", .str "content"),
+    ("target", number 8300), ("owner", number 8),
+    ("ownerCapability", number 85), ("controlCapability", number 86),
+    ("predicate", emptyRule)]
+  let plain := configuredRequest "resources" (.arr #[resource])
+  let grain := object [("tariff", object [("base", number 5), ("perBirth", number 2)]),
+    ("birth", plain), ("authorityRoot", number 777),
+    ("tool", peer 6000 6001 6002 6003), ("parent", peer 7000 7001 7002 7003)]
+  for (kind, source) in [
+      ("birth", plain), ("birth-intent", wrapIntent "birth" plain),
+      ("grain-birth", grain), ("grain-birth-intent", wrapIntent "grainBirth" grain),
+      ("application-birth", app),
+      ("application-birth-intent", wrapIntent "applicationBirth" app),
+      ("application-session-birth", web),
+      ("application-session-birth-intent", wrapIntent "applicationSessionBirth" web),
+      ("application-grain-birth-intent", composite "applicationBirth" app),
+      ("application-session-grain-birth-intent", composite "applicationSessionBirth" web)] do
+    match Minidregg.Host.Json.author kind source (some custodyOperator) with
+    | .error reason => throw (IO.userError s!"configured {kind}: {reason}")
+    | .ok _ => pure ()
+    -- Losing the configured custodian must reproduce the old refusal.
+    match Minidregg.Host.Json.author kind source (some grainOperator) with
+    | .error _ => pure ()
+    | .ok _ => throw (IO.userError s!"{kind}: accepted wrong custodian profile")
+  for changed in [
+      { custodyOperator with federation := ⟨10⟩ },
+      { custodyOperator with genesisHeight := 11 },
+      { custodyOperator with template := ⟨⟨6⟩, 100000, 10000⟩ },
+      { custodyOperator with tariff := ⟨4, 2, 1, 0, 99, 0⟩ },
+      { custodyOperator with deployment := ⟨⟨8502⟩, 10, 11, 12⟩ },
+      { custodyOperator with completionCustodianKey := some (List.replicate 32 8) }] do
+    match Minidregg.Host.Json.author "application-birth" app (some changed) with
+    | .error _ => pure ()
+    | .ok _ => throw (IO.userError "accepted mismatched deployment profile")
+  match Minidregg.Host.Json.author "application-grain-birth-intent"
+      (composite "applicationBirth" app)
+      (some { custodyOperator with grainBirthTariff := some ⟨6, 2⟩ }) with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "accepted mismatched enclosing tariff")
+  let (context, _) ← IO.ofExcept <| Minidregg.Host.Json.applicationBirthContext
+    "$" "application" app none (some 42) (some custodyOperator)
+  unless context.height == 42 && context.profile.semantics == custodyOperator.profile.semantics do
+    throw (IO.userError "loaded birth context lost current height or deployed semantics")
+  IO.println "configured birth routes: 10 positive, 10 wrong-custodian refusals, 7 mismatches, loaded context: ok"
+
 def main : IO Unit := do
   let app := request "application" (application)
   let web := request "session" (session)
@@ -198,6 +259,7 @@ def main : IO Unit := do
       ("invalid session kind", refused "application-session-birth" (request "session" (session "invalid")))] do
     unless passed do throw (IO.userError s!"application birth JSON authoring: {label} failed")
   IO.println "application birth JSON authoring: ok"
+  configuredChecks
 
 end Minidregg.Host.ApplicationBirthAuthoringCheck
 

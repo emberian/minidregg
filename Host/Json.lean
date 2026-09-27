@@ -4,6 +4,7 @@ notation: successful authoring constructs the real source values and invokes
 their canonical codecs. All unbounded integers are decimal strings.
 -/
 import Kernel.NativeHost
+import Host.BirthRuntimeProfile
 import Kernel.NativeHostGenesis
 import Kernel.AgentGrain
 import Kernel.CapabilityRevocationController
@@ -1227,7 +1228,8 @@ private def birthParts (path : String)
 absent roots, declared cells, owner/control grants, policy addresses, identity,
 nullifier and quoted fee are never supplied as JSON assertions. -/
 private def birth (path : String) (json : Lean.Json)
-    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none) : Result Draft := do
+    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
+    (deployed : Option NativeHost.Config := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1248,7 +1250,8 @@ private def birth (path : String) (json : Lean.Json)
     if let some supplied := suppliedTariff then
       unless supplied == expected do
         throw s!"{path}.grainBirthTariff: differs from enclosing grain birth tariff"
-  let grainBirthTariff := if grainBirthTariff.isSome then grainBirthTariff else suppliedTariff
+  let grainBirthTariff := if grainBirthTariff.isSome then grainBirthTariff
+    else if suppliedTariff.isSome then suppliedTariff else deployed.bind (·.grainBirthTariff)
   let source ← genesis (path ++ ".genesis") (← field path "genesis" obj)
   let height ← match obj.get? "height" with
     | none => pure source.genesisHeight
@@ -1266,7 +1269,7 @@ private def birth (path : String) (json : Lean.Json)
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
     storage := ⟨"", ""⟩, signature := ⟨""⟩,
     grainBirthTariff := grainBirthTariff }
-  let profile := nativeConfig.profile
+  let profile ← BirthRuntimeProfile.select nativeConfig deployed
   unless source.expectedSemantics = profile.semantics do
     throw s!"{path}.genesis.expectedSemantics: does not match the source-derived native profile"
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
@@ -1304,7 +1307,8 @@ JSON may select IDs and the signer capabilities but cannot inject cells,
 policies, grants, roots or a fee amount. -/
 def applicationBirthContext (path specField : String) (json : Lean.Json)
     (expectedTariff : Option NativeHost.GrainBirthTariffPin := none)
-    (loadedHeight : Option Nat := none) :
+    (loadedHeight : Option Nat := none)
+    (deployed : Option NativeHost.Config := none) :
     Result (ApplicationBirthContext × Lean.Json) := do
   let raw ← object path json
   let obj ← exactObject path
@@ -1327,7 +1331,8 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
     if let some supplied := suppliedTariff then
       unless supplied == expected do
         throw s!"{path}.grainBirthTariff: differs from enclosing grain birth tariff"
-  let grainBirthTariff := if expectedTariff.isSome then expectedTariff else suppliedTariff
+  let grainBirthTariff := if expectedTariff.isSome then expectedTariff
+    else if suppliedTariff.isSome then suppliedTariff else deployed.bind (·.grainBirthTariff)
   let source ← genesis (path ++ ".genesis") (← field path "genesis" obj)
   let height ← match obj.get? "height" with
     | none => pure (loadedHeight.getD source.genesisHeight)
@@ -1349,7 +1354,7 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
     storage := ⟨"", ""⟩, signature := ⟨""⟩, grainBirthTariff := grainBirthTariff }
-  let profile := nativeConfig.profile
+  let profile ← BirthRuntimeProfile.select nativeConfig deployed
   unless source.expectedSemantics = profile.semantics do
     throw s!"{path}.genesis.expectedSemantics: does not match the source-derived native profile"
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
@@ -1410,8 +1415,9 @@ def applicationSessionSpec (path : String) (json : Lean.Json) :
       (← field path "descriptorControlCapability" obj)⟩ }
 
 private def applicationBirth (path : String) (json : Lean.Json)
-    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none) : Result Draft := do
-  let (context, specJson) ← applicationBirthContext path "application" json grainBirthTariff
+    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
+    (deployed : Option NativeHost.Config := none) : Result Draft := do
+  let (context, specJson) ← applicationBirthContext path "application" json grainBirthTariff none deployed
   let spec ← applicationSpec (path ++ ".application") specJson
   let ready ← ApplicationGrainBirth.prepare spec
   let descriptor := ready.descriptor context.profile context.source context.height
@@ -1420,8 +1426,9 @@ private def applicationBirth (path : String) (json : Lean.Json)
     context.sourceCapabilities)
 
 private def applicationSessionBirth (path : String) (json : Lean.Json)
-    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none) : Result Draft := do
-  let (context, specJson) ← applicationBirthContext path "session" json grainBirthTariff
+    (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
+    (deployed : Option NativeHost.Config := none) : Result Draft := do
+  let (context, specJson) ← applicationBirthContext path "session" json grainBirthTariff none deployed
   let spec ← applicationSessionSpec (path ++ ".session") specJson
   let ready ← ApplicationGrainSessionBirth.prepare spec
   let descriptor := ready.descriptor context.profile context.source context.height
@@ -1483,14 +1490,16 @@ def grainBirthFrom (path sourceField : String) (json : Lean.Json)
   pure (.birth (GrainResourceBirthHostCodec.sourceCodec.encode source) capabilities)
 
 /-- Existing content-family composite. -/
-private def grainBirth (path : String) (json : Lean.Json) : Result Draft :=
-  grainBirthFrom path "birth" json (fun path source tariff => birth path source tariff)
+private def grainBirth (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Draft :=
+  grainBirthFrom path "birth" json (fun path source tariff => birth path source tariff deployed)
 
-private def grainBirthIntent (path : String) (json : Lean.Json) : Result Intent := do
+private def grainBirthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "grainBirth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
-    .prepare (← grainBirth (path ++ ".grainBirth") (← field path "grainBirth" obj)),
+    .prepare (← grainBirth (path ++ ".grainBirth") (← field path "grainBirth" obj) deployed),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
 def grainBirthIntentFrom (path intentField sourceField : String) (json : Lean.Json)
@@ -1503,35 +1512,40 @@ def grainBirthIntentFrom (path intentField sourceField : String) (json : Lean.Js
       (← field path intentField obj) authorBirth),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
-private def applicationGrainBirthIntent (path : String) (json : Lean.Json) : Result Intent :=
+private def applicationGrainBirthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent :=
   grainBirthIntentFrom path "applicationGrainBirth" "applicationBirth" json
-    (fun path source tariff => applicationBirth path source tariff)
+    (fun path source tariff => applicationBirth path source tariff deployed)
 
-private def applicationSessionGrainBirthIntent (path : String) (json : Lean.Json) : Result Intent :=
+private def applicationSessionGrainBirthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent :=
   grainBirthIntentFrom path "applicationSessionGrainBirth" "applicationSessionBirth" json
-    (fun path source tariff => applicationSessionBirth path source tariff)
+    (fun path source tariff => applicationSessionBirth path source tariff deployed)
 
-private def birthIntent (path : String) (json : Lean.Json) : Result Intent := do
+private def birthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "birth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
-    .prepare (← birth (path ++ ".birth") (← field path "birth" obj)),
+    .prepare (← birth (path ++ ".birth") (← field path "birth" obj) none deployed),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
-private def applicationBirthIntent (path : String) (json : Lean.Json) : Result Intent := do
+private def applicationBirthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "applicationBirth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
     .prepare (← applicationBirth (path ++ ".applicationBirth")
-      (← field path "applicationBirth" obj)),
+      (← field path "applicationBirth" obj) none deployed),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
-private def applicationSessionBirthIntent (path : String) (json : Lean.Json) : Result Intent := do
+private def applicationSessionBirthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "applicationSessionBirth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
     .prepare (← applicationSessionBirth (path ++ ".applicationSessionBirth")
-      (← field path "applicationSessionBirth" obj)),
+      (← field path "applicationSessionBirth" obj) none deployed),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
 private def grainSource (path : String) (json : Lean.Json) :
@@ -2037,7 +2051,8 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
   return descriptor.canonicalBytes
 
 /-- Author JSON into source-owned canonical bytes. -/
-def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
+def author (kind : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
   match kind with
   | "application-lifecycle-resident-begin" => residentBegin json
   | "application-lifecycle-completion-report" => completionReport json
@@ -2091,19 +2106,19 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "revocation-draft" => do
       let bytes ← revocation "$" json
       pure (draftCodec.encode (.revoke bytes))
-  | "birth" => draftCodec.encode <$> birth "$" json
-  | "birth-intent" => intentCodec.encode <$> birthIntent "$" json
-  | "application-birth" => draftCodec.encode <$> applicationBirth "$" json
-  | "application-birth-intent" => intentCodec.encode <$> applicationBirthIntent "$" json
-  | "application-session-birth" => draftCodec.encode <$> applicationSessionBirth "$" json
-  | "application-session-birth-intent" => intentCodec.encode <$> applicationSessionBirthIntent "$" json
-  | "application-grain-birth-intent" => intentCodec.encode <$> applicationGrainBirthIntent "$" json
+  | "birth" => draftCodec.encode <$> birth "$" json none deployed
+  | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed
+  | "application-birth" => draftCodec.encode <$> applicationBirth "$" json none deployed
+  | "application-birth-intent" => intentCodec.encode <$> applicationBirthIntent "$" json deployed
+  | "application-session-birth" => draftCodec.encode <$> applicationSessionBirth "$" json none deployed
+  | "application-session-birth-intent" => intentCodec.encode <$> applicationSessionBirthIntent "$" json deployed
+  | "application-grain-birth-intent" => intentCodec.encode <$> applicationGrainBirthIntent "$" json deployed
   | "application-session-grain-birth-intent" =>
-      intentCodec.encode <$> applicationSessionGrainBirthIntent "$" json
+      intentCodec.encode <$> applicationSessionGrainBirthIntent "$" json deployed
   | "application-permission-schema" => do
       pure (← ApplicationPermissionSchemaAuthoring.author json).1
-  | "grain-birth" => draftCodec.encode <$> grainBirth "$" json
-  | "grain-birth-intent" => intentCodec.encode <$> grainBirthIntent "$" json
+  | "grain-birth" => draftCodec.encode <$> grainBirth "$" json deployed
+  | "grain-birth-intent" => intentCodec.encode <$> grainBirthIntent "$" json deployed
   | "content" => ContentResource.commandCodec.encode <$> contentCommand "$" json
   | "resource" | "joint" => DeclaredResourceController.commandCodec.encode <$> command "$" json
   | "joint-draft" => do

@@ -1291,7 +1291,7 @@ def dispatchSession (config : NativeHost.Config)
       let some text := String.fromUTF8? source.toByteArray
         | throw (IO.userError "native host author source is not UTF-8")
       let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
-      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value))
+      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value (some config)))
   | 8 =>
       let (kind, source) ← splitKind payload
       let value ← IO.ofExcept (inspectHost kind source)
@@ -4567,7 +4567,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-lifetime-reserve-request" ||
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
-          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
+          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source (some config))
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>

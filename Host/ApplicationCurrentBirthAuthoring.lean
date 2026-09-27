@@ -44,7 +44,7 @@ private def appDraft (config : NativeHost.Config) (opened : NativeHost.Opened co
     (tariff : Option NativeHost.GrainBirthTariffPin) : Except String Draft := do
   checkCompositeTariff config tariff
   let (context, specJson) ← Json.applicationBirthContext path "application" source tariff
-    (some (NativeHost.logicalHeight config opened.durable))
+    (some (NativeHost.logicalHeight config opened.durable)) (some config)
   checkSource config opened context
   let spec ← Json.applicationSpec (path ++ ".application") specJson
   let ready ← ApplicationGrainBirth.prepare spec
@@ -59,7 +59,7 @@ private def sessionDraft (config : NativeHost.Config) (opened : NativeHost.Opene
     (tariff : Option NativeHost.GrainBirthTariffPin) : Except String Draft := do
   checkCompositeTariff config tariff
   let (context, specJson) ← Json.applicationBirthContext path "session" source tariff
-    (some (NativeHost.logicalHeight config opened.durable))
+    (some (NativeHost.logicalHeight config opened.durable)) (some config)
   checkSource config opened context
   let spec ← Json.applicationSessionSpec (path ++ ".session") specJson
   let ready ← ApplicationGrainSessionBirth.prepare spec
