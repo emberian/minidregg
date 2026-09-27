@@ -4,9 +4,11 @@
 //! must check resource, generation, subject, grant and exact operation before
 //! giving it an approved session. There is no public listener here.
 
+mod bridge_config;
 mod permission_schema;
 mod protocol;
 mod web;
+pub use bridge_config::{decode_bridge_config, BridgeConfig};
 pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};
 pub use protocol::{
     InlineResponse, LocalizedText, PermissionDefinition, RoleDefinition, SessionParameters,
@@ -54,13 +56,17 @@ pub mod api_session_capnp {
     include!(concat!(env!("OUT_DIR"), "/api_session_capnp.rs"));
 }
 #[allow(clippy::all)]
+pub mod package_rust_capnp {
+    include!(concat!(env!("OUT_DIR"), "/package_rust_capnp.rs"));
+}
+#[allow(clippy::all)]
 pub mod persistent_capnp {
     include!(concat!(env!("OUT_DIR"), "/capnp/persistent_capnp.rs"));
 }
 
 pub mod schema {
     pub use crate::{
-        activity_capnp, api_session_capnp, grain_capnp, identity_capnp, ip_capnp, powerbox_capnp,
-        supervisor_capnp, util_capnp, web_session_capnp,
+        activity_capnp, api_session_capnp, grain_capnp, identity_capnp, ip_capnp,
+        package_rust_capnp, powerbox_capnp, supervisor_capnp, util_capnp, web_session_capnp,
     };
 }

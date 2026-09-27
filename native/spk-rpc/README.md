@@ -77,3 +77,21 @@ socket, sends a typed `WebSession.get` and a body-carrying POST with query,
 cookie, and whitelisted header to a fake app server, then checks typed error,
 stream completion, overflow, and unsupported-header refusal.
 It does not run a third-party SPK, the packaged bridge, or the Mini controller.
+
+# Signed bridge-config member projection
+
+`decode_bridge_config` accepts one exact, bounded, unpacked Cap'n Proto
+`package.capnp::BridgeConfig` member supplied by the SPK materializer after its
+single signed-tree verification. It returns the ordered `ViewInfo` permission
+and role definitions, the legacy `apiPath`, and bridge flags. It rejects
+trailing bytes and nonempty Powerbox APIs, whose permission/tag semantics need
+a separate descriptor route. The decoder does not verify an SPK signature or
+authorize a session.
+
+The complete pinned `package.capnp` is compiled from a private derived copy:
+only the `categoryInfo` annotation symbol is renamed to avoid a Rust codegen
+collision with `CategoryInfo`. The build checks the upstream source SHA-256
+`e5535bc6cae621c7205befa5d8aea655206ecfc859d27b4bd43b2e4c065fadfb`;
+all wire IDs and field declarations remain intact. The test fixture is the
+exact 576-byte signed GitWeb member, SHA-256
+`49d196f64ca2ce672a378581a8376ada53b27614bba522bbaec042237f0e70a2`.

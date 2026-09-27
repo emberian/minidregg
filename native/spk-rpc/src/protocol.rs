@@ -137,6 +137,73 @@ fn bounded_len(value: usize, maximum: usize, field: &str) -> capnp::Result<u32> 
     u32::try_from(value).map_err(|_| capnp::Error::failed(format!("{field} is too large")))
 }
 
+pub(crate) fn decode_view_info(
+    info: grain_capnp::ui_view::view_info::Reader<'_>,
+) -> capnp::Result<ViewInfo> {
+    let app_title = bounded_text(info.get_app_title()?.get_default_text()?, 4096)?;
+    let raw_permissions = info.get_permissions()?;
+    let raw_roles = info.get_roles()?;
+    bounded_len(
+        raw_permissions.len() as usize,
+        4096,
+        "permission definitions",
+    )?;
+    bounded_len(raw_roles.len() as usize, 4096, "role definitions")?;
+    let mut names = std::collections::HashSet::new();
+    let mut permissions = Vec::with_capacity(raw_permissions.len() as usize);
+    for item in raw_permissions.iter() {
+        let name = bounded_text(item.get_name()?, 256)?;
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic())
+            || !name.chars().all(|c| c.is_ascii_alphanumeric())
+            || !names.insert(name.clone())
+        {
+            return Err(capnp::Error::failed(
+                "invalid or duplicate permission name".into(),
+            ));
+        }
+        permissions.push(PermissionDefinition {
+            name,
+            title: localized(item.get_title()?)?,
+            description: localized(item.get_description()?)?,
+            obsolete: item.get_obsolete(),
+        });
+    }
+    let mut roles = Vec::with_capacity(raw_roles.len() as usize);
+    let mut defaults = 0;
+    for item in raw_roles.iter() {
+        let bits = item.get_permissions()?;
+        bounded_len(bits.len() as usize, 4096, "role permission bits")?;
+        let default = item.get_default();
+        if default {
+            defaults += 1;
+        }
+        roles.push(RoleDefinition {
+            title: localized(item.get_title()?)?,
+            verb_phrase: localized(item.get_verb_phrase()?)?,
+            description: localized(item.get_description()?)?,
+            permissions: bits.iter().collect(),
+            obsolete: item.get_obsolete(),
+            default,
+        });
+    }
+    if defaults > 1 {
+        return Err(capnp::Error::failed(
+            "multiple default roles are ambiguous".into(),
+        ));
+    }
+    let denied = info.get_denied_permissions()?;
+    bounded_len(denied.len() as usize, 4096, "denied permission bits")?;
+    let permission_names = permissions.iter().map(|p| p.name.clone()).collect();
+    Ok(ViewInfo {
+        app_title,
+        permissions,
+        roles,
+        denied_permissions: denied.iter().collect(),
+        permission_names,
+        role_count: raw_roles.len(),
+    })
+}
+
 /// The supervisor side of one already-connected Sandstorm fd3 socketpair.
 ///
 /// The caller must drive the returned RPC system on a Tokio LocalSet for as
@@ -166,69 +233,7 @@ impl SupervisorConnection {
 
     pub async fn get_view_info(&self) -> capnp::Result<ViewInfo> {
         let reply = self.view.get_view_info_request().send().promise.await?;
-        let info = reply.get()?;
-        let app_title = bounded_text(info.get_app_title()?.get_default_text()?, 4096)?;
-        let raw_permissions = info.get_permissions()?;
-        let raw_roles = info.get_roles()?;
-        bounded_len(
-            raw_permissions.len() as usize,
-            4096,
-            "permission definitions",
-        )?;
-        bounded_len(raw_roles.len() as usize, 4096, "role definitions")?;
-        let mut names = std::collections::HashSet::new();
-        let mut permissions = Vec::with_capacity(raw_permissions.len() as usize);
-        for item in raw_permissions.iter() {
-            let name = bounded_text(item.get_name()?, 256)?;
-            if !name.starts_with(|c: char| c.is_ascii_alphabetic())
-                || !name.chars().all(|c| c.is_ascii_alphanumeric())
-                || !names.insert(name.clone())
-            {
-                return Err(capnp::Error::failed(
-                    "invalid or duplicate permission name".into(),
-                ));
-            }
-            permissions.push(PermissionDefinition {
-                name,
-                title: localized(item.get_title()?)?,
-                description: localized(item.get_description()?)?,
-                obsolete: item.get_obsolete(),
-            });
-        }
-        let mut roles = Vec::with_capacity(raw_roles.len() as usize);
-        let mut defaults = 0;
-        for item in raw_roles.iter() {
-            let bits = item.get_permissions()?;
-            bounded_len(bits.len() as usize, 4096, "role permission bits")?;
-            let default = item.get_default();
-            if default {
-                defaults += 1;
-            }
-            roles.push(RoleDefinition {
-                title: localized(item.get_title()?)?,
-                verb_phrase: localized(item.get_verb_phrase()?)?,
-                description: localized(item.get_description()?)?,
-                permissions: bits.iter().collect(),
-                obsolete: item.get_obsolete(),
-                default,
-            });
-        }
-        if defaults > 1 {
-            return Err(capnp::Error::failed(
-                "multiple default roles are ambiguous".into(),
-            ));
-        }
-        let denied = info.get_denied_permissions()?;
-        bounded_len(denied.len() as usize, 4096, "denied permission bits")?;
-        let permission_names = permissions.iter().map(|p| p.name.clone()).collect();
-        Ok(ViewInfo {
-            app_title,
-            permissions,
-            roles,
-            denied_permissions: denied.iter().collect(),
-            permission_names,
-            role_count: raw_roles.len(),
-        })
+        decode_view_info(reply.get()?)
     }
 
     pub async fn new_web_session(
