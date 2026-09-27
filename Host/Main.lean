@@ -722,6 +722,55 @@ bounded read; recursive list equality is unsuitable for the full V2 profile. -/
 def sameBytes (left right : List UInt8) : Bool :=
   left.toByteArray == right.toByteArray
 
+/-- The qualified fn owner prepends exactly these two hop-local fields to a
+signed article that already supplied Date and Message-ID. Both the delivered
+article and the retained outbox carrier must independently pass native hybrid
+verification before a progress decision. The suffix must be the complete
+retained carrier, byte for byte; arbitrary header rewriting is refused. -/
+def fnAgentAtext (byte : UInt8) : Bool :=
+  let n := byte.toNat
+  (65 ≤ n && n ≤ 90) || (97 ≤ n && n ≤ 122) ||
+    (48 ≤ n && n ≤ 57) ||
+    [33, 35, 36, 37, 38, 39, 42, 43, 45, 47, 61, 63, 94, 95,
+      96, 123, 124, 125, 126].contains n
+
+def fnAgentDotAtom (agent : String) : Bool :=
+  let bytes := agent.toUTF8.toList
+  !bytes.isEmpty && bytes.length ≤ 128 &&
+    (agent.splitOn ".").all (fun atom =>
+      !atom.isEmpty && atom.toUTF8.toList.all fnAgentAtext)
+
+def fnOwnRInjectionPrefix (injectedPrefix : List UInt8) : Bool :=
+  if injectedPrefix.length > 512 ||
+      !injectedPrefix.all (fun byte => byte.toNat < 128) then false
+  else
+    match String.fromUTF8? injectedPrefix.toByteArray with
+    | none => false
+    | some text =>
+        match text.splitOn "Injection-Info: " with
+        | [_, info] =>
+            match info.splitOn "\r\n" with
+            | [agent, ""] =>
+                fnAgentDotAtom agent &&
+                  text == "Path: " ++ agent ++
+                    "!not-for-mail\r\nInjection-Info: " ++ agent ++ "\r\n"
+            | _ => false
+        | _ => false
+
+def fnOwnRCarrierMatches (received authored : List UInt8) : Bool :=
+  let prefixLength := received.length - authored.length
+  let injectedPrefix := received.take prefixLength
+  let suffix := received.drop prefixLength
+  decide (suffix.toByteArray = authored.toByteArray) &&
+    (injectedPrefix.isEmpty || fnOwnRInjectionPrefix injectedPrefix)
+
+theorem fnOwnRCarrierMatches_exact_tail (received authored : List UInt8)
+    (matched : fnOwnRCarrierMatches received authored = true) :
+    (received.drop (received.length - authored.length)).toByteArray =
+      authored.toByteArray := by
+  simp only [fnOwnRCarrierMatches, Bool.and_eq_true, decide_eq_true_eq] at matched
+  exact matched.1
+
 def evidenceReceiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
   Lean.Json.mkObj
@@ -1814,8 +1863,8 @@ def verifyCatalogOwnR (config : NativeHost.Config)
   let (prepared, record) ← IO.ofExcept <|
     FnOriginOutbox.selectUniqueParent gateway config.deployment.domain
       config.profile.semantics projection.messageId opened.durable.image.accepted
-  unless sameBytes received prepared.carrier do
-    throw (IO.userError "A own-R poll differs from exact accepted R carrier")
+  unless fnOwnRCarrierMatches received prepared.carrier do
+    throw (IO.userError "A own-R poll differs from exact accepted R carrier or fn injection")
   let (retainedVerified, retainedR, original) ←
     IO.FS.withTempDir fun directory => do
       let path := (directory / "accepted-r-carrier.eml").toString
