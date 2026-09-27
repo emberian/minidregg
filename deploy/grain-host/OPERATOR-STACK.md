@@ -40,6 +40,13 @@ The operator supplies a mode-0600 JSON manifest in an operator-owned directory. 
 
 Each `workerRuntime` pin must name the `grain-runtime` executable in that task's configured Hermes `--runtime-root`. Its SHA must equal the controller runtime SHA. This binds the keyless MCP process inside the worker to the controller image; the installer rechecks both worker files in its pre-exec guard. Changing a task config to point at a new runtime root also changes its durable journal binding, so an existing grain upgrade must retain the configured root path and replace its operator-owned executable only while the controller and all worker cgroups are stopped.
 
+For a controller with an isolated `providerTask`, also pin
+`controllers[].workerBridge` with the operator-owned executable
+`RUNTIME_ROOT/grain-provider-bridge` and its exact SHA-256. Both installers
+require that pin before a provider-enabled controller can start. Local
+deterministic fixtures that explicitly select `localFixtureHostNetwork` are a
+separate host-network test route.
+
 As the operator, with a working user systemd manager, use:
 
 ```sh

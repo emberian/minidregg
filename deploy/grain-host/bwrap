@@ -70,6 +70,18 @@ if [[ -n $broker_socket ]]; then
   [[ $broker_socket == /* && -S $broker_socket ]] || usage
   broker_socket=$(realpath -e -- "$broker_socket")
 fi
+provider_socket=${MINI_GRAIN_PROVIDER_SOCKET:-}
+provider_port=${MINI_GRAIN_PROVIDER_PORT:-}
+if [[ -n $provider_socket ]]; then
+  [[ $network == none && $provider_socket == /* && -S $provider_socket ]] || usage
+  provider_socket=$(realpath -e -- "$provider_socket")
+  [[ $(dirname -- "$provider_socket") == $(realpath -e -- "$MINI_GRAIN_STATE_DIR") ]] || usage
+  [[ $provider_port =~ ^[1-9][0-9]*$ && ${#provider_port} -le 5 ]] || usage
+  (( 10#$provider_port <= 65535 )) || usage
+  [[ -x $runtime_root/grain-provider-bridge ]] || usage
+elif [[ -n $provider_port ]]; then
+  usage
+fi
 [[ ${MINI_GRAIN_UNIT:-} =~ ^mini-grain-t[0-9]+-o[0-9]+$ ]] || {
   echo 'MINI_GRAIN_UNIT must identify one reserved Mini operation' >&2
   exit 64
@@ -105,7 +117,9 @@ sandbox=(
   --ro-bind "$runtime_root" /agent --bind "$workspace" /workspace
   --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
 )
-[[ -z $broker_socket ]] || sandbox+=(--dir /run --ro-bind "$broker_socket" /run/mini-grain.sock)
+[[ -z $broker_socket && -z $provider_socket ]] || sandbox+=(--dir /run)
+[[ -z $broker_socket ]] || sandbox+=(--ro-bind "$broker_socket" /run/mini-grain.sock)
+[[ -z $provider_socket ]] || sandbox+=(--ro-bind "$provider_socket" /run/mini-provider.sock)
 if [[ $network == none ]]; then
   sandbox+=(--unshare-net)
 else
@@ -113,7 +127,11 @@ else
   [[ ! -d /etc/ssl ]] || sandbox+=(--ro-bind /etc/ssl /etc/ssl)
   [[ ! -f /etc/resolv.conf ]] || sandbox+=(--ro-bind /etc/resolv.conf /etc/resolv.conf)
 fi
-sandbox+=(-- "$@")
+if [[ -n $provider_socket ]]; then
+  sandbox+=(-- /agent/grain-provider-bridge --socket /run/mini-provider.sock --port "$provider_port" --seconds "$runtime_max_sec" -- "$@")
+else
+  sandbox+=(-- "$@")
+fi
 
 runner_pid=
 stop_unit() {

@@ -107,6 +107,10 @@ struct ProviderTask {
     /// the established six-iteration profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_iterations: Option<u8>,
+    /// Only deterministic local upstream fixtures may retain the older host
+    /// network route. Real HTTPS provider prompts use a private Unix gateway.
+    #[serde(default)]
+    local_fixture_host_network: bool,
 }
 
 fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
@@ -115,6 +119,39 @@ fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
         return Err("providerTask maxIterations must be between 1 and 6".into());
     }
     Ok(iterations)
+}
+
+fn provider_required_network(task: &ProviderTask) -> Result<&'static str> {
+    if !task.local_fixture_host_network {
+        return Ok("none");
+    }
+    if task.upstream_url.starts_with("http://127.0.0.1:")
+        || task.upstream_url.starts_with("http://[::1]:")
+    {
+        Ok("host")
+    } else {
+        Err("localFixtureHostNetwork requires a loopback HTTP upstream".into())
+    }
+}
+
+fn provider_command_route(command: &AllowedCommand, required_network: &str) -> bool {
+    command.systemd_scope
+        && command.wall_time_seconds.unwrap_or(600) >= 120
+        && command.args.first().is_some_and(|arg| arg == "--workspace")
+        && command
+            .args
+            .get(2)
+            .is_some_and(|arg| arg == "--runtime-root")
+        && command.args.get(4).is_some_and(|arg| arg == "--network")
+        && command
+            .args
+            .get(5)
+            .is_some_and(|arg| arg == required_network)
+        && command.args.get(6).is_some_and(|arg| arg == "--")
+        && command
+            .args
+            .get(7)
+            .is_some_and(|arg| arg == "/agent/hermes-acp")
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1321,6 +1358,11 @@ fn validate(c: &Config) -> Result<()> {
         if !bind.ip().is_loopback() || bind.port() == 0 {
             return Err("providerTask.gatewayBind must pin a loopback port".into());
         }
+        if !p.local_fixture_host_network
+            && bind.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        {
+            return Err("isolated provider bridge requires gatewayBind 127.0.0.1:PORT".into());
+        }
         if p.model.is_empty()
             || p.model.len() > 256
             || p.model.chars().any(char::is_control)
@@ -1333,22 +1375,15 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("providerTask model or bounds invalid".into());
         }
+        let required_network = provider_required_network(p)?;
         if !c
             .commands
             .iter()
             .find(|command| command.name == "hermes-acp")
-            .is_some_and(|command| {
-                command.systemd_scope
-                    && command.wall_time_seconds.unwrap_or(600) >= 120
-                    && command
-                        .args
-                        .windows(2)
-                        .any(|args| args[0] == "--network" && args[1] == "host")
-                    && command.args.iter().any(|arg| arg.ends_with("hermes-acp"))
-            })
+            .is_some_and(|command| provider_command_route(command, required_network))
         {
             return Err(
-                "providerTask requires the selected hermes-acp command to be scoped with --network host"
+                "providerTask requires the selected hermes-acp command to have its configured network route"
                     .into(),
             );
         }
@@ -1480,6 +1515,19 @@ impl Runtime {
             if let Some(provider) = &self.config.provider_task {
                 command.env("MINI_GRAIN_PROVIDER_CUSTODY_KEY", &provider.custody_key);
                 command.env("MINI_GRAIN_PROVIDER_KEY_FILE", &provider.provider_key_file);
+                if spec.name == "hermes-acp" && !provider.local_fixture_host_network {
+                    let port = provider
+                        .gateway_bind
+                        .parse::<std::net::SocketAddr>()
+                        .expect("validated provider gateway address")
+                        .port();
+                    command
+                        .env(
+                            "MINI_GRAIN_PROVIDER_SOCKET",
+                            self.config.state_dir.join("provider-gateway.sock"),
+                        )
+                        .env("MINI_GRAIN_PROVIDER_PORT", port.to_string());
+                }
             }
             if let Some(broker) = broker {
                 command.env("MINI_GRAIN_BROKER_SOCKET", broker);
@@ -5341,6 +5389,8 @@ impl Runtime {
             let endpoint = provider::GatewayEndpoint::start(
                 provider::GatewayConfig {
                     bind,
+                    unix_socket: (!task.local_fixture_host_network)
+                        .then(|| self.config.state_dir.join("provider-gateway.sock")),
                     upstream_url: task.upstream_url.clone(),
                     pinned_model: task.model.clone(),
                     provider_key: key,
@@ -7992,10 +8042,36 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             provider_max_iterations(configured.max_iterations).unwrap(),
             2
         );
+        assert_eq!(provider_required_network(&configured).unwrap(), "none");
+        let mut fixture = configured.clone();
+        fixture.local_fixture_host_network = true;
+        assert!(provider_required_network(&fixture).is_err());
+        fixture.upstream_url = "http://127.0.0.1:18762/v1/chat/completions".into();
+        assert_eq!(provider_required_network(&fixture).unwrap(), "host");
         for invalid in [json!(-1), json!(1.5), json!("2"), json!(256)] {
             explicit["maxIterations"] = invalid;
             assert!(serde_json::from_value::<ProviderTask>(explicit.clone()).is_err());
         }
+    }
+
+    #[test]
+    fn provider_network_route_is_launcher_positional_not_an_injected_argument() {
+        let mut command: AllowedCommand = serde_json::from_value(json!({
+            "name":"hermes-acp", "program":"/opt/mini/bwrap",
+            "args":["--workspace","/work","--runtime-root","/agent-root",
+                "--network","none","--","/agent/hermes-acp"],
+            "systemdScope":true, "wallTimeSeconds":600,
+            "reserve":"3", "charge":"0"
+        }))
+        .unwrap();
+        assert!(provider_command_route(&command, "none"));
+        assert!(!provider_command_route(&command, "host"));
+        command.args[5] = "host".into();
+        command.args.extend(["--network".into(), "none".into()]);
+        assert!(!provider_command_route(&command, "none"));
+        command.args[7] = "/agent/other".into();
+        command.args.push("/agent/hermes-acp".into());
+        assert!(!provider_command_route(&command, "host"));
     }
 
     #[test]

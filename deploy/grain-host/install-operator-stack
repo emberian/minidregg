@@ -240,6 +240,8 @@ for ((i=0; i<controller_count; i++)); do
   runtime_sha=$(jq -er "$base.runtime.sha256" "$manifest")
   worker_runtime=$(jq -er "$base.workerRuntime.path" "$manifest")
   worker_runtime_sha=$(jq -er "$base.workerRuntime.sha256" "$manifest")
+  worker_bridge=$(jq -r "$base.workerBridge.path // empty" "$manifest")
+  worker_bridge_sha=$(jq -r "$base.workerBridge.sha256 // empty" "$manifest")
   fragment=$(jq -er "$base.fragment.path" "$manifest")
   fragment_sha=$(jq -er "$base.fragment.sha256" "$manifest")
   [[ $uid =~ ^[1-9][0-9]*$ && $task =~ ^[1-9][0-9]*$ &&
@@ -251,6 +253,12 @@ for ((i=0; i<controller_count; i++)); do
   operator_owned "$worker_runtime"
   [[ -x $worker_runtime ]] || fail 'worker MCP runtime not executable'
   [[ $worker_runtime_sha == "$runtime_sha" ]] || fail 'controller and worker MCP runtime images differ'
+  if [[ -n $worker_bridge || -n $worker_bridge_sha ]]; then
+    [[ -n $worker_bridge && -n $worker_bridge_sha ]] || fail 'worker bridge needs path and SHA pin'
+    sha_pin "$worker_bridge" "$worker_bridge_sha"
+    operator_owned "$worker_bridge"
+    [[ -x $worker_bridge ]] || fail 'worker bridge not executable'
+  fi
   safe_path "$config"
   if [[ $action != guard ]]; then
     user=$(id -nu "$uid")
@@ -276,6 +284,10 @@ for ((i=0; i<controller_count; i++)); do
     ' "$config") || fail 'task command has no unique Hermes runtime root'
     [[ $worker_runtime == "$worker_root/grain-runtime" ]] ||
       fail 'worker MCP runtime path differs from configured Hermes runtime root'
+    if sudo -n -u "$user" jq -e '(.providerTask != null) and ((.providerTask.localFixtureHostNetwork // false) == false)' "$config" >/dev/null; then
+      [[ $worker_bridge == "$worker_root/grain-provider-bridge" ]] ||
+        fail 'isolated provider requires pinned worker bridge in Hermes runtime root'
+    fi
   fi
   controller_uids+=("$uid"); controller_tasks+=("$task"); controller_units+=("$unit")
   controller_configs+=("$config"); controller_runtimes+=("$runtime"); controller_fragments+=("$fragment")

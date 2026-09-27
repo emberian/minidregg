@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -26,6 +27,9 @@ const MAX_BUSY_RESPONDERS: usize = 4;
 
 pub struct GatewayConfig {
     pub bind: SocketAddr,
+    /// When set, the worker reaches this private socket through a bind mount
+    /// and the host TCP address is used only in its isolated loopback profile.
+    pub unix_socket: Option<PathBuf>,
     /// Exact upstream endpoint, including `/v1/chat/completions`.
     pub upstream_url: String,
     pub pinned_model: String,
@@ -132,8 +136,96 @@ struct Shared {
     busy_responders: AtomicUsize,
     last_permit_id: AtomicU64,
     curl: Mutex<Option<Child>>,
-    client: Mutex<Option<TcpStream>>,
+    client: Mutex<Option<GatewayStream>>,
     stop: AtomicBool,
+}
+
+enum GatewayStream {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+impl GatewayStream {
+    fn is_unix(&self) -> bool {
+        matches!(self, Self::Unix(_))
+    }
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_read_timeout(timeout),
+            Self::Unix(stream) => stream.set_read_timeout(timeout),
+        }
+    }
+
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_write_timeout(timeout),
+            Self::Unix(stream) => stream.set_write_timeout(timeout),
+        }
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        match self {
+            Self::Tcp(stream) => stream.try_clone().map(Self::Tcp),
+            Self::Unix(stream) => stream.try_clone().map(Self::Unix),
+        }
+    }
+
+    fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.shutdown(how),
+            Self::Unix(stream) => stream.shutdown(how),
+        }
+    }
+}
+
+impl Read for GatewayStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => stream.read(buf),
+            Self::Unix(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for GatewayStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => stream.write(buf),
+            Self::Unix(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.flush(),
+            Self::Unix(stream) => stream.flush(),
+        }
+    }
+}
+
+enum GatewayListener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+impl GatewayListener {
+    fn accept(&self) -> io::Result<GatewayStream> {
+        match self {
+            Self::Tcp(listener) => listener
+                .accept()
+                .map(|(stream, _)| GatewayStream::Tcp(stream)),
+            Self::Unix(listener) => listener
+                .accept()
+                .map(|(stream, _)| GatewayStream::Unix(stream)),
+        }
+    }
+
+    fn set_nonblocking(&self, value: bool) -> io::Result<()> {
+        match self {
+            Self::Tcp(listener) => listener.set_nonblocking(value),
+            Self::Unix(listener) => listener.set_nonblocking(value),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -245,6 +337,7 @@ impl GatewayControl {
 
 pub struct GatewayEndpoint {
     address: SocketAddr,
+    socket_identity: Option<(PathBuf, u64, u64)>,
     control: GatewayControl,
     listener_thread: Option<JoinHandle<()>>,
 }
@@ -255,9 +348,53 @@ impl GatewayEndpoint {
         commands: SyncSender<ProviderCommand>,
     ) -> Result<Self, String> {
         validate_config(&config)?;
-        let listener = TcpListener::bind(config.bind).map_err(|e| format!("provider bind: {e}"))?;
+        let (listener, address, socket_identity) = if let Some(path) = &config.unix_socket {
+            if path.parent() != Some(config.private_dir.as_path()) {
+                return Err("provider socket must be directly in private state".into());
+            }
+            match fs::symlink_metadata(path) {
+                Ok(meta) => {
+                    if !meta.file_type().is_socket()
+                        || meta.uid() != unsafe { libc::geteuid() }
+                        || meta.permissions().mode() & 0o077 != 0
+                    {
+                        return Err("existing provider socket is not an owned socket".into());
+                    }
+                    match UnixStream::connect(path) {
+                        Ok(_) => {
+                            return Err("provider socket is already accepting connections".into())
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {}
+                        Err(error) => {
+                            return Err(format!("existing provider socket probe: {error}"))
+                        }
+                    }
+                    fs::remove_file(path).map_err(|e| format!("stale provider socket: {e}"))?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("provider socket metadata: {error}")),
+            }
+            let listener =
+                UnixListener::bind(path).map_err(|e| format!("provider socket bind: {e}"))?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("provider socket permissions: {e}"))?;
+            let meta =
+                fs::symlink_metadata(path).map_err(|e| format!("provider socket metadata: {e}"))?;
+            if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
+                return Err("provider socket is not owned by controller".into());
+            }
+            (
+                GatewayListener::Unix(listener),
+                config.bind,
+                Some((path.clone(), meta.dev(), meta.ino())),
+            )
+        } else {
+            let listener =
+                TcpListener::bind(config.bind).map_err(|e| format!("provider bind: {e}"))?;
+            let address = listener.local_addr().map_err(|e| e.to_string())?;
+            (GatewayListener::Tcp(listener), address, None)
+        };
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let address = listener.local_addr().map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {
             lease: Mutex::new(LeaseState {
                 active: None,
@@ -279,7 +416,7 @@ impl GatewayEndpoint {
         let listener_thread = thread::spawn(move || {
             while !shared.stop.load(Ordering::SeqCst) {
                 match listener.accept() {
-                    Ok((mut stream, _)) => {
+                    Ok(mut stream) => {
                         if shared.active_request.swap(true, Ordering::SeqCst) {
                             if shared.busy_responders.fetch_add(1, Ordering::SeqCst)
                                 >= MAX_BUSY_RESPONDERS
@@ -334,6 +471,7 @@ impl GatewayEndpoint {
         });
         Ok(Self {
             address,
+            socket_identity,
             control,
             listener_thread: Some(listener_thread),
         })
@@ -353,6 +491,13 @@ impl Drop for GatewayEndpoint {
         self.control.shared.stop.store(true, Ordering::SeqCst);
         if let Some(handle) = self.listener_thread.take() {
             let _ = handle.join();
+        }
+        if let Some((path, dev, ino)) = &self.socket_identity {
+            if fs::symlink_metadata(path).is_ok_and(|meta| {
+                meta.file_type().is_socket() && meta.dev() == *dev && meta.ino() == *ino
+            }) {
+                let _ = fs::remove_file(path);
+            }
         }
     }
 }
@@ -437,7 +582,7 @@ struct HttpRequest {
     body: Vec<u8>,
 }
 
-fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpRequest, String> {
+fn read_request(stream: &mut GatewayStream, max_body: usize) -> Result<HttpRequest, String> {
     let started = Instant::now();
     let mut bytes = Vec::new();
     let header_end = loop {
@@ -545,7 +690,7 @@ fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpRequest, 
 }
 
 fn write_http(
-    stream: &mut TcpStream,
+    stream: &mut GatewayStream,
     status: u16,
     content_type: &str,
     body: &[u8],
@@ -566,13 +711,13 @@ fn write_http(
     stream.write_all(body)
 }
 
-fn error_reply(stream: &mut TcpStream, status: u16, message: &str) {
+fn error_reply(stream: &mut GatewayStream, status: u16, message: &str) {
     let body = json!({"error":{"message":message,"type":"gateway_error"}}).to_string();
     let _ = write_http(stream, status, "application/json", body.as_bytes());
 }
 
 fn serve_client(
-    stream: &mut TcpStream,
+    stream: &mut GatewayStream,
     config: &GatewayConfig,
     shared: &Arc<Shared>,
     commands: &SyncSender<ProviderCommand>,
@@ -713,7 +858,8 @@ fn serve_client(
         return;
     }
     if let Some((status, content_type, body)) = reply {
-        let local_write_success = write_http(stream, status, &content_type, &body).is_ok();
+        let local_write_success = write_http(stream, status, &content_type, &body).is_ok()
+            && bridge_delivery_ack(stream, &control, &lease);
         let _ = report_delivery(commands, attempt_id, local_write_success);
     } else {
         error_reply(
@@ -721,6 +867,40 @@ fn serve_client(
             502,
             "provider outcome is uncertain; no retry was sent",
         );
+    }
+}
+
+/// TCP means the gateway wrote directly to Hermes. For the private Unix
+/// route, one byte from this connection's worker bridge attests only that its
+/// write to the local Hermes socket completed. It cannot prove consumption.
+/// Missing acknowledgement retains the provider hold and forbids resend.
+fn bridge_delivery_ack(
+    stream: &mut GatewayStream,
+    control: &GatewayControl,
+    lease: &LeaseId,
+) -> bool {
+    if !stream.is_unix() {
+        return true;
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut byte = [0u8; 1];
+    loop {
+        if Instant::now() >= deadline || !control.still_active(lease) {
+            return false;
+        }
+        match stream.read(&mut byte) {
+            Ok(1) => return byte == *b"1" && control.still_active(lease),
+            Ok(0) | Ok(_) => return false,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                continue
+            }
+            Err(_) => return false,
+        }
     }
 }
 
@@ -1218,6 +1398,7 @@ mod tests {
     fn config(dir: PathBuf, upstream: SocketAddr) -> GatewayConfig {
         GatewayConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
+            unix_socket: None,
             upstream_url: format!("http://{upstream}/v1/chat/completions"),
             pinned_model: "operator-model".into(),
             provider_key: "private-provider-key".into(),
@@ -1226,6 +1407,188 @@ mod tests {
             max_response_bytes: 16_384,
             timeout: Duration::from_secs(5),
         }
+    }
+
+    #[test]
+    fn private_unix_gateway_keeps_token_check_and_owned_socket_lifecycle() {
+        let dir = test_dir();
+        let socket = dir.join("provider-gateway.sock");
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.bind = "127.0.0.1:18762".parse().unwrap();
+        settings.unix_socket = Some(socket.clone());
+        let (commands, _requests) = mpsc::sync_channel(1);
+        let endpoint = GatewayEndpoint::start(settings, commands).unwrap();
+        assert_eq!(endpoint.local_addr().port(), 18762);
+        let meta = fs::symlink_metadata(&socket).unwrap();
+        assert!(meta.file_type().is_socket());
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        let mut client = UnixStream::connect(&socket).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client
+            .write_all(b"POST /v1/chat/completions HTTP/1.1\r\nAuthorization: Bearer wrong\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+            .unwrap();
+        let mut reply = Vec::new();
+        client.read_to_end(&mut reply).unwrap();
+        assert!(reply.starts_with(b"HTTP/1.1 401 "));
+        drop(client);
+        drop(endpoint);
+        assert!(!socket.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn private_unix_gateway_reopens_only_owned_stale_socket() {
+        let dir = test_dir();
+        let socket = dir.join("provider-gateway.sock");
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.unix_socket = Some(socket.clone());
+        fs::write(&socket, b"not a socket").unwrap();
+        let (commands, _requests) = mpsc::sync_channel(1);
+        assert!(GatewayEndpoint::start(settings, commands).is_err());
+        assert_eq!(fs::read(&socket).unwrap(), b"not a socket");
+        fs::remove_file(&socket).unwrap();
+        let stale = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        drop(stale);
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.unix_socket = Some(socket.clone());
+        let (commands, _requests) = mpsc::sync_channel(1);
+        let endpoint = GatewayEndpoint::start(settings, commands).unwrap();
+        assert!(UnixStream::connect(&socket).is_ok());
+        drop(endpoint);
+        assert!(!socket.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn private_bridge_ack_is_per_connection_and_revocation_fails_closed() {
+        let dir = test_dir();
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.unix_socket = Some(dir.join("provider-gateway.sock"));
+        let (commands, _requests) = mpsc::sync_channel(1);
+        let endpoint = GatewayEndpoint::start(settings, commands).unwrap();
+        let lease = lease(1, TOKEN);
+        endpoint
+            .control()
+            .activate(lease, Instant::now() + Duration::from_secs(10))
+            .unwrap();
+        let id = LeaseId {
+            prompt_operation_id: 1,
+            parent_generation: "17".into(),
+        };
+        let (server, mut bridge) = UnixStream::pair().unwrap();
+        let mut server = GatewayStream::Unix(server);
+        bridge.write_all(b"1").unwrap();
+        assert!(bridge_delivery_ack(&mut server, &endpoint.control(), &id));
+        let (server, bridge) = UnixStream::pair().unwrap();
+        drop(bridge);
+        assert!(!bridge_delivery_ack(
+            &mut GatewayStream::Unix(server),
+            &endpoint.control(),
+            &id,
+        ));
+        let (server, mut bridge) = UnixStream::pair().unwrap();
+        endpoint.control().revoke();
+        bridge.write_all(b"1").unwrap();
+        assert!(!bridge_delivery_ack(
+            &mut GatewayStream::Unix(server),
+            &endpoint.control(),
+            &id,
+        ));
+        drop(endpoint);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn unix_delivery_case(acknowledge: bool) {
+        let dir = test_dir();
+        let socket = dir.join("provider-gateway.sock");
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread = fake_upstream(
+            upstream.try_clone().unwrap(),
+            deliveries.clone(),
+            false,
+            br#"{"id":"local-provider"}"#.to_vec(),
+        );
+        let mut settings = config(dir.clone(), upstream.local_addr().unwrap());
+        settings.unix_socket = Some(socket.clone());
+        let (commands, requests) = mpsc::sync_channel(4);
+        let gateway = GatewayEndpoint::start(settings, commands).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(20))
+            .unwrap();
+        let controller = thread::spawn(move || {
+            let ProviderCommand::Reserve { request, reply } =
+                requests.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("reserve expected");
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 7,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            let ProviderCommand::BeforeSend { reply, .. } =
+                requests.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("send boundary expected");
+            };
+            reply.send(Ok(())).unwrap();
+            let ProviderCommand::Outcome { outcome, reply, .. } =
+                requests.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("outcome expected");
+            };
+            assert!(matches!(outcome, ProviderOutcome::Received { .. }));
+            reply.send(Ok(())).unwrap();
+            let ProviderCommand::Delivery {
+                local_write_success,
+                reply,
+                ..
+            } = requests.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("delivery expected");
+            };
+            assert_eq!(local_write_success, acknowledge);
+            reply.send(Ok(())).unwrap();
+        });
+        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let mut client = UnixStream::connect(&socket).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(client, "POST /v1/chat/completions HTTP/1.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+        client.write_all(body).unwrap();
+        let mut response = Vec::new();
+        while !response
+            .windows(b"local-provider".len())
+            .any(|part| part == b"local-provider")
+        {
+            let mut chunk = [0u8; 4096];
+            let count = client.read(&mut chunk).unwrap();
+            assert!(count > 0);
+            response.extend_from_slice(&chunk[..count]);
+        }
+        if acknowledge {
+            client.write_all(b"1").unwrap();
+        }
+        drop(client);
+        controller.join().unwrap();
+        upstream_thread.join().unwrap();
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn private_unix_delivery_requires_bridge_write_ack() {
+        unix_delivery_case(true);
+        unix_delivery_case(false);
     }
 
     #[test]

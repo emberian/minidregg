@@ -144,6 +144,17 @@ while IFS= read -r program; do
   [[ $($program --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] ||
     fail "launcher/gate protocol mismatch: $program"
 done < <(jq -r '.commands[].program' "$config" | sort -u)
+if jq -e '(.providerTask != null) and ((.providerTask.localFixtureHostNetwork // false) == false)' "$config" >/dev/null; then
+  worker_root=$(jq -er '
+    [.commands[] | select(.name == "hermes-acp") | .args as $args |
+      [$args | to_entries[] | select(.value == "--runtime-root") | .key] as $positions |
+      select(($positions | length) == 1) | $args[$positions[0] + 1] |
+      select(type == "string" and startswith("/"))] |
+    if length == 1 then .[0] else empty end
+  ' "$config") || fail 'isolated provider has no unique worker runtime root'
+  safe_path "$worker_root"
+  require_pin "$worker_root/grain-provider-bridge"
+fi
 
 unit="mini-grain-controller@$task.service"
 target=$unit_dir/$unit

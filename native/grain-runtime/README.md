@@ -85,7 +85,7 @@ An optional `providerTask` gives a hosted Hermes prompt a separate Mini
 authority and a controller-held provider key. It requires a distinct subject,
 task, and custody key; the parent grain policy must name both the tool and
 provider subjects at the prompt generation. The selected `hermes-acp` command
-must be the scoped Linux `bwrap` launcher with fixed `--network host` and an
+must be the scoped Linux `bwrap` launcher with fixed `--network none` and an
 upstream `hermes-acp` executable. For example, alongside the tool task above:
 
 ```json
@@ -106,6 +106,19 @@ upstream `hermes-acp` executable. For example, alongside the tool task above:
 an integer from 1 through 6; omission preserves the generated six-iteration
 profile. This limits Hermes turn iterations, while the signed provider reserve,
 worker wall deadline, and external provider spending cap remain separate bounds.
+The controller listens on an owned mode-0600 Unix socket directly in its
+private `stateDir`. The launcher bind-mounts only that socket into the worker's
+private network namespace; a pinned `/agent/grain-provider-bridge` serves the
+profile's `gatewayBind` loopback port inside that namespace. The worker can
+still reach its separately mounted Mini MCP Unix socket. Neither socket gives
+the worker the provider key. The bridge acknowledges a completed local HTTP
+socket write on the same Unix connection before provider delivery is recorded;
+a missing acknowledgement retains the held allowance. This does not prove
+Hermes consumed the response.
+
+Older deterministic HTTP loopback fixtures may explicitly set
+`"localFixtureHostNetwork":true` and use `--network host`. That setting is
+refused for an HTTPS upstream and is not a route for real provider credentials.
 
 The real provider key stays in the private controller state directory. Each
 worker receives only a new prompt token and a generated local Hermes profile.

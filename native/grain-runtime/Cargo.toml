@@ -10,6 +10,10 @@ description = "Physical supervisor for Mini agent-grain tasks"
 name = "grain-runtime"
 path = "src/main.rs"
 
+[[bin]]
+name = "grain-provider-bridge"
+path = "src/provider_bridge.rs"
+
 [dependencies]
 libc = "=0.2.177"
 serde = { version = "=1.0.228", features = ["derive"] }
