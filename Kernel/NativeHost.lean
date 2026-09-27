@@ -143,7 +143,9 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
-  pure ⟨config.deployment.domain, profile.semantics, imageBoundary config opened.durable.image,
+  -- Loaded.canonical and imageBoundaryCanonical_loaded preserve the exact
+  -- commitment while avoiding another whole-history serialization per plan.
+  pure ⟨config.deployment.domain, profile.semantics, imageBoundaryCanonical config opened.durable.bytes,
     height, finalized, slots⟩
 
 /-- Internal operator computation only. It must not be exposed to an untrusted

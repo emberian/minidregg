@@ -1,0 +1,4 @@
+d96387c79eaa9935278abb8c39a50e789486a861b2e79799b71f5e8b70de68dc  Kernel/NativeHost.lean
+434512686d1537a713434eb8321c12d728dab15703281fb13684371fd690063c  docs/evidence/2026-09-27-nativehost-canonical-prepare/README.md
+f8cae924f19b8c131664bfbe870d6ca4eb6e01825e204e562130326fa4357d1c  docs/evidence/2026-09-27-nativehost-canonical-prepare/stop-nativehost-canonical.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-nativehost-canonical-prepare/stop-session-canonical.log
