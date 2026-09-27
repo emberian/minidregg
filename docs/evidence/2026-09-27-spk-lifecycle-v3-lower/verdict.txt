@@ -1,0 +1,20 @@
+SOURCE-ONLY V3 LOWER CHECK: PASS
+Qualification: hbox private overlay /tank/dregg-build/minidregg-55d3868-launch-v2-narrow
+Base immutable prefix-292 manifest: 0c0b8fd0aedf4f97650d3ad4d369629e955943fd472c0ec089eb4de0f017d1cd
+Method: one LEAN_NUM_THREADS=2 `lake env lean -o .lake/build/lib/lean/Kernel/<Module>.olean Kernel/<Module>.lean` at a time under atomic lean-seat-2.
+All named new modules below exited 0; their final direct compiler diagnostic logs were empty.
+Kernel.ApplicationLifecycleLaunchBinding
+Kernel.ApplicationLifecycleBeginV3Ingress
+Kernel.ApplicationLifecycleClaimV3Ingress
+Kernel.ApplicationLifecycleBeginV3Admission
+Kernel.ApplicationLifecycleClaimV3Projection
+Kernel.ApplicationLifecycleClaimV3Core
+Kernel.ApplicationLifecycleCompletionV2Report
+Kernel.ApplicationLifecycleCompletionV2Source
+Kernel.ApplicationLifecycleCompletionV2Ingress
+Kernel.ApplicationLifecycleCompletionV2Policy
+Kernel.ApplicationLifecycleCompletionV2History
+Kernel.ApplicationLifecycleCompletionV2Admission
+Kernel.ApplicationLifecycleCompletionV2Core
+Kernel.ApplicationLifecycleCreatedHistory
+This does not establish Verified same-walk history, native receiver routes, a launched process, or a linked native Host binary.
