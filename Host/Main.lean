@@ -85,6 +85,7 @@ import Host.ApplicationLifecycleLaunchClaimInspection
 import Host.ApplicationLifecycleLaunchCompletionAuthoring
 import Host.ApplicationLifecycleLaunchCompletionInspection
 import Host.ApplicationLifecycleClaimV3Inspection
+import Host.ApplicationLifecycleStopClaimInspection
 import Host.ApplicationAgentLifetimeGrantInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
@@ -540,6 +541,8 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleLaunchBeginInspection.inspectContinueRequest bytes
   else if kind == "application-lifecycle-launch-begin-plan" then
     ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
+  else if kind == "application-lifecycle-launch-stop-plan" then
+    ApplicationLifecycleLaunchBeginInspection.inspectStopPlan bytes
   else if kind == "application-lifecycle-launch-claim-request" then
     ApplicationLifecycleLaunchClaimInspection.inspectRequest bytes
   else if kind == "application-lifecycle-launch-claim-plan" then
@@ -549,6 +552,21 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
   else if kind == "application-lifecycle-launch-completion-plan" then
     ApplicationLifecycleLaunchCompletionInspection.inspectPlan bytes
   else Minidregg.Host.Json.inspect kind bytes
+
+/-- A STOP physical custodian may compare its retained op66 plan and fresh
+op26 callback with one newly verified Mini image. This read-only join returns
+the exact prior running event25 witness; it never mints a launch permit. -/
+def inspectStopClaimCurrent (config : NativeHost.Config)
+    (planBytes committedBytes : List UInt8) : IO (Except String Lean.Json) := do
+  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  | .error detail => return .error detail
+  | .ok durable =>
+      match ← NativeHostReplay.verifyLoaded config durable with
+      | .error failure =>
+          return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
+      | .ok verified =>
+          return ApplicationLifecycleStopClaimInspection.inspectVerified
+            verified planBytes committedBytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
 this reads neither storage nor protected resource values. Full-width integers
@@ -4349,7 +4367,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-"fn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
+"inspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
 "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
@@ -4387,6 +4405,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
+              kind == "application-lifecycle-launch-stop-plan" ||
               kind == "application-lifecycle-launch-claim-request" ||
               kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-lifecycle-launch-completion-request" ||
@@ -4411,6 +4430,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
+              kind == "application-lifecycle-launch-stop-plan" ||
               kind == "application-lifecycle-launch-claim-request" ||
               kind == "application-lifecycle-launch-claim-plan" ||
               kind == "application-lifecycle-launch-completion-request" ||
@@ -4428,6 +4448,15 @@ def run (arguments : List String) : IO UInt32 := do
               throw (IO.userError "application dispatch inspection exceeds JSON budget")
             IO.FS.writeFile output serialized
           else writeJson output value
+          pure 0
+      | "inspect-stop-claim", [planPath, committedPath, output] =>
+          let plan ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
+          let committed ← readBoundedBytes committedPath FnEvidenceCodec.maxHostFrameBytes
+          let view ← IO.ofExcept (← inspectStopClaimCurrent config plan committed)
+          let serialized := view.compress
+          unless serialized.toUTF8.size ≤ maxDispatchInspectionJsonBytes do
+            throw (IO.userError "STOP claim inspection exceeds JSON budget")
+          IO.FS.writeFile output serialized
           pure 0
       | "derive", [kind, input, output] =>
           let value ← IO.ofExcept (Minidregg.Host.Json.derive kind (← readJson input))
@@ -4753,26 +4782,40 @@ def run (arguments : List String) : IO UInt32 := do
                               | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
                                   "resident BEGIN management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
-                            let plan ← if let some request :=
+                            let bytes ← if let some request :=
                                 ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
-                              IO.ofExcept <| ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
-                                pinnedConfig session.verified custody.pin request
+                              if request.kind == .stop then do
+                                let plan ← IO.ofExcept <|
+                                  ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
+                                    pinnedConfig session.verified custody.pin payload
+                                pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
+                              else do
+                                let plan ← IO.ofExcept <|
+                                  ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
+                                    pinnedConfig session.verified custody.pin request
+                                pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
                             else do
-                              let result ← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
-                                pinnedConfig session.verified custody.pin payload
-                              IO.ofExcept result
-                            let bytes := ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan
+                              let plan ← IO.ofExcept <|
+                                (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
+                                  pinnedConfig session.verified custody.pin payload)
+                              pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN plan exceeds host frame bound")
                             return ((66 : UInt8), bytes)
                         | 67 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
-                            let some plan := ApplicationLifecycleLaunchBeginAuthoring.planCodec.decode
-                                planBytes
-                              | throw (IO.userError "noncanonical launch BEGIN plan")
                             let signatures ← decodeSignatures signaturesBytes
-                            let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
+                            let ingress ← if let some plan :=
+                                ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.decode
+                                  planBytes then
+                              IO.ofExcept <|
+                                ApplicationLifecycleLaunchBeginAuthoring.assembleStop plan signatures
+                            else if let some plan :=
+                                ApplicationLifecycleLaunchBeginAuthoring.planCodec.decode
+                                  planBytes then
+                              IO.ofExcept <|
+                                ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
+                            else throw (IO.userError "noncanonical launch BEGIN plan")
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
                             return ((67 : UInt8), ingress)

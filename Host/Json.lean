@@ -2668,6 +2668,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       ApplicationLifecycleLaunchBeginInspection.inspectContinueRequest bytes
   | "application-lifecycle-launch-begin-plan" =>
       ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
+  | "application-lifecycle-launch-stop-plan" =>
+      ApplicationLifecycleLaunchBeginInspection.inspectStopPlan bytes
   | "application-lifecycle-launch-claim-request" =>
       ApplicationLifecycleLaunchClaimInspection.inspectRequest bytes
   | "application-lifecycle-launch-claim-plan" =>
