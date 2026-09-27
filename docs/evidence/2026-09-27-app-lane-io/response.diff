@@ -1,0 +1,11 @@
+--- /home/ember/build/minidregg-overnight-20260927-success-prefix-evidence/build-r2/minidregg-host.rsp	2026-09-27 03:36:41.880487692 -0400
++++ /tmp/mini-core-ecb46aa-experimental-link/host-core-only.rsp	2026-09-27 04:25:06.202163956 -0400
+@@ -51,7 +51,7 @@
+ .lake/build/ir/Compiler/SemanticArtifactBundle.c.o.export
+ .lake/build/ir/Compiler/MinidreggV1Artifact.c.o.export
+ .lake/build/ir/Compiler/BinaryTower256Profile.c.o.export
+-.lake/build/ir/Compiler/Sp800185Cshake256Core.c.o.export
++/tmp/mini-core-ecb46aa-experimental/Compiler/Sp800185Cshake256Core.c.o.export
+ .lake/build/ir/Compiler/Sp800185Cshake256.c.o.export
+ .lake/build/ir/Compiler/Tower256ConcreteBackend.c.o.export
+ .lake/build/ir/Theory/CellState.c.o.export
