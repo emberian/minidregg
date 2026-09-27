@@ -128,11 +128,12 @@ private def observationSlot (config : Config) (opened : Opened config)
       (fun _ => "dispatch observation signing key unavailable")
   pure ⟨9, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
 
-/-- A verified historical issue selects the ticket; current cells and their
-inner roots come from the same verified loaded image. The final ingress is
-still unsigned and is not a pending dispatch or delivery permit. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (request : Request) :
+/-- Shared construction for a source-selected human or agent parent. A caller
+can only obtain unsigned signing headers here; the special receiver will
+check the parent against the actual current cell, capability and policy. -/
+def prepareWithParent (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request)
+    (parent : Option ApplicationDispatchCommand.Parent) :
     Except String Plan := do
   let opened := verified.opened
   let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
@@ -141,8 +142,8 @@ def prepareVerified (config : Config) {target : Durable}
   if spec.ticket.resource != request.ticketResource then
     throw "custodian ticket differs from admitted issue"
   let ticket := spec.ticket
-  if ticket.participant.origin != .human then
-    throw "agent dispatch authoring requires an explicit parent plan"
+  if !ApplicationDispatchCommand.parentMatches ticket.participant.origin parent then
+    throw "dispatch parent differs from admitted ticket origin"
   if !ApplicationDispatchAdmission.requestSafe request.http then
     throw "unsupported or unsafe HTTP request shape"
   let appResource := ticket.scope.app
@@ -213,7 +214,7 @@ def prepareVerified (config : Config) {target : Durable}
       enrollmentObservationEnvelope := [] }
   let unsigned : ApplicationDispatchAdmissionIngress.Ingress :=
     { dispatch := base, appSnapshotManifest := request.snapshotManifest
-      appManagementSubject := spec.issuer, parent := none
+      appManagementSubject := spec.issuer, parent := parent
       ticketRoot := ticketCell.payload.root
       ticketObserveCapability := ticket.participant.ticketObserveCapability
       ticketObservationEnvelope := []
@@ -222,7 +223,7 @@ def prepareVerified (config : Config) {target : Durable}
   let selection : Selection :=
     ⟨opened.authority.snapshot.cell.root, sessionCell.payload.root,
       request.sessionObserveCapability⟩
-  let command := ApplicationDispatchCommand.command base selection none
+  let command := ApplicationDispatchCommand.command base selection parent
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
     opened.durable command
@@ -253,6 +254,18 @@ def prepareVerified (config : Config) {target : Durable}
     ticket.resource ticket.participant.ticketObserveCapability unsigned.ticketRoot
   pure ⟨request, unsigned.canonicalBytes, invocation,
     [appSlot, manifestSlot, enrollmentSlot, ticketSlot]⟩
+
+/-- The public human authoring route remains human-only with the same exact
+request/plan wire. Agent tickets require a separately source-derived parent
+from `ApplicationDispatchAgentAuthoring`, never a human principal fallback. -/
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request) :
+    Except String Plan := do
+  let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
+    | throw "admitted share issue index unavailable"
+  if prior.evidence.ingress.spec.ticket.participant.origin != .human then
+    throw "agent dispatch authoring requires an explicit parent plan"
+  prepareWithParent config verified request none
 
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
