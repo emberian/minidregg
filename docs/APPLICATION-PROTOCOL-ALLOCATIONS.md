@@ -75,6 +75,14 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 43 | Consumer namespace registration detached signature assembly (reserved private authoring; no commit) |
 | 44 | Verified-current-image lifecycle completion signing plan (reserved private authoring; no commit) |
 | 45 | Lifecycle completion detached signature assembly (reserved private authoring; no commit) |
+| 46 | Fresh event21 agent dispatch with one-use reserve claim (reserved private admission) |
+| 47 | Event21 historical receipt-only lookup (reserved; never a delivery permit) |
+| 48 | Verified-current-image event21 agent dispatch signing plan (reserved private authoring; no commit) |
+| 49 | Event21 agent dispatch detached signature assembly (reserved private authoring; no commit) |
+
+The fresh event21 response must have its own strict committed-permit frame and
+source inspector. Agent callers cannot substitute the human event11 operations
+34/36/37 or convert an operation47 historical receipt into physical delivery.
 
 Selected fn coverage must bind the configured local consumer scope, prior ACK,
 bounded first-match scan, exact projected article and an originally admitted
