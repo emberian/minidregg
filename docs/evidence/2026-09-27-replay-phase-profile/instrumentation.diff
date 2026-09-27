@@ -1,0 +1,30 @@
+--- Kernel/NativeHostReplay.lean:f461
++++ Kernel/NativeHostReplay.lean:profile-v2
+@@ -2016,18 +2016,27 @@
+       frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
+   | record :: rest => do
+       let index := opened.durable.image.accepted.length
++      let started ← IO.monoNanosNow
+       match ← derive config opened issues reserves begins beginsV2 claimsV2
+           beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
+           record.event.canonicalBytes with
+       | .error detail => return .error ⟨index, detail⟩
+       | .ok derived =>
++        let afterDerive ← IO.monoNanosNow
+         if matched : recordMatches record derived.intent = true then
++          let afterMatch ← IO.monoNanosNow
+           match advanced : advance opened derived with
+           | .error detail => return .error ⟨index, detail⟩
+           | .ok next =>
++            let afterAdvance ← IO.monoNanosNow
+             match validated : validateLoaded config next with
+             | .error detail => return .error ⟨index, s!"native post image: {detail}"⟩
+             | .ok after =>
++              let afterValidate ← IO.monoNanosNow
++              let profiledBoundaryRef ← IO.mkRef (imageBoundaryCanonical config next.bytes)
++              let afterBoundary ← IO.monoNanosNow
++              let profiledBoundary ← profiledBoundaryRef.get
++              IO.eprintln s!"REPLAY_PHASE index={index} derive_ns={afterDerive - started} match_ns={afterMatch - afterDerive} advance_ns={afterAdvance - afterMatch} validate_ns={afterValidate - afterAdvance} boundary_ns={afterBoundary - afterValidate} boundary_value={profiledBoundary.value}"
+               let receipt : NativeHostCodec.Receipt :=
+                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
+                   index + 1, imageBoundaryCanonical config next.bytes⟩

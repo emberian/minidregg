@@ -1,0 +1,35 @@
+--- f461-private-phase-v2/Kernel/NativeHostReplay.lean
++++ f461-private-event3/Kernel/NativeHostReplay.lean
+@@ -1568,12 +1568,29 @@
+             match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+             | none => return .error "noncanonical historical invocation command"
+             | some command =>
+-              match DeclaredResourceController.prepare config.deployment config.profile
+-                  ⟨config.federation, height⟩ opened.durable command with
++              let event3Started ← IO.monoNanosNow
++              let directoryProbeRef ← IO.mkRef (CredentialAuthorityDomainReceiver.loadDirectory opened.durable)
++              let directoryProbe ← directoryProbeRef.get
++              let directoryDone ← IO.monoNanosNow
++              let authorityProbeRef ← IO.mkRef
++                (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
++              let authorityProbe ← authorityProbeRef.get
++              let authorityDone ← IO.monoNanosNow
++              let preparedResult := DeclaredResourceController.prepare config.deployment config.profile
++                  ⟨config.federation, height⟩ opened.durable command
++              let preparedRef ← IO.mkRef preparedResult
++              let preparedResult ← preparedRef.get
++              let preparedDone ← IO.monoNanosNow
++              IO.eprintln s!"EVENT3_PREP directory_ns={directoryDone - event3Started} authority_ns={authorityDone - directoryDone} prepare_ns={preparedDone - authorityDone} directory_ok={directoryProbe.isSome} authority_ok={authorityProbe.isSome}"
++              match preparedResult with
+               | .error reason => return .error s!"invocation preparation refused: {repr reason}"
+               | .ok prepared =>
+                 if shape : DeclaredResourceController.PhysicalShape prepared then
+-                  match ← DeclaredResourceController.admit config.signature prepared signed with
++                  let admitStarted ← IO.monoNanosNow
++                  let admitted ← DeclaredResourceController.admit config.signature prepared signed
++                  let admitDone ← IO.monoNanosNow
++                  IO.eprintln s!"EVENT3_ADMIT admit_ns={admitDone - admitStarted} admitted_ok={match admitted with | .ok _ => true | .error _ => false}"
++                  match admitted with
+                   | .error reason => return .error s!"invocation admission refused: {repr reason}"
+                   | .ok accepted => return .ok ⟨accepted.dataIntent shape,
+                       .invoke prepared signed shape accepted, none, none, none, none,

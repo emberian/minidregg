@@ -1,0 +1,11 @@
+5dedd6eabd1a25dc8b3b256921e3190e1ccac0079c8fcdbdc08a45c9b265bebe  docs/evidence/2026-09-27-replay-phase-profile/build-summary.txt
+21196613f440f079e281029bc9614c7ce56dbbb9e997a202732b0b32bc5a1392  docs/evidence/2026-09-27-replay-phase-profile/event-kind-probe.lean
+8e1c7f6a1d99ac4f969f55096e83492d3160561171abfe279d316dfb707700d3  docs/evidence/2026-09-27-replay-phase-profile/event-kinds.txt
+28a2187ccc612293ecd8cd70842499a696d66ac223a807c69b5e7dcd82d50ca2  docs/evidence/2026-09-27-replay-phase-profile/event-version-probe.lean
+9272b73c2c8763ee724d27979f7e4f27d18e9334985cfd6f0e76268c9105ab26  docs/evidence/2026-09-27-replay-phase-profile/event-versions.txt
+c12a7cf2d5ebe1247ac32312f9a3f77154eed88cd3b43564bb6d2f6637b3a949  docs/evidence/2026-09-27-replay-phase-profile/event3-instrumentation.diff
+87097185d3219f43210ab6511a2af178056429a8d7db736974bae913ce566131  docs/evidence/2026-09-27-replay-phase-profile/event3-subphases.txt
+560b4478fbc43413b1b13578c624823320a922d9f11af28a820bd6ca8bac2890  docs/evidence/2026-09-27-replay-phase-profile/event3-time-summary.txt
+5086795b268a0f202b8c5fedb0aa460e26c2eeefcec6871e5e8cd98d0d95bc8e  docs/evidence/2026-09-27-replay-phase-profile/instrumentation.diff
+61378b798b6b40910f59083f92a8b76ece0176dbef9e7d9aa060b71913916613  docs/evidence/2026-09-27-replay-phase-profile/phase-lines.txt
+609581da9e9feaa31e37670e9f2a8853f42d77aab90ca84753ffe62ccffed016  docs/evidence/2026-09-27-replay-phase-profile/time-summary.txt

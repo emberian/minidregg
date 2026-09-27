@@ -1,0 +1,17 @@
+0 2 resourceBirth
+1 1 otherSpecial
+2 1 otherSpecial
+3 1 otherSpecial
+4 1 otherSpecial
+5 1 otherSpecial
+6 3 ordinaryInvoke
+7 3 ordinaryInvoke
+8 3 ordinaryInvoke
+9 3 ordinaryInvoke
+10 3 grainBirth
+11 2 resourceBirth
+12 3 ordinaryInvoke
+13 3 grainBirth
+14 3 ordinaryInvoke
+15 3 grainBirth
+16 3 ordinaryInvoke

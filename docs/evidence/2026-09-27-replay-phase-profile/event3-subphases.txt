@@ -1,0 +1,14 @@
+index=6 EVENT3_PREP directory_ns=17112127 authority_ns=13832498 prepare_ns=63735046 directory_ok=true authority_ok=true
+index=6 EVENT3_ADMIT admit_ns=292873452 admitted_ok=true
+index=7 EVENT3_PREP directory_ns=12082421 authority_ns=14093423 prepare_ns=64774871 directory_ok=true authority_ok=true
+index=7 EVENT3_ADMIT admit_ns=314565479 admitted_ok=true
+index=8 EVENT3_PREP directory_ns=12577638 authority_ns=14554319 prepare_ns=65551004 directory_ok=true authority_ok=true
+index=8 EVENT3_ADMIT admit_ns=264962199 admitted_ok=true
+index=9 EVENT3_PREP directory_ns=11187380 authority_ns=13633603 prepare_ns=62659532 directory_ok=true authority_ok=true
+index=9 EVENT3_ADMIT admit_ns=283619406 admitted_ok=true
+index=12 EVENT3_PREP directory_ns=12092591 authority_ns=17000470 prepare_ns=73885893 directory_ok=true authority_ok=true
+index=12 EVENT3_ADMIT admit_ns=290994029 admitted_ok=true
+index=14 EVENT3_PREP directory_ns=14785359 authority_ns=18962011 prepare_ns=80918515 directory_ok=true authority_ok=true
+index=14 EVENT3_ADMIT admit_ns=312054583 admitted_ok=true
+index=16 EVENT3_PREP directory_ns=15488496 authority_ns=21459915 prepare_ns=88951299 directory_ok=true authority_ok=true
+index=16 EVENT3_ADMIT admit_ns=324912484 admitted_ok=true

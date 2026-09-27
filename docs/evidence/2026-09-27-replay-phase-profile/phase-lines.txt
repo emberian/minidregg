@@ -1,0 +1,17 @@
+REPLAY_PHASE index=0 derive_ns=25327903540 match_ns=17785219 advance_ns=34735443 validate_ns=117962987 boundary_ns=84593600
+REPLAY_PHASE index=1 derive_ns=328417090 match_ns=26277678 advance_ns=79125405 validate_ns=123309608 boundary_ns=103551884
+REPLAY_PHASE index=2 derive_ns=381641347 match_ns=27397550 advance_ns=122604314 validate_ns=124005752 boundary_ns=111102527
+REPLAY_PHASE index=3 derive_ns=419875395 match_ns=30024278 advance_ns=178306966 validate_ns=89785243 boundary_ns=82337646
+REPLAY_PHASE index=4 derive_ns=313289256 match_ns=20598558 advance_ns=210599360 validate_ns=116723599 boundary_ns=91760840
+REPLAY_PHASE index=5 derive_ns=336585157 match_ns=21883690 advance_ns=212372789 validate_ns=91507814 boundary_ns=88460262
+REPLAY_PHASE index=6 derive_ns=509871479 match_ns=5111196 advance_ns=192273755 validate_ns=87306831 boundary_ns=88808874
+REPLAY_PHASE index=7 derive_ns=471519148 match_ns=4746790 advance_ns=205410440 validate_ns=88253859 boundary_ns=106542260
+REPLAY_PHASE index=8 derive_ns=534092853 match_ns=6027288 advance_ns=235695413 validate_ns=99493700 boundary_ns=103797926
+REPLAY_PHASE index=9 derive_ns=523062636 match_ns=5380495 advance_ns=279135825 validate_ns=85779906 boundary_ns=103753490
+REPLAY_PHASE index=10 derive_ns=6038864970 match_ns=323917827 advance_ns=1064580112 validate_ns=153209196 boundary_ns=189612456
+REPLAY_PHASE index=11 derive_ns=1684011355 match_ns=6750083 advance_ns=696783847 validate_ns=152389702 boundary_ns=153860307
+REPLAY_PHASE index=12 derive_ns=548523181 match_ns=6142024 advance_ns=748480341 validate_ns=100863573 boundary_ns=157122164
+REPLAY_PHASE index=13 derive_ns=22550314786 match_ns=1102127397 advance_ns=2820573059 validate_ns=111436481 boundary_ns=162299369
+REPLAY_PHASE index=14 derive_ns=571313095 match_ns=6241132 advance_ns=3452072234 validate_ns=106241160 boundary_ns=170642859
+REPLAY_PHASE index=15 derive_ns=9535940705 match_ns=517399247 advance_ns=3960209135 validate_ns=167475814 boundary_ns=305466201
+REPLAY_PHASE index=16 derive_ns=833673697 match_ns=7021941 advance_ns=3891058474 validate_ns=118072577 boundary_ns=252319386

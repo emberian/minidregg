@@ -1,0 +1,12 @@
+end_utc=2026-09-27T15:43:38Z
+elapsed_seconds=328
+incremental_changed_module=Kernel.NativeHostReplay
+unchanged_imported_modules=258
+unchanged_later_sources=84
+compiled_source_modules=85
+source_modules=343
+package_modules=2933
+response_objects=3276
+usage_exit=1
+binary=/home/ember/build/minidregg-f461-replay-profile-v2-20260927/minidregg-host-f461-profile-v2b
+binary_sha256=4b17acefc7cd96a0e17876cc93f46b7428180120ae4c50ef3381aedf222bef14
