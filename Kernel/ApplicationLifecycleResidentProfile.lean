@@ -5,6 +5,7 @@ opaque identities keeps its original replay meaning, but cannot be launched
 by this host adapter.
 -/
 import Kernel.ApplicationLifecycleBeginV2Ingress
+import Kernel.ApplicationLifecycleBeginV3Ingress
 import Kernel.ApplicationLifecycleClaimProjection
 
 namespace Minidregg.Kernel.ApplicationLifecycleResidentProfile
@@ -20,6 +21,17 @@ def beginMatches (ingress : ApplicationLifecycleBeginV2Ingress.Ingress) : Bool :
   ingress.base.source.imageIdentity == ingress.descriptor.imageIdentity &&
   ingress.base.source.processIdentity ==
     processIdentity ingress.base.source.app ingress.base.source.processGeneration
+
+/-- A v3 STOP advances the app operation generation, but fences the unit from
+the already-running START generation. The replay's admitted-running witness
+binds that prior unit and exact incarnation. Historical v2 matching is
+unchanged. -/
+def beginMatchesV3 (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) : Bool :=
+  let source := ingress.base.source
+  source.imageIdentity == ingress.descriptor.package.imageIdentity &&
+    source.processIdentity == processIdentity source.app
+      (if source.kind == .stop then source.before.generation
+       else source.processGeneration)
 
 def claimMatches (claim : ApplicationLifecycleClaimProjection.CommittedV2) : Bool :=
   claim.core.source.begin.source.imageIdentity == claim.descriptor.imageIdentity &&

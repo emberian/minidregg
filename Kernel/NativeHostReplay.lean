@@ -162,6 +162,36 @@ structure PriorCreatedV3 (config : Config) where
       record = DurableReceiver.IntentRecord.ofIntent
         (ApplicationLifecycleCompletionV2Core.intent accepted)
 
+/-- A physical running incarnation is retained only after the exact event25
+record and successor image were admitted by this verified replay walk. STOP
+must select this unit, invocation and cgroup; its own operation generation is
+not the generation of the process being stopped. -/
+structure PriorRunningV3 (config : Config) where
+  private mk ::
+  index : Nat
+  receipt : NativeHostCodec.Receipt
+  ingress : ApplicationLifecycleCompletionV2Ingress.Ingress
+  record : DurableReceiver.IntentRecord
+  running : ingress.source.physical.report.outcome = .running
+  started : ingress.source.originalBegin.base.source.kind = .start
+  admitted : ∃ original : Opened config,
+    ∃ accepted : ApplicationLifecycleCompletionV2Admission.Candidate config original ingress,
+      record = DurableReceiver.IntentRecord.ofIntent
+        (ApplicationLifecycleCompletionV2Core.intent accepted)
+
+structure RunningAt (config : Config) (opened : Opened config)
+    (source : ApplicationLifecycleBegin.Source) where
+  private mk ::
+  prior : PriorRunningV3 config
+  present : opened.durable.image.accepted[prior.index]? = some prior.record
+  appExact : prior.ingress.source.originalBegin.base.source.app = source.app
+  generationExact :
+    prior.ingress.source.originalBegin.base.source.processGeneration =
+      source.before.generation
+  unitExact : prior.ingress.source.physical.report.unit = source.processIdentity
+  imageExact : prior.ingress.source.physical.report.materializedImage =
+    source.imageIdentity
+
 /-- A completed-create candidate is usable only when its original event25 was
 also admitted by the very replay walk that verified today's tip. -/
 structure CreatedAt (config : Config) (opened : Opened config)
@@ -180,6 +210,9 @@ including the original completed-create witness for every continue. -/
 inductive BeginV3History (config : Config) (opened : Opened config)
     (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) : Type where
   | install (selected : ingress.start = none)
+  | stop (selected : ingress.start = none)
+      (kind : ingress.base.source.kind = .stop)
+      (running : RunningAt config opened ingress.base.source)
   | create (binding : ApplicationLifecycleLaunchBinding.Binding) (index : Nat)
       (selected : ingress.start = some binding)
       (choice : binding.choice = .create index)
@@ -264,13 +297,51 @@ private def selectCreatedAt (config : Config) (opened : Opened config)
     else return .error "completed-create receipt differs from admitted history"
   else return .error "completed-create index differs from admitted history"
 
+private def selectRunningAt {config : Config} (opened : Opened config)
+    (running : List (PriorRunningV3 config))
+    (source : ApplicationLifecycleBegin.Source) :
+    Except String (RunningAt config opened source) := do
+  -- The list is newest first. Selecting by app before checking generation
+  -- prevents an old running incarnation from being revived after a newer run.
+  let some prior := running.find? (fun prior =>
+      prior.ingress.source.originalBegin.base.source.app == source.app)
+    | throw "STOP has no admitted running incarnation at current generation"
+  match found : opened.durable.image.accepted[prior.index]? with
+  | none => throw "STOP running completion record absent from verified prefix"
+  | some record =>
+      if bytesExact : DurableReceiverCodec.intentStream.encode record =
+          DurableReceiverCodec.intentStream.encode prior.record then
+        have recordExact : record = prior.record :=
+          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) bytesExact
+        have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
+          rw [found, recordExact]
+        if appExact : prior.ingress.source.originalBegin.base.source.app = source.app then
+          if generationExact :
+              prior.ingress.source.originalBegin.base.source.processGeneration =
+                source.before.generation then
+            if unitExact : prior.ingress.source.physical.report.unit = source.processIdentity then
+              if imageExact : prior.ingress.source.physical.report.materializedImage =
+                  source.imageIdentity then
+                return ⟨prior, present, appExact, generationExact, unitExact, imageExact⟩
+              else throw "STOP image differs from admitted running incarnation"
+            else throw "STOP unit differs from admitted running incarnation"
+          else throw "STOP generation differs from admitted running incarnation"
+        else throw "STOP app differs from admitted running incarnation"
+      else throw "STOP running completion record differs from verified prefix"
+
 private def admitBeginV3At (config : Config) (opened : Opened config)
     (created : List (PriorCreatedV3 config))
+    (running : List (PriorRunningV3 config))
     (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) :
     IO (Except String (BeginAtV3 config opened ingress)) := do
   let history : BeginV3History config opened ingress ←
     match selected : ingress.start with
-    | none => pure (.install selected)
+    | none =>
+        if kind : ingress.base.source.kind = .stop then
+          match selectRunningAt opened running ingress.base.source with
+          | .error detail => return .error detail
+          | .ok exact => pure (.stop selected kind exact)
+        else pure (.install selected)
     | some binding =>
         match choice : binding.choice with
         | .create index => pure (.create binding index selected choice)
@@ -344,6 +415,20 @@ def CompletionAt.intent {config : Config} {opened : Opened config}
     (admitted : CompletionAt config opened ingress) : DataIntent rootBytes :=
   ApplicationLifecycleCompletionCore.intent admitted.conditional
 
+inductive CompletionV2Running (config : Config) (opened : Opened config)
+    (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) : Type where
+  | other (notStop : ingress.source.originalBegin.base.source.kind ≠ .stop)
+  | stop (running : RunningAt config opened
+        ingress.source.originalBegin.base.source)
+      (unitExact : ingress.source.physical.report.unit =
+        running.prior.ingress.source.physical.report.unit)
+      (invocationExact : ingress.source.physical.report.invocationId =
+        running.prior.ingress.source.physical.report.invocationId)
+      (controlGroupExact : ingress.source.physical.report.controlGroup =
+        running.prior.ingress.source.physical.report.controlGroup)
+      (custodyExact : ingress.source.physical.report.volumeCustody =
+        running.prior.ingress.source.physical.report.volumeCustody)
+
 structure CompletionAtV2 (config : Config) (opened : Opened config)
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) where
   private mk ::
@@ -353,6 +438,7 @@ structure CompletionAtV2 (config : Config) (opened : Opened config)
   ingressExact : prior.ingress = ingress.source.originalClaim
   recordExact : prior.record = conditional.historical.selected.record
   present : opened.durable.image.accepted[prior.index]? = some prior.record
+  running : CompletionV2Running config opened ingress
 
 def CompletionAtV2.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
@@ -1232,6 +1318,7 @@ private def admitCompletionAt (config : Config) (opened : Opened config)
 
 private def admitCompletionV2At (config : Config) (opened : Opened config)
     (claims : List (PriorClaimV3 config))
+    (running : List (PriorRunningV3 config))
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) :
     IO (Except String (CompletionAtV2 config opened ingress)) := do
   let conditional ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional
@@ -1250,7 +1337,29 @@ private def admitCompletionV2At (config : Config) (opened : Opened config)
             some prior.record := by
           rw [indexExact, recordExact]
           exact conditional.historical.selected.atIndex
-        return .ok ⟨prior, conditional, indexExact, ingressExact, recordExact, present⟩
+        let runningCheck : CompletionV2Running config opened ingress ←
+          if kind : ingress.source.originalBegin.base.source.kind = .stop then
+            match selectRunningAt opened running
+                ingress.source.originalBegin.base.source with
+            | .error detail => return .error detail
+            | .ok exact =>
+                if unitExact : ingress.source.physical.report.unit =
+                    exact.prior.ingress.source.physical.report.unit then
+                  if invocationExact : ingress.source.physical.report.invocationId =
+                      exact.prior.ingress.source.physical.report.invocationId then
+                    if controlGroupExact : ingress.source.physical.report.controlGroup =
+                        exact.prior.ingress.source.physical.report.controlGroup then
+                      if custodyExact : ingress.source.physical.report.volumeCustody =
+                          exact.prior.ingress.source.physical.report.volumeCustody then
+                        pure (.stop exact unitExact invocationExact controlGroupExact
+                          custodyExact)
+                      else return .error "STOP volume custody differs from running incarnation"
+                    else return .error "STOP cgroup differs from admitted running incarnation"
+                  else return .error "STOP invocation differs from admitted running incarnation"
+                else return .error "STOP unit differs from admitted running incarnation"
+          else pure (.other kind)
+        return .ok ⟨prior, conditional, indexExact, ingressExact, recordExact,
+          present, runningCheck⟩
       else return .error "v2 completion original claim record differs"
     else return .error "v2 completion original claim ingress differs"
   else return .error "v2 completion original claim index differs"
@@ -1267,6 +1376,7 @@ private def derive (config : Config) (opened : Opened config)
     (beginsV3 : List (PriorBeginV3 config))
     (claimsV3 : List (PriorClaimV3 config))
     (createdV3 : List (PriorCreatedV3 config))
+    (runningV3 : List (PriorRunningV3 config))
     (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
@@ -1360,7 +1470,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes then
-    match ← admitCompletionV2At config opened claimsV3 ingress with
+    match ← admitCompletionV2At config opened claimsV3 runningV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleCompletionV2 admitted,
@@ -1374,7 +1484,7 @@ private def derive (config : Config) (opened : Opened config)
           none, none, none, none, none, none,
           some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes then
-    match ← admitBeginV3At config opened createdV3 ingress with
+    match ← admitBeginV3At config opened createdV3 runningV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
@@ -1655,6 +1765,26 @@ private def createdV3After (config : Config) (opened : Opened config)
           isCreated, ⟨opened, admitted.conditional, recordExact⟩⟩ :: created
       else created
 
+private def runningV3After (config : Config) (opened : Opened config)
+    (running : List (PriorRunningV3 config))
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
+    (derived : Derived config opened)
+    (matched : recordMatches record derived.intent = true) :
+    List (PriorRunningV3 config) :=
+  match derived.completionV2 with
+  | none => running
+  | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
+      if isRunning : ingress.source.physical.report.outcome = .running then
+        if isStart : ingress.source.originalBegin.base.source.kind = .start then
+          let recordExact : record = DurableReceiver.IntentRecord.ofIntent
+              admitted.intent := by
+            rw [← intentExact]
+            exact (recordMatches_iff record derived.intent).mp matched
+          ⟨opened.durable.image.accepted.length, receipt, ingress, record,
+            isRunning, isStart, ⟨opened, admitted.conditional, recordExact⟩⟩ :: running
+        else running
+      else running
+
 private def grantsAfter (config : Config) (opened : Opened config)
     (grants : List (PriorLifetimeGrant config))
     (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
@@ -1810,6 +1940,7 @@ private structure Walked (config : Config) (start : Opened config)
   beginsV3 : List (PriorBeginV3 config)
   claimsV3 : List (PriorClaimV3 config)
   createdV3 : List (PriorCreatedV3 config)
+  runningV3 : List (PriorRunningV3 config)
   grants : List (PriorLifetimeGrant config)
 
 /-- Called only after the original record was natively admitted, matched in
@@ -1874,6 +2005,7 @@ private def walk (config : Config) (opened : Opened config)
     (beginsV3 : List (PriorBeginV3 config))
     (claimsV3 : List (PriorClaimV3 config))
     (createdV3 : List (PriorCreatedV3 config))
+    (runningV3 : List (PriorRunningV3 config))
     (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
@@ -1881,11 +2013,11 @@ private def walk (config : Config) (opened : Opened config)
     (records : List DurableReceiver.IntentRecord) →
     IO (Except Failure (Walked config opened records))
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
-      frontier, releases, beginsV3, claimsV3, createdV3, grants⟩)
+      frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
       match ← derive config opened issues reserves begins beginsV2 claimsV2
-          beginsV3 claimsV3 createdV3 grants frontier releases
+          beginsV3 claimsV3 createdV3 runningV3 grants frontier releases
           record.event.canonicalBytes with
       | .error detail => return .error ⟨index, detail⟩
       | .ok derived =>
@@ -1908,12 +2040,14 @@ private def walk (config : Config) (opened : Opened config)
               let nextClaimsV3 := claimsV3After config opened claimsV3 record derived matched
               let nextCreatedV3 := createdV3After config opened createdV3 record receipt
                 derived matched
+              let nextRunningV3 := runningV3After config opened runningV3 record receipt
+                derived matched
               let nextGrants := grantsAfter config opened grants record receipt derived matched
               let .ok nextFrontier := frontierAfter config frontier record receipt
                 | return .error ⟨index, "fn consumer frontier transition refused"⟩
               let nextReleases := selectedReleaseAfter config after releases record receipt
               match ← walk config after nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
-                  nextBeginsV3 nextClaimsV3 nextCreatedV3 nextGrants
+                  nextBeginsV3 nextClaimsV3 nextCreatedV3 nextRunningV3 nextGrants
                   nextFrontier nextReleases selectIndex rest with
               | .error failure => return .error failure
               | .ok tail =>
@@ -1932,7 +2066,8 @@ private def walk (config : Config) (opened : Opened config)
                 return .ok ⟨tail.final, receipt :: tail.receipts,
                   .cons step tail.trace, selectedAt, tail.issues, tail.reserves, tail.begins,
                   tail.beginsV2, tail.claimsV2, tail.frontier, tail.releases,
-                  tail.beginsV3, tail.claimsV3, tail.createdV3, tail.grants⟩
+                  tail.beginsV3, tail.claimsV3, tail.createdV3, tail.runningV3,
+                  tail.grants⟩
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 
@@ -1957,6 +2092,7 @@ structure Verified (config : Config) (target : Durable) where
   beginsV3 : List (PriorBeginV3 config)
   claimsV3 : List (PriorClaimV3 config)
   createdV3 : List (PriorCreatedV3 config)
+  runningV3 : List (PriorRunningV3 config)
   grants : List (PriorLifetimeGrant config)
 
 /-- Per-scope current frontier minted by this exact admitted-history walk.
@@ -1993,7 +2129,8 @@ def deriveVerified {config : Config} {target : Durable}
     (old : Verified config target) (bytes : List UInt8) :
     IO (Except String (Derived config old.opened)) :=
   derive config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
-    old.beginsV3 old.claimsV3 old.createdV3 old.grants old.frontier old.releases bytes
+    old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
+    old.frontier old.releases bytes
 
 /-- A fresh v2 BEGIN is checked on the same verified current image and then
 converted to the exact native admission used by physical CAS readback. Its
@@ -2017,11 +2154,19 @@ def Verified.selectCreated {config : Config} {target : Durable}
     IO (Except String (CreatedAt config old.opened binding)) :=
   selectCreatedAt config old.opened old.createdV3 binding
 
+/-- The unit and incarnation selected for STOP come from an event25 running
+completion admitted by this exact verified walk, never from the request. -/
+def Verified.selectRunning {config : Config} {target : Durable}
+    (old : Verified config target) (source : ApplicationLifecycleBegin.Source) :
+    Except String (RunningAt config old.opened source) :=
+  selectRunningAt old.opened old.runningV3 source
+
 def admitBeginV3Verified {config : Config} {target : Durable}
     (old : Verified config target)
     (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) :
     IO (Except String (Derived config old.opened)) := do
-  let admitted ← match ← admitBeginV3At config old.opened old.createdV3 ingress with
+  let admitted ← match ← admitBeginV3At config old.opened old.createdV3
+      old.runningV3 ingress with
     | .error detail => return .error detail
     | .ok admitted => pure admitted
   return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
@@ -2079,7 +2224,7 @@ def admitCompletionV2Verified {config : Config} {target : Durable}
     (old : Verified config target)
     (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) :
     IO (Except String (CompletionAtV2 config old.opened ingress)) :=
-  admitCompletionV2At config old.opened old.claimsV3 ingress
+  admitCompletionV2At config old.opened old.claimsV3 old.runningV3 ingress
 
 /-- The persistent Host can admit a fresh dispatch from its exact verified tip
 without replaying the whole history for every request. Only that tip's
@@ -2191,6 +2336,8 @@ def extendExact {config : Config} {oldTarget : Durable}
     record readback.derived matched
   let createdV3 := createdV3After config old.opened old.createdV3
     record receipt readback.derived matched
+  let runningV3 := runningV3After config old.opened old.runningV3
+    record receipt readback.derived matched
   let grants := grantsAfter config old.opened old.grants
     record receipt readback.derived matched
   -- Existing exact-readback callers are non-frontier operations. If a future
@@ -2203,7 +2350,7 @@ def extendExact {config : Config} {oldTarget : Durable}
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
   exact ⟨old.origin, readback.after, exactBytes, old.receipts ++ [receipt], countExact,
     admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
-    beginsV3, claimsV3, createdV3, grants⟩
+    beginsV3, claimsV3, createdV3, runningV3, grants⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
 subsequent current tip will contain more accepted entries. -/
@@ -2316,7 +2463,7 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2324,7 +2471,8 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
             return .ok ⟨opened, walked.final, exactBytes, walked.receipts,
               countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
               walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
-              walked.beginsV3, walked.claimsV3, walked.createdV3, walked.grants⟩
+              walked.beginsV3, walked.claimsV3, walked.createdV3,
+              walked.runningV3, walked.grants⟩
           else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
         else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
 
@@ -2369,7 +2517,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2382,7 +2530,8 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
                   ⟨opened, walked.final, exactBytes, walked.receipts,
                     countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
                     walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
-                    walked.beginsV3, walked.claimsV3, walked.createdV3, walked.grants⟩
+                    walked.beginsV3, walked.claimsV3, walked.createdV3,
+                    walked.runningV3, walked.grants⟩
                 return .ok ⟨verified, selected, indexExact⟩
               else return .error ⟨index, "selected native checkpoint index mismatch"⟩
           else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
@@ -2408,7 +2557,8 @@ def extendVerified (config : Config) {oldTarget : Durable}
         oldTarget.image.accepted then
     let suffix := target.image.accepted.drop count
     match ← walk config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
-        old.beginsV3 old.claimsV3 old.createdV3 old.grants old.frontier old.releases none suffix with
+        old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
+        old.frontier old.releases none suffix with
     | .error failure => return .error failure
     | .ok walked =>
       if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2431,7 +2581,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
           return .ok ⟨old.origin, walked.final, exactBytes, receipts, countExact,
             admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
             walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
-            walked.createdV3, walked.grants⟩
+            walked.createdV3, walked.runningV3, walked.grants⟩
         else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
       else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
   else

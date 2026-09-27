@@ -154,7 +154,12 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.package.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        pin.app (before.generation + 1) }
+        pin.app (if request.kind == .stop then before.generation
+                 else before.generation + 1) }
+  if request.kind == .stop then
+    match verified.selectRunning source with
+    | .error detail => throw detail
+    | .ok _ => pure ()
   let base : ApplicationLifecycleBeginIngress.Ingress :=
     { domain := config.deployment.domain
       semantics := config.profile.semantics

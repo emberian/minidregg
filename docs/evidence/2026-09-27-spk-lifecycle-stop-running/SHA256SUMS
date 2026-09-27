@@ -1,0 +1,12 @@
+a2ab7c0e226f6e4071473359b0ffbbb1a5bd2e97522bec4a95d8dc40f14403da  Kernel/ApplicationLifecycleResidentProfile.lean
+21e354bb3e06edf577a00d01100c3db1e0623e6f94993a62cfd5c94433be4385  Kernel/NativeHostReplay.lean
+db54362941e3df28a4ee54f19da66a8ff926807c5b14a0ad80e0c44bfdc1772c  Host/ApplicationLifecycleLaunchBeginAuthoring.lean
+9c0dc1dad098275dffe5713d5e3970484fcce6edede943ab3a8de6a68e9e0b2f  docs/evidence/2026-09-27-spk-lifecycle-stop-running/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-author-final.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-begin-receiver-final.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-claim-receiver-final.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-completion-receiver-final.log
+f8cae924f19b8c131664bfbe870d6ca4eb6e01825e204e562130326fa4357d1c  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-nativehost.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-profile.log
+3466e88f21218fe7c070c50a9908a0d67b1b5c726a8280006163c771fdbcd1e3  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-replay-final.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-lifecycle-stop-running/stop-session.log
