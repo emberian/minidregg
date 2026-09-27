@@ -43,8 +43,8 @@ private def checked : Bool :=
               ["read".toUTF8.toList, "edit".toUTF8.toList] &&
           schema.root == root &&
           schema.resolve noneRole == some [true, false] &&
-          schema.resolve allRole == some [true, false] &&
-          schema.resolve explicit == some [true, false] &&
+          schema.resolve allRole == some [true, true] &&
+          schema.resolve explicit == some [true, true] &&
           schema.resolve unknown == none && schema.resolve stale == none &&
           (match author (sample (roles := #[role #[.bool true] true,
               role #[.bool true, .bool true] false true])) with

@@ -6,6 +6,7 @@ namespace Minidregg.Host.ApplicationPermissionSchemaRouteCheck
 
 open Lean
 open Minidregg.Kernel.ApplicationPermissionSchema
+open Minidregg.Kernel.ApplicationGrainSessionEnrollment
 open Minidregg.Kernel.ApplicationDispatchManifest
 
 private def authored (source : String) : IO (List UInt8) := do
@@ -40,6 +41,11 @@ def main : IO Unit := do
     | throw (IO.userError "denied variant decode refused")
   unless schema.root != roleSchema.root && schema.root != deniedSchema.root do
     throw (IO.userError "full role/denied metadata is not bound by schema root")
+  let originalAll : RoleAssignment := ⟨.allAccess, [], [], schema.root, 7⟩
+  let deniedAll : RoleAssignment := ⟨.allAccess, [], [], deniedSchema.root, 7⟩
+  unless schema.resolve originalAll == some [true, true] &&
+      deniedSchema.resolve deniedAll == schema.resolve originalAll do
+    throw (IO.userError "informational denied metadata altered role bits")
   let interface : Interface := ⟨1, 7, .web, schema⟩
   unless interface.permissionSchemaRoot == schema.root &&
       interfaceCodec.decode (interfaceCodec.encode interface) == some interface do

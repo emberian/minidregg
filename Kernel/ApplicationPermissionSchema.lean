@@ -3,6 +3,13 @@ Pure ordered Sandstorm ViewInfo permission/role metadata and role-selection math
 This describes an application and a requested role only. It does not establish
 that the descriptor is installed, that a share exists, or that the session has
 any grant; those are current native admission obligations.
+
+Pinned Sandstorm source a97cf3ee19d3bf2761cd597583ca5d998de425d8:
+src/sandstorm/grain.capnp:324-334 says deniedPermissions is informational for
+the sharing UI and not the caller's responsibility to enforce. The full source
+tree has no executable reader of that field. Role assignment uses
+shell/imports/sandstorm-permissions/permissions.js:48-100; missing role bits
+are false. A Mini-governed ticket/share ceiling is a separate authority input.
 -/
 import Kernel.ApplicationGrainSessionEnrollment
 
@@ -30,9 +37,10 @@ structure Role where
   default : Bool
   deriving DecidableEq, Repr
 
-/-- The entire role-relevant ViewInfo projection. `denied` is the UiView proxy
-mask, not an app-issued grant ceiling. Labels/localizations are UI metadata and
-are not read by permission resolution. -/
+/-- The entire role-relevant ViewInfo projection. `denied` is informational
+proxy metadata for the sharing UI, not an app-issued grant ceiling or a mask
+that a caller enforces. It remains in the canonical root. Labels and
+localizations are UI metadata and are not read by role resolution. -/
 structure Schema where
   version : Nat
   permissions : List Permission
@@ -141,18 +149,19 @@ def Schema.chosenBase (s : Schema) (basis : RoleBasis) : Option (List Bool) :=
   | .allAccess => some (List.replicate s.permissions.length true)
   | .role roleId => (s.roles[roleId]?).map (·.permissions)
 
-/-- One normalized bit, after requested additions/removals and the view's
-denied mask. A missing bit in a short historical role mask is false. -/
-def Schema.resolveBit (s : Schema) (base : List Bool)
+/-- One normalized bit after role assignment additions/removals. A missing
+bit in a short historical role mask is false. ViewInfo.deniedPermissions is
+informational and has no effect here; any actual proxy restriction must come
+from a separate admitted Mini policy source. -/
+def Schema.resolveBit (base : List Bool)
     (assignment : RoleAssignment) (i : Nat) (permission : Permission) : Bool :=
   ((base[i]?.getD false) || assignment.added.contains permission.name) &&
-    !(assignment.removed.contains permission.name) &&
-    !(s.denied[i]?.getD false)
+    !(assignment.removed.contains permission.name)
 
 def Schema.resolveVector (s : Schema) (base : List Bool)
     (assignment : RoleAssignment) : List Bool :=
   s.permissions.mapIdx fun i permission =>
-    s.resolveBit base assignment i permission
+    resolveBit base assignment i permission
 
 /-- Reject stale schema selectors, malformed metadata, unknown deltas, and
 out-of-range role IDs. Result length is exactly the current permission count.
@@ -167,26 +176,24 @@ def Schema.resolve (s : Schema) (assignment : RoleAssignment) : Option (List Boo
   let base ← s.chosenBase assignment.basis
   some (s.resolveVector base assignment)
 
-theorem resolveBit_denied (s : Schema) (base : List Bool)
+theorem resolveBit_removed (base : List Bool)
     (assignment : RoleAssignment) (i : Nat) (p : Permission)
-    (denied : s.denied[i]?.getD false = true) :
-    s.resolveBit base assignment i p = false := by
-  simp [Schema.resolveBit, denied]
+    (removed : assignment.removed.contains p.name = true) :
+    Schema.resolveBit base assignment i p = false := by
+  simp only [Schema.resolveBit, removed, Bool.not_true, Bool.and_false]
 
 theorem resolveVector_length (s : Schema) (base : List Bool)
     (assignment : RoleAssignment) :
     (s.resolveVector base assignment).length = s.permissions.length := by
   simp [Schema.resolveVector]
 
-theorem resolveVector_denied (s : Schema) (base : List Bool)
-    (assignment : RoleAssignment) (i : Nat)
-    (denied : s.denied[i]?.getD false = true) :
-    (s.resolveVector base assignment)[i]?.getD false = false := by
-  simp only [Schema.resolveVector, List.getElem?_mapIdx]
-  cases found : s.permissions[i]? with
-  | none => simp
-  | some permission =>
-      simp [resolveBit_denied s base assignment i permission denied]
+/-- The advertised proxy mask is bound into the descriptor root but does not
+change role-assignment math. Enforced restrictions are separate Mini authority. -/
+theorem resolveVector_denied_metadata_only (s : Schema) (base : List Bool)
+    (assignment : RoleAssignment) (denied : List Bool) :
+    ({ s with denied := denied }).resolveVector base assignment =
+      s.resolveVector base assignment := by
+  rfl
 
 theorem chosenBase_allAccess (s : Schema) :
     s.chosenBase .allAccess = some (List.replicate s.permissions.length true) := by
