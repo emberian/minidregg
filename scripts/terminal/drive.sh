@@ -81,8 +81,8 @@ else
     }
     sleep 1
   done
+  exec 3>&-
 fi
-exec 3>&-
 close_deadline=$(($(date +%s) + 120))
 while kill -0 "$TERMINAL_PID" 2>/dev/null; do
   [ "$(date +%s)" -lt "$close_deadline" ] || {
@@ -91,6 +91,7 @@ while kill -0 "$TERMINAL_PID" 2>/dev/null; do
   sleep 1
 done
 wait "$TERMINAL_PID"
+exec 3>&-
 trap - EXIT HUP INT TERM
 rm "$OUT/input.fifo"
 echo "terminal presentation recorded under $OUT"
