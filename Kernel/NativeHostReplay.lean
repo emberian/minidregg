@@ -14,6 +14,7 @@ trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
 import Kernel.GrainResourceBirthReceiver
+import Kernel.FnSelectiveReleaseAdmission
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -67,6 +68,9 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
+  | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
+      (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
+      NativeAdmission config opened (accepted.intent config opened ingress)
 
 structure Derived (config : Config) (opened : Opened config) where
   intent : DataIntent rootBytes
@@ -83,6 +87,11 @@ def derive (config : Config) (opened : Opened config) (bytes : List UInt8) :
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted⟩
+  if let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode bytes then
+    match ← FnSelectiveReleaseAdmission.admit config opened ingress with
+    | .error _ => return .error "historical selected release admission refused"
+    | .ok accepted =>
+        return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
     match pinned : config.grainBirthTariffValue with
     | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"

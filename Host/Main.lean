@@ -5,7 +5,8 @@ private signing keys. `assemble` combines detached custody signatures only.
 
 stdio framing: four-byte little-endian length, then one operation byte and
 payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
-5=authorized query. Reply operation byte matches; failures use 255 plus a
+5=authorized query, 20=owner-signed selected-public-release submit,
+21=selected-release lookup. Reply operation byte matches; failures use 255 plus a
 strict Outcome. The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
@@ -21,6 +22,7 @@ import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
+import Kernel.FnSelectiveReleaseReceiver
 import Host.Json
 import Host.FnInboxView
 import Host.GrainOriginCommand
@@ -277,7 +279,8 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson
-       ((["birth", "invoke", "install", "delegate", "revoke"] : List String) ++
+       ((["birth", "invoke", "install", "delegate", "revoke",
+          "fn-selected-public-release"] : List String) ++
          if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
@@ -352,6 +355,44 @@ def sessionExactConfirmed (config : NativeHost.Config)
     (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
   state.set (some ⟨target, verified⟩)
   return .confirmed kind receipt
+
+/-- The special receiver accepts raw strict selected-release ingress, not a
+forged ordinary DRC signed command. Its current-key and law checks use the
+same verifier-opened recipient image as the session. -/
+def selectedReleaseSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let result ← FnSelectiveReleaseReceiver.receiveLoaded config opened payload
+  let outcome ← match result with
+    | .confirmed kind receipt =>
+        sessionConfirmed config state kind receipt.transactionId receipt.eventId
+    | .rejected _ =>
+        pure (.refused "selected-release".toUTF8.toList "request refused".toUTF8.toList)
+    | .transactionConflict =>
+        pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+/-- Lookup never submits missing work. An exact historical retry retains its
+original receipt even after current owner authority has changed. -/
+def selectedReleaseLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode payload
+    | return .refused "selected-release".toUTF8.toList "noncanonical ingress".toUTF8.toList
+  match FnSelectiveReleaseReceiver.replay config opened ingress with
+  | none => return .absent
+  | some (.error _) =>
+      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+  | some (.ok receipt) =>
+      match NativeHost.historicalReceipt config opened.durable
+          receipt.transactionId receipt.eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some historical => return .confirmed .replayed historical
 
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
   unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
@@ -449,6 +490,12 @@ def dispatchSession (config : NativeHost.Config)
       let signatures ← decodeSignatures signaturesBytes
       let call ← IO.ofExcept (NativeHost.assemble plan signatures)
       return (11, callCodec.encode call)
+  | 20 =>
+      return (20, outcomeCodec.encode
+        (← selectedReleaseSubmitSession config state payload))
+  | 21 =>
+      return (21, outcomeCodec.encode
+        (← selectedReleaseLookupSession config state payload))
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -2870,7 +2917,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -3020,6 +3067,22 @@ def run (arguments : List String) : IO UInt32 := do
       | "lookup", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
           pure 0
+      | "selected-release-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← selectedReleaseSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "selected-release-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← selectedReleaseLookupSession pinnedConfig state ingress))
+            pure 0
       | "export-evidence", [input, output] =>
           let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
           let package ← IO.ofExcept (← FnEvidence.exportPackage config call)
