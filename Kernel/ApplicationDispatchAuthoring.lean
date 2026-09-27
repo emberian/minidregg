@@ -128,22 +128,20 @@ private def observationSlot (config : Config) (opened : Opened config)
       (fun _ => "dispatch observation signing key unavailable")
   pure ⟨9, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩
 
-/-- Shared construction for a source-selected human or agent parent. A caller
-can only obtain unsigned signing headers here; the special receiver will
-check the parent against the actual current cell, capability and policy. -/
-def prepareWithParent (config : Config) {target : Durable}
+/- Shared signing-header construction after a source-specific route has
+selected a verified historical issue and parent. This is private because a
+raw Parent alone is not lifetime authorization. Both public wrappers below
+apply their distinct historical/current parent checks first. -/
+private def prepareForSelectedIssue (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (request : Request)
+    (prior : NativeHostReplay.PriorIssue config)
     (parent : Option ApplicationDispatchCommand.Parent) :
     Except String Plan := do
   let opened := verified.opened
-  let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
-    | throw "admitted share issue index unavailable"
   let spec := prior.evidence.spec
   if spec.ticket.resource != request.ticketResource then
     throw "custodian ticket differs from admitted issue"
   let ticket := spec.ticket
-  if !ApplicationDispatchCommand.parentMatches ticket.participant.origin parent then
-    throw "dispatch parent differs from admitted ticket origin"
   if !ApplicationDispatchAdmission.requestSafe request.http then
     throw "unsupported or unsafe HTTP request shape"
   let appResource := ticket.scope.app
@@ -253,6 +251,52 @@ def prepareWithParent (config : Config) {target : Durable}
     ticket.resource ticket.participant.ticketObserveCapability unsigned.ticketRoot
   pure ⟨request, unsigned.canonicalBytes, invocation,
     [appSlot, manifestSlot, enrollmentSlot, ticketSlot]⟩
+
+/-- The v1/v2 authoring surface retains its exact original-generation rule
+and bytes. An agent session cannot use this wrapper after a hard reconnect. -/
+def prepareWithParent (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request)
+    (parent : Option ApplicationDispatchCommand.Parent) :
+    Except String Plan := do
+  let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
+    | throw "admitted share issue index unavailable"
+  if prior.evidence.spec.ticket.resource != request.ticketResource then
+    throw "custodian ticket differs from admitted issue"
+  if !ApplicationDispatchCommand.parentMatches
+      prior.evidence.spec.ticket.participant.origin parent then
+    throw "dispatch parent differs from admitted ticket origin"
+  prepareForSelectedIssue config verified request prior parent
+
+/-- Event26 source authoring selects the grant from the same verified walk,
+checks its original ticket lineage, and reads a fresh reserved parent from
+the current image. This emits only unsigned signing headers; event26 later
+rechecks grant, parent, capabilities, policy and physical image at admission. -/
+def prepareWithLifetimeGrant (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request)
+    (grantIssueIndex parentTask : Nat)
+    (parentCapability parentObserve : CapabilityId) : Except String Plan := do
+  let some grant := verified.grants.find? (fun prior => prior.index == grantIssueIndex)
+    | throw "lifetime grant absent from admitted prefix"
+  let prior := grant.ticket
+  if prior.index != request.issueIndex ||
+      prior.evidence.spec.ticket.resource != request.ticketResource ||
+      !grant.ingress.spec.grant.matchesIssued prior.evidence.spec prior.index prior.receipt ||
+      parentTask != grant.ingress.spec.grant.participant.parentTask then
+    throw "lifetime grant does not certify selected ticket and parent"
+  let cell ← NativeHost.need "lifetime parent cell unavailable"
+    (cellAt config verified.opened parentTask)
+  let ⟨.declaredObject, payload⟩ := cell
+    | throw "lifetime parent is not a grain"
+  let page ← NativeHost.need "lifetime parent page unavailable"
+    (DeclaredEffectPageMaterializer.pageAt payload.logical)
+  let state ← NativeHost.need "lifetime parent state unavailable"
+    (AgentGrain.readState parentTask page)
+  if !(state.status == 3 || state.status == 4) ||
+      state.remaining < 0 || state.reserved < 0 then
+    throw "lifetime parent is not currently reserved"
+  let parent : ApplicationDispatchCommand.Parent :=
+    ⟨parentTask, state, parentCapability, payload.root, parentObserve⟩
+  prepareForSelectedIssue config verified request prior (some parent)
 
 /-- The public human authoring route remains human-only with the same exact
 request/plan wire. Agent tickets require a separately source-derived parent
