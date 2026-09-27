@@ -48,7 +48,7 @@ fn previous_index(count: &str) -> io::Result<String> {
         .map_err(|_| invalid("v3 claim original BEGIN index malformed"))
 }
 
-fn later_decimal(value: &str, earlier: &str) -> bool {
+pub(crate) fn later_decimal(value: &str, earlier: &str) -> bool {
     decimal(value)
         && decimal(earlier)
         && (value.len() > earlier.len()
@@ -239,6 +239,7 @@ pub(crate) struct AssembledLaunchClaim {
 pub(crate) struct CommittedLaunchClaim {
     pub committed: Vec<u8>,
     pub inspection: Vec<u8>,
+    pub claim_ingress: Vec<u8>,
     pub physical_begin: VerifiedBegin,
     pub transaction_id: String,
     pub event_id: String,
@@ -485,6 +486,7 @@ pub(crate) fn submit_fresh_once(
     Ok(CommittedLaunchClaim {
         committed,
         inspection,
+        claim_ingress: assembled.ingress,
         physical_begin,
         transaction_id,
         event_id,
@@ -782,7 +784,7 @@ mod tests {
     #[test]
     fn committed_claim_must_echo_fresh_frame_and_original_authority() {
         let launch = launch();
-        let begin = AcceptedLaunchBegin {
+        let mut begin = AcceptedLaunchBegin {
             ingress: b"begin".to_vec(),
             action: LaunchBeginAction::Create(0),
             prior_create: None,
@@ -862,6 +864,14 @@ mod tests {
         assert!(checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).is_err());
         view["receipt"]["acceptedCount"] = json!("11");
         assert!(checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).is_err());
+        begin.authorization_operation_id =
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935".into();
+        assert_eq!(
+            verified_physical_begin(&fixed, &begin, &launch, "21", "22")
+                .unwrap()
+                .operation_id,
+            begin.authorization_operation_id
+        );
     }
 
     #[test]

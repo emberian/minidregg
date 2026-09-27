@@ -1,0 +1,19 @@
+Running as unit: run-r1703e2361c464f5484ab4a72e8e5071c.scope; invocation ID: f22e6b6234f24e1b9b1457f00f8fe076
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.45s
+────────────
+ Nextest run ID ff12ec55-f234-4ee3-8822-6d20351d3300 with nextest profile: default
+    Starting 11 tests across 1 binary (124 tests skipped)
+        PASS [   0.006s] ( 1/11) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_frame_cannot_be_v2_or_wrong_opcode
+        PASS [   0.006s] ( 2/11) minidregg-spk-host lifecycle_v3_claim_native::tests::assembled_claim_preflight_binds_one_parent_marker_begin_and_descriptor
+        PASS [   0.006s] ( 3/11) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_plan_joins_original_receipt_volume_and_selected_command
+        PASS [   0.006s] ( 4/11) minidregg-spk-host lifecycle_v3_claim_native::tests::committed_claim_must_echo_fresh_frame_and_original_authority
+        PASS [   0.005s] ( 5/11) minidregg-spk-host lifecycle_v3_claim_native::tests::original_index_carries_full_nat_without_u64_truncation
+        PASS [   0.006s] ( 6/11) minidregg-spk-host lifecycle_v3_claim_native::tests::continue_claim_requires_same_created_receipt_and_custody_as_begin
+        PASS [   0.005s] ( 7/11) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_receipt_order_and_historical_kind_are_distinct
+        PASS [   0.006s] ( 8/11) minidregg-spk-host lifecycle_v3_completion_native::tests::completion_plan_pins_exact_begin_claim_report_and_volume
+        PASS [   0.006s] ( 9/11) minidregg-spk-host lifecycle_v3_completion_native::tests::event25_ingress_and_fresh_outcome_tags_do_not_alias
+        PASS [   0.006s] (10/11) minidregg-spk-host lifecycle_v3_completion_native::tests::retained_completion_recovery_requires_exact_originals_and_submit_marker
+        PASS [   0.006s] (11/11) minidregg-spk-host lifecycle_v3_report_native::tests::report_inspection_requires_exact_observation_and_source_volume
+────────────
+     Summary [   0.035s] 11 tests run: 11 passed, 124 skipped

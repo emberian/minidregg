@@ -1,0 +1,7 @@
+86a7e5430c40493d5b6beda430248f5d693eab9232f18089d06a0a8010049c26  native/spk-host/src/hostd.rs
+5ba2d865da7631da11f21d754f1b0184347dccda0b338ee334927e37dee6e40e  native/spk-host/src/lib.rs
+3d79881a5805636f564e1b3bfb95167b21b7398d63c42ba61c9f73795888bbb3  native/spk-host/src/lifecycle_v3_claim_native.rs
+d365e9b668d41bf441a877a9c604039f11a981695e93959bf3ed7ff995fefe53  native/spk-host/src/lifecycle_v3_completion_native.rs
+4d8587a1f7324a52847debc7ef305b246e20f8aa369be7f0be0e6808f529b9a5  native/spk-host/src/lifecycle_v3_report_native.rs
+36c7a5174f5989c7d980f550a74259990a72b79961afbbd642c5f750b3a1bbac  docs/evidence/2026-09-27-spk-v3-physical-report-completion/focused.log
+7217f4e2245d3448df28df2c69e184d1ad67cb2060196144d2c081be3cfd2cc4  docs/evidence/2026-09-27-spk-v3-physical-report-completion/clippy.log

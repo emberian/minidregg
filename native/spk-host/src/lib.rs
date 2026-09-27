@@ -43,7 +43,11 @@ pub mod launch_descriptor_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_claim_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_v3_completion_native;
+#[cfg(target_os = "linux")]
 mod lifecycle_v3_native;
+#[cfg(target_os = "linux")]
+mod lifecycle_v3_report_native;
 #[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]

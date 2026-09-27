@@ -141,6 +141,9 @@ impl Record {
     pub fn event_id(&self) -> &str {
         &self.identity.event_id
     }
+    pub(crate) fn operation_id(&self) -> &str {
+        &self.identity.operation_id
+    }
     pub(crate) fn invocation_id(&self) -> Option<&str> {
         self.invocation_id.as_deref()
     }
