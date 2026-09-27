@@ -16,6 +16,8 @@ mod current_birth;
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod historical_call_receipt;
+#[cfg(unix)]
 mod meter;
 #[cfg(unix)]
 mod prepare_refusal;
@@ -147,6 +149,7 @@ usage:
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
   mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
@@ -2281,6 +2284,38 @@ fn run(mut args: Args) -> Result<()> {
                 &config,
                 socket,
                 &ingress,
+                [fields[0], fields[1], fields[2], fields[3]],
+                &directory,
+            )
+        }
+        #[cfg(unix)]
+        "historical-call-receipt-lookup" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let call = path(args.required("call")?);
+            let transaction_id = args.required("transaction-id")?;
+            let event_id = args.required("event-id")?;
+            let accepted_count = args.required("accepted-count")?;
+            let image_boundary = args.required("image-boundary")?;
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("historical call receipt lookup requires --socket")?;
+            let expected = [transaction_id, event_id, accepted_count, image_boundary];
+            let fields = expected
+                .iter()
+                .map(|value| {
+                    value
+                        .to_str()
+                        .ok_or_else(|| "historical call receipt field must be UTF-8".to_owned())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            historical_call_receipt::lookup(
+                &host,
+                &config,
+                socket,
+                &call,
                 [fields[0], fields[1], fields[2], fields[3]],
                 &directory,
             )
