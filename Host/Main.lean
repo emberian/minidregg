@@ -1904,7 +1904,7 @@ earlier event in this at-most-16-event window is neutral for the selected
 group; no matching Q can be hidden behind this own R. -/
 def runCatalogOwnRDecisionLoaded (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (service : FnReplyCatalogService)
-    (scope : FnPollScopePin) (before : FnConsumerStatus)
+    (fnBinary : String) (scope : FnPollScopePin) (before : FnConsumerStatus)
     (cursorPath reportPath carrierPath : String)
     (cursor event : List UInt8) (projection : FnPollProjection) :
     IO (UInt8 × List UInt8) := do
@@ -1938,7 +1938,7 @@ def runCatalogOwnRDecisionLoaded (config : NativeHost.Config)
     ⟨cursor, event, true, projection.sourceIdentity, projection.sequence,
       projection.transactionId, projection.messageId,
       projection.verdictPrincipal, projection.verdictEvent,
-      FnConsumerOperation.pollControlBinding service.qExecutable service.controlPath⟩
+      FnConsumerOperation.pollControlBinding fnBinary service.controlPath⟩
   let evidence : FnCatalogOwnRProgress.Evidence :=
     ⟨policy.application, selectedScope, before.committedAck, position,
       outbox.transactionId, portable, poll⟩
@@ -2649,7 +2649,7 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
     let extracted ← match FnReplySource.extract projection.source with
       | .ok q => pure q
       | .error _ =>
-          return ← runCatalogOwnRDecisionLoaded config opened service scope before
+          return ← runCatalogOwnRDecisionLoaded config opened service pin.fnBinary scope before
             cursorPath reportPath carrierPath polledCursor polledEvent projection
     writeJson claimPath (Lean.Json.mkObj
       [("sourceIdentity", toJson
