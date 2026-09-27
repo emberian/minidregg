@@ -1,0 +1,10 @@
+baseline_snapshot=/private/tmp/minidregg-provider-composite-native
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-provider-composite
+baseline_binary_sha256=ea7d99c5765612cd29f2d4a5b21cf5ea084025ec25da49f67d1fbe89aa96495a
+changed_module=Host.Json
+unchanged_imported_modules=173
+unchanged_later_sources=6
+additional_changed_sources=1
+changed_source_manifest=/private/tmp/minidregg-overnight-20260926/build-local-provider-composite-height-stable/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=31f400a1d483e0e9fb400fd5a2790f0cfdb497dc5ab9b4f6a2d989a22d863a06

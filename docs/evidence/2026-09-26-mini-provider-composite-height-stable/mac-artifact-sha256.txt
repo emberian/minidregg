@@ -1,0 +1,4 @@
+1092a5bc29e3811bd9183b207ca5aa6e25ac9e1bc2895bfc5af92c89cd04165e  /private/tmp/minidregg-overnight-20260926/minidregg-host-provider-composite-height-stable
+682071c920e9c412b748fdb64b0e9ca2de1061dfeaf6bbe37bbf206f8072bddb  /private/tmp/minidregg-overnight-20260926/build-local-provider-composite-height-stable/minidregg-host.rsp
+1ec81959a53b8ad32060bca64687ef42f8efaeec9036da2a4ee6abb308c0adfa  /private/tmp/minidregg-overnight-20260926/build-local-provider-composite-height-stable/transitive-imports.json
+891fd8b4b60e8008583d6887224120362ff632f74eabc0de9995f6bbe4816ce3  /private/tmp/minidregg-overnight-20260926/build-local-provider-composite-height-stable/reusable-artifact-sha256.txt

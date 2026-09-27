@@ -1,0 +1,4 @@
+30731bb4e35b784ab58fa8f442407ef2bc4fddeed77ab782a5056f107096fc82  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-provider-composite-height-stable
+682071c920e9c412b748fdb64b0e9ca2de1061dfeaf6bbe37bbf206f8072bddb  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite-height-stable/minidregg-host.rsp
+1ec81959a53b8ad32060bca64687ef42f8efaeec9036da2a4ee6abb308c0adfa  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite-height-stable/transitive-imports.json
+113d34d210600f47fb48060f00be47f0d9a66c730d2d05f34df819e41f80ce2a  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite-height-stable/reusable-artifact-sha256.txt

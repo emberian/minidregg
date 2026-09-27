@@ -1,0 +1,10 @@
+baseline_snapshot=/home/ember/build/minidregg-overnight-20260926/source-provider-composite
+baseline_output=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite
+baseline_binary_sha256=c6c21859e54b3ef96e0ff60b345ef705a6a3b3e359345a26894fd054aa248c5a
+changed_module=Host.Json
+unchanged_imported_modules=173
+unchanged_later_sources=6
+additional_changed_sources=1
+changed_source_manifest=/home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite-height-stable/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=31f400a1d483e0e9fb400fd5a2790f0cfdb497dc5ab9b4f6a2d989a22d863a06
