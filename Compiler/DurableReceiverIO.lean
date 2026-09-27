@@ -233,22 +233,38 @@ silently acquire a later journal boundary between admission and publication.
 There is one CAS attempt and no rebase. A caller wishing to retry contention
 must reconstruct admission from a fresh image. Physical success still requires
 the existing exact-intent readback; a lost response never becomes a refusal. -/
-def receiveLoadedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
+def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
-    IO (DetailedResult rootBytes loaded intent) := do
+    IO (Bool × DetailedResult rootBytes loaded intent) := do
   match prepared : prepare loaded.image loaded.snapshot loaded.represented intent with
-  | .inr (.replayed _) => return .ordinary (.confirmed .replayed loaded.snapshot)
-  | .inr (.rejected reason) => return .ordinary (.rejected reason)
-  | .inr _ => return .ordinary (.unavailable "unexpected complete-schedule outcome")
+  | .inr (.replayed _) => return (false, .ordinary (.confirmed .replayed loaded.snapshot))
+  | .inr (.rejected reason) => return (false, .ordinary (.rejected reason))
+  | .inr _ => return (false, .ordinary (.unavailable "unexpected complete-schedule outcome"))
   | .inl ready =>
       let proposed := encode (loaded.image.append intent)
       match ← transport.cas (some loaded.bytes) proposed with
-      | .installed | .alreadyPresent =>
-          confirmPreparedDetailed transport rootBytes loaded intent ready prepared proposed rfl .installed
-      | .conflict => return .ordinary .contention
+      | .installed =>
+          let confirmed ← confirmPreparedDetailed transport rootBytes loaded intent ready
+            prepared proposed rfl .installed
+          return (true, confirmed)
+      | .alreadyPresent =>
+          let confirmed ← confirmPreparedDetailed transport rootBytes loaded intent ready
+            prepared proposed rfl .installed
+          return (false, confirmed)
+      | .conflict => return (false, .ordinary .contention)
       | .uncertain _ =>
-          confirmPreparedDetailed transport rootBytes loaded intent ready prepared proposed rfl
-            .recoveredAfterUncertainResponse
+          let confirmed ← confirmPreparedDetailed transport rootBytes loaded intent ready
+            prepared proposed rfl .recoveredAfterUncertainResponse
+          return (false, confirmed)
+
+/-- Existing receivers retain their historical outcome classification. A
+physical one-shot consumer may instead use the additional CAS observation
+from `receiveLoadedDetailedWithFresh`; an exact readback alone cannot prove
+that this caller installed it. -/
+def receiveLoadedDetailed (transport : Transport) (rootBytes : List UInt8 → Digest)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) :
+    IO (DetailedResult rootBytes loaded intent) := do
+  return (← receiveLoadedDetailedWithFresh transport rootBytes loaded intent).2
 
 /-- Existing receiver surface projects the detailed branch without changing
 the semantics of birth, installation, delegation, revocation or retries. -/

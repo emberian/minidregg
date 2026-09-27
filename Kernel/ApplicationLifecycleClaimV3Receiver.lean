@@ -23,6 +23,9 @@ structure Reservation (config : Config) where
   readback : NativeHostReplay.ExactReadback config old
   derivedExact : readback.derived.intent = admitted.intent
   confirmation : DurableReceiverIO.Confirmation
+  /-- True only when this attempt observed native CAS `.installed`. Exact
+  readback following `.alreadyPresent` is receipt recovery, not launch power. -/
+  freshCasWinner : Bool
 
 def Reservation.verified {config : Config} (reservation : Reservation config) :
     NativeHostReplay.Verified config
@@ -71,6 +74,8 @@ def Reservation.projection {config : Config} (reservation : Reservation config) 
 def Reservation.withFreshTip {config : Config} {α : Type}
     (reservation : Reservation config) (handoff : List UInt8 → IO α) :
     IO (Except String α) := do
+  unless reservation.confirmation == .installed && reservation.freshCasWinner do
+    return .error "launch-bound claim was not freshly installed"
   let .ok (some current) ← config.storage.transport.read
     | return .error "launch-bound claim physical tip unavailable before handoff"
   if exact : current.toByteArray == reservation.readback.physicalBytes.toByteArray then
@@ -97,7 +102,8 @@ def receiveVerified (config : Config) {target : Durable}
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "launch-bound claim transaction identity already used"
-  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+  let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
+    config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind ready preparedEq readback readbackExact =>
@@ -116,7 +122,7 @@ def receiveVerified (config : Config) {target : Durable}
                 validated := validated
                 afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
             return .reserved ⟨target, old, ingress, admitted,
-              proof, admitted.toDerived_intent, kind⟩
+              proof, admitted.toDerived_intent, kind, freshCasWinner⟩
           else return .uncertain "launch-bound claim successor bytes changed"
   | .ordinary ordinary =>
       match ordinary with

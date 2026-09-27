@@ -44,6 +44,27 @@ def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL {label}")
 
 def main : IO Unit := do
+  let (freshInstalled, freshResult) ← receiveLoadedDetailedWithFresh
+      (transport (.ok (some candidate)) .installed)
+      Witness.lengthRoot original Witness.intent
+  require "CAS winner marked fresh" freshInstalled
+  match freshResult with
+  | .exact .installed _ _ _ _ => pure ()
+  | _ => throw (IO.userError "FAIL fresh CAS winner lost exact readback")
+  let (alreadyFresh, alreadyResult) ← receiveLoadedDetailedWithFresh
+      (transport (.ok (some candidate)) .alreadyPresent)
+      Witness.lengthRoot original Witness.intent
+  require "already-present exact readback is not fresh" (!alreadyFresh)
+  match alreadyResult with
+  | .exact .installed _ _ _ _ => pure ()
+  | _ => throw (IO.userError "FAIL already-present readback changed legacy result")
+  let (uncertainFresh, uncertainResult) ← receiveLoadedDetailedWithFresh
+      (transport (.ok (some candidate)) (.uncertain "lost CAS reply"))
+      Witness.lengthRoot original Witness.intent
+  require "uncertain CAS readback is not fresh" (!uncertainFresh)
+  match uncertainResult with
+  | .exact .recoveredAfterUncertainResponse _ _ _ _ => pure ()
+  | _ => throw (IO.userError "FAIL uncertain readback changed legacy result")
   match ← receiveLoadedDetailed (transport (.ok (some candidate)) .installed)
       Witness.lengthRoot original Witness.intent with
   | .exact .installed _ _ readback _ =>
@@ -90,4 +111,4 @@ def main : IO Unit := do
       Witness.lengthRoot reopened Witness.intent with
   | .ordinary (.confirmed .replayed _) => pure ()
   | _ => throw (IO.userError "FAIL prior replay gained new exact witness")
-  IO.println "PASS exact readback, lost response, unavailable/missing/malformed readback, contention, later append, prior replay"
+  IO.println "PASS exact readback, CAS-winner distinction, lost response, unavailable/missing/malformed readback, contention, later append, prior replay"
