@@ -8,6 +8,8 @@
 use minidregg_spk_rpc::{
     dispatch_web, SessionParameters, SupervisorConnection, ViewInfo, WebRequest, WebResponse,
 };
+use minidregg_spk_rpc::web_session_capnp;
+use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc as sync_mpsc;
@@ -33,10 +35,74 @@ fn remaining(deadline: Instant) -> io::Result<Duration> {
 }
 
 /// Protocol routing after native authorization, not a role decision.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum SessionKind {
     Web,
     Api,
+}
+
+/// Supplied only by a future source-owned current-session projection. The
+/// fingerprint covers the current checked ticket/permission state, not caller
+/// HTTP headers. This driver is fixed to one app process generation.
+#[derive(Clone, Debug)]
+pub(crate) struct SessionBinding {
+    pub app: u64,
+    pub process_generation: u64,
+    pub session_resource: u64,
+    pub subject: u64,
+    pub projection_fingerprint: [u8; 32],
+    pub kind: SessionKind,
+    pub params: SessionParameters,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct SessionKey {
+    app: u64,
+    generation: u64,
+    session: u64,
+    subject: u64,
+    kind: SessionKind,
+}
+
+impl SessionBinding {
+    fn key(&self) -> SessionKey {
+        SessionKey {
+            app: self.app,
+            generation: self.process_generation,
+            session: self.session_resource,
+            subject: self.subject,
+            kind: self.kind,
+        }
+    }
+}
+
+fn same_params(a: &SessionParameters, b: &SessionParameters) -> bool {
+    a.identity_id == b.identity_id
+        && a.display_name == b.display_name
+        && a.preferred_handle == b.preferred_handle
+        && a.permissions == b.permissions
+        && a.tab_id == b.tab_id
+        && a.base_path == b.base_path
+        && a.user_agent == b.user_agent
+        && a.acceptable_languages == b.acceptable_languages
+}
+
+struct CachedSession {
+    fingerprint: [u8; 32],
+    params: SessionParameters,
+    client: web_session_capnp::web_session::Client,
+}
+
+fn same_projection(
+    fingerprint: &[u8; 32],
+    params: &SessionParameters,
+    binding: &SessionBinding,
+) -> bool {
+    *fingerprint == binding.projection_fingerprint && same_params(params, &binding.params)
+}
+
+fn cache_matches(cached: &CachedSession, binding: &SessionBinding) -> bool {
+    same_projection(&cached.fingerprint, &cached.params, binding)
 }
 
 enum Command {
@@ -45,25 +111,42 @@ enum Command {
         reply: sync_mpsc::SyncSender<io::Result<ViewInfo>>,
     },
     Dispatch {
-        kind: SessionKind,
-        params: Box<SessionParameters>,
+        binding: Box<SessionBinding>,
         request: Box<WebRequest>,
         max_response_bytes: usize,
         deadline: Instant,
         reply: sync_mpsc::SyncSender<io::Result<WebResponse>>,
     },
+    Stats {
+        reply: sync_mpsc::SyncSender<RpcStats>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RpcStats {
+    pub sessions_created: u64,
+    pub cached_sessions: usize,
 }
 
 /// One connected fd3 for one app generation. A dedicated LocalSet drives
 /// Cap'n Proto callbacks throughout its lifetime, including between calls.
 /// A timeout poisons the driver: an uncertain write is never resent.
 pub(crate) struct RpcDriver {
+    app: u64,
+    generation: u64,
     sender: mpsc::Sender<Command>,
     uncertain: bool,
 }
 
 impl RpcDriver {
-    pub(crate) fn from_connected_stream(stream: UnixStream) -> io::Result<Self> {
+    pub(crate) fn from_connected_stream(
+        app: u64,
+        generation: u64,
+        stream: UnixStream,
+    ) -> io::Result<Self> {
+        if app == 0 || generation == 0 {
+            return Err(invalid("invalid fixed app generation for fd3"));
+        }
         let (sender, mut receiver) = mpsc::channel::<Command>(8);
         let (ready_tx, ready_rx) = sync_mpsc::sync_channel(1);
         std::thread::Builder::new()
@@ -89,6 +172,8 @@ impl RpcDriver {
                 let local = LocalSet::new();
                 let _ = ready_tx.send(Ok(()));
                 local.block_on(&runtime, async move {
+                    let mut sessions: HashMap<SessionKey, CachedSession> = HashMap::new();
+                    let mut sessions_created = 0_u64;
                     tokio::task::spawn_local(async move {
                         let _ = rpc.await;
                     });
@@ -106,19 +191,40 @@ impl RpcDriver {
                                 let _ = reply.send(result);
                             }
                             Command::Dispatch {
-                                kind, params, request, max_response_bytes, deadline, reply,
+                                binding, request, max_response_bytes, deadline, reply,
                             } => {
                                 let result = async {
-                                    let left = remaining(deadline)?;
-                                    let session = tokio::time::timeout(left, async {
-                                        match kind {
-                                            SessionKind::Web => supervisor.new_web_session(&params).await,
-                                            SessionKind::Api => supervisor.new_api_session(&params).await,
+                                    let key = binding.key();
+                                    if sessions
+                                        .get(&key)
+                                        .is_some_and(|cached| !cache_matches(cached, &binding))
+                                    {
+                                        sessions.remove(&key);
+                                    }
+                                    let session = if let Some(cached) = sessions.get(&key) {
+                                        cached.client.clone()
+                                    } else {
+                                        if sessions.len() >= 32 {
+                                            return Err(invalid("SPK live session cache full"));
                                         }
-                                    })
-                                    .await
-                                    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK session timeout"))?
-                                    .map_err(io::Error::other)?;
+                                        let left = remaining(deadline)?;
+                                        let client = tokio::time::timeout(left, async {
+                                            match binding.kind {
+                                                SessionKind::Web => supervisor.new_web_session(&binding.params).await,
+                                                SessionKind::Api => supervisor.new_api_session(&binding.params).await,
+                                            }
+                                        })
+                                        .await
+                                        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK session timeout"))?
+                                        .map_err(io::Error::other)?;
+                                        sessions.insert(key, CachedSession {
+                                            fingerprint: binding.projection_fingerprint,
+                                            params: binding.params.clone(),
+                                            client: client.clone(),
+                                        });
+                                        sessions_created += 1;
+                                        client
+                                    };
                                     let left = remaining(deadline)?;
                                     tokio::time::timeout(
                                         left,
@@ -131,12 +237,18 @@ impl RpcDriver {
                                 .await;
                                 let _ = reply.send(result);
                             }
+                            Command::Stats { reply } => {
+                                let _ = reply.send(RpcStats {
+                                    sessions_created,
+                                    cached_sessions: sessions.len(),
+                                });
+                            }
                         }
                     }
                 });
             })?;
         match ready_rx.recv_timeout(Duration::from_secs(2)) {
-            Ok(Ok(())) => Ok(Self { sender, uncertain: false }),
+            Ok(Ok(())) => Ok(Self { app, generation, sender, uncertain: false }),
             Ok(Err(error)) => Err(io::Error::other(error)),
             Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "SPK RPC worker initialization timeout")),
         }
@@ -188,28 +300,46 @@ impl RpcDriver {
         self.receive(reply_rx, deadline)
     }
 
-    /// One already-admitted operation. A fresh app-side session is created per
-    /// request; generic stateful WebSession continuity is not claimed yet.
+    /// One already-admitted operation. The same app-side WebSession survives
+    /// requests under an unchanged source projection; any effective permission
+    /// or identity drift discards it before another call.
     pub(crate) fn dispatch(
         &mut self,
-        kind: SessionKind,
-        params: SessionParameters,
+        binding: SessionBinding,
         request: WebRequest,
         max_response_bytes: usize,
         timeout: Duration,
     ) -> io::Result<WebResponse> {
         let deadline = self.check_bound(timeout)?;
-        if max_response_bytes == 0 || max_response_bytes > MAX_RESPONSE_BYTES {
+        if binding.app != self.app
+            || binding.process_generation != self.generation
+            || binding.session_resource == 0
+            || binding.subject == 0
+            || binding.projection_fingerprint == [0; 32]
+            || max_response_bytes == 0
+            || max_response_bytes > MAX_RESPONSE_BYTES
+        {
             return Err(invalid("SPK dispatch response bound refused"));
         }
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
         self.sender
             .try_send(Command::Dispatch {
-                kind, params: Box::new(params), request: Box::new(request),
+                binding: Box::new(binding), request: Box::new(request),
                 max_response_bytes, deadline, reply: reply_tx,
             })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
         self.receive(reply_rx, deadline)
+    }
+
+    /// Internal fixture/operations diagnostic; it conveys no authority.
+    pub(crate) fn stats(&self) -> io::Result<RpcStats> {
+        let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.sender
+            .try_send(Command::Stats { reply: reply_tx })
+            .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
+        reply_rx.recv_timeout(Duration::from_secs(1)).map_err(|_| {
+            io::Error::new(io::ErrorKind::TimedOut, "SPK RPC stats unavailable")
+        })
     }
 }
 
@@ -217,11 +347,60 @@ impl RpcDriver {
 mod tests {
     use super::*;
 
+    fn binding() -> SessionBinding {
+        SessionBinding {
+            app: 91,
+            process_generation: 2,
+            session_resource: 6208,
+            subject: 8,
+            projection_fingerprint: [7; 32],
+            kind: SessionKind::Web,
+            params: SessionParameters {
+                identity_id: [8; 32],
+                display_name: "Friend".into(),
+                preferred_handle: "friend".into(),
+                permissions: vec![true, false],
+                tab_id: vec![],
+                base_path: "/".into(),
+                user_agent: "Mini".into(),
+                acceptable_languages: vec!["en".into()],
+            },
+        }
+    }
+
+    #[test]
+    fn session_reuse_requires_current_projection_and_full_parameter_match() {
+        let original = binding();
+        assert!(same_projection(
+            &original.projection_fingerprint,
+            &original.params,
+            &original
+        ));
+        let mut changed_bits = original.clone();
+        changed_bits.params.permissions[1] = true;
+        assert!(!same_projection(
+            &original.projection_fingerprint,
+            &original.params,
+            &changed_bits
+        ));
+        let mut changed_ticket = original.clone();
+        changed_ticket.projection_fingerprint = [9; 32];
+        assert!(!same_projection(
+            &original.projection_fingerprint,
+            &original.params,
+            &changed_ticket
+        ));
+        assert_ne!(original.key(), SessionKey {
+            generation: 3,
+            ..original.key()
+        });
+    }
+
     #[test]
     fn disconnected_fd3_has_no_view_or_dispatch_authority() {
         let (supervisor, app) = UnixStream::pair().unwrap();
         drop(app);
-        let mut driver = RpcDriver::from_connected_stream(supervisor).unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
         assert!(driver.get_view_info(Duration::from_millis(100)).is_err());
         assert!(driver.get_view_info(Duration::ZERO).is_err());
     }
@@ -229,7 +408,7 @@ mod tests {
     #[test]
     fn stalled_fd3_times_out_and_poisoned_driver_cannot_resend() {
         let (supervisor, _app) = UnixStream::pair().unwrap();
-        let mut driver = RpcDriver::from_connected_stream(supervisor).unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
         let start = Instant::now();
         let error = driver.get_view_info(Duration::from_millis(50)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
