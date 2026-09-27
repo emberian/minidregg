@@ -4,3 +4,4 @@
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-fn-frontier-receiving/rust-fmt.log
 5d5e443d26190acd4d34c29045adac8cd62b7cec4d657783503caa44d8377780  docs/evidence/2026-09-27-fn-frontier-receiving/rust-nextest.log
 ecb4cb9f6e7a58f2cfbb0bc1faa669ef96c3398a30e75fd3653ef56767eeaf6d  docs/evidence/2026-09-27-fn-frontier-receiving/rust-clippy.log
+f728021ff13d1dcdab1f93698d524a336302954f9d6fcedfd067cd2a4bdd14d6  docs/evidence/2026-09-27-fn-frontier-receiving/RUST-VERDICT.txt

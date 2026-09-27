@@ -32,8 +32,10 @@ Validation so far is source-only: `cargo fmt --check`, the five focused
 `fn_frontier::tests` through nextest, and `cargo clippy --all-targets -- -D
 warnings` pass in `native/resource-client`. A broad local Lake attempt stopped
 before these new modules on an unrelated stale CanonicalPolicyRegistry closure;
-it establishes no Lean verdict. The exact 9746 Host build also stopped at that
-baseline proof, and its repair belongs to build_native. Do not invoke native
+it establishes no Lean verdict. The first exact 9746 Host attempt stopped at
+that baseline proof; its a097554 source repair passed a narrow check, while
+build_native's resumed full build remained pending when this Rust gate froze.
+Do not invoke native
 event14 publication, op60–65, POST, or ACK against an older Host image. Serial
 source-matched Lean qualification and a linked native acceptance fixture remain
 required after the repaired Host snapshot is available.
@@ -43,7 +45,8 @@ and synced before a durable pin, Host/config/request/plan/poll artifact pins are
 checked again after external operations, and receipt decimals reject leading
 zeroes. The final focused nextest run has five passing tests, including changed
 Host/config refusal and marker-driven lookup-only recovery. Exact Rust source
-and log hashes are in `RUST-SOURCE-MANIFEST.txt`; the empty fmt log represents a
+and log hashes are in `RUST-SOURCE-MANIFEST.txt`; `RUST-VERDICT.txt`
+records command exits. The empty fmt log represents a
 successful command with no diagnostics. The pre-existing untracked upper
 `FnSelectedPollAdmission`, `FnSelectedPollReleaseLink`, and
 `FnEmptyPollAdmissionV2` modules are dependencies owned by a separate lane;

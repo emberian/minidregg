@@ -1,0 +1,12 @@
+Scope: native/resource-client fn frontier custody only
+Command: cargo fmt --check
+Exit: 0
+Log: rust-fmt.log (empty; no diagnostics)
+Command: cargo nextest run -E 'test(fn_frontier::tests::)'
+Exit: 0
+Verdict: 5 passed, 85 skipped
+Log: rust-nextest.log
+Command: cargo clippy --all-targets -- -D warnings
+Exit: 0
+Log: rust-clippy.log
+No Lean compilation, native Host link, fn POST, Mini acceptance, or fn ACK is claimed.
