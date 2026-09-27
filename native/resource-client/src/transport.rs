@@ -123,11 +123,26 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             response_prefix < payload.len() && payload.len() - response_prefix <= 8_388_608
         }
         [20 | 21, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [30 | 31, payload @ ..] => {
             !payload.is_empty()
                 && payload.len() <= 256 * 1024
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
+        }
+        _ => false,
+    }
+}
+
+// An unsigned share-issue plan discloses current app and factory signing
+// selectors. It is available only on the separately started operator socket.
+fn allowed_operator_operation(request: &[u8]) -> bool {
+    match request {
+        [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
+        [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+            let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            plan_length > 0 && plan_length < pair.len() - 4
         }
         _ => false,
     }
@@ -287,6 +302,20 @@ fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
+    if operator && !path.exists() && legacy_config_exists {
+        return Err("existing public service pin cannot be upgraded to operator mode".into());
+    }
+    pin_config(
+        path,
+        if operator {
+            b"operator-v1"
+        } else {
+            b"public-v1"
+        },
+    )
 }
 
 fn clear_stale_socket(path: &Path) -> Result<(), String> {
@@ -485,6 +514,19 @@ fn invoke_inner(
 /// The socket directory must be owned by this account and inaccessible to
 /// others. This closes the interval between bind and chmod on the socket.
 pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
+    serve_with_mode(socket, host, config, false)
+}
+
+pub fn serve_operator(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
+    serve_with_mode(socket, host, config, true)
+}
+
+fn serve_with_mode(
+    socket: &Path,
+    host: &Path,
+    config: &Path,
+    operator: bool,
+) -> Result<(), String> {
     let host_sha256 = host_image_sha256(host)?;
     let config_bytes = read_config(config)?;
     let catalog_enabled = serde_json::from_slice::<serde_json::Value>(&config_bytes)
@@ -503,8 +545,13 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
         ));
     }
     let _service_lock = service_lock(&socket.with_extension("lock"))?;
-    clear_stale_socket(socket)?;
     let pinned_config = socket.with_extension("config");
+    pin_service_mode(
+        &socket.with_extension("mode"),
+        operator,
+        pinned_config.exists(),
+    )?;
+    clear_stale_socket(socket)?;
     pin_config(&pinned_config, &config_bytes)?;
     let listener =
         UnixListener::bind(socket).map_err(|e| format!("cannot bind {}: {e}", socket.display()))?;
@@ -554,6 +601,10 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
     );
     for accepted in listener.incoming() {
         let mut stream = accepted.map_err(|e| format!("socket accept failed: {e}"))?;
+        if operator && peer_uid(&stream)? != effective_uid() {
+            let _ = write_frame(&mut stream, b"\xfeoperator peer UID mismatch");
+            continue;
+        }
         stream
             .set_write_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("cannot set client write deadline: {e}"))?;
@@ -581,8 +632,12 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
             let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
             continue;
         }
-        if !allowed_operation(request, catalog_enabled) {
-            let _ = write_frame(&mut stream, b"\xfeoperation unavailable on public socket");
+        if !(if operator {
+            allowed_operator_operation(request)
+        } else {
+            allowed_operation(request, catalog_enabled)
+        }) {
+            let _ = write_frame(&mut stream, b"\xfeoperation unavailable on selected socket");
             continue;
         }
         write_frame(
@@ -607,6 +662,66 @@ pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+    unsafe extern "C" {
+        fn getpeereid(socket: i32, uid: *mut u32, gid: *mut u32) -> i32;
+    }
+    let mut uid = 0;
+    let mut gid = 0;
+    if unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
+        return Err(format!(
+            "operator peer credential: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    Ok(uid)
+}
+
+#[cfg(target_os = "linux")]
+fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+    #[repr(C)]
+    struct Ucred {
+        pid: i32,
+        uid: u32,
+        gid: u32,
+    }
+    unsafe extern "C" {
+        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut Ucred, length: *mut u32) -> i32;
+    }
+    let mut credential = Ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<Ucred>() as u32;
+    if unsafe { getsockopt(stream.as_raw_fd(), 1, 17, &mut credential, &mut length) } != 0
+        || length as usize != std::mem::size_of::<Ucred>()
+    {
+        return Err(format!(
+            "operator peer credential: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    Ok(credential.uid)
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
+fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
+    Err("operator peer credentials are unavailable on this platform".into())
 }
 
 fn effective_uid() -> u32 {
@@ -855,6 +970,44 @@ mod tests {
         oversized[1] = b'{';
         *oversized.last_mut().unwrap() = b'}';
         assert!(!allowed_operation(&oversized, false));
+    }
+
+    #[test]
+    fn unsigned_share_issue_plan_stays_off_public_socket() {
+        let mut assembly = vec![33];
+        assembly.extend(1u32.to_le_bytes());
+        assembly.extend([b'P', b'S']);
+        for request in [&[32, 1][..], assembly.as_slice()] {
+            assert!(!allowed_operation(request, false));
+            assert!(allowed_operator_operation(request));
+        }
+        assert!(!allowed_operator_operation(&[32]));
+        assert!(!allowed_operator_operation(&[33, 1, 0, 0, 0, b'P']));
+        assert!(!allowed_operator_operation(&[30, b'{', b'}']));
+    }
+
+    #[test]
+    fn service_mode_pin_refuses_public_to_operator_restart() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-service-mode-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let mode = directory.join("socket.mode");
+        pin_service_mode(&mode, false, false).unwrap();
+        pin_service_mode(&mode, false, true).unwrap();
+        assert!(pin_service_mode(&mode, true, true).is_err());
+        fs::remove_file(&mode).unwrap();
+        assert!(pin_service_mode(&mode, true, true).is_err());
+        pin_service_mode(&mode, true, false).unwrap();
+        assert!(pin_service_mode(&mode, false, true).is_err());
+        fs::remove_file(mode).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]

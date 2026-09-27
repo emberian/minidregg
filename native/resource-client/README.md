@@ -65,6 +65,96 @@ input and output to 1 MiB and requires Host's canonical bytes to equal the
 exact supplied schema binary before writing the requested result. Host owns
 the schema root, permission, role, and denial interpretation.
 
+## Operator custody for application shares
+
+Application share issue uses a separate operator service. Run it under the
+operator OS account, with a new `0700` socket directory that participants
+cannot access. `serve-operator` pins that socket's mode; an existing public
+`serve` endpoint cannot restart as an operator endpoint. The public socket
+refuses unsigned planning/assembly operations 32/33. The operator socket
+accepts only share issue operations 28/29/32/33 and checks the peer UID.
+
+```sh
+mkdir -m 700 /operator/private/share-socket
+mini serve-operator --host HOST --config PINNED-CONFIG.json \
+  --socket /operator/private/share-socket/host.sock
+```
+
+The producer supplies `REQUEST.json`. It selects a ticket, payer, funding,
+and source capabilities, but does not supply birth cells, policies, signing
+headers, or authority. The operator first previews the source-owned canonical
+Request and current Plan using the pinned Host, then writes a private approval
+file. These commands perform no native issue:
+
+```sh
+mini author --host HOST --config PINNED-CONFIG.json \
+  --kind application-share-issue-request --input REQUEST.json --output REQUEST.bin
+HOST PINNED-CONFIG.json inspect application-share-issue-request \
+  REQUEST.bin REQUEST-inspected.json
+HOST PINNED-CONFIG.json application-share-issue-plan REQUEST.bin PLAN.bin
+HOST PINNED-CONFIG.json inspect application-share-issue-plan PLAN.bin PLAN.json
+```
+
+The approval file and its parent directory must be owned by the operator and
+inaccessible to group and world. Its `requestSha256` covers the **entire**
+canonical Request, including payer, funding amounts and source capabilities;
+`canonicalSpec` comes from `REQUEST-inspected.json`. The four readable
+selectors help the custodian check issuer, participant and delegate scope.
+Each ordered `signers` entry corresponds to a `PLAN.json` `slots` entry and
+pins that slot's exact header digest and the expected enrolled key identity:
+
+```json
+{
+  "type": "minidregg-application-share-issue-approval-v1",
+  "requestSha256": "<lowercase SHA-256 of REQUEST.bin>",
+  "canonicalSpec": "<REQUEST-inspected.json canonicalSpec>",
+  "issuer": "7",
+  "participantSubject": "8",
+  "appDelegateCapability": "141",
+  "ticketResource": "8500",
+  "signers": [
+    {
+      "role": "<PLAN.json slots[0].role>",
+      "index": "<PLAN.json slots[0].index>",
+      "keyId": "<PLAN.json slots[0].signing.keyId>",
+      "keyEpoch": "<PLAN.json slots[0].signing.keyEpoch>",
+      "publicKey": "<64 lowercase hex digits from enrollment>",
+      "headerSha256": "<lowercase SHA-256 of decoded slots[0].header>",
+      "keyPath": "/operator/private/keys/signer-0.key"
+    }
+  ]
+}
+```
+
+List every slot, including the final app `.delegateObject` slot; one key is
+not assumed to authorize them all. The key files and their parent directories
+must also be owner-private. `share-issue-prepare` reauthors Request, asks
+operator op32 for a fresh Plan, requires exact canonical Request and Spec
+equality, checks each approved slot/header/key, signs only the Host's header
+bytes, lets Host encode the signature list and asks op33 to assemble ingress.
+It retains all bytes in a new private directory. If a current root, signing
+key or plan changes after preview, approval must be reviewed again.
+
+```sh
+mini share-issue-prepare --host HOST --config PINNED-CONFIG.json \
+  --socket /operator/private/share-socket/host.sock \
+  --request REQUEST.json --approval /operator/private/approval.json \
+  --dir /operator/private/share-attempt
+mini share-issue-submit --socket /operator/private/share-socket/host.sock \
+  --attempt /operator/private/share-attempt
+mini share-issue-lookup --socket /operator/private/share-socket/host.sock \
+  --attempt /operator/private/share-attempt
+```
+
+Op28 is the sole submit attempt. The client writes and syncs its marker
+before sending. If the reply is lost, repeat **lookup op29 only**; no
+automatic resubmit occurs. The first confirmed exact outcome becomes a
+durable four-field receipt anchor, reconstructed from a retained response
+frame if a crash interrupted extraction. Later lookups must match its
+transaction, event, accepted count and image boundary. Native receiving
+rechecks current authority and installed policy; a signed Plan alone is not
+an accepted share or a dispatch grant.
+
 Selected public release uses a distinct Lean-authored canonical ingress and
 the same native receiver, through Host operations 20 and 21:
 

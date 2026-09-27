@@ -26,6 +26,8 @@ mod selected_publisher;
 #[cfg(unix)]
 mod selected_release;
 #[cfg(unix)]
+mod share_issue;
+#[cfg(unix)]
 mod transport;
 #[cfg(unix)]
 mod worker;
@@ -138,6 +140,10 @@ usage:
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
+  mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
+  mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
@@ -1881,6 +1887,14 @@ fn run(mut args: Args) -> Result<()> {
                 Err("persistent host sessions require Unix sockets".to_owned())
             }
         }
+        #[cfg(unix)]
+        "serve-operator" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-operator requires --socket")?;
+            transport::serve_operator(socket, &host, &config)
+        }
         "host-command" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -2210,6 +2224,31 @@ fn run(mut args: Args) -> Result<()> {
                 .get()
                 .ok_or("current birth authoring requires --socket")?;
             current_birth::author(&host, &config, socket, &source, &directory, route)
+        }
+        #[cfg(unix)]
+        "share-issue-prepare" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let request = path(args.required("request")?);
+            let approval = path(args.required("approval")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("share-issue-prepare requires --socket")?;
+            share_issue::prepare(&host, &config, socket, &request, &approval, &directory)
+        }
+        #[cfg(unix)]
+        "share-issue-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            share_issue::submit(&directory, SOCKET.get().map(PathBuf::as_path))
+        }
+        #[cfg(unix)]
+        "share-issue-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            share_issue::lookup(&directory, SOCKET.get().map(PathBuf::as_path))
         }
         "submit" => {
             let host = path(args.required("host")?);
