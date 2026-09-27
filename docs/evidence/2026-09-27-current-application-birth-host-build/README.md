@@ -1,0 +1,7 @@
+# Current application birth Host link
+
+The private Persvati Linux Host `/home/ember/build/minidregg-overnight-20260927-currentbirth-native-evidence/minidregg-host-currentbirth-r1` has SHA-256 `4661301b549c2703b6910beceb8b32aaaee1e82b450ae9d70c408e10e41050a2`. The [manifest](manifest.txt), [210-file source hashes](source-sha256.txt), [artifact hashes](artifact-sha256.txt), [Lean build log](build.log), and [link log](link.log) are retained here. The build compiled 210/210 Lean modules, linked 3,143 objects, and rechecked all four output artifacts. Its no-argument usage probe exited 1 as expected.
+
+The source cut consists of 199 modules byte-identical to the exact `776ba59` archive (SHA-256 `d8fc3c53c9f1ef0cc2ba67d53674d5afa4d6d08e102f526b8c3ba52de3111798`) and 11 pinned overlays from the [current-birth narrow gate](../2026-09-27-current-application-birth-routes/README.md) (overlay manifest SHA-256 `60e29e53aa12787e4a488b79131823950d8b2ddee6baaddd4b3499ba0c219cde`). Every module in the native build's source list was compared against one of those two sources before link. The warm snapshot's inherited `.git` head in the manifest is not the source identity. This image adds current app/session birth op30/31 to the earlier selected-source and share-issue routes; it excludes later share-issue authoring op32/33 and newer physical-root repairs.
+
+This is a source-matched executable gate. Signed current-birth acceptance and hosted controller use require separate fresh-Store evidence.
