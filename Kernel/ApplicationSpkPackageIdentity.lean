@@ -64,6 +64,12 @@ def codec : LawfulCodec Descriptor :=
 def Descriptor.canonicalBytes (descriptor : Descriptor) : List UInt8 :=
   codec.encode descriptor
 
+/-- Stable physical image identity for the exact raw signed-SPK bytes.
+The host must still verify the raw SHA-256 from its single Bread parse and
+bind the launched immutable image to those bytes. -/
+def Descriptor.imageIdentity (descriptor : Descriptor) : List UInt8 :=
+  "DREGG/SPK-IMAGE/v1".toUTF8.toList ++ descriptor.rawSha256
+
 /-- Sandstorm's signing-key App ID is a 52-character unpadded encoding of a
 32-byte Ed25519 public key in this exact alphabet (Bread `spk.rs::base32`). -/
 def appIdAlphabet : List UInt8 :=

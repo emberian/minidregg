@@ -12,6 +12,8 @@ import Kernel.ApplicationGrainBirth
 import Kernel.ApplicationGrainSessionBirth
 import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationDispatchAuthoring
+import Host.ApplicationLifecycleCompletionAuthoring
+import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
 
@@ -1579,9 +1581,116 @@ private def dispatchAuthorRequest (json : Lean.Json) : Result (List UInt8) := do
      ← dispatchHttpRequest "$.http" (← field "$" "http" obj)⟩
   pure (ApplicationDispatchAuthoring.requestCodec.encode request)
 
+private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
+  return ⟨← nat path json⟩
+
+/-- Validate an already signed BEGIN-v2 frame for this physical host profile.
+The generic native BEGIN route and historical replay remain unchanged. -/
+private def residentBegin (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin"] json
+  let bytes ← decodeHex "$.begin" (← field "$" "begin" obj)
+  let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode bytes
+    | throw "noncanonical BEGIN-v2 ingress"
+  unless ApplicationLifecycleResidentProfile.beginMatches ingress do
+    throw "BEGIN-v2 is outside the resident signed-SPK physical hosting profile"
+  return ingress.canonicalBytes
+
+private def completionReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "claim", "nonce", "unit", "materializedImage",
+    "outcome", "invocationId", "controlGroup", "pid", "stopAudit"] json
+  let outcome ← string "$.outcome" (← field "$" "outcome" obj)
+  let outcome ← match outcome with
+    | "materialized" => pure ApplicationLifecycleCompletionReport.Outcome.materialized
+    | "running" => pure .running
+    | "stopped" => pure .stopped
+    | _ => failAt "$.outcome" "expected materialized, running, or stopped"
+  let observed : ApplicationLifecycleCompletionAuthoring.PhysicalObservation :=
+    { nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      unit := ← decodeHex "$.unit" (← field "$" "unit" obj)
+      materializedImage := ← decodeHex "$.materializedImage" (← field "$" "materializedImage" obj)
+      outcome := outcome
+      invocationId := ← decodeHex "$.invocationId" (← field "$" "invocationId" obj)
+      controlGroup := ← decodeHex "$.controlGroup" (← field "$" "controlGroup" obj)
+      pid := ← nat "$.pid" (← field "$" "pid" obj)
+      stopAudit := ← decodeHex "$.stopAudit" (← field "$" "stopAudit" obj) }
+  let report ← ApplicationLifecycleCompletionAuthoring.reportPlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.claim" (← field "$" "claim" obj)) observed
+  return ApplicationLifecycleCompletionReport.codec.encode report
+
+private def completionSigningFrame (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["domain", "semantics", "begin", "report"] json
+  ApplicationLifecycleCompletionAuthoring.signingPlan
+    (← completionDigest "$.domain" (← field "$" "domain" obj))
+    (← completionDigest "$.semantics" (← field "$" "semantics" obj))
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+
+private def completionSignedReport (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "report", "signature"] json
+  ApplicationLifecycleCompletionAuthoring.signedReport
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.report" (← field "$" "report" obj))
+    (← decodeHex "$.signature" (← field "$" "signature" obj))
+
+private def completionSource (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["begin", "claimIngress", "signedReport", "authorityRoot",
+    "appRoot", "packageRoot", "appCapability", "appObserveCapability",
+    "packageCapability", "packageObserveCapability", "packageAtomBefore"] json
+  let current : ApplicationLifecycleCompletionAuthoring.CurrentObservation :=
+    { authorityRoot := ← completionDigest "$.authorityRoot" (← field "$" "authorityRoot" obj)
+      appRoot := ← completionDigest "$.appRoot" (← field "$" "appRoot" obj)
+      packageRoot := ← completionDigest "$.packageRoot" (← field "$" "packageRoot" obj)
+      appCapability := ⟨← nat "$.appCapability" (← field "$" "appCapability" obj)⟩
+      appObserveCapability := ⟨← nat "$.appObserveCapability" (← field "$" "appObserveCapability" obj)⟩
+      packageCapability := ⟨← nat "$.packageCapability" (← field "$" "packageCapability" obj)⟩
+      packageObserveCapability := ⟨← nat "$.packageObserveCapability" (← field "$" "packageObserveCapability" obj)⟩
+      packageAtomBefore := ← optional "$.packageAtomBefore" atomRecord
+        (← field "$" "packageAtomBefore" obj) }
+  let source ← ApplicationLifecycleCompletionAuthoring.sourcePlan
+    (← decodeHex "$.begin" (← field "$" "begin" obj))
+    (← decodeHex "$.claimIngress" (← field "$" "claimIngress" obj))
+    (← decodeHex "$.signedReport" (← field "$" "signedReport" obj)) current
+  return ApplicationLifecycleCompletionSource.codec.encode source
+
+private def completionCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["domain", "semantics", "source"] json
+  ApplicationLifecycleCompletionAuthoring.commandPlan
+    (← completionDigest "$.domain" (← field "$" "domain" obj))
+    (← completionDigest "$.semantics" (← field "$" "semantics" obj))
+    (← decodeHex "$.source" (← field "$" "source" obj))
+
+private def completionSignedCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["command", "targetEnvelopes", "observeEnvelopes",
+    "authorityEnvelope"] json
+  ApplicationLifecycleCompletionAuthoring.signedCommandPlan
+    (← decodeHex "$.command" (← field "$" "command" obj))
+    (← list "$.targetEnvelopes" decodeHex (← field "$" "targetEnvelopes" obj))
+    (← list "$.observeEnvelopes" decodeHex (← field "$" "observeEnvelopes" obj))
+    (← decodeHex "$.authorityEnvelope" (← field "$" "authorityEnvelope" obj))
+
+private def completionIngress (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["domain", "semantics", "source", "signedCommand",
+    "packageObservationEnvelope"] json
+  ApplicationLifecycleCompletionAuthoring.assemble
+    (← completionDigest "$.domain" (← field "$" "domain" obj))
+    (← completionDigest "$.semantics" (← field "$" "semantics" obj))
+    (← decodeHex "$.source" (← field "$" "source" obj))
+    (← decodeHex "$.signedCommand" (← field "$" "signedCommand" obj))
+    (← decodeHex "$.packageObservationEnvelope"
+      (← field "$" "packageObservationEnvelope" obj))
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
+  | "application-lifecycle-resident-begin" => residentBegin json
+  | "application-lifecycle-completion-report" => completionReport json
+  | "application-lifecycle-completion-signing-frame" => completionSigningFrame json
+  | "application-lifecycle-completion-signed-report" => completionSignedReport json
+  | "application-lifecycle-completion-source" => completionSource json
+  | "application-lifecycle-completion-command" => completionCommand json
+  | "application-lifecycle-completion-signed-command" => completionSignedCommand json
+  | "application-lifecycle-completion-ingress" => completionIngress json
   | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
