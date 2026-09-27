@@ -12,7 +12,7 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -22,6 +22,7 @@ const MAX_HEADER: usize = 16_384;
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: usize = 8_388_608;
 const MAX_TOKEN: usize = 128;
+const MAX_BUSY_RESPONDERS: usize = 4;
 
 pub struct GatewayConfig {
     pub bind: SocketAddr,
@@ -128,6 +129,7 @@ struct Shared {
     lease: Mutex<LeaseState>,
     revoked: AtomicBool,
     active_request: AtomicBool,
+    busy_responders: AtomicUsize,
     last_permit_id: AtomicU64,
     curl: Mutex<Option<Child>>,
     client: Mutex<Option<TcpStream>>,
@@ -264,6 +266,7 @@ impl GatewayEndpoint {
             }),
             revoked: AtomicBool::new(true),
             active_request: AtomicBool::new(false),
+            busy_responders: AtomicUsize::new(0),
             last_permit_id: AtomicU64::new(0),
             curl: Mutex::new(None),
             client: Mutex::new(None),
@@ -278,7 +281,25 @@ impl GatewayEndpoint {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         if shared.active_request.swap(true, Ordering::SeqCst) {
-                            let _ = stream.shutdown(Shutdown::Both);
+                            if shared.busy_responders.fetch_add(1, Ordering::SeqCst)
+                                >= MAX_BUSY_RESPONDERS
+                            {
+                                shared.busy_responders.fetch_sub(1, Ordering::SeqCst);
+                                let _ = stream.shutdown(Shutdown::Both);
+                                continue;
+                            }
+                            let busy_shared = shared.clone();
+                            let max_request_bytes = config.max_request_bytes;
+                            thread::spawn(move || {
+                                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                                // Drain one bounded request before replying. Closing with an
+                                // unread POST body can turn a valid 503 into a TCP reset.
+                                if read_request(&mut stream, max_request_bytes).is_ok() {
+                                    error_reply(&mut stream, 503, "provider controller is busy");
+                                }
+                                busy_shared.busy_responders.fetch_sub(1, Ordering::SeqCst);
+                            });
                             continue;
                         }
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
@@ -1536,6 +1557,41 @@ mod tests {
         gateway.control().revoke();
         let stale = post(gateway.local_addr(), TOKEN, body);
         assert!(stale.starts_with("HTTP/1.1 401"));
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_request_gets_bounded_busy_reply_without_a_second_reserve() {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let (tx, rx) = mpsc::sync_channel(2);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let address = gateway.local_addr();
+        let first = thread::spawn(move || post(address, TOKEN, body));
+        let ProviderCommand::Reserve { reply, .. } =
+            rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("first request must await native reserve");
+        };
+        let busy = post(address, TOKEN, body);
+        assert!(busy.starts_with("HTTP/1.1 503"), "{busy}");
+        assert!(busy.contains("provider controller is busy"));
+        assert!(rx.try_recv().is_err(), "busy request must not reserve");
+        reply.send(Err("signed reserve refused".into())).unwrap();
+        assert!(first.join().unwrap().starts_with("HTTP/1.1 503"));
         assert_eq!(
             upstream.accept().unwrap_err().kind(),
             io::ErrorKind::WouldBlock

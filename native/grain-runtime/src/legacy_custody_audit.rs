@@ -374,9 +374,10 @@ pub fn inspect(input: &Input<'_>) -> Result<Value> {
         return Err("fresh signed tool observation is outside a runtime query attempt".into());
     }
     bounded_owned(signed_path, uid, 12_102_760)?;
+    let operation_id = input.operation_id.to_string();
     if grain["task"] != input.tool_task
         || grain["subject"] != input.tool_subject
-        || grain["context"]["operationId"] != input.operation_id.to_string()
+        || grain["context"]["operationId"].as_str() != Some(operation_id.as_str())
         || grain["operation"]["type"] != "settle"
         || grain["before"]["generation"] != observed["generation"]
         || grain["before"]["status"] != observed["status"]
@@ -398,7 +399,7 @@ pub fn inspect(input: &Input<'_>) -> Result<Value> {
     )?)
     .map_err(|e| format!("legacy challenge: {e}"))?;
     if challenge["intent"]["subject"] != input.tool_subject
-        || challenge["intent"]["nonce"] != input.operation_id.to_string()
+        || challenge["intent"]["nonce"].as_str() != Some(operation_id.as_str())
         || challenge["intent"]["purpose"]["type"] != "prepare"
         || challenge["intent"]["grants"] != source["grants"]
         || challenge["imageBoundary"] != input.reserve_boundary
