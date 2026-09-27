@@ -49,6 +49,6 @@ The source author and package input above produced `/tmp/mini-gitweb-identity-au
 | `schema.bin` | `534278a3930b12049cbbb69eeecea91b72ced7245edf4898356091e15e8ef21d` |
 | `web-interface.bin` / `api-interface.bin` | `3156abd5815eb8b243b22b89ecc96a03d3a3eb61bca5481785b4dbdc3ec0e98b` / `716c4c22fe44eee7de335a4a2ab314cfe80fae4bf27a8ef3bb3876ccc97284cf` |
 | `prospective-manifest.bin` for app 8401, Mini packageVersion 1 | `ca431a7f5972bd2ce675026c71ae4af921531530c8c22d68c349069d79d252f7` |
-| `roots.json` | `0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f` |
+| `roots.json` | `0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f`; byte-identical portable copy at `scripts/application-share-issue/gitweb-roots.json` |
 
 The historical package and bridge evidence is the physical signature-check boundary. This author does not itself parse or verify an SPK. The positive-fee issue fixture deliberately uses current package version 0 to prove ticket fee and recovery without pretending an install happened. The actual Mini install must still admit the exact descriptor/manifest binding through the lifecycle receiver and current physical host; a final share ticket scoped to package version 1 cannot be used against an uninstalled version-0 app. No dispatch or GitWeb app execution is established by these root calculations.

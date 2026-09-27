@@ -21,11 +21,17 @@ test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = "$SOURCE_SHA" || {
   echo "workroom source changed; review overlay before use" >&2; exit 2;
 }
 test ! -e "$EVIDENCE" || { echo "evidence directory exists" >&2; exit 2; }
-STAGE=$(mktemp -d)
+test ! -e "$EVIDENCE.source-stage" || {
+  echo "private source stage already exists" >&2; exit 2;
+}
+# Keep exact generated source and hashes on failure; the sibling stays 0700
+# and is never copied into a public artifact. Runtime keys stay under EVIDENCE.
+STAGE=$EVIDENCE.source-stage
+mkdir -m 700 "$STAGE"
+STAGE=$(CDPATH='' cd -- "$STAGE" && pwd)
 SERVICE_PID=
 cleanup() {
   if [ -n "$SERVICE_PID" ]; then kill "$SERVICE_PID" 2>/dev/null || :; wait "$SERVICE_PID" 2>/dev/null || :; fi
-  rm -rf "$STAGE"
 }
 trap cleanup EXIT HUP INT TERM
 
