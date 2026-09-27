@@ -15,6 +15,7 @@ import Kernel.ApplicationDispatchAuthoring
 import Host.ApplicationLifecycleCompletionAuthoring
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.ApplicationLifecycleClaimOperator
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
@@ -1703,6 +1704,13 @@ private def residentBeginOperatorRequest (json : Lean.Json) : Result (List UInt8
       descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj) }
   return ApplicationLifecycleBeginOperator.requestCodec.encode request
 
+private def lifecycleClaimOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["originalIndex", "queryNonce"] json
+  let request : ApplicationLifecycleClaimOperator.Request :=
+    { originalIndex := ← nat "$.originalIndex" (← field "$" "originalIndex" obj)
+      queryNonce := ← nat "$.queryNonce" (← field "$" "queryNonce" obj) }
+  return ApplicationLifecycleClaimOperator.requestCodec.encode request
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
@@ -1716,6 +1724,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-completion-ingress" => completionIngress json
   | "application-lifecycle-completion-operator-request" => completionOperatorRequest json
   | "application-lifecycle-resident-begin-operator-request" => residentBeginOperatorRequest json
+  | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
@@ -2038,6 +2047,38 @@ private def residentBeginOperatorPlanJson
      ("slots", .arr <| (plan.invocation.slots ++
         [plan.packageObservationSlot]).toArray.map slotJson)]
 
+private def lifecycleClaimOperatorPlanJson
+    (plan : ApplicationLifecycleClaimOperator.Plan) : Result Lean.Json := do
+  let some source := ApplicationLifecycleClaim.codec.decode plan.sourceBytes
+    | failAt "application-lifecycle-claim-operator-plan" "noncanonical claim source"
+  let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode plan.originalBeginBytes
+    | failAt "application-lifecycle-claim-operator-plan" "noncanonical original BEGIN"
+  let slotJson := fun (slot : SigningSlot) => .mkObj
+    [("role", decimal slot.role), ("index", decimal slot.index),
+     ("header", hexJson slot.header), ("signing", signedHeaderJson slot.header)]
+  pure <| .mkObj
+    [("type", "application-lifecycle-claim-operator-plan-v1"),
+     ("canonicalPlan", hexJson <| ApplicationLifecycleClaimOperator.planCodec.encode plan),
+     ("source", hexJson plan.sourceBytes),
+     ("originalBegin", hexJson plan.originalBeginBytes),
+     ("descriptor", hexJson begin.descriptor.canonicalBytes),
+     ("domain", decimal plan.invocation.domain.value),
+     ("semantics", decimal plan.invocation.semantics.value),
+     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("height", decimal plan.invocation.height),
+     ("app", decimal source.begin.source.app),
+     ("originalIndex", decimal source.originalIndex),
+     ("queryNonce", decimal source.queryNonce),
+     ("managementSubject", decimal source.begin.source.managementSubject.value),
+     ("beforeGeneration", signedDecimal source.before.generation),
+     ("beforePhase", signedDecimal source.before.phase),
+     ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
+     ("currentAppRoot", decimal source.currentAppRoot.value),
+     ("currentPackageRoot", decimal source.currentPackageRoot.value),
+     ("currentImageBoundary", decimal source.currentImageBoundary.value),
+     ("slots", .arr <| (plan.invocation.slots ++
+        [plan.appObservationSlot, plan.packageObservationSlot]).toArray.map slotJson)]
+
 private def intentJson (value : Intent) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value), ("nonce", decimal value.nonce),
    ("purpose", match value.purpose with
@@ -2194,6 +2235,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let plan ← decoded "application-lifecycle-resident-begin-operator-plan"
         ApplicationLifecycleBeginOperator.planCodec bytes
       residentBeginOperatorPlanJson plan
+  | "application-lifecycle-claim-operator-plan" => do
+      let plan ← decoded "application-lifecycle-claim-operator-plan"
+        ApplicationLifecycleClaimOperator.planCodec bytes
+      lifecycleClaimOperatorPlanJson plan
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"
