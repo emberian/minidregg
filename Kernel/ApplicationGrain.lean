@@ -1,0 +1,276 @@
+/-
+An application's stable identity is an ordinary Mini object, independent of its
+process, HTTP connection, and any user's AgentGrain. This four-entry declared
+page records only lifecycle generation, phase, package version and snapshot
+version. Full package and snapshot bytes live in separate canonical content
+resources. A version step is admitted only with a content incidence on the
+corresponding target in the same ordinary resource transaction.
+
+This module constructs source predicates and candidate actions. Admission still
+belongs to the installed policy, current capability, signed ingress and durable
+DeclaredResourceController receiver. In particular, it does not grant an HTTP
+dispatch permit or assert that an external app, package or snapshot is sound.
+-/
+import Kernel.DeclaredResourceProjection
+import Kernel.ResourceTransaction
+import Pred.Core
+
+namespace Minidregg.Kernel.ApplicationGrain
+open Minidregg.Compiler
+open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.EffectDeclaration
+open Minidregg.Theory.DeclaredActionLowering
+open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Pred
+set_option autoImplicit false
+
+/-- Phase 0 is new, 1 install pending, 2 stopped, 3 start pending,
+4 serving, 5 stop pending, 6 upgrade pending, 7 retired. Pending means a
+physical effect is unresolved, never an automatic retry license. -/
+structure State where
+  generation : Int
+  phase : Int
+  packageVersion : Int
+  snapshotVersion : Int
+  deriving DecidableEq, Repr
+
+def State.values (s : State) : List Int :=
+  [s.generation, s.phase, s.packageVersion, s.snapshotVersion]
+
+def key (app field : Nat) : StateKey := .objectField ⟨app⟩ ⟨field⟩
+
+def State.page (s : State) (domain : Digest) (app : Nat) : Page :=
+  ⟨domain, app % shardCount,
+    some ⟨key app 0, s.generation⟩, some ⟨key app 1, s.phase⟩,
+    some ⟨key app 2, s.packageVersion⟩, some ⟨key app 3, s.snapshotVersion⟩⟩
+
+def initialPage (domain : Digest) (app : Nat) : Page :=
+  (⟨0, 0, 0, 0⟩ : State).page domain app
+
+def readState (app : Nat) (page : Page) : Option State := do
+  let read := fun n => (page.entries.find? (fun e => e.key == key app n)).map (·.value)
+  return ⟨← read 0, ← read 1, ← read 2, ← read 3⟩
+
+/-- Expected-value writes compare every coordinate, including unchanged ones. -/
+def actions (app : Nat) (before after : State) : List Action :=
+  (List.range 4).zipWith (fun n pair =>
+    .write (key app n) (some pair.1) pair.2) (before.values.zip after.values)
+
+def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
+  [(0,s.generation),(1,s.phase),(2,s.packageVersion),(3,s.snapshotVersion)]
+
+def slots (before after : State) : List (String × Int) :=
+  DeclaredResourceProjection.scalarSlots before.coordinates after.coordinates
+
+theorem page_projection_exact (domain : Digest) (app : Nat) (before after : State) :
+    DeclaredResourceProjection.project app (before.page domain app) (after.page domain app) =
+      slots before after := by
+  simp [DeclaredResourceProjection.project, DeclaredResourceProjection.values,
+    Page.entries, State.page, key, slots, State.coordinates]
+
+private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
+private def unchanged (field : Nat) : Pred :=
+  .eq (DeclaredResourceProjection.fieldName field "delta") 0
+private def increased (field : Nat) : Pred :=
+  .eq (DeclaredResourceProjection.fieldName field "delta") 1
+def contentChanged (target : Nat) : Pred :=
+  .not (.le (s!"joint/target/{target}/content/operations") 0)
+private def edge (old new generationDelta : Int) (conditions : List Pred) : Pred :=
+  .all ([.eq "resource/field/1/before" old,
+    .eq "resource/field/1/after" new,
+    .eq "resource/field/0/delta" generationDelta] ++ conditions)
+
+/-- Only a special native receiving path may derive these slots after checking
+the pending operation and physical custody evidence. Generic DRC projection
+does not expose either name, and absent or zero means refusal. -/
+def completionSlot : String := "application/completion/checked"
+def reconciliationSlot : String := "application/reconciliation/checked"
+def completionGate : Pred := .eq completionSlot 1
+def reconciliationGate : Pred := .eq reconciliationSlot 1
+
+/-- Lifecycle changes are independent of any participant's session fence.
+Version increments require same-transaction content incidences. Action count
+can be a no-op; package identity and physical snapshot custody still require
+the checked completion receiver before it supplies the reserved gate. -/
+def transitionPolicy (packageTarget snapshotTarget : Nat) : Pred :=
+  if packageTarget = snapshotTarget then .any [] else .all [
+    .memberOf "resource/field/0/delta" [0,1],
+    .memberOf "resource/field/2/delta" [0,1],
+    .memberOf "resource/field/3/delta" [0,1],
+    .memberOf "resource/field/1/before" [0,1,2,3,4,5,6],
+    .memberOf "resource/field/1/after" [0,1,2,3,4,5,6,7],
+    .any [.eq "resource/field/2/delta" 0, contentChanged packageTarget],
+    .any [.eq "resource/field/3/delta" 0, contentChanged snapshotTarget],
+    nonnegative "resource/field/0/before", nonnegative "resource/field/0/after",
+    nonnegative "resource/field/2/before", nonnegative "resource/field/2/after",
+    nonnegative "resource/field/3/before", nonnegative "resource/field/3/after",
+    .any [
+      edge 0 1 1 [unchanged 2, unchanged 3],
+      edge 1 2 0 [increased 2, unchanged 3, contentChanged packageTarget,
+        completionGate],
+      edge 2 3 1 [unchanged 2, unchanged 3],
+      edge 3 4 0 [unchanged 2, unchanged 3, completionGate],
+      edge 4 5 1 [unchanged 2, unchanged 3],
+      edge 5 2 0 [unchanged 2, unchanged 3, completionGate],
+      edge 2 6 1 [unchanged 2, unchanged 3],
+      edge 6 2 0 [increased 2, unchanged 3, contentChanged packageTarget,
+        completionGate],
+      edge 2 2 0 [unchanged 2, increased 3, contentChanged snapshotTarget,
+        completionGate],
+      edge 4 4 0 [unchanged 2, increased 3, contentChanged snapshotTarget,
+        completionGate],
+      -- A signed current-state witness for a separate checked dispatch path.
+      -- Its generic DRC receipt is never itself a delivery permit.
+      edge 4 4 0 [unchanged 2, unchanged 3],
+      edge 3 2 1 [unchanged 2, unchanged 3, reconciliationGate],
+      edge 2 7 1 [unchanged 2, unchanged 3]]]
+
+/-- Management can be deliberately locked. A separate native capability
+check still governs observation and delegation. No generic mutate branch here
+authorizes dispatch to an external app. -/
+def policy (packageTarget snapshotTarget : Nat)
+    (management : Pred := .any []) : Pred := .any [
+  .all [.eq "request/verb" 2, transitionPolicy packageTarget snapshotTarget],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5], management]]
+
+/-- Install on the package content target. The content resource's own law
+rejects a direct edit without the application version increment in the same
+authorized joint command. The application law above provides the converse. -/
+def packageManifestPolicy (app : Nat) (management : Pred := .any []) : Pred := .any [
+  .all [.eq "request/verb" 2,
+    .eq (s!"joint/target/{app}/resource/field/2/delta") 1],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5], management]]
+
+/-- Install on the snapshot content target. Snapshot capture and physical
+retention must still be checked by the native receiver before authoring. -/
+def snapshotManifestPolicy (app : Nat) (management : Pred := .any []) : Pred := .any [
+  .all [.eq "request/verb" 2,
+    .eq (s!"joint/target/{app}/resource/field/3/delta") 1],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5], management]]
+
+inductive Operation where
+  | beginInstall
+  | completeInstall
+  | beginStart
+  | completeStart
+  | beginStop
+  | completeStop
+  | beginUpgrade
+  | completeUpgrade
+  | checkpoint
+  | servingWitness
+  | reconcileFailedStart
+  | retire
+  deriving DecidableEq, Repr
+
+/-- Candidate authoring only. The installed predicate checks the old and new
+pages, and the generic receiver checks the current signed authority. -/
+def Operation.after (operation : Operation) (s : State) : State :=
+  match operation with
+  | .beginInstall => { s with generation := s.generation + 1, phase := 1 }
+  | .completeInstall => { s with phase := 2, packageVersion := s.packageVersion + 1 }
+  | .beginStart => { s with generation := s.generation + 1, phase := 3 }
+  | .completeStart => { s with phase := 4 }
+  | .beginStop => { s with generation := s.generation + 1, phase := 5 }
+  | .completeStop => { s with phase := 2 }
+  | .beginUpgrade => { s with generation := s.generation + 1, phase := 6 }
+  | .completeUpgrade => { s with phase := 2, packageVersion := s.packageVersion + 1 }
+  | .checkpoint => { s with snapshotVersion := s.snapshotVersion + 1 }
+  | .servingWitness => s
+  | .reconcileFailedStart => { s with generation := s.generation + 1, phase := 2 }
+  | .retire => { s with generation := s.generation + 1, phase := 7 }
+
+def Operation.target (operation : Operation) (app : Nat) (capability : CapabilityId)
+    (expectedRoot : Digest) (before : State)
+    (observeCapability : Option CapabilityId := none) :
+    DeclaredResourceController.Target :=
+  { kind := .object, target := app, capability := capability,
+    observeCapability := observeCapability, schemaVersion := 1,
+    expectedTargetRoot := expectedRoot,
+    payload := .scalar (actions app before (operation.after before)) }
+
+/-- The caller must put the matching package or snapshot content incidence in
+`contentTargets`; the installed law above refuses a version advance without it.
+This command still needs ordinary DRC admission and does not prove physical
+package install, process stop, or snapshot capture. -/
+def Operation.command (operation : Operation) (subject : SubjectId)
+    (authorityRoot : Digest) (nonce app : Nat) (capability : CapabilityId)
+    (expectedRoot : Digest) (before : State)
+    (contentTargets : List DeclaredResourceController.Target := [])
+    (observeCapability : Option CapabilityId := none) :
+    DeclaredResourceController.Command :=
+  { subject := subject, expectedAuthorityRoot := authorityRoot, nonce := nonce,
+    targets := operation.target app capability expectedRoot before observeCapability :: contentTargets }
+
+/-- Legacy incomplete request identity retained temporarily for compatibility.
+It omits query, headers, cookies, generated WebSession identity, and exact body
+bytes. `ApplicationDispatchCodec` supersedes it for any checked ingress. Its
+generic DRC nonce or receipt is never an external delivery permit. -/
+structure DispatchIntent where
+  app : Nat
+  appGeneration : Int
+  sessionTask : Nat
+  sessionGeneration : Int
+  subject : SubjectId
+  interfaceId : Nat
+  method : List UInt8
+  path : List UInt8
+  bodyDigest : Digest
+  bodyLength : Nat
+  operationId : Nat
+  deriving DecidableEq, Repr
+
+private def headerStream :=
+  StreamCodec.product StreamCodec.nat
+    (StreamCodec.product intStream
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product intStream TypedAuthorizationRequestCodec.subjectIdStream)))
+
+private def requestStream :=
+  StreamCodec.product StreamCodec.nat
+    (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream
+        (StreamCodec.product digestStream
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat))))
+
+def dispatchStream : StreamCodec DispatchIntent :=
+  StreamCodec.xmap (StreamCodec.product headerStream requestStream)
+    (fun intent =>
+      ((intent.app, intent.appGeneration, intent.sessionTask,
+          intent.sessionGeneration, intent.subject),
+       (intent.interfaceId, intent.method, intent.path, intent.bodyDigest,
+          intent.bodyLength, intent.operationId)))
+    (fun pair =>
+      ⟨pair.1.1, pair.1.2.1, pair.1.2.2.1, pair.1.2.2.2.1,
+       pair.1.2.2.2.2, pair.2.1, pair.2.2.1, pair.2.2.2.1,
+       pair.2.2.2.2.1, pair.2.2.2.2.2.1, pair.2.2.2.2.2.2⟩)
+    (by intro intent; cases intent; rfl)
+
+private def dispatchFrame : List UInt8 :=
+  "DREGG/APPLICATION/DISPATCH/v1".toUTF8.toList
+
+private def rawDispatchCodec : LawfulCodec DispatchIntent where
+  encode intent := dispatchFrame ++ dispatchStream.encode intent
+  decode bytes := if bytes.take dispatchFrame.length = dispatchFrame then
+    dispatchStream.toLawful.decode (bytes.drop dispatchFrame.length) else none
+  decode_encode := by
+    intro intent
+    have decoded := dispatchStream.toLawful.decode_encode intent
+    change dispatchStream.toLawful.decode (dispatchStream.encode intent) = some intent at decoded
+    simp [decoded]
+
+def dispatchCodec : LawfulCodec DispatchIntent :=
+  ResourceBirthCodec.strictCodec rawDispatchCodec
+
+def DispatchIntent.canonicalBytes (intent : DispatchIntent) : List UInt8 :=
+  dispatchCodec.encode intent
+
+theorem dispatch_decode_encode (intent : DispatchIntent) :
+    dispatchCodec.decode intent.canonicalBytes = some intent := dispatchCodec.decode_encode intent
+
+end Minidregg.Kernel.ApplicationGrain
