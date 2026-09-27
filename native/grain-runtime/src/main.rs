@@ -3326,13 +3326,26 @@ impl Runtime {
             }
         }
     }
-    fn handle_tool(&mut self, request: mcp::BrokerRequest) {
+    fn handle_tool(&mut self, request: mcp::BrokerRequest, broker: &mcp::BrokerEndpoint) {
         if request.prompt_epoch != 1 {
             let _ = request.reply.send(json!({"isError":true,
                 "text":"tool request was queued outside the active prompt"}));
             return;
         }
         let outcome = self.tool_call(&request.name, &request.arguments);
+        if request.name == "mini_create_application" && outcome.is_ok() {
+            // Refresh discovery before Hermes sees the successful birth
+            // receipt. Session is also advertised from prompt start because
+            // this unforked worker may cache its first tools/list response.
+            if let Err(error) = self
+                .tool_catalog()
+                .and_then(|catalog| broker.replace_catalog(catalog))
+            {
+                self.emit(format!(
+                    "MCP catalog refresh failed after retained app birth: {error}\n"
+                ));
+            }
+        }
         let response = match outcome {
             Ok(value) => json!({"isError":false,"text":value.to_string()}),
             Err(error) => json!({"isError":true,"text":error}),
@@ -5867,6 +5880,69 @@ impl Runtime {
             thread::sleep(Duration::from_millis(20));
         }
     }
+    /// Prepare bounded tool-discovery names from exact retained Mini births.
+    /// The catalog never substitutes for admission on a later tool call.
+    fn tool_catalog(&self) -> Result<mcp::ToolCatalog> {
+        let Some(tool) = self.config.tool_task.as_ref() else {
+            return Ok(mcp::ToolCatalog::default());
+        };
+        if !tool.allowed_application_families.is_empty()
+            || !tool.allowed_session_families.is_empty()
+        {
+            let expected = tool
+                .current_birth_host_sha256
+                .as_deref()
+                .ok_or("current application birth Host pin absent")?;
+            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+                return Err(
+                    "current application birth Host image or socket differs from operator pin"
+                        .into(),
+                );
+            }
+        }
+        let mut applications = Vec::new();
+        if !tool.allowed_session_families.is_empty() {
+            let mut seen = std::collections::HashSet::new();
+            // A bounded discovery hint, never a use grant. Later tool calls
+            // still require the exact birth receipt and fresh signed read.
+            for record in self.journal.born_resources.iter().rev() {
+                if record.pending.route == Some(ApplicationBirthRoute::Application)
+                    && tool
+                        .allowed_session_families
+                        .iter()
+                        .any(|family| family.application_family == record.pending.family)
+                {
+                    self.verify_born_record(record)?;
+                    if !seen.insert(&record.pending.born.name) {
+                        return Err("duplicate confirmed application name".into());
+                    }
+                    if applications.len() < 64 {
+                        applications.push(record.pending.born.name.clone());
+                    }
+                }
+            }
+            applications.reverse();
+        }
+        Ok(mcp::ToolCatalog {
+            birth_families: tool
+                .allowed_birth_families
+                .iter()
+                .map(|family| family.name.clone())
+                .collect(),
+            application_families: tool
+                .allowed_application_families
+                .iter()
+                .map(|family| family.name.clone())
+                .collect(),
+            session_families: tool
+                .allowed_session_families
+                .iter()
+                .map(|family| family.name.clone())
+                .collect(),
+            applications,
+        })
+    }
+
     /// Drive the real upstream `hermes-acp` through an operator-selected OS
     /// confinement wrapper. ACP permission requests are refused; built-in
     /// tools are still present upstream, so OS confinement is mandatory.
@@ -6105,19 +6181,11 @@ impl Runtime {
             self.launch_gate(&spec.program, unit, "init")?;
         }
         let broker_path = self.config.state_dir.join(format!("mcp-{id:016}.sock"));
+        let catalog = self.tool_catalog()?;
         let broker = mcp::start_broker(
             &broker_path,
             Duration::from_secs(spec.wall_time_seconds.unwrap_or(600)),
-            self.config
-                .tool_task
-                .as_ref()
-                .map(|tool| {
-                    tool.allowed_birth_families
-                        .iter()
-                        .map(|family| family.name.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            catalog,
         )?;
         let broker_program = if spec.systemd_scope {
             PathBuf::from("/agent/grain-runtime")
@@ -6506,7 +6574,7 @@ impl Runtime {
             }
             for _ in 0..4 {
                 match broker.requests.try_recv() {
-                    Ok(request) => self.handle_tool(request),
+                    Ok(request) => self.handle_tool(request, broker),
                     Err(_) => break,
                 }
             }

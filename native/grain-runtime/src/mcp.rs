@@ -8,7 +8,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,7 @@ pub struct BrokerEndpoint {
     path: PathBuf,
     socket_identity: (u64, u64),
     prompt_epoch: Arc<AtomicU64>,
+    catalog: Arc<RwLock<ToolCatalog>>,
 }
 
 impl BrokerEndpoint {
@@ -38,6 +39,14 @@ impl BrokerEndpoint {
 
     pub fn deactivate_prompt(&self) {
         self.prompt_epoch.store(0, Ordering::SeqCst);
+    }
+
+    pub fn replace_catalog(&self, catalog: ToolCatalog) -> Result<(), String> {
+        *self
+            .catalog
+            .write()
+            .map_err(|_| "MCP catalog lock poisoned")? = catalog;
+        Ok(())
     }
 }
 
@@ -52,10 +61,18 @@ impl Drop for BrokerEndpoint {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct ToolCatalog {
+    pub birth_families: Vec<String>,
+    pub application_families: Vec<String>,
+    pub session_families: Vec<String>,
+    pub applications: Vec<String>,
+}
+
 pub fn start_broker(
     path: &Path,
     worker_wall: Duration,
-    birth_families: Vec<String>,
+    catalog: ToolCatalog,
 ) -> Result<BrokerEndpoint, String> {
     if worker_wall.is_zero() || worker_wall > MAX_WORKER_WALL {
         return Err("MCP broker worker wall time must be 1..1800 seconds".into());
@@ -73,7 +90,8 @@ pub fn start_broker(
     let prompt_epoch = Arc::new(AtomicU64::new(0));
     let thread_stop = stop.clone();
     let thread_epoch = prompt_epoch.clone();
-    let birth_families = Arc::new(birth_families);
+    let catalog = Arc::new(RwLock::new(catalog));
+    let broker_catalog = catalog.clone();
     thread::spawn(move || {
         while !thread_stop.load(Ordering::SeqCst) {
             match listener.accept() {
@@ -85,15 +103,9 @@ pub fn start_broker(
                     let tx = tx.clone();
                     let active = active.clone();
                     let epoch = thread_epoch.clone();
-                    let birth_families = birth_families.clone();
+                    let catalog = catalog.clone();
                     thread::spawn(move || {
-                        serve_broker_connection(
-                            stream,
-                            tx,
-                            epoch,
-                            response_timeout,
-                            birth_families,
-                        );
+                        serve_broker_connection(stream, tx, epoch, response_timeout, catalog);
                         active.fetch_sub(1, Ordering::SeqCst);
                     });
                 }
@@ -110,6 +122,7 @@ pub fn start_broker(
         path: path.to_path_buf(),
         socket_identity,
         prompt_epoch,
+        catalog: broker_catalog,
     })
 }
 
@@ -118,7 +131,7 @@ fn serve_broker_connection(
     tx: SyncSender<BrokerRequest>,
     epoch: Arc<AtomicU64>,
     response_timeout: Duration,
-    birth_families: Arc<Vec<String>>,
+    catalog: Arc<RwLock<ToolCatalog>>,
 ) {
     if stream
         .set_write_timeout(Some(Duration::from_secs(5)))
@@ -152,10 +165,22 @@ fn serve_broker_connection(
     // It carries only validated operator-selected names, never grant paths,
     // private policy bytes, resource IDs, or custody credentials.
     if name == "__catalog" && req.get("arguments") == Some(&json!({})) {
+        let Ok(snapshot) = catalog.read() else {
+            let _ = writeln!(
+                stream,
+                "{}",
+                json!({"isError":true,"text":"MCP catalog unavailable"})
+            );
+            return;
+        };
         let _ = writeln!(
             stream,
             "{}",
-            json!({"type":"mini-grain-tool-catalog-v1","birthFamilies":birth_families.as_ref()})
+            json!({"type":"mini-grain-tool-catalog-v2",
+                "birthFamilies":snapshot.birth_families,
+                "applicationFamilies":snapshot.application_families,
+                "sessionFamilies":snapshot.session_families,
+                "applications":snapshot.applications})
         );
         return;
     }
@@ -187,35 +212,52 @@ fn call_controller(path: &Path, name: &str, arguments: Value) -> Value {
     call_controller_with_timeout(path, name, arguments, MAX_PROXY_WAIT)
 }
 
-fn catalog_birth_families(reply: &Value) -> Result<Vec<String>, String> {
-    if reply.get("type").and_then(Value::as_str) != Some("mini-grain-tool-catalog-v1") {
-        return Err("controller MCP catalog unavailable".into());
-    }
-    let families = reply
-        .get("birthFamilies")
+fn catalog_names(reply: &Value, field: &str, max: usize) -> Result<Vec<String>, String> {
+    let names = reply
+        .get(field)
         .and_then(Value::as_array)
-        .ok_or("controller MCP birth catalog absent")?;
-    if families.len() > 8 {
-        return Err("controller MCP birth catalog exceeds bound".into());
+        .ok_or_else(|| format!("controller MCP {field} absent"))?;
+    if names.len() > max {
+        return Err(format!("controller MCP {field} exceeds bound"));
     }
-    let mut result = Vec::with_capacity(families.len());
-    for family in families {
-        let name = family.as_str().ok_or("MCP birth family is not a name")?;
+    let mut result = Vec::with_capacity(names.len());
+    for value in names {
+        let name = value.as_str().ok_or("MCP catalog entry is not a name")?;
         if name.is_empty()
-            || name.len() > 32
+            || name.len() > 64
             || !name
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             || result.iter().any(|prior| prior == name)
         {
-            return Err("controller MCP birth catalog has an invalid name".into());
+            return Err(format!("controller MCP {field} has an invalid name"));
         }
         result.push(name.to_owned());
     }
     Ok(result)
 }
 
-fn tools_for_birth_families(families: &[String]) -> Value {
+fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
+    if reply.get("type").and_then(Value::as_str) != Some("mini-grain-tool-catalog-v2") {
+        return Err("controller MCP catalog unavailable".into());
+    }
+    let catalog = ToolCatalog {
+        birth_families: catalog_names(reply, "birthFamilies", 8)?,
+        application_families: catalog_names(reply, "applicationFamilies", 8)?,
+        session_families: catalog_names(reply, "sessionFamilies", 8)?,
+        applications: catalog_names(reply, "applications", 64)?,
+    };
+    if catalog
+        .applications
+        .iter()
+        .any(|name| !name.ends_with("-app"))
+    {
+        return Err("controller MCP application selector is not a named app".into());
+    }
+    Ok(catalog)
+}
+
+fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
     let mut tools = vec![
         json!({"name":"mini_grain_status","description":"Read the signed Mini task resource",
             "inputSchema":{"type":"object","properties":{}}}),
@@ -224,10 +266,32 @@ fn tools_for_birth_families(families: &[String]) -> Value {
         json!({"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns a historical signed publication receipt; current content requires a fresh signed read.",
             "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}),
     ];
-    if !families.is_empty() {
+    if !catalog.birth_families.is_empty() {
         tools.push(json!({"name":"mini_create_resource",
             "description":"Create one resource in an operator-approved family through Mini's signed, budgeted composite birth. The family selects fixed factory, payer, tariff, policy and bounded ID namespace; the model supplies no IDs or capabilities. Success returns a historical birth receipt. Later reads and writes require fresh Mini admission.",
-            "inputSchema":{"type":"object","properties":{"family":{"type":"string","enum":families}},"required":["family"],"additionalProperties":false}}));
+            "inputSchema":{"type":"object","properties":{"family":{"type":"string","enum":catalog.birth_families}},"required":["family"],"additionalProperties":false}}));
+    }
+    if !catalog.application_families.is_empty() {
+        tools.push(json!({"name":"mini_create_application",
+            "description":"Create one operator-approved application, package manifest, and snapshot manifest through Mini's signed, budgeted current-authority birth. The family fixes all target and capability namespaces; this returns a historical receipt, not a live use grant.",
+            "inputSchema":{"type":"object","properties":{"family":{"type":"string","enum":catalog.application_families}},"required":["family"],"additionalProperties":false}}));
+    }
+    if !catalog.session_families.is_empty() {
+        let description = if catalog.applications.is_empty() {
+            "Name returned by a confirmed Mini application birth in this grain".to_owned()
+        } else {
+            format!("Name returned by a confirmed Mini application birth in this grain. Known names: {}", catalog.applications.join(", "))
+        };
+        // Hermes may cache its first tools/list for an ACP session. A dynamic
+        // enum here would exclude apps created later in the same session.
+        let application_selector = json!({"type":"string","maxLength":64,
+            "pattern":"^[A-Za-z0-9-]+-app$","description":description});
+        tools.push(json!({"name":"mini_create_application_session",
+            "description":"Create a Mini-governed application session and descriptor for one named, already confirmed local application. Mini rechecks current authority and the app owner grant before birth; this receipt is not a dispatch permit.",
+            "inputSchema":{"type":"object","properties":{
+                "family":{"type":"string","enum":catalog.session_families},
+                "application":application_selector},
+                "required":["family","application"],"additionalProperties":false}}));
     }
     json!({"tools":tools})
 }
@@ -315,8 +379,8 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
             "ping" => json!({}),
             "tools/list" => {
                 let catalog = call_controller(path, "__catalog", json!({}));
-                match catalog_birth_families(&catalog) {
-                    Ok(families) => tools_for_birth_families(&families),
+                match catalog_from_reply(&catalog) {
+                    Ok(catalog) => tools_for_catalog(&catalog),
                     Err(reason) => json!({"tools":[],"catalogError":reason}),
                 }
             }
@@ -351,7 +415,7 @@ mod tests {
     static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
 
     #[test]
-    fn birth_catalog_is_operator_named_and_available_before_prompt() {
+    fn birth_catalog_lists_only_named_confirmed_routes_before_prompt() {
         let (mut client, broker) = UnixStream::pair().unwrap();
         let (tx, rx) = mpsc::sync_channel(1);
         let epoch = Arc::new(AtomicU64::new(0));
@@ -361,7 +425,12 @@ mod tests {
                 tx,
                 epoch,
                 Duration::from_secs(1),
-                Arc::new(vec!["note".into()]),
+                Arc::new(RwLock::new(ToolCatalog {
+                    birth_families: vec!["note".into()],
+                    application_families: vec!["office".into()],
+                    session_families: vec!["office-web".into()],
+                    applications: vec!["office-0-app".into()],
+                })),
             );
         });
         writeln!(client, "{}", json!({"name":"__catalog","arguments":{}})).unwrap();
@@ -369,8 +438,8 @@ mod tests {
         io::BufReader::new(&client).read_line(&mut reply).unwrap();
         worker.join().unwrap();
         assert!(rx.try_recv().is_err());
-        let families = catalog_birth_families(&serde_json::from_str(&reply).unwrap()).unwrap();
-        let tools = tools_for_birth_families(&families);
+        let catalog = catalog_from_reply(&serde_json::from_str(&reply).unwrap()).unwrap();
+        let tools = tools_for_catalog(&catalog);
         let birth = tools["tools"]
             .as_array()
             .unwrap()
@@ -382,16 +451,130 @@ mod tests {
             json!(["note"])
         );
         assert_eq!(birth["inputSchema"]["additionalProperties"], false);
-        assert!(tools_for_birth_families(&[])["tools"]
+        let application = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_application")
+            .unwrap();
+        assert_eq!(
+            application["inputSchema"]["properties"]["family"]["enum"],
+            json!(["office"])
+        );
+        let session = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_application_session")
+            .unwrap();
+        assert!(session["inputSchema"]["properties"]["application"]
+            .get("enum")
+            .is_none());
+        assert!(
+            session["inputSchema"]["properties"]["application"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("office-0-app")
+        );
+        assert!(tools_for_catalog(&ToolCatalog::default())["tools"]
             .as_array()
             .unwrap()
             .iter()
             .all(|tool| tool["name"] != "mini_create_resource"));
+        let no_app = ToolCatalog {
+            applications: vec![],
+            ..catalog
+        };
+        let session_before_app = tools_for_catalog(&no_app)["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_application_session")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            session_before_app["inputSchema"]["properties"]["application"]["type"],
+            "string"
+        );
         assert!(
-            catalog_birth_families(&json!({"type":"mini-grain-tool-catalog-v1",
-            "birthFamilies":["note","note"]}))
+            session_before_app["inputSchema"]["properties"]["application"]
+                .get("enum")
+                .is_none()
+        );
+        assert!(
+            catalog_from_reply(&json!({"type":"mini-grain-tool-catalog-v2",
+            "birthFamilies":["note","note"],"applicationFamilies":[],
+            "sessionFamilies":[],"applications":[]}))
             .is_err()
         );
+        assert!(
+            catalog_from_reply(&json!({"type":"mini-grain-tool-catalog-v2",
+            "birthFamilies":[],"applicationFamilies":["office"],
+            "sessionFamilies":["office-web"],"applications":["8401"]}))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn same_broker_lists_new_confirmed_app_after_catalog_refresh() {
+        let socket = std::env::temp_dir().join(format!(
+            "mini-mcp-catalog-{}-{}",
+            std::process::id(),
+            NEXT_SOCKET.fetch_add(1, Ordering::SeqCst)
+        ));
+        let broker = start_broker(
+            &socket,
+            Duration::from_secs(1),
+            ToolCatalog {
+                application_families: vec!["office".into()],
+                session_families: vec!["office-web".into()],
+                ..ToolCatalog::default()
+            },
+        )
+        .unwrap();
+        let listed = || {
+            let mut stream = UnixStream::connect(&socket).unwrap();
+            writeln!(stream, "{}", json!({"name":"__catalog","arguments":{}})).unwrap();
+            let mut reply = String::new();
+            io::BufReader::new(&stream).read_line(&mut reply).unwrap();
+            tools_for_catalog(&catalog_from_reply(&serde_json::from_str(&reply).unwrap()).unwrap())
+        };
+        let initial = listed();
+        let session = initial["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_application_session")
+            .unwrap();
+        assert!(session["inputSchema"]["properties"]["application"]
+            .get("enum")
+            .is_none());
+        broker
+            .replace_catalog(ToolCatalog {
+                application_families: vec!["office".into()],
+                session_families: vec!["office-web".into()],
+                applications: vec!["office-0-app".into()],
+                ..ToolCatalog::default()
+            })
+            .unwrap();
+        let updated = listed();
+        let session = updated["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_application_session")
+            .unwrap();
+        assert!(session["inputSchema"]["properties"]["application"]
+            .get("enum")
+            .is_none());
+        assert!(
+            session["inputSchema"]["properties"]["application"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("office-0-app")
+        );
+        drop(broker);
+        assert!(!socket.exists());
     }
 
     #[test]
@@ -408,7 +591,7 @@ mod tests {
                 tx,
                 epoch,
                 Duration::from_millis(30),
-                Arc::new(vec![]),
+                Arc::new(RwLock::new(ToolCatalog::default())),
             );
         });
         writeln!(client, "{}", json!({"name":"mini_publish","arguments":{}})).unwrap();
