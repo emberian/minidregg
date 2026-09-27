@@ -109,11 +109,14 @@ def event (domain : Digest) (ingress : Ingress) : StableEvent where
   domain := domain
   eventId := (Sp800185Cshake256.hash
     "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EVENT/v1".toUTF8.toList
-    ingress.canonicalBytes).digest
+    (digestStream.encode domain ++ ingress.canonicalBytes)).digest
   canonicalBytes := ingress.canonicalBytes
 
 theorem event_retains_ingress (domain : Digest) (ingress : Ingress) :
     (event domain ingress).canonicalBytes = ingress.canonicalBytes := rfl
+
+theorem event_retains_domain (domain : Digest) (ingress : Ingress) :
+    (event domain ingress).domain = domain := rfl
 
 /-- The app request signs both the complete canonical grant and the ordinary
 birth descriptor, so a grant payload cannot be spliced into another birth. -/
