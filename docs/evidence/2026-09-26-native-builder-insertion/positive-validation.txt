@@ -1,0 +1,12 @@
+baseline_snapshot=/private/tmp/minidregg-provider-metering-op6-native
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-provider-metering-op6
+baseline_binary_sha256=b7a0dd64e20aa2bdf1dc60c151152cee866d526e131beb1cd97fb4a6ade4c412
+changed_module=Kernel.FnOriginOutbox
+unchanged_imported_modules=157
+unchanged_later_sources=11
+additional_changed_sources=2
+inserted_source_modules=1
+restart_source_unchanged=1
+changed_source_manifest=/private/tmp/minidregg-overnight-20260926/build-insert-positive-ownr/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=5fb063ab84b78920aa455563a69672e1cd9bee9149c56de342d9401473170387

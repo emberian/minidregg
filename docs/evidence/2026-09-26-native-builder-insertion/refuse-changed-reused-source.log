@@ -1,0 +1,4 @@
+warning: mathlib: repository '/private/tmp/minidregg-provider-ownr-insertion-test/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-provider-ownr-insertion-test/.lake/packages/batteries' has local changes
+build-native-host: imported source/artifact changed: Compiler/PredCompile.lean
+exit_code=65

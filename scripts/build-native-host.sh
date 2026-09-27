@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...]] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -25,6 +25,12 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
   --allow-suffix-change MODULE
               require this additional later source to differ from the baseline;
               compile it in the suffix and reject any undeclared source change
+  --allow-inserted-module MODULE
+              require this module to be newly inserted in the native import
+              closure at or after the suffix start; recompile the whole suffix
+  --allow-unchanged-restart
+              permit an unchanged suffix-start source only with an explicitly
+              declared insertion later in the freshly computed closure
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -43,6 +49,8 @@ incremental_baseline_output=""
 incremental_changed_module=""
 incremental_suffix_mode=0
 suffix_allowed_modules=()
+inserted_modules=()
+allow_unchanged_restart=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -68,7 +76,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-suffix-change)
       [[ $# -ge 2 && -n "$2" ]] || { usage >&2; exit 64; }
-      for allowed in "${suffix_allowed_modules[@]}"; do
+      for allowed in "${suffix_allowed_modules[@]+"${suffix_allowed_modules[@]}"}"; do
         [[ "$allowed" != "$2" ]] || {
           printf 'build-native-host: duplicate suffix change: %s\n' "$2" >&2
           exit 64
@@ -76,6 +84,21 @@ while [[ $# -gt 0 ]]; do
       done
       suffix_allowed_modules+=("$2")
       shift 2
+      ;;
+    --allow-inserted-module)
+      [[ $# -ge 2 && -n "$2" ]] || { usage >&2; exit 64; }
+      for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
+        [[ "$inserted" != "$2" ]] || {
+          printf 'build-native-host: duplicate inserted module: %s\n' "$2" >&2
+          exit 64
+        }
+      done
+      inserted_modules+=("$2")
+      shift 2
+      ;;
+    --allow-unchanged-restart)
+      allow_unchanged_restart=1
+      shift
       ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
@@ -106,8 +129,25 @@ if [[ ${#suffix_allowed_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]];
   printf 'build-native-host: suffix change allowlist requires --incremental-suffix-from\n' >&2
   exit 64
 fi
+if [[ ${#inserted_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]]; then
+  printf 'build-native-host: inserted module allowlist requires --incremental-suffix-from\n' >&2
+  exit 64
+fi
+if [[ "$allow_unchanged_restart" == 1 && ${#inserted_modules[@]} == 0 ]]; then
+  printf 'build-native-host: unchanged restart requires an inserted module\n' >&2
+  exit 64
+fi
+for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
+  for allowed in "${suffix_allowed_modules[@]+"${suffix_allowed_modules[@]}"}"; do
+    if [[ "$inserted" == "$allowed" ]]; then
+      printf 'build-native-host: module cannot be both changed and inserted: %s\n' \
+        "$inserted" >&2
+      exit 64
+    fi
+  done
+done
 
-for command in git jq lake file find sort join comm xargs shasum uname cmp; do
+for command in git jq lake file find sort join comm xargs shasum uname cmp head awk uniq; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
@@ -223,6 +263,12 @@ jq -r '.[]' "$closure" | while IFS= read -r module; do
 done > "$source_modules"
 grep -qxF Host.Main "$source_modules" || printf '%s\n' Host.Main >> "$source_modules"
 
+package_required="$output_dir/package-modules.txt"
+jq -r '.[]' "$closure" | while IFS= read -r module; do
+  relative=${module//./\/}.lean
+  [[ -f "$relative" ]] || printf '%s\n' "$module"
+done | sort -u > "$package_required"
+
 build_modules="$output_dir/build-modules.txt"
 if [[ "$build_umbrella" == 1 ]]; then
   umbrella_closure="$output_dir/umbrella-transitive-imports.json"
@@ -285,6 +331,7 @@ if [[ -n "$incremental_baseline_root" ]]; then
   for baseline_file in "$baseline_manifest" "$baseline_sources" \
       "$baseline_artifacts" "$baseline_reusable" "$baseline_packages" \
       "$incremental_baseline_output/source-modules.txt" \
+      "$incremental_baseline_output/package-modules.txt" \
       "$incremental_baseline_output/compile-args.txt"; do
     [[ -f "$baseline_file" ]] || {
       printf 'build-native-host: missing baseline evidence: %s\n' "$baseline_file" >&2
@@ -319,10 +366,63 @@ if [[ -n "$incremental_baseline_root" ]]; then
     > "$output_dir/baseline-source-check.log"
   (cd "$incremental_baseline_root" && shasum -a 256 -c "$baseline_reusable") \
     > "$output_dir/baseline-reusable-check.log"
-  cmp -s "$source_modules" "$incremental_baseline_output/source-modules.txt" || {
-    printf 'build-native-host: incremental import closure changed\n' >&2
-    exit 65
-  }
+  if [[ ${#inserted_modules[@]} == 0 ]]; then
+    cmp -s "$source_modules" "$incremental_baseline_output/source-modules.txt" || {
+      printf 'build-native-host: incremental import closure changed\n' >&2
+      exit 65
+    }
+  else
+    # Lake may reorder unchanged modules after a new import. The reusable
+    # prefix must be identical in order; beyond the restart, the old closure
+    # must survive as a set and every extra member must be declared. The whole
+    # new suffix is compiled in its freshly computed topological order.
+    baseline_sorted="$output_dir/baseline-source-modules-sorted.txt"
+    current_sorted="$output_dir/current-source-modules-sorted.txt"
+    sort "$incremental_baseline_output/source-modules.txt" > "$baseline_sorted"
+    sort "$source_modules" > "$current_sorted"
+    if [[ -n "$(uniq -d "$baseline_sorted")" || -n "$(uniq -d "$current_sorted")" ]]; then
+      printf 'build-native-host: duplicate module in native source closure\n' >&2
+      exit 65
+    fi
+    missing_baseline="$output_dir/missing-baseline-source-modules.txt"
+    comm -23 "$baseline_sorted" "$current_sorted" > "$missing_baseline"
+    if [[ -s "$missing_baseline" ]]; then
+      printf 'build-native-host: inserted closure removed baseline modules; see %s\n' \
+        "$missing_baseline" >&2
+      exit 65
+    fi
+    inserted_seen="$output_dir/inserted-source-modules.txt"
+    comm -13 "$baseline_sorted" "$current_sorted" > "$inserted_seen"
+    declared_sorted="$output_dir/declared-inserted-modules-sorted.txt"
+    printf '%s\n' "${inserted_modules[@]}" | sort > "$declared_sorted"
+    if ! cmp -s "$inserted_seen" "$declared_sorted"; then
+      printf 'build-native-host: inserted closure differs from declared modules\n' >&2
+      exit 65
+    fi
+    current_prefix="$output_dir/current-reused-prefix.txt"
+    baseline_prefix="$output_dir/baseline-reused-prefix.txt"
+    awk -v restart="$incremental_changed_module" '$0 == restart { exit } { print }' \
+      "$source_modules" > "$current_prefix"
+    head -n "$(wc -l < "$current_prefix" | tr -d ' ')" \
+      "$incremental_baseline_output/source-modules.txt" > "$baseline_prefix"
+    cmp -s "$current_prefix" "$baseline_prefix" || {
+      printf 'build-native-host: insertion or reorder precedes suffix restart\n' >&2
+      exit 65
+    }
+    while IFS= read -r module; do
+      stem=${module//./\/}
+      if [[ -e "$incremental_baseline_root/$stem.lean" || ! -f "$stem.lean" ]]; then
+        printf 'build-native-host: declared inserted source is not new: %s\n' \
+          "$stem.lean" >&2
+        exit 65
+      fi
+    done < "$inserted_seen"
+    # A new local module may not silently pull new, unpinned package objects.
+    cmp -s "$package_required" "$incremental_baseline_output/package-modules.txt" || {
+      printf 'build-native-host: inserted closure changed package requirements\n' >&2
+      exit 65
+    }
+  fi
   [[ -f lakefile.lean || -f lakefile.toml ]] || {
     printf 'build-native-host: neither Lake project file exists\n' >&2
     exit 65
@@ -348,16 +448,33 @@ if [[ -n "$incremental_baseline_root" ]]; then
       "$incremental_changed_module" >&2
     exit 65
   }
-  [[ -f "$changed_source" && -f "$incremental_baseline_root/$changed_source" &&
-      ! "$changed_source" -ef "$incremental_baseline_root/$changed_source" ]] || {
-    printf 'build-native-host: changed module must be in an independent copy: %s\n' \
-      "$changed_source" >&2
-    exit 73
-  }
-  if cmp -s "$incremental_baseline_root/$changed_source" "$changed_source"; then
-    printf 'build-native-host: incremental source is unchanged: %s\n' \
-      "$changed_source" >&2
-    exit 65
+  changed_is_inserted=0
+  for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
+    [[ "$inserted" == "$incremental_changed_module" ]] && changed_is_inserted=1
+  done
+  if [[ "$changed_is_inserted" == 1 ]]; then
+    [[ -f "$changed_source" && ! -e "$incremental_baseline_root/$changed_source" ]] || {
+      printf 'build-native-host: suffix start is not a new source: %s\n' \
+        "$changed_source" >&2
+      exit 65
+    }
+  else
+    [[ -f "$changed_source" && -f "$incremental_baseline_root/$changed_source" &&
+        ! "$changed_source" -ef "$incremental_baseline_root/$changed_source" ]] || {
+      printf 'build-native-host: changed module must be in an independent copy: %s\n' \
+        "$changed_source" >&2
+      exit 73
+    }
+    if cmp -s "$incremental_baseline_root/$changed_source" "$changed_source"; then
+      if [[ "$allow_unchanged_restart" != 1 ]]; then
+        printf 'build-native-host: incremental source is unchanged: %s\n' \
+          "$changed_source" >&2
+        exit 65
+      fi
+      restart_source_unchanged=1
+    else
+      restart_source_unchanged=0
+    fi
   fi
   shasum -a 256 "$changed_source" > "$output_dir/changed-source-sha256.txt"
   reused_paths="$output_dir/reused-artifact-paths.nul"
@@ -365,6 +482,7 @@ if [[ -n "$incremental_baseline_root" ]]; then
   validated_sources=0
   validated_tail_sources=0
   validated_additional_changes=0
+  validated_insertions=$changed_is_inserted
   changed_seen=0
   while IFS= read -r module; do
     stem=${module//./\/}
@@ -374,12 +492,29 @@ if [[ -n "$incremental_baseline_root" ]]; then
     fi
     if [[ "$changed_seen" == 1 ]]; then
       allowed_change=0
-      for allowed in "${suffix_allowed_modules[@]}"; do
+      inserted_module=0
+      for allowed in "${suffix_allowed_modules[@]+"${suffix_allowed_modules[@]}"}"; do
         if [[ "$allowed" == "$module" ]]; then
           allowed_change=1
           break
         fi
       done
+      for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
+        if [[ "$inserted" == "$module" ]]; then
+          inserted_module=1
+          break
+        fi
+      done
+      if [[ "$inserted_module" == 1 ]]; then
+        if [[ -e "$incremental_baseline_root/$stem.lean" || ! -f "$stem.lean" ]]; then
+          printf 'build-native-host: declared inserted source is not new: %s\n' \
+            "$stem.lean" >&2
+          exit 65
+        fi
+        shasum -a 256 "$stem.lean" >> "$output_dir/changed-source-sha256.txt"
+        validated_insertions=$((validated_insertions + 1))
+        continue
+      fi
       if [[ ! -f "$incremental_baseline_root/$stem.lean" ||
             ! -f "$stem.lean" ]]; then
         printf 'build-native-host: later source absent: %s\n' "$stem.lean" >&2
@@ -423,6 +558,10 @@ if [[ -n "$incremental_baseline_root" ]]; then
       "$incremental_changed_module" >&2
     exit 65
   }
+  [[ "$validated_insertions" == "${#inserted_modules[@]}" ]] || {
+    printf 'build-native-host: declared inserted module was not reached in suffix\n' >&2
+    exit 65
+  }
   validated_packages=0
   while IFS= read -r object; do
     package_root=${object%%/.lake/build/ir/*}
@@ -449,6 +588,8 @@ if [[ -n "$incremental_baseline_root" ]]; then
     printf 'unchanged_imported_modules=%s\n' "$validated_sources"
     printf 'unchanged_later_sources=%s\n' "$validated_tail_sources"
     printf 'additional_changed_sources=%s\n' "$validated_additional_changes"
+    printf 'inserted_source_modules=%s\n' "$validated_insertions"
+    printf 'restart_source_unchanged=%s\n' "${restart_source_unchanged:-0}"
     printf 'changed_source_manifest=%s\n' "$output_dir/changed-source-sha256.txt"
     printf 'unchanged_package_objects=%s\n' "$validated_packages"
     printf 'changed_source_sha256=%s\n' \
@@ -460,8 +601,8 @@ if [[ -n "$incremental_baseline_root" ]]; then
   } > "$output_dir/incremental-validation.txt"
   shasum -a 256 "$toolchain/bin/lean" "$toolchain/bin/clang" \
     "$toolchain/bin/leanc" > "$output_dir/toolchain-sha256.txt"
-  printf 'incremental source/artifact check PASS %s earlier modules, %s declared later changes, %s unchanged later sources, %s package objects\n' \
-    "$validated_sources" "$validated_additional_changes" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
+  printf 'incremental source/artifact check PASS %s earlier modules, %s declared later changes, %s inserted modules, %s unchanged later sources, %s package objects\n' \
+    "$validated_sources" "$validated_additional_changes" "$validated_insertions" "$validated_tail_sources" "$validated_packages" | tee -a "$output_dir/build.log"
 fi
 
 if [[ "$build_umbrella" == 0 ]]; then
@@ -676,12 +817,6 @@ xargs -P "$native_jobs" -n 1 bash -c '
     > "$output_dir/c/${module//./_}.log" 2>&1
 ' build-module < "$source_modules"
 
-package_required="$output_dir/package-modules.txt"
-jq -r '.[]' "$closure" | while IFS= read -r module; do
-  relative=${module//./\/}.lean
-  [[ -f "$relative" ]] || printf '%s\n' "$module"
-done | sort -u > "$package_required"
-
 make_package_index() {
   find .lake/packages -type f -path '*/.lake/build/ir/*.c.o.export' -print | awk '
     {
@@ -875,6 +1010,8 @@ git status --short > "$output_dir/git-status.txt"
     printf 'incremental_changed_module=%s\n' "$incremental_changed_module"
     printf 'unchanged_imported_modules=%s\n' "$validated_sources"
     printf 'unchanged_later_sources=%s\n' "$validated_tail_sources"
+    printf 'inserted_source_modules=%s\n' "$validated_insertions"
+    printf 'restart_source_unchanged=%s\n' "${restart_source_unchanged:-0}"
     printf 'unchanged_package_objects=%s\n' "$validated_packages"
     printf 'reused_artifact_manifest=%s\n' "$output_dir/reused-artifact-sha256.txt"
   fi
