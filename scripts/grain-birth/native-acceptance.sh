@@ -128,7 +128,7 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
   --slurpfile tool "$EVIDENCE/tool-ready/view.json" \
   --slurpfile parent "$EVIDENCE/parent-ready/view.json" \
   --slurpfile challenge "$EVIDENCE/tool-ready/challenge.json" \
-  '{subject:"8",nonce:"41000",tariff:{base:"2",perBirth:"1"},
+  '{subject:"8",nonce:"41000",
     grainBirth:{tariff:{base:"2",perBirth:"1"},authorityRoot:$challenge[0].signing[0].authorityRoot,
       birth:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
         creator:"8",nonce:"41000",resources:[{kind:"object",storage:"content",
@@ -145,7 +145,7 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
       {kind:"account",target:"8",capability:"42"},
       {kind:"object",target:"7902",capability:"81"},
       {kind:"object",target:"7901",capability:"73"}]}' \
-  | jq 'del(.tariff)' >"$EVIDENCE/grain-birth-intent.json"
+  >"$EVIDENCE/grain-birth-intent.json"
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/grain-birth-intent.json" --intent-kind grain-birth-intent \
   --key "$EVIDENCE/tool.key" --dir "$EVIDENCE/grain-birth-attempt" \
@@ -160,6 +160,28 @@ jq -e '.page.grain.remaining == "47" and .page.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
 jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null
+
+# A same-profile owner-7 bare content birth is the positive factory-law
+# control. The only factory predicate alternative for worker 8 requires the
+# composite mode slot; both account predicates are the genesis's `all []`.
+jq '{subject:"7",nonce:"41500",
+    birth:(.grainBirth.birth | .creator="7" | .nonce="41500" |
+      .grainBirthTariff={base:"2",perBirth:"1"} |
+      .resources[0].target="8303" | .resources[0].owner="7" |
+      .resources[0].ownerCapability="103" |
+      .resources[0].controlCapability="104" |
+      .sourceCapabilities=["41"] | .feePayer="7"),
+    grants:[{kind:"object",target:"10",capability:"54"},
+      {kind:"account",target:"7",capability:"41"}]}' \
+  "$EVIDENCE/grain-birth-intent.json" >"$EVIDENCE/owner-bare-intent.json"
+"$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+  --intent "$EVIDENCE/owner-bare-intent.json" --intent-kind birth-intent \
+  --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/owner-bare-attempt" \
+  >"$EVIDENCE/owner-bare.stdout"
+confirmed "$EVIDENCE/owner-bare-attempt/outcome.json"
+query owner-bare-content 7 8303 103 "$EVIDENCE/controller.key" 41510
+jq -e '.page.document == "8303" and .page.entries == []' \
+  "$EVIDENCE/owner-bare-content/view.json" >/dev/null
 
 # The same worker's ordinary bare birth has valid source-account authority,
 # but the installed factory law has no grain-backed mode slot on that route.
@@ -179,7 +201,11 @@ if "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$EVIDENCE/worker-bare.stdout" 2>"$EVIDENCE/worker-bare.stderr"; then
   echo "worker bare birth unexpectedly accepted" >&2; exit 1
 fi
-jq -e '.type == "refused" and .phase == "6269727468" and
-    (.detail | startswith("61646d697373696f6e3a"))' \
+POLICY_REJECTION=$(printf '%s' \
+  'admission: Minidregg.Kernel.ResourceBirthPolicyController.Reject.policyRejected' \
+  | od -An -tx1 -v | tr -d ' \n')
+jq -e --arg policy_rejection "$POLICY_REJECTION" \
+  '.type == "refused" and .phase == "6269727468" and
+    .detail == $policy_rejection' \
   "$EVIDENCE/worker-bare-attempt/outcome.json" >/dev/null
 echo "grain-backed resource birth native acceptance PASS"
