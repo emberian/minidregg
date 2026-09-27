@@ -7,6 +7,16 @@ then changes only the two tariff fields, initial payer balances, and the
 member's underfunded balance. It hashes inputs before and after execution and
 keeps stage logs on failure. Do not point it at an existing Store.
 
+The reviewed portable source inputs are
+`scripts/workroom/provision.sh` SHA-256 `4648f7222897de69e3454c8b7abad7022719697594c0b987fe24a0bb000ba9c8`,
+`scripts/grain-birth/native-share-member.sh` SHA-256 `274f27ae1bd5328a49eeffd382045472d471d0097b16136c239f50e322af5524`, and
+`scripts/application-current-birth/native-share-base.sh` SHA-256 `b62a2d4ae17b6aa85a663fada3779eca3be10e252bffea1b7066e501ee9015cd`.
+The latter two were recovered byte-for-byte from the successful fresh
+`/tmp/mini-application-current-birth-20260927/run-r3` fixture's retained
+`source/scripts/` on Persvati; the provisioner already existed in the repo
+with the same hash. These scripts generate keys inside the private runtime
+evidence directory; they contain no embedded private keys.
+
 `native-acceptance.sh` uses that base with a source-matched Host and Mini. It
 checks private op32 custody, payer/funding/header tamper refusal, a same-Spec
 low-balance alternate-payer refusal with unchanged full Store image, exact signed fee
@@ -25,8 +35,9 @@ Set `MINI_LEAN_ROOT` and `FEE_SOURCE` for `inspect-signed-fee.sh`; it claims one
 Lean seat and runs from the source-qualified build tree. Pin every executable
 and source hash in the resulting evidence before interpreting a verdict.
 
-Set `IDENTITY_ROOTS` to the `roots.json` authored by
-`author-gitweb-identity.lean` and set `PACKAGE_ROOT`, `INTERFACE_ROOT`, and
+Set `IDENTITY_ROOTS` to `scripts/application-share-issue/gitweb-roots.json`,
+the exact `roots.json` authored by `author-gitweb-identity.lean`, and set
+`PACKAGE_ROOT`, `INTERFACE_ROOT`, and
 `SCHEMA_ROOT` to its matching package, web-interface, and schema roots. The
 script compares all three before creating a Store and retains the roots-file
 hash; it also pins the exact GitWeb author output `roots.json` SHA-256
