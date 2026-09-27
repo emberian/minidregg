@@ -164,8 +164,6 @@ pub(crate) struct CurrentClaims {
     pub session_generation: String,
     pub parent_generation: String,
     pub purse_generation: String,
-    pub app_root: String,
-    pub session_root: String,
     pub app_physical_root: String,
     pub session_physical_root: String,
     pub parent_physical_root: String,
@@ -179,8 +177,6 @@ impl CurrentClaims {
             &self.session_generation,
             &self.parent_generation,
             &self.purse_generation,
-            &self.app_root,
-            &self.session_root,
             &self.app_physical_root,
             &self.session_physical_root,
             &self.parent_physical_root,
@@ -502,8 +498,14 @@ pub(crate) fn match_committed_inspection(input: CommittedMatch<'_>) -> io::Resul
     let image = inspected
         .get("currentImage")
         .ok_or_else(|| refused("current image absent"))?;
-    same(image, "appRoot", &current.app_root)?;
-    same(image, "sessionRoot", &current.session_root)?;
+    // Logical roots are reported by the verified committed projection, but
+    // op80 exposes only complete physical cell roots. Do not invent a
+    // pre-reserve logical-root transport claim to compare here.
+    for name in ["appRoot", "sessionRoot"] {
+        if !decimal(field(image, name)?) {
+            return Err(refused("lifetime committed logical root malformed"));
+        }
+    }
     let parent = inspected
         .get("parent")
         .ok_or_else(|| refused("parent absent"))?;
@@ -593,8 +595,6 @@ mod tests {
             session_generation: "5".into(),
             parent_generation: "6".into(),
             purse_generation: "7".into(),
-            app_root: "100".into(),
-            session_root: "101".into(),
             app_physical_root: "200".into(),
             session_physical_root: "201".into(),
             parent_physical_root: "202".into(),
@@ -734,7 +734,7 @@ mod tests {
                 "subject":lineage.participant_subject,
                 "originalOrigin":{"type":"agent","task":lineage.original_parent_task,
                     "generation":lineage.original_parent_generation}},
-            "currentImage":{"appRoot":current.app_root,"sessionRoot":current.session_root},
+            "currentImage":{"appRoot":"100","sessionRoot":"101"},
             "parent":{"task":lineage.parent_task,
                 "generation":current.parent_generation,
                 "physicalRoot":current.parent_physical_root},
