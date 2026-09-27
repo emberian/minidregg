@@ -21,7 +21,10 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch,
 47=paid agent dispatch receipt-only lookup, 48=private paid dispatch plan,
 49=private paid dispatch assembly, 58=private agent reserve plan,
-59=private agent reserve assembly. Op34/46 success uses a distinct
+59=private agent reserve assembly, 60=selected fn coverage submit,
+61=selected fn coverage receipt-only lookup, 62=empty fn progress submit,
+63=empty fn progress receipt-only lookup, 64=private fn frontier plan,
+65=private fn frontier detached assembly. Op34/46 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -34,6 +37,8 @@ import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnConsumerProgress
 import Kernel.FnConsumerNamespaceReceiver
+import Kernel.FnSelectedPollReceiver
+import Kernel.FnEmptyPollReceiverV2
 import Kernel.FnCatalogOwnRProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
@@ -64,6 +69,7 @@ import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
+import Host.FnConsumerFrontierPlan
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -499,6 +505,8 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleClaimInspection.inspect bytes
   else if kind == "fn-consumer-namespace-plan" then
     FnConsumerNamespacePlan.inspectPlanBytes bytes
+  else if kind == "fn-consumer-frontier-plan" then
+    FnConsumerFrontierPlan.inspectPlanBytes bytes
   else if kind == "application-agent-reserve-plan" then
     ApplicationDispatchAgentPaidInspection.inspectReservePlan bytes
   else if kind == "application-agent-paid-dispatch-plan" then
@@ -799,6 +807,67 @@ def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
     | return .refused "fn-consumer-namespace".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   match FnConsumerNamespaceReceiver.lookupVerified session.verified ingress with
+  | none => return .absent
+  | some (.ok receipt) => return .confirmed .replayed receipt
+  | some (.error detail) => return .uncertain detail.toUTF8.toList
+
+/-- Event17 is a verified Mini commitment to one pinned local first-match
+observation. It never implies that an external fn delivery is complete. -/
+def fnSelectedPollSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← FnSelectedPollReceiver.receiveVerified session.verified payload
+  let outcome ← match result with
+  | .confirmed kind receipt =>
+      sessionConfirmed config state kind receipt.transactionId receipt.eventId
+  | .rejected _ =>
+      pure (.refused "fn-selected-poll".toUTF8.toList "request refused".toUTF8.toList)
+  | .transactionConflict =>
+      pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+  | .contention => pure .contention
+  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+def fnSelectedPollLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let some ingress := FnSelectedPollCoverage.ingressCodec.decode payload
+    | return .refused "fn-selected-poll".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  match FnSelectedPollReceiver.lookupVerified session.verified ingress with
+  | none => return .absent
+  | some (.ok receipt) => return .confirmed .replayed receipt
+  | some (.error detail) => return .uncertain detail.toUTF8.toList
+
+/-- Event19 advances the same durable frontier for a bounded empty page. -/
+def fnEmptyPollSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← FnEmptyPollReceiverV2.receiveVerified session.verified payload
+  let outcome ← match result with
+  | .confirmed kind receipt =>
+      sessionConfirmed config state kind receipt.transactionId receipt.eventId
+  | .rejected _ =>
+      pure (.refused "fn-empty-poll-v2".toUTF8.toList "request refused".toUTF8.toList)
+  | .transactionConflict =>
+      pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+  | .contention => pure .contention
+  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+def fnEmptyPollLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let some ingress := FnEmptyPollProgressV2.ingressCodec.decode payload
+    | return .refused "fn-empty-poll-v2".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  match FnEmptyPollReceiverV2.lookupVerified session.verified ingress with
   | none => return .absent
   | some (.ok receipt) => return .confirmed .replayed receipt
   | some (.error detail) => return .uncertain detail.toUTF8.toList
@@ -2533,6 +2602,128 @@ def fnNamespaceLocalZero (config : NativeHost.Config)
     throw (IO.userError "fn namespace activation requires native ACK zero")
   return (scope, FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath)
 
+/-- Exact configured fn identity for post-registration progress. Position is
+checked against the replay-minted Mini predecessor by the caller. -/
+def fnFrontierLocalScope (config : NativeHost.Config)
+    (service : FnPollService) : IO (FnPollScopePin × FnConsumerScope.Scope ×
+      List UInt8 × NativeHost.FnGatewayPin) := do
+  let gateway ← requireGateway config
+  let pinJson ← readJson service.fnPinPath
+  IO.ofExcept (requireExactFields "fn frontier binary pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] pinJson)
+  let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
+  let policyJson ← readJson service.policyPath
+  IO.ofExcept (requireExactFields "fn frontier gateway policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let policy : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  unless policy.policy.matchesGateway gateway do
+    throw (IO.userError "fn frontier operator policy differs from configured gateway")
+  let scopePin ← selectedFnScope service.scopePath
+  let scope ← IO.ofExcept scopePin.progressScope
+  return (scopePin, scope,
+    FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath, gateway)
+
+def fnFrontierPlanRequestCodec :=
+  ResourceBirthCodec.strictCodec
+    (NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN-REQUEST/v2".toUTF8.toList
+      (StreamCodec.option digestStream))
+
+/-- Op64 polls only the configured local consumer. The optional transaction ID
+selects an already accepted Mini event13; `none` selects a bounded empty page.
+No cursor, fn status, root, gateway, or scope is accepted in the request. -/
+def fnFrontierPrepareSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (service : FnPollService)
+    (releaseKey : Option Minidregg.Theory.TypedAuthorization.Digest) :
+    IO FnConsumerFrontierPlan.Plan := do
+  let (scopePin, scope, binding, gateway) ← fnFrontierLocalScope config service
+  let key : FnConsumerFrontierCore.Key :=
+    ⟨gateway.application, scope, binding, gateway.subject, gateway.target,
+      gateway.capability⟩
+  let session ← sessionCurrent config state
+  let cursor ← IO.ofExcept (session.verified.frontierCursor key)
+  let registration ← match session.verified.frontier.registrations.find?
+      (fun original => original.ingress.spec.consumerNamespace == key.namespace) with
+    | none => throw (IO.userError "fn frontier has no admitted namespace")
+    | some original => pure original
+  let _ ← IO.ofExcept (session.verified.frontierRegistration key registration.receipt)
+  IO.FS.withTempDir fun directory => do
+    let executable ← snapshotOperatorFile directory "fn-frontier-helper"
+      service.fnExecutable (64 * 1024 * 1024) "0500"
+    let (position, before) ← queryFnConsumerPosition executable scopePin
+      service.controlPath
+    unless position == before.committedAck && position == cursor.position do
+      throw (IO.userError "fn frontier local ACK differs from verified Mini predecessor")
+    let cursorPath := (directory / "cursor.fncu").toString
+    let reportPath := (directory / "report.fn-e").toString
+    let (cursorBytes, reportBytes) ← invokeFnConsumerPollRaw executable scopePin
+      service.controlPath cursorPath reportPath
+    let mut selected : Option FnSelectedPollCoverage.Spec := none
+    let mut empty : Option FnEmptyPollProgressV2.Spec := none
+    let mut sourceBytes : List UInt8 := []
+    match releaseKey with
+    | some transaction =>
+        unless !reportBytes.isEmpty do
+          throw (IO.userError "selected fn frontier poll produced an empty page")
+        let (projectedCursor, projectedReport, projection) ←
+          projectFnPoll executable scopePin cursorPath reportPath
+        unless projectedCursor == cursorBytes && sameBytes projectedReport reportBytes &&
+            cursor.position ≤ projection.sequence &&
+            projection.sequence + 1 == projection.position &&
+            projection.position ≤ cursor.position + FnConsumerScope.maxPollScan do
+          throw (IO.userError "selected fn poll is outside authenticated scan window")
+        let original ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal
+          config session.target session.verified transaction
+          projection.source projection.messageId
+        sourceBytes := projection.source
+        selected := some
+          { domain := config.deployment.domain
+            semantics := config.profile.semantics
+            evidence :=
+              { key := key
+                fromPosition := cursor.position
+                selectedSequence := projection.sequence
+                toPosition := projection.position
+                predecessor := cursor.receipt
+                cursor := cursorBytes
+                reportDigest := FnConsumerFrontierCore.reportDigest reportBytes
+                sourceDigest := FnConsumerFrontierCore.sourceDigest projection.source
+                messageId := projection.messageId
+                releaseReceipt := original.receipt
+                releaseKey := transaction }
+            registrationReceipt := registration.receipt
+            gatewaySubject := gateway.subject
+            gatewayTarget := gateway.target
+            gatewayCapability := gateway.capability }
+    | none =>
+        unless reportBytes.isEmpty do
+          throw (IO.userError "empty fn frontier poll returned an article")
+        let some (fromPosition, toPosition) ← classifyFnEmptyPoll executable scopePin
+            service.controlPath cursorPath reportPath cursorBytes before
+          | throw (IO.userError "fn frontier poll is idle")
+        unless fromPosition == cursor.position do
+          throw (IO.userError "empty fn poll differs from verified Mini predecessor")
+        empty := some
+          { domain := config.deployment.domain
+            semantics := config.profile.semantics
+            evidence :=
+              { key := key
+                fromPosition := fromPosition
+                toPosition := toPosition
+                predecessor := cursor.receipt
+                cursor := cursorBytes
+                reportDigest := FnConsumerFrontierCore.reportDigest reportBytes }
+            registrationReceipt := registration.receipt
+            gatewaySubject := gateway.subject
+            gatewayTarget := gateway.target
+            gatewayCapability := gateway.capability }
+    let (afterPosition, after) ← queryFnConsumerPosition executable scopePin
+      service.controlPath
+    unless afterPosition == position && after.committedAck == before.committedAck do
+      throw (IO.userError "fn frontier local ACK changed during poll")
+    IO.ofExcept (FnConsumerFrontierPlan.prepare config session.opened
+      selected empty cursorBytes reportBytes sourceBytes)
+
 def selectedFnNewPaths (paths : List String) : IO Unit := do
   unless paths.all (·.startsWith "/") && paths.eraseDups.length == paths.length do
     throw (IO.userError "selected-release fn paths must be distinct absolute paths")
@@ -2568,11 +2759,13 @@ def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
       projectFnPoll executable scope cursorPath reportPath
     unless cursor == selectedCursor && sameBytes report selectedReport do
       throw (IO.userError "selected-release fn poll changed during projection")
-    -- Qualified fn can scan past unrelated committed records before returning
-    -- an article. Only the immediately adjacent record may be ACKed here.
-    unless projection.sequence == fromPosition &&
-        projection.position == fromPosition + 1 do
-      throw (IO.userError "selected-release fn poll crossed unrelated backlog")
+    -- Qualified fn scans at most one bounded first-match page. This route
+    -- emits only an owner-signed recipient candidate, never an fn ACK.
+    -- Event17 must later record the exact local observation before ACK.
+    unless fromPosition ≤ projection.sequence &&
+        projection.position == projection.sequence + 1 &&
+        projection.position ≤ fromPosition + FnConsumerScope.maxPollScan do
+      throw (IO.userError "selected-release fn poll exceeds bounded scan")
     let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
     unless afterPosition == fromPosition && after.committedAck == before.committedAck do
       throw (IO.userError "selected-release fn poll position changed before candidate")
@@ -2596,16 +2789,21 @@ def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
 /-- Reproject the exact retained cursor/event and select the original accepted
 Mini event 13 from a fresh verifier-opened Store. Before a new ACK, repeat the
 authenticated local poll and require the fn Store to return those same bytes. -/
-def selectedReleaseFnAck (config : NativeHost.Config) (fnBinary scopePath controlPath
-    cursorPath reportPath transaction resultPath : String) : IO UInt32 := do
-  unless [fnBinary, scopePath, controlPath, cursorPath, reportPath, resultPath].all
-      (·.startsWith "/") && cursorPath != reportPath &&
-      resultPath != cursorPath && resultPath != reportPath do
+def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
+    (cursorPath reportPath transaction coveragePath resultPath : String) : IO UInt32 := do
+  let fnBinary := service.fnExecutable
+  let controlPath := service.controlPath
+  unless [fnBinary, controlPath, cursorPath, reportPath, coveragePath,
+      resultPath].all (·.startsWith "/") && cursorPath != reportPath &&
+      resultPath != cursorPath && resultPath != reportPath &&
+      coveragePath != cursorPath && coveragePath != reportPath &&
+      coveragePath != resultPath do
     throw (IO.userError "selected-release fn ACK paths must be distinct absolute paths")
   selectedFnNewPaths [resultPath]
   let transactionId : Minidregg.Theory.TypedAuthorization.Digest :=
     ⟨← IO.ofExcept (exactDecimal "accepted Mini transaction" transaction)⟩
-  let scope ← selectedFnScope scopePath
+  let (scope, progressScope, binding, gateway) ←
+    fnFrontierLocalScope config service
   IO.FS.withTempDir fun directory => do
     let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
       fnBinary (64 * 1024 * 1024) "0500"
@@ -2618,13 +2816,37 @@ def selectedReleaseFnAck (config : NativeHost.Config) (fnBinary scopePath contro
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
     let selected ← IO.ofExcept <| FnSelectiveReleaseFnAck.selectOriginal config
       target verified transactionId projection.source projection.messageId
+    let coverageBytes ← readBoundedBytes coveragePath 16384
+    let some coverage := FnSelectedPollCoverage.ingressCodec.decode coverageBytes
+      | throw (IO.userError "selected-release fn ACK lacks canonical event17 ingress")
+    let some (.ok coverageReceipt) :=
+        FnSelectedPollReceiver.lookupVerified verified coverage
+      | throw (IO.userError "selected-release fn ACK lacks an admitted event17 receipt")
+    let evidence := coverage.spec.evidence
+    unless evidence.key.application == gateway.application &&
+        evidence.key.scope == progressScope &&
+        evidence.key.controlBinding == binding &&
+        evidence.key.gatewaySubject == gateway.subject &&
+        evidence.key.gatewayTarget == gateway.target &&
+        evidence.key.gatewayCapability == gateway.capability &&
+        evidence.releaseKey == transactionId &&
+        evidence.releaseReceipt == selected.receipt &&
+        evidence.cursor == cursor &&
+        evidence.reportDigest == FnConsumerFrontierCore.reportDigest report &&
+        evidence.sourceDigest == FnConsumerFrontierCore.sourceDigest projection.source &&
+        evidence.messageId == projection.messageId &&
+        evidence.selectedSequence == projection.sequence &&
+        evidence.toPosition == projection.position do
+      throw (IO.userError "selected-release fn ACK differs from durable coverage")
+    let _ ← IO.ofExcept (verified.frontierRegistration evidence.key
+      coverage.spec.registrationReceipt)
     let (currentPosition, currentStatus) ←
       queryFnConsumerPosition executable scope controlPath
     unless currentPosition == currentStatus.committedAck do
       throw (IO.userError "selected-release fn ACK lacks an exact durable position")
     unless currentStatus.committedAck ≥ projection.position ||
-        currentStatus.committedAck + 1 == projection.position do
-      throw (IO.userError "selected-release fn ACK would cross unrelated backlog")
+        currentStatus.committedAck == evidence.fromPosition do
+      throw (IO.userError "selected-release fn ACK differs from covered predecessor")
     let mut status := "covered-by-durable-frontier"
     let mut committedAck := currentStatus.committedAck
     if committedAck < projection.position then do
@@ -2663,9 +2885,109 @@ def selectedReleaseFnAck (config : NativeHost.Config) (fnBinary scopePath contro
       [("type", toJson "selected-release-fn-ack-v1"),
        ("miniTransactionId", toJson transaction),
        ("miniReceipt", evidenceReceiptJson selected.receipt),
+       ("coverageReceipt", evidenceReceiptJson coverageReceipt),
        ("fnStoreSequence", toJson (toString projection.sequence)),
        ("fnStoreTransactionId", toJson (toString projection.transactionId)),
        ("fnPosition", toJson (toString projection.position)),
+       ("fnCommittedAck", toJson (toString committedAck)),
+       ("fnAck", toJson status)]
+    if status == "durable-accepted" || status == "covered-by-durable-frontier" then pure 0
+    else if status == "refused" then pure 2
+    else if status == "uncertain" then pure 3
+    else pure 1
+
+/-- An empty-page ACK consumes only a durably accepted event19. The exact
+retained cursor/report and a fresh pinned local poll must agree before the fn
+ACK call; a transport cursor alone cannot skip a Mini predecessor. -/
+def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
+    (cursorPath reportPath coveragePath resultPath : String) : IO UInt32 := do
+  let fnBinary := service.fnExecutable
+  let controlPath := service.controlPath
+  unless [fnBinary, controlPath, cursorPath, reportPath, coveragePath,
+      resultPath].all (·.startsWith "/") &&
+      [cursorPath, reportPath, coveragePath, resultPath].eraseDups.length == 4 do
+    throw (IO.userError "empty fn ACK paths must be distinct absolute paths")
+  selectedFnNewPaths [resultPath]
+  let (scope, progressScope, binding, gateway) ←
+    fnFrontierLocalScope config service
+  IO.FS.withTempDir fun directory => do
+    let executable ← snapshotOperatorFile directory "fn-empty-ack-helper"
+      fnBinary (64 * 1024 * 1024) "0500"
+    let cursor ← readBoundedBytes cursorPath 346
+    let report ← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes
+    unless !cursor.isEmpty && report.isEmpty do
+      throw (IO.userError "empty fn ACK retained poll is not empty")
+    let (inspectedScope, position) ← inspectFnConsumerCursor executable cursorPath
+    unless inspectedScope == progressScope do
+      throw (IO.userError "empty fn ACK cursor differs from pinned scope")
+    let target ← IO.ofExcept (← DurableReceiverIO.load config.storage.transport
+      ResourceBirthCodec.rootBytes)
+    let verified ← match ← NativeHostReplay.verifyLoaded config target with
+      | .ok verified => pure verified
+      | .error failure =>
+          throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")
+    let coverageBytes ← readBoundedBytes coveragePath 12288
+    let some coverage := FnEmptyPollProgressV2.ingressCodec.decode coverageBytes
+      | throw (IO.userError "empty fn ACK lacks canonical event19 ingress")
+    let some (.ok coverageReceipt) :=
+        FnEmptyPollReceiverV2.lookupVerified verified coverage
+      | throw (IO.userError "empty fn ACK lacks an admitted event19 receipt")
+    let evidence := coverage.spec.evidence
+    unless evidence.key.application == gateway.application &&
+        evidence.key.scope == progressScope &&
+        evidence.key.controlBinding == binding &&
+        evidence.key.gatewaySubject == gateway.subject &&
+        evidence.key.gatewayTarget == gateway.target &&
+        evidence.key.gatewayCapability == gateway.capability &&
+        evidence.cursor == cursor &&
+        evidence.reportDigest == FnConsumerFrontierCore.reportDigest report &&
+        evidence.toPosition == position do
+      throw (IO.userError "empty fn ACK differs from durable progress")
+    let _ ← IO.ofExcept (verified.frontierRegistration evidence.key
+      coverage.spec.registrationReceipt)
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition executable scope controlPath
+    unless currentPosition == currentStatus.committedAck &&
+        (currentPosition ≥ position || currentPosition == evidence.fromPosition) do
+      throw (IO.userError "empty fn ACK differs from covered predecessor")
+    let mut status := "covered-by-durable-frontier"
+    let mut committedAck := currentStatus.committedAck
+    if committedAck < position then do
+      let liveCursorPath := (directory / "current-cursor.fncu").toString
+      let liveReportPath := (directory / "current-report.fn-e").toString
+      let (liveCursor, liveReport) ← invokeFnConsumerPollRaw executable scope
+        controlPath liveCursorPath liveReportPath
+      unless cursor == liveCursor && report == liveReport && liveReport.isEmpty do
+        throw (IO.userError "empty fn ACK poll differs from retained page")
+      let child ← IO.Process.spawn
+        { cmd := executable, args := #["--fn", "consumer", "ack", controlPath, liveCursorPath],
+          stdin := .null, stdout := .piped, stderr := .null }
+      let output ← try readBoundedLoop child.stdout 128
+        catch error =>
+          child.kill
+          discard <| child.wait
+          throw error
+      let exitCode ← child.wait
+      unless cursor == (← readBoundedBytes cursorPath 346) &&
+          report == (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
+        throw (IO.userError "empty fn ACK inputs changed during local call")
+      status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+          "durable-accepted"
+        else if exitCode == 2 then "refused"
+        else if exitCode == 3 then "uncertain"
+        else "transport-fault"
+      let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
+      unless afterPosition == after.committedAck do
+        throw (IO.userError "empty fn ACK changed consumer scope")
+      committedAck := after.committedAck
+      if status == "durable-accepted" && committedAck < position then
+        throw (IO.userError "fn accepted empty ACK without durable cursor")
+      if status == "refused" && committedAck ≥ position then
+        status := "covered-by-durable-frontier"
+    writeJson resultPath <| Lean.Json.mkObj
+      [("type", toJson "fn-empty-page-ack-v2"),
+       ("coverageReceipt", evidenceReceiptJson coverageReceipt),
+       ("fnPosition", toJson (toString position)),
        ("fnCommittedAck", toJson (toString committedAck)),
        ("fnAck", toJson status)]
     if status == "durable-accepted" || status == "covered-by-durable-frontier" then pure 0
@@ -3918,7 +4240,8 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack FN-BINARY SCOPE.json CONTROL.sock CURSOR.fncu REPORT.fn-e MINI-TRANSACTION RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+"fn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
+"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -4066,6 +4389,52 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome ← applicationGrainShareIssueLookupSession
                               pinnedConfig state payload
                             return ((55 : UInt8), outcomeCodec.encode outcome)
+                        | 60 =>
+                            let outcome ← fnSelectedPollSubmitSession
+                              pinnedConfig state payload
+                            return ((60 : UInt8), outcomeCodec.encode outcome)
+                        | 61 =>
+                            let outcome ← fnSelectedPollLookupSession
+                              pinnedConfig state payload
+                            return ((61 : UInt8), outcomeCodec.encode outcome)
+                        | 62 =>
+                            let outcome ← fnEmptyPollSubmitSession
+                              pinnedConfig state payload
+                            return ((62 : UInt8), outcomeCodec.encode outcome)
+                        | 63 =>
+                            let outcome ← fnEmptyPollLookupSession
+                              pinnedConfig state payload
+                            return ((63 : UInt8), outcomeCodec.encode outcome)
+                        | 64 =>
+                            let some service := service
+                              | return ((255 : UInt8), failure "fn-frontier-plan"
+                                  "fn consumer service is not configured")
+                            let some releaseKey := fnFrontierPlanRequestCodec.decode payload
+                              | throw (IO.userError "noncanonical fn frontier plan request")
+                            let plan ← fnFrontierPrepareSession pinnedConfig state
+                              service releaseKey
+                            let bytes := FnConsumerFrontierPlan.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "fn frontier plan exceeds host frame bound")
+                            return ((64 : UInt8), bytes)
+                        | 65 =>
+                            let some service := service
+                              | return ((255 : UInt8), failure "fn-frontier-assemble"
+                                  "fn consumer service is not configured")
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := FnConsumerFrontierPlan.planCodec.decode planBytes
+                              | throw (IO.userError "noncanonical fn frontier signing plan")
+                            let releaseKey := plan.selected.map
+                              (fun spec => spec.evidence.releaseKey)
+                            let current ← fnFrontierPrepareSession pinnedConfig state
+                              service releaseKey
+                            unless current == plan do
+                              throw (IO.userError "fn frontier poll or Mini history changed before assembly")
+                            let opened ← sessionOpened pinnedConfig state
+                            let ingress ← IO.ofExcept <|
+                              FnConsumerFrontierPlan.assembleSignature
+                                pinnedConfig opened plan signature
+                            return ((65 : UInt8), ingress)
                         | 30 =>
                             let intent ← applicationCurrentBirthIntentSession
                               pinnedConfig state true payload
@@ -4498,11 +4867,113 @@ def run (arguments : List String) : IO UInt32 := do
             ingressPath resultPath
           pure 0
       | "selected-release-fn-ack",
-          [fnBinary, scopePath, controlPath, cursorPath, reportPath,
-           transaction, resultPath] =>
+          [cursorPath, reportPath, transaction, coveragePath, resultPath] =>
           withPinnedSignature config fun pinnedConfig =>
-            selectedReleaseFnAck pinnedConfig fnBinary scopePath controlPath
-              cursorPath reportPath transaction resultPath
+            withFnPollService settings fun selected => do
+              let some service := selected
+                | throw (IO.userError "selected-release fn service is not configured")
+              selectedReleaseFnAck pinnedConfig service cursorPath reportPath
+                transaction coveragePath resultPath
+      | "fn-empty-page-ack",
+          [cursorPath, reportPath, coveragePath, resultPath] =>
+          withPinnedSignature config fun pinnedConfig =>
+            withFnPollService settings fun selected => do
+              let some service := selected
+                | throw (IO.userError "empty fn service is not configured")
+              selectedEmptyFnAck pinnedConfig service cursorPath reportPath
+                coveragePath resultPath
+      | "fn-frontier-request", [kind, transaction, outputPath] =>
+          let releaseKey ← if kind == "selected" then do
+              let id ← IO.ofExcept (exactDecimal "selected Mini transaction" transaction)
+              pure (some (⟨id⟩ : Minidregg.Theory.TypedAuthorization.Digest))
+            else if kind == "empty" && transaction == "-" then pure none
+            else throw (IO.userError "fn frontier request kind must be selected or empty")
+          selectedFnNewPaths [outputPath]
+          writeBytes outputPath (fnFrontierPlanRequestCodec.encode releaseKey)
+          pure 0
+      | "fn-frontier-export", [planPath, cursorPath, reportPath, sourcePath] =>
+          selectedFnNewPaths [cursorPath, reportPath, sourcePath]
+          let bytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
+          let some plan := FnConsumerFrontierPlan.planCodec.decode bytes
+            | throw (IO.userError "noncanonical fn frontier signing plan")
+          let _ ← IO.ofExcept plan.proposal
+          writeBytes cursorPath plan.cursorBytes
+          writeBytes reportPath plan.reportBytes
+          writeBytes sourcePath plan.sourceBytes
+          pure 0
+      | "fn-frontier-plan",
+          [kind, transaction, planPath, cursorPath, reportPath, sourcePath] =>
+          withPinnedSignature config fun pinnedConfig =>
+            withFnPollService settings fun selected => do
+              let some service := selected
+                | throw (IO.userError "fn frontier service is not configured")
+              selectedFnNewPaths [planPath, cursorPath, reportPath, sourcePath]
+              let releaseKey ← if kind == "selected" then do
+                  let id ← IO.ofExcept (exactDecimal "selected Mini transaction" transaction)
+                  pure (some (⟨id⟩ : Minidregg.Theory.TypedAuthorization.Digest))
+                else if kind == "empty" && transaction == "-" then pure none
+                else throw (IO.userError "fn frontier plan kind must be selected or empty")
+              let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+              let state ← IO.mkRef (some session)
+              let plan ← fnFrontierPrepareSession pinnedConfig state service releaseKey
+              writeBytes planPath (FnConsumerFrontierPlan.planCodec.encode plan)
+              writeBytes cursorPath plan.cursorBytes
+              writeBytes reportPath plan.reportBytes
+              writeBytes sourcePath plan.sourceBytes
+              pure 0
+      | "fn-frontier-assemble", [planPath, signaturePath, outputPath] =>
+          withPinnedSignature config fun pinnedConfig =>
+            withFnPollService settings fun selected => do
+              let some service := selected
+                | throw (IO.userError "fn frontier service is not configured")
+              let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
+              let some plan := FnConsumerFrontierPlan.planCodec.decode planBytes
+                | throw (IO.userError "noncanonical fn frontier signing plan")
+              let signature ← readBoundedBytes signaturePath 64
+              let releaseKey := plan.selected.map (fun spec => spec.evidence.releaseKey)
+              let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+              let state ← IO.mkRef (some session)
+              let current ← fnFrontierPrepareSession pinnedConfig state service releaseKey
+              unless current == plan do
+                throw (IO.userError "fn frontier poll or Mini history changed before assembly")
+              let opened ← sessionOpened pinnedConfig state
+              let ingress ← IO.ofExcept <| FnConsumerFrontierPlan.assembleSignature
+                pinnedConfig opened plan signature
+              selectedFnNewPaths [outputPath]
+              writeBytes outputPath ingress
+              pure 0
+      | "fn-selected-poll-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input 16384
+            writeBytes output (outcomeCodec.encode
+              (← fnSelectedPollSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "fn-selected-poll-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input 16384
+            writeBytes output (outcomeCodec.encode
+              (← fnSelectedPollLookupSession pinnedConfig state ingress))
+            pure 0
+      | "fn-empty-poll-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input 12288
+            writeBytes output (outcomeCodec.encode
+              (← fnEmptyPollSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "fn-empty-poll-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input 12288
+            writeBytes output (outcomeCodec.encode
+              (← fnEmptyPollLookupSession pinnedConfig state ingress))
+            pure 0
       | "export-evidence", [input, output] =>
           let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
           let package ← IO.ofExcept (← FnEvidence.exportPackage config call)
