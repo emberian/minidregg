@@ -1,24 +1,26 @@
 //! Exact physical STOP target selected by Mini's current verified history.
-//! This module only checks the source-inspected witness against retained local
-//! state. The manager fence stays unavailable until hostd returns a typed
-//! before/after audit and the fresh op26 STOP callback is joined by the caller.
+//! A sealed fresh op26 claim may fence the running incarnation. Recovery can
+//! only resume its exact retained attempt from an already-Fenced journal row.
 #![allow(dead_code)]
 
-use crate::dispatch_native::{private_dir, write_new};
+use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::{Journal, Phase, Record, StopIdentity, UnitStopAudit};
-use crate::lifecycle_v3_native::{decimal, hex, lowercase_hex, unhex};
-use crate::lifecycle_v3_stop_claim_native::FreshStopClaim;
+use crate::lifecycle_v3_native::{decimal, framed_payload, hex, lowercase_hex, unhex};
+use crate::lifecycle_v3_stop_claim_native::{ExactReceipt, FreshStopClaim};
 use crate::volume_custody::VolumeWitness;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::OpenOptions;
+use std::fs::{DirBuilder, OpenOptions};
 use std::io::{self, Read};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 const MAX_INSPECTION: usize = 2 * 1024 * 1024;
+const MAX_FRAME: usize = 12_102_760;
 const MARKER_NAME: &str = "stop-fence-requested.json";
 const MAX_MARKER: u64 = 8192;
+const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -395,6 +397,169 @@ pub(crate) fn fence_exact(
         .fence_and_stop_manager_checked(&target.stop_identity(), || target.recheck_volume(volume))
 }
 
+fn read_private_artifact(path: &Path, max: usize) -> io::Result<Vec<u8>> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    let before = file.metadata()?;
+    if !before.is_file()
+        || before.uid() != unsafe { libc::geteuid() }
+        || before.nlink() != 1
+        || before.permissions().mode() & 0o777 != 0o600
+        || before.len() == 0
+        || before.len() > max as u64
+    {
+        return Err(invalid("STOP recovery inspection file custody refused"));
+    }
+    let mut bytes = Vec::with_capacity(before.len() as usize);
+    file.by_ref().take(max as u64 + 1).read_to_end(&mut bytes)?;
+    let after = file.metadata()?;
+    if bytes.len() as u64 != before.len()
+        || after.dev() != before.dev()
+        || after.ino() != before.ino()
+        || after.len() != before.len()
+        || after.mtime() != before.mtime()
+        || after.mtime_nsec() != before.mtime_nsec()
+        || after.ctime() != before.ctime()
+        || after.ctime_nsec() != before.ctime_nsec()
+    {
+        return Err(invalid("STOP recovery inspection changed during read"));
+    }
+    Ok(bytes)
+}
+
+fn retained_receipt(value: &Value) -> io::Result<ExactReceipt> {
+    ExactReceipt::new(
+        field(value, "transactionId")?,
+        field(value, "eventId")?,
+        field(value, "acceptedCount")?,
+        field(value, "imageBoundary")?,
+    )
+}
+
+fn receipt_fields(receipt: &ExactReceipt) -> ReceiptFields<'_> {
+    ReceiptFields {
+        transaction_id: receipt.transaction_id(),
+        event_id: receipt.event_id(),
+        accepted_count: receipt.accepted_count(),
+        image_boundary: receipt.image_boundary(),
+    }
+}
+
+/// Resume only a STOP that already crossed the fresh fence's durable Fenced
+/// boundary. Historical ingress or an op27 receipt cannot call `fence_exact`.
+/// The current pinned Host reselects the exact retained plan, committed op26
+/// frame and prior running event25; the private marker must match those bytes.
+/// The hostd recovery method independently requires Fenced under its lock.
+pub(crate) fn resume_fenced_exact(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    fresh_probe_dir: &Path,
+    journal: &Journal,
+    volume: &VolumeWitness,
+) -> io::Result<UnitStopAudit> {
+    private_dir(attempt_dir)?;
+    let retained_plan = read_private_artifact(&attempt_dir.join("stop-plan-v2.bin"), MAX_FRAME)?;
+    let original_begin =
+        read_private_artifact(&attempt_dir.join("original-begin-v3.bin"), MAX_FRAME)?;
+    let claim_ingress =
+        read_private_artifact(&attempt_dir.join("claim-ingress-v3.bin"), MAX_FRAME)?;
+    let retained_committed =
+        read_private_artifact(&attempt_dir.join("committed-v3.bin"), MAX_FRAME)?;
+    let original_frame = read_private_artifact(&attempt_dir.join("op26-frame.bin"), MAX_FRAME)?;
+    if framed_payload(&original_frame, 26, COMMITTED_TAG)? != retained_committed {
+        return Err(invalid("STOP recovery original op26 frame differs"));
+    }
+    let requested: Value = serde_json::from_slice(&read_private_artifact(
+        &attempt_dir.join("op26-requested.json"),
+        MAX_MARKER as usize,
+    )?)?;
+    if field(&requested, "protocol")? != "mini-spk-stop-claim-op26-requested-v1"
+        || field(&requested, "stopPlanSha256")? != hex(&Sha256::digest(&retained_plan))
+        || field(&requested, "originalBeginSha256")? != hex(&Sha256::digest(&original_begin))
+        || field(&requested, "claimIngressSha256")? != hex(&Sha256::digest(&claim_ingress))
+    {
+        return Err(invalid("STOP recovery original op26 attempt differs"));
+    }
+    let begin_receipt = retained_receipt(
+        requested
+            .get("beginReceipt")
+            .ok_or_else(|| invalid("STOP recovery original BEGIN receipt absent"))?,
+    )?;
+    let committed_view: Value = serde_json::from_slice(&read_private_artifact(
+        &attempt_dir.join("committed-v3.json"),
+        MAX_INSPECTION,
+    )?)?;
+    if field(&committed_view, "type")? != "application-lifecycle-claim-committed-v3"
+        || field(&committed_view, "kind")? != "stop"
+        || field(&committed_view, "frameHex")? != hex(&retained_committed)
+        || field(&committed_view, "originalClaimHex")? != hex(&claim_ingress)
+        || field(&committed_view, "originalBeginHex")? != hex(&original_begin)
+    {
+        return Err(invalid("STOP recovery original claim inspection differs"));
+    }
+    let claim_receipt = retained_receipt(
+        committed_view
+            .get("receipt")
+            .ok_or_else(|| invalid("STOP recovery original claim receipt absent"))?,
+    )?;
+    let probe_parent = fresh_probe_dir
+        .parent()
+        .ok_or_else(|| invalid("STOP recovery probe parent absent"))?;
+    private_dir(probe_parent)?;
+    DirBuilder::new().mode(0o700).create(fresh_probe_dir)?;
+    let plan_path = write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
+    let committed_path = write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
+    let output = fresh_probe_dir.join("stop-claim-current.json");
+    let _ = operator.pinned_config()?;
+    let status = Command::new(&operator.host)
+        .arg(&operator.config)
+        .arg("inspect-stop-claim")
+        .arg(&plan_path)
+        .arg(&committed_path)
+        .arg(&output)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(invalid("pinned Mini Host STOP recovery inspection refused"));
+    }
+    let inspection = read_private_artifact(&output, MAX_INSPECTION)?;
+    let _ = operator.pinned_config()?;
+    let target = StopTarget::from_verified_inspection(
+        &retained_plan,
+        &retained_committed,
+        &original_begin,
+        &inspection,
+        receipt_fields(&begin_receipt),
+        receipt_fields(&claim_receipt),
+    )?;
+    target.check_marker(attempt_dir)?;
+    let record = journal
+        .read()?
+        .ok_or_else(|| invalid("STOP fenced recovery journal absent"))?;
+    if record.phase != Phase::Fenced {
+        return Err(invalid("STOP recovery requires Fenced journal"));
+    }
+    target.compare_identity(RunningState {
+        app: record.app(),
+        generation: record.generation(),
+        unit: record.unit(),
+        image_hex: record.image_identity(),
+        invocation_id: record.invocation_id(),
+        control_group: record.control_group(),
+        volume_resource: volume.resource,
+        volume_id_hex: &volume.volume_id,
+        physical_witness: &volume.bytes,
+    })?;
+    target.recheck_volume(volume)?;
+    journal.resume_fenced_stop_manager_checked(&target.stop_identity(), || {
+        target.recheck_volume(volume)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,5 +755,34 @@ mod tests {
         assert!(target.persist_marker(&interrupted).is_err());
         fs::remove_file(partial).unwrap();
         fs::remove_dir(interrupted).unwrap();
+    }
+
+    #[test]
+    fn stop_recovery_artifacts_require_private_exact_files_and_large_receipts() {
+        let dir = private_attempt();
+        let original = dir.join("original.bin");
+        fs::write(&original, b"retained").unwrap();
+        fs::set_permissions(&original, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(read_private_artifact(&original, 8).unwrap(), b"retained");
+        assert!(read_private_artifact(&original, 7).is_err());
+        let link = dir.join("alias.bin");
+        std::os::unix::fs::symlink(&original, &link).unwrap();
+        assert!(read_private_artifact(&link, 8).is_err());
+        fs::set_permissions(&original, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_private_artifact(&original, 8).is_err());
+        let receipt = retained_receipt(&json!({
+            "transactionId":LARGE_DIGEST,
+            "eventId":"1",
+            "acceptedCount":"2",
+            "imageBoundary":LARGE_DIGEST,
+        }))
+        .unwrap();
+        assert_eq!(receipt.transaction_id(), LARGE_DIGEST);
+        assert!(retained_receipt(&json!({
+            "transactionId":"01", "eventId":"1", "acceptedCount":"2",
+            "imageBoundary":"3"
+        }))
+        .is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

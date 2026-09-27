@@ -1,0 +1,7 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+────────────
+ Nextest run ID 8014ec28-32df-47e8-adf0-9dbe396239de with nextest profile: default
+    Starting 1 test across 1 binary (149 tests skipped)
+        PASS [   0.005s] (1/1) minidregg-spk-host hostd::tests::source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence
+────────────
+     Summary [   0.005s] 1 test run: 1 passed, 149 skipped

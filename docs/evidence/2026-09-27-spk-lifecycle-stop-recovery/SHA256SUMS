@@ -1,0 +1,7 @@
+652468c16fd4d5729ebcf6ef64ec2191f369f9ee409af84f2404288c1aca3ee9  native/spk-host/src/lifecycle_v3_stop_native.rs
+94b5b74e9c18ba5a596ac82c6f232c2e859d33d7be4f349e0a10fd1585f6d386  native/spk-host/src/hostd.rs
+e2449d98792875835b4cfe86778e3a83a8c71721beeb2e222c4829ba61670b4c  native/spk-host/src/lifecycle_v3_stop_claim_native.rs
+e039ae9bc9cef8956b148e9a2963df25e977fb618ad55d14526c50dbeb2445ba  docs/evidence/2026-09-27-spk-lifecycle-stop-recovery/README.md
+f1d5e4ea1398021b776e9b195d912ba224d3e8b082c57ae93a8aa5f7eb233d32  docs/evidence/2026-09-27-spk-lifecycle-stop-recovery/nextest.log
+cd41554e243ccd916cdd16aa3e870f777e3c9b1930cbc0ad95c96e5d7e5ee50a  docs/evidence/2026-09-27-spk-lifecycle-stop-recovery/hostd-nextest.log
+9a4e7792a153b179b7ea4874031c3faa6081234402c99df61c1348f0e8869103  docs/evidence/2026-09-27-spk-lifecycle-stop-recovery/clippy.log
