@@ -57,12 +57,13 @@ fn mark_birth(runtime: &mut Runtime) {
     runtime.journal.birth_operation = Some(BirthOperation {
         family: "content".into(),
         ordinal: 0,
+        no_native_submit: true,
     });
     runtime.save().unwrap();
 }
 
 #[test]
-fn crash_after_birth_marker_before_reserve_recovers_without_charge_or_rebirth() {
+fn crash_after_birth_marker_before_reserve_recovers_without_charge_and_returns_ordinal() {
     let (mut runtime, root) = fixture();
     mark_birth(&mut runtime);
     assert!(runtime.tool_call("mini_grain_status", &json!({})).is_err());
@@ -74,6 +75,9 @@ fn crash_after_birth_marker_before_reserve_recovers_without_charge_or_rebirth() 
     assert!(runtime.journal.tool_hold.is_none());
     runtime.finish_no_birth().unwrap();
     assert!(runtime.journal.birth_operation.is_none());
+    assert_eq!(runtime.journal.birth_next_ordinal["content"], 0);
+    runtime.finish_no_birth().unwrap();
+    assert_eq!(runtime.journal.birth_next_ordinal["content"], 0);
     assert!(!runtime.config.state_dir.join("mutations").exists());
     assert!(runtime.journal.born_resources.is_empty());
     fs::remove_dir_all(root).unwrap();

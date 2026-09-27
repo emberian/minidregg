@@ -269,8 +269,9 @@ struct Journal {
     /// tool-result delivery. Never synthesize a tool response from this list.
     #[serde(default)]
     publication_receipts: Vec<PublicationReceipt>,
-    /// Ordinals are consumed before dispatch, including definitive refusals.
-    /// An uncertain pending attempt prevents allocating another ID.
+    /// Ordinals are consumed before dispatch. A proven no-submit birth may
+    /// return only its unoccupied tail after signed zero settlement; any
+    /// possible native submit keeps the consumed ordinal.
     #[serde(default)]
     birth_next_ordinal: BTreeMap<String, u16>,
     #[serde(default)]
@@ -448,6 +449,46 @@ impl BirthPending {
 struct BirthOperation {
     family: String,
     ordinal: u16,
+    // Old journals have no proof of the pre-submit boundary. They keep the
+    // consumed ordinal even when a later zero settlement clears the marker.
+    #[serde(default)]
+    no_native_submit: bool,
+}
+
+fn retire_no_birth_operation(journal: &mut Journal) -> Result<()> {
+    let Some(operation) = journal.birth_operation.as_ref() else {
+        return Ok(());
+    };
+    if journal.birth_pending.is_some() || journal.tool_pending.is_some() {
+        return Err("no-birth ordinal still has a pending native attempt".into());
+    }
+    if operation.no_native_submit {
+        let expected_next = operation
+            .ordinal
+            .checked_add(1)
+            .ok_or("no-birth ordinal overflow")?;
+        if journal.birth_next_ordinal.get(&operation.family) != Some(&expected_next)
+            || journal.born_resources.iter().any(|record| {
+                record.pending.family == operation.family
+                    && record.pending.ordinal == operation.ordinal
+            })
+        {
+            return Err("no-birth ordinal is not an unoccupied family tail".into());
+        }
+        journal
+            .birth_next_ordinal
+            .insert(operation.family.clone(), operation.ordinal);
+    }
+    journal.birth_operation = None;
+    Ok(())
+}
+
+fn persist_retired_no_birth_operation(path: &Path, journal: &mut Journal) -> Result<()> {
+    let mut terminal = journal.clone();
+    retire_no_birth_operation(&mut terminal)?;
+    atomic_json(path, &terminal)?;
+    *journal = terminal;
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -5653,8 +5694,14 @@ impl Runtime {
         {
             return Err("no-birth zero-charge cleanup has no signed idle terminal".into());
         }
-        self.journal.birth_operation = None;
-        self.save()
+        // The signed zero release is terminal. Only a marker that still
+        // proves no Mini birth submit could have started may return the
+        // consumed tail ordinal. The ordinal and marker change in one journal
+        // rename below; an interrupted save leaves the old marker intact.
+        persist_retired_no_birth_operation(
+            &self.config.state_dir.join("journal.json"),
+            &mut self.journal,
+        )
     }
 
     fn create_resource(
@@ -5809,6 +5856,7 @@ impl Runtime {
         self.journal.birth_operation = Some(BirthOperation {
             family: family_name.to_owned(),
             ordinal,
+            no_native_submit: true,
         });
         // Save the no-dispatch identity before even attaching or reserving.
         // A crash before the exact composite pending save can only release
@@ -5968,6 +6016,20 @@ impl Runtime {
             session_id,
         };
         origin.validate_members()?;
+        let birth_operation = self
+            .journal
+            .birth_operation
+            .as_mut()
+            .ok_or("resource birth lost its pre-submit marker")?;
+        if birth_operation.family != family_name
+            || birth_operation.ordinal != ordinal
+            || !birth_operation.no_native_submit
+        {
+            return Err("resource birth pre-submit marker differs".into());
+        }
+        // This flag and both pending records become durable together before
+        // the first possible `mini submit` invocation.
+        birth_operation.no_native_submit = false;
         self.journal.birth_pending = Some(origin.clone());
         self.journal.tool_pending = Some(Pending {
             operation_id: id,
@@ -7988,6 +8050,15 @@ impl Runtime {
         {
             return Err("resource birth origin and tool pending attempt differ".into());
         }
+        if self
+            .journal
+            .birth_operation
+            .as_ref()
+            .is_some_and(|operation| operation.no_native_submit)
+            && self.journal.birth_pending.is_some()
+        {
+            return Err("no-submit birth marker conflicts with a pending native birth".into());
+        }
         self.retry_pending(true)?;
         self.finish_no_birth()?;
         self.retry_pending(false)?;
@@ -9747,6 +9818,108 @@ mod tests {
         journal.validate_birth_registry().unwrap();
         journal.born_resources.push(record);
         assert!(journal.validate_birth_registry().is_err());
+    }
+
+    #[test]
+    fn birth_ordinal_crash_before_submit_boundary_reclaims_tail_once() {
+        let mut journal = Journal::fresh(json!({}));
+        journal.birth_next_ordinal.insert("office".into(), 1);
+        journal.birth_operation = Some(BirthOperation {
+            family: "office".into(),
+            ordinal: 0,
+            no_native_submit: true,
+        });
+        // A controller restart reloads the durable marker from journal JSON.
+        let bytes = serde_json::to_vec(&journal).unwrap();
+        let mut restarted: Journal = serde_json::from_slice(&bytes).unwrap();
+        retire_no_birth_operation(&mut restarted).unwrap();
+        assert_eq!(restarted.birth_next_ordinal["office"], 0);
+        assert!(restarted.birth_operation.is_none());
+        let first = serde_json::to_vec(&restarted).unwrap();
+        retire_no_birth_operation(&mut restarted).unwrap();
+        assert_eq!(serde_json::to_vec(&restarted).unwrap(), first);
+    }
+
+    #[test]
+    fn birth_ordinal_crash_after_submit_boundary_preserves_identity() {
+        let mut journal = Journal::fresh(json!({}));
+        journal.birth_next_ordinal.insert("office".into(), 1);
+        journal.birth_operation = Some(BirthOperation {
+            family: "office".into(),
+            ordinal: 0,
+            no_native_submit: false,
+        });
+        journal.birth_pending = Some(birth_pending_for_test());
+        journal.tool_pending = Some(Pending {
+            operation_id: 7,
+            operation: "tool birth".into(),
+            attempt: "attempt".into(),
+            uncertain: true,
+            publication: None,
+        });
+        let bytes = serde_json::to_vec(&journal).unwrap();
+        let mut restarted: Journal = serde_json::from_slice(&bytes).unwrap();
+        assert!(retire_no_birth_operation(&mut restarted).is_err());
+        // Even an explicit later refusal and zero settlement cannot establish
+        // that the original native submit never crossed the send boundary.
+        restarted.birth_pending = None;
+        restarted.tool_pending = None;
+        retire_no_birth_operation(&mut restarted).unwrap();
+        assert_eq!(restarted.birth_next_ordinal["office"], 1);
+        assert!(restarted.birth_operation.is_none());
+        let old: BirthOperation =
+            serde_json::from_value(json!({"family":"office","ordinal":0})).unwrap();
+        assert!(!old.no_native_submit);
+    }
+
+    #[test]
+    fn birth_ordinal_no_submit_marker_rejects_occupied_or_nontail_identity() {
+        let mut journal = Journal::fresh(json!({}));
+        journal.birth_next_ordinal.insert("office".into(), 2);
+        journal.birth_operation = Some(BirthOperation {
+            family: "office".into(),
+            ordinal: 0,
+            no_native_submit: true,
+        });
+        assert!(retire_no_birth_operation(&mut journal).is_err());
+        assert_eq!(journal.birth_next_ordinal["office"], 2);
+        assert!(journal.birth_operation.is_some());
+    }
+
+    #[test]
+    fn birth_ordinal_interrupted_journal_save_keeps_consumed_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "grain-birth-ordinal-save-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("journal.json");
+        let mut journal = Journal::fresh(json!({}));
+        journal.birth_next_ordinal.insert("office".into(), 1);
+        journal.birth_operation = Some(BirthOperation {
+            family: "office".into(),
+            ordinal: 0,
+            no_native_submit: true,
+        });
+        atomic_json(&path, &journal).unwrap();
+        std::fs::write(path.with_extension("tmp"), b"unresolved").unwrap();
+        assert!(persist_retired_no_birth_operation(&path, &mut journal).is_err());
+        assert_eq!(journal.birth_next_ordinal["office"], 1);
+        assert!(journal.birth_operation.is_some());
+        let disk: Journal = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(disk.birth_next_ordinal["office"], 1);
+        assert!(disk.birth_operation.is_some());
+        std::fs::remove_file(path.with_extension("tmp")).unwrap();
+        persist_retired_no_birth_operation(&path, &mut journal).unwrap();
+        assert_eq!(journal.birth_next_ordinal["office"], 0);
+        let disk: Journal = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(disk.birth_next_ordinal["office"], 0);
+        assert!(disk.birth_operation.is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
