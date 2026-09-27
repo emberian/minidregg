@@ -93,8 +93,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.packageManifest != pin.packageManifest ||
       beginSource.managementSubject.value != pin.managementSubject then
     return .error "completion subject or resource differs from operator pin"
-  if !ApplicationLifecycleResidentProfile.beginMatches
-      { base := begin.base, descriptor := begin.descriptor.package } then
+  if !ApplicationLifecycleResidentProfile.beginMatchesV3 begin then
     return .error "completion BEGIN is outside resident host profile"
   let some key := config.completionCustodianKey
     | return .error "pinned physical custodian key unavailable"

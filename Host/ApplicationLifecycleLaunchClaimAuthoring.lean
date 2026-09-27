@@ -88,8 +88,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.managementSubject.value == pin.managementSubject &&
       beginSource.capability == pin.appCapability do
     throw "historical BEGIN differs from fixed claim operator pin"
-  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatches
-      { base := begin.base, descriptor := begin.descriptor.package } do
+  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 begin do
     throw "historical BEGIN is outside resident host profile"
   let opened := verified.opened
   let some retained := opened.durable.image.accepted[prior.index]?
@@ -218,8 +217,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
       plan.originalBeginReceipt.eventId ==
         (ApplicationLifecycleBeginV3Ingress.event begin).eventId &&
       plan.originalBeginReceipt.acceptedCount == source.originalIndex + 1 &&
-      ApplicationLifecycleResidentProfile.beginMatches
-        { base := begin.base, descriptor := begin.descriptor.package } &&
+      ApplicationLifecycleResidentProfile.beginMatchesV3 begin &&
       plan.invocation.finalizedDraft == .invoke
         (DeclaredResourceController.commandCodec.encode
           (ApplicationLifecycleClaim.command plan.invocation.domain
