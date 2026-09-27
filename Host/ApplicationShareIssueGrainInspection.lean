@@ -90,17 +90,21 @@ private def requestJson (request : Request) : Json :=
 private def slotJson (slot : SigningSlot) : Json :=
   let signing := match CredentialSignedEnvelopeController.headerCodec.decode slot.header with
     | none => Json.mkObj [("decoded", .bool false)]
-    | some header => Json.mkObj
-        [("decoded", .bool true),
-         ("codecVersion", decimal header.codecVersion),
-         ("algorithm", decimal header.algorithm),
-         ("keyId", decimal header.keyId),
-         ("keyEpoch", decimal header.keyEpoch),
-         ("authorityRoot", decimal header.authorityRoot.value),
-         ("registryCommitment", decimal header.registryCommitment.value),
-         ("domain", hex header.domain),
-         ("message", hex header.message),
-         ("nullifier", decimal header.nullifier)]
+    | some header =>
+        let canonical := CredentialSignedEnvelopeController.headerCodec.encode header
+        if canonical == slot.header then Json.mkObj
+          [("decoded", .bool true),
+           ("canonical", hex canonical),
+           ("codecVersion", decimal header.codecVersion),
+           ("algorithm", decimal header.algorithm),
+           ("keyId", decimal header.keyId),
+           ("keyEpoch", decimal header.keyEpoch),
+           ("authorityRoot", decimal header.authorityRoot.value),
+           ("registryCommitment", decimal header.registryCommitment.value),
+           ("domain", hex header.domain),
+           ("message", hex header.message),
+           ("nullifier", decimal header.nullifier)]
+        else Json.mkObj [("decoded", .bool false)]
   .mkObj [("role", decimal slot.role), ("index", decimal slot.index),
     ("header", hex slot.header), ("signing", signing)]
 
