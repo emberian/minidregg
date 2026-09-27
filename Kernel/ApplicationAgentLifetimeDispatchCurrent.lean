@@ -34,8 +34,8 @@ against the separately issued grant. The original ticket origin stays bound
 to its issuance generation. -/
 def currentParentMatches (ingress : Ingress)
     (grant : ApplicationAgentLifetimeGrant.Grant) : Bool :=
-  let context := ingress.dispatch.reserveContext
-  match ingress.dispatch.dispatch.parent with
+  let context := ingress.reserveContext.base
+  match ingress.dispatch.parent with
   | none => false
   | some current =>
       decide (current.task = context.parentTask ∧
@@ -55,77 +55,77 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
     (certifiedGrantRoot : Digest) where
   private mk ::
   issued : grant.matchesIssued spec ticketIssueIndex ticketIssueReceipt = true
-  issueBytesExact : ingress.dispatch.dispatch.issueIngressBytes = issuedIngressBytes
+  issueBytesExact : ingress.dispatch.issueIngressBytes = issuedIngressBytes
   route : matchesRoute ingress grant spec.ticket.resource certifiedGrantIssueIndex = true
-  profileExact : ingress.dispatch.dispatch.dispatch.domain = deployment.domain ∧
-    ingress.dispatch.dispatch.dispatch.semantics = profile.semantics
-  identityExact : identityMatches ingress.dispatch.dispatch = true
+  profileExact : ingress.dispatch.dispatch.domain = deployment.domain ∧
+    ingress.dispatch.dispatch.semantics = profile.semantics
+  identityExact : identityMatches ingress.dispatch = true
   selection : Selection
-  selectedCommand : selectCommand ingress.dispatch.dispatch = some selection
+  selectedCommand : selectCommand ingress.dispatch = some selection
   signedCommand : DeclaredResourceController.Command
   decodedCommand : DeclaredResourceController.commandCodec.decode
-    ingress.dispatch.dispatch.dispatch.signed.commandBytes = some signedCommand
+    ingress.dispatch.dispatch.signed.commandBytes = some signedCommand
   parentCurrent : currentParentMatches ingress grant = true
-  commandExact : signedCommand = command ingress.dispatch.dispatch.dispatch
-    selection ingress.dispatch.dispatch.parent
+  commandExact : signedCommand = command ingress.dispatch.dispatch
+    selection ingress.dispatch.parent
   prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
-    (command ingress.dispatch.dispatch.dispatch selection ingress.dispatch.dispatch.parent)
+    (command ingress.dispatch.dispatch selection ingress.dispatch.parent)
   shape : DeclaredResourceController.PhysicalShape prepared
   linked : linkedCurrentPolicies deployment profile ambient durable
-    ingress.dispatch.dispatch spec selection prepared = true
-  appRead : CheckedRead deployment profile ambient durable ingress.dispatch.dispatch
-    selection prepared ingress.dispatch.dispatch.dispatch.dispatch.app.resource
-    ingress.dispatch.dispatch.dispatch.appObserveCapability
-    ingress.dispatch.dispatch.dispatch.appRoot
-    ingress.dispatch.dispatch.dispatch.appObservationEnvelope
-  manifestRead : CheckedRead deployment profile ambient durable ingress.dispatch.dispatch
-    selection prepared ingress.dispatch.dispatch.dispatch.dispatch.app.packageManifest
-    ingress.dispatch.dispatch.dispatch.manifestObserveCapability
-    ingress.dispatch.dispatch.dispatch.dispatch.app.manifestRoot
-    ingress.dispatch.dispatch.dispatch.manifestObservationEnvelope
-  enrollmentRead : CheckedRead deployment profile ambient durable ingress.dispatch.dispatch
-    selection prepared ingress.dispatch.dispatch.dispatch.enrollmentResource
-    ingress.dispatch.dispatch.dispatch.enrollmentObserveCapability
-    ingress.dispatch.dispatch.dispatch.enrollmentRoot
-    ingress.dispatch.dispatch.dispatch.enrollmentObservationEnvelope
-  ticketRead : CheckedRead deployment profile ambient durable ingress.dispatch.dispatch
+    ingress.dispatch spec selection prepared = true
+  appRead : CheckedRead deployment profile ambient durable ingress.dispatch
+    selection prepared ingress.dispatch.dispatch.dispatch.app.resource
+    ingress.dispatch.dispatch.appObserveCapability
+    ingress.dispatch.dispatch.appRoot
+    ingress.dispatch.dispatch.appObservationEnvelope
+  manifestRead : CheckedRead deployment profile ambient durable ingress.dispatch
+    selection prepared ingress.dispatch.dispatch.dispatch.app.packageManifest
+    ingress.dispatch.dispatch.manifestObserveCapability
+    ingress.dispatch.dispatch.dispatch.app.manifestRoot
+    ingress.dispatch.dispatch.manifestObservationEnvelope
+  enrollmentRead : CheckedRead deployment profile ambient durable ingress.dispatch
+    selection prepared ingress.dispatch.dispatch.enrollmentResource
+    ingress.dispatch.dispatch.enrollmentObserveCapability
+    ingress.dispatch.dispatch.enrollmentRoot
+    ingress.dispatch.dispatch.enrollmentObservationEnvelope
+  ticketRead : CheckedRead deployment profile ambient durable ingress.dispatch
     selection prepared spec.ticket.resource
-    ingress.dispatch.dispatch.ticketObserveCapability
-    ingress.dispatch.dispatch.ticketRoot
-    ingress.dispatch.dispatch.ticketObservationEnvelope
-  grantRead : CheckedRead deployment profile ambient durable ingress.dispatch.dispatch
-    selection prepared ingress.grantResource ingress.grantObserveCapability
+    ingress.dispatch.ticketObserveCapability
+    ingress.dispatch.ticketRoot
+    ingress.dispatch.ticketObservationEnvelope
+  grantRead : CheckedRead deployment profile ambient durable ingress.dispatch
+    selection prepared ingress.reserveContext.grantResource ingress.grantObserveCapability
     ingress.grantRoot ingress.grantObservationEnvelope
   grantPhysical : ResourceBirthCodec.physicalRoot (.live grantRead.selected.observed.before) =
     certifiedGrantRoot
-  grantExact : grantAt deployment.domain ingress.grantResource
+  grantExact : grantAt deployment.domain ingress.reserveContext.grantResource
     grantRead.selected.observed.before = some grant
   actualApp : ApplicationGrain.State
-  appExact : appState ingress.dispatch.dispatch.dispatch.dispatch.app.resource
+  appExact : appState ingress.dispatch.dispatch.dispatch.app.resource
     appRead.selected.observed.before = some actualApp
   manifest : ApplicationDispatchManifest.Manifest
   manifestExact : installedManifest deployment.domain
-    ingress.dispatch.dispatch.dispatch.dispatch.app.packageManifest
-    ingress.dispatch.dispatch.dispatch.dispatch.app.resource
-    ingress.dispatch.dispatch.dispatch.dispatch.app.packageVersion
+    ingress.dispatch.dispatch.dispatch.app.packageManifest
+    ingress.dispatch.dispatch.dispatch.app.resource
+    ingress.dispatch.dispatch.dispatch.app.packageVersion
     manifestRead.selected.observed.before = some manifest
   enrollment : ApplicationGrainSessionEnrollment.Enrollment
   enrollmentExact : installedEnrollment deployment.domain
-    ingress.dispatch.dispatch.dispatch.enrollmentResource
-    ingress.dispatch.dispatch.dispatch.dispatch.session.resource
-    ingress.dispatch.dispatch.dispatch.dispatch.session.generation
+    ingress.dispatch.dispatch.enrollmentResource
+    ingress.dispatch.dispatch.dispatch.session.resource
+    ingress.dispatch.dispatch.dispatch.session.generation
     enrollmentRead.selected.observed.before = some enrollment
   ticket : ApplicationDispatchAuthority.Ticket
   ticketExact : installedTicket deployment.domain spec.ticket.resource
     ticketRead.selected.observed.before = some ticket
   bits : List Bool
-  meaningExact : selectedMeaning ingress.dispatch.dispatch spec actualApp manifest
+  meaningExact : selectedMeaning ingress.dispatch spec actualApp manifest
     enrollment ticket = some bits
-  requestShape : requestSafe ingress.dispatch.dispatch.dispatch.dispatch.request = true
+  requestShape : requestSafe ingress.dispatch.dispatch.dispatch.request = true
   issuerCurrent : issuerLineageCurrent deployment profile ambient durable
-    ingress.dispatch.dispatch spec selection descriptor prepared = true
+    ingress.dispatch spec selection descriptor prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared
-    ingress.dispatch.dispatch.dispatch.signed
+    ingress.dispatch.dispatch.signed
 
 /-- All five current observations share the exact prepared DRC image. The
 grant read uses the participant's separately issued selector; its signed
@@ -143,7 +143,7 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
     IO (Except String (Checked deployment profile ambient durable ingress spec
       descriptor grant ticketIssueIndex ticketIssueReceipt issuedIngressBytes
       certifiedGrantIssueIndex certifiedGrantRoot)) := do
-  let base := ingress.dispatch.dispatch
+  let base := ingress.dispatch
   if issued : grant.matchesIssued spec ticketIssueIndex ticketIssueReceipt = true then
     if issueBytesExact : base.issueIngressBytes = issuedIngressBytes then
       if route : matchesRoute ingress grant spec.ticket.resource
@@ -191,13 +191,13 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
                             base.ticketObservationEnvelope
                             | return .error "lifetime dispatch original ticket observation refused"
                           let .ok grantRead ← checkRead deployment profile ambient native durable
-                            base selection prepared ingress.grantResource
+                            base selection prepared ingress.reserveContext.grantResource
                             ingress.grantObserveCapability ingress.grantRoot
                             ingress.grantObservationEnvelope
                             | return .error "lifetime dispatch grant observation refused"
                           if grantPhysical : ResourceBirthCodec.physicalRoot
                               (.live grantRead.selected.observed.before) = certifiedGrantRoot then
-                            if grantExact : grantAt deployment.domain ingress.grantResource
+                            if grantExact : grantAt deployment.domain ingress.reserveContext.grantResource
                                 grantRead.selected.observed.before = some grant then
                               match appExact : appState base.dispatch.dispatch.app.resource
                                   appRead.selected.observed.before with

@@ -1,0 +1,18 @@
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveContext.canonicalBytes_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveContext.matchesGrant_exact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchIngress.canonicalBytes_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchCore.readGuards_current' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchCore.readGuards_readonly' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.ApplicationAgentLifetimeDispatchCore.candidate_event_version' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
