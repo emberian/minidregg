@@ -1,0 +1,3 @@
+5139e1e1d86e508ac5b318a85e1d87db5d24a0a8f13123ed62edfb4adab1fe5e  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/mini
+7420e41d1cc76ab3d98d4699e392f799e0d3c587a24c1a9c3f3c5b13d480b82a  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/minidregg-link-sqlite-store
+4f5a9095aa8401e538ac962a37de715b317e443dd35846317e2f068ae9829836  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/minidregg-credential-signature-verifier

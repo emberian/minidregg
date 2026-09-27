@@ -1,0 +1,17 @@
+   Compiling minidregg-hyperdocument-link-sqlite-store v0.1.0 (/tmp/minidregg-appbirth-2e60a9c-helpers/native/hyperdocument-link-sqlite-store)
+    Finished `release` profile [optimized] target(s) in 1.21s
+────────────
+ Nextest run ID c8562bda-543b-4ee1-b271-50c78de49f38 with nextest profile: default
+    Starting 10 tests across 3 binaries
+        PASS [   0.039s] ( 1/10) minidregg-hyperdocument-link-sqlite-store tests::old_bounded_table_upgrades_without_rewriting_its_blob
+        PASS [   0.149s] ( 2/10) minidregg-hyperdocument-link-sqlite-store::lifecycle concurrent_cas_writers_cannot_both_replace_the_same_preimage
+        PASS [   0.031s] ( 3/10) minidregg-hyperdocument-link-sqlite-store::lifecycle corrupt_header_and_torn_database_fail_opaquely
+        PASS [   0.026s] ( 4/10) minidregg-hyperdocument-link-sqlite-store::lifecycle crash_after_begin_or_insert_recovers_absent
+        PASS [   0.020s] ( 5/10) minidregg-hyperdocument-link-sqlite-store::lifecycle crash_after_commit_reopens_exact_and_retry_is_idempotent
+        PASS [   0.009s] ( 6/10) minidregg-hyperdocument-link-sqlite-store::lifecycle lean_fixture_is_exact_and_bounded
+        PASS [   0.014s] ( 7/10) minidregg-hyperdocument-link-sqlite-store::lifecycle oversize_fails_before_transaction
+        PASS [   0.221s] ( 8/10) minidregg-hyperdocument-link-sqlite-store::lifecycle concurrent_conflicting_transaction_waits_then_fails_without_overwrite
+        PASS [   0.022s] ( 9/10) minidregg-hyperdocument-link-sqlite-store::lifecycle repeated_cas_preserves_exact_expected_bytes_and_absence
+        PASS [   0.042s] (10/10) minidregg-hyperdocument-link-sqlite-store::lifecycle update_crash_before_commit_preserves_old_image_after_commit_preserves_new
+────────────
+     Summary [   0.303s] 10 tests run: 10 passed, 0 skipped
