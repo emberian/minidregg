@@ -8,6 +8,7 @@
 use crate::sandbox::open_protected_directory;
 use crate::spawn_gate::{self, BoundedChild, SpawnSpec};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -20,6 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const VERSION: u32 = 1;
 const MAX_RECORD_BYTES: u64 = 16 * 1024;
+const MAX_DISPATCH_PERMIT_BYTES: usize = 12_102_760;
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -86,6 +88,10 @@ pub struct Record {
     invocation_id: Option<String>,
     #[serde(default)]
     control_group: Option<String>,
+    /// One physical RPC may be in flight. Historical operation tombstones live
+    /// in separate exact files so a long-lived app does not grow this record.
+    #[serde(default)]
+    dispatch_in_flight: Option<DispatchIdentity>,
 }
 
 impl Record {
@@ -130,16 +136,116 @@ impl Record {
             }
             .validate(&self.identity.unit)?;
         }
-        if matches!(self.phase, Phase::Entered | Phase::Running)
-            && self.invocation_id.is_none()
-        {
+        if matches!(self.phase, Phase::Entered | Phase::Running) && self.invocation_id.is_none() {
             return Err(invalid("entered journal lacks unit instance"));
         }
         if self.phase == Phase::Running && self.child_pid.is_none() {
             return Err(invalid("running journal lacks child PID"));
         }
+        if let Some(dispatch) = &self.dispatch_in_flight {
+            dispatch.validate()?;
+            if !matches!(self.phase, Phase::Running | Phase::Fenced | Phase::Stopped) {
+                return Err(invalid("dispatch custody before app Running"));
+            }
+            if dispatch.app != self.identity.app
+                || dispatch.app_generation != self.identity.generation
+                || self.invocation_id.as_deref() != Some(dispatch.invocation_id.as_str())
+            {
+                return Err(invalid(
+                    "dispatch custody differs from app execution instance",
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+/// Identity projected from one fresh Mini op34 committed permit and compared
+/// against the captured HTTP request. No public socket constructs this type.
+/// The permit bytes themselves remain in a separate private capture; this
+/// durable row records their SHA-256 and the exact request/process coordinate.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct DispatchIdentity {
+    pub permit_sha256: String,
+    pub request_digest: String,
+    pub app: u64,
+    pub app_generation: u64,
+    pub invocation_id: String,
+    pub operation_id: String,
+    pub session_resource: String,
+    pub session_generation: String,
+    pub dispatch_transaction: String,
+    pub dispatch_event: String,
+}
+
+fn canonical_decimal(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && (value == "0" || !value.starts_with('0'))
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+impl DispatchIdentity {
+    fn validate(&self) -> io::Result<()> {
+        if !hex64(&self.permit_sha256)
+            || !hex64(&self.request_digest)
+            || !hex64(&self.dispatch_transaction)
+            || !hex64(&self.dispatch_event)
+            || self.app_generation == 0
+            || self.invocation_id.len() != 32
+            || !self.invocation_id.bytes().all(|b| b.is_ascii_hexdigit())
+            || !canonical_decimal(&self.operation_id)
+            || !canonical_decimal(&self.session_resource)
+            || !canonical_decimal(&self.session_generation)
+        {
+            return Err(invalid("invalid exact dispatch custody identity"));
+        }
+        Ok(())
+    }
+
+    /// Physical one-shot coordinate, independent of the request payload. Two
+    /// sessions may send byte-identical requests; one session may not reuse an
+    /// operation ID with changed bytes or a different native receipt.
+    fn operation_key(&self) -> String {
+        let mut hash = Sha256::new();
+        hash.update(b"DREGG/SPK-HOST/DISPATCH-OPERATION/v1");
+        hash.update(self.app.to_le_bytes());
+        hash.update(self.app_generation.to_le_bytes());
+        for part in [
+            self.session_resource.as_bytes(),
+            self.session_generation.as_bytes(),
+            self.operation_id.as_bytes(),
+        ] {
+            hash.update((part.len() as u16).to_le_bytes());
+            hash.update(part);
+        }
+        format!("{:x}", hash.finalize())
+    }
+}
+
+fn validate_committed_permit(identity: &DispatchIdentity, permit: &[u8]) -> io::Result<()> {
+    if permit.is_empty()
+        || permit.len() > MAX_DISPATCH_PERMIT_BYTES
+        || format!("{:x}", Sha256::digest(permit)) != identity.permit_sha256
+    {
+        return Err(invalid("committed permit byte count or SHA-256 mismatch"));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DispatchPhase {
+    DeliveryRequested,
+    Delivered,
+    Uncertain,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct DispatchTombstone {
+    version: u32,
+    identity: DispatchIdentity,
+    phase: DispatchPhase,
 }
 
 /// Captured by the exact systemd unit process, not caller JSON. Systemd's
@@ -200,7 +306,9 @@ fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
 fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
     let prefix = format!("{name}=");
     let mut matches = output.lines().filter_map(|line| line.strip_prefix(&prefix));
-    let value = matches.next().ok_or_else(|| invalid("missing systemd property"))?;
+    let value = matches
+        .next()
+        .ok_or_else(|| invalid("missing systemd property"))?;
     if matches.next().is_some() {
         return Err(invalid("duplicate systemd property"));
     }
@@ -209,8 +317,8 @@ fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
 
 impl UnitInstance {
     fn current(unit: &str) -> io::Result<Self> {
-        let invocation_id = std::env::var("INVOCATION_ID")
-            .map_err(|_| invalid("missing systemd InvocationID"))?;
+        let invocation_id =
+            std::env::var("INVOCATION_ID").map_err(|_| invalid("missing systemd InvocationID"))?;
         let cgroup = fs::read_to_string("/proc/self/cgroup")?;
         let control_group = cgroup
             .lines()
@@ -228,7 +336,9 @@ impl UnitInstance {
             || property(&manager, "InvocationID")? != instance.invocation_id
             || property(&manager, "ControlGroup")? != instance.control_group
         {
-            return Err(invalid("unit process identity differs from systemd manager"));
+            return Err(invalid(
+                "unit process identity differs from systemd manager",
+            ));
         }
         Ok(instance)
     }
@@ -242,7 +352,10 @@ impl UnitInstance {
             || !self.control_group.starts_with('/')
             || !self.control_group.ends_with(&format!("/{unit}"))
             || self.control_group.contains("//")
-            || self.control_group.split('/').any(|component| component == "..")
+            || self
+                .control_group
+                .split('/')
+                .any(|component| component == "..")
         {
             return Err(invalid("unit InvocationID or cgroup identity refused"));
         }
@@ -269,8 +382,7 @@ pub(crate) struct UnitStopAudit {
 impl UnitStopAudit {
     fn before_stop(record: &Record) -> io::Result<()> {
         let output = systemd_show(record.unit())?;
-        if property(&output, "Id")? != record.unit()
-            || property(&output, "LoadState")? != "loaded"
+        if property(&output, "Id")? != record.unit() || property(&output, "LoadState")? != "loaded"
         {
             return Err(invalid("exact unit absent before stop"));
         }
@@ -502,6 +614,292 @@ impl Journal {
         result
     }
 
+    fn dispatch_path(&self, identity: &DispatchIdentity) -> PathBuf {
+        self.directory
+            .join(format!("dispatch-op-{}.json", identity.operation_key()))
+    }
+
+    fn active_dispatch_path(&self) -> PathBuf {
+        self.directory.join("dispatch-active.json")
+    }
+
+    fn dispatch_permit_path(&self, identity: &DispatchIdentity) -> PathBuf {
+        self.directory
+            .join(format!("dispatch-permit-{}.bin", identity.operation_key()))
+    }
+
+    fn capture_dispatch_permit_unlocked(
+        &self,
+        identity: &DispatchIdentity,
+        permit: &[u8],
+    ) -> io::Result<()> {
+        validate_committed_permit(identity, permit)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.dispatch_permit_path(identity))?;
+        file.write_all(permit)?;
+        file.sync_all()?;
+        File::open(&self.directory)?.sync_all()
+    }
+
+    fn verify_dispatch_permit_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.dispatch_permit_path(identity))?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+            || meta.len() == 0
+            || meta.len() > MAX_DISPATCH_PERMIT_BYTES as u64
+        {
+            return Err(invalid("captured committed permit identity or size drift"));
+        }
+        let mut hash = Sha256::new();
+        let mut reader = file;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hash.update(&buffer[..count]);
+        }
+        if format!("{:x}", hash.finalize()) != identity.permit_sha256 {
+            return Err(invalid("captured committed permit SHA-256 drift"));
+        }
+        Ok(())
+    }
+
+    fn create_active_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
+        let bytes = serde_json::to_vec(identity)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.active_dispatch_path())?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        File::open(&self.directory)?.sync_all()
+    }
+
+    fn read_active_dispatch_unlocked(&self) -> io::Result<DispatchIdentity> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.active_dispatch_path())?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+            || meta.len() > 1024
+        {
+            return Err(invalid("active dispatch marker identity drift"));
+        }
+        let mut bytes = Vec::new();
+        file.take(1025).read_to_end(&mut bytes)?;
+        if bytes.len() > 1024 {
+            return Err(invalid("active dispatch marker grew"));
+        }
+        let identity: DispatchIdentity = serde_json::from_slice(&bytes)?;
+        identity.validate()?;
+        Ok(identity)
+    }
+
+    fn clear_active_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
+        if &self.read_active_dispatch_unlocked()? != identity {
+            return Err(invalid("active dispatch marker coordinate drift"));
+        }
+        fs::remove_file(self.active_dispatch_path())?;
+        File::open(&self.directory)?.sync_all()
+    }
+
+    fn read_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<DispatchTombstone> {
+        identity.validate()?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.dispatch_path(identity))?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+            || meta.len() > 2048
+        {
+            return Err(invalid("dispatch tombstone identity or size drift"));
+        }
+        let mut bytes = Vec::new();
+        file.take(2049).read_to_end(&mut bytes)?;
+        if bytes.len() > 2048 {
+            return Err(invalid("dispatch tombstone grew"));
+        }
+        let tombstone: DispatchTombstone = serde_json::from_slice(&bytes)?;
+        if tombstone.version != VERSION || tombstone.identity != *identity {
+            return Err(invalid("dispatch tombstone coordinate drift"));
+        }
+        Ok(tombstone)
+    }
+
+    fn write_dispatch_unlocked(
+        &self,
+        tombstone: &DispatchTombstone,
+        initial: bool,
+    ) -> io::Result<()> {
+        tombstone.identity.validate()?;
+        if tombstone.version != VERSION {
+            return Err(invalid("dispatch tombstone version drift"));
+        }
+        let bytes = serde_json::to_vec(tombstone)?;
+        if bytes.len() > 2048 {
+            return Err(invalid("dispatch tombstone exceeds bound"));
+        }
+        let path = self.dispatch_path(&tombstone.identity);
+        if initial {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(path)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            return File::open(&self.directory)?.sync_all();
+        }
+        let old = self.read_dispatch_unlocked(&tombstone.identity)?;
+        if old.phase != DispatchPhase::DeliveryRequested
+            || !matches!(
+                tombstone.phase,
+                DispatchPhase::Delivered | DispatchPhase::Uncertain
+            )
+        {
+            return Err(invalid("dispatch tombstone transition refused"));
+        }
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| invalid("clock before epoch"))?
+            .as_nanos();
+        let temporary = self
+            .directory
+            .join(format!(".dispatch-{}-{nonce}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)?;
+        let result = (|| {
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            fs::rename(&temporary, path)?;
+            File::open(&self.directory)?.sync_all()
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    /// Durable one-shot transition before invoking fd3. The caller must have
+    /// captured and checked the exact fresh native permit, but this journal
+    /// never interprets that authority. Creating the terminally unique file
+    /// first means a crash during the following record fsync cannot rearm it.
+    pub(crate) fn request_dispatch(
+        &self,
+        identity: DispatchIdentity,
+        committed_permit: &[u8],
+    ) -> io::Result<()> {
+        identity.validate()?;
+        validate_committed_permit(&identity, committed_permit)?;
+        self.with_lock(|this| {
+            let mut record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing BEGIN"))?;
+            if record.phase != Phase::Running || record.dispatch_in_flight.is_some() {
+                return Err(invalid("app is not ready for one physical dispatch"));
+            }
+            if identity.app != record.identity.app
+                || identity.app_generation != record.identity.generation
+                || record.invocation_id.as_deref() != Some(identity.invocation_id.as_str())
+            {
+                return Err(invalid("physical dispatch app execution identity drift"));
+            }
+            match fs::symlink_metadata(this.active_dispatch_path()) {
+                Ok(_) => return Err(invalid("prior physical dispatch still needs audit")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            match fs::symlink_metadata(this.dispatch_path(&identity)) {
+                Ok(_) => return Err(invalid("exact physical request already attempted")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            // This marker is fsynced first. If any later file or record write
+            // fails, an operator must audit it before unrelated requests run.
+            this.create_active_dispatch_unlocked(&identity)?;
+            this.capture_dispatch_permit_unlocked(&identity, committed_permit)?;
+            let tombstone = DispatchTombstone {
+                version: VERSION,
+                identity: identity.clone(),
+                phase: DispatchPhase::DeliveryRequested,
+            };
+            this.write_dispatch_unlocked(&tombstone, true)?;
+            record.dispatch_in_flight = Some(identity);
+            this.write_unlocked(&record)
+        })
+    }
+
+    /// Complete only while the same app generation is still Running. Failure
+    /// or a concurrent fence retains the operation as uncertain; no caller
+    /// may submit it again. This lock is *not* held over the app RPC wait.
+    pub(crate) fn finish_dispatch(
+        &self,
+        identity: &DispatchIdentity,
+        delivered: bool,
+    ) -> io::Result<()> {
+        identity.validate()?;
+        self.with_lock(|this| {
+            let mut record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing BEGIN"))?;
+            if record.dispatch_in_flight.as_ref() != Some(identity) {
+                return Err(invalid("dispatch completion identity drift"));
+            }
+            if this.read_active_dispatch_unlocked()? != *identity {
+                return Err(invalid("active dispatch completion marker drift"));
+            }
+            this.verify_dispatch_permit_unlocked(identity)?;
+            let phase = if delivered && record.phase == Phase::Running {
+                DispatchPhase::Delivered
+            } else {
+                DispatchPhase::Uncertain
+            };
+            this.write_dispatch_unlocked(
+                &DispatchTombstone {
+                    version: VERSION,
+                    identity: identity.clone(),
+                    phase,
+                },
+                false,
+            )?;
+            if phase == DispatchPhase::Delivered {
+                record.dispatch_in_flight = None;
+                this.write_unlocked(&record)?;
+                this.clear_active_dispatch_unlocked(identity)?;
+                Ok(())
+            } else {
+                Err(invalid("physical dispatch result uncertain or app fenced"))
+            }
+        })
+    }
+
     pub fn read(&self) -> io::Result<Option<Record>> {
         self.with_lock(Self::read_unlocked)
     }
@@ -522,6 +920,7 @@ impl Journal {
                 child_pid: None,
                 invocation_id: None,
                 control_group: None,
+                dispatch_in_flight: None,
             };
             this.write_unlocked(&record)?;
             Ok(record)
@@ -609,6 +1008,9 @@ impl Journal {
             if record.phase == Phase::Stopped {
                 return Ok(None);
             }
+            // The fsynced active marker and DeliveryRequested tombstone already
+            // preserve uncertainty. Do not make physical stop depend on an
+            // additional tombstone rewrite that could fail before unit kill.
             record.phase = Phase::Fenced;
             this.write_unlocked(&record)?;
             Ok(Some(record))
@@ -654,10 +1056,8 @@ impl Journal {
                     return Ok(());
                 }
                 UnitStopAudit::before_stop(&record)?;
-                let output = bounded_systemctl(
-                    &["--system", "stop", unit],
-                    Duration::from_secs(10),
-                )?;
+                let output =
+                    bounded_systemctl(&["--system", "stop", unit], Duration::from_secs(10))?;
                 if output.status.success() {
                     Ok(())
                 } else {
@@ -732,6 +1132,212 @@ mod tests {
         }
     }
 
+    fn dispatch_identity(digit: char) -> DispatchIdentity {
+        DispatchIdentity {
+            permit_sha256: format!("{:x}", Sha256::digest(committed_permit())),
+            request_digest: digit.to_string().repeat(64),
+            app: 91,
+            app_generation: 2,
+            invocation_id: "f".repeat(32),
+            operation_id: "0".into(),
+            session_resource: "6208".into(),
+            session_generation: "0".into(),
+            dispatch_transaction: "b".repeat(64),
+            dispatch_event: "c".repeat(64),
+        }
+    }
+
+    fn committed_permit() -> &'static [u8] {
+        b"private exact committed op34 permit fixture"
+    }
+
+    fn running_journal() -> (PathBuf, Journal, VerifiedBegin) {
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        let begin = begin();
+        journal.arm(begin.clone()).unwrap();
+        journal.request_launch(&begin).unwrap();
+        journal
+            .enter_and_spawn_with(
+                &begin,
+                &instance(),
+                || Ok(child(123)),
+                Journal::write_unlocked,
+            )
+            .unwrap();
+        (path, journal, begin)
+    }
+
+    #[test]
+    fn dispatch_delivered_is_one_shot_and_next_distinct_request_can_run() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('1');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        assert_eq!(
+            fs::read(journal.dispatch_permit_path(&first)).unwrap(),
+            committed_permit()
+        );
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::DeliveryRequested
+        );
+        journal.finish_dispatch(&first, true).unwrap();
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Delivered
+        );
+        assert!(journal
+            .read()
+            .unwrap()
+            .unwrap()
+            .dispatch_in_flight
+            .is_none());
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(journal.request_dispatch(first, committed_permit()).is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        // A real op34 permit contains the unique request coordinate. This
+        // fixture changes its exact bytes when it changes the request digest.
+        let second_permit = b"private exact committed op34 permit fixture two";
+        let mut second = dispatch_identity('2');
+        second.operation_id = "1".into();
+        second.permit_sha256 = format!("{:x}", Sha256::digest(second_permit));
+        journal
+            .request_dispatch(second.clone(), second_permit)
+            .unwrap();
+        assert!(journal.finish_dispatch(&second, false).is_err());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&second).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        assert!(journal
+            .request_dispatch(dispatch_identity('3'), committed_permit())
+            .is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn hard_fence_between_rpc_send_and_reply_retains_uncertain_one_shot() {
+        let (path, journal, _) = running_journal();
+        let identity = dispatch_identity('4');
+        journal
+            .request_dispatch(identity.clone(), committed_permit())
+            .unwrap();
+        journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        assert_eq!(
+            journal.read_dispatch_unlocked(&identity).unwrap().phase,
+            DispatchPhase::DeliveryRequested
+        );
+        assert!(journal.finish_dispatch(&identity, true).is_err());
+        assert!(journal.active_dispatch_path().exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn crash_after_active_marker_fsync_blocks_new_dispatch() {
+        let (path, journal, _) = running_journal();
+        journal
+            .with_lock(|this| this.create_active_dispatch_unlocked(&dispatch_identity('5')))
+            .unwrap();
+        assert!(journal
+            .request_dispatch(dispatch_identity('6'), committed_permit())
+            .is_err());
+        assert!(!journal.dispatch_path(&dispatch_identity('6')).exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn dispatch_refuses_other_app_generation_or_unit_invocation_before_marker() {
+        let (path, journal, _) = running_journal();
+        let mut identity = dispatch_identity('7');
+        identity.app = 92;
+        assert!(journal
+            .request_dispatch(identity.clone(), committed_permit())
+            .is_err());
+        identity.app = 91;
+        identity.app_generation = 3;
+        assert!(journal
+            .request_dispatch(identity.clone(), committed_permit())
+            .is_err());
+        identity.app_generation = 2;
+        identity.invocation_id = "e".repeat(32);
+        assert!(journal
+            .request_dispatch(identity, committed_permit())
+            .is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(!journal.dispatch_path(&dispatch_identity('7')).exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn dispatch_refuses_wrong_permit_hash_without_marking_in_flight() {
+        let (path, journal, _) = running_journal();
+        let identity = dispatch_identity('8');
+        assert!(journal
+            .request_dispatch(identity.clone(), b"wrong permit")
+            .is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(!journal.dispatch_permit_path(&identity).exists());
+        assert!(journal
+            .read()
+            .unwrap()
+            .unwrap()
+            .dispatch_in_flight
+            .is_none());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn dispatch_tombstone_is_per_session_operation_not_http_digest() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('9');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&first, true).unwrap();
+
+        // Same operation coordinate with changed HTTP bytes and receipt is a
+        // replay, even though its request digest points elsewhere.
+        let mut changed = dispatch_identity('a');
+        changed.dispatch_transaction = "d".repeat(64);
+        assert_eq!(first.operation_key(), changed.operation_key());
+        assert!(journal
+            .request_dispatch(changed.clone(), committed_permit())
+            .is_err());
+        assert!(!journal.active_dispatch_path().exists());
+
+        // A different participant session can make the same HTTP request.
+        let mut other_session = first.clone();
+        other_session.session_resource = "6209".into();
+        assert_ne!(first.operation_key(), other_session.operation_key());
+        journal
+            .request_dispatch(other_session.clone(), committed_permit())
+            .unwrap();
+        assert!(journal.dispatch_path(&other_session).exists());
+        assert!(journal.dispatch_permit_path(&other_session).exists());
+        journal.finish_dispatch(&other_session, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn changed_captured_permit_cannot_be_marked_delivered() {
+        let (path, journal, _) = running_journal();
+        let identity = dispatch_identity('0');
+        journal
+            .request_dispatch(identity.clone(), committed_permit())
+            .unwrap();
+        fs::write(journal.dispatch_permit_path(&identity), b"altered bytes").unwrap();
+        assert!(journal.finish_dispatch(&identity, true).is_err());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&identity).unwrap().phase,
+            DispatchPhase::DeliveryRequested
+        );
+        assert!(journal.active_dispatch_path().exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
     fn stopped(record: &Record) -> io::Result<UnitStopAudit> {
         Ok(UnitStopAudit {
             unit: record.identity.unit.clone(),
@@ -763,7 +1369,12 @@ mod tests {
             Phase::Stopped
         );
         assert!(journal
-            .enter_and_spawn_with(&identity, &instance(), || Ok(child(123)), Journal::write_unlocked)
+            .enter_and_spawn_with(
+                &identity,
+                &instance(),
+                || Ok(child(123)),
+                Journal::write_unlocked
+            )
             .is_err());
         fs::remove_dir_all(path).unwrap();
     }
@@ -785,18 +1396,26 @@ mod tests {
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
         assert!(journal
-            .enter_and_spawn_with(&identity, &instance(), || Ok(child(124)), Journal::write_unlocked)
+            .enter_and_spawn_with(
+                &identity,
+                &instance(),
+                || Ok(child(124)),
+                Journal::write_unlocked
+            )
             .is_err());
         assert!(journal
             .fence_and_stop(|_| Err(invalid("injected stop fault")), stopped)
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
         assert!(journal
-            .fence_and_stop(|_| Ok(()), |record| {
-                let mut audit = stopped(record)?;
-                audit.exact_cgroup_empty = false;
-                Ok(audit)
-            })
+            .fence_and_stop(
+                |_| Ok(()),
+                |record| {
+                    let mut audit = stopped(record)?;
+                    audit.exact_cgroup_empty = false;
+                    Ok(audit)
+                }
+            )
             .is_err());
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Fenced);
         journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
@@ -870,7 +1489,12 @@ mod tests {
         assert!(observed.load(Ordering::SeqCst));
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Entered);
         assert!(journal
-            .enter_and_spawn_with(&identity, &instance(), || Ok(child(458)), Journal::write_unlocked)
+            .enter_and_spawn_with(
+                &identity,
+                &instance(),
+                || Ok(child(458)),
+                Journal::write_unlocked
+            )
             .is_err());
         fs::remove_dir_all(path).unwrap();
     }
@@ -948,6 +1572,7 @@ mod tests {
             child_pid: Some(1),
             invocation_id: Some(instance.invocation_id),
             control_group: Some(instance.control_group),
+            dispatch_in_flight: None,
         };
         UnitStopAudit::before_stop(&record).unwrap();
         let status = Command::new("/usr/bin/systemctl")
@@ -965,7 +1590,9 @@ mod tests {
         let path = Path::new("/run").join(format!("mini-spk-stop-audit-{}", std::process::id()));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         let journal = Journal::open(&path).unwrap();
-        journal.with_lock(|this| this.write_unlocked(&record)).unwrap();
+        journal
+            .with_lock(|this| this.write_unlocked(&record))
+            .unwrap();
         journal.fence_and_stop_manager().unwrap();
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
         fs::remove_dir_all(path).unwrap();
