@@ -5,6 +5,7 @@ their canonical codecs. All unbounded integers are decimal strings.
 -/
 import Kernel.NativeHost
 import Host.BirthRuntimeProfile
+import Host.CapabilityInspection
 import Kernel.NativeHostGenesis
 import Kernel.AgentGrain
 import Kernel.CapabilityRevocationController
@@ -2799,6 +2800,9 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
         ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
         ("predicate", predicateJson value.predicate)]
+  | "view-object-capability" => CapabilityInspection.inspect .object bytes
+  | "view-account-capability" => CapabilityInspection.inspect .account bytes
+  | "view-program-capability" => CapabilityInspection.inspect .program bytes
   | "view-capability" =>
       let accepted :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .object).toLawful.decode bytes).isSome ||

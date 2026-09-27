@@ -28,7 +28,8 @@
       "plannedCaps": {
         "sessionOwner": "151", "sessionControl": "152",
         "descriptorOwner": "153", "descriptorControl": "154",
-        "ticketOwner": "181", "ticketControl": "182", "ticketObserve": "183"
+        "ticketOwner": "181", "ticketControl": "182", "ticketObserve": "183",
+        "appObserve": "184"
       }
     },
     {
@@ -71,6 +72,7 @@
         "sessionOwner": "241", "sessionControl": "242",
         "descriptorOwner": "243", "descriptorControl": "244",
         "ticketOwner": "271", "ticketControl": "272", "ticketObserve": "273",
+        "appObserve": "274",
         "grantOwner": "281", "grantControl": "282", "grantObserve": "283"
       }
     },
@@ -99,6 +101,7 @@
         "sessionOwner": "341", "sessionControl": "342",
         "descriptorOwner": "343", "descriptorControl": "344",
         "ticketOwner": "371", "ticketControl": "372", "ticketObserve": "373",
+        "appObserve": "374",
         "grantOwner": "381", "grantControl": "382", "grantObserve": "383"
       }
     }
