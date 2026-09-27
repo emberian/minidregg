@@ -32,6 +32,7 @@ import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
 import Host.Json
+import Host.ApplicationCurrentBirthAuthoring
 import Host.FnInboxView
 import Host.GrainOriginCommand
 import Host.ProviderUsage
@@ -521,6 +522,25 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
           receipt.transactionId receipt.eventId with
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some historical => return .confirmed .replayed historical
+
+/-- Author a current app/session birth intent from one verifier-opened image.
+The JSON is only a request for source selectors; the helper derives current
+height and grant epochs and checks the pinned genesis identity. -/
+def applicationCurrentBirthIntentSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (application : Bool) (payload : List UInt8) : IO (List UInt8) := do
+  unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+    throw (IO.userError "application birth request exceeds host frame bound")
+  let opened ← sessionOpened config state
+  let some text := String.fromUTF8? payload.toByteArray
+    | throw (IO.userError "application birth request is not UTF-8")
+  let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
+  if application then
+    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.applicationIntentLoaded
+      config opened json
+  else
+    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.sessionIntentLoaded
+      config opened json
 
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
   unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
@@ -3170,6 +3190,14 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome ← applicationShareIssueLookupSession
                               pinnedConfig state payload
                             return ((29 : UInt8), outcomeCodec.encode outcome)
+                        | 30 =>
+                            let intent ← applicationCurrentBirthIntentSession
+                              pinnedConfig state true payload
+                            return ((30 : UInt8), intent)
+                        | 31 =>
+                            let intent ← applicationCurrentBirthIntentSession
+                              pinnedConfig state false payload
+                            return ((31 : UInt8), intent)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
