@@ -39,6 +39,8 @@ mod http_response;
 #[cfg(target_os = "linux")]
 pub mod install_service;
 #[cfg(target_os = "linux")]
+pub mod launch_descriptor_native;
+#[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]
 mod native_dispatch;

@@ -14,6 +14,41 @@ use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 
+/// The only pure source-authoring formats the physical SPK descriptor path
+/// may request. This does not expose Mini submit, lookup or admission.
+pub(crate) enum SourceStep {
+    AuthorSchema,
+    InspectSchema,
+    AuthorPackage,
+    InspectPackage,
+    AuthorLaunch,
+    InspectLaunch,
+}
+
+impl SourceStep {
+    pub(crate) fn command_kind(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::AuthorSchema => ("author", "application-permission-schema"),
+            Self::InspectSchema => ("inspect", "application-permission-schema"),
+            Self::AuthorPackage => ("author", "application-spk-package-identity"),
+            Self::InspectPackage => ("inspect", "application-spk-package-identity"),
+            Self::AuthorLaunch => ("author", "application-spk-launch-descriptor"),
+            Self::InspectLaunch => ("inspect", "application-spk-launch-descriptor"),
+        }
+    }
+}
+
+pub(crate) trait SourceTool {
+    fn source_step(&self, step: SourceStep, input: &Path, output: &Path) -> io::Result<Vec<u8>>;
+}
+
+impl SourceTool for PrivateOperator {
+    fn source_step(&self, step: SourceStep, input: &Path, output: &Path) -> io::Result<Vec<u8>> {
+        let (command, kind) = step.command_kind();
+        self.tool(command, kind, input, output)
+    }
+}
+
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
@@ -53,8 +88,8 @@ pub(crate) struct SourceDescriptor {
 /// bridge member is decoded once here, never looked up from extracted files.
 /// A Mini inspector echoes the exact authored bytes; JSON is interpretation
 /// only and cannot replace the original canonical descriptor artifact.
-pub(crate) fn author_signed_package(
-    operator: &PrivateOperator,
+pub(crate) fn author_signed_package<T: SourceTool>(
+    operator: &T,
     package: &InstalledPackage,
     attempt_dir: &Path,
 ) -> io::Result<SourceDescriptor> {
@@ -81,16 +116,14 @@ pub(crate) fn author_signed_package(
         "schema-source.json",
         &serde_json::to_vec(&schema_source)?,
     )?;
-    let schema = operator.tool(
-        "author",
-        "application-permission-schema",
+    let schema = operator.source_step(
+        SourceStep::AuthorSchema,
         &schema_input,
         &attempt_dir.join("schema.bin"),
     )?;
     let schema_path = attempt_dir.join("schema.bin");
-    let schema_inspection = operator.tool(
-        "inspect",
-        "application-permission-schema",
+    let schema_inspection = operator.source_step(
+        SourceStep::InspectSchema,
         &schema_path,
         &attempt_dir.join("schema-inspection.json"),
     )?;
@@ -126,16 +159,14 @@ pub(crate) fn author_signed_package(
         "descriptor-source.json",
         &serde_json::to_vec(&source)?,
     )?;
-    let canonical = operator.tool(
-        "author",
-        "application-spk-package-identity",
+    let canonical = operator.source_step(
+        SourceStep::AuthorPackage,
         &input,
         &attempt_dir.join("descriptor.bin"),
     )?;
     let descriptor_path = attempt_dir.join("descriptor.bin");
-    let inspected = operator.tool(
-        "inspect",
-        "application-spk-package-identity",
+    let inspected = operator.source_step(
+        SourceStep::InspectPackage,
         &descriptor_path,
         &attempt_dir.join("descriptor-inspection.json"),
     )?;

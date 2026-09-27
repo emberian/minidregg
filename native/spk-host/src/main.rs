@@ -1,5 +1,6 @@
 #[cfg(target_os = "linux")]
 fn main() {
+    use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
         materialize_spk, qualify_bridge_spk, signed_schema_source,
     };
@@ -15,6 +16,18 @@ fn main() {
     }
 
     let args: Vec<_> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "qualify-launch" {
+        match qualify_launch(Path::new(&args[2])) {
+            Ok(result) => {
+                println!("{result}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("spk-host: launch qualification refused: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.len() == 3 && matches!(args[1].as_str(), "install-prepare" | "install-complete") {
         let result = if args[1] == "install-prepare" {
             minidregg_spk_host::install_service::prepare(Path::new(&args[2]))
@@ -89,7 +102,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG"
     );
     eprintln!("spk-host: application launch is unavailable until Mini admission is installed");
     std::process::exit(2);
