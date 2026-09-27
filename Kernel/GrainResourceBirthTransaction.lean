@@ -255,7 +255,8 @@ def bindFamily {F : Type} [Field F]
         declaration := (), outcome := (grain.targets index).post
         preExact := rfl, requestExact := rfl, effectsExact := by
           simp only [rawLeg, DeclaredResourceController.targetFamily,
-            DeclaredResourceController.requestFor, id_eq]
+            DeclaredResourceController.requestFor_eq_reference,
+            DeclaredResourceController.requestForReference, id_eq]
         patchExact := rfl, postconditionExact := fun _ => Iff.rfl }
 
 def plan {F : Type} [Field F]
