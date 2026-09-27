@@ -1045,6 +1045,7 @@ theorem baseIntent_ready : baseIntent.preflight readySnapshot = .ok () := by
   unfold DataIntent.preflight
   rw [guardsReady]
   simp only [Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+  rw [if_neg (by simp [baseIntent])]
   rw [durableReady]
 
 theorem guardedIntent_ready : guardedIntent.preflight readySnapshot = .ok () :=

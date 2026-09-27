@@ -1,0 +1,34 @@
+start_utc=2026-09-27T11:30:30Z
+root=/tank/dregg-build/minidregg-9746c47-20260927
+lean_threads=1
+native_jobs=1
+seat=/tank/dregg-build/minidregg-a097554-cycle/lean-seat-1
+failed-build resume check PASS 109 compiled prefix modules
+lean[110/292] Kernel.CanonicalPolicyRegistry start
+lean[110/292] Kernel.CanonicalPolicyRegistry PASS 20s
+lean[111/292] Kernel.CredentialSignedEnvelopeController start
+lean[111/292] Kernel.CredentialSignedEnvelopeController PASS 14s
+lean[112/292] Compiler.CredentialSignatureIO start
+lean[112/292] Compiler.CredentialSignatureIO PASS 8s
+lean[113/292] Compiler.CredentialSignatureAdmission start
+lean[113/292] Compiler.CredentialSignatureAdmission PASS 10s
+lean[114/292] Compiler.CanonicalRuntimeProfile start
+lean[114/292] Compiler.CanonicalRuntimeProfile PASS 12s
+lean[115/292] Compiler.NativeHostProfile start
+lean[115/292] Compiler.NativeHostProfile PASS 9s
+lean[116/292] Kernel.DurableReceiver start
+lean[116/292] Kernel.DurableReceiver PASS 18s
+lean[117/292] Compiler.DurableReceiverCodec start
+lean[117/292] Compiler.DurableReceiverCodec PASS 12s
+lean[118/292] Compiler.DurableReceiverIO start
+lean[118/292] Compiler.DurableReceiverIO PASS 11s
+lean[119/292] Theory.CredentialLineageAdmission start
+lean[119/292] Theory.CredentialLineageAdmission PASS 11s
+lean[120/292] Theory.CredentialAuthorityEffects start
+lean[120/292] Theory.CredentialAuthorityEffects PASS 22s
+lean[121/292] Theory.ResourceBirthAuthority start
+lean[121/292] Theory.ResourceBirthAuthority PASS 17s
+lean[122/292] Compiler.CredentialAuthorityDomainReceiver start
+lean[122/292] Compiler.CredentialAuthorityDomainReceiver PASS 22s
+lean[123/292] Compiler.CredentialAuthorityPolicyRegistry start
+lean[123/292] Compiler.CredentialAuthorityPolicyRegistry FAIL(1) log=/tank/dregg-build/minidregg-a097554-evidence/build-r4/lean/0123-Compiler_CredentialAuthorityPolicyRegistry.log

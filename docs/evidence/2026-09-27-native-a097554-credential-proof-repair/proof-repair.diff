@@ -1,0 +1,10 @@
+--- /tmp/CredentialAuthorityPolicyRegistry-a097-original.lean	2026-09-27 07:41:33
++++ /tmp/CredentialAuthorityPolicyRegistry-a097-proof.lean	2026-09-27 07:38:57
+@@ -1045,6 +1045,7 @@
+   unfold DataIntent.preflight
+   rw [guardsReady]
+   simp only [Bool.not_true, Bool.false_eq_true, ↓reduceIte]
++  rw [if_neg (by simp [baseIntent])]
+   rw [durableReady]
+ 
+ theorem guardedIntent_ready : guardedIntent.preflight readySnapshot = .ok () :=

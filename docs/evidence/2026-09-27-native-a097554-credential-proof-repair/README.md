@@ -1,0 +1,7 @@
+# Credential authority proof repair after claim-only preflight
+
+The source-qualified `a097554` Host resume reused 109 checkpointed modules from the exact failed `9746c47` build, then compiled modules 110–122. Module 123, `Compiler.CredentialAuthorityPolicyRegistry`, failed in `Example.baseIntent_ready`; the [module log](failing-module.log) shows the new unguarded claim-only branch remained in the goal, and its dependent axiom check consequently reported `sorryAx`. The [build log](failed-build.log) records the stop. No Host executable was linked or released. The corrected runner returned `qualified_build=FAIL script_exit=1`, so a systemd wrapper status cannot mask this source red.
+
+The [private proof patch](proof-repair.diff) adds one explicit `if_neg` rewrite: the example's `baseIntent.writes` is a singleton, so it cannot be an unguarded claim-only event. The original source SHA-256 was `588cffbd7445322e94df10ba536a092153dd70eef58c0d72965bbb1d05dc790a`; the narrow-green candidate SHA-256 is `007fcff1c62c59ebce624037cbd66484f3c82d3cc7277763130966da639767e7`. No definition or runtime behavior changes.
+
+The candidate was checked as a separate writable file at `/tank/dregg-build/minidregg-a097554-proofpatch/Compiler/CredentialAuthorityPolicyRegistry.lean`, importing the completed exact `a097554` predecessor OLeans from `/tank/dregg-build/minidregg-9746c47-20260927`. `LEAN_NUM_THREADS=1 lake env lean` exited 0 with an empty diagnostic log; the module's axiom audit passed without `sorryAx`. This is a narrow source check, not a qualified native link.
