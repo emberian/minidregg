@@ -147,17 +147,23 @@ cat >"$ACTION/workroom-continuation.sh" <<'EOF'
 set -eu
 umask 077
 EVIDENCE=$1 HOST=$2 MINI=$3 STORE_BINARY=$4 SIGNATURE_BINARY=$5
-SPK_AGENT_ALLOCATION=$6 ADOPTED_RECEIPT=$7
+SPK_AGENT_ALLOCATION=$6 ADOPTED_RECEIPT=$7 ACTION_DIR=$8
 WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902
 CONFIG="$EVIDENCE/deployment/pinned-config.json"
 SEMANTICS=$(jq -er .semantics "$EVIDENCE/operator-profile.json")
 SERVICE_PID=
 cleanup() { if [ -n "$SERVICE_PID" ]; then kill "$SERVICE_PID" 2>/dev/null || :; wait "$SERVICE_PID" 2>/dev/null || :; fi; }
 trap cleanup EXIT HUP INT TERM
-mkdir -m 700 "$EVIDENCE/continuation-session"
-SOCKET="$EVIDENCE/continuation-session/host.sock"
+RUNTIME_BASE="/run/user/$(id -u)"
+[ -d "$RUNTIME_BASE" ] && [ ! -L "$RUNTIME_BASE" ] &&
+  [ "$(stat -c '%u:%a' "$RUNTIME_BASE")" = "$(id -u):700" ] || exit 2
+SOCKET_DIR=$(mktemp -d "$RUNTIME_BASE/mini-r3w.XXXXXX")
+printf '%s\n' "$SOCKET_DIR" >"$ACTION_DIR/socket-dir.txt"
+sync -f "$ACTION_DIR/socket-dir.txt"
+sync -f "$ACTION_DIR"
+SOCKET="$SOCKET_DIR/host.sock"
 "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-  >"$EVIDENCE/continuation-session/stdout" 2>"$EVIDENCE/continuation-session/stderr" &
+  >"$ACTION_DIR/workroom-service.stdout" 2>"$ACTION_DIR/workroom-service.stderr" &
 SERVICE_PID=$!
 tick=0
 until [ -S "$SOCKET" ]; do
@@ -259,7 +265,7 @@ else
   mark_phase workroom
   /bin/sh "$ACTION/workroom-continuation.sh" "$WORKROOM" "$HOST" "$MINI" \
     "$STORE_BINARY" "$SIGNATURE_BINARY" "$ROOT/source-stage/agent-allocation.json" \
-    "$ACTION/adopted-birth-receipt.json" \
+    "$ACTION/adopted-birth-receipt.json" "$ACTION" \
     >"$ACTION/workroom.stdout" 2>"$ACTION/workroom.stderr"
   test -s "$WORKROOM/agents/verified/birth-evidence.json" || fail "workroom continuation lacked birth evidence"
   complete_phase workroom
