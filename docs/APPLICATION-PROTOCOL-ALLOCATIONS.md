@@ -20,6 +20,7 @@ reservation does not establish an implemented or accepted native path.
 | 19 | Ordered empty-page consumer progress | Reserved for v2 special admission sharing the selected-coverage frontier; legacy content atom tag 9 remains a distinct namespace |
 | 20 | Consumer namespace registration | Reserved for a gateway-authorized durable namespace, gateway-independent uniqueness nullifier, and explicit authenticated initial anchor; not native-qualified |
 | 21 | Agent dispatch with a claimed reservation | Reserved for replayable dispatch binding the exact delegated purse reservation and consuming its one-use claim; not native-qualified |
+| 22 | Grain-backed application share issuance | Reserved for atomic ticket issuance with composite grain birth, current app delegation authority and grain settlement; distinct from bare event15 |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -79,6 +80,20 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 47 | Event21 historical receipt-only lookup (reserved; never a delivery permit) |
 | 48 | Verified-current-image event21 agent dispatch signing plan (reserved private authoring; no commit) |
 | 49 | Event21 agent dispatch detached signature assembly (reserved private authoring; no commit) |
+| 50 | Current-image resident lifecycle BEGIN signing plan (private authoring) |
+| 51 | Resident lifecycle BEGIN detached signature assembly (private authoring) |
+| 52 | Current-image lifecycle claim signing plan (private authoring) |
+| 53 | Lifecycle claim detached signature assembly (private authoring) |
+| 54 | Grain-backed application share-issue submit (reserved) |
+| 55 | Grain-backed share-issue historical receipt-only lookup (reserved) |
+| 56 | Current-image grain-backed share-issue signing plan (reserved private authoring) |
+| 57 | Grain-backed share-issue detached signature assembly (reserved private authoring) |
+
+Event22 and operations54–57 are additive. Existing event15 and operations28/29
+retain their original meaning. Dispatch may consume a grain-backed ticket only
+after Replay has admitted that exact variant against its original prefix and
+produced corresponding historical issuance evidence. Reusing an event15 tag or
+loosening the factory's grain-backed-only rule is not this migration.
 
 The fresh event21 response must have its own strict committed-permit frame and
 source inspector. Agent callers cannot substitute the human event11 operations
