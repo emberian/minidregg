@@ -28,4 +28,7 @@ esac
 mkdir "$SEAT" || { echo "Lean seat unavailable" >&2; exit 75; }
 trap 'rmdir "$SEAT"' EXIT HUP INT TERM
 cd "$MINI_LEAN_ROOT"
-LEAN_NUM_THREADS=2 lake env lean --run "$FEE_SOURCE" "$PLAN"
+LEAN_IMPORT_PATH=$(lake env printenv LEAN_PATH)
+FEE_SOURCE_ROOT=$(CDPATH='' cd -- "$(dirname -- "$FEE_SOURCE")/../.." && pwd)
+cd "$FEE_SOURCE_ROOT"
+LEAN_NUM_THREADS=2 LEAN_PATH="$LEAN_IMPORT_PATH" lean --run "$FEE_SOURCE" "$PLAN"
