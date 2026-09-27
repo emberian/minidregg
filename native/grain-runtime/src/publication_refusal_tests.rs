@@ -7,8 +7,8 @@ pub(super) fn fixture(
     fail_disconnect: bool,
     pre_submit: bool,
 ) -> (Runtime, PathBuf) {
-    let root = std::env::temp_dir().join(format!(
-        "grain-publication-refusal-{}-{}",
+    let root = PathBuf::from("/tmp").join(format!(
+        "gpr-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -120,6 +120,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        foreground_tool: None,
         dispatch_task: None,
         tool_task: Some(ToolTask {
             task: "7102".into(),
@@ -178,6 +179,322 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
     runtime.prompt_active = true;
     runtime.save().unwrap();
     (runtime, root)
+}
+
+#[test]
+fn foreground_status_uses_signed_parent_lease_without_a_hermes_child() {
+    let (mut runtime, root) = fixture(false, false, false);
+    let original = fs::read_to_string(&runtime.config.mini).unwrap();
+    let patched = original
+        .replace(
+            "status=$(cat \"$state/status\")",
+            "status=$(cat \"$state/status\")\n      target=$(jq -r .purpose.target \"$intent\")",
+        )
+        .replace("\"task\":\"7102\"", "\"task\":\"%s\"")
+        .replace(
+            "' \"$status\" > \"$dir/view.json\"",
+            "' \"$target\" \"$status\" > \"$dir/view.json\"",
+        );
+    assert_ne!(original, patched);
+    fs::write(&runtime.config.mini, patched).unwrap();
+    runtime.config.foreground_tool = Some(ForegroundToolProfile {
+        reserve: "2".into(),
+        charge: "0".into(),
+    });
+    runtime.journal.connection = Connection::Soft;
+    runtime.journal.child = None;
+    runtime.journal.hermes_session = None;
+    runtime.journal.prompt_witness = None;
+    runtime.prompt_active = false;
+    runtime.journal.binding = json!({"config":runtime.config,"configPath":runtime.config_path});
+    runtime.save().unwrap();
+    let server = control::start(&runtime.config.control_socket, Arc::new(|_| {})).unwrap();
+    let mut connection = UnixStream::connect(&runtime.config.control_socket).unwrap();
+    connection.write_all(b"attach terminal-v1 soft\n").unwrap();
+    let attachment_id = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+        control::Event::Attached { id, soft: true } => id,
+        other => panic!("unexpected foreground attach: {other:?}"),
+    };
+    let mut attached = String::new();
+    io::BufReader::new(&mut connection)
+        .read_line(&mut attached)
+        .unwrap();
+    runtime.output = Some(server.output_handle());
+    let (_sender, input) = mpsc::channel();
+    let before_rejected = runtime.journal.next_operation_id;
+    assert!(runtime.foreground_tool(
+        attachment_id,
+        br#"{"requestId":"ffffffffffffffffffffffffffffffff","name":"mini_grain_status","arguments":{"unexpected":true}}"#,
+        &input,
+    ).unwrap_err().contains("takes no arguments"));
+    assert_eq!(runtime.journal.next_operation_id, before_rejected);
+    assert!(runtime.journal.parent_hold.is_none());
+    assert!(runtime.journal.foreground_attempt.is_none());
+    assert!(!foreground_tombstone_path(
+        &runtime.config.state_dir,
+        "ffffffffffffffffffffffffffffffff"
+    )
+    .exists());
+    runtime
+        .foreground_tool(
+            attachment_id,
+            br#"{"requestId":"0123456789abcdef0123456789abcdef","name":"mini_grain_status","arguments":{}}"#,
+            &input,
+        )
+        .unwrap();
+    let mut delivered = String::new();
+    io::BufReader::new(&mut connection)
+        .read_line(&mut delivered)
+        .unwrap();
+    let event: Value = serde_json::from_str(&delivered).unwrap();
+    assert_eq!(event["type"], "tool-complete");
+    assert_eq!(event["isError"], false);
+    assert_eq!(event["requestId"], "0123456789abcdef0123456789abcdef");
+    assert!(runtime.journal.parent_hold.is_none());
+    assert!(runtime.journal.child.is_none());
+    assert!(runtime.journal.hermes_session.is_none());
+    assert_eq!(runtime.journal.foreground_history.len(), 1);
+    assert!(!runtime.journal.foreground_history[0].reported);
+    assert!(runtime.journal.foreground_attempt.is_none());
+    assert_eq!(
+        runtime
+            .foreground_result("0123456789abcdef0123456789abcdef")
+            .unwrap()
+            .1,
+        event["result"]
+    );
+    let next_operation = runtime.journal.next_operation_id;
+    assert!(runtime.foreground_tool(
+        attachment_id,
+        br#"{"requestId":"0123456789abcdef0123456789abcdef","name":"mini_grain_status","arguments":{}}"#,
+        &input,
+    ).unwrap_err().contains("inspect it without resubmitting"));
+    assert_eq!(runtime.journal.next_operation_id, next_operation);
+    assert!(runtime.foreground_tool(
+        attachment_id,
+        br#"{"requestId":"0123456789abcdef0123456789abcdef","name":"mini_grain_status","arguments":{"changed":true}}"#,
+        &input,
+    ).unwrap_err().contains("different bytes"));
+    for index in 1..=17 {
+        let request = format!(
+            "{{\"requestId\":\"{index:032x}\",\"name\":\"mini_grain_status\",\"arguments\":{{}}}}"
+        );
+        runtime
+            .foreground_tool(attachment_id, request.as_bytes(), &input)
+            .unwrap();
+    }
+    assert_eq!(runtime.journal.foreground_history.len(), 18);
+    assert!(runtime
+        .journal
+        .foreground_history
+        .iter()
+        .all(|record| !record.reported));
+    // Simulate a crash after signed settlement and the Definite marker but
+    // before moving the final result into the bounded history.
+    let last = runtime.journal.foreground_history.pop().unwrap();
+    assert_eq!(last.request_id, format!("{:032x}", 17));
+    runtime.journal.foreground_attempt = Some(last);
+    runtime.save().unwrap();
+    drop(connection);
+    assert!(matches!(
+        server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        control::Event::Detached { hard: false, .. }
+    ));
+    let ack_id = format!("{:032x}", 16);
+    let mut lost_ack = UnixStream::connect(&runtime.config.control_socket).unwrap();
+    lost_ack.write_all(b"attach terminal-v1 inspect\n").unwrap();
+    let inspect_attachment = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+        control::Event::InspectAttached { id } => id,
+        other => panic!("unexpected inspect attach: {other:?}"),
+    };
+    let mut hello = String::new();
+    io::BufReader::new(&mut lost_ack)
+        .read_line(&mut hello)
+        .unwrap();
+    lost_ack
+        .write_all(format!("tool ack {ack_id}\n").as_bytes())
+        .unwrap();
+    assert!(
+        matches!(server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        control::Event::Line { id, text } if id == inspect_attachment && text == format!("tool ack {ack_id}"))
+    );
+    runtime
+        .answer_foreground_ack(inspect_attachment, &ack_id)
+        .unwrap();
+    drop(lost_ack); // ACK frame may have been queued but was never read.
+    assert!(matches!(
+        server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        control::Event::Detached { hard: false, .. }
+    ));
+    let socket = runtime.config.control_socket.clone();
+    let retry = std::thread::spawn(move || control::tool_ack_connect(&socket, &ack_id));
+    let inspect_attachment = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+        control::Event::InspectAttached { id } => id,
+        other => panic!("unexpected retry inspect attach: {other:?}"),
+    };
+    assert!(
+        matches!(server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        control::Event::Line { id, text } if id == inspect_attachment && text.starts_with("tool ack "))
+    );
+    runtime
+        .answer_foreground_ack(inspect_attachment, &format!("{:032x}", 16))
+        .unwrap();
+    let ack_frame = retry.join().unwrap().unwrap();
+    assert_eq!(ack_frame["type"], "tool-acknowledged");
+    assert_eq!(ack_frame["requestId"], format!("{:032x}", 16));
+    let saved_config = runtime.config.clone();
+    let saved_config_path = runtime.config_path.clone();
+    runtime.output = None;
+    drop(server);
+    drop(runtime);
+    let mut reopened = Runtime::open(saved_config, saved_config_path).unwrap();
+    assert_eq!(
+        reopened
+            .foreground_result("0123456789abcdef0123456789abcdef")
+            .unwrap()
+            .1,
+        event["result"]
+    );
+    assert!(reopened.foreground_result(&format!("{:032x}", 17)).is_ok());
+    reopened
+        .acknowledge_foreground(&format!("{:032x}", 17))
+        .unwrap();
+    assert!(reopened.journal.foreground_attempt.is_none());
+    assert_eq!(reopened.journal.foreground_history.len(), 18);
+    reopened
+        .acknowledge_foreground("0123456789abcdef0123456789abcdef")
+        .unwrap();
+    reopened
+        .acknowledge_foreground("0123456789abcdef0123456789abcdef")
+        .unwrap();
+    assert!(reopened.journal.foreground_history[0].reported);
+    let old_operation = reopened.journal.foreground_history[0].operation_id;
+    reopened.journal.foreground_history.remove(0);
+    reopened.save().unwrap();
+    let next_operation = reopened.journal.next_operation_id;
+    assert!(reopened.foreground_tool(0,
+        br#"{"requestId":"0123456789abcdef0123456789abcdef","name":"mini_grain_status","arguments":{}}"#,
+        &input).unwrap_err().contains(&format!("operation {old_operation}")));
+    assert_eq!(reopened.journal.next_operation_id, next_operation);
+    drop(reopened);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
+    let (mut runtime, root) = fixture(false, false, false);
+    runtime.config.dispatch_task = Some(DispatchTask {
+        task: "7103".into(),
+        subject: "9".into(),
+        capability: "91".into(),
+        query_capability: "92".into(),
+        custody_key: root.join("dispatch.key"),
+        parent_capability: "76".into(),
+        parent_observe_capability: "77".into(),
+        reserve: "5".into(),
+        charge: "2".into(),
+        socket_path: runtime.config.state_dir.join("dispatch.sock"),
+        host_uid: unsafe { libc::geteuid() } + 1,
+        operator_socket: None,
+        reserve_signer: None,
+    });
+    runtime.config.provider_task = Some(ProviderTask {
+        task: "7104".into(),
+        subject: "10".into(),
+        capability: "101".into(),
+        query_capability: "102".into(),
+        custody_key: root.join("provider.key"),
+        parent_capability: "78".into(),
+        parent_observe_capability: "79".into(),
+        reserve: "5".into(),
+        charge: "0".into(),
+        metering: false,
+        max_input_tokens: None,
+        max_output_tokens: None,
+        model: "fixture".into(),
+        upstream_url: "http://127.0.0.1:1".into(),
+        provider_key_file: root.join("provider.secret"),
+        gateway_bind: "127.0.0.1:0".into(),
+        max_request_bytes: 1024,
+        max_response_bytes: 1024,
+        timeout_seconds: 30,
+        max_iterations: None,
+        local_fixture_host_network: true,
+    });
+    let workers = runtime.managed_worker_subjects().unwrap();
+    assert_eq!(workers, ["8", "9", "10"]);
+    let next_generation = managed_worker_policy_source("7", &workers, "2");
+    assert_eq!(
+        next_generation,
+        json!({"owner":"7",
+        "workerSubjects":["8","9","10"],"workerGeneration":"2"})
+    );
+    assert_ne!(
+        next_generation,
+        managed_worker_policy_source("7", &workers, "1")
+    );
+    runtime.config.provider_task.as_mut().unwrap().subject = "9".into();
+    assert!(runtime.managed_worker_subjects().is_err());
+    runtime.config.provider_task.as_mut().unwrap().subject = "10".into();
+    let state = runtime.config.state_dir.clone();
+    fs::write(
+        state.join("policy-view.json"),
+        serde_json::to_vec(&json!({
+            "policyId":"7101",
+            "domain":"1","semantics":"2","version":"3","address":"4",
+            "predicate":managed_worker_policy_source("7", &workers, "1")
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let original = fs::read_to_string(&runtime.config.mini).unwrap();
+    let author = r#"if [ "$1" = author ]; then
+  shift
+  input=
+  output=
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --input) input=$2; shift 2 ;;
+      --output) output=$2; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  jq -cS . "$input" > "$output"
+  exit 0
+fi
+"#;
+    let policy_query = r#"if [ "$command" = query ] && grep -q '"view":"policy"' "$intent"; then
+  cp "$state/policy-view.json" "$dir/view.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  exit 0
+fi
+"#;
+    let patched = original
+        .replacen("command=$1", &format!("{author}command=$1"), 1)
+        .replacen(
+            "if [ \"$command\" = query ]; then",
+            &format!("{policy_query}if [ \"$command\" = query ]; then"),
+            1,
+        )
+        .replace("\"task\":\"7102\"", "\"task\":\"7101\"");
+    assert_ne!(original, patched);
+    fs::write(&runtime.config.mini, patched).unwrap();
+    runtime.renew_worker_policy(true).unwrap();
+    let source_path = fs::read_dir(&state)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("policy-source-")
+        })
+        .unwrap();
+    let installed: Value = serde_json::from_slice(&fs::read(source_path).unwrap()).unwrap();
+    assert_eq!(installed["workerSubjects"], json!(["8", "9", "10"]));
+    assert_eq!(installed["workerGeneration"], "2");
+    drop(runtime);
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn publication(root: &str) -> Value {

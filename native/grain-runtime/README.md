@@ -40,6 +40,29 @@ the held allowance must be reconciled before the task can reattach. `cancel`
 remains a distinct terminal native operation and is not a controller command.
 Each command name and all arguments come from the operator's fixed allowlist.
 
+An operator may separately enable model-free foreground MCP calls with
+`foregroundTool: {"reserve":"100","charge":"0"}` and the existing `toolTask`.
+This parent allowance is explicit; it does not copy a Hermes prompt budget or
+claim measured model usage. A shell caller first obtains and retains a random
+request ID, then sends one named tool call on the same controller socket:
+
+```sh
+grain-runtime tool-id
+grain-runtime tool /absolute/controller.sock soft REQUEST_ID_32_HEX mini_grain_status /absolute/arguments.json
+grain-runtime tool-result /absolute/controller.sock REQUEST_ID_32_HEX
+grain-runtime tool-ack /absolute/controller.sock REQUEST_ID_32_HEX
+```
+
+`arguments.json` contains the tool's JSON arguments (for status, `{}`). The
+request ID must be known before sending. `tool-result` uses a read-only
+attachment and can recover an exact retained result after a lost response or
+controller restart. Repeating `tool` with the same ID never sends the work
+again, even after an explicitly acknowledged result has been evicted. A
+different request body under that ID is refused. `tool-ack` is an explicit,
+idempotent client acknowledgement; only acknowledged results can be evicted
+from the bounded journal. An uncertain Mini or HTTP outcome remains fenced for
+exact lookup or operator audit, without automatic resubmission.
+
 Example configuration shape (IDs and paths must match an independently
 bootstrapped native Mini deployment):
 

@@ -59,6 +59,10 @@ struct Config {
     policy_control_capability: Option<String>,
     #[serde(default)]
     tool_task: Option<ToolTask>,
+    /// Parent allowance for one model-free foreground tool invocation.
+    /// The delegated tool task remains separately reserved and charged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    foreground_tool: Option<ForegroundToolProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dispatch_task: Option<DispatchTask>,
     #[serde(default)]
@@ -107,6 +111,13 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForegroundToolProfile {
+    reserve: String,
+    charge: String,
 }
 
 /// A separate AgentGrain purse for app API attempts by this fixed agent
@@ -301,6 +312,10 @@ struct Journal {
     /// prompt. SDK retries receive these bytes without another upstream send.
     #[serde(default)]
     provider_replays: Vec<ProviderReplay>,
+    #[serde(default)]
+    foreground_attempt: Option<ForegroundAttempt>,
+    #[serde(default)]
+    foreground_history: Vec<ForegroundAttempt>,
     /// Confirmed native publication receipts retained independently of ACP
     /// tool-result delivery. Never synthesize a tool response from this list.
     #[serde(default)]
@@ -354,6 +369,9 @@ struct Pending {
 struct PublicationPending {
     prompt_operation_id: u64,
     session_id: String,
+    /// Explicit for foreground calls; absent in retained pre-foreground journals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_origin: Option<WorkOrigin>,
     source_sha256: String,
     targets: Vec<String>,
 }
@@ -363,6 +381,8 @@ struct PublicationPending {
 struct PublicationReceipt {
     prompt_operation_id: u64,
     session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_origin: Option<WorkOrigin>,
     operation_id: u64,
     attempt: PathBuf,
     source_sha256: String,
@@ -403,6 +423,127 @@ struct BirthPending {
     parent_view: Value,
     prompt_operation_id: u64,
     session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_origin: Option<WorkOrigin>,
+}
+
+/// A foreground invocation is its own work identity. Historical journals
+/// omit this field and retain the original Hermes session identity.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum WorkOrigin {
+    ForegroundTool { operation_id: u64 },
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForegroundAttempt {
+    request_id: String,
+    operation_id: u64,
+    name: String,
+    request_path: PathBuf,
+    request_sha256: String,
+    phase: ForegroundPhase,
+    #[serde(default)]
+    result_path: Option<PathBuf>,
+    #[serde(default)]
+    result_sha256: Option<String>,
+    /// Explicit client acknowledgement (or operator-audited terminal with no
+    /// result). Queuing a socket frame is never a delivery acknowledgement.
+    #[serde(default)]
+    reported: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForegroundTombstone {
+    request_id: String,
+    operation_id: u64,
+    request_sha256: String,
+}
+
+fn foreground_tombstone_path(state_dir: &Path, request_id: &str) -> PathBuf {
+    state_dir.join(format!("foreground-request-{request_id}.json"))
+}
+
+fn read_foreground_tombstone(
+    state_dir: &Path,
+    request_id: &str,
+) -> Result<Option<ForegroundTombstone>> {
+    let path = foreground_tombstone_path(state_dir, request_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let tombstone: ForegroundTombstone =
+        serde_json::from_slice(&bounded_regular_file(&path, 4096)?)
+            .map_err(|e| format!("foreground tombstone: {e}"))?;
+    if tombstone.request_id != request_id
+        || tombstone.operation_id == 0
+        || tombstone.request_sha256.len() != 64
+        || !tombstone
+            .request_sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("foreground tombstone identity changed".into());
+    }
+    Ok(Some(tombstone))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForegroundRequest {
+    #[serde(rename = "requestId")]
+    request_id: String,
+    name: String,
+    arguments: Value,
+}
+
+fn valid_foreground_request_id(id: &str) -> bool {
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn foreground_request_id(frame: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(frame).ok()?;
+    let id = value.get("requestId")?.as_str()?;
+    valid_foreground_request_id(id).then(|| id.to_owned())
+}
+
+fn bounded_foreground_result(mut result: Value) -> Result<(Value, Vec<u8>)> {
+    let mut bytes = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
+    // Leave room for the operation/request IDs and the outer control frame.
+    // Native effects and their exact receipts remain in the journal even if a
+    // tool produced more text than this foreground transport can retain.
+    if bytes.len() > 1_000_000 {
+        result = json!({"isError":true,
+            "text":"foreground result exceeds the 1 MiB transport profile; inspect retained native receipts before any further work",
+            "originalResultSha256":sha256_bytes(&bytes)?,
+            "originalResultBytes":bytes.len()});
+        bytes = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
+    }
+    Ok((result, bytes))
+}
+
+fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &str) -> Value {
+    if workers.len() == 1 {
+        json!({"owner":owner,"workerSubject":workers[0],"workerGeneration":generation})
+    } else {
+        json!({"owner":owner,"workerSubjects":workers,"workerGeneration":generation})
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ForegroundPhase {
+    Prepared,
+    Reserved,
+    Executing,
+    Definite,
+    Uncertain,
+    Audited,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -428,6 +569,17 @@ impl BirthPending {
     }
 
     fn validate_members(&self) -> Result<()> {
+        match &self.work_origin {
+            None if self.session_id.is_empty() => {
+                return Err("Hermes birth origin lacks its retained session".into());
+            }
+            Some(WorkOrigin::ForegroundTool { operation_id })
+                if *operation_id != self.prompt_operation_id || !self.session_id.is_empty() =>
+            {
+                return Err("foreground birth origin differs from its operation".into());
+            }
+            _ => {}
+        }
         let expected = match self.route {
             None => {
                 if !self.born_bundle.is_empty() {
@@ -555,6 +707,7 @@ fn same_publication_confirmation(a: &PublicationReceipt, b: &PublicationReceipt)
     a.operation_id == b.operation_id
         && a.prompt_operation_id == b.prompt_operation_id
         && a.session_id == b.session_id
+        && a.work_origin == b.work_origin
         && a.source_sha256 == b.source_sha256
         && a.call_sha256 == b.call_sha256
         && a.targets == b.targets
@@ -569,12 +722,14 @@ fn current_publication_receipt<'a>(
     prior_operation_ids: &[u64],
     prompt_operation_id: u64,
     session_id: &str,
+    work_origin: Option<&WorkOrigin>,
     targets: &[String],
 ) -> Result<&'a PublicationReceipt> {
     let mut matching = records.iter().filter(|record| {
         !prior_operation_ids.contains(&record.operation_id)
             && record.prompt_operation_id == prompt_operation_id
             && record.session_id == session_id
+            && record.work_origin.as_ref() == work_origin
             && record.targets == targets
             && !record.reported
     });
@@ -1107,6 +1262,72 @@ impl Journal {
         Ok(())
     }
 
+    fn validate_foreground(&self, state_dir: &Path) -> Result<()> {
+        if self.foreground_history.len() > 256 {
+            return Err("foreground result history exceeds retention bound".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for attempt in self
+            .foreground_history
+            .iter()
+            .chain(self.foreground_attempt.iter())
+        {
+            if !valid_foreground_request_id(&attempt.request_id)
+                || !seen.insert((attempt.operation_id, attempt.request_id.clone()))
+                || attempt.operation_id >= self.next_operation_id
+                || attempt.request_path
+                    != state_dir.join(format!(
+                        "foreground-{:016}.request.json",
+                        attempt.operation_id
+                    ))
+                || sha256_bytes(&bounded_regular_file(&attempt.request_path, 262_144)?)?
+                    != attempt.request_sha256
+            {
+                return Err("foreground request origin changed or repeated".into());
+            }
+            let tombstone = read_foreground_tombstone(state_dir, &attempt.request_id)?
+                .ok_or("foreground request tombstone absent")?;
+            if tombstone.operation_id != attempt.operation_id
+                || tombstone.request_sha256 != attempt.request_sha256
+            {
+                return Err("foreground request tombstone differs from journal".into());
+            }
+            match (&attempt.result_path, &attempt.result_sha256) {
+                (None, None) if attempt.phase != ForegroundPhase::Definite => {}
+                (Some(path), Some(digest))
+                    if *path
+                        == state_dir.join(format!(
+                            "foreground-{:016}.result.json",
+                            attempt.operation_id
+                        ))
+                        && sha256_bytes(&bounded_regular_file(path, 1_048_576)?)? == *digest => {}
+                _ => return Err("foreground retained result differs".into()),
+            }
+            if attempt.reported
+                && !matches!(
+                    attempt.phase,
+                    ForegroundPhase::Definite | ForegroundPhase::Audited
+                )
+            {
+                return Err("foreground result was reported before settlement".into());
+            }
+        }
+        let mut request_ids = std::collections::HashSet::new();
+        let mut operation_ids = std::collections::HashSet::new();
+        for attempt in self
+            .foreground_history
+            .iter()
+            .chain(self.foreground_attempt.iter())
+        {
+            if !request_ids.insert(&attempt.request_id)
+                || !operation_ids.insert(attempt.operation_id)
+            {
+                return Err("foreground identity repeated".into());
+            }
+        }
+        Ok(())
+    }
+
     fn validate_birth_registry(&self) -> Result<()> {
         let mut operations = std::collections::HashSet::new();
         let mut names = std::collections::HashSet::new();
@@ -1214,6 +1435,8 @@ impl Journal {
             provider_attempt: None,
             provider_settlement: None,
             provider_replays: Vec::new(),
+            foreground_attempt: None,
+            foreground_history: Vec::new(),
             publication_receipts: Vec::new(),
             birth_next_ordinal: BTreeMap::new(),
             birth_operation: None,
@@ -1716,6 +1939,23 @@ fn validate(c: &Config) -> Result<()> {
     if c.tool_task.is_some() && c.policy_control_capability.is_none() {
         return Err("toolTask requires policyControlCapability for generation renewal".into());
     }
+    if let Some(profile) = &c.foreground_tool {
+        if c.tool_task.is_none() {
+            return Err("foregroundTool requires toolTask".into());
+        }
+        decimal(&profile.reserve, "foregroundTool.reserve")?;
+        decimal(&profile.charge, "foregroundTool.charge")?;
+        if profile
+            .reserve
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .zip(profile.charge.parse::<u64>().ok())
+            .is_none_or(|(reserve, charge)| charge > reserve)
+        {
+            return Err("foregroundTool charge must fit positive u64 reserve".into());
+        }
+    }
     #[cfg(not(target_os = "linux"))]
     if c.dispatch_task.is_some() {
         return Err("dispatchTask requires Linux SO_PEERCRED".into());
@@ -2205,10 +2445,57 @@ struct Runtime {
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
     provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
+    foreground_operation: Option<u64>,
     output: Option<control::OutputHandle>,
 }
 
 impl Runtime {
+    fn current_work_origin(&self) -> Result<(u64, String, Option<WorkOrigin>)> {
+        if let Some(operation_id) = self.foreground_operation {
+            return Ok((
+                operation_id,
+                String::new(),
+                Some(WorkOrigin::ForegroundTool { operation_id }),
+            ));
+        }
+        let operation_id = self
+            .journal
+            .child
+            .as_ref()
+            .ok_or("work has no active Hermes worker")?
+            .operation_id;
+        let session_id = self
+            .journal
+            .hermes_session
+            .as_ref()
+            .ok_or("work has no retained Hermes session")?
+            .id
+            .clone();
+        Ok((operation_id, session_id, None))
+    }
+
+    fn reserve_parent_work_lease(
+        &mut self,
+        reserve: &str,
+        charge: &str,
+        label: &str,
+    ) -> Result<()> {
+        self.mark_hold(false, reserve, charge)?;
+        self.transition(json!({"type":"reserve","amount":reserve}), "reserve", label)?;
+        let parent = self.query()?;
+        let before = parent.get("grain").ok_or("reserved parent grain absent")?;
+        if !matches!(
+            before.get("status").and_then(Value::as_str),
+            Some("3" | "4")
+        ) {
+            return Err("parent grain is not reserved after work allowance".into());
+        }
+        self.journal.prompt_witness = Some(json!({"task":self.config.task,
+            "expectedTargetRoot":parent.get("targetRoot").ok_or("parent root absent")?,
+            "before":{"generation":before.get("generation"),"status":before.get("status"),
+                "remaining":before.get("remaining"),"reserved":before.get("reserved")}}));
+        self.save()
+    }
     fn emit(&self, message: impl Into<String>) {
         if let Some(output) = &self.output {
             let _ = output.try_output(message);
@@ -2728,7 +3015,7 @@ impl Runtime {
             .application_api_attempt
             .as_ref()
             .ok_or("no retained forward API attempt")?;
-        if !self.prompt_active
+        if !self.prompt_active && self.foreground_operation.is_none()
             || self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
             || attempt.operation_id != forward_id
@@ -3289,7 +3576,7 @@ impl Runtime {
             return Err("payer request lacks exact confirmed v2 reserve".into());
         }
         if self.cancelled.load(Ordering::SeqCst)
-            || !self.prompt_active
+            || (!self.prompt_active && self.foreground_operation.is_none())
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
         {
             return Err("agent parent no longer permits payer signing".into());
@@ -3533,7 +3820,7 @@ impl Runtime {
             return Err("retained payer signature has invalid shape".into());
         }
         self.check_not_cancelled()?;
-        if !self.prompt_active
+        if !self.prompt_active && self.foreground_operation.is_none()
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
         {
             return Err("agent parent disconnected before payer signature reply".into());
@@ -3560,7 +3847,7 @@ impl Runtime {
         if self.cancelled.load(Ordering::SeqCst)
             || !self.prompt_active
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || self.journal.child.is_none()
+            || (self.journal.child.is_none() && self.foreground_operation.is_none())
             || self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
@@ -3809,7 +4096,7 @@ impl Runtime {
         }
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || !self.prompt_active
+            || (!self.prompt_active && self.foreground_operation.is_none())
         {
             return Err("agent parent no longer permits app send".into());
         }
@@ -3844,7 +4131,7 @@ impl Runtime {
         }
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || !self.prompt_active
+            || (!self.prompt_active && self.foreground_operation.is_none())
         {
             return Err("agent parent fenced during app send preparation".into());
         }
@@ -4143,6 +4430,7 @@ impl Runtime {
             }
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
+            j.validate_foreground(&config.state_dir)?;
             j
         } else {
             let j = Journal::fresh(binding);
@@ -4167,11 +4455,13 @@ impl Runtime {
             provider_control: Arc::new(Mutex::new(None)),
             provider_lease: None,
             prompt_active: false,
+            foreground_operation: None,
             output: None,
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
         if rt.journal.child.is_some()
+            || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
             || rt.journal.hard_reconnect_pending
         {
@@ -4202,6 +4492,17 @@ impl Runtime {
             || origin.targets.len() > 8
         {
             return Err("publication pending origin is inconsistent".into());
+        }
+        match &origin.work_origin {
+            None if origin.session_id.is_empty() => {
+                return Err("publication Hermes origin lacks its session".into());
+            }
+            Some(WorkOrigin::ForegroundTool { operation_id })
+                if *operation_id != origin.prompt_operation_id || !origin.session_id.is_empty() =>
+            {
+                return Err("publication foreground origin differs from its operation".into());
+            }
+            _ => {}
         }
         let source_path = self
             .config
@@ -4269,6 +4570,7 @@ impl Runtime {
         Ok(Some(PublicationReceipt {
             prompt_operation_id: origin.prompt_operation_id,
             session_id: origin.session_id.clone(),
+            work_origin: origin.work_origin.clone(),
             operation_id: pending.operation_id,
             attempt: pending.attempt.clone(),
             source_sha256: origin.source_sha256.clone(),
@@ -4659,6 +4961,7 @@ impl Runtime {
             .publication_receipts
             .iter()
             .filter(|record| !record.reported)
+            .filter(|record| record.work_origin.is_none())
             .cloned()
             .collect();
         if pending.is_empty()
@@ -4666,7 +4969,7 @@ impl Runtime {
                 .journal
                 .born_resources
                 .iter()
-                .all(|record| record.reported)
+                .all(|record| record.reported || record.pending.work_origin.is_some())
         {
             return Ok((String::new(), Vec::new()));
         }
@@ -4694,6 +4997,7 @@ impl Runtime {
                 publication: Some(PublicationPending {
                     prompt_operation_id: record.prompt_operation_id,
                     session_id: record.session_id.clone(),
+                    work_origin: record.work_origin.clone(),
                     source_sha256: record.source_sha256.clone(),
                     targets: record.targets.clone(),
                 }),
@@ -4738,7 +5042,7 @@ impl Runtime {
             .journal
             .born_resources
             .iter()
-            .filter(|record| !record.reported)
+            .filter(|record| !record.reported && record.pending.work_origin.is_none())
             .take(4usize.saturating_sub(ids.len()))
         {
             self.verify_born_record(record)?;
@@ -5077,17 +5381,29 @@ impl Runtime {
         }
         Ok(json!({"view":view,"authorityRoot":challenge.pointer("/signing/0/authorityRoot")}))
     }
-    fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
+    fn managed_worker_subjects(&self) -> Result<Vec<String>> {
         let mut workers = Vec::new();
         if let Some(tool) = &self.config.tool_task {
             workers.push(tool.subject.clone());
         }
+        if let Some(dispatch) = &self.config.dispatch_task {
+            if workers.iter().any(|subject| subject == &dispatch.subject) {
+                return Err("dispatch and tool witness subjects must be distinct".into());
+            }
+            workers.push(dispatch.subject.clone());
+        }
         if let Some(provider) = &self.config.provider_task {
             if workers.iter().any(|subject| subject == &provider.subject) {
-                return Err("provider and tool witness subjects must be distinct".into());
+                return Err(
+                    "provider witness subject must be distinct from tool and dispatch".into(),
+                );
             }
             workers.push(provider.subject.clone());
         }
+        Ok(workers)
+    }
+    fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
+        let workers = self.managed_worker_subjects()?;
         if workers.is_empty() {
             return Ok(());
         }
@@ -5219,11 +5535,10 @@ impl Runtime {
             let paused_generation = current_generation
                 .checked_sub(1)
                 .ok_or("paused generation has no prior value")?;
-            let mut values = vec![current_generation];
-            if let Some(prior) = paused_generation.checked_sub(1) {
-                values.push(prior);
-            }
-            values
+            // A paused grain still carries the policy for its signed current
+            // generation. An interrupted renewal may already have installed
+            // the next law; both cases are exact, source-authored bytes.
+            vec![current_generation, paused_generation]
         } else {
             vec![current_generation]
         };
@@ -5239,13 +5554,8 @@ impl Runtime {
         self.author_grain_policy_bytes("predicate", &observed_source, &observed_bytes)?;
         let observed = bounded_policy_bytes(&observed_bytes)?;
         for candidate in candidates {
-            let source = if workers.len() == 1 {
-                json!({"owner":self.config.subject,"workerSubject":workers[0],
-                    "workerGeneration":candidate.to_string()})
-            } else {
-                json!({"owner":self.config.subject,"workerSubjects":workers,
-                    "workerGeneration":candidate.to_string()})
-            };
+            let source =
+                managed_worker_policy_source(&self.config.subject, workers, &candidate.to_string());
             let path = dir.join(format!("managed-{candidate}.json"));
             write_new(
                 &path,
@@ -5560,16 +5870,7 @@ impl Runtime {
                 };
                 self.journal.publication_receipts.remove(index);
             }
-            let child = self
-                .journal
-                .child
-                .as_ref()
-                .ok_or("publication has no worker")?;
-            let session = self
-                .journal
-                .hermes_session
-                .as_ref()
-                .ok_or("publication has no retained Hermes session")?;
+            let (work_operation_id, session_id, work_origin) = self.current_work_origin()?;
             let targets = source["grain"]["publications"]
                 .as_array()
                 .ok_or("publication targets absent")?
@@ -5582,7 +5883,7 @@ impl Runtime {
                     Ok(id.to_owned())
                 })
                 .collect::<Result<Vec<_>>>()?;
-            Some((child.operation_id, session.id.clone(), targets))
+            Some((work_operation_id, session_id, work_origin, targets))
         } else {
             None
         };
@@ -5594,10 +5895,11 @@ impl Runtime {
         )?;
         let publication = publication
             .map(
-                |(prompt_operation_id, session_id, targets)| -> Result<PublicationPending> {
+                |(prompt_operation_id, session_id, work_origin, targets)| -> Result<PublicationPending> {
                     Ok(PublicationPending {
                         prompt_operation_id,
                         session_id,
+                        work_origin,
                         source_sha256: sha256_file(&source_path)?,
                         targets,
                     })
@@ -5809,13 +6111,16 @@ impl Runtime {
     }
     fn begin_application_api(
         &mut self,
-        request: &mcp::BrokerRequest,
+        arguments: &Value,
+        reply: mpsc::Sender<Value>,
+        prompt_epoch: Option<u64>,
     ) -> Result<ActiveApplicationApi> {
-        if request.prompt_epoch != 1
-            || !self.prompt_active
+        if (self.foreground_operation.is_none() && prompt_epoch != Some(1))
+            || (self.foreground_operation.is_some() && prompt_epoch.is_some())
+            || (!self.prompt_active && self.foreground_operation.is_none())
             || self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
-            || self.journal.child.is_none()
+            || (self.journal.child.is_none() && self.foreground_operation.is_none())
             || self.journal.application_api_attempt.is_some()
             || self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
@@ -5838,7 +6143,7 @@ impl Runtime {
             .iter()
             .map(|route| route.name.clone())
             .collect::<Vec<_>>();
-        let input = application_api_tools::parse_input(&request.arguments, &allowed)?;
+        let input = application_api_tools::parse_input(arguments, &allowed)?;
         let route = routes
             .iter()
             .find(|route| route.name == input.application)
@@ -5920,7 +6225,7 @@ impl Runtime {
             operation_id,
             route,
             request: dispatch,
-            reply: request.reply.clone(),
+            reply,
             step: ApplicationApiStep::Hello(hello),
             deadline,
         })
@@ -7562,19 +7867,7 @@ impl Runtime {
         if self.journal.born_resource_count() + member_count > 8 * 1024 {
             return Err("resource birth registry is full".into());
         }
-        let prompt_operation_id = self
-            .journal
-            .child
-            .as_ref()
-            .ok_or("resource birth has no active worker")?
-            .operation_id;
-        let session_id = self
-            .journal
-            .hermes_session
-            .as_ref()
-            .ok_or("resource birth has no retained Hermes session")?
-            .id
-            .clone();
+        let (prompt_operation_id, session_id, work_origin) = self.current_work_origin()?;
         let next_ordinal = ordinal.checked_add(1).ok_or("birth ordinal exhausted")?;
         self.journal
             .birth_next_ordinal
@@ -7750,6 +8043,7 @@ impl Runtime {
             parent_view,
             prompt_operation_id,
             session_id,
+            work_origin,
         };
         origin.validate_members()?;
         let birth_operation = self
@@ -7865,7 +8159,7 @@ impl Runtime {
     fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
-            || self.journal.child.is_none()
+            || (self.journal.child.is_none() && self.foreground_operation.is_none())
             || self.journal.pending.is_some()
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
@@ -7873,7 +8167,7 @@ impl Runtime {
             || self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
-            || !self.prompt_active
+            || (!self.prompt_active && self.foreground_operation.is_none())
         {
             return Err("Hermes task is not running under this controller".into());
         }
@@ -7995,19 +8289,7 @@ impl Runtime {
                 // The settle transition journals one verified receipt before
                 // returning. Bind the tool response to that new record and the
                 // active prompt, never to a previous publication on this task.
-                let prompt_operation_id = self
-                    .journal
-                    .child
-                    .as_ref()
-                    .ok_or("publication has no active worker")?
-                    .operation_id;
-                let session_id = self
-                    .journal
-                    .hermes_session
-                    .as_ref()
-                    .ok_or("publication has no retained Hermes session")?
-                    .id
-                    .clone();
+                let (prompt_operation_id, session_id, work_origin) = self.current_work_origin()?;
                 let target_ids: Vec<String> = publications
                     .iter()
                     .map(|publication| {
@@ -8125,12 +8407,742 @@ impl Runtime {
                     &prior_receipt_ids,
                     prompt_operation_id,
                     &session_id,
+                    work_origin.as_ref(),
                     &target_ids,
                 )?;
                 tool_view["publicationReceipt"] = publication_receipt_json(receipt);
                 Ok(tool_view)
             }
             _ => Err("tool is not delegated".into()),
+        }
+    }
+
+    /// Reject definite input errors before taking a signed parent allowance.
+    /// This is only a syntax/operator-profile preflight; the normal tool path
+    /// still verifies every native grant and current source state.
+    fn preflight_foreground_arguments(&self, request: &ForegroundRequest) -> Result<()> {
+        let arguments = &request.arguments;
+        let tool = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask is not configured")?;
+        match request.name.as_str() {
+            "mini_grain_status" => {
+                if arguments != &json!({}) && !arguments.is_null() {
+                    return Err("mini_grain_status takes no arguments".into());
+                }
+            }
+            "mini_read_resource" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("read arguments must be an object")?;
+                if object.len() != 1 {
+                    return Err("read requires exactly one name".into());
+                }
+                let name = object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("read name must be a string")?;
+                if !tool.allowed_reads.iter().any(|read| read.name == name)
+                    && !self
+                        .journal
+                        .born_resources
+                        .iter()
+                        .any(|born| born.pending.born.name == name)
+                {
+                    return Err("resource read name is not configured or recorded".into());
+                }
+            }
+            "mini_create_resource" => {
+                resource_tools::select_birth(&tool.allowed_birth_families, arguments)?;
+            }
+            "mini_create_application" | "mini_create_application_session" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("birth arguments must be an object")?;
+                let session = request.name == "mini_create_application_session";
+                if object.len() != if session { 2 } else { 1 } {
+                    return Err("birth tool has unexpected arguments".into());
+                }
+                let family = object
+                    .get("family")
+                    .and_then(Value::as_str)
+                    .ok_or("birth family must be a name")?;
+                if session {
+                    let app = object
+                        .get("application")
+                        .and_then(Value::as_str)
+                        .ok_or("session birth requires application")?;
+                    if app.is_empty()
+                        || app.len() > 64
+                        || !tool
+                            .allowed_session_families
+                            .iter()
+                            .any(|entry| entry.name == family)
+                    {
+                        return Err("session family or application is unavailable".into());
+                    }
+                    if !self
+                        .journal
+                        .born_resources
+                        .iter()
+                        .any(|born| born.pending.born.name == app)
+                        && !tool
+                            .registered_shared_applications
+                            .iter()
+                            .any(|entry| entry.name == app)
+                    {
+                        return Err("session application is not recorded or registered".into());
+                    }
+                } else if !tool
+                    .allowed_application_families
+                    .iter()
+                    .any(|entry| entry.name == family)
+                {
+                    return Err("application family is not allowlisted".into());
+                }
+                let pin = tool
+                    .current_birth_host_sha256
+                    .as_deref()
+                    .ok_or("current application birth is not enabled by operator Host pin")?;
+                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                    return Err(
+                        "current application birth Host image or socket differs from operator pin"
+                            .into(),
+                    );
+                }
+            }
+            "mini_publish" => {
+                let supplied = arguments
+                    .get("publications")
+                    .and_then(Value::as_array)
+                    .ok_or("publications must be an array")?;
+                if supplied.is_empty()
+                    || supplied.len() > 8
+                    || serde_json::to_vec(arguments)
+                        .map_err(|e| e.to_string())?
+                        .len()
+                        > 32_768
+                {
+                    return Err("publication request exceeds count or byte bound".into());
+                }
+                for source in supplied {
+                    let object = source.as_object().ok_or("publication must be an object")?;
+                    if object.len() != 4
+                        || object.keys().any(|key| {
+                            !matches!(
+                                key.as_str(),
+                                "kind" | "target" | "expectedTargetRoot" | "payload"
+                            )
+                        })
+                    {
+                        return Err("publication fields are not canonical".into());
+                    }
+                    let kind = source
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .ok_or("publication kind")?;
+                    let target = source
+                        .get("target")
+                        .and_then(Value::as_str)
+                        .ok_or("publication target")?;
+                    decimal(
+                        source
+                            .get("expectedTargetRoot")
+                            .and_then(Value::as_str)
+                            .ok_or("expectedTargetRoot must be decimal string")?,
+                        "expectedTargetRoot",
+                    )?;
+                    if !tool
+                        .allowed_publications
+                        .iter()
+                        .any(|entry| entry.kind == kind && entry.target == target)
+                        && !self.journal.born_resources.iter().any(|born| {
+                            born.pending.born.kind == kind && born.pending.born.target == target
+                        })
+                    {
+                        return Err("publication target is not configured or recorded".into());
+                    }
+                }
+            }
+            "mini_application_api" => {
+                let allowed = tool
+                    .allowed_application_api_routes
+                    .iter()
+                    .map(|route| route.name.clone())
+                    .collect::<Vec<_>>();
+                let input = application_api_tools::parse_input(arguments, &allowed)?;
+                let pin = tool.agent_api_host_sha256.as_deref().ok_or(
+                    "application API event21 Host pin is absent; agent delivery is unavailable",
+                )?;
+                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                    return Err(
+                        "application API event21 Host image or socket differs from pin".into(),
+                    );
+                }
+                let route = tool
+                    .allowed_application_api_routes
+                    .iter()
+                    .find(|route| route.name == input.application)
+                    .ok_or("application API route is absent")?;
+                if !tool
+                    .registered_shared_applications
+                    .iter()
+                    .any(|entry| entry.name == route.name)
+                    && !self
+                        .journal
+                        .born_resources
+                        .iter()
+                        .any(|born| born.pending.born.name == route.name)
+                {
+                    return Err(
+                        "application API route has no recorded app birth or shared registration"
+                            .into(),
+                    );
+                }
+            }
+            _ => return Err("foreground tool is not delegated".into()),
+        }
+        Ok(())
+    }
+
+    /// Run one model-free tool call under the same signed parent/tool custody.
+    /// The foreground operation ID is durable before reserve or any native
+    /// submit; a lost result can only be inspected, never replayed as work.
+    fn foreground_tool(
+        &mut self,
+        attachment_id: u64,
+        frame: &[u8],
+        input: &Receiver<Input>,
+    ) -> Result<()> {
+        if frame.is_empty() || frame.len() > 262_144 {
+            return Err("foreground request exceeds 256 KiB".into());
+        }
+        let request: ForegroundRequest =
+            serde_json::from_slice(frame).map_err(|e| format!("foreground request: {e}"))?;
+        if !valid_foreground_request_id(&request.request_id) {
+            return Err("foreground requestId must be 32 lowercase hex characters".into());
+        }
+        let request_sha256 = sha256_bytes(frame)?;
+        if let Some(prior) = read_foreground_tombstone(&self.config.state_dir, &request.request_id)?
+        {
+            if prior.request_sha256 != request_sha256 {
+                return Err("foreground requestId was already used for different bytes".into());
+            }
+            return Err(format!("foreground requestId {} is durably claimed by operation {}; inspect it without resubmitting", request.request_id, prior.operation_id));
+        }
+        if let Some(prior) = self
+            .journal
+            .foreground_history
+            .iter()
+            .chain(self.journal.foreground_attempt.iter())
+            .find(|prior| prior.request_id == request.request_id)
+        {
+            if prior.request_sha256 != request_sha256 {
+                return Err("foreground requestId was already used for different bytes".into());
+            }
+            return Err(format!("foreground requestId {} is retained as operation {}; inspect it without resubmitting", request.request_id, prior.operation_id));
+        }
+        if request.name.is_empty()
+            || request.name.len() > 64
+            || !request
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        {
+            return Err("foreground tool name is invalid".into());
+        }
+        if !matches!(
+            request.name.as_str(),
+            "mini_grain_status"
+                | "mini_read_resource"
+                | "mini_create_resource"
+                | "mini_create_application"
+                | "mini_create_application_session"
+                | "mini_publish"
+                | "mini_application_api"
+        ) {
+            return Err("foreground tool is not delegated".into());
+        }
+        let profile = self
+            .config
+            .foreground_tool
+            .clone()
+            .ok_or("foregroundTool is not configured")?;
+        self.preflight_foreground_arguments(&request)?;
+        if !self
+            .output
+            .as_ref()
+            .is_some_and(|output| output.is_active_framed_attachment(attachment_id))
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.cancelled.load(Ordering::SeqCst)
+            || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty()
+        {
+            return Err("foreground tool requires an attached, reconciled idle task".into());
+        }
+        if self.journal.foreground_history.len() >= 256 {
+            let Some(index) = self
+                .journal
+                .foreground_history
+                .iter()
+                .position(|attempt| attempt.reported)
+            else {
+                return Err("foreground history has 256 unacknowledged results".into());
+            };
+            self.journal.foreground_history.remove(index);
+            self.save()?;
+        }
+        let operation_id = self.next_id()?;
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("foreground-{operation_id:016}.request.json"));
+        let tombstone = ForegroundTombstone {
+            request_id: request.request_id.clone(),
+            operation_id,
+            request_sha256: request_sha256.clone(),
+        };
+        write_new(
+            &foreground_tombstone_path(&self.config.state_dir, &request.request_id),
+            &serde_json::to_vec(&tombstone).map_err(|e| e.to_string())?,
+        )?;
+        write_new(&request_path, frame)?;
+        self.journal.foreground_attempt = Some(ForegroundAttempt {
+            request_id: request.request_id.clone(),
+            operation_id,
+            name: request.name.clone(),
+            request_sha256,
+            request_path,
+            phase: ForegroundPhase::Prepared,
+            result_path: None,
+            result_sha256: None,
+            reported: false,
+        });
+        self.save()?;
+        let outcome = (|| -> Result<Value> {
+            self.reserve_parent_work_lease(&profile.reserve, &profile.charge, "foreground tool")?;
+            self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Reserved;
+            self.save()?;
+            self.foreground_operation = Some(operation_id);
+            self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
+            self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Executing;
+            self.save()?;
+            let result = if request.name == "mini_application_api" {
+                self.foreground_application_api(&request.arguments, input)?
+            } else {
+                self.tool_call(&request.name, &request.arguments)
+                    .map(|value| json!({"isError":false,"text":value.to_string()}))?
+            };
+            self.check_not_cancelled()?;
+            Ok(result)
+        })();
+        self.foreground_operation = None;
+        let result = match outcome {
+            Ok(value) => value,
+            Err(error) => {
+                if self.journal.parent_hold.is_none()
+                    && self.journal.pending.is_none()
+                    && self.journal.tool_hold.is_none()
+                    && self.journal.tool_pending.is_none()
+                    && self.journal.dispatch_hold.is_none()
+                    && self.journal.dispatch_attempt.is_none()
+                    && self.journal.application_api_attempt.is_none()
+                    && !self.cancelled.load(Ordering::SeqCst)
+                {
+                    let (result, bytes) =
+                        bounded_foreground_result(json!({"isError":true,"text":error}))?;
+                    let path = self
+                        .config
+                        .state_dir
+                        .join(format!("foreground-{operation_id:016}.result.json"));
+                    write_new(&path, &bytes)?;
+                    let attempt = self.journal.foreground_attempt.as_mut().unwrap();
+                    attempt.result_sha256 = Some(sha256_bytes(&bytes)?);
+                    attempt.result_path = Some(path);
+                    attempt.phase = ForegroundPhase::Definite;
+                    self.save()?;
+                    let _queued = self.output.as_ref().is_some_and(|output| {
+                        output.try_tool_event_for(
+                            attachment_id,
+                            json!({"v":1,
+                            "type":"tool-complete","operationId":operation_id.to_string(),
+                            "requestId":request.request_id,
+                            "isError":true,"result":result}),
+                        )
+                    });
+                    let finished = self.journal.foreground_attempt.take().unwrap();
+                    self.journal.foreground_history.push(finished);
+                    self.save()?;
+                    return Ok(());
+                }
+                if let Some(attempt) = self.journal.foreground_attempt.as_mut() {
+                    attempt.phase = ForegroundPhase::Uncertain;
+                }
+                self.save()?;
+                let fence = self.disconnect();
+                return Err(format!(
+                    "foreground operation {operation_id} requires exact recovery: {error}; fence={fence:?}"
+                ));
+            }
+        };
+        let result_path = self
+            .config
+            .state_dir
+            .join(format!("foreground-{operation_id:016}.result.json"));
+        let (result, result_bytes) = bounded_foreground_result(result)?;
+        write_new(&result_path, &result_bytes)?;
+        let attempt = self.journal.foreground_attempt.as_mut().unwrap();
+        attempt.result_sha256 = Some(sha256_bytes(&result_bytes)?);
+        attempt.result_path = Some(result_path);
+        self.save()?;
+        if !self.claim_completion(&profile.charge)? {
+            self.disconnect()?;
+            return Err("hard disconnect before foreground settlement".into());
+        }
+        self.transition(
+            json!({"type":"settle","charge":profile.charge}),
+            "settle",
+            "foreground tool complete",
+        )?;
+        self.journal.prompt_witness = None;
+        self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Definite;
+        self.save()?;
+        self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
+        self.finish_reconnected_mode()?;
+        let _queued = self.output.as_ref().is_some_and(|output| {
+            output.try_tool_event_for(
+                attachment_id,
+                json!({"v":1,"type":"tool-complete","operationId":operation_id.to_string(),
+                    "requestId":request.request_id,
+                    "isError":result.get("isError").and_then(Value::as_bool).unwrap_or(true),
+                    "result":result}),
+            )
+        });
+        let finished = self.journal.foreground_attempt.take().unwrap();
+        if self.journal.foreground_history.len() >= 256 {
+            let Some(index) = self
+                .journal
+                .foreground_history
+                .iter()
+                .position(|attempt| attempt.reported)
+            else {
+                self.journal.foreground_attempt = Some(finished);
+                self.save()?;
+                return Err("foreground result archive has 256 unacknowledged results".into());
+            };
+            self.journal.foreground_history.remove(index);
+        }
+        self.journal.foreground_history.push(finished);
+        self.save()?;
+        Ok(())
+    }
+
+    fn foreground_result(&self, request_id: &str) -> Result<(u64, Value)> {
+        if !valid_foreground_request_id(request_id) {
+            return Err("foreground requestId is invalid".into());
+        }
+        let record = self
+            .journal
+            .foreground_history
+            .iter()
+            .find(|record| record.request_id == request_id)
+            .or_else(|| {
+                self.journal
+                    .foreground_attempt
+                    .as_ref()
+                    .filter(|record| record.request_id == request_id)
+            });
+        let Some(record) = record else {
+            return if let Some(tombstone) =
+                read_foreground_tombstone(&self.config.state_dir, request_id)?
+            {
+                Err(format!("foreground operation {} is durably claimed without a retained result; inspect or audit, never resubmit", tombstone.operation_id))
+            } else {
+                Err("foreground requestId is not retained".into())
+            };
+        };
+        if record.phase != ForegroundPhase::Definite {
+            return Err(format!(
+                "foreground operation {} is {:?}; exact recovery is required",
+                record.operation_id, record.phase
+            ));
+        }
+        let path = record
+            .result_path
+            .as_ref()
+            .ok_or("foreground result path absent")?;
+        let digest = record
+            .result_sha256
+            .as_deref()
+            .ok_or("foreground result digest absent")?;
+        let bytes = bounded_regular_file(path, 1_048_576)?;
+        if sha256_bytes(&bytes)? != digest {
+            return Err("foreground result bytes changed".into());
+        }
+        let result =
+            serde_json::from_slice(&bytes).map_err(|e| format!("foreground result JSON: {e}"))?;
+        Ok((record.operation_id, result))
+    }
+
+    fn acknowledge_foreground(&mut self, request_id: &str) -> Result<u64> {
+        let (operation_id, _) = self.foreground_result(request_id)?;
+        if self
+            .journal
+            .foreground_attempt
+            .as_ref()
+            .is_some_and(|attempt| {
+                attempt.request_id == request_id && attempt.phase == ForegroundPhase::Definite
+            })
+        {
+            if self.journal.pending.is_some()
+                || self.journal.parent_hold.is_some()
+                || self.journal.tool_pending.is_some()
+                || self.journal.tool_hold.is_some()
+                || self.journal.dispatch_pending.is_some()
+                || self.journal.dispatch_hold.is_some()
+                || self.journal.provider_pending.is_some()
+                || self.journal.provider_hold.is_some()
+                || self.journal.birth_pending.is_some()
+                || self.journal.birth_operation.is_some()
+                || self.journal.application_api_attempt.is_some()
+                || self.journal.settlement_due.is_some()
+            {
+                return Err("definite foreground result still has unsettled authority".into());
+            }
+            if self.journal.foreground_history.len() >= 256 {
+                let index = self
+                    .journal
+                    .foreground_history
+                    .iter()
+                    .position(|attempt| attempt.reported)
+                    .ok_or("foreground history has 256 unacknowledged results")?;
+                self.journal.foreground_history.remove(index);
+            }
+            let mut finished = self.journal.foreground_attempt.take().unwrap();
+            finished.reported = true;
+            self.journal.foreground_history.push(finished);
+            return self.save().map(|()| operation_id);
+        }
+        let record = self
+            .journal
+            .foreground_history
+            .iter_mut()
+            .find(|record| record.request_id == request_id)
+            .ok_or("foreground result has not been archived")?;
+        if !record.reported {
+            record.reported = true;
+            self.save()?;
+        }
+        Ok(operation_id)
+    }
+
+    fn answer_foreground_result(&self, attachment_id: u64, request_id: &str) -> Result<()> {
+        let response = self.foreground_result(request_id);
+        if let Some(output) = &self.output {
+            let event = match &response {
+                Ok((id, result)) => json!({"v":1,"type":"tool-complete",
+                    "operationId":id.to_string(),"requestId":request_id,
+                    "isError":result.get("isError").and_then(Value::as_bool).unwrap_or(true),
+                    "result":result}),
+                Err(error) => json!({"v":1,"type":"tool-complete",
+                    "requestId":request_id,"isError":true,"result":error}),
+            };
+            let _ = output.try_tool_event_for(attachment_id, event);
+        }
+        response.map(|_| ())
+    }
+
+    fn answer_foreground_ack(&mut self, attachment_id: u64, request_id: &str) -> Result<()> {
+        let response = self.acknowledge_foreground(request_id);
+        if let Some(output) = &self.output {
+            let event = match &response {
+                Ok(id) => json!({"v":1,"type":"tool-acknowledged",
+                    "requestId":request_id,"operationId":id.to_string()}),
+                Err(error) => json!({"v":1,"type":"tool-acknowledged",
+                    "requestId":request_id,"isError":true,"result":error}),
+            };
+            let _ = output.try_tool_event_for(attachment_id, event);
+        }
+        response.map(|_| ())
+    }
+
+    fn reconcile_foreground_audited(&mut self) -> Result<()> {
+        let attempt = self
+            .journal
+            .foreground_attempt
+            .as_ref()
+            .ok_or("no unresolved foreground operation")?
+            .clone();
+        if attempt.phase == ForegroundPhase::Definite {
+            return Err("definite foreground result requires exact result inspection".into());
+        }
+        if self.journal.pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty()
+        {
+            return Err(
+                "foreground audit requires all native and external effects reconciled".into(),
+            );
+        }
+        let parent = self.query()?;
+        if !matches!(
+            parent.pointer("/grain/status").and_then(Value::as_str),
+            Some("0" | "1" | "2" | "6")
+        ) || parent.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+        {
+            return Err("foreground audit lacks signed idle parent".into());
+        }
+        let tool = self.query_as(&self.tool()?)?;
+        if !matches!(
+            tool.pointer("/grain/status").and_then(Value::as_str),
+            Some("0" | "1" | "2" | "6")
+        ) || tool.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+        {
+            return Err("foreground audit lacks signed idle tool".into());
+        }
+        let attempt_id = attempt.operation_id;
+        let request_sha256 = attempt.request_sha256.clone();
+        let decision_id = self.next_id()?;
+        self.journal.reconciliation_log.push(json!({
+            "decisionId":decision_id.to_string(),
+            "action":"foreground-audited-terminal",
+            "operationId":attempt_id.to_string(),
+            "requestSha256":request_sha256,
+            "result":"no definitive foreground response claimed"
+        }));
+        let mut finished = self.journal.foreground_attempt.take().unwrap();
+        finished.phase = ForegroundPhase::Audited;
+        finished.reported = true;
+        if self.journal.foreground_history.len() >= 256 {
+            let Some(index) = self
+                .journal
+                .foreground_history
+                .iter()
+                .position(|prior| prior.reported)
+            else {
+                self.journal.foreground_attempt = Some(finished);
+                return Err("foreground audit history has 256 unacknowledged results".into());
+            };
+            self.journal.foreground_history.remove(index);
+        }
+        self.journal.foreground_history.push(finished);
+        self.save()
+    }
+
+    fn foreground_application_api(
+        &mut self,
+        arguments: &Value,
+        input: &Receiver<Input>,
+    ) -> Result<Value> {
+        let (reply, received) = mpsc::channel();
+        let mut active = Some(self.begin_application_api(arguments, reply, None)?);
+        let deadline = Instant::now() + Duration::from_secs(1800);
+        loop {
+            self.poll_application_api(&mut active)?;
+            if let Ok(value) = received.try_recv() {
+                if value.get("isError").and_then(Value::as_bool) == Some(true)
+                    && self.journal.application_api_attempt.is_some()
+                {
+                    return Err(
+                        "application API outcome remains retained for read-only inspection".into(),
+                    );
+                }
+                return Ok(value);
+            }
+            if self.cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
+                return Err(
+                    "foreground API call cancelled or timed out; inspect exact attempt".into(),
+                );
+            }
+            match input.try_recv() {
+                Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
+                Ok(Input::Admin(request)) => {
+                    let _ = request.reply.send("foreground API call is running".into());
+                }
+                Ok(Input::Disconnect) => {
+                    self.stdin_gone = true;
+                    if self.hard_connection.load(Ordering::SeqCst) {
+                        return Err("hard disconnect during foreground API call".into());
+                    }
+                }
+                Ok(Input::Line(line)) if line == "disconnect" => {
+                    self.stdin_gone = true;
+                    if self.hard_connection.load(Ordering::SeqCst) {
+                        return Err("hard disconnect during foreground API call".into());
+                    }
+                }
+                Ok(Input::SoftDetach) => self.stdin_gone = true,
+                Ok(Input::Line(line))
+                    if line == "attach soft" && self.journal.connection == Connection::Soft =>
+                {
+                    self.emit("reconnected to soft foreground tool\n");
+                }
+                Ok(Input::Line(line))
+                    if line == "attach hard" && self.journal.connection == Connection::Soft =>
+                {
+                    self.note_hard_reconnect()?;
+                }
+                Ok(Input::ForegroundTool {
+                    attachment_id,
+                    frame,
+                }) => {
+                    if let Some(output) = &self.output {
+                        let _ = output.try_tool_event_for(
+                            attachment_id,
+                            json!({"v":1,
+                            "type":"tool-complete","isError":true,
+                            "requestId":foreground_request_id(&frame),
+                            "result":"foreground tool already in progress"}),
+                        );
+                    }
+                }
+                Ok(Input::ForegroundResult {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                }
+                Ok(Input::ForegroundAck {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                }
+                Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("foreground connector channel closed".into());
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
         }
     }
     fn check_not_cancelled(&self) -> Result<()> {
@@ -8166,6 +9178,7 @@ impl Runtime {
         if !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
             || self.child.is_some()
             || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
             || self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.parent_hold.is_some()
@@ -8208,6 +9221,7 @@ impl Runtime {
     fn attach(&mut self, soft: bool) -> Result<()> {
         if self.journal.connection == Connection::Fenced
             || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
             || self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.settlement_due.is_some()
@@ -8586,6 +9600,7 @@ impl Runtime {
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
             || self.journal.settlement_due.is_some()
             || self.journal.parent_hold.is_some()
             || self.journal.tool_hold.is_some()
@@ -8781,6 +9796,32 @@ impl Runtime {
                 Ok(Input::Line(_) | Input::TerminalLine { .. }) => {
                     eprintln!("command running; only disconnect is accepted")
                 }
+                Ok(Input::ForegroundTool {
+                    attachment_id,
+                    frame,
+                }) => {
+                    if let Some(output) = &self.output {
+                        let _ = output.try_tool_event_for(
+                            attachment_id,
+                            json!({"v":1,
+                            "type":"tool-complete","isError":true,
+                            "requestId":foreground_request_id(&frame),
+                            "result":"worker is running"}),
+                        );
+                    }
+                }
+                Ok(Input::ForegroundResult {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                }
+                Ok(Input::ForegroundAck {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                }
                 Ok(Input::Admin(request)) => {
                     let _ = request
                         .reply
@@ -8899,6 +9940,7 @@ impl Runtime {
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
             || self.journal.settlement_due.is_some()
             || self.journal.parent_hold.is_some()
             || self.journal.tool_hold.is_some()
@@ -9075,24 +10117,7 @@ impl Runtime {
             prove_controller_unit(&self.config.task)?;
             Self::prove_launcher_gate(&spec.program)?;
         }
-        self.mark_hold(false, &spec.reserve, &spec.charge)?;
-        self.transition(
-            json!({"type":"reserve","amount":spec.reserve}),
-            "reserve",
-            "hermes-acp prompt",
-        )?;
-        let parent = self.query()?;
-        let before = parent.get("grain").ok_or("reserved parent grain absent")?;
-        if before.get("status").and_then(Value::as_str) != Some("3")
-            && before.get("status").and_then(Value::as_str) != Some("4")
-        {
-            return Err("parent grain is not reserved after prompt allowance".into());
-        }
-        self.journal.prompt_witness = Some(json!({"task":self.config.task,
-            "expectedTargetRoot":parent.get("targetRoot").ok_or("parent root absent")?,
-            "before":{"generation":before.get("generation"),"status":before.get("status"),
-                "remaining":before.get("remaining"),"reserved":before.get("reserved")}}));
-        self.save()?;
+        self.reserve_parent_work_lease(&spec.reserve, &spec.charge, "hermes-acp prompt")?;
         if self.journal.connection == Connection::Hard {
             match input.try_recv() {
                 Ok(Input::Disconnect) => {
@@ -9550,7 +10575,11 @@ impl Runtime {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
                         } else {
-                            match self.begin_application_api(&request) {
+                            match self.begin_application_api(
+                                &request.arguments,
+                                request.reply.clone(),
+                                Some(request.prompt_epoch),
+                            ) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {
                                     let _ =
@@ -9590,6 +10619,32 @@ impl Runtime {
                 }
                 Ok(Input::Line(_) | Input::TerminalLine { .. }) => {
                     eprintln!("Hermes prompt running; only disconnect is accepted")
+                }
+                Ok(Input::ForegroundTool {
+                    attachment_id,
+                    frame,
+                }) => {
+                    if let Some(output) = &self.output {
+                        let _ = output.try_tool_event_for(
+                            attachment_id,
+                            json!({"v":1,
+                            "type":"tool-complete","isError":true,
+                            "requestId":foreground_request_id(&frame),
+                            "result":"Hermes prompt is running"}),
+                        );
+                    }
+                }
+                Ok(Input::ForegroundResult {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                }
+                Ok(Input::ForegroundAck {
+                    attachment_id,
+                    request_id,
+                }) => {
+                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
                 }
                 Ok(Input::Admin(request)) => {
                     let _ = request
@@ -11166,7 +12221,22 @@ impl Runtime {
 
 enum Input {
     Line(String),
-    TerminalLine { attachment_id: u64, line: String },
+    ForegroundTool {
+        attachment_id: u64,
+        frame: Vec<u8>,
+    },
+    ForegroundResult {
+        attachment_id: u64,
+        request_id: String,
+    },
+    ForegroundAck {
+        attachment_id: u64,
+        request_id: String,
+    },
+    TerminalLine {
+        attachment_id: u64,
+        line: String,
+    },
     Disconnect,
     SoftDetach,
     Admin(control::AdminRequest),
@@ -11553,14 +12623,34 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     current = Some(id);
                     Input::Line(if soft { "attach soft" } else { "attach hard" }.into())
                 }
+                control::Event::InspectAttached { id } => {
+                    current = Some(id);
+                    continue;
+                }
                 control::Event::Line { id, text } if current == Some(id) => {
                     if text.starts_with("terminal ") {
                         Input::TerminalLine {
                             attachment_id: id,
                             line: text,
                         }
+                    } else if let Some(request_id) = text.strip_prefix("tool result ") {
+                        Input::ForegroundResult {
+                            attachment_id: id,
+                            request_id: request_id.to_owned(),
+                        }
+                    } else if let Some(request_id) = text.strip_prefix("tool ack ") {
+                        Input::ForegroundAck {
+                            attachment_id: id,
+                            request_id: request_id.to_owned(),
+                        }
                     } else {
                         Input::Line(text)
+                    }
+                }
+                control::Event::Tool { id, frame } if current == Some(id) => {
+                    Input::ForegroundTool {
+                        attachment_id: id,
+                        frame,
                     }
                 }
                 control::Event::Detached { id, hard } if current == Some(id) => {
@@ -11623,6 +12713,10 @@ fn serve(mut rt: Runtime) -> Result<()> {
             }
             Input::Line(line) if line == "recover" => rt.recover(),
             Input::Line(line) if line == "conversation new" => rt.conversation_new(),
+            Input::ForegroundResult { attachment_id, request_id } =>
+                rt.answer_foreground_result(attachment_id, &request_id),
+            Input::ForegroundAck { attachment_id, request_id } =>
+                rt.answer_foreground_ack(attachment_id, &request_id),
             Input::Admin(request) => {
                 if Instant::now() >= request.deadline
                     || request
@@ -11659,6 +12753,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
+                    "reconcile foreground audited" => rt.reconcile_foreground_audited(),
                     _ => Err("unknown admin reconciliation action".into()),
                 };
                 request.phase.store(2, Ordering::SeqCst);
@@ -11671,6 +12766,21 @@ fn serve(mut rt: Runtime) -> Result<()> {
             Input::Dispatch(request) => {
                 rt.answer_dispatch(request);
                 Ok(())
+            }
+            Input::ForegroundTool { attachment_id, frame } => {
+                let outcome = rt.foreground_tool(attachment_id, &frame, &input);
+                if let Err(error) = &outcome {
+                    let request_id = foreground_request_id(&frame);
+                    if let Some(output) = &rt.output {
+                        let _ = output.try_tool_event_for(attachment_id, json!({"v":1,
+                            "type":"tool-complete","isError":true,"result":error,
+                            "requestId":request_id,
+                            "operationId":rt.journal.foreground_attempt.as_ref()
+                                .map(|attempt| attempt.operation_id.to_string())}));
+                    }
+                }
+                rt.stdin_gone = false;
+                outcome
             }
             Input::Line(line) if line == "disconnect" => rt.disconnect(),
             Input::Line(line) if line.starts_with("run ") => {
@@ -11751,6 +12861,109 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() == 2 && args[1] == "tool-id" {
+        let mut bytes = [0u8; 16];
+        let result =
+            File::open("/dev/urandom").and_then(|mut source| source.read_exact(&mut bytes));
+        return match result {
+            Ok(()) => {
+                for byte in bytes {
+                    print!("{byte:02x}");
+                }
+                println!();
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("grain-runtime tool-id: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.len() == 4 && (args[1] == "tool-result" || args[1] == "tool-ack") {
+        let request_id = match args[3].to_str() {
+            Some(id) if valid_foreground_request_id(id) => id,
+            _ => {
+                eprintln!(
+                    "grain-runtime tool-result: request ID must be 32 lowercase hex characters"
+                );
+                return ExitCode::from(2);
+            }
+        };
+        let result = if args[1] == "tool-ack" {
+            control::tool_ack_connect(&PathBuf::from(&args[2]), request_id)
+        } else {
+            control::tool_result_connect(&PathBuf::from(&args[2]), request_id)
+        };
+        return match result {
+            Ok(result) => {
+                println!("{result}");
+                if (args[1] == "tool-ack"
+                    && result.get("type").and_then(Value::as_str) == Some("tool-acknowledged")
+                    && result.get("isError").is_none())
+                    || (args[1] == "tool-result"
+                        && result.get("isError").and_then(Value::as_bool) == Some(false))
+                {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
+            }
+            Err(error) => {
+                eprintln!("grain-runtime tool-result: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    if args.len() == 7 && args[1] == "tool" {
+        let mode = match args[3].to_str() {
+            Some("hard") => control::Mode::Hard,
+            Some("soft") => control::Mode::Soft,
+            _ => {
+                eprintln!("grain-runtime tool: mode must be hard or soft");
+                return ExitCode::from(2);
+            }
+        };
+        let request_id = match args[4].to_str() {
+            Some(id) if valid_foreground_request_id(id) => id,
+            _ => {
+                eprintln!("grain-runtime tool: request ID must be 32 lowercase hex characters");
+                return ExitCode::from(2);
+            }
+        };
+        let arguments = match bounded_regular_file(&PathBuf::from(&args[6]), 262_144)
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+        {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("grain-runtime tool: arguments: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        let frame = json!({"requestId":request_id,
+            "name":args[5].to_string_lossy(),"arguments":arguments});
+        let bytes = match serde_json::to_vec(&frame) {
+            Ok(bytes) if bytes.len() <= 262_144 => bytes,
+            _ => {
+                eprintln!("grain-runtime tool: request exceeds frame limit");
+                return ExitCode::from(2);
+            }
+        };
+        eprintln!("grain-runtime tool requestId={request_id}; recover with tool-result, never repeat a lost call");
+        return match control::tool_connect(&PathBuf::from(&args[2]), mode, request_id, &bytes) {
+            Ok(result) => {
+                println!("{result}");
+                if result.get("isError").and_then(Value::as_bool) == Some(false) {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
+            }
+            Err(error) => {
+                eprintln!("grain-runtime tool: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() == 3 && args[1] == "mcp-stdio" {
         return match mcp::serve_stdio(&PathBuf::from(&args[2])) {
             Ok(()) => ExitCode::SUCCESS,
@@ -11831,7 +13044,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -11852,6 +13065,82 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foreground_result_identity_is_durable_and_not_a_hermes_session() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-foreground-journal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let request = b"{\"requestId\":\"0123456789abcdef0123456789abcdef\",\"name\":\"mini_grain_status\",\"arguments\":{}}";
+        let request_path = directory.join("foreground-0000000000000007.request.json");
+        let result_path = directory.join("foreground-0000000000000007.result.json");
+        let result = b"{\"isError\":false,\"text\":\"{}\"}";
+        write_new(&request_path, request).unwrap();
+        write_new(&result_path, result).unwrap();
+        write_new(
+            &foreground_tombstone_path(&directory, "0123456789abcdef0123456789abcdef"),
+            &serde_json::to_vec(&ForegroundTombstone {
+                request_id: "0123456789abcdef0123456789abcdef".into(),
+                operation_id: 7,
+                request_sha256: sha256_bytes(request).unwrap(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut journal = Journal::fresh(json!({}));
+        journal.next_operation_id = 8;
+        journal.foreground_history.push(ForegroundAttempt {
+            request_id: "0123456789abcdef0123456789abcdef".into(),
+            operation_id: 7,
+            name: "mini_grain_status".into(),
+            request_path: request_path.clone(),
+            request_sha256: sha256_bytes(request).unwrap(),
+            phase: ForegroundPhase::Definite,
+            result_path: Some(result_path.clone()),
+            result_sha256: Some(sha256_bytes(result).unwrap()),
+            reported: false,
+        });
+        journal.validate_foreground(&directory).unwrap();
+        journal.foreground_attempt = Some(journal.foreground_history[0].clone());
+        assert!(journal.validate_foreground(&directory).is_err());
+        journal.foreground_attempt = None;
+        let tombstone_path =
+            foreground_tombstone_path(&directory, "0123456789abcdef0123456789abcdef");
+        let tombstone = fs::read(&tombstone_path).unwrap();
+        fs::write(&tombstone_path, b"{} ").unwrap();
+        assert!(journal.validate_foreground(&directory).is_err());
+        fs::write(&tombstone_path, tombstone).unwrap();
+        fs::write(&result_path, b"different").unwrap();
+        assert!(journal.validate_foreground(&directory).is_err());
+        assert!(journal.hermes_session.is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn foreground_oversize_result_keeps_a_bounded_explicit_effect_notice() {
+        let original = json!({"isError":false,"text":"x".repeat(1_048_576)});
+        let original_bytes = serde_json::to_vec(&original).unwrap();
+        let (retained, bytes) = bounded_foreground_result(original).unwrap();
+        assert!(bytes.len() < 1_000_000);
+        assert_eq!(retained["isError"], true);
+        assert_eq!(retained["originalResultBytes"], original_bytes.len());
+        assert_eq!(
+            retained["originalResultSha256"],
+            sha256_bytes(&original_bytes).unwrap()
+        );
+        assert_eq!(retained["originalResultSha256"].as_str().unwrap().len(), 64);
+        let envelope = serde_json::to_vec(&json!({"v":1,"type":"tool-complete",
+            "operationId":"18446744073709551615",
+            "requestId":"0123456789abcdef0123456789abcdef","result":retained}))
+        .unwrap();
+        assert!(envelope.len() <= 1_048_576);
+    }
 
     #[test]
     fn large_payer_approval_reenters_with_exact_bytes_only() {
@@ -11981,6 +13270,7 @@ mod tests {
             parent_view: json!({}),
             prompt_operation_id: 1,
             session_id: "s".into(),
+            work_origin: None,
         }
     }
 
@@ -12267,6 +13557,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             capability: "71".into(),
             query_capability: "74".into(),
             policy_control_capability: Some("72".into()),
+            foreground_tool: None,
             dispatch_task: None,
             tool_task: Some(ToolTask {
                 task: "7102".into(),
@@ -12320,6 +13611,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         let mut stale = PublicationReceipt {
             prompt_operation_id: 40,
             session_id: "prior-session".into(),
+            work_origin: None,
             operation_id: 2,
             attempt: root.join("old-attempt"),
             source_sha256: String::new(),
@@ -12371,6 +13663,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             &prior,
             42,
             "current-session",
+            None,
             &ids
         )
         .is_err());
@@ -12379,6 +13672,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             &prior,
             41,
             "wrong-session",
+            None,
             &ids
         )
         .is_err());
@@ -12391,6 +13685,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             &prior,
             41,
             "current-session",
+            None,
             &ids
         )
         .is_err());

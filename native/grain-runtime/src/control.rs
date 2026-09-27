@@ -17,18 +17,22 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_LINE: u64 = 16_384;
+const MAX_TOOL_FRAME: usize = 262_144;
 const QUEUE: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Hard,
     Soft,
+    Inspect,
 }
 
 #[derive(Debug)]
 pub enum Event {
     Attached { id: u64, soft: bool },
+    InspectAttached { id: u64 },
     Line { id: u64, text: String },
+    Tool { id: u64, frame: Vec<u8> },
     Detached { id: u64, hard: bool },
 }
 
@@ -189,6 +193,25 @@ pub struct OutputHandle {
 }
 
 impl OutputHandle {
+    /// Send one bounded foreground result or acknowledgement only to its
+    /// original framed attachment.
+    /// A missing reader never turns a retained Mini outcome into a retry.
+    pub fn try_tool_event_for(&self, id: u64, event: Value) -> bool {
+        if !matches!(
+            event.get("type").and_then(Value::as_str),
+            Some("tool-complete" | "tool-acknowledged")
+        ) || !serde_json::to_vec(&event).is_ok_and(|bytes| bytes.len() <= 1_048_576)
+        {
+            return false;
+        }
+        self.state.lock().is_ok_and(|state| {
+            state.active.as_ref().is_some_and(|active| {
+                active.framed
+                    && active.id == id
+                    && active.output.try_send(Outbound::Terminal(event)).is_ok()
+            })
+        })
+    }
     pub fn is_active_framed_attachment(&self, id: u64) -> bool {
         self.state.lock().is_ok_and(|state| {
             state
@@ -337,6 +360,7 @@ fn serve_connection(
         "attach soft" => (Mode::Soft, false),
         "attach terminal-v1 hard" => (Mode::Hard, true),
         "attach terminal-v1 soft" => (Mode::Soft, true),
+        "attach terminal-v1 inspect" => (Mode::Inspect, true),
         _ => {
             let _ = stream.write_all(
                 b"first line must be attach hard|soft or attach terminal-v1 hard|soft\n",
@@ -364,13 +388,15 @@ fn serve_connection(
             framed,
             output,
         });
-        if events
-            .try_send(Event::Attached {
+        let attached = if mode == Mode::Inspect {
+            Event::InspectAttached { id }
+        } else {
+            Event::Attached {
                 id,
                 soft: mode == Mode::Soft,
-            })
-            .is_err()
-        {
+            }
+        };
+        if events.try_send(attached).is_err() {
             state.active = None;
             return;
         }
@@ -389,7 +415,8 @@ fn serve_connection(
         && write_frame(
             &mut writer,
             &json!({"v":1,"type":"socket-attached",
-        "attachmentId":id,"mode":if mode == Mode::Soft { "soft" } else { "hard" }}),
+        "attachmentId":id,"mode":match mode {
+            Mode::Soft => "soft", Mode::Hard => "hard", Mode::Inspect => "inspect"}}),
         )
         .is_err()
     {
@@ -415,6 +442,29 @@ fn serve_connection(
     loop {
         match read_line(&mut stream) {
             Ok(line) if line == "disconnect" => break,
+            Ok(line) if line.starts_with("tool-v1 ") => {
+                if !framed || mode == Mode::Inspect {
+                    break;
+                }
+                let size = line[8..].parse::<usize>();
+                let Ok(size) = size else { break };
+                if size == 0 || size > MAX_TOOL_FRAME || size.to_string() != line[8..] {
+                    break;
+                }
+                let mut frame = vec![0; size];
+                if stream.read_exact(&mut frame).is_err()
+                    || events.try_send(Event::Tool { id, frame }).is_err()
+                {
+                    break;
+                }
+            }
+            Ok(line)
+                if mode == Mode::Inspect
+                    && !line.starts_with("tool result ")
+                    && !line.starts_with("tool ack ") =>
+            {
+                break
+            }
             Ok(line) => {
                 if events.try_send(Event::Line { id, text: line }).is_err() {
                     break;
@@ -457,6 +507,10 @@ fn detach(id: u64, state: &Mutex<State>, events: &SyncSender<Event>, interrupt: 
 }
 
 fn read_line(stream: &mut UnixStream) -> io::Result<String> {
+    read_line_bounded(stream, MAX_LINE as usize)
+}
+
+fn read_line_bounded(stream: &mut UnixStream, limit: usize) -> io::Result<String> {
     let mut bytes = Vec::new();
     loop {
         let mut byte = [0u8; 1];
@@ -469,7 +523,7 @@ fn read_line(stream: &mut UnixStream) -> io::Result<String> {
         if byte[0] == b'\n' {
             break;
         }
-        if bytes.len() as u64 == MAX_LINE {
+        if bytes.len() == limit {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "control line too long",
@@ -538,11 +592,177 @@ pub fn connect(path: &Path, mode: Option<&str>) -> Result<(), String> {
     result
 }
 
+/// One foreground tool request on the existing exclusive attachment. The
+/// caller never receives a Mini key; loss after sending is an unknown result.
+pub fn tool_connect(
+    path: &Path,
+    mode: Mode,
+    request_id: &str,
+    request: &[u8],
+) -> Result<Value, String> {
+    if !path.is_absolute() || request.is_empty() || request.len() > MAX_TOOL_FRAME {
+        return Err("foreground tool socket or frame is invalid".into());
+    }
+    let mut stream = UnixStream::connect(path).map_err(|e| format!("tool connect: {e}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1810)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .write_all(match mode {
+            Mode::Hard => b"attach terminal-v1 hard\n",
+            Mode::Soft => b"attach terminal-v1 soft\n",
+            Mode::Inspect => return Err("inspect attachment cannot dispatch a tool".into()),
+        })
+        .map_err(|e| format!("tool attach: {e}"))?;
+    let attached: Value = serde_json::from_str(
+        &read_line_bounded(&mut stream, 4096).map_err(|e| format!("tool attach: {e}"))?,
+    )
+    .map_err(|e| format!("tool attach frame: {e}"))?;
+    if attached.get("type").and_then(Value::as_str) != Some("socket-attached") {
+        return Err("foreground tool attachment refused".into());
+    }
+    stream
+        .write_all(format!("tool-v1 {}\n", request.len()).as_bytes())
+        .and_then(|_| stream.write_all(request))
+        .map_err(|e| format!("tool frame send: {e}; outcome unknown"))?;
+    loop {
+        let line = read_line_bounded(&mut stream, 1_048_576)
+            .map_err(|e| format!("tool result lost: {e}; inspect retained operation"))?;
+        let frame: Value = serde_json::from_str(&line)
+            .map_err(|e| format!("tool result frame: {e}; inspect retained operation"))?;
+        if frame.get("type").and_then(Value::as_str) == Some("tool-complete") {
+            if frame.get("requestId").and_then(Value::as_str) != Some(request_id) {
+                return Err(format!(
+                    "foreground completion identity differs; inspect requestId {request_id}"
+                ));
+            }
+            return Ok(frame);
+        }
+    }
+}
+
+pub fn tool_result_connect(path: &Path, request_id: &str) -> Result<Value, String> {
+    inspect_tool_connect(path, "result", request_id, "tool-complete")
+}
+
+pub fn tool_ack_connect(path: &Path, request_id: &str) -> Result<Value, String> {
+    inspect_tool_connect(path, "ack", request_id, "tool-acknowledged")
+}
+
+fn inspect_tool_connect(
+    path: &Path,
+    verb: &str,
+    request_id: &str,
+    expected_type: &str,
+) -> Result<Value, String> {
+    if !path.is_absolute()
+        || request_id.len() != 32
+        || !request_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("foreground result coordinates are invalid".into());
+    }
+    let mut stream = UnixStream::connect(path).map_err(|e| format!("result connect: {e}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .write_all(b"attach terminal-v1 inspect\n")
+        .map_err(|e| format!("result attach: {e}"))?;
+    let attached: Value = serde_json::from_str(
+        &read_line_bounded(&mut stream, 4096).map_err(|e| format!("result attach: {e}"))?,
+    )
+    .map_err(|e| format!("result attach frame: {e}"))?;
+    if attached.get("type").and_then(Value::as_str) != Some("socket-attached") {
+        return Err("foreground result attachment refused".into());
+    }
+    stream
+        .write_all(format!("tool {verb} {request_id}\n").as_bytes())
+        .map_err(|e| format!("result request: {e}"))?;
+    loop {
+        let line = read_line_bounded(&mut stream, 1_048_576)
+            .map_err(|e| format!("retained result lost: {e}"))?;
+        let frame: Value =
+            serde_json::from_str(&line).map_err(|e| format!("retained result frame: {e}"))?;
+        if frame.get("type").and_then(Value::as_str) == Some(expected_type) {
+            if frame.get("requestId").and_then(Value::as_str) != Some(request_id) {
+                return Err("foreground inspected requestId differs".into());
+            }
+            return Ok(frame);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn foreground_frame_exceeds_line_limit_and_inspect_is_read_only() {
+        let dir = PathBuf::from("/tmp").join(format!("gt-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let socket = dir.join("control.sock");
+        let (interrupt_tx, interrupt_rx) = mpsc::channel();
+        let server = start(
+            &socket,
+            Arc::new(move |id| {
+                let _ = interrupt_tx.send(id);
+            }),
+        )
+        .unwrap();
+        let mut stream = UnixStream::connect(&socket).unwrap();
+        stream.write_all(b"attach terminal-v1 soft\n").unwrap();
+        let id = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+            Event::Attached { id, soft: true } => id,
+            other => panic!("unexpected attachment: {other:?}"),
+        };
+        let _ = read_line(&mut stream).unwrap();
+        let frame = vec![b'a'; 24_000];
+        stream
+            .write_all(format!("tool-v1 {}\n", frame.len()).as_bytes())
+            .unwrap();
+        stream.write_all(&frame).unwrap();
+        assert!(matches!(
+            server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Tool { id: event_id, frame: received }
+                if event_id == id && received == frame
+        ));
+        let completion = json!({"v":1,"type":"tool-complete","operationId":"71",
+            "isError":false,"result":{"ok":true}});
+        assert!(server
+            .output_handle()
+            .try_tool_event_for(id, completion.clone()));
+        let observed: Value = serde_json::from_str(&read_line(&mut stream).unwrap()).unwrap();
+        assert_eq!(observed, completion);
+        drop(stream);
+        assert!(matches!(
+            server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Detached { hard: false, .. }
+        ));
+        let mut inspect = UnixStream::connect(&socket).unwrap();
+        inspect.write_all(b"attach terminal-v1 inspect\n").unwrap();
+        let inspect_id = match server.events.recv_timeout(Duration::from_secs(2)).unwrap() {
+            Event::InspectAttached { id } => id,
+            other => panic!("unexpected inspect attachment: {other:?}"),
+        };
+        let hello: Value = serde_json::from_str(&read_line(&mut inspect).unwrap()).unwrap();
+        assert_eq!(hello["mode"], "inspect");
+        inspect
+            .write_all(b"tool result 0123456789abcdef0123456789abcdef\n")
+            .unwrap();
+        assert!(matches!(
+            server.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Line { id, text } if id == inspect_id && text == "tool result 0123456789abcdef0123456789abcdef"
+        ));
+        drop(inspect);
+        let _ = server.events.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(interrupt_rx.try_recv().is_err());
+        drop(server);
+        fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn framed_attachment_escapes_model_text_and_binds_events_to_attachment() {

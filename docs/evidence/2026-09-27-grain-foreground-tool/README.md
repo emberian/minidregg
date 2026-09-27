@@ -1,0 +1,20 @@
+# Foreground Mini tool and parent policy source gate (2026-09-27)
+
+This is a Rust source/test checkpoint, not a native Mini or hosted SPK acceptance. No model, paid provider, shared Store, or live controller was invoked. `source-sha256.txt` pins the entire crate source and Cargo inputs; its hashes were compared byte-for-byte with the independent Linux test copy. This package retains both platforms' bounded test and Clippy logs.
+
+The opt-in `foregroundTool` profile gives a direct shell tool call its own explicit parent reserve and charge, while reusing the existing signed parent/tool custody, native tool handlers, and asynchronous app-API reverse-custody pump. It creates no Hermes child or session and does not borrow model metering. The caller supplies a 32-character lowercase-hex request ID before any send. The controller saves the exact request bytes/hash and an immutable per-ID tombstone before reserving; a repeated ID never dispatches again, even after an acknowledged result is evicted. Read-only `tool-result` retrieves the retained definite result by that ID after response loss or restart. Only explicit `tool-ack` (or operator audit of a terminal with no result) makes a record eligible for bounded eviction. Unknown native outcomes remain fenced for exact lookup/audit.
+
+Known malformed or unconfigured tool arguments are rejected before the parent reserve and before allocating a request ID. The foreground API uses the existing asynchronous reverse-custody pump; a controlled Linux test checks that an active foreground operation accepts only the retained exact v2 reverse request with separate parent and purse subjects and rejects changed routed HTTP. That test does not submit a native event21 permit or deliver to SPK.
+
+The same cut extends the source-authored managed parent worker policy from tool/provider to ordered tool/dispatch/provider subjects. On hard attachment, the exact paused current-generation law or already-installed next-generation law is accepted before a new law is authored for the next generation. This fixes the prior gen1→gen2 check that skipped gen1. No dynamic worker grant is inferred from Rust config.
+
+Commands, run from `native/grain-runtime` with two Cargo jobs:
+
+```text
+CARGO_BUILD_JOBS=2 cargo nextest run -p minidregg-grain-runtime
+CARGO_BUILD_JOBS=2 cargo clippy --all-targets -- -D warnings
+```
+
+Result: **macOS 117/117 nextest PASS and strict Clippy PASS; Linux 122/122 nextest PASS and Clippy PASS with only the toolchain-specific `chunks_exact_to_as_chunks` lint suppressed**. `cargo fmt --check` and `git diff --check` passed. The foreground integration test uses a controlled Mini client stub for lease/controller behavior, runs 18 calls, retains one unacknowledged result through 17 subsequent calls and restart, rejects duplicate ID and changed bytes, exercises idempotent ACK over a control socket and the immutable tombstone after payload eviction, and reconstructs a definite result left in the active slot after an archival crash. It also proves a malformed request leaves no allowance, attempt, request ID allocation, or tombstone. A separate stub fixture checks three-role gen1→gen2 hard-renewal source and exact law comparison. These fixtures do not prove native Mini admission. Direct foreground birth/publication/API acceptance and the staged two-controller SPK journey remain pending source-qualified native artifacts and fresh private Stores.
+
+The Linux gate ran in private `/tank/dregg-build/grain-foreground-20260927` with two Cargo jobs, a 4 GiB systemd unit cap, and an independent target. Its toolchain reports the newer `chunks_exact_to_as_chunks` lint in three unchanged lines of `application_api_tools.rs` and `dispatch_custody.rs`; the final Linux Clippy command was `cargo clippy --all-targets -- -D warnings -A clippy::chunks_exact_to_as_chunks`. The macOS command above had no lint suppression. The first Linux lint failure is retained separately in the private build evidence, not counted as a source regression.

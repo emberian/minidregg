@@ -58,6 +58,62 @@ fn agent_route_participant_is_parent_subject_not_purse_payer() {
     });
     let config: Config = serde_json::from_value(value.clone()).unwrap();
     validate(&config).unwrap();
+    // The foreground path must admit the same exact reverse v2 custody
+    // handshake while keeping the parent and purse subjects distinct. This
+    // checks the no-Hermes-child controller join, before any native submit.
+    let mut runtime = Runtime::open(config.clone(), root.join("config.json")).unwrap();
+    let forward = json!({"operation_id":"50","method":"POST","path":"git-receive-pack",
+        "query":"service=git-receive-pack","headers":[],"body_hex":"abcd"});
+    let request_path = state.join("forward-50.json");
+    fs::write(&request_path, serde_json::to_vec(&forward).unwrap()).unwrap();
+    runtime.journal.connection = Connection::Soft;
+    runtime.foreground_operation = Some(40);
+    runtime.journal.application_api_attempt = Some(ApplicationApiAttempt {
+        operation_id: 50,
+        route_name: "gitweb-app".into(),
+        request_sha256: sha256_file(&request_path).unwrap(),
+        request_path,
+        phase: ApplicationApiPhase::DispatchStarted,
+        binding_sha256: None,
+        host_invocation: None,
+        reply_path: None,
+        reply_sha256: None,
+        reported: false,
+    });
+    let selected = &config
+        .tool_task
+        .as_ref()
+        .unwrap()
+        .allowed_application_api_routes[0];
+    let dispatch = config.dispatch_task.as_ref().unwrap();
+    let fixed = json!({
+        "base":{"issueIndex":selected.dispatch_selectors.issue_index,
+            "ticketResource":selected.ticket_resource,
+            "packageManifest":selected.dispatch_selectors.package_manifest,
+            "snapshotManifest":selected.dispatch_selectors.snapshot_manifest,
+            "sessionObserveCapability":selected.dispatch_selectors.session_observe,
+            "manifestObserveCapability":selected.dispatch_selectors.manifest_observe,
+            "enrollmentObserveCapability":selected.dispatch_selectors.enrollment_observe,
+            "http":application_api_tools::routed_reserve_http(&forward, &selected.signed_api_path).unwrap()},
+        "parentTask":config.task,"parentCapability":dispatch.parent_capability,
+        "parentObserve":dispatch.parent_observe_capability,
+        "purseTask":dispatch.task,"purseCapability":dispatch.capability,
+        "purseObserve":dispatch.query_capability,"payerSubject":dispatch.subject,
+        "reserveAmount":dispatch.reserve,"maximumCharge":dispatch.charge,
+        "reserveOperationId":"0"
+    });
+    runtime
+        .verified_reverse_fixed_request("gitweb-app", "50", &fixed)
+        .unwrap();
+    let mut changed = fixed.clone();
+    changed["base"]["http"]["pathHex"] = json!("00");
+    assert!(runtime
+        .verified_reverse_fixed_request("gitweb-app", "50", &changed)
+        .is_err());
+    runtime.foreground_operation = None;
+    assert!(runtime
+        .verified_reverse_fixed_request("gitweb-app", "50", &fixed)
+        .is_err());
     value["toolTask"]["allowedApplicationApiRoutes"][0]["participantSubject"] = json!("12");
     let wrong_participant: Config = serde_json::from_value(value).unwrap();
     assert!(validate(&wrong_participant).is_err());
@@ -119,6 +175,7 @@ esac
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        foreground_tool: None,
         tool_task: None,
         dispatch_task: Some(DispatchTask {
             task: "7103".into(),
@@ -331,6 +388,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        foreground_tool: None,
         tool_task: None,
         dispatch_task: Some(DispatchTask {
             task: "7103".into(),
