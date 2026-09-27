@@ -27,8 +27,11 @@ open Minidregg.Pred
 set_option autoImplicit false
 
 /-- Phase 0 is new, 1 install pending, 2 stopped, 3 start pending,
-4 serving, 5 stop pending, 6 upgrade pending, 7 retired. Pending means a
-physical effect is unresolved, never an automatic retry license. -/
+4 serving, 5 stop pending, 6 upgrade pending, 7 retired. Phases 8, 9, 10,
+and 11 are one-shot claims of the respective pending install, start, stop,
+and upgrade operation. A claim is a durable reservation, not an assertion
+that the physical effect occurred; uncertain host execution never licenses
+automatic retry. -/
 structure State where
   generation : Int
   phase : Int
@@ -90,11 +93,10 @@ def reconciliationSlot : String := "application/reconciliation/checked"
 def completionGate : Pred := .eq completionSlot 1
 def reconciliationGate : Pred := .eq reconciliationSlot 1
 
-/-- Lifecycle changes are independent of any participant's session fence.
-Version increments require same-transaction content incidences. Action count
-can be a no-op; package identity and physical snapshot custody still require
-the checked completion receiver before it supplies the reserved gate. -/
-def transitionPolicy (packageTarget snapshotTarget : Nat) : Pred :=
+/-- Exact original installed lifecycle policy. Keep this source value for
+historical admission at an original prefix and authorized policy migration;
+its old pending-to-complete edges do not grant a new one-shot launch claim. -/
+def transitionPolicyV1 (packageTarget snapshotTarget : Nat) : Pred :=
   if packageTarget = snapshotTarget then .any [] else .all [
     .memberOf "resource/field/0/delta" [0,1],
     .memberOf "resource/field/2/delta" [0,1],
@@ -121,11 +123,66 @@ def transitionPolicy (packageTarget snapshotTarget : Nat) : Pred :=
         completionGate],
       edge 4 4 0 [unchanged 2, increased 3, contentChanged snapshotTarget,
         completionGate],
+      edge 4 4 0 [unchanged 2, unchanged 3],
+      edge 3 2 1 [unchanged 2, unchanged 3, reconciliationGate],
+      edge 2 7 1 [unchanged 2, unchanged 3]]]
+
+def policyV1 (packageTarget snapshotTarget : Nat)
+    (management : Pred := .any []) : Pred := .any [
+  .all [.eq "request/verb" 2, transitionPolicyV1 packageTarget snapshotTarget],
+  .memberOf "request/verb" [1,3],
+  .all [.memberOf "request/verb" [4,5], management]]
+
+/-- Lifecycle changes are independent of any participant's session fence.
+Version increments require same-transaction content incidences. Action count
+can be a no-op; package identity and physical snapshot custody still require
+the checked completion receiver before it supplies the reserved gate. -/
+def transitionPolicy (packageTarget snapshotTarget : Nat) : Pred :=
+  if packageTarget = snapshotTarget then .any [] else .all [
+    .memberOf "resource/field/0/delta" [0,1],
+    .memberOf "resource/field/2/delta" [0,1],
+    .memberOf "resource/field/3/delta" [0,1],
+    .memberOf "resource/field/1/before" [0,1,2,3,4,5,6,8,9,10,11],
+    .memberOf "resource/field/1/after" [0,1,2,3,4,5,6,7,8,9,10,11],
+    .any [.eq "resource/field/2/delta" 0, contentChanged packageTarget],
+    .any [.eq "resource/field/3/delta" 0, contentChanged snapshotTarget],
+    nonnegative "resource/field/0/before", nonnegative "resource/field/0/after",
+    nonnegative "resource/field/2/before", nonnegative "resource/field/2/after",
+    nonnegative "resource/field/3/before", nonnegative "resource/field/3/after",
+    .any [
+      edge 0 1 1 [unchanged 2, unchanged 3],
+      edge 8 2 0 [increased 2, unchanged 3, contentChanged packageTarget,
+        completionGate],
+      edge 2 3 1 [unchanged 2, unchanged 3],
+      edge 9 4 0 [unchanged 2, unchanged 3, completionGate],
+      edge 4 5 1 [unchanged 2, unchanged 3],
+      edge 10 2 0 [unchanged 2, unchanged 3, completionGate],
+      edge 2 6 1 [unchanged 2, unchanged 3],
+      edge 11 2 0 [increased 2, unchanged 3, contentChanged packageTarget,
+        completionGate],
+      edge 2 2 0 [unchanged 2, increased 3, contentChanged snapshotTarget,
+        completionGate],
+      edge 4 4 0 [unchanged 2, increased 3, contentChanged snapshotTarget,
+        completionGate],
       -- A signed current-state witness for a separate checked dispatch path.
       -- Its generic DRC receipt is never itself a delivery permit.
       edge 4 4 0 [unchanged 2, unchanged 3],
       edge 3 2 1 [unchanged 2, unchanged 3, reconciliationGate],
+      edge 9 2 1 [unchanged 2, unchanged 3, reconciliationGate],
       edge 2 7 1 [unchanged 2, unchanged 3]]]
+
+/-- The one-shot reservation leg is separate from ordinary lifecycle
+transitions. Its caller must also satisfy the installed management predicate;
+the native claim receiver additionally requires the original BEGIN mutation
+capability, exact historical provenance and current signed observations. -/
+def claimTransitionPolicy : Pred := .all [
+  .eq "resource/field/0/delta" 0,
+  .eq "resource/field/2/delta" 0,
+  .eq "resource/field/3/delta" 0,
+  .any [edge 1 8 0 [unchanged 2, unchanged 3],
+    edge 3 9 0 [unchanged 2, unchanged 3],
+    edge 5 10 0 [unchanged 2, unchanged 3],
+    edge 6 11 0 [unchanged 2, unchanged 3]]]
 
 /-- Management can be deliberately locked. A separate native capability
 check still governs observation and delegation. No generic mutate branch here
@@ -133,6 +190,7 @@ authorizes dispatch to an external app. -/
 def policy (packageTarget snapshotTarget : Nat)
     (management : Pred := .any []) : Pred := .any [
   .all [.eq "request/verb" 2, transitionPolicy packageTarget snapshotTarget],
+  .all [.eq "request/verb" 2, claimTransitionPolicy, management],
   .memberOf "request/verb" [1,3],
   .all [.memberOf "request/verb" [4,5], management]]
 
@@ -161,6 +219,10 @@ inductive Operation where
   | beginStop
   | completeStop
   | beginUpgrade
+  | claimInstall
+  | claimStart
+  | claimStop
+  | claimUpgrade
   | completeUpgrade
   | checkpoint
   | servingWitness
@@ -179,6 +241,10 @@ def Operation.after (operation : Operation) (s : State) : State :=
   | .beginStop => { s with generation := s.generation + 1, phase := 5 }
   | .completeStop => { s with phase := 2 }
   | .beginUpgrade => { s with generation := s.generation + 1, phase := 6 }
+  | .claimInstall => { s with phase := 8 }
+  | .claimStart => { s with phase := 9 }
+  | .claimStop => { s with phase := 10 }
+  | .claimUpgrade => { s with phase := 11 }
   | .completeUpgrade => { s with phase := 2, packageVersion := s.packageVersion + 1 }
   | .checkpoint => { s with snapshotVersion := s.snapshotVersion + 1 }
   | .servingWitness => s

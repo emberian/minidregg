@@ -101,6 +101,24 @@ theorem replay_only_exact (durable : Durable) (ingress : Ingress) (result : Rece
 /-- Exact source restriction for the first implementation. A future source-
 authored provenance relation may admit equivalent policy revisions without
 allowing a caller to nominate an unrelated content cell as the package. -/
+def appPolicyMatches (packageTarget snapshotTarget : Nat)
+    (management : Minidregg.Pred.Pred)
+    (installed : Option Minidregg.Pred.Pred) : Bool :=
+  installed == some (ApplicationGrain.policyV1 packageTarget snapshotTarget management) ||
+  installed == some (ApplicationGrain.policy packageTarget snapshotTarget management)
+
+theorem appPolicyMatches_v1 (packageTarget snapshotTarget : Nat)
+    (management : Minidregg.Pred.Pred) :
+    appPolicyMatches packageTarget snapshotTarget management
+      (some (ApplicationGrain.policyV1 packageTarget snapshotTarget management)) = true := by
+  simp [appPolicyMatches]
+
+theorem appPolicyMatches_current (packageTarget snapshotTarget : Nat)
+    (management : Minidregg.Pred.Pred) :
+    appPolicyMatches packageTarget snapshotTarget management
+      (some (ApplicationGrain.policy packageTarget snapshotTarget management)) = true := by
+  simp [appPolicyMatches]
+
 def linkedCurrentPolicy {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (source : Source)
@@ -124,10 +142,10 @@ def linkedCurrentPolicy {F : Type} [Field F]
         policy.record.semantics == profile.semantics then
       pure policy.record.predicate
     else none
-  appPolicy == some (ApplicationGrain.policy source.packageManifest source.snapshotManifest
-    (.eq "request/subject" source.managementSubject.value)) &&
+  let management := Minidregg.Pred.Pred.eq "request/subject" source.managementSubject.value
+  appPolicyMatches source.packageManifest source.snapshotManifest management appPolicy &&
   packagePolicy == some (ApplicationGrain.packageManifestPolicy source.app
-    (.eq "request/subject" source.managementSubject.value))
+    management)
 
 /-- The package observation uses the same signed command identity and current
 policy epoch/revision as the mutation. It is not satisfied by the app's
