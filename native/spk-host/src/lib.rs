@@ -24,6 +24,7 @@ mod native_dispatch;
 mod dispatch_inspection;
 #[cfg(target_os = "linux")]
 mod dispatch_web_input;
+#[cfg(target_os = "linux")]
 mod resident_launch;
 #[cfg(target_os = "linux")]
 mod dispatch_author;
