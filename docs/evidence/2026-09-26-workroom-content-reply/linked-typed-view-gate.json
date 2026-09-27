@@ -1,0 +1,22 @@
+{
+  "entryTypes": [
+    "preparedOriginOutbox",
+    "aReplyResult",
+    "aReplyInbox"
+  ],
+  "fnStoreSequence": "5",
+  "linkedHostSha256": "8e24573962ec54d81ecd6859dc2dd5b8158610f926401aa903a1ec6eb4ba7524",
+  "originReceipt": {
+    "acceptedCount": "20",
+    "eventId": "19302899713478614648317033798292983451013749099175324834566009145612214627877",
+    "imageBoundary": "53417682264557877670488054077774732041751696713496998209344473990154327520105",
+    "transactionId": "75066520320494335503287207186282537477487057135753415221093985984904776611415"
+  },
+  "replyMessageId": "<mini-e2-f25758a50130db36735f2491da5213f5f43bf8822be08f2cce95dc4dcdbd38daff@example.invalid>",
+  "scope": "read-only native inspect on retained signed A view; no Host migration or Store mutation",
+  "signedViewSha256": "d67e6073ce31937c540107837bfe13ea0a0b4e58f53293fa2519c48c12d5b508",
+  "sourceManifestSha256": "ec30ea1408ee3a11ed79df08d97058a86c9d911aebc944e2c4d58c3b79e68a9d",
+  "sourceProbeSemanticEqual": true,
+  "type": "linked-a-typed-view-gate-v1",
+  "typedOutputSha256": "51fd46360a06981105682c2be8c8de2d6d4c973d653baf67f5c9fc4a266cd289"
+}
