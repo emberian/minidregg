@@ -1,0 +1,346 @@
+start_utc=2026-09-27T11:45:02Z
+root=/tank/dregg-build/minidregg-9746c47-20260927
+lean_threads=1
+native_jobs=1
+seat=/tank/dregg-build/minidregg-55d3868-cycle/lean-seat-1
+failed-build resume check PASS 122 compiled prefix modules
+lean[123/292] Compiler.CredentialAuthorityPolicyRegistry start
+lean[123/292] Compiler.CredentialAuthorityPolicyRegistry PASS 29s
+lean[124/292] Compiler.GrainResourceBirthAuthority start
+lean[124/292] Compiler.GrainResourceBirthAuthority PASS 19s
+lean[125/292] Kernel.CanonicalResourceEffect start
+lean[125/292] Kernel.CanonicalResourceEffect PASS 16s
+lean[126/292] Kernel.ResourceBirthController start
+lean[126/292] Kernel.ResourceBirthController PASS 29s
+lean[127/292] Kernel.DeclaredResourceProjection start
+lean[127/292] Kernel.DeclaredResourceProjection PASS 17s
+lean[128/292] Kernel.DeclaredResourceScalar start
+lean[128/292] Kernel.DeclaredResourceScalar PASS 19s
+lean[129/292] Kernel.ContentResource start
+lean[129/292] Kernel.ContentResource PASS 16s
+lean[130/292] Kernel.ResourceTransaction start
+lean[130/292] Kernel.ResourceTransaction PASS 17s
+lean[131/292] Compiler.ResourceTargetAdmission start
+lean[131/292] Compiler.ResourceTargetAdmission PASS 13s
+lean[132/292] Compiler.CanonicalAccountView start
+lean[132/292] Compiler.CanonicalAccountView PASS 11s
+lean[133/292] Compiler.ResourceAuthorityProjection start
+lean[133/292] Compiler.ResourceAuthorityProjection PASS 7s
+lean[134/292] Kernel.ResourceObservationAdmission start
+lean[134/292] Kernel.ResourceObservationAdmission PASS 12s
+lean[135/292] Kernel.DeclaredResourceController start
+lean[135/292] Kernel.DeclaredResourceController PASS 30s
+lean[136/292] Compiler.DeclaredHyperedgeArtifact start
+lean[136/292] Compiler.DeclaredHyperedgeArtifact PASS 15s
+lean[137/292] Kernel.PolicyInstallController start
+lean[137/292] Kernel.PolicyInstallController PASS 22s
+lean[138/292] Kernel.PolicyInstallReceiver start
+lean[138/292] Kernel.PolicyInstallReceiver PASS 24s
+lean[139/292] Kernel.ResourceBirthPolicyController start
+lean[139/292] Kernel.ResourceBirthPolicyController PASS 36s
+lean[140/292] Kernel.ResourceBirthReceiver start
+lean[140/292] Kernel.ResourceBirthReceiver PASS 25s
+lean[141/292] Kernel.CapabilityDelegationController start
+lean[141/292] Kernel.CapabilityDelegationController PASS 22s
+lean[142/292] Kernel.CapabilityDelegationReceiver start
+lean[142/292] Kernel.CapabilityDelegationReceiver PASS 22s
+lean[143/292] Kernel.CapabilityRevocationController start
+lean[143/292] Kernel.CapabilityRevocationController PASS 34s
+lean[144/292] Kernel.CapabilityRevocationReceiver start
+lean[144/292] Kernel.CapabilityRevocationReceiver PASS 25s
+lean[145/292] Compiler.NativeHostCodec start
+lean[145/292] Compiler.NativeHostCodec PASS 17s
+lean[146/292] Kernel.AgentGrain start
+lean[146/292] Kernel.AgentGrain PASS 146s
+lean[147/292] Compiler.GrainResourceBirthController start
+lean[147/292] Compiler.GrainResourceBirthController PASS 16s
+lean[148/292] Kernel.NativeHostContext start
+lean[148/292] Kernel.NativeHostContext PASS 15s
+lean[149/292] Compiler.GrainResourceBirthHostCodec start
+lean[149/292] Compiler.GrainResourceBirthHostCodec PASS 14s
+lean[150/292] Kernel.GrainResourceBirthPolicyController start
+lean[150/292] Kernel.GrainResourceBirthPolicyController PASS 14s
+lean[151/292] Kernel.GrainResourceBirthFamilies start
+lean[151/292] Kernel.GrainResourceBirthFamilies PASS 12s
+lean[152/292] Kernel.GrainResourceBirthTransaction start
+lean[152/292] Kernel.GrainResourceBirthTransaction PASS 20s
+lean[153/292] Kernel.GrainResourceBirthAdmission start
+lean[153/292] Kernel.GrainResourceBirthAdmission PASS 28s
+lean[154/292] Kernel.NativeHostGrainBirth start
+lean[154/292] Kernel.NativeHostGrainBirth PASS 28s
+lean[155/292] Kernel.GrainResourceBirthReceiver start
+lean[155/292] Kernel.GrainResourceBirthReceiver PASS 16s
+lean[156/292] Compiler.NativeObservationCodec start
+lean[156/292] Compiler.NativeObservationCodec PASS 22s
+lean[157/292] Kernel.NativeObservationController start
+lean[157/292] Kernel.NativeObservationController PASS 19s
+lean[158/292] Compiler.FnEvidenceCodec start
+lean[158/292] Compiler.FnEvidenceCodec PASS 13s
+lean[159/292] Kernel.FnSelectiveRelease start
+lean[159/292] Kernel.FnSelectiveRelease PASS 17s
+lean[160/292] Kernel.FnGatewayPolicy start
+lean[160/292] Kernel.FnGatewayPolicy PASS 19s
+lean[161/292] Kernel.FnSelectiveReleaseSignature start
+lean[161/292] Kernel.FnSelectiveReleaseSignature PASS 32s
+lean[162/292] Kernel.FnSelectiveReleaseIngress start
+lean[162/292] Kernel.FnSelectiveReleaseIngress PASS 14s
+lean[163/292] Kernel.FnSelectiveReleaseAdmission start
+lean[163/292] Kernel.FnSelectiveReleaseAdmission PASS 14s
+lean[164/292] Kernel.FnSelectiveReleaseSourcePublication start
+lean[164/292] Kernel.FnSelectiveReleaseSourcePublication PASS 19s
+lean[165/292] Kernel.PhysicalResourceReadGuard start
+lean[165/292] Kernel.PhysicalResourceReadGuard PASS 15s
+lean[166/292] Kernel.FnSelectiveReleaseSourceAuthority start
+lean[166/292] Kernel.FnSelectiveReleaseSourceAuthority PASS 15s
+lean[167/292] Kernel.FnSelectiveReleaseSourceReceiver start
+lean[167/292] Kernel.FnSelectiveReleaseSourceReceiver PASS 19s
+lean[168/292] Kernel.ApplicationGrain start
+lean[168/292] Kernel.ApplicationGrain PASS 25s
+lean[169/292] Kernel.ApplicationLifecycleBegin start
+lean[169/292] Kernel.ApplicationLifecycleBegin PASS 15s
+lean[170/292] Kernel.ApplicationLifecycleBeginIngress start
+lean[170/292] Kernel.ApplicationLifecycleBeginIngress PASS 17s
+lean[171/292] Kernel.ApplicationDispatchCodec start
+lean[171/292] Kernel.ApplicationDispatchCodec PASS 20s
+lean[172/292] Kernel.ApplicationGrainSession start
+lean[172/292] Kernel.ApplicationGrainSession PASS 20s
+lean[173/292] Kernel.ApplicationGrainSessionEnrollment start
+lean[173/292] Kernel.ApplicationGrainSessionEnrollment PASS 21s
+lean[174/292] Kernel.ApplicationPermissionSchema start
+lean[174/292] Kernel.ApplicationPermissionSchema PASS 18s
+lean[175/292] Kernel.ApplicationDispatchManifest start
+lean[175/292] Kernel.ApplicationDispatchManifest PASS 18s
+lean[176/292] Kernel.ApplicationLifecycleBeginReceiver start
+lean[176/292] Kernel.ApplicationLifecycleBeginReceiver PASS 20s
+lean[177/292] Kernel.ApplicationLifecycleClaim start
+lean[177/292] Kernel.ApplicationLifecycleClaim PASS 18s
+lean[178/292] Kernel.ApplicationLifecycleClaimIngress start
+lean[178/292] Kernel.ApplicationLifecycleClaimIngress PASS 12s
+lean[179/292] Kernel.NativeHistorySelection start
+lean[179/292] Kernel.NativeHistorySelection PASS 16s
+lean[180/292] Kernel.ApplicationLifecycleClaimHistory start
+lean[180/292] Kernel.ApplicationLifecycleClaimHistory PASS 20s
+lean[181/292] Kernel.ApplicationLifecycleClaimCurrent start
+lean[181/292] Kernel.ApplicationLifecycleClaimCurrent PASS 22s
+lean[182/292] Kernel.ApplicationLifecycleClaimCore start
+lean[182/292] Kernel.ApplicationLifecycleClaimCore PASS 16s
+lean[183/292] Kernel.ApplicationSpkPackageIdentity start
+lean[183/292] Kernel.ApplicationSpkPackageIdentity PASS 15s
+lean[184/292] Kernel.ApplicationLifecycleBeginV2Ingress start
+lean[184/292] Kernel.ApplicationLifecycleBeginV2Ingress PASS 17s
+lean[185/292] Kernel.ApplicationLifecycleClaimV2Ingress start
+lean[185/292] Kernel.ApplicationLifecycleClaimV2Ingress PASS 14s
+lean[186/292] Kernel.ApplicationLifecycleBeginV2Admission start
+lean[186/292] Kernel.ApplicationLifecycleBeginV2Admission PASS 23s
+lean[187/292] Kernel.ApplicationLifecycleClaimV2Core start
+lean[187/292] Kernel.ApplicationLifecycleClaimV2Core PASS 14s
+lean[188/292] Kernel.ApplicationDispatchAuthority start
+lean[188/292] Kernel.ApplicationDispatchAuthority PASS 22s
+lean[189/292] Kernel.ApplicationShareIssueSource start
+lean[189/292] Kernel.ApplicationShareIssueSource PASS 17s
+lean[190/292] Kernel.ApplicationShareIssueDelegation start
+lean[190/292] Kernel.ApplicationShareIssueDelegation PASS 16s
+lean[191/292] Kernel.ApplicationShareIssueAtomicBirth start
+lean[191/292] Kernel.ApplicationShareIssueAtomicBirth PASS 17s
+lean[192/292] Kernel.ApplicationShareIssueAdmission start
+lean[192/292] Kernel.ApplicationShareIssueAdmission PASS 18s
+lean[193/292] Kernel.ApplicationShareIssueReceiver start
+lean[193/292] Kernel.ApplicationShareIssueReceiver PASS 18s
+lean[194/292] Kernel.ApplicationShareIssueGrainSource start
+lean[194/292] Kernel.ApplicationShareIssueGrainSource PASS 17s
+lean[195/292] Kernel.ApplicationShareIssueGrainAdmission start
+lean[195/292] Kernel.ApplicationShareIssueGrainAdmission PASS 16s
+lean[196/292] Kernel.ApplicationShareIssueGrainReceiver start
+lean[196/292] Kernel.ApplicationShareIssueGrainReceiver PASS 15s
+lean[197/292] Kernel.ApplicationDispatchIngress start
+lean[197/292] Kernel.ApplicationDispatchIngress PASS 13s
+lean[198/292] Kernel.ApplicationDispatchCommand start
+lean[198/292] Kernel.ApplicationDispatchCommand PASS 13s
+lean[199/292] Kernel.ApplicationDispatchAdmissionIngress start
+lean[199/292] Kernel.ApplicationDispatchAdmissionIngress PASS 11s
+lean[200/292] Kernel.ApplicationDispatchWitness start
+lean[200/292] Kernel.ApplicationDispatchWitness PASS 20s
+lean[201/292] Kernel.ApplicationDispatchAdmission start
+lean[201/292] Kernel.ApplicationDispatchAdmission PASS 22s
+lean[202/292] Kernel.ApplicationDispatchPending start
+lean[202/292] Kernel.ApplicationDispatchPending PASS 22s
+lean[203/292] Kernel.ApplicationDispatchHistoricalCore start
+lean[203/292] Kernel.ApplicationDispatchHistoricalCore PASS 17s
+lean[204/292] Kernel.ApplicationDispatchAgentReserveContext start
+lean[204/292] Kernel.ApplicationDispatchAgentReserveContext PASS 10s
+lean[205/292] Kernel.ApplicationDispatchAgentPayer start
+lean[205/292] Kernel.ApplicationDispatchAgentPayer PASS 20s
+lean[206/292] Kernel.ApplicationDispatchAgentReserveCore start
+lean[206/292] Kernel.ApplicationDispatchAgentReserveCore PASS 19s
+lean[207/292] Kernel.ApplicationDispatchAgentIngress start
+lean[207/292] Kernel.ApplicationDispatchAgentIngress PASS 14s
+lean[208/292] Kernel.ApplicationDispatchAgentCore start
+lean[208/292] Kernel.ApplicationDispatchAgentCore PASS 16s
+lean[209/292] Kernel.FnConsumerScope start
+lean[209/292] Kernel.FnConsumerScope PASS 13s
+lean[210/292] Kernel.FnConsumerFrontierCore start
+lean[210/292] Kernel.FnConsumerFrontierCore PASS 13s
+lean[211/292] Kernel.FnConsumerProgressHistory start
+lean[211/292] Kernel.FnConsumerProgressHistory PASS 12s
+lean[212/292] Kernel.FnConsumerNamespaceRegistration start
+lean[212/292] Kernel.FnConsumerNamespaceRegistration PASS 14s
+lean[213/292] Kernel.FnConsumerFrontierGateway start
+lean[213/292] Kernel.FnConsumerFrontierGateway PASS 13s
+lean[214/292] Kernel.FnConsumerNamespaceAdmissionAt start
+lean[214/292] Kernel.FnConsumerNamespaceAdmissionAt PASS 10s
+lean[215/292] Kernel.FnConsumerNamespaceHistory start
+lean[215/292] Kernel.FnConsumerNamespaceHistory PASS 7s
+lean[216/292] Kernel.FnConsumerFrontierReplay start
+lean[216/292] Kernel.FnConsumerFrontierReplay PASS 10s
+lean[217/292] Kernel.FnSelectiveReleaseReceiver start
+lean[217/292] Kernel.FnSelectiveReleaseReceiver PASS 12s
+lean[218/292] Kernel.FnSelectedPollReleaseShape start
+lean[218/292] Kernel.FnSelectedPollReleaseShape PASS 8s
+lean[219/292] Kernel.FnSelectedPollCoverage start
+lean[219/292] Kernel.FnSelectedPollCoverage PASS 11s
+lean[220/292] Kernel.FnEmptyPollProgressV2 start
+lean[220/292] Kernel.FnEmptyPollProgressV2 PASS 6s
+lean[221/292] Kernel.FnConsumerFrontierProposal start
+lean[221/292] Kernel.FnConsumerFrontierProposal PASS 8s
+lean[222/292] Kernel.FnSelectedPollAdmissionAt start
+lean[222/292] Kernel.FnSelectedPollAdmissionAt PASS 6s
+lean[223/292] Kernel.FnEmptyPollAdmissionAtV2 start
+lean[223/292] Kernel.FnEmptyPollAdmissionAtV2 PASS 5s
+lean[224/292] Kernel.ApplicationLifecycleClaimProjection start
+lean[224/292] Kernel.ApplicationLifecycleClaimProjection PASS 7s
+lean[225/292] Kernel.ApplicationLifecycleCompletionReport start
+lean[225/292] Kernel.ApplicationLifecycleCompletionReport PASS 9s
+lean[226/292] Kernel.ApplicationLifecycleCompletionPolicy start
+lean[226/292] Kernel.ApplicationLifecycleCompletionPolicy PASS 8s
+lean[227/292] Kernel.ApplicationLifecycleCompletionSource start
+lean[227/292] Kernel.ApplicationLifecycleCompletionSource PASS 8s
+lean[228/292] Kernel.ApplicationLifecycleCompletionHistory start
+lean[228/292] Kernel.ApplicationLifecycleCompletionHistory PASS 8s
+lean[229/292] Kernel.ApplicationLifecycleCompletionIngress start
+lean[229/292] Kernel.ApplicationLifecycleCompletionIngress PASS 11s
+lean[230/292] Kernel.ApplicationLifecycleCompletionAdmission start
+lean[230/292] Kernel.ApplicationLifecycleCompletionAdmission PASS 11s
+lean[231/292] Kernel.ApplicationLifecycleCompletionCore start
+lean[231/292] Kernel.ApplicationLifecycleCompletionCore PASS 11s
+lean[232/292] Kernel.NativeHostReplay start
+lean[232/292] Kernel.NativeHostReplay PASS 21s
+lean[233/292] Kernel.NativeHost start
+lean[233/292] Kernel.NativeHost PASS 10s
+lean[234/292] Kernel.NativeHostSession start
+lean[234/292] Kernel.NativeHostSession PASS 6s
+lean[235/292] Kernel.NativeReserveContinuity start
+lean[235/292] Kernel.NativeReserveContinuity PASS 9s
+lean[236/292] Kernel.NativeHostGenesis start
+lean[236/292] Kernel.NativeHostGenesis PASS 20s
+lean[237/292] Kernel.FnEvidence start
+lean[237/292] Kernel.FnEvidence PASS 12s
+lean[238/292] Kernel.FnConsumerOperation start
+lean[238/292] Kernel.FnConsumerOperation PASS 14s
+lean[239/292] Kernel.FnConsumerProgress start
+lean[239/292] Kernel.FnConsumerProgress PASS 15s
+lean[240/292] Kernel.FnConsumerNamespaceAdmission start
+lean[240/292] Kernel.FnConsumerNamespaceAdmission PASS 13s
+lean[241/292] Kernel.FnConsumerNamespaceReceiver start
+lean[241/292] Kernel.FnConsumerNamespaceReceiver PASS 14s
+lean[242/292] Kernel.FnOriginOutbox start
+lean[242/292] Kernel.FnOriginOutbox PASS 15s
+lean[243/292] Kernel.FnCatalogOwnRProgress start
+lean[243/292] Kernel.FnCatalogOwnRProgress PASS 14s
+lean[244/292] Kernel.FnReplyPublication start
+lean[244/292] Kernel.FnReplyPublication PASS 18s
+lean[245/292] Kernel.FnPortableSource start
+lean[245/292] Kernel.FnPortableSource PASS 12s
+lean[246/292] Kernel.FnReplySource start
+lean[246/292] Kernel.FnReplySource PASS 11s
+lean[247/292] Kernel.FnReplyConsumption start
+lean[247/292] Kernel.FnReplyConsumption PASS 10s
+lean[248/292] Kernel.ApplicationShareIssueAuthoring start
+lean[248/292] Kernel.ApplicationShareIssueAuthoring PASS 7s
+lean[249/292] Kernel.ApplicationShareIssueGrainAuthoring start
+lean[249/292] Kernel.ApplicationShareIssueGrainAuthoring PASS 9s
+lean[250/292] Kernel.ApplicationShareIssueGrainLookup start
+lean[250/292] Kernel.ApplicationShareIssueGrainLookup PASS 6s
+lean[251/292] Kernel.ApplicationDispatchProjection start
+lean[251/292] Kernel.ApplicationDispatchProjection PASS 8s
+lean[252/292] Kernel.ApplicationDispatchReceiver start
+lean[252/292] Kernel.ApplicationDispatchReceiver PASS 7s
+lean[253/292] Kernel.ApplicationDispatchLookup start
+lean[253/292] Kernel.ApplicationDispatchLookup PASS 5s
+lean[254/292] Kernel.ApplicationDispatchAgentProjection start
+lean[254/292] Kernel.ApplicationDispatchAgentProjection PASS 8s
+lean[255/292] Kernel.ApplicationDispatchAgentReceiver start
+lean[255/292] Kernel.ApplicationDispatchAgentReceiver PASS 7s
+lean[256/292] Kernel.ApplicationDispatchAgentLookup start
+lean[256/292] Kernel.ApplicationDispatchAgentLookup PASS 6s
+lean[257/292] Kernel.ApplicationDispatchAuthoring start
+lean[257/292] Kernel.ApplicationDispatchAuthoring PASS 8s
+lean[258/292] Kernel.ApplicationDispatchAgentAuthoring start
+lean[258/292] Kernel.ApplicationDispatchAgentAuthoring PASS 7s
+lean[259/292] Kernel.ApplicationDispatchAgentPaidAuthoring start
+lean[259/292] Kernel.ApplicationDispatchAgentPaidAuthoring PASS 9s
+lean[260/292] Kernel.ApplicationLifecycleBeginV2Receiver start
+lean[260/292] Kernel.ApplicationLifecycleBeginV2Receiver PASS 7s
+lean[261/292] Kernel.ApplicationLifecycleClaimV2Receiver start
+lean[261/292] Kernel.ApplicationLifecycleClaimV2Receiver PASS 6s
+lean[262/292] Kernel.ApplicationLifecycleV2Lookup start
+lean[262/292] Kernel.ApplicationLifecycleV2Lookup PASS 7s
+lean[263/292] Kernel.ApplicationLifecycleCompletionReceiver start
+lean[263/292] Kernel.ApplicationLifecycleCompletionReceiver PASS 6s
+lean[264/292] Kernel.ApplicationLifecycleCompletionLookup start
+lean[264/292] Kernel.ApplicationLifecycleCompletionLookup PASS 5s
+lean[265/292] Host.ApplicationDispatchInspection start
+lean[265/292] Host.ApplicationDispatchInspection PASS 6s
+lean[266/292] Host.ApplicationDispatchAgentPaidInspection start
+lean[266/292] Host.ApplicationDispatchAgentPaidInspection PASS 7s
+lean[267/292] Host.ApplicationDispatchAgentInspection start
+lean[267/292] Host.ApplicationDispatchAgentInspection PASS 8s
+lean[268/292] Kernel.ApplicationLifecycleResidentProfile start
+lean[268/292] Kernel.ApplicationLifecycleResidentProfile PASS 6s
+lean[269/292] Host.ApplicationLifecycleClaimInspection start
+lean[269/292] Host.ApplicationLifecycleClaimInspection PASS 7s
+lean[270/292] Host.ApplicationLifecycleCompletionAuthoring start
+lean[270/292] Host.ApplicationLifecycleCompletionAuthoring PASS 7s
+lean[271/292] Host.ApplicationLifecycleCompletionOperator start
+lean[271/292] Host.ApplicationLifecycleCompletionOperator PASS 8s
+lean[272/292] Host.ApplicationLifecycleBeginOperator start
+lean[272/292] Host.ApplicationLifecycleBeginOperator PASS 8s
+lean[273/292] Host.ApplicationLifecycleClaimOperator start
+lean[273/292] Host.ApplicationLifecycleClaimOperator PASS 9s
+lean[274/292] Host.FnConsumerNamespacePlan start
+lean[274/292] Host.FnConsumerNamespacePlan PASS 11s
+lean[275/292] Kernel.ApplicationGrainBirth start
+lean[275/292] Kernel.ApplicationGrainBirth PASS 12s
+lean[276/292] Kernel.ApplicationGrainSessionBirth start
+lean[276/292] Kernel.ApplicationGrainSessionBirth PASS 6s
+lean[277/292] Host.ApplicationShareIssueGrainInspection start
+lean[277/292] Host.ApplicationShareIssueGrainInspection PASS 8s
+lean[278/292] Host.ApplicationPermissionSchemaAuthoring start
+lean[278/292] Host.ApplicationPermissionSchemaAuthoring PASS 8s
+lean[279/292] Host.Json start
+lean[279/292] Host.Json PASS 19s
+lean[280/292] Kernel.FnSelectiveReleaseArticle start
+lean[280/292] Kernel.FnSelectiveReleaseArticle PASS 6s
+lean[281/292] Host.FnSelectiveReleaseAuthoring start
+lean[281/292] Host.FnSelectiveReleaseAuthoring PASS 6s
+lean[282/292] Host.FnSelectiveReleaseSourceAuthoring start
+lean[282/292] Host.FnSelectiveReleaseSourceAuthoring PASS 7s
+lean[283/292] Host.FnSelectiveReleaseFnReceiving start
+lean[283/292] Host.FnSelectiveReleaseFnReceiving PASS 4s
+lean[284/292] Host.FnSelectiveReleaseFnAck start
+lean[284/292] Host.FnSelectiveReleaseFnAck PASS 4s
+lean[285/292] Host.ApplicationCurrentBirthAuthoring start
+lean[285/292] Host.ApplicationCurrentBirthAuthoring PASS 5s
+lean[286/292] Host.FnInboxView start
+lean[286/292] Host.FnInboxView PASS 6s
+lean[287/292] Host.GrainOriginSource start
+lean[287/292] Host.GrainOriginSource PASS 7s
+lean[288/292] Host.GrainOriginPreparation start
+lean[288/292] Host.GrainOriginPreparation PASS 5s
+lean[289/292] Host.GrainOriginCommand start
+lean[289/292] Host.GrainOriginCommand PASS 5s
+lean[290/292] Kernel.ProviderMetering start
+lean[290/292] Kernel.ProviderMetering PASS 5s
+lean[291/292] Host.ProviderUsage start
+lean[291/292] Host.ProviderUsage PASS 6s
+lean[292/292] Host.Main start
+lean[292/292] Host.Main PASS 29s

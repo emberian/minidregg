@@ -1,0 +1,27 @@
+start_utc=2026-09-27T12:52:15Z
+root=/tank/dregg-build/minidregg-9746c47-20260927
+lean_threads=1
+native_jobs=1
+seat=/tank/dregg-build/minidregg-55d3868-cycle/lean-seat-1
+post-Lean recovery check PASS 292 source/OLean/C modules; recompile project C
+end_utc=2026-09-27T13:07:18Z
+elapsed_seconds=903
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/tank/dregg-build/minidregg-9746c47-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=0
+resumed_prefix_modules=292
+source_modules=292
+package_modules=2933
+response_objects=3225
+reusable_artifact_manifest_sha256=fe804c1960d6cd14193f561b95747b10fd5afbfff62bbfd3d22ca198a6d0181b
+checkpointed_success=1
+post_lean_recovery=/tank/dregg-build/minidregg-55d3868-evidence/build-r5
+post_lean_prior_builder_sha256=9ef38dbd16da1e6a7f0751bd64ec2eddd2feaf4c2009bbaecb4f47b26bc1f2c6
+recompiled_project_c_modules=292
+usage_exit=1
+binary=/tank/dregg-build/minidregg-55d3868-evidence/minidregg-host-55d3868-r8
+binary_sha256=a9e5cf96015b8439b596e602cd7685773dc5eebf96356bc0c8cc5f22b7c46f87

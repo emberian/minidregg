@@ -107,8 +107,9 @@ theorem charge_fee_source_quoted (accepted : Accepted profile config pins durabl
 ordinary resource birth. Both prior-image admissions were checked at the same
 `durable`; the app read guard fences its cell root, while the birth's complete
 authority guards and the full-image CAS fence current policy/grant state. The
-newborn owner/control grants go to the issuer; a participant still needs an
-actual native observe delegation before dispatch can use its grant selector. -/
+newborn owner/control grants go to the issuer; the participant's bounded
+grant-resource-only observe selector is born in the same checked descriptor.
+Event26 must still verify its current signature, law and revocation status. -/
 def template (accepted : Accepted profile config pins durable height ingress) :
     DataIntent ResourceBirthCodec.rootBytes where
   transactionId := accepted.birth.descriptor.transactionId
