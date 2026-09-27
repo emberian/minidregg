@@ -48,6 +48,17 @@ private def continueRequestJson (request : ContinueRequest) : Json := .mkObj
    ("descriptorHex", hex request.descriptorBytes),
    ("createdIndex", decimal request.createdIndex)]
 
+/-- STOP and INSTALL share the no-action shape but retain their distinct kind
+in the canonical request echoed by plan inspection. -/
+def noActionRequest (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) : Request :=
+  { kind := ingress.base.source.kind
+    clientOperationId := ingress.clientOperationId
+    descriptorBytes := ingress.descriptor.canonicalBytes
+    createIndex := none }
+
+theorem noActionRequest_kind (ingress : ApplicationLifecycleBeginV3Ingress.Ingress) :
+    (noActionRequest ingress).kind = ingress.base.source.kind := rfl
+
 private def slotJson (slot : SigningSlot) : Json :=
   let signing := match CredentialSignedEnvelopeController.headerCodec.decode
       slot.header with
@@ -72,11 +83,11 @@ def inspectRequest (bytes : List UInt8) : Except String Json := do
     | throw "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
   match request.kind, request.createIndex with
-  | .install, none => pure ()
+  | .install, none | .stop, none => pure ()
   | .start, some index =>
       unless (descriptor.selectedCreate index).isSome do
         throw "selected create action absent from descriptor"
-  | _, _ => throw "request is not INSTALL or first-create START"
+  | _, _ => throw "request is not INSTALL, STOP or first-create START"
   pure <| .mkObj
     [("request", requestJson request),
      ("descriptorRoot", decimal descriptor.root.value),
@@ -105,12 +116,8 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
       ingress.base.packageObservationEnvelope.isEmpty do
     throw "launch BEGIN plan is not unsigned"
   let (requestProjection, requestBytes) ← match ingress.base.source.kind, ingress.start with
-    | .install, none =>
-        let request : Request :=
-          { kind := .install
-            clientOperationId := ingress.clientOperationId
-            descriptorBytes := ingress.descriptor.canonicalBytes
-            createIndex := none }
+    | .install, none | .stop, none =>
+        let request := noActionRequest ingress
         pure (requestJson request, requestCodec.encode request)
     | .start, some binding =>
         match binding.choice, binding.priorCreate with
@@ -130,7 +137,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
                 createdIndex := receipt.acceptedCount - 1 }
             pure (continueRequestJson request, continueRequestCodec.encode request)
         | _, _ => throw "launch binding has invalid prior-create shape"
-    | _, _ => throw "plan is not INSTALL or START"
+    | _, _ => throw "plan is not INSTALL, STOP or START"
   let source := ingress.base.source
   unless plan.invocation.finalizedDraft == .invoke
       (DeclaredResourceController.commandCodec.encode

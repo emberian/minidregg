@@ -1,0 +1,4 @@
+6cbd3c8a9ae67b7f153eabc265bf5138ddb2a3994054afa21854d063f676dc14  ../../../Host/ApplicationLifecycleLaunchBeginAuthoring.lean
+fdbf733d47ee48c834655f860d7dc49d33016848448470a676b7ffc8b62ed4e1  ../../../Host/ApplicationLifecycleLaunchBeginInspection.lean
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  mini-launch-stop-ApplicationLifecycleLaunchBeginAuthoring.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  mini-launch-stop-ApplicationLifecycleLaunchBeginInspection-final.log

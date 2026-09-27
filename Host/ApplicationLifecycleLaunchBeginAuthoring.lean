@@ -1,7 +1,7 @@
 /-
-Operator-private current-image plan for source-bound INSTALL or first-create
-START. Continue is deliberately refused until Verified exposes the admitted
-completed-create certificate. A client operation ID is only a correlation
+Operator-private current-image plan for source-bound INSTALL, START and STOP.
+Continue selects an admitted completed-create certificate from Verified.
+A client operation ID is only a correlation
 value: the signed ordinary operation ID is derived from the complete v3
 descriptor, volume, and selected action before any header is issued.
 -/
@@ -106,6 +106,7 @@ private def startBinding (domain : Digest) (app : Nat)
     Except String (Option ApplicationLifecycleLaunchBinding.Binding) := do
   match kind, index with
   | .install, none => pure none
+  | .stop, none => pure none
   | .start, some selected =>
       let some command := descriptor.selectedCreate selected
         | throw "launch START create index is absent from signed descriptor"
@@ -119,7 +120,8 @@ private def startBinding (domain : Digest) (app : Nat)
           commandDigest := command.digest })
   | .start, none => throw "launch START needs a selected create action"
   | .install, some _ => throw "launch INSTALL cannot select a create action"
-  | _, _ => throw "launch BEGIN authoring supports INSTALL or first-create START only"
+  | .stop, some _ => throw "launch STOP cannot select a create action"
+  | _, _ => throw "launch BEGIN authoring supports INSTALL, START or STOP only"
 
 private def prepareSelectedVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
