@@ -1,0 +1,14 @@
+Scope command line contains environment variable, which is not expanded by default for now, but will be expanded by default in the future. Use --expand-environment=yes/no to explicitly control it as needed.
+Running as unit: run-p579040-i977454405.scope; invocation ID: 0c557da7d0cb426096d19114206c976b
+MODULE:ApplicationGrain
+MODULE:ApplicationShareIssueSource
+Kernel/ApplicationShareIssueSource.lean:257:5: warning: unused variable `domainBound`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Kernel/ApplicationShareIssueSource.lean:258:5: warning: unused variable `operationBound`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+MODULE:ApplicationDispatchWitness
+MODULE:ApplicationDispatchAdmissionIngress
+MODULE:ApplicationDispatchAdmission
+VERDICT:PASS
