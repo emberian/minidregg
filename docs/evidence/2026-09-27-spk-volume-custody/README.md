@@ -78,3 +78,12 @@ under protected root paths and invoked by the resident service's START
 preflight before `read_attested_volume` may qualify a real launch. The current
 resident START remains fail-closed pending exact v3 source action selection,
 volume comparison, and physical completion.
+
+The subsequent resident FD5 seam in `native/spk-host/src/resident_launch.rs`
+(SHA-256 `bfcc138cf6a354a4b4e448cdd12b902f13cffbf3c77997c63e1d6947089cf85b`)
+compares the retained witness against the exact preopened `/var` directory and
+rechecks the same handoff immediately before one-shot spawn. Its bounded
+[Linux Clippy check](resident-fd5-clippy-r2.log) passed against a private hbox
+snapshot with this file copied byte-for-byte (2 jobs, 4 GiB cap, 393.6 MiB
+peak). No v3 Mini claim or app launch was run, and this physical comparison
+does not by itself grant START authority.

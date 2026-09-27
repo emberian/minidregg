@@ -10,6 +10,7 @@ use crate::sandbox::{
     verify_var_volume, SandboxSpec,
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
+use crate::volume_custody::VolumeWitness;
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -98,6 +99,27 @@ impl PreparedResident {
             _persistent_var: persistent_var,
             launch,
         })
+    }
+
+    /// Compare the root-owned custody handoff with the exact directory held
+    /// open for fd5. This is a physical observation; the caller must also
+    /// compare the witness bytes and volume ID to the source-owned v3 claim.
+    pub(crate) fn compare_attested_volume(&self, witness: &VolumeWitness) -> io::Result<()> {
+        witness.compare_open_mount(self._persistent_var.as_raw_fd())?;
+        witness.recheck_handoff()
+    }
+
+    /// Repeat the fixed handoff/FD5 check at the last physical boundary before
+    /// consuming the journal's one-shot spawn. This does not mint Mini launch
+    /// authority or promise cancellation of a later operator mount change.
+    pub(crate) fn start_attested(
+        self,
+        journal: &Journal,
+        begin: &VerifiedBegin,
+        witness: &VolumeWitness,
+    ) -> io::Result<ResidentProcess> {
+        self.compare_attested_volume(witness)?;
+        self.start(journal, begin)
     }
 
     /// Must execute as the exact unit MainPID after native COMMITTED/v2 claim

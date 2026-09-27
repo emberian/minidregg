@@ -1,0 +1,8 @@
+Running as unit: mini-spk-resident-fd5-check-r2.service
+    Checking minidregg-spk-host v0.1.0 (/tank/chreatures/mini-spk-resident-check-20260927/native/spk-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.23s
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 2.454s
+CPU time consumed: 1.813s
+Memory peak: 393.6M (swap: 0B)
