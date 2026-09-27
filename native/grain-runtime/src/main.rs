@@ -4936,12 +4936,6 @@ impl Runtime {
                     self.supervised_json_command(command)
                 }
                 shared_app_refs::NativeOperation::IssueLookup { kind, ingress } => {
-                    if kind != shared_app_refs::ShareIssueKind::BareEvent15 {
-                        return Err(
-                            "grain-backed share issue requires the qualified public op55 receipt route"
-                                .into(),
-                        );
-                    }
                     let socket = self
                         .config
                         .host_socket
@@ -4949,7 +4943,7 @@ impl Runtime {
                         .ok_or("shared app issue lookup requires pinned hostSocket")?;
                     let mut command = Command::new(&self.config.mini);
                     command
-                        .arg("share-issue-receipt-lookup")
+                        .arg(kind.recipient_lookup_command())
                         .arg("--host")
                         .arg(&self.config.host)
                         .arg("--config")

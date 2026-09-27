@@ -1,0 +1,8 @@
+   Compiling minidregg-grain-runtime v0.1.0 (/Users/ember/dev/minidregg/native/grain-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.15s
+────────────
+ Nextest run ID fb189bfb-2630-49f6-a17e-a1783f266084 with nextest profile: default
+    Starting 1 test across 2 binaries (111 tests skipped)
+        PASS [   0.010s] (1/1) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::issue_carrier_kind_is_required_and_cannot_fall_back_to_event15
+────────────
+     Summary [   0.010s] 1 test run: 1 passed, 111 skipped

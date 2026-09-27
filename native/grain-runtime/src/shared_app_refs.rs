@@ -104,6 +104,17 @@ pub(super) enum ShareIssueKind {
     GrainBackedEvent22,
 }
 
+impl ShareIssueKind {
+    /// Public historical receipt routes only. Issuer prepare/submit commands
+    /// are deliberately absent from this recipient selection.
+    pub(super) fn recipient_lookup_command(self) -> &'static str {
+        match self {
+            Self::BareEvent15 => "share-issue-receipt-lookup",
+            Self::GrainBackedEvent22 => "grain-share-issue-receipt-lookup",
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SharedApplicationRef {
@@ -637,6 +648,19 @@ mod tests {
         encoded["kind"] = json!("grainBackedEvent22");
         let grain: ShareIssuePin = serde_json::from_value(encoded).unwrap();
         assert_eq!(grain.kind, ShareIssueKind::GrainBackedEvent22);
+        assert_eq!(
+            ShareIssueKind::BareEvent15.recipient_lookup_command(),
+            "share-issue-receipt-lookup"
+        );
+        assert_eq!(
+            grain.kind.recipient_lookup_command(),
+            "grain-share-issue-receipt-lookup"
+        );
+        for kind in [ShareIssueKind::BareEvent15, grain.kind] {
+            let command = kind.recipient_lookup_command();
+            assert!(command.ends_with("-receipt-lookup"));
+            assert!(!command.contains("submit"));
+        }
     }
 
     #[test]

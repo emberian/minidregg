@@ -1,0 +1,7 @@
+# Agent event22 recipient lookup: Rust source checkpoint
+
+This checkpoint selects the public, read-only grain-backed share receipt lookup for a registered shared application. `ShareIssueKind::BareEvent15` selects `mini share-issue-receipt-lookup` (native op29); `ShareIssueKind::GrainBackedEvent22` selects `mini grain-share-issue-receipt-lookup` (native op55). The kind is required in the operator-pinned reference. Neither branch selects an issuer prepare or submit command.
+
+The controller still checks the staged exact ingress SHA-256 before and after lookup, compares all four fields of the historical accepted receipt, and performs four current signed reads through its supervised Mini path. This Rust mapping is not a native Host55 acceptance, a current ticket authority claim, or a deployed agent dispatch. A changed parent generation remains bound by the source ticket/enrollment origin; this cut does not refresh it.
+
+The exact two-file source cut is in [source-sha256.txt](source-sha256.txt). From `native/grain-runtime`, `CARGO_BUILD_JOBS=2 cargo nextest run -E 'test(/issue_carrier_kind_is_required_and_cannot_fall_back_to_event15/)'` passed **1/1**; the test checks absent/unknown kinds, distinct exact CLI names, and that neither is a submit. `CARGO_BUILD_JOBS=2 cargo clippy --all-targets -- -D warnings` passed. The retained logs are [nextest.log](nextest.log) and [clippy.log](clippy.log). No native Store, model, or application HTTP call was made.
