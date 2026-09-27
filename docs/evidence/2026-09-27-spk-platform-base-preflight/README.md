@@ -23,3 +23,16 @@ The source correction counts the two exact quoted rewritten fields in
 `run-base.sh`. `sh -n`, ShellCheck, `git diff --check`, and the retained r1
 overlay compatibility assertions passed. Fresh r2 must use a new private root;
 this is a source/preflight correction, not native acceptance.
+
+Fresh r2 used committed `6dacab3` scripts and passed the corrected overlay
+preflight and offline v2 qualifier. It reached fresh workroom birth, then the
+Mini Host rejected `$.birth.genesis.expectedSemantics` as different from its
+source-derived profile; the run exited 1 after 52.07 seconds. Its Store and
+attempts remain private at
+`/var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r2`.
+`r2-profile-shape.json` shows the authored birth and operator profile carried
+the same expected semantics and grain tariff, while the operator config has a
+completion custodian key. `Host.Json.birth` reconstructs a temporary native
+profile without that configured key, which is part of runtime parameters.
+The source repair must preserve the exact semantics equality guard; this r2
+result is a real refusal, not an installed app or session.

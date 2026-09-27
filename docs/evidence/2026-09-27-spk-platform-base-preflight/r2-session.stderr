@@ -1,0 +1,3 @@
+mini: serving /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r2/base/workroom/session/host.sock with host process 3927508
+minidregg-host: $.birth.genesis.expectedSemantics: does not match the source-derived native profile
+mini: host closed during request; status uncertain

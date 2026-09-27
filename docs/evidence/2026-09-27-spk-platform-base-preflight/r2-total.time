@@ -1,0 +1,24 @@
+Command exited with non-zero status 1
+	Command being timed: "/bin/sh /tank/dregg-build/minidregg-spk-platform-6dacab3-source/scripts/spk-platform/run-base.sh /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r2 /tank/dregg-build/minidregg-spk-launch-v2-positive-20260927/minidregg-host-v2-launch-r1 /tank/dregg-build/minidregg-007b513-client-evidence/bin/mini-007b513 /tank/dregg-build/minidregg-9746c47-helpers-evidence/bin/minidregg-link-sqlite-store-9746c47 /tank/dregg-build/minidregg-9746c47-helpers-evidence/bin/minidregg-credential-signature-verifier-9746c47 /tank/dregg-build/minidregg-spk-host-d513bfa-qualifier/bin/spk-host-d513bfa"
+	User time (seconds): 27.67
+	System time (seconds): 24.24
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:52.07
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 363924
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 210
+	Minor (reclaiming a frame) page faults: 1289275
+	Voluntary context switches: 2004
+	Involuntary context switches: 636
+	Swaps: 0
+	File system inputs: 5732987
+	File system outputs: 1448
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1

@@ -1,0 +1,79 @@
+mini — custody and exact-retry client for minidregg-host
+
+usage:
+  mini keygen --secret KEY --public PUBLIC
+  mini profile --host HOST --config CONFIG.json [--socket SOCKET]
+  mini describe --host HOST --config CONFIG.json [--socket SOCKET]
+  mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
+  mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
+  mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
+  mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-reserve-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --public-socket PUBLIC-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-reserve-submit --attempt PRIVATE-DIR
+  mini agent-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-reserve-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --public-socket PUBLIC-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-reserve-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-paid-plan --reserve-attempt PRIVATE-DIR --grant-attempt PRIVATE-DIR --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-paid-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-paid-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-paid-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
+  mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
+  mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
+  mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
+  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
+  mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
+  mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
+  mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
+  mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
+  mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
+  mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
+  mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
+  mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
+  mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
+  mini fn-namespace-lookup --state-dir PRIVATE-DIR
+  mini fn-frontier-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --kind selected|empty --transaction MINI-TX|- --state-dir NEW-PRIVATE-DIR
+  mini fn-frontier-advance --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
+  mini fn-frontier-lookup --state-dir PRIVATE-DIR
+  mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
+  mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
+  mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
+  mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock
+  mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
+  mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
+  mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
+  mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
+  mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
+  mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
+  mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
+  mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
+  mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
+  mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
+  mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
+  mini reply-consumer-resume-ack --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
+  mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
+  mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
+  mini reply-consumer-worker --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
+
+Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
+supported host commands to use one persistent Lean host session.
+
+The Lean host authors and decodes every semantic value. This client owns only
+private-key custody, process transport, retained attempts, and exact retries.
