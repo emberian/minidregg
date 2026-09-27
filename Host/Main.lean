@@ -9,8 +9,10 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 21=selected-release lookup, 22=application lifecycle begin submit,
 23=application lifecycle begin lookup, 24=selected source publication submit,
 25=selected source publication lookup, 28=app share issue submit,
-29=app share issue lookup. Reply operation byte matches; failures use 255 plus a
-strict Outcome. The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
+29=app share issue lookup, 34=fresh checked dispatch permit,
+35=historical dispatch receipt-only lookup. Op34 success uses a distinct
+committed-permit frame; all other op34 outcomes carry a strict Outcome.
+The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
@@ -29,6 +31,8 @@ import Kernel.FnSelectiveReleaseReceiver
 import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
+import Kernel.ApplicationDispatchReceiver
+import Kernel.ApplicationDispatchLookup
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -526,6 +530,25 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some historical => return .confirmed .replayed historical
 
+/-- Historical dispatch lookup is receipt-only. It rechecks the original
+special event at its verifier-selected prefix and never mints a delivery
+permit or replays an application effect. -/
+def applicationDispatchLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  match ApplicationDispatchLookup.lookupVerified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-dispatch".toUTF8.toList
+        "noncanonical lookup ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "dispatch original history unavailable".toUTF8.toList
+
 /-- Author a current app/session birth intent from one verifier-opened image.
 The JSON is only a request for source selectors; the helper derives current
 height and grant epochs and checks the pinned genesis identity. -/
@@ -659,6 +682,9 @@ def dispatchSession (config : NativeHost.Config)
   | 25 =>
       return (25, outcomeCodec.encode
         (← selectedSourcePublicationLookupSession config state payload))
+  | 35 =>
+      return (35, outcomeCodec.encode
+        (← applicationDispatchLookupSession config state payload))
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -676,6 +702,46 @@ def frameLength (bytes : ByteArray) : Nat :=
 def lengthBytes (length : Nat) : ByteArray :=
   [UInt8.ofNat length, UInt8.ofNat (length / 256),
     UInt8.ofNat (length / 65536), UInt8.ofNat (length / 16777216)].toByteArray
+
+def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
+    (payload : List UInt8) : IO Unit := do
+  let response := (operation :: payload).toByteArray
+  if response.size > maxFrame then
+    throw (IO.userError "native host response exceeds frame budget")
+  output.write (lengthBytes response.size ++ response)
+  output.flush
+
+/-- Op34 writes a committed permit only inside the receiver's point-in-time
+physical-tip callback. This check is not a lease against later Store writes;
+the external host must fence process generation and reconcile uncertain
+delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
+def dispatchApplicationSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationDispatchReceiver.receiveVerified config session.verified payload
+  match result with
+  | .permitted permit =>
+      let handed ← permit.withFreshTip fun committedBytes =>
+        writeSessionFrame output 34 committedBytes
+      match handed with
+      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .error detail =>
+          writeSessionFrame output 34 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .rejected _ =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  | .contention =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome .contention
+  | .unavailable detail =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .uncertain detail =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
 partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
@@ -706,11 +772,13 @@ partial def serveSession (config : NativeHost.Config)
   let frame ← readExactly input length
   let (operation, payload) ← match frame.toList with
     | [] => throw (IO.userError "empty native host frame")
-    | operation :: payload => dispatchSession config state meteringProfile fnDispatch operation payload
-  let response := (operation :: payload).toByteArray
-  if response.size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
-  output.write (lengthBytes response.size ++ response)
-  output.flush
+    | operation :: payload => pure (operation, payload)
+  if operation == 34 then
+    dispatchApplicationSubmitSession config state payload output
+  else
+    let (responseOperation, responsePayload) ←
+      dispatchSession config state meteringProfile fnDispatch operation payload
+    writeSessionFrame output responseOperation responsePayload
   serveSession config state meteringProfile fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
