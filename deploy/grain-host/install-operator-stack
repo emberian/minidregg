@@ -17,7 +17,7 @@ case $action in
   *) usage ;;
 esac
 [[ $(uname -s) == Linux ]] || { echo 'Linux user systemd required' >&2; exit 69; }
-for tool in jq realpath stat sha256sum systemctl cmp mktemp ln flock readlink ss loginctl sudo getfacl; do
+for tool in jq realpath stat sha256sum systemctl cmp mktemp ln flock readlink ss loginctl sudo getfacl nc head; do
   command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
 done
 fail() { echo "install-operator-stack: $*" >&2; exit 65; }
@@ -385,9 +385,11 @@ endpoint_ready() {
       uid=${task_uids[idx]}
       if [[ -n $uid ]]; then
         user=$(id -nu "$uid")
-        sudo -n -u "$user" /usr/bin/test -r "${task_configs[idx]}" || return 1
-        sudo -n -u "$user" /usr/bin/test -w "$endpoint" || return 1
-        sudo -n -u "$user" /usr/bin/test ! -e "$host_socket" || return 1
+        # Rust coreutils `test -r/-w` on this host misreports effective named
+        # ACL access; exercise an actual read and Unix connect instead.
+        sudo -n -u "$user" head -c 1 "${task_configs[idx]}" >/dev/null || return 1
+        sudo -n -u "$user" nc -U -z -w 1 "$endpoint" >/dev/null 2>&1 || return 1
+        if sudo -n -u "$user" nc -U -z -w 1 "$host_socket" >/dev/null 2>&1; then return 1; fi
         printf -v expected 'user::rwx\nuser:%s:--x\ngroup::---\nmask::--x\nother::---' "$uid"
         acl=$(getfacl -cnp -- "${endpoint%/*}")
         [[ $acl == "$expected" ]] || return 1
