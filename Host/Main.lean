@@ -6,7 +6,9 @@ private signing keys. `assemble` combines detached custody signatures only.
 stdio framing: four-byte little-endian length, then one operation byte and
 payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 5=authorized query, 20=owner-signed selected-public-release submit,
-21=selected-release lookup. Reply operation byte matches; failures use 255 plus a
+21=selected-release lookup, 22=application lifecycle begin submit,
+23=application lifecycle begin lookup, 24=selected source publication submit,
+25=selected source publication lookup. Reply operation byte matches; failures use 255 plus a
 strict Outcome. The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
@@ -23,6 +25,10 @@ import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
 import Kernel.FnSelectiveReleaseReceiver
+import Kernel.ApplicationLifecycleBeginReceiver
+import Kernel.FnSelectiveReleaseSourceReceiver
+import Host.FnSelectiveReleaseAuthoring
+import Host.FnSelectiveReleaseSourceAuthoring
 import Host.Json
 import Host.FnInboxView
 import Host.GrainOriginCommand
@@ -280,7 +286,8 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson
        ((["birth", "invoke", "install", "delegate", "revoke",
-          "fn-selected-public-release"] : List String) ++
+          "fn-selected-public-release", "application-lifecycle-begin",
+          "selected-source-publication"] : List String) ++
          if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
@@ -394,6 +401,81 @@ def selectedReleaseLookupSession (config : NativeHost.Config)
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some historical => return .confirmed .replayed historical
 
+/-- A BEGIN records source-authorized pending work. Physical launch and
+completion require separate host custody and current claim validation. -/
+def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let ambient : DeclaredResourceController.Ambient :=
+    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+  let result ← ApplicationLifecycleBeginReceiver.receiveLoaded config.deployment
+    config.profile ambient config.signature config.storage.transport opened.durable payload
+  let outcome ← match result with
+    | .historical receipt =>
+        sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
+    | .confirmed kind receipt =>
+        sessionConfirmed config state kind receipt.transactionId receipt.eventId
+    | .rejected _ => pure (.refused "application-lifecycle-begin".toUTF8.toList
+        "request refused".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let some ingress := ApplicationLifecycleBeginIngress.codec.decode payload
+    | return .refused "application-lifecycle-begin".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  match ApplicationLifecycleBeginReceiver.replay opened.durable ingress with
+  | none => return .absent
+  | some (.error _) =>
+      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+  | some (.ok receipt) =>
+      match NativeHost.historicalReceipt config opened.durable
+          receipt.transactionId receipt.eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some historical => return .confirmed .replayed historical
+
+/-- This records current source authorization for one selected content version.
+External fn delivery is a separate effect with its own uncertain outcome. -/
+def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let result ← FnSelectiveReleaseSourceReceiver.receiveLoaded config opened payload
+  let outcome ← match result with
+    | .confirmed kind receipt =>
+        sessionConfirmed config state kind receipt.transactionId receipt.eventId
+    | .rejected _ => pure (.refused "selected-source-publication".toUTF8.toList
+        "request refused".toUTF8.toList)
+    | .transactionConflict => pure (.refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+def selectedSourcePublicationLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode payload
+    | return .refused "selected-source-publication".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  match FnSelectiveReleaseSourceReceiver.replay opened ingress with
+  | none => return .absent
+  | some (.error _) =>
+      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+  | some (.ok receipt) =>
+      match NativeHost.historicalReceipt config opened.durable
+          receipt.transactionId receipt.eventId with
+      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | some historical => return .confirmed .replayed historical
+
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
   unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat
@@ -496,6 +578,18 @@ def dispatchSession (config : NativeHost.Config)
   | 21 =>
       return (21, outcomeCodec.encode
         (← selectedReleaseLookupSession config state payload))
+  | 22 =>
+      return (22, outcomeCodec.encode
+        (← applicationLifecycleBeginSubmitSession config state payload))
+  | 23 =>
+      return (23, outcomeCodec.encode
+        (← applicationLifecycleBeginLookupSession config state payload))
+  | 24 =>
+      return (24, outcomeCodec.encode
+        (← selectedSourcePublicationSubmitSession config state payload))
+  | 25 =>
+      return (25, outcomeCodec.encode
+        (← selectedSourcePublicationLookupSession config state payload))
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -2917,7 +3011,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -3083,6 +3177,92 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedReleaseLookupSession pinnedConfig state ingress))
             pure 0
+      | "application-lifecycle-begin-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationLifecycleBeginSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "application-lifecycle-begin-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationLifecycleBeginLookupSession pinnedConfig state ingress))
+            pure 0
+      | "selected-source-publication-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← selectedSourcePublicationSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "selected-source-publication-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← selectedSourcePublicationLookupSession pinnedConfig state ingress))
+            pure 0
+      | "selected-release-source-plan", [packetPath, capabilityText, specPath,
+          headerPath, rootPath] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let packet ← readBoundedBytes packetPath maxFrame
+            let capability ← IO.ofExcept (exactDecimal "delegate capability" capabilityText)
+            let plan ← IO.ofExcept (FnSelectiveReleaseSourceAuthoring.planLoaded
+              pinnedConfig session.opened packet ⟨capability⟩)
+            writeBytes specPath plan.specBytes
+            writeBytes headerPath plan.headerBytes
+            IO.FS.writeFile rootPath (toString plan.sourceRoot.value ++ "\n")
+            pure 0
+      | "selected-release-source-assemble", [specPath, headerPath, signaturePath, output] =>
+          let spec ← readBoundedBytes specPath maxFrame
+          let header ← readBoundedBytes headerPath maxFrame
+          let signature ← readBoundedBytes signaturePath 64
+          let ingress ← IO.ofExcept (FnSelectiveReleaseSourceAuthoring.assemble spec header signature)
+          writeBytes output ingress
+          pure 0
+      | "selected-release-check-preimage", [input, output] =>
+          let preimage ← readBoundedBytes input (FnEvidenceCodec.maxCarrierBytes + 4096)
+          let release ← IO.ofExcept (FnSelectiveReleaseAuthoring.checkPreimage preimage)
+          writeBytes output (FnSelectiveRelease.signedPreimage release)
+          pure 0
+      -- Selection-only: this emits a candidate preimage, not publication authority.
+      | "selected-release-prepare", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let sourceBytes ← readBoundedBytes input maxFrame
+            let some source := String.fromUTF8? sourceBytes.toByteArray
+              | throw (IO.userError "selected-release request is not UTF-8")
+            let selected ← IO.ofExcept
+              (← FnSelectiveReleaseAuthoring.prepareJsonLoaded pinnedConfig session.opened source)
+            writeBytes output selected.preimage
+            pure 0
+      | "selected-release-assemble", [preimagePath, signaturePath, fromMailbox, date,
+          subject, packetPath, articlePath] =>
+          let preimage ← readBoundedBytes preimagePath (FnEvidenceCodec.maxCarrierBytes + 4096)
+          let signature ← readBoundedBytes signaturePath 64
+          let (packet, article) ← IO.ofExcept
+            (FnSelectiveReleaseAuthoring.assemble preimage signature fromMailbox date subject)
+          writeBytes packetPath packet
+          writeBytes articlePath article
+          pure 0
+      | "selected-release-ingress", [packetPath, capabilityText, authorityText,
+          targetText, output] =>
+          let packet ← readBoundedBytes packetPath maxFrame
+          let capability ← IO.ofExcept (exactDecimal "capability" capabilityText)
+          let authority ← IO.ofExcept (exactDecimal "authority root" authorityText)
+          let target ← IO.ofExcept (exactDecimal "target root" targetText)
+          let ingress ← IO.ofExcept
+            (FnSelectiveReleaseAuthoring.assembleIngress packet ⟨capability⟩ ⟨authority⟩ ⟨target⟩)
+          writeBytes output ingress
+          pure 0
       | "export-evidence", [input, output] =>
           let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
           let package ← IO.ofExcept (← FnEvidence.exportPackage config call)

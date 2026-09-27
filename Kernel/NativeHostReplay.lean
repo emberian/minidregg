@@ -15,6 +15,8 @@ trusted history. Profile/clock changes require an explicit future migration.
 import Kernel.NativeHostContext
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
+import Kernel.FnSelectiveReleaseSourceReceiver
+import Kernel.ApplicationLifecycleBeginReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -71,6 +73,13 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
+  | selectedSourcePublication {ingress : FnSelectiveReleaseSourcePublication.Ingress}
+      (accepted : FnSelectiveReleaseSourceReceiver.Accepted config opened ingress) :
+      NativeAdmission config opened (accepted.intent config opened ingress)
+  | applicationLifecycleBegin {ingress : ApplicationLifecycleBeginIngress.Ingress}
+      (accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened accepted.intent
 
 structure Derived (config : Config) (opened : Opened config) where
   intent : DataIntent rootBytes
@@ -92,6 +101,16 @@ def derive (config : Config) (opened : Opened config) (bytes : List UInt8) :
     | .error _ => return .error "historical selected release admission refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted⟩
+  if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
+    match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
+    | .error _ => return .error "historical selected source publication admission refused"
+    | .ok accepted =>
+        return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted⟩
+  if let some ingress := ApplicationLifecycleBeginIngress.codec.decode bytes then
+    match ← ApplicationLifecycleBeginReceiver.admitLoaded config.deployment config.profile
+        ⟨config.federation, height⟩ config.signature opened.durable ingress with
+    | .error _ => return .error "historical application lifecycle begin admission refused"
+    | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
     match pinned : config.grainBirthTariffValue with
     | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"

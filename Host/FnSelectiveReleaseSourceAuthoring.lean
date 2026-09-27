@@ -41,11 +41,18 @@ def planLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
     CredentialSignedEnvelopeController.headerCodec.encode header,
     prepared.root⟩
 
-def assemble (specBytes envelopeBytes : List UInt8) : Except String (List UInt8) := do
+def assemble (specBytes headerBytes signatureBytes : List UInt8) :
+    Except String (List UInt8) := do
   let some spec := specCodec.decode specBytes
     | throw "selected source spec is noncanonical"
-  let some _ := CredentialSignatureAdmission.canonicalEnvelopeCodec.decode envelopeBytes
-    | throw "selected source envelope is noncanonical"
+  let some header := CredentialSignedEnvelopeController.headerCodec.decode headerBytes
+    | throw "selected source signing header is noncanonical"
+  if CredentialSignedEnvelopeController.headerCodec.encode header != headerBytes then
+    throw "selected source signing header is noncanonical"
+  if signatureBytes.length != 64 then
+    throw "selected source signature must be 64 bytes"
+  let envelopeBytes := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode
+    ⟨header, signatureBytes⟩
   pure <| ingressCodec.encode ⟨spec, envelopeBytes⟩
 
 end Minidregg.Host.FnSelectiveReleaseSourceAuthoring
