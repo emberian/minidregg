@@ -1,0 +1,96 @@
+{
+  "name": "app",
+  "type": "resource",
+  "root": "78273641394136004676841219073082787278948978249297758684781367055302557776492",
+  "entries": [
+    {
+      "key": {
+        "field": "0",
+        "resource": "8401",
+        "type": "object"
+      },
+      "value": "0"
+    },
+    {
+      "key": {
+        "field": "1",
+        "resource": "8401",
+        "type": "object"
+      },
+      "value": "0"
+    },
+    {
+      "key": {
+        "field": "2",
+        "resource": "8401",
+        "type": "object"
+      },
+      "value": "0"
+    },
+    {
+      "key": {
+        "field": "3",
+        "resource": "8401",
+        "type": "object"
+      },
+      "value": "0"
+    }
+  ]
+}
+{
+  "name": "package",
+  "type": "resource",
+  "root": "46300027243521768844013651496807482006601181730936201825012132941522840901526",
+  "entries": []
+}
+{
+  "name": "snapshot",
+  "type": "resource",
+  "root": "78248462519471737347783430994966808460001049161645583977869033659707044088451",
+  "entries": []
+}
+{
+  "name": "session",
+  "type": "resource",
+  "root": "33203646310001642232008162778404087787052983224613237725762185899763454395848",
+  "entries": [
+    {
+      "key": {
+        "field": "0",
+        "resource": "8404",
+        "type": "object"
+      },
+      "value": "8401"
+    },
+    {
+      "key": {
+        "field": "1",
+        "resource": "8404",
+        "type": "object"
+      },
+      "value": "0"
+    },
+    {
+      "key": {
+        "field": "2",
+        "resource": "8404",
+        "type": "object"
+      },
+      "value": "0"
+    },
+    {
+      "key": {
+        "field": "3",
+        "resource": "8404",
+        "type": "object"
+      },
+      "value": "0"
+    }
+  ]
+}
+{
+  "name": "descriptor",
+  "type": "resource",
+  "root": "14925900315081397555045642771642313502577522206241437852571336460166452230257",
+  "entries": []
+}

@@ -1,0 +1,24 @@
+{
+  "imageBoundary": "61510224589997603132392083516309815187450028603026821569543202026129660117674",
+  "parent": {
+    "generation": "1",
+    "remaining": "98",
+    "reserved": "0",
+    "status": "2",
+    "task": "9601"
+  },
+  "tool": {
+    "generation": "4",
+    "remaining": "41",
+    "reserved": "0",
+    "status": "0",
+    "task": "9602"
+  },
+  "provider": {
+    "generation": "8",
+    "remaining": "96",
+    "reserved": "0",
+    "status": "0",
+    "task": "9604"
+  }
+}

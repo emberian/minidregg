@@ -1,6 +1,7 @@
-6c3e92474e9e3f1ef7d172a52fe9748bc6f43e3178778c5910cb03b2331cc20f  docs/evidence/2026-09-27-app-latency/README.md
+503c22f558e8645bba187638a398a3bdf2dcc6e7c5d8b41b93e5e57fa7636775  docs/evidence/2026-09-27-app-latency/README.md
 252039161df9287649254140803c311388b67d88a273b3934e6d942d776f3806  docs/evidence/2026-09-27-app-latency/timings.txt
 19608280d9cb7ef073f409310fad5ab7ca2d3ce76da94e6b938245f655b43fa6  docs/evidence/2026-09-27-app-latency/read-projection.json
 3a33629a7f4af18bcfbc779c1f9cd3b53740ba8c4fac260802f46a102de8fe28  docs/evidence/2026-09-27-app-latency/receipt-projection.json
 099ecd1da6ac54e51cbabc1d5f7dfe78780755a1f9ba538977c9a47f0fca0378  docs/evidence/2026-09-27-app-latency/identities.txt
 4325303b18a63b16ec0a1977bac194cb06ea33ae8dc03c3ae9d5b020c201ce71  docs/evidence/2026-09-27-app-latency/cold-profile.txt
+ec52c5727f6c737ded1cf77fbb59cbfe6cece5a71ab6836a2550ca17b755b8f1  docs/evidence/2026-09-27-app-latency/cold-symbol-samples.txt

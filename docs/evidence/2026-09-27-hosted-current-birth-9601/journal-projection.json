@@ -1,0 +1,85 @@
+{
+  "format": "minidregg-grain-runtime-v1",
+  "connection": "soft",
+  "hermesSession": {
+    "id": "afcd9b84-c8cc-43e4-a64c-9fa30f3d2ae1",
+    "pendingPrompt": false,
+    "loadVerified": true
+  },
+  "bornResources": [
+    {
+      "route": "application",
+      "family": "office",
+      "ordinal": 0,
+      "selectedApplication": null,
+      "sourceSha256": "6a019f340a2e27d1f4e85173d4d3c4ee92bf3905ff0c679e9903b178b3a842f4",
+      "authoredIntentSha256": "14e546c200c5af94c1f2bdf46b9df09b6866aa2dde0fa112f3f3ce1279976180",
+      "members": [
+        {
+          "name": "office-0-app",
+          "kind": "object",
+          "target": "8401",
+          "ownerCapability": "141",
+          "controlCapability": "142",
+          "maxResultBytes": 262144
+        },
+        {
+          "name": "office-0-package",
+          "kind": "object",
+          "target": "8402",
+          "ownerCapability": "143",
+          "controlCapability": "144",
+          "maxResultBytes": 262144
+        },
+        {
+          "name": "office-0-snapshot",
+          "kind": "object",
+          "target": "8403",
+          "ownerCapability": "145",
+          "controlCapability": "146",
+          "maxResultBytes": 262144
+        }
+      ],
+      "transactionId": "1815769766745016237367310460244982656647678711985354865842240516834530657632",
+      "eventId": "46428770212618214770051162569462286298214056469363265709388265601129198055260",
+      "acceptedCount": "15",
+      "imageBoundary": "14430044122986024885185807096871281245291223673707069090395037572752804278505",
+      "callSha256": "cf15d224d7f20a3f485890c0b9d56781965bb5f8ca6dd3b300ad1d9a2a38ca83",
+      "outcomeSha256": "232737ac41ab97c1a1fd0967c711b86ef2a5dd2e5369c5d5558f7cf2f0336e27"
+    },
+    {
+      "route": "session",
+      "family": "office-web",
+      "ordinal": 0,
+      "selectedApplication": "office-0-app",
+      "sourceSha256": "c09fca6d40d2e88b8b6d214d2065b606ce89f056c612f9ab086090c438b021ad",
+      "authoredIntentSha256": "89c95564dd1916edbc01f8f160d6da31fc685390b73d6277e5f389e202a7e945",
+      "members": [
+        {
+          "name": "office-web-0-session",
+          "kind": "object",
+          "target": "8404",
+          "ownerCapability": "147",
+          "controlCapability": "148",
+          "maxResultBytes": 262144
+        },
+        {
+          "name": "office-web-0-descriptor",
+          "kind": "object",
+          "target": "8405",
+          "ownerCapability": "149",
+          "controlCapability": "150",
+          "maxResultBytes": 262144
+        }
+      ],
+      "transactionId": "20007589122064837956483122081798986748368773762749962699279694467561899650131",
+      "eventId": "72397803195861086158922106876881369496306036919750370339346839135950679266293",
+      "acceptedCount": "31",
+      "imageBoundary": "47395925420496627171577682136261891222627520403501237720403645264347681570973",
+      "callSha256": "49edc60a9db019ae38a61c4a1e00536412cec18b53b89bca28c83c8eb9e17763",
+      "outcomeSha256": "e56348501103890d1b876b3860bbe7e0562df145e954ef81ca9a03d2bf8fd0b3"
+    }
+  ],
+  "pendingAbsent": true,
+  "holdsAbsent": true
+}

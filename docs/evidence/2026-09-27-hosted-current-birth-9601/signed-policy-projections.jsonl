@@ -1,0 +1,30 @@
+{
+  "name": "app",
+  "type": "policy",
+  "version": "0",
+  "hasPredicate": true
+}
+{
+  "name": "package",
+  "type": "policy",
+  "version": "0",
+  "hasPredicate": true
+}
+{
+  "name": "snapshot",
+  "type": "policy",
+  "version": "0",
+  "hasPredicate": true
+}
+{
+  "name": "session",
+  "type": "policy",
+  "version": "0",
+  "hasPredicate": true
+}
+{
+  "name": "descriptor",
+  "type": "policy",
+  "version": "0",
+  "hasPredicate": true
+}

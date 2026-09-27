@@ -1,0 +1,12 @@
+Exact binary: 9aec865 Host SHA-256 47e09c5589667ef3f5dc5e630601b85ca4a5a76062509fdf562525dd04aa9a25
+Input: the same private copied Store and authorized application read as README.md
+Method: GDB launched Mini serve, followed its Host exec, switched follow-fork-mode to parent, then interrupted the active Host worker thread at separate points during one cold read. No source or binary modification. Six observed active-thread stacks; the idle main/event-loop threads were excluded. Full debugger transcript remains private in the scratch fixture. This is a small convenience sample, not a statistical CPU percentage.
+
+1. Sp800185Cshake256.laneFromBlock -> xorRateBlock -> absorbFrom -> cshake256Bytes -> CredentialAuthorityStateCodec.rootBytes -> CredentialSignatureAdmission.verifyNative -> ResourceBirthPolicyController admission.
+2. Sp800185Cshake256.laneFromBlock -> xorRateBlock -> absorbFrom -> cshake256Bytes -> GrainResourceBirthController.Source.grainNonce -> GrainResourceBirthTransaction.physicalShapeDecidable.
+3. GMP deallocation -> Sp800185Cshake256.laneFromBlock -> xorRateBlock -> absorbFrom -> cshake256Bytes -> GrainResourceBirthTransaction.rawLeg -> DeclaredResourceController.collectIO_loop.
+4. GMP allocation / lean_nat_pow -> Sp800185Cshake256.stateByte -> squeeze32 -> cshake256Bytes -> GrainResourceBirthAdmission.policyGuardShapeDecidable -> NativeHostReplay.walk.
+5. GMP realloc / lean_nat_pow -> BitVec.ofNat -> Sp800185Cshake256.laneFromBlock -> xorRateBlock -> absorbFrom -> cshake256Bytes -> CredentialAuthorityStateCodec.rootBytes -> GrainResourceBirthReceiver.charge.
+6. GMP pow / lean_nat_pow -> BitVec.ofNat -> Sp800185Cshake256.laneFromBlock -> xorRateBlock -> absorbFrom -> cshake256Bytes -> CredentialAuthorityStateCodec.rootBytes -> DeclaredResourceController.collectIO_loop.
+
+Source cut `9aec865` already compiles proved UInt64 `keccakF1600` via `@[csimp]`. The sampled lane input/output code is still Nat/BitVec arithmetic: `laneFromBlock` multiplies each byte by `2 ^ (8 * offset)` under `BitVec.ofNat`; `stateByte` converts a BitVec to Nat and divides by `2 ^ (8 * (index % 8))`. This sample identifies those residual paths as the first exact-source optimization target; it does not measure `advance`, `validateLoaded`, or `imageBoundary` separately.
