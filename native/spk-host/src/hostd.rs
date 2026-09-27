@@ -36,6 +36,26 @@ fn canonical_native_id(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+fn deserialize_operation_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let text = match value {
+        serde_json::Value::String(value) => value,
+        serde_json::Value::Number(value) => value
+            .as_u64()
+            .ok_or_else(|| D::Error::custom("historical operation ID is not unsigned integer"))?
+            .to_string(),
+        _ => return Err(D::Error::custom("operation ID is not decimal")),
+    };
+    if !canonical_native_id(&text) {
+        return Err(D::Error::custom("operation ID is not canonical decimal"));
+    }
+    Ok(text)
+}
+
 fn hex64(value: &str) -> bool {
     value.len() == 64
         && value
@@ -49,7 +69,8 @@ fn hex64(value: &str) -> bool {
 pub(crate) struct VerifiedBegin {
     pub app: u64,
     pub generation: u64,
-    pub operation_id: u64,
+    #[serde(deserialize_with = "deserialize_operation_id")]
+    pub operation_id: String,
     pub transaction_id: String,
     pub event_id: String,
     pub package_sha256: String,
@@ -61,6 +82,7 @@ pub(crate) struct VerifiedBegin {
 impl VerifiedBegin {
     fn validate(&self) -> io::Result<()> {
         if self.generation == 0
+            || !canonical_native_id(&self.operation_id)
             || !canonical_native_id(&self.transaction_id)
             || !canonical_native_id(&self.event_id)
             || !hex64(&self.package_sha256)
@@ -1339,7 +1361,7 @@ mod tests {
         VerifiedBegin {
             app: 91,
             generation: 2,
-            operation_id: 7,
+            operation_id: "7".into(),
             transaction_id: "123".into(),
             event_id: "456".into(),
             package_sha256: "c".repeat(64),
@@ -1347,6 +1369,27 @@ mod tests {
             process_identity: "unit-generation-2".into(),
             unit: "mini-spk-a91-g2.service".into(),
         }
+    }
+
+    #[test]
+    fn physical_journal_retains_full_native_operation_id_and_reads_historical_number() {
+        let mut source = begin();
+        source.operation_id =
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935".into();
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        journal.arm(source.clone()).unwrap();
+        let saved = Journal::open(&path).unwrap().read().unwrap().unwrap();
+        assert_eq!(saved.identity.operation_id, source.operation_id);
+        fs::remove_dir_all(path).unwrap();
+
+        let mut historical = serde_json::to_value(begin()).unwrap();
+        historical["operation_id"] = serde_json::json!(7);
+        let parsed: VerifiedBegin = serde_json::from_value(historical).unwrap();
+        assert_eq!(parsed.operation_id, "7");
+        let mut aliased = serde_json::to_value(begin()).unwrap();
+        aliased["operation_id"] = serde_json::json!("07");
+        assert!(serde_json::from_value::<VerifiedBegin>(aliased).is_err());
     }
 
     fn instance() -> UnitInstance {
@@ -2095,7 +2138,7 @@ mod tests {
         let identity = VerifiedBegin {
             app: 991005,
             generation: 1,
-            operation_id: 1,
+            operation_id: "1".into(),
             transaction_id: "123".into(),
             event_id: "456".into(),
             package_sha256: "c".repeat(64),

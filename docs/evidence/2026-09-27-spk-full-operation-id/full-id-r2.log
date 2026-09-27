@@ -1,0 +1,17 @@
+Running as unit: run-ra349ca496bb5457499fe8af94ccbdb31.scope; invocation ID: f4bb42e963564a63a71c3b23d08c93fa
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.35s
+────────────
+ Nextest run ID 118cddc3-92c4-473f-83ff-99309befe44f with nextest profile: default
+    Starting 9 tests across 1 binary (121 tests skipped)
+        PASS [   0.008s] (1/9) minidregg-spk-host claim_descriptor::tests::start_identity_binds_exact_unit_raw_spk_digest_and_native_decimal_receipt
+        PASS [   0.008s] (2/9) minidregg-spk-host claim_descriptor::tests::signed_gitweb_bridge_projects_exact_ordered_schema_and_api_path
+        PASS [   0.007s] (3/9) minidregg-spk-host lifecycle_v3_claim_native::tests::assembled_claim_preflight_binds_one_parent_marker_begin_and_descriptor
+        PASS [   0.007s] (4/9) minidregg-spk-host hostd::tests::physical_journal_retains_full_native_operation_id_and_reads_historical_number
+        PASS [   0.006s] (5/9) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_frame_cannot_be_v2_or_wrong_opcode
+        PASS [   0.006s] (6/9) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_plan_joins_original_receipt_volume_and_selected_command
+        PASS [   0.005s] (7/9) minidregg-spk-host lifecycle_v3_claim_native::tests::committed_claim_must_echo_fresh_frame_and_original_authority
+        PASS [   0.006s] (8/9) minidregg-spk-host lifecycle_v3_claim_native::tests::continue_claim_requires_same_created_receipt_and_custody_as_begin
+        PASS [   0.005s] (9/9) minidregg-spk-host lifecycle_v3_claim_native::tests::original_index_carries_full_nat_without_u64_truncation
+────────────
+     Summary [   0.033s] 9 tests run: 9 passed, 121 skipped

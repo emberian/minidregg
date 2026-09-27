@@ -65,9 +65,6 @@ fn verified_identity(
     let generation: u64 = generation
         .parse()
         .map_err(|_| invalid("generation exceeds host unit range"))?;
-    let operation_id: u64 = operation_id
-        .parse()
-        .map_err(|_| invalid("operation exceeds host journal range"))?;
     if generation == 0 {
         return Err(invalid("resident process generation is zero"));
     }
@@ -93,7 +90,7 @@ fn verified_identity(
     Ok(VerifiedBegin {
         app,
         generation,
-        operation_id,
+        operation_id: operation_id.to_owned(),
         transaction_id: transaction_id.to_owned(),
         event_id: event_id.to_owned(),
         package_sha256: hex(raw_sha256),

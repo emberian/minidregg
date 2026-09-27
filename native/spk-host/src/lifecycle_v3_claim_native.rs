@@ -508,11 +508,12 @@ fn verified_physical_begin(
         .process_generation
         .parse()
         .map_err(|_| invalid("v3 claimed generation exceeds host unit range"))?;
-    let operation_id: u64 = begin
-        .authorization_operation_id
-        .parse()
-        .map_err(|_| invalid("v3 claimed operation exceeds host journal range"))?;
-    if app == 0 || generation == 0 || !decimal(transaction_id) || !decimal(event_id) {
+    if app == 0
+        || generation == 0
+        || !decimal(&begin.authorization_operation_id)
+        || !decimal(transaction_id)
+        || !decimal(event_id)
+    {
         return Err(invalid("v3 claimed physical identity malformed"));
     }
     let unit = format!("mini-spk-a{app}-g{generation}.service");
@@ -522,7 +523,7 @@ fn verified_physical_begin(
     Ok(VerifiedBegin {
         app,
         generation,
-        operation_id,
+        operation_id: begin.authorization_operation_id.clone(),
         transaction_id: transaction_id.to_owned(),
         event_id: event_id.to_owned(),
         package_sha256: launch.signed_package_sha256().to_owned(),

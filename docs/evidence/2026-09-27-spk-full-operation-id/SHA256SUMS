@@ -1,0 +1,5 @@
+4cce2f86287b9477bc0849ba8101f0981ea124de0b3ad9e657e172dccc1fd973  native/spk-host/src/hostd.rs
+c86ee228d1632d65b81035ca4e9379a1d8e6633a59cff30394e1332eb848df01  native/spk-host/src/claim_descriptor.rs
+3a809b5e452676fcc6bd55452b5be7ed8abb43f4264a5e1a71bb435f00cf4031  native/spk-host/src/lifecycle_v3_claim_native.rs
+590b4456a9e6545f56446f46dd83b99c8f66a49b304074bed4d20a7131bb2e0a  docs/evidence/2026-09-27-spk-full-operation-id/full-id-r2.log
+67fe1c6e2291f8c0bc94dc72e6f9ffbc113c9129f0bdbfe6b6939089a209d7fe  docs/evidence/2026-09-27-spk-full-operation-id/full-id-clippy-r2.log
