@@ -1,0 +1,15 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling hashbrown v0.17.1
+   Compiling syn v2.0.119
+   Compiling equivalent v1.0.2
+   Compiling indexmap v2.14.2
+   Compiling unsafe-libyaml v0.2.11
+   Compiling serde_derive v1.0.228
+   Compiling ryu v1.0.23
+   Compiling memchr v2.8.3
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.151
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling minidregg-grain-runtime v0.1.0 (/tank/dregg-build/minidregg-6d34efd-rust-closeout/source/native/grain-runtime)
+    Finished `release` profile [optimized] target(s) in 36.81s

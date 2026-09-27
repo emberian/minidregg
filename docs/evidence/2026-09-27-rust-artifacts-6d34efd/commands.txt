@@ -1,0 +1,14 @@
+# Source archive, made on the Mini workspace (read-only Git operation):
+git archive --format=tar --output=/tmp/minidregg-6d34efd-native-closeout.tar 6d34efd native/spk-host native/spk-rpc native/grain-runtime native/resource-client
+
+# On hbox, with the archive extracted under source/:
+cd /tank/dregg-build/minidregg-6d34efd-rust-closeout
+export CARGO_BUILD_JOBS=2
+export CARGO_TARGET_DIR=/tank/dregg-build/minidregg-6d34efd-rust-closeout/target
+cargo build --release --locked --manifest-path source/native/spk-host/Cargo.toml --bin spk-host
+cargo build --release --locked --manifest-path source/native/grain-runtime/Cargo.toml --bins
+cargo build --release --locked --manifest-path source/native/resource-client/Cargo.toml --bin mini
+
+# Readback performed after copying each target/release binary into bin/:
+sha256sum -c evidence/binaries.sha256
+sha256sum bin/spk-host bin/grain-runtime bin/grain-provider-bridge bin/mini
