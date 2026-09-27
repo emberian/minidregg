@@ -1,0 +1,5 @@
+# Restarted own-R repeat: marker miss
+
+The carrier-prefix repair let A op14 propose exact cursor 0→4. Mini gateway signed and installed one tag9 progress command, accepted count 4; the exact four-field receipt is `accepted-tag9-outcome.json`. Fn A committed ACK remained zero. After restarting the *same pinned* A service on the certified repaired Host, op14 proposed a fresh second intent for the same cursor/outbox instead of returning `repeated`. The second intent was not submitted and fn ACK was not attempted.
+
+`second-red-summary.json` retains bounded typed decisions and hashes of the private intent, signed call, fn cursor/event, and status. Independent read-only fn polls before/after tag9 had byte-identical cursor and event, and status before/after tag9 was byte-identical. The current hypothesis is that the Mini evidence marker includes the physical temporary path of the copied fn executable, which changes across Host restarts; a source-owned decode must confirm and repair that binding. Private raw intents, call, and Store remain under `/tmp/mini-workroom-ownr-skip-20260926`.

@@ -1,0 +1,48 @@
+{
+  "acceptedTag9": {
+    "acceptedCount": "4",
+    "confirmation": "installed",
+    "eventId": "72348445444589219977415657129756609513990132571959682163444373011642139717580",
+    "imageBoundary": "99619836545290131658358795545955489819666616581213352593373227762073491859592",
+    "transactionId": "18001981282504040616842935573649907735701540010463595731961583222167846846243",
+    "type": "confirmed"
+  },
+  "analysisHypothesis": "Host own-R evidence binds service.qExecutable physical temp copy path, which changes on service restart; source-owned decoder pending.",
+  "firstDecision": {
+    "decision": {
+      "decision": "proposed-fresh",
+      "fromPosition": "0",
+      "outboxTransactionId": "92570003295046408898231234575929281965187506423865668432502201907106117385438",
+      "toPosition": "4",
+      "type": "fn-a-own-r-progress-decision-v1"
+    },
+    "status": "skip-decision",
+    "type": "fn-a-reply-poll-session-v1"
+  },
+  "firstIntentBytes": 1050313,
+  "firstIntentSha256": "a7b9c60fff59a082320cf77752d618e7d8155a5e73a122de1bc9180877ce2ed4",
+  "fnAckAttempted": false,
+  "fnPollCursorAfterTag9Sha256": "aba5c101535b0a81d4255a32a23b024712c1cd3c194e505cfad8f08ec2b79865",
+  "fnPollCursorSha256": "aba5c101535b0a81d4255a32a23b024712c1cd3c194e505cfad8f08ec2b79865",
+  "fnPollEventAfterTag9Sha256": "5ee129e7b23a2975dfcc120401066b43d304911d486a43b199baaf82c2b1139f",
+  "fnPollEventSha256": "5ee129e7b23a2975dfcc120401066b43d304911d486a43b199baaf82c2b1139f",
+  "fnStatusAfterTag9Sha256": "eba0a9b5933f5ec8824d69fbbccc52dbbdbabd3cdf43743e115a58766444df5c",
+  "fnStatusBeforeSha256": "eba0a9b5933f5ec8824d69fbbccc52dbbdbabd3cdf43743e115a58766444df5c",
+  "miniClientSha256": "9fc6a97ad5319e2d7f4c264ecfe40258e46d0c40ac077ec430106409ff28be8b",
+  "miniHostSha256": "6e76d0dafd52ea0aba2c8f87a846d93ed3544eca215ebb4471b4e4f9d05ba651",
+  "repeatDecision": {
+    "decision": {
+      "decision": "proposed-fresh",
+      "fromPosition": "0",
+      "outboxTransactionId": "92570003295046408898231234575929281965187506423865668432502201907106117385438",
+      "toPosition": "4",
+      "type": "fn-a-own-r-progress-decision-v1"
+    },
+    "status": "skip-decision",
+    "type": "fn-a-reply-poll-session-v1"
+  },
+  "repeatedIntentBytes": 1050311,
+  "repeatedIntentSha256": "8cfbaa6f460e6e827e6f0239b808fb5125738c809217b9ae8db5713932dbd7d6",
+  "scope": "Restarted own-R op14 after accepted Mini tag9, before any fn ACK; second intent not submitted",
+  "secondIntentSubmitted": false
+}
