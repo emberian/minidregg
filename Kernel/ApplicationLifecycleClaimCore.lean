@@ -50,11 +50,15 @@ def packageGuard (source : Source)
 
 /-- The app's old root is already guarded by the DRC target write. Only the
 independent package observation contributes a new read-only guard. Both native
-observation signatures are separately checked by `current`. -/
-def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened config}
-    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+observation signatures are separately checked by `current`. The event and
+canonical byte count come from an admitted versioned outer ingress. -/
+def intentFromCurrent {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {ingress : Ingress}
+    (current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
+      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+      opened.durable ingress)
+    (wireEvent : StableEvent) (wireBytes : Nat) :
     DataIntent rootBytes := by
-  let current := conditional.current
   let ordinary := current.invocation.dataIntent current.shape
   have guarded : ∀ guard ∈ ordinary.readGuards ++
       [packageGuard ingress.source current.packageRead.selected.observed.before],
@@ -74,18 +78,23 @@ def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened 
         [stableNullifier config.deployment.domain config.profile.semantics ingress.source]
       exactCharge := fun dimension => match dimension with
         | .incidences => ordinary.exactCharge .incidences + 2
-        | .turnBytes => ingress.canonicalBytes.length
-        | .witnessBytes => ingress.canonicalBytes.length
+        | .turnBytes => wireBytes
+        | .witnessBytes => wireBytes
         | .proofWork => ordinary.exactCharge .proofWork + 2
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 2
         | .storageBytes => ordinary.exactCharge .storageBytes +
-            ingress.canonicalBytes.length +
+            wireBytes +
             (stableNullifier config.deployment.domain config.profile.semantics
               ingress.source).canonicalBytes.length
         | other => ordinary.exactCharge other
-      event := event ingress
+      event := wireEvent
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
+
+def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {ingress : Ingress} (conditional : Conditional config opened ingress) :
+    DataIntent rootBytes :=
+  intentFromCurrent conditional.current (event ingress) ingress.canonicalBytes.length
 
 theorem Conditional.intent_event {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {ingress : Ingress} (conditional : Conditional config opened ingress) :
