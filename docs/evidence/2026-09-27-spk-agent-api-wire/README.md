@@ -1,5 +1,12 @@
 # Disabled agent API transport contract
 
+This records the initial wire cut. The later shared-entrance cut accepts an
+empty relative API-root path, matching Mini and the HTTP parser. Its source
+SHA-256 is `3ef7c0f40582b311f3b23d16ace8a2e8c7b25969f5a2130b2bce7d327a4fbfbe`;
+two focused wire tests and strict Clippy passed after that change. See the
+[multi-entrance evidence](../2026-09-27-spk-multi-entrance/README.md) for the
+combined scope. The initial 73-test result below applies to the earlier hash.
+
 `native/spk-host/src/agent_api_wire.rs` SHA-256
 `ddeb56bcadd59dd697a982952aacaae150cc1191bf322e68e928ddd33966261b`
 defines a private transport frame only. It creates no socket or app listener and
