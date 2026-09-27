@@ -1,0 +1,6 @@
+9d9356533bdf19e8da92c62596bc6cdb29f3610725eb90442d93d87789b261c4  native/grain-runtime/src/main.rs
+a81fa1d99244fc8f1c6b35571f59fbe72968c2d5b56d52796bc78721c7ac9b81  native/grain-runtime/src/application_api_tools.rs
+5b14bd3abb70868980c827bd4a70b0d17b4d0beed4cb51bab1364e8a24280e08  native/grain-runtime/src/dispatch_custody.rs
+383f88e8df92d3f7e4a25a7f7e82e0e3ab8e868840b0c34a9f39b9bbd253868b  docs/evidence/2026-09-27-agent-lifetime-controller-source/README.md
+df3e28fb113791b92f6e5aea53af54dc14c1fd13ca956231652c6bd990ef0330  docs/evidence/2026-09-27-agent-lifetime-controller-source/nextest.log
+2be7fb6a73cafe956e53f79357f9bb2a7adeffbf07c68ebc3d90605e413d20a4  docs/evidence/2026-09-27-agent-lifetime-controller-source/clippy-verdict.txt

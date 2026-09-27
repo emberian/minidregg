@@ -1,0 +1,1373 @@
+diff --git a/native/spk-host/src/agent_api_native.rs b/native/spk-host/src/agent_api_native.rs
+index c415584..2ea99b9 100644
+--- a/native/spk-host/src/agent_api_native.rs
++++ b/native/spk-host/src/agent_api_native.rs
+@@ -189,7 +189,7 @@ impl ReverseCustodyClient {
+         })
+     }
+ 
+-    fn exchange(&self, request: &Value, cancelled: &AtomicBool) -> io::Result<Value> {
++    pub(crate) fn exchange(&self, request: &Value, cancelled: &AtomicBool) -> io::Result<Value> {
+         if cancelled.load(Ordering::Acquire) {
+             return Err(invalid("caller cancelled before reverse custody"));
+         }
+@@ -278,9 +278,10 @@ impl ReverseCustodyClient {
+         let mut length = [0u8; 4];
+         read_cancelled(&mut stream, &mut length, deadline, cancelled)?;
+         let length = u32::from_be_bytes(length) as usize;
+-        // The reserve reply returns the full source-authored Request as hex;
+-        // even a bounded Git HTTP body can exceed a 16 KiB control reply.
+-        if length == 0 || length > 262_144 {
++        // V3 also returns the exact op80 ReservePlan frame. A bounded Git
++        // body can appear twice as hex (Request and Plan), so keep the
++        // response bound separate from the smaller forward HTTP frame.
++        if length == 0 || length > 1_048_576 {
+             return Err(invalid("reverse custody reply bound"));
+         }
+         let mut reply = vec![0u8; length];
+diff --git a/native/spk-host/src/lib.rs b/native/spk-host/src/lib.rs
+index b120579..1477ae6 100644
+--- a/native/spk-host/src/lib.rs
++++ b/native/spk-host/src/lib.rs
+@@ -8,6 +8,12 @@ mod agent_api_custody;
+ #[cfg(target_os = "linux")]
+ mod agent_api_lifetime_v3;
+ #[cfg(target_os = "linux")]
++mod agent_api_lifetime_reverse_v3;
++#[cfg(target_os = "linux")]
++mod agent_api_lifetime_custody_v3;
++#[cfg(target_os = "linux")]
++mod agent_api_lifetime_paid_native_v3;
++#[cfg(target_os = "linux")]
+ mod agent_api_lifetime_wire_v3;
+ #[cfg(target_os = "linux")]
+ mod agent_api_native;
+diff --git a/native/spk-host/src/agent_api_lifetime_reverse_v3.rs b/native/spk-host/src/agent_api_lifetime_reverse_v3.rs
+new file mode 100644
+index 0000000..a4bd59b
+--- /dev/null
++++ b/native/spk-host/src/agent_api_lifetime_reverse_v3.rs
+@@ -0,0 +1,536 @@
++//! One-way controller reserve bridge for lifetime dispatch. The controller
++//! owns the purse key; the resident re-inspects its exact source plan before
++//! accepting per-operation current claims. No reply is a delivery permit.
++#![allow(dead_code)] // The shared v3 listener is enabled in a later cut.
++
++use crate::agent_api_lifetime_v3::{
++    match_reserve_plan, operation_fingerprint, CurrentClaims, LifetimeBinding, ReceiptPin,
++};
++use crate::agent_api_native::ReverseCustodyClient;
++use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
++use serde::Deserialize;
++use serde_json::{json, Value};
++use sha2::{Digest, Sha256};
++use std::io;
++use std::path::Path;
++use std::sync::atomic::{AtomicBool, Ordering};
++
++const MAX_SOURCE_FRAME: usize = 12_102_759;
++
++fn refused(reason: &'static str) -> io::Error {
++    io::Error::new(io::ErrorKind::InvalidData, reason)
++}
++
++fn decimal(value: &str) -> bool {
++    !value.is_empty()
++        && value.len() <= 128
++        && (value == "0" || !value.starts_with('0'))
++        && value.bytes().all(|byte| byte.is_ascii_digit())
++}
++
++fn index_precedes_count(index: &str, count: &str) -> bool {
++    if !decimal(index) || !decimal(count) {
++        return false;
++    }
++    let mut digits = index.as_bytes().to_vec();
++    let mut carry = true;
++    for digit in digits.iter_mut().rev() {
++        if !carry {
++            break;
++        }
++        if *digit == b'9' {
++            *digit = b'0';
++        } else {
++            *digit += 1;
++            carry = false;
++        }
++    }
++    if carry {
++        digits.insert(0, b'1');
++    }
++    digits == count.as_bytes()
++}
++
++fn hex(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++fn unhex(value: &str) -> io::Result<Vec<u8>> {
++    if !value.len().is_multiple_of(2)
++        || !value
++            .bytes()
++            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++        || value.len() > MAX_SOURCE_FRAME * 2
++    {
++        return Err(refused("lifetime source frame hex refused"));
++    }
++    value
++        .as_bytes()
++        .as_chunks::<2>()
++        .0
++        .iter()
++        .map(|pair| {
++            u8::from_str_radix(
++                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
++                16,
++            )
++            .map_err(|_| refused("lifetime hex byte"))
++        })
++        .collect()
++}
++
++fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
++    value
++        .get(name)
++        .and_then(Value::as_str)
++        .ok_or_else(|| refused("lifetime source inspection field absent"))
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct ReservedReply {
++    #[serde(rename = "type")]
++    kind: String,
++    attempt_id: String,
++    http_operation_id: String,
++    binding_sha256: String,
++    operation_fingerprint: String,
++    current_claims: CurrentClaims,
++    reserve_operation_id: String,
++    fixed_request_hex: String,
++    reserve_plan_hex: String,
++    context_hex: String,
++    reserve_index: String,
++    reserve_receipt: ReceiptPin,
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct PayerReply {
++    #[serde(rename = "type")]
++    kind: String,
++    attempt_id: String,
++    binding_sha256: String,
++    operation_fingerprint: String,
++    plan_sha256: String,
++    signed_post_reserve_purse_physical_root: String,
++    signatures: Vec<String>,
++}
++
++pub(crate) struct PayerSignaturesV3 {
++    pub signatures: Vec<String>,
++    pub signed_post_reserve_purse_physical_root: String,
++}
++
++pub(crate) struct RetainedReserveV3 {
++    pub attempt_id: String,
++    pub http_operation_id: String,
++    pub binding_sha256: String,
++    pub operation_fingerprint: String,
++    pub current_claims: CurrentClaims,
++    pub reserve_operation_id: String,
++    pub reserve_index: String,
++    pub reserve_receipt: ReceiptPin,
++    pub request_bytes: Vec<u8>,
++    pub plan_bytes: Vec<u8>,
++    pub context_bytes: Vec<u8>,
++    pub request_sha256: String,
++}
++
++pub(crate) struct LifetimeReverseClient {
++    transport: ReverseCustodyClient,
++}
++
++pub(crate) struct ReserveV3Input<'a> {
++    pub operator: &'a PrivateOperator,
++    pub binding: &'a LifetimeBinding,
++    pub forward_operation_id: &'a str,
++    pub fixed_request: &'a Value,
++    pub decoded_http: &'a Value,
++    pub attempt_dir: &'a Path,
++}
++
++impl LifetimeReverseClient {
++    pub(crate) fn new(transport: ReverseCustodyClient) -> Self {
++        Self { transport }
++    }
++
++    /// The controller signs only its separately held payer slots. App and
++    /// grant slots stay with the resident's fixed participant custodian.
++    pub(crate) fn sign_payer_once(
++        &self,
++        reserve: &RetainedReserveV3,
++        paid_plan: &[u8],
++        source_inspection: &Value,
++        cancelled: &AtomicBool,
++    ) -> io::Result<PayerSignaturesV3> {
++        if paid_plan.is_empty() || paid_plan.len() > MAX_SOURCE_FRAME {
++            return Err(refused("lifetime paid plan bound refused"));
++        }
++        let plan_sha256 = hex(&Sha256::digest(paid_plan));
++        let response = self.transport.exchange(
++            &json!({"type":"sign-payer-v3",
++                "route_name":self.transport.route_name,
++                "forward_operation_id":reserve.http_operation_id,
++                "attempt_id":reserve.attempt_id,
++                "paid_plan_hex":hex(paid_plan),
++                "source_inspection_json":source_inspection,
++                "operation_fingerprint":reserve.operation_fingerprint}),
++            cancelled,
++        )?;
++        let reply: PayerReply = serde_json::from_value(response)?;
++        if reply.kind != "payer-signatures-v3"
++            || reply.attempt_id != reserve.attempt_id
++            || reply.binding_sha256 != reserve.binding_sha256
++            || reply.operation_fingerprint != reserve.operation_fingerprint
++            || reply.plan_sha256 != plan_sha256
++            || !decimal(&reply.signed_post_reserve_purse_physical_root)
++            || reply.signatures.is_empty()
++            || reply.signatures.len() > 64
++            || reply.signatures.iter().any(|signature| {
++                signature.len() != 128
++                    || !signature
++                        .bytes()
++                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++            })
++        {
++            return Err(refused("lifetime payer signatures differ from exact plan"));
++        }
++        Ok(PayerSignaturesV3 {
++            signatures: reply.signatures,
++            signed_post_reserve_purse_physical_root: reply.signed_post_reserve_purse_physical_root,
++        })
++    }
++
++    /// The only reserve submit. On a lost reply, inspect-v3 is read-only;
++    /// failure to recover the exact confirmed reserve remains uncertainty.
++    pub(crate) fn reserve_once(
++        &self,
++        input: ReserveV3Input<'_>,
++        cancelled: &AtomicBool,
++    ) -> io::Result<RetainedReserveV3> {
++        let ReserveV3Input {
++            operator,
++            binding,
++            forward_operation_id,
++            fixed_request,
++            decoded_http,
++            attempt_dir,
++        } = input;
++        if !decimal(forward_operation_id) || cancelled.load(Ordering::Acquire) {
++            return Err(refused("lifetime forward operation refused"));
++        }
++        binding.validate()?;
++        private_dir(attempt_dir)?;
++        let binding_sha256 = binding.fingerprint()?;
++        let request = json!({
++            "type":"reserve-v3",
++            "route_name":self.transport.route_name,
++            "forward_operation_id":forward_operation_id,
++            "binding_sha256":binding_sha256,
++            "fixed_request":fixed_request,
++        });
++        let reply = match self.transport.exchange(&request, cancelled) {
++            Ok(reply) => reply,
++            Err(error) => {
++                if cancelled.load(Ordering::Acquire) {
++                    return Err(error);
++                }
++                self.transport
++                    .exchange(
++                        &json!({"type":"inspect-v3",
++                            "route_name":self.transport.route_name,
++                            "forward_operation_id":forward_operation_id,
++                            "binding_sha256":binding_sha256}),
++                        cancelled,
++                    )
++                    .map_err(|_| error)?
++            }
++        };
++        self.accept_reserved_reply(
++            operator,
++            binding,
++            forward_operation_id,
++            decoded_http,
++            attempt_dir,
++            reply,
++        )
++    }
++
++    fn accept_reserved_reply(
++        &self,
++        operator: &PrivateOperator,
++        binding: &LifetimeBinding,
++        forward_operation_id: &str,
++        decoded_http: &Value,
++        attempt_dir: &Path,
++        reply: Value,
++    ) -> io::Result<RetainedReserveV3> {
++        let reply: ReservedReply = serde_json::from_value(reply)?;
++        if reply.kind != "dispatch-reserved-v3"
++            || reply.http_operation_id != forward_operation_id
++            || reply.binding_sha256 != binding.fingerprint()?
++            || ![
++                &reply.attempt_id,
++                &reply.reserve_operation_id,
++                &reply.reserve_index,
++                &reply.reserve_receipt.transaction_id,
++                &reply.reserve_receipt.event_id,
++                &reply.reserve_receipt.accepted_count,
++                &reply.reserve_receipt.image_boundary,
++            ]
++            .into_iter()
++            .all(|value| decimal(value))
++            || !index_precedes_count(&reply.reserve_index, &reply.reserve_receipt.accepted_count)
++        {
++            return Err(refused("lifetime reserve reply coordinate drift"));
++        }
++        let request_bytes = unhex(&reply.fixed_request_hex)?;
++        let plan_bytes = unhex(&reply.reserve_plan_hex)?;
++        let context_bytes = unhex(&reply.context_hex)?;
++        if request_bytes.is_empty() || plan_bytes.is_empty() || context_bytes.is_empty() {
++            return Err(refused("lifetime reserve reply frame absent"));
++        }
++        let request_path = write_new(attempt_dir, "reserve-request-v3.bin", &request_bytes)?;
++        let plan_path = write_new(attempt_dir, "reserve-plan-v3.bin", &plan_bytes)?;
++        let inspected_request = operator.tool(
++            "inspect",
++            "application-agent-lifetime-reserve-request",
++            &request_path,
++            &attempt_dir.join("reserve-request-v3.json"),
++        )?;
++        let inspected_plan = operator.tool(
++            "inspect",
++            "application-agent-lifetime-reserve-plan",
++            &plan_path,
++            &attempt_dir.join("reserve-plan-v3.json"),
++        )?;
++        let request_view: Value = serde_json::from_slice(&inspected_request)?;
++        let plan_view: Value = serde_json::from_slice(&inspected_plan)?;
++        if field(&request_view, "canonicalRequestHex")? != reply.fixed_request_hex
++            || field(&plan_view, "canonicalPlanHex")? != reply.reserve_plan_hex
++            || field(
++                plan_view
++                    .get("context")
++                    .ok_or_else(|| refused("lifetime reserve context absent"))?,
++                "canonicalHex",
++            )? != reply.context_hex
++        {
++            return Err(refused("lifetime source reserve frame drift"));
++        }
++        match_reserve_plan(
++            binding,
++            &reply.current_claims,
++            &request_view,
++            &plan_view,
++            decoded_http,
++        )?;
++        let canonical_http = unhex(field(&plan_view, "canonicalHttpHex")?)?;
++        let request_sha256 = hex(&Sha256::digest(&canonical_http));
++        let operation_fingerprint = operation_fingerprint(
++            binding,
++            &reply.current_claims,
++            forward_operation_id,
++            &request_sha256,
++        )?;
++        if reply.operation_fingerprint != operation_fingerprint {
++            return Err(refused("lifetime operation fingerprint drift"));
++        }
++        write_new(
++            attempt_dir,
++            "reserve-verified-v3.json",
++            &serde_json::to_vec(&json!({
++                "protocol":"mini-spk-lifetime-reserve-verified-v3",
++                "attemptId":reply.attempt_id,
++                "httpOperationId":reply.http_operation_id,
++                "bindingSha256":reply.binding_sha256,
++                "operationFingerprint":operation_fingerprint,
++                "currentClaims":reply.current_claims,
++                "reserveOperationId":reply.reserve_operation_id,
++                "reserveIndex":reply.reserve_index,
++                "reserveReceipt":reply.reserve_receipt,
++                "requestSha256":request_sha256,
++                "fixedRequestSha256":hex(&Sha256::digest(&request_bytes)),
++                "reservePlanSha256":hex(&Sha256::digest(&plan_bytes)),
++                "contextSha256":hex(&Sha256::digest(&context_bytes)),
++            }))?,
++        )?;
++        Ok(RetainedReserveV3 {
++            attempt_id: reply.attempt_id,
++            http_operation_id: reply.http_operation_id,
++            binding_sha256: reply.binding_sha256,
++            operation_fingerprint,
++            current_claims: reply.current_claims,
++            reserve_operation_id: reply.reserve_operation_id,
++            reserve_index: reply.reserve_index,
++            reserve_receipt: reply.reserve_receipt,
++            request_bytes,
++            plan_bytes,
++            context_bytes,
++            request_sha256,
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::fs::{self, DirBuilder};
++    use std::io::{Read, Write};
++    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
++    use std::os::unix::net::UnixListener;
++    use std::thread;
++    use std::time::{SystemTime, UNIX_EPOCH};
++
++    #[test]
++    fn reserve_index_matches_full_decimal_receipt_count() {
++        assert!(index_precedes_count("0", "1"));
++        assert!(index_precedes_count(
++            "340282366920938463463374607431768211455",
++            "340282366920938463463374607431768211456"
++        ));
++        assert!(!index_precedes_count("4", "4"));
++        assert!(!index_precedes_count("4", "6"));
++        assert!(!index_precedes_count("04", "5"));
++    }
++
++    #[test]
++    fn reverse_transport_accepts_bounded_double_frame_reply() {
++        let nonce = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .unwrap()
++            .as_nanos();
++        let directory = std::env::temp_dir().join(format!(
++            "mini-lifetime-reverse-{}-{nonce}",
++            std::process::id()
++        ));
++        DirBuilder::new().mode(0o700).create(&directory).unwrap();
++        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
++        let socket = directory.join("reverse.sock");
++        let listener = UnixListener::bind(&socket).unwrap();
++        let server = thread::spawn(move || {
++            let (mut stream, _) = listener.accept().unwrap();
++            let mut length = [0u8; 4];
++            stream.read_exact(&mut length).unwrap();
++            let mut request = vec![0u8; u32::from_be_bytes(length) as usize];
++            stream.read_exact(&mut request).unwrap();
++            let request: Value = serde_json::from_slice(&request).unwrap();
++            assert_eq!(request["type"], "inspect-v3");
++            let response = serde_json::to_vec(&json!({
++                "type":"dispatch-reserved-v3",
++                "fixedRequestHex":"ab".repeat(65_536),
++                "reservePlanHex":"cd".repeat(65_536),
++                "contextHex":"ef",
++            }))
++            .unwrap();
++            assert!(response.len() > 262_144 && response.len() < 1_048_576);
++            stream
++                .write_all(&(response.len() as u32).to_be_bytes())
++                .unwrap();
++            stream.write_all(&response).unwrap();
++        });
++        let client = ReverseCustodyClient::new(
++            socket.clone(),
++            unsafe { libc::geteuid() },
++            "workroom-app".into(),
++        )
++        .unwrap();
++        let reply = client
++            .exchange(&json!({"type":"inspect-v3"}), &AtomicBool::new(false))
++            .unwrap();
++        assert_eq!(reply["fixedRequestHex"].as_str().unwrap().len(), 131_072);
++        server.join().unwrap();
++        fs::remove_file(socket).unwrap();
++        fs::remove_dir(directory).unwrap();
++    }
++
++    #[test]
++    fn payer_callback_preserves_all_ordered_slots_and_operation_pins() {
++        let nonce = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .unwrap()
++            .as_nanos();
++        let directory = std::env::temp_dir().join(format!(
++            "mini-lifetime-payer-{}-{nonce}",
++            std::process::id()
++        ));
++        DirBuilder::new().mode(0o700).create(&directory).unwrap();
++        let socket = directory.join("reverse.sock");
++        let listener = UnixListener::bind(&socket).unwrap();
++        let server = thread::spawn(move || {
++            let (mut stream, _) = listener.accept().unwrap();
++            let mut length = [0u8; 4];
++            stream.read_exact(&mut length).unwrap();
++            let mut request = vec![0u8; u32::from_be_bytes(length) as usize];
++            stream.read_exact(&mut request).unwrap();
++            let request: Value = serde_json::from_slice(&request).unwrap();
++            assert_eq!(request["type"], "sign-payer-v3");
++            assert_eq!(request["operation_fingerprint"], "b".repeat(64));
++            assert_eq!(request["paid_plan_hex"], "0102");
++            let response = serde_json::to_vec(&json!({
++                "type":"payer-signatures-v3","attemptId":"41",
++                "bindingSha256":"a".repeat(64),
++                "operationFingerprint":"b".repeat(64),
++                "planSha256":hex(&Sha256::digest([1, 2])),
++                "signedPostReservePursePhysicalRoot":"204",
++                "signatures":["c".repeat(128),"d".repeat(128)],
++            }))
++            .unwrap();
++            stream
++                .write_all(&(response.len() as u32).to_be_bytes())
++                .unwrap();
++            stream.write_all(&response).unwrap();
++        });
++        let transport = ReverseCustodyClient::new(
++            socket.clone(),
++            unsafe { libc::geteuid() },
++            "workroom-app".into(),
++        )
++        .unwrap();
++        let client = LifetimeReverseClient::new(transport);
++        let reserve = RetainedReserveV3 {
++            attempt_id: "41".into(),
++            http_operation_id: "17".into(),
++            binding_sha256: "a".repeat(64),
++            operation_fingerprint: "b".repeat(64),
++            current_claims: CurrentClaims {
++                app_generation: "1".into(),
++                session_generation: "1".into(),
++                parent_generation: "1".into(),
++                purse_generation: "1".into(),
++                app_physical_root: "1".into(),
++                session_physical_root: "1".into(),
++                parent_physical_root: "1".into(),
++                purse_physical_root: "1".into(),
++            },
++            reserve_operation_id: "18".into(),
++            reserve_index: "4".into(),
++            reserve_receipt: ReceiptPin {
++                transaction_id: "1".into(),
++                event_id: "2".into(),
++                accepted_count: "5".into(),
++                image_boundary: "3".into(),
++            },
++            request_bytes: vec![1],
++            plan_bytes: vec![2],
++            context_bytes: vec![3],
++            request_sha256: "e".repeat(64),
++        };
++        let signatures = client
++            .sign_payer_once(
++                &reserve,
++                &[1, 2],
++                &json!({"type":"plan"}),
++                &AtomicBool::new(false),
++            )
++            .unwrap();
++        assert_eq!(
++            signatures.signatures,
++            vec!["c".repeat(128), "d".repeat(128)]
++        );
++        assert_eq!(signatures.signed_post_reserve_purse_physical_root, "204");
++        server.join().unwrap();
++        fs::remove_file(socket).unwrap();
++        fs::remove_dir(directory).unwrap();
++    }
++}
+diff --git a/native/spk-host/src/agent_api_lifetime_custody_v3.rs b/native/spk-host/src/agent_api_lifetime_custody_v3.rs
+new file mode 100644
+index 0000000..dd69cfa
+--- /dev/null
++++ b/native/spk-host/src/agent_api_lifetime_custody_v3.rs
+@@ -0,0 +1,558 @@
++//! Protected stable lifetime route and the exact first GitWeb HTTP projection.
++//! Current generations and physical roots come only from the op80 source plan.
++#![allow(dead_code)] // Resident v3 listener is enabled in a later cut.
++
++use crate::agent_api_lifetime_v3::{LifetimeBinding, LifetimeLineage};
++use crate::agent_api_lifetime_wire_v3::Request;
++use crate::dispatch_author::private_signing_key;
++use crate::dispatch_author::SignerPin;
++use crate::hostd::Record;
++use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
++use serde::Deserialize;
++use serde_json::{json, Value};
++use std::io;
++
++fn refused(reason: &'static str) -> io::Error {
++    io::Error::new(io::ErrorKind::InvalidData, reason)
++}
++
++fn decimal(value: &str) -> bool {
++    !value.is_empty()
++        && value.len() <= 128
++        && (value == "0" || !value.starts_with('0'))
++        && value.bytes().all(|byte| byte.is_ascii_digit())
++}
++
++fn hex(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++fn unhex(value: &str) -> io::Result<Vec<u8>> {
++    if !value.len().is_multiple_of(2)
++        || !value
++            .bytes()
++            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++    {
++        return Err(refused("lifetime signature hex refused"));
++    }
++    value
++        .as_bytes()
++        .as_chunks::<2>()
++        .0
++        .iter()
++        .map(|pair| {
++            u8::from_str_radix(
++                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
++                16,
++            )
++            .map_err(|_| refused("lifetime hex byte"))
++        })
++        .collect()
++}
++
++fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
++    value
++        .get(name)
++        .and_then(Value::as_str)
++        .ok_or_else(|| refused("lifetime signing field absent"))
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub(crate) struct PayerPin {
++    pub role: String,
++    pub index: String,
++    pub key_id: String,
++    pub key_epoch: String,
++    pub public_key_hex: String,
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub(crate) struct LifetimeCustodyV3 {
++    pub protocol: String,
++    pub lineage: LifetimeLineage,
++    pub package_manifest: String,
++    pub snapshot_manifest: String,
++    pub session_observe_capability: String,
++    pub manifest_observe_capability: String,
++    pub enrollment_observe_capability: String,
++    pub parent_capability: String,
++    pub parent_observe: String,
++    pub purse_capability: String,
++    pub purse_observe: String,
++    pub grant_observe_capability: String,
++    pub payer_subject: String,
++    pub reserve_amount: String,
++    pub maximum_charge: String,
++    pub app_signers: Vec<SignerPin>,
++    pub grant_signer: SignerPin,
++    pub payer_pins: Vec<PayerPin>,
++}
++
++impl LifetimeCustodyV3 {
++    pub(crate) fn validate(&self) -> io::Result<()> {
++        self.lineage.validate()?;
++        if self.protocol != "mini-spk-agent-lifetime-custody-v3"
++            || ![
++                &self.package_manifest,
++                &self.snapshot_manifest,
++                &self.session_observe_capability,
++                &self.manifest_observe_capability,
++                &self.enrollment_observe_capability,
++                &self.parent_capability,
++                &self.parent_observe,
++                &self.purse_capability,
++                &self.purse_observe,
++                &self.grant_observe_capability,
++                &self.payer_subject,
++                &self.reserve_amount,
++                &self.maximum_charge,
++            ]
++            .into_iter()
++            .all(|value| decimal(value))
++            || self
++                .reserve_amount
++                .parse::<u128>()
++                .ok()
++                .is_none_or(|n| n == 0)
++            || self
++                .maximum_charge
++                .parse::<u128>()
++                .ok()
++                .is_none_or(|n| n == 0 || n > self.reserve_amount.parse::<u128>().unwrap())
++            || self.app_signers.is_empty()
++            || self.app_signers.len() > 64
++            || self.payer_pins.is_empty()
++            || self.payer_pins.len() > 64
++        {
++            return Err(refused("lifetime protected route refused"));
++        }
++        for (index, pin) in self.app_signers.iter().enumerate() {
++            if ![&pin.role, &pin.index, &pin.key_id, &pin.key_epoch]
++                .into_iter()
++                .all(|value| decimal(value))
++                || pin.public_key_hex.len() != 64
++                || !pin
++                    .public_key_hex
++                    .bytes()
++                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++                || !pin.seed_path.is_absolute()
++                || self.app_signers[..index]
++                    .iter()
++                    .any(|earlier| earlier.role == pin.role && earlier.index == pin.index)
++            {
++                return Err(refused("lifetime app/grant signer pin refused"));
++            }
++        }
++        let grant = &self.grant_signer;
++        if ![&grant.role, &grant.index, &grant.key_id, &grant.key_epoch]
++            .into_iter()
++            .all(|value| decimal(value))
++            || grant.public_key_hex.len() != 64
++            || unhex(&grant.public_key_hex).is_err()
++            || !grant.seed_path.is_absolute()
++            || self
++                .app_signers
++                .iter()
++                .any(|pin| pin.role == grant.role && pin.index == grant.index)
++        {
++            return Err(refused("lifetime grant signer pin refused"));
++        }
++        for (index, pin) in self.payer_pins.iter().enumerate() {
++            if ![&pin.role, &pin.index, &pin.key_id, &pin.key_epoch]
++                .into_iter()
++                .all(|value| decimal(value))
++                || pin.public_key_hex.len() != 64
++                || unhex(&pin.public_key_hex).is_err()
++                || self.payer_pins[..index]
++                    .iter()
++                    .any(|earlier| earlier.role == pin.role && earlier.index == pin.index)
++            {
++                return Err(refused("lifetime payer public pin refused"));
++            }
++        }
++        Ok(())
++    }
++
++    pub(crate) fn sign_app_slots(&self, inspection: &Value, plan: &[u8]) -> io::Result<Value> {
++        self.validate()?;
++        if field(inspection, "type")? != "application-agent-lifetime-paid-plan-v3"
++            || field(inspection, "canonicalPlanHex")? != hex(plan)
++        {
++            return Err(refused("lifetime app signing plan differs from source"));
++        }
++        let slots = inspection
++            .get("appSlots")
++            .and_then(Value::as_array)
++            .ok_or_else(|| refused("lifetime app/grant slots absent"))?;
++        if slots.len() != self.app_signers.len() {
++            return Err(refused("lifetime app/grant signer count drift"));
++        }
++        let mut signatures = Vec::with_capacity(slots.len());
++        for (slot, pin) in slots.iter().zip(&self.app_signers) {
++            let signing = slot
++                .get("signing")
++                .ok_or_else(|| refused("lifetime app signing header absent"))?;
++            if field(slot, "role")? != pin.role
++                || field(slot, "index")? != pin.index
++                || signing.get("decoded").and_then(Value::as_bool) != Some(true)
++                || field(signing, "keyId")? != pin.key_id
++                || field(signing, "keyEpoch")? != pin.key_epoch
++                || field(signing, "algorithm")? != "1"
++            {
++                return Err(refused("lifetime app/grant slot differs from fixed signer"));
++            }
++            let header = unhex(field(slot, "headerHex")?)?;
++            if header.is_empty() || header.len() > 65_536 {
++                return Err(refused("lifetime app/grant header bound"));
++            }
++            let key = private_signing_key(&pin.seed_path)?;
++            if hex(&key.verifying_key().to_bytes()) != pin.public_key_hex {
++                return Err(refused("lifetime app/grant seed differs from enrolled key"));
++            }
++            signatures.push(Value::String(hex(&key.sign(&header).to_bytes())));
++        }
++        Ok(Value::Array(signatures))
++    }
++
++    pub(crate) fn sign_grant_slot(&self, inspection: &Value, plan: &[u8]) -> io::Result<Vec<u8>> {
++        self.validate()?;
++        if field(inspection, "type")? != "application-agent-lifetime-paid-plan-v3"
++            || field(inspection, "canonicalPlanHex")? != hex(plan)
++        {
++            return Err(refused("lifetime grant signing plan differs from source"));
++        }
++        let slot = inspection
++            .get("grantObservationSlot")
++            .ok_or_else(|| refused("lifetime grant observation slot absent"))?;
++        let signing = slot
++            .get("signing")
++            .ok_or_else(|| refused("lifetime grant signing header absent"))?;
++        let pin = &self.grant_signer;
++        if field(slot, "role")? != pin.role
++            || field(slot, "index")? != pin.index
++            || signing.get("decoded").and_then(Value::as_bool) != Some(true)
++            || field(signing, "keyId")? != pin.key_id
++            || field(signing, "keyEpoch")? != pin.key_epoch
++            || field(signing, "algorithm")? != "1"
++        {
++            return Err(refused("lifetime grant slot differs from fixed signer"));
++        }
++        let header = unhex(field(slot, "headerHex")?)?;
++        if header.is_empty() || header.len() > 65_536 {
++            return Err(refused("lifetime grant header bound"));
++        }
++        let key = private_signing_key(&pin.seed_path)?;
++        if hex(&key.verifying_key().to_bytes()) != pin.public_key_hex {
++            return Err(refused("lifetime grant seed differs from enrolled key"));
++        }
++        Ok(key.sign(&header).to_bytes().to_vec())
++    }
++
++    pub(crate) fn verify_payer_slots(
++        &self,
++        inspection: &Value,
++        plan: &[u8],
++        signatures: &[String],
++    ) -> io::Result<()> {
++        self.validate()?;
++        if field(inspection, "type")? != "application-agent-lifetime-paid-plan-v3"
++            || field(inspection, "canonicalPlanHex")? != hex(plan)
++        {
++            return Err(refused("lifetime payer plan differs from source"));
++        }
++        let slots = inspection
++            .get("payerSlots")
++            .and_then(Value::as_array)
++            .ok_or_else(|| refused("lifetime payer slots absent"))?;
++        if slots.len() != self.payer_pins.len() || signatures.len() != slots.len() {
++            return Err(refused("lifetime payer slot count drift"));
++        }
++        for ((slot, pin), signature) in slots.iter().zip(&self.payer_pins).zip(signatures) {
++            let signing = slot
++                .get("signing")
++                .ok_or_else(|| refused("lifetime payer signing header absent"))?;
++            if field(slot, "role")? != pin.role
++                || field(slot, "index")? != pin.index
++                || signing.get("decoded").and_then(Value::as_bool) != Some(true)
++                || field(signing, "keyId")? != pin.key_id
++                || field(signing, "keyEpoch")? != pin.key_epoch
++                || field(signing, "algorithm")? != "1"
++            {
++                return Err(refused("lifetime payer slot differs from fixed key"));
++            }
++            let header = unhex(field(slot, "headerHex")?)?;
++            let key_bytes: [u8; 32] = unhex(&pin.public_key_hex)?
++                .try_into()
++                .map_err(|_| refused("lifetime payer key length"))?;
++            let key = VerifyingKey::from_bytes(&key_bytes)
++                .map_err(|_| refused("lifetime payer key invalid"))?;
++            let signature_bytes: [u8; 64] = unhex(signature)?
++                .try_into()
++                .map_err(|_| refused("lifetime payer signature length"))?;
++            key.verify(&header, &Signature::from_bytes(&signature_bytes))
++                .map_err(|_| refused("lifetime payer signature differs from source slot"))?;
++        }
++        Ok(())
++    }
++
++    pub(crate) fn binding(
++        &self,
++        record: &Record,
++        signed_api_path: &str,
++    ) -> io::Result<LifetimeBinding> {
++        self.validate()?;
++        record.verify_running_instance()?;
++        if record.app().to_string() != self.lineage.app_resource {
++            return Err(refused("lifetime app differs from running incarnation"));
++        }
++        let binding = LifetimeBinding {
++            protocol: "mini-spk-agent-lifetime-binding-v3".into(),
++            lineage: self.lineage.clone(),
++            signed_api_path: signed_api_path.to_owned(),
++            host_unit: record.unit().to_owned(),
++            host_invocation: record
++                .invocation_id()
++                .ok_or_else(|| refused("lifetime host invocation absent"))?
++                .to_owned(),
++        };
++        binding.validate()?;
++        Ok(binding)
++    }
++
++    /// The only first-profile path transform: signed `/repo.git/` plus the
++    /// caller's relative path. Header order and bytes are preserved exactly.
++    pub(crate) fn fixed_reserve_request(
++        &self,
++        request: &Request,
++        signed_api_path: &str,
++    ) -> io::Result<(Value, Value)> {
++        self.validate()?;
++        Request::parse(&serde_json::to_vec(request)?)?;
++        if signed_api_path != "/repo.git/" {
++            return Err(refused("lifetime signed GitWeb API path refused"));
++        }
++        let Request::DispatchV3 {
++            operation_id,
++            method,
++            path,
++            query,
++            headers,
++            body_hex,
++            ..
++        } = request
++        else {
++            return Err(refused("lifetime fixed request requires dispatch"));
++        };
++        let ordered = headers
++            .iter()
++            .map(|header| {
++                json!({"nameHex":hex(header.name.as_bytes()),
++                    "valueHex":hex(header.value.as_bytes()),"generated":false})
++            })
++            .collect::<Vec<_>>();
++        let http = json!({
++            "operationId":operation_id,
++            "methodHex":hex(method.as_bytes()),
++            "pathHex":hex(format!("repo.git/{path}").as_bytes()),
++            "queryHex":hex(query.as_bytes()),
++            "headers":ordered,
++            "bodyHex":body_hex,
++        });
++        let fixed = json!({
++            "fixed":{
++                "base":{
++                    "issueIndex":self.lineage.original_issue_index,
++                    "ticketResource":self.lineage.ticket_resource,
++                    "packageManifest":self.package_manifest,
++                    "snapshotManifest":self.snapshot_manifest,
++                    "sessionObserveCapability":self.session_observe_capability,
++                    "manifestObserveCapability":self.manifest_observe_capability,
++                    "enrollmentObserveCapability":self.enrollment_observe_capability,
++                    "http":http,
++                },
++                "parentTask":self.lineage.parent_task,
++                "parentCapability":self.parent_capability,
++                "parentObserve":self.parent_observe,
++                "purseTask":self.lineage.purse_task,
++                "purseCapability":self.purse_capability,
++                "purseObserve":self.purse_observe,
++                "payerSubject":self.payer_subject,
++                "reserveAmount":self.reserve_amount,
++                "maximumCharge":self.maximum_charge,
++                "reserveOperationId":"0",
++            },
++            "grantIssueIndex":self.lineage.grant_issue_index,
++            "grantResource":self.lineage.grant_resource,
++            "grantObserveCapability":self.grant_observe_capability,
++        });
++        Ok((fixed, http))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::agent_api_lifetime_wire_v3::OrdinaryHeader;
++    use std::fs::{self, DirBuilder, OpenOptions};
++    use std::io::Write;
++    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
++    use std::time::{SystemTime, UNIX_EPOCH};
++
++    fn custody() -> LifetimeCustodyV3 {
++        serde_json::from_value(json!({
++            "protocol":"mini-spk-agent-lifetime-custody-v3",
++            "lineage":{
++                "appResource":"800","sessionResource":"801",
++                "participantSubject":"8","ticketResource":"802",
++                "originalParentTask":"700","originalParentGeneration":"1",
++                "originalIssueIndex":"2",
++                "originalIssueReceipt":{"transactionId":"11","eventId":"12",
++                    "acceptedCount":"3","imageBoundary":"13"},
++                "originalDescriptorSha256":"ab".repeat(32),
++                "grantResource":"803","grantIssueIndex":"3",
++                "grantDigest":"123","grantInitializedRoot":"456",
++                "grantIssueReceipt":{"transactionId":"21","eventId":"22",
++                    "acceptedCount":"4","imageBoundary":"23"},
++                "parentTask":"700","purseTask":"701",
++            },
++            "packageManifest":"10","snapshotManifest":"11",
++            "sessionObserveCapability":"12","manifestObserveCapability":"13",
++            "enrollmentObserveCapability":"14","parentCapability":"15",
++            "parentObserve":"16","purseCapability":"17","purseObserve":"18",
++            "grantObserveCapability":"19","payerSubject":"20",
++            "reserveAmount":"100","maximumCharge":"10",
++            "appSigners":[{"role":"1","index":"0","keyId":"2","keyEpoch":"3",
++                "publicKeyHex":"cd".repeat(32),"seedPath":"/operator/app.seed"}],
++            "grantSigner":{"role":"2","index":"0","keyId":"4","keyEpoch":"5",
++                "publicKeyHex":"ab".repeat(32),"seedPath":"/operator/grant.seed"},
++            "payerPins":[{"role":"4","index":"0","keyId":"5","keyEpoch":"6",
++                "publicKeyHex":"ef".repeat(32)}],
++        }))
++        .unwrap()
++    }
++
++    #[test]
++    fn first_gitweb_http_has_exact_ordered_source_bytes_and_no_current_claims() {
++        let custody = custody();
++        let request = Request::DispatchV3 {
++            protocol: "mini-spk-agent-api-v3".into(),
++            operation_id: "9".into(),
++            binding_sha256: "ef".repeat(32),
++            method: "POST".into(),
++            path: "git-receive-pack".into(),
++            query: "service=git-receive-pack".into(),
++            headers: vec![
++                OrdinaryHeader {
++                    name: "accept".into(),
++                    value: "one".into(),
++                },
++                OrdinaryHeader {
++                    name: "content-type".into(),
++                    value: "two".into(),
++                },
++            ],
++            body_hex: "abcd".into(),
++        };
++        let (fixed, http) = custody
++            .fixed_reserve_request(&request, "/repo.git/")
++            .unwrap();
++        assert_eq!(fixed["fixed"]["base"]["http"], http);
++        assert_eq!(http["pathHex"], hex(b"repo.git/git-receive-pack"));
++        assert_eq!(http["headers"][0]["nameHex"], hex(b"accept"));
++        assert_eq!(http["headers"][1]["valueHex"], hex(b"two"));
++        assert_eq!(fixed["fixed"]["reserveOperationId"], "0");
++        assert_eq!(fixed["grantIssueIndex"], "3");
++        assert!(fixed.get("appGeneration").is_none());
++        assert!(custody.fixed_reserve_request(&request, "/api/").is_err());
++    }
++
++    #[test]
++    fn payer_signatures_cover_every_exact_ordered_source_slot() {
++        let mut custody = custody();
++        let first = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
++        let second = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
++        custody.payer_pins[0].public_key_hex = hex(&first.verifying_key().to_bytes());
++        custody.payer_pins.push(PayerPin {
++            role: "4".into(),
++            index: "1".into(),
++            key_id: "7".into(),
++            key_epoch: "8".into(),
++            public_key_hex: hex(&second.verifying_key().to_bytes()),
++        });
++        let plan = b"source paid plan";
++        let inspection = json!({
++            "type":"application-agent-lifetime-paid-plan-v3",
++            "canonicalPlanHex":hex(plan),
++            "payerSlots":[
++                {"role":"4","index":"0","headerHex":hex(b"first"),
++                    "signing":{"decoded":true,"keyId":"5","keyEpoch":"6","algorithm":"1"}},
++                {"role":"4","index":"1","headerHex":hex(b"second"),
++                    "signing":{"decoded":true,"keyId":"7","keyEpoch":"8","algorithm":"1"}},
++            ],
++        });
++        let mut signatures = vec![
++            hex(&first.sign(b"first").to_bytes()),
++            hex(&second.sign(b"second").to_bytes()),
++        ];
++        custody
++            .verify_payer_slots(&inspection, plan, &signatures)
++            .unwrap();
++        signatures.swap(0, 1);
++        assert!(custody
++            .verify_payer_slots(&inspection, plan, &signatures)
++            .is_err());
++        signatures.swap(0, 1);
++        let mut altered = inspection;
++        altered["payerSlots"][1]["headerHex"] = json!(hex(b"different"));
++        assert!(custody
++            .verify_payer_slots(&altered, plan, &signatures)
++            .is_err());
++    }
++
++    #[test]
++    fn grant_observation_uses_its_own_exact_source_slot_and_seed() {
++        let nonce = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .unwrap()
++            .as_nanos();
++        let dir = std::env::temp_dir().join(format!(
++            "mini-lifetime-grant-signer-{}-{nonce}",
++            std::process::id()
++        ));
++        DirBuilder::new().mode(0o700).create(&dir).unwrap();
++        let seed = dir.join("grant.seed");
++        let mut file = OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .mode(0o600)
++            .open(&seed)
++            .unwrap();
++        file.write_all(&[9u8; 32]).unwrap();
++        file.sync_all().unwrap();
++        let key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
++        let mut custody = custody();
++        custody.grant_signer.seed_path = seed.clone();
++        custody.grant_signer.public_key_hex = hex(&key.verifying_key().to_bytes());
++        let plan = b"exact source plan";
++        let mut inspection = json!({
++            "type":"application-agent-lifetime-paid-plan-v3",
++            "canonicalPlanHex":hex(plan),
++            "grantObservationSlot":{"role":"2","index":"0",
++                "headerHex":hex(b"grant header"),
++                "signing":{"decoded":true,"keyId":"4","keyEpoch":"5","algorithm":"1"}},
++        });
++        let signature = custody.sign_grant_slot(&inspection, plan).unwrap();
++        key.verifying_key()
++            .verify(
++                b"grant header",
++                &Signature::from_bytes(&signature.try_into().unwrap()),
++            )
++            .unwrap();
++        inspection["grantObservationSlot"]["signing"]["keyEpoch"] = json!("6");
++        assert!(custody.sign_grant_slot(&inspection, plan).is_err());
++        fs::remove_file(seed).unwrap();
++        fs::remove_dir(dir).unwrap();
++    }
++}
+diff --git a/native/spk-host/src/agent_api_lifetime_paid_native_v3.rs b/native/spk-host/src/agent_api_lifetime_paid_native_v3.rs
+new file mode 100644
+index 0000000..eb2f03c
+--- /dev/null
++++ b/native/spk-host/src/agent_api_lifetime_paid_native_v3.rs
+@@ -0,0 +1,217 @@
++//! Exact op78/79 lifetime paid assembly. This stage retains an ingress but
++//! cannot deliver it: only a later fresh op76 installed callback may do that.
++#![allow(dead_code)] // The versioned resident listener is wired separately.
++
++use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
++use crate::agent_api_lifetime_reverse_v3::{LifetimeReverseClient, RetainedReserveV3};
++use crate::agent_api_lifetime_v3::{match_paid_plan, LifetimeBinding};
++use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
++use serde_json::{json, Value};
++use sha2::{Digest, Sha256};
++use std::io;
++use std::path::Path;
++use std::sync::atomic::{AtomicBool, Ordering};
++
++fn refused(reason: &'static str) -> io::Error {
++    io::Error::new(io::ErrorKind::InvalidData, reason)
++}
++
++fn hex(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++fn source_payload(frame: &[u8], opcode: u8) -> io::Result<&[u8]> {
++    if frame.len() < 6
++        || u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize + 4 != frame.len()
++        || frame[4] != opcode
++    {
++        return Err(refused("lifetime paid native reply opcode/frame drift"));
++    }
++    Ok(&frame[5..])
++}
++
++fn pair(left: &[u8], right: &[u8]) -> io::Result<Vec<u8>> {
++    let length = u32::try_from(left.len()).map_err(|_| refused("lifetime paid pair size"))?;
++    let mut result = Vec::with_capacity(4 + left.len() + right.len());
++    result.extend_from_slice(&length.to_le_bytes());
++    result.extend_from_slice(left);
++    result.extend_from_slice(right);
++    Ok(result)
++}
++
++fn signatures(
++    operator: &PrivateOperator,
++    attempt_dir: &Path,
++    name: &str,
++    values: &Value,
++) -> io::Result<Vec<u8>> {
++    let input = write_new(
++        attempt_dir,
++        &format!("{name}.json"),
++        &serde_json::to_vec(values)?,
++    )?;
++    operator.tool(
++        "signatures",
++        "",
++        &input,
++        &attempt_dir.join(format!("{name}.bin")),
++    )
++}
++
++pub(crate) struct AssembledLifetimePaidV3 {
++    pub plan: Vec<u8>,
++    pub ingress: Vec<u8>,
++    pub inspection: Value,
++    pub signed_post_reserve_purse_physical_root: String,
++}
++
++pub(crate) fn assemble_once(
++    operator: &PrivateOperator,
++    custody: &LifetimeCustodyV3,
++    reverse: &LifetimeReverseClient,
++    binding: &LifetimeBinding,
++    reserve: &RetainedReserveV3,
++    attempt_dir: &Path,
++    cancelled: &AtomicBool,
++) -> io::Result<AssembledLifetimePaidV3> {
++    if cancelled.load(Ordering::Acquire) {
++        return Err(refused("lifetime caller cancelled before paid authoring"));
++    }
++    private_dir(attempt_dir)?;
++    let reserve_plan_path = attempt_dir.join("reserve-plan-v3.bin");
++    let reserve_view_bytes = operator.tool(
++        "inspect",
++        "application-agent-lifetime-reserve-plan",
++        &reserve_plan_path,
++        &attempt_dir.join("reserve-plan-paid-v3.json"),
++    )?;
++    let reserve_view: Value = serde_json::from_slice(&reserve_view_bytes)?;
++    if reserve_view.get("canonicalPlanHex").and_then(Value::as_str)
++        != Some(hex(&reserve.plan_bytes).as_str())
++    {
++        return Err(refused(
++            "lifetime retained reserve plan differs from source",
++        ));
++    }
++    let paid_json = json!({
++        "fixedRequestHex":hex(&reserve.request_bytes),
++        "contextHex":hex(&reserve.context_bytes),
++        "reserveIndex":reserve.reserve_index,
++    });
++    let paid_json_path = write_new(
++        attempt_dir,
++        "paid-request-v3.json",
++        &serde_json::to_vec(&paid_json)?,
++    )?;
++    let paid_request = operator.tool(
++        "author",
++        "application-agent-lifetime-paid-request",
++        &paid_json_path,
++        &attempt_dir.join("paid-request-v3.bin"),
++    )?;
++    let request_path = attempt_dir.join("paid-request-v3.bin");
++    let request_view_bytes = operator.tool(
++        "inspect",
++        "application-agent-lifetime-paid-request",
++        &request_path,
++        &attempt_dir.join("paid-request-v3-inspected.json"),
++    )?;
++    let request_view: Value = serde_json::from_slice(&request_view_bytes)?;
++    if request_view.get("type").and_then(Value::as_str)
++        != Some("application-agent-lifetime-paid-request-v3")
++        || request_view
++            .get("canonicalRequestHex")
++            .and_then(Value::as_str)
++            != Some(hex(&paid_request).as_str())
++        || request_view.get("contextHex").and_then(Value::as_str)
++            != Some(hex(&reserve.context_bytes).as_str())
++        || request_view.get("reserveIndex").and_then(Value::as_str)
++            != Some(reserve.reserve_index.as_str())
++    {
++        return Err(refused("lifetime paid request source projection drift"));
++    }
++    let plan = source_payload(&operator.invoke(78, &paid_request)?, 78)?.to_vec();
++    let plan_path = write_new(attempt_dir, "paid-plan-v3.bin", &plan)?;
++    let inspection_bytes = operator.tool(
++        "inspect",
++        "application-agent-lifetime-paid-plan",
++        &plan_path,
++        &attempt_dir.join("paid-plan-v3.json"),
++    )?;
++    let inspection: Value = serde_json::from_slice(&inspection_bytes)?;
++    if inspection.get("canonicalPlanHex").and_then(Value::as_str) != Some(hex(&plan).as_str()) {
++        return Err(refused("lifetime paid plan source projection drift"));
++    }
++    let payer = reverse.sign_payer_once(reserve, &plan, &inspection, cancelled)?;
++    match_paid_plan(
++        binding,
++        &reserve.current_claims,
++        &reserve_view,
++        &inspection,
++        &reserve.reserve_index,
++        &reserve.reserve_receipt,
++        &payer.signed_post_reserve_purse_physical_root,
++    )?;
++    custody.verify_payer_slots(&inspection, &plan, &payer.signatures)?;
++    if cancelled.load(Ordering::Acquire) {
++        return Err(refused("lifetime caller cancelled before paid assembly"));
++    }
++    let app = custody.sign_app_slots(&inspection, &plan)?;
++    let grant = custody.sign_grant_slot(&inspection, &plan)?;
++    let app_binary = signatures(operator, attempt_dir, "app-signatures-v3", &app)?;
++    let payer_binary = signatures(
++        operator,
++        attempt_dir,
++        "payer-signatures-v3",
++        &json!(payer.signatures),
++    )?;
++    let detached = pair(&app_binary, &pair(&grant, &payer_binary)?)?;
++    let ingress = source_payload(&operator.invoke(79, &pair(&plan, &detached)?)?, 79)?.to_vec();
++    write_new(attempt_dir, "paid-ingress-v3.bin", &ingress)?;
++    write_new(
++        attempt_dir,
++        "paid-assembled-v3.json",
++        &serde_json::to_vec(&json!({
++            "protocol":"mini-spk-lifetime-paid-assembled-v3",
++            "bindingSha256":reserve.binding_sha256,
++            "operationFingerprint":reserve.operation_fingerprint,
++            "planSha256":hex(&Sha256::digest(&plan)),
++            "ingressSha256":hex(&Sha256::digest(&ingress)),
++            "signedPostReservePursePhysicalRoot":payer.signed_post_reserve_purse_physical_root,
++        }))?,
++    )?;
++    Ok(AssembledLifetimePaidV3 {
++        plan,
++        ingress,
++        inspection,
++        signed_post_reserve_purse_physical_root: payer.signed_post_reserve_purse_physical_root,
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::{pair, source_payload};
++
++    #[test]
++    fn op79_detached_signature_pair_keeps_grant_between_app_and_payer() {
++        let grant = [7u8; 64];
++        let nested = pair(b"app", &pair(&grant, b"payer").unwrap()).unwrap();
++        assert_eq!(u32::from_le_bytes(nested[..4].try_into().unwrap()), 3);
++        assert_eq!(&nested[4..7], b"app");
++        assert_eq!(u32::from_le_bytes(nested[7..11].try_into().unwrap()), 64);
++        assert_eq!(&nested[11..75], &grant);
++        assert_eq!(&nested[75..], b"payer");
++    }
++
++    #[test]
++    fn native_reply_must_be_exact_op_and_frame() {
++        let mut reply = [0u8; 7];
++        reply[..4].copy_from_slice(&3u32.to_le_bytes());
++        reply[4] = 79;
++        reply[5..].copy_from_slice(b"ok");
++        assert_eq!(source_payload(&reply, 79).unwrap(), b"ok");
++        assert!(source_payload(&reply, 78).is_err());
++        reply[0] = 4;
++        assert!(source_payload(&reply, 79).is_err());
++    }
++}

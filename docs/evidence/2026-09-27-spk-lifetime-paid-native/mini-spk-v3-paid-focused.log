@@ -1,0 +1,15 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.68s
+────────────
+ Nextest run ID dc0c2429-8ec4-4755-b6f5-8855ee838f47 with nextest profile: default
+    Starting 8 tests across 1 binary (152 tests skipped)
+        PASS [   0.006s] (1/8) minidregg-spk-host agent_api_lifetime_paid_native_v3::tests::native_reply_must_be_exact_op_and_frame
+        PASS [   0.006s] (2/8) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::reserve_index_matches_full_decimal_receipt_count
+        PASS [   0.006s] (3/8) minidregg-spk-host agent_api_lifetime_paid_native_v3::tests::op79_detached_signature_pair_keeps_grant_between_app_and_payer
+        PASS [   0.007s] (4/8) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::payer_callback_preserves_all_ordered_slots_and_operation_pins
+        PASS [   0.007s] (5/8) minidregg-spk-host agent_api_lifetime_custody_v3::tests::first_gitweb_http_has_exact_ordered_source_bytes_and_no_current_claims
+        PASS [   0.016s] (6/8) minidregg-spk-host agent_api_lifetime_custody_v3::tests::grant_observation_uses_its_own_exact_source_slot_and_seed
+        PASS [   0.022s] (7/8) minidregg-spk-host agent_api_lifetime_reverse_v3::tests::reverse_transport_accepts_bounded_double_frame_reply
+        PASS [   0.038s] (8/8) minidregg-spk-host agent_api_lifetime_custody_v3::tests::payer_signatures_cover_every_exact_ordered_source_slot
+────────────
+     Summary [   0.039s] 8 tests run: 8 passed, 152 skipped

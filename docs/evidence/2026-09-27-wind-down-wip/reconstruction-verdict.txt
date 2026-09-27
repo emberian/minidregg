@@ -1,0 +1,1 @@
+PASS: both patches apply to the named base in a separate plain scratch directory; all 13 reconstructed source hashes match. No build or native acceptance implied.

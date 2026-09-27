@@ -1,0 +1,6 @@
+Observed on frozen source SHA-256 main.rs 9d9356533bdf19e8da92c62596bc6cdb29f3610725eb90442d93d87789b261c4, application_api_tools.rs a81fa1d99244fc8f1c6b35571f59fbe72968c2d5b56d52796bc78721c7ac9b81, dispatch_custody.rs 5b14bd3abb70868980c827bd4a70b0d17b4d0beed4cb51bab1364e8a24280e08.
+cwd: native/grain-runtime
+command: cargo clippy --all-targets -- -D warnings
+exit: 0
+terminal verdict: Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.87s
+This is a recorded terminal verdict, not a captured raw Clippy log.
