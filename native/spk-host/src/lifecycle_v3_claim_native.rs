@@ -1,10 +1,11 @@
-//! Source-owned v3 launch claim plan and detached assembly. Fresh op26
-//! committed-v3 inspection is still unavailable, so no physical caller may
-//! promote these signed ingress bytes into an INSTALL or START permit.
-#![allow(dead_code)] // Awaiting native event24 receiver and committed inspector.
+//! Source-owned v3 launch claim plan, detached assembly, and fresh op26
+//! committed callback inspection. Physical INSTALL/START remains gated until
+//! the linked source receiver, completion, and volume joins qualify.
+#![allow(dead_code)] // Awaiting the physical v3 lifecycle caller.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
+use crate::hostd::VerifiedBegin;
 use crate::lifecycle_v3_native::{
     decimal, framed_payload, hex, lowercase_hex, sign_pinned_slots, text, AcceptedLaunchBegin,
     LaunchBeginAction,
@@ -14,13 +15,14 @@ use crate::resident_launch::SourceBoundLaunch;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::DirBuilder;
+use std::fs::{self, DirBuilder};
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-CLAIM-OPERATOR-PLAN/v1";
 const INGRESS_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v3";
+const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -44,6 +46,13 @@ fn previous_index(count: &str) -> io::Result<String> {
         .unwrap_or(bytes.len() - 1);
     String::from_utf8(bytes[first..].to_vec())
         .map_err(|_| invalid("v3 claim original BEGIN index malformed"))
+}
+
+fn later_decimal(value: &str, earlier: &str) -> bool {
+    decimal(value)
+        && decimal(earlier)
+        && (value.len() > earlier.len()
+            || (value.len() == earlier.len() && value.as_bytes() > earlier.as_bytes()))
 }
 
 #[derive(Deserialize)]
@@ -169,14 +178,14 @@ impl FixedLaunchClaimSigners {
         let binding = view
             .get("binding")
             .ok_or_else(|| invalid("v3 claim binding field absent"))?;
-        match begin.action {
+        match &begin.action {
             LaunchBeginAction::Install if !binding.is_null() => {
                 return Err(invalid("INSTALL claim unexpectedly selects a launch"));
             }
             LaunchBeginAction::Create(index) => {
                 let selected = descriptor
                     .create_digests
-                    .get(index)
+                    .get(*index)
                     .ok_or_else(|| invalid("v3 claim create index absent"))?;
                 if text(binding, "choice")? != "create"
                     || text(binding, "createIndex")? != index.to_string()
@@ -184,6 +193,24 @@ impl FixedLaunchClaimSigners {
                     || binding.get("priorCreate") != Some(&Value::Null)
                 {
                     return Err(invalid("v3 claim create choice differs from signed SPK"));
+                }
+            }
+            LaunchBeginAction::Continue { .. } => {
+                let prior = begin
+                    .prior_create
+                    .as_ref()
+                    .ok_or_else(|| invalid("v3 claim retained create witness absent"))?;
+                let selected = &descriptor.continue_digest;
+                let binding_prior = binding
+                    .get("priorCreate")
+                    .ok_or_else(|| invalid("v3 claim prior create binding absent"))?;
+                if text(binding, "choice")? != "continue"
+                    || binding.get("createIndex") != Some(&Value::Null)
+                    || text(binding, "commandDigest")? != selected
+                    || text(binding_prior, "receiptHex")? != prior.receipt_hex
+                    || text(binding_prior, "custodyHex")? != prior.custody_hex
+                {
+                    return Err(invalid("v3 claim continue witness differs from BEGIN"));
                 }
             }
             LaunchBeginAction::Install => {}
@@ -200,9 +227,23 @@ impl FixedLaunchClaimSigners {
 }
 
 pub(crate) struct AssembledLaunchClaim {
-    pub ingress: Vec<u8>,
-    pub original_index: String,
-    pub query_nonce: String,
+    attempt_dir: PathBuf,
+    active_marker: Vec<u8>,
+    begin_sha256: String,
+    descriptor_sha256: String,
+    ingress: Vec<u8>,
+    original_index: String,
+    query_nonce: String,
+}
+
+pub(crate) struct CommittedLaunchClaim {
+    pub committed: Vec<u8>,
+    pub inspection: Vec<u8>,
+    pub physical_begin: VerifiedBegin,
+    pub transaction_id: String,
+    pub event_id: String,
+    pub accepted_count: String,
+    pub image_boundary: String,
 }
 
 /// Current-image op68 plan plus detached op69 ingress. This does not submit
@@ -286,10 +327,233 @@ pub(crate) fn assemble_once(
     let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "claim-v3.bin", &ingress)?;
     Ok(AssembledLaunchClaim {
+        attempt_dir: attempt_dir.to_path_buf(),
+        active_marker: active,
+        begin_sha256: hex(&Sha256::digest(&begin.ingress)),
+        descriptor_sha256: hex(&Sha256::digest(&launch.descriptor().canonical)),
         ingress,
         original_index,
         query_nonce,
     })
+}
+
+fn checked_committed(
+    view: &Value,
+    committed: &[u8],
+    assembled: &AssembledLaunchClaim,
+    begin: &AcceptedLaunchBegin,
+    launch: &SourceBoundLaunch<'_>,
+    fixed: &FixedLaunchClaimSigners,
+) -> io::Result<(String, String, String, String)> {
+    let descriptor = launch.descriptor();
+    let kind = match &begin.action {
+        LaunchBeginAction::Install => "install",
+        LaunchBeginAction::Create(_) | LaunchBeginAction::Continue { .. } => "start",
+    };
+    if text(view, "type")? != "application-lifecycle-claim-committed-v3"
+        || text(view, "frameHex")? != hex(committed)
+        || text(view, "frameByteCount")? != committed.len().to_string()
+        || text(view, "originalClaimHex")? != hex(&assembled.ingress)
+        || text(view, "originalBeginHex")? != hex(&begin.ingress)
+        || text(view, "app")? != fixed.app
+        || text(view, "kind")? != kind
+        || text(view, "clientOperationId")? != begin.client_operation_id
+        || text(view, "authorizationOperationId")? != begin.authorization_operation_id
+        || text(view, "packageManifest")? != fixed.package_manifest
+        || text(view, "snapshotManifest")? != begin.snapshot_manifest
+        || text(view, "processGeneration")? != begin.process_generation
+        || text(view, "processIdentityHex")? != begin.process_identity_hex
+        || text(view, "descriptorHex")? != hex(&descriptor.canonical)
+        || text(view, "descriptorRoot")? != descriptor.root
+        || text(view, "volumeIdHex")? != begin.volume_id_hex
+        || text(view, "originalTransaction")? != begin.transaction_id
+        || text(view, "originalEvent")? != begin.event_id
+        || text(view, "imageIdentityHex")? != hex(&descriptor.package.image_identity)
+        || !decimal(text(view, "originalNullifier")?)
+        || !decimal(text(view, "claimNullifier")?)
+        || !decimal(text(view, "appPhysicalRoot")?)
+        || !decimal(text(view, "packagePhysicalRoot")?)
+        || !decimal(text(view, "authorityPhysicalRoot")?)
+        || !decimal(text(view, "postImageBoundary")?)
+    {
+        return Err(invalid(
+            "v3 committed claim differs from fresh ingress or signed SPK",
+        ));
+    }
+    let binding = view
+        .get("binding")
+        .ok_or_else(|| invalid("v3 committed claim binding absent"))?;
+    match &begin.action {
+        LaunchBeginAction::Install if !binding.is_null() => {
+            return Err(invalid(
+                "INSTALL committed claim unexpectedly selected launch",
+            ));
+        }
+        LaunchBeginAction::Create(index) => {
+            let digest = descriptor
+                .create_digests
+                .get(*index)
+                .ok_or_else(|| invalid("v3 committed create index absent"))?;
+            if text(binding, "choice")? != "create"
+                || text(binding, "createIndex")? != index.to_string()
+                || text(binding, "commandDigest")? != digest
+                || binding.get("priorCreate") != Some(&Value::Null)
+            {
+                return Err(invalid("v3 committed create binding differs"));
+            }
+        }
+        LaunchBeginAction::Continue { .. } => {
+            let prior = begin
+                .prior_create
+                .as_ref()
+                .ok_or_else(|| invalid("v3 committed continue witness absent"))?;
+            let committed_prior = binding
+                .get("priorCreate")
+                .ok_or_else(|| invalid("v3 committed prior create absent"))?;
+            if text(binding, "choice")? != "continue"
+                || binding.get("createIndex") != Some(&Value::Null)
+                || text(binding, "commandDigest")? != descriptor.continue_digest
+                || text(committed_prior, "receiptHex")? != prior.receipt_hex
+                || text(committed_prior, "custodyHex")? != prior.custody_hex
+            {
+                return Err(invalid("v3 committed continue witness differs"));
+            }
+        }
+        LaunchBeginAction::Install => {}
+    }
+    let receipt = view
+        .get("receipt")
+        .ok_or_else(|| invalid("v3 committed receipt absent"))?;
+    let receipt_field = |name| -> io::Result<String> {
+        let value = text(receipt, name)?;
+        if !decimal(value) {
+            return Err(invalid("v3 committed receipt noncanonical"));
+        }
+        Ok(value.to_owned())
+    };
+    let transaction_id = receipt_field("transactionId")?;
+    let event_id = receipt_field("eventId")?;
+    let accepted_count = receipt_field("acceptedCount")?;
+    let image_boundary = receipt_field("imageBoundary")?;
+    if !later_decimal(&accepted_count, &begin.accepted_count)
+        || image_boundary != text(view, "postImageBoundary")?
+    {
+        return Err(invalid(
+            "v3 committed receipt differs from claimed post-image",
+        ));
+    }
+    Ok((transaction_id, event_id, accepted_count, image_boundary))
+}
+
+/// Submit once to op26. Only its fresh-tip committed-v3 callback can arm a
+/// physical caller; an op27 receipt-only lookup never enters this path.
+pub(crate) fn submit_fresh_once(
+    operator: &PrivateOperator,
+    assembled: AssembledLaunchClaim,
+    begin: &AcceptedLaunchBegin,
+    launch: &SourceBoundLaunch<'_>,
+    fixed: &FixedLaunchClaimSigners,
+) -> io::Result<CommittedLaunchClaim> {
+    checked_assembled(&assembled, begin, launch)?;
+    let attempt_dir = &assembled.attempt_dir;
+    let marker = json!({
+        "protocol":"mini-spk-launch-claim-submit-requested-v1",
+        "originalIndex":assembled.original_index,
+        "queryNonce":assembled.query_nonce,
+        "ingressSha256":hex(&Sha256::digest(&assembled.ingress)),
+        "originalBeginSha256":hex(&Sha256::digest(&begin.ingress)),
+    });
+    write_new(
+        attempt_dir,
+        "op26-requested.json",
+        &serde_json::to_vec(&marker)?,
+    )?;
+    let reply = operator.invoke(26, &assembled.ingress)?;
+    write_new(attempt_dir, "op26-frame.bin", &reply)?;
+    let committed = framed_payload(&reply, 26, COMMITTED_TAG)?.to_vec();
+    let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
+    let inspection = operator.tool(
+        "inspect",
+        "application-lifecycle-claim-committed-v3",
+        &committed_path,
+        &attempt_dir.join("committed-v3.json"),
+    )?;
+    let view: Value = serde_json::from_slice(&inspection)?;
+    let (transaction_id, event_id, accepted_count, image_boundary) =
+        checked_committed(&view, &committed, &assembled, begin, launch, fixed)?;
+    let physical_begin = verified_physical_begin(fixed, begin, launch, &transaction_id, &event_id)?;
+    Ok(CommittedLaunchClaim {
+        committed,
+        inspection,
+        physical_begin,
+        transaction_id,
+        event_id,
+        accepted_count,
+        image_boundary,
+    })
+}
+
+fn verified_physical_begin(
+    fixed: &FixedLaunchClaimSigners,
+    begin: &AcceptedLaunchBegin,
+    launch: &SourceBoundLaunch<'_>,
+    transaction_id: &str,
+    event_id: &str,
+) -> io::Result<VerifiedBegin> {
+    let app: u64 = fixed
+        .app
+        .parse()
+        .map_err(|_| invalid("v3 claimed app exceeds host unit range"))?;
+    let generation: u64 = begin
+        .process_generation
+        .parse()
+        .map_err(|_| invalid("v3 claimed generation exceeds host unit range"))?;
+    let operation_id: u64 = begin
+        .authorization_operation_id
+        .parse()
+        .map_err(|_| invalid("v3 claimed operation exceeds host journal range"))?;
+    if app == 0 || generation == 0 || !decimal(transaction_id) || !decimal(event_id) {
+        return Err(invalid("v3 claimed physical identity malformed"));
+    }
+    let unit = format!("mini-spk-a{app}-g{generation}.service");
+    if begin.process_identity_hex != hex(unit.as_bytes()) {
+        return Err(invalid("v3 claimed unit differs from inspected BEGIN"));
+    }
+    Ok(VerifiedBegin {
+        app,
+        generation,
+        operation_id,
+        transaction_id: transaction_id.to_owned(),
+        event_id: event_id.to_owned(),
+        package_sha256: launch.signed_package_sha256().to_owned(),
+        image_identity: hex(&launch.descriptor().package.image_identity),
+        process_identity: unit.clone(),
+        unit,
+    })
+}
+
+fn checked_assembled(
+    assembled: &AssembledLaunchClaim,
+    begin: &AcceptedLaunchBegin,
+    launch: &SourceBoundLaunch<'_>,
+) -> io::Result<()> {
+    let attempt_dir = &assembled.attempt_dir;
+    private_dir(attempt_dir)?;
+    let parent = attempt_dir
+        .parent()
+        .ok_or_else(|| invalid("v3 claim attempt parent absent"))?;
+    private_dir(parent)?;
+    if fs::read(parent.join("lifecycle-claim-v3-active.json"))? != assembled.active_marker
+        || fs::read(attempt_dir.join("claim-v3.bin"))? != assembled.ingress
+        || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
+        || assembled.descriptor_sha256 != hex(&Sha256::digest(&launch.descriptor().canonical))
+    {
+        return Err(invalid("v3 claim attempt artifacts differ before submit"));
+    }
+    if !decimal(&assembled.original_index) || !decimal(&assembled.query_nonce) {
+        return Err(invalid("v3 assembled claim identity malformed"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -299,6 +563,8 @@ mod tests {
     use crate::launch_descriptor_native::SourceLaunchDescriptor;
     use crate::materialize::InstalledPackage;
     use sandstorm_package::{manifest::Action, manifest::Command as SpkCommand, SpkManifest};
+    use std::os::unix::fs::DirBuilderExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn launch() -> SourceBoundLaunch<'static> {
         let manifest: SpkManifest = serde_json::from_value(json!({
@@ -348,6 +614,14 @@ mod tests {
             previous_index("100000000000000000000").unwrap(),
             "99999999999999999999"
         );
+        assert!(later_decimal(
+            "100000000000000000000",
+            "99999999999999999999"
+        ));
+        assert!(!later_decimal(
+            "99999999999999999999",
+            "100000000000000000000"
+        ));
         for bad in ["0", "01", "", "-1"] {
             assert!(previous_index(bad).is_err());
         }
@@ -372,9 +646,13 @@ mod tests {
         let begin = AcceptedLaunchBegin {
             ingress: b"original begin".to_vec(),
             action: LaunchBeginAction::Create(0),
+            prior_create: None,
             client_operation_id: "7".into(),
             authorization_operation_id: "8".into(),
             volume_id_hex: "aa".repeat(32),
+            snapshot_manifest: "16".into(),
+            process_generation: "2".into(),
+            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "12".into(),
@@ -437,5 +715,200 @@ mod tests {
         }
         plan["binding"]["commandDigest"] = Value::String("44".into());
         assert!(fixed.checked_plan_slots(&plan, &evidence).is_err());
+    }
+
+    #[test]
+    fn continue_claim_requires_same_created_receipt_and_custody_as_begin() {
+        let launch = launch();
+        let begin = AcceptedLaunchBegin {
+            ingress: b"continued begin".to_vec(),
+            action: LaunchBeginAction::Continue {
+                created_index: "7".into(),
+            },
+            prior_create: Some(crate::lifecycle_v3_native::CreatedWitness {
+                receipt_hex: "abcd".into(),
+                custody_hex: "ef01".into(),
+            }),
+            client_operation_id: "8".into(),
+            authorization_operation_id: "9".into(),
+            volume_id_hex: "aa".repeat(32),
+            snapshot_manifest: "16".into(),
+            process_generation: "2".into(),
+            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            transaction_id: "10".into(),
+            event_id: "11".into(),
+            accepted_count: "12".into(),
+            image_boundary: "13".into(),
+        };
+        let fixed = FixedLaunchClaimSigners {
+            protocol: "mini-spk-resident-claim-management-v1".into(),
+            app: "5".into(),
+            package_manifest: "6".into(),
+            management_subject: "4".into(),
+            signers: vec![],
+        };
+        let mut plan = json!({
+            "type":"application-lifecycle-launch-claim-plan-v1",
+            "canonicalPlanHex":"706c616e", "canonicalRequestHex":"72657175657374",
+            "originalBeginHex":hex(&begin.ingress),
+            "descriptorHex":hex(&launch.descriptor().canonical), "descriptorRoot":"22",
+            "volumeIdHex":begin.volume_id_hex, "clientOperationId":"8",
+            "authorizationOperationId":"9", "originalIndex":"11", "queryNonce":"14",
+            "app":"5", "managementSubject":"4",
+            "originalBeginTransactionId":"10", "originalBeginEventId":"11",
+            "originalBeginAcceptedCount":"12", "originalBeginImageBoundary":"13",
+            "originalBeginReceiptHex":"ab", "sourceHex":"cd",
+            "currentAuthorityRoot":"1", "currentAppRoot":"2",
+            "currentPackageRoot":"3", "currentImageBoundary":"4",
+            "imageBoundary":"5", "height":"6",
+            "binding":{"choice":"continue","createIndex":null,"commandDigest":"44",
+                       "priorCreate":{"receiptHex":"abcd","custodyHex":"ef01"}},
+            "slots":[],
+        });
+        let evidence = ClaimPlanEvidence {
+            plan: b"plan",
+            request: b"request",
+            begin: &begin,
+            launch: &launch,
+            original_index: "11",
+            query_nonce: "14",
+        };
+        assert!(fixed.checked_plan_slots(&plan, &evidence).is_ok());
+        plan["binding"]["priorCreate"]["custodyHex"] = json!("ef02");
+        assert!(fixed.checked_plan_slots(&plan, &evidence).is_err());
+    }
+
+    #[test]
+    fn committed_claim_must_echo_fresh_frame_and_original_authority() {
+        let launch = launch();
+        let begin = AcceptedLaunchBegin {
+            ingress: b"begin".to_vec(),
+            action: LaunchBeginAction::Create(0),
+            prior_create: None,
+            client_operation_id: "7".into(),
+            authorization_operation_id: "8".into(),
+            volume_id_hex: "aa".repeat(32),
+            snapshot_manifest: "16".into(),
+            process_generation: "2".into(),
+            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            transaction_id: "9".into(),
+            event_id: "10".into(),
+            accepted_count: "11".into(),
+            image_boundary: "12".into(),
+        };
+        let assembled = AssembledLaunchClaim {
+            attempt_dir: "/protected/claim-attempt".into(),
+            active_marker: b"active".to_vec(),
+            begin_sha256: hex(&Sha256::digest(b"begin")),
+            descriptor_sha256: hex(&Sha256::digest(&launch.descriptor().canonical)),
+            ingress: b"claim".to_vec(),
+            original_index: "10".into(),
+            query_nonce: "14".into(),
+        };
+        let fixed = FixedLaunchClaimSigners {
+            protocol: "mini-spk-resident-claim-management-v1".into(),
+            app: "5".into(),
+            package_manifest: "6".into(),
+            management_subject: "4".into(),
+            signers: vec![],
+        };
+        let committed = b"committed";
+        let mut view = json!({
+            "type":"application-lifecycle-claim-committed-v3",
+            "frameHex":hex(committed), "frameByteCount":committed.len().to_string(),
+            "originalClaimHex":hex(&assembled.ingress),
+            "originalBeginHex":hex(&begin.ingress),
+            "app":"5", "kind":"start", "clientOperationId":"7",
+            "authorizationOperationId":"8", "packageManifest":"6",
+            "snapshotManifest":"16", "processGeneration":"2",
+            "processIdentityHex":begin.process_identity_hex,
+            "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
+            "descriptorHex":hex(&launch.descriptor().canonical),
+            "descriptorRoot":"22", "volumeIdHex":begin.volume_id_hex,
+            "originalTransaction":"9", "originalEvent":"10",
+            "originalNullifier":"15", "claimNullifier":"16",
+            "appPhysicalRoot":"17", "packagePhysicalRoot":"18",
+            "authorityPhysicalRoot":"19", "postImageBoundary":"24",
+            "binding":{"choice":"create","createIndex":"0",
+                       "commandDigest":"33","priorCreate":null},
+            "receipt":{"transactionId":"21","eventId":"22",
+                       "acceptedCount":"23","imageBoundary":"24"}
+        });
+        assert_eq!(
+            checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).unwrap(),
+            ("21".into(), "22".into(), "23".into(), "24".into())
+        );
+        let identity = verified_physical_begin(&fixed, &begin, &launch, "21", "22").unwrap();
+        assert_eq!(identity.unit, "mini-spk-a5-g2.service");
+        assert_eq!(identity.package_sha256, "a".repeat(64));
+        assert_eq!(identity.transaction_id, "21");
+        for (field, changed) in [
+            ("frameHex", "00"),
+            ("originalClaimHex", "00"),
+            ("originalBeginHex", "00"),
+            ("volumeIdHex", "00"),
+            ("originalTransaction", "99"),
+            ("postImageBoundary", "20"),
+        ] {
+            let saved = view[field].clone();
+            view[field] = json!(changed);
+            assert!(
+                checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).is_err()
+            );
+            view[field] = saved;
+        }
+        view["receipt"]["acceptedCount"] = json!("023");
+        assert!(checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).is_err());
+        view["receipt"]["acceptedCount"] = json!("11");
+        assert!(checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).is_err());
+    }
+
+    #[test]
+    fn assembled_claim_preflight_binds_one_parent_marker_begin_and_descriptor() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!(
+            "spk-v3-claim-active-{}-{stamp}",
+            std::process::id()
+        ));
+        DirBuilder::new().mode(0o700).create(&parent).unwrap();
+        let attempt_dir = parent.join("attempt");
+        DirBuilder::new().mode(0o700).create(&attempt_dir).unwrap();
+        let launch = launch();
+        let mut begin = AcceptedLaunchBegin {
+            ingress: b"begin".to_vec(),
+            action: LaunchBeginAction::Install,
+            prior_create: None,
+            client_operation_id: "7".into(),
+            authorization_operation_id: "8".into(),
+            volume_id_hex: "aa".repeat(32),
+            snapshot_manifest: "16".into(),
+            process_generation: "2".into(),
+            process_identity_hex: hex(b"mini-spk-a5-g2.service"),
+            transaction_id: "9".into(),
+            event_id: "10".into(),
+            accepted_count: "11".into(),
+            image_boundary: "12".into(),
+        };
+        let assembled = AssembledLaunchClaim {
+            attempt_dir: attempt_dir.clone(),
+            active_marker: b"active".to_vec(),
+            begin_sha256: hex(&Sha256::digest(&begin.ingress)),
+            descriptor_sha256: hex(&Sha256::digest(&launch.descriptor().canonical)),
+            ingress: b"claim".to_vec(),
+            original_index: "10".into(),
+            query_nonce: "13".into(),
+        };
+        write_new(&parent, "lifecycle-claim-v3-active.json", b"active").unwrap();
+        write_new(&attempt_dir, "claim-v3.bin", b"claim").unwrap();
+        assert!(checked_assembled(&assembled, &begin, &launch).is_ok());
+        begin.ingress = b"different begin".to_vec();
+        assert!(checked_assembled(&assembled, &begin, &launch).is_err());
+        begin.ingress = b"begin".to_vec();
+        fs::write(attempt_dir.join("claim-v3.bin"), b"different claim").unwrap();
+        assert!(checked_assembled(&assembled, &begin, &launch).is_err());
+        fs::remove_dir_all(&parent).unwrap();
     }
 }

@@ -1,0 +1,22 @@
+Running as unit: run-r7555dd9cba604aad8ca004fc249a5b22.scope; invocation ID: 9733d97c689440a0999047ce58fe3c38
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.82s
+────────────
+ Nextest run ID 5a9f94b2-c275-4285-bf35-d5d92b5cf8a6 with nextest profile: default
+    Starting 14 tests across 1 binary (115 tests skipped)
+        PASS [   0.006s] ( 1/14) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_frame_cannot_be_v2_or_wrong_opcode
+        PASS [   0.007s] ( 2/14) minidregg-spk-host lifecycle_v3_claim_native::tests::assembled_claim_preflight_binds_one_parent_marker_begin_and_descriptor
+        PASS [   0.006s] ( 3/14) minidregg-spk-host lifecycle_v3_claim_native::tests::committed_claim_must_echo_fresh_frame_and_original_authority
+        PASS [   0.006s] ( 4/14) minidregg-spk-host lifecycle_v3_claim_native::tests::claim_plan_joins_original_receipt_volume_and_selected_command
+        PASS [   0.006s] ( 5/14) minidregg-spk-host lifecycle_v3_claim_native::tests::continue_claim_requires_same_created_receipt_and_custody_as_begin
+        PASS [   0.006s] ( 6/14) minidregg-spk-host lifecycle_v3_claim_native::tests::original_index_carries_full_nat_without_u64_truncation
+        PASS [   0.007s] ( 7/14) minidregg-spk-host lifecycle_v3_native::tests::inspected_unit_and_image_are_joined_to_signed_spk
+        PASS [   0.007s] ( 8/14) minidregg-spk-host lifecycle_v3_native::tests::continue_plan_requires_retained_created_witness_and_exact_digest
+        PASS [   0.008s] ( 9/14) minidregg-spk-host lifecycle_v3_native::tests::plan_pin_uses_launch_root_for_installed_package_and_exact_request
+        PASS [   0.008s] (10/14) minidregg-spk-host lifecycle_v3_native::tests::request_requires_source_owned_launch_and_exact_create_selection
+        PASS [   0.007s] (11/14) minidregg-spk-host lifecycle_v3_native::tests::v3_plan_and_ingress_reply_tags_cannot_accept_historical_payload
+        PASS [   0.007s] (12/14) minidregg-spk-host lifecycle_v3_native::tests::uncertain_begin_attempt_blocks_new_client_id_in_same_journal
+        PASS [   0.007s] (13/14) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+        PASS [   0.008s] (14/14) minidregg-spk-host resident_launch::tests::inspected_create_index_and_digest_select_exact_signed_action
+────────────
+     Summary [   0.049s] 14 tests run: 14 passed, 115 skipped

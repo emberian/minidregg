@@ -59,6 +59,10 @@ impl<'a> SourceBoundLaunch<'a> {
         &self.descriptor
     }
 
+    pub(crate) fn signed_package_sha256(&self) -> &str {
+        &self.package.raw_sha256
+    }
+
     /// Select only the signed create command named by Mini's inspected v3
     /// BEGIN/claim. No default action or `continueCommand` may substitute.
     pub(crate) fn source_selected_create(
@@ -83,6 +87,18 @@ impl<'a> SourceBoundLaunch<'a> {
             .get(index)
             .map(|action| &action.command)
             .ok_or_else(|| invalid("source create selection absent from signed SPK"))
+    }
+
+    /// Continue is selected only by the source-inspected v3 BEGIN with a
+    /// retained successful create witness. The caller must compare that
+    /// witness to the committed claim before opening the physical volume.
+    pub(crate) fn source_selected_continue(&self, source_digest: &str) -> io::Result<&SpkCommand> {
+        if self.descriptor.continue_digest != source_digest {
+            return Err(invalid(
+                "source continue selection differs from signed launch descriptor",
+            ));
+        }
+        Ok(&self.package.manifest.continue_command)
     }
 }
 
@@ -280,5 +296,10 @@ mod tests {
         );
         assert!(bound.source_selected_create(1, "3").is_err());
         assert!(bound.source_selected_create(2, "4").is_err());
+        assert_eq!(
+            bound.source_selected_continue("5").unwrap().argv,
+            ["/continue"]
+        );
+        assert!(bound.source_selected_continue("4").is_err());
     }
 }

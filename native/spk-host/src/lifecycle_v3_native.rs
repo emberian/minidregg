@@ -153,43 +153,66 @@ pub(crate) fn sign_pinned_slots(slots: &[Value], pins: &[SignerPin]) -> io::Resu
     Ok(Value::Array(signatures))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum LaunchBeginAction {
     Install,
     Create(usize),
+    /// A retained successful create is selected by its verified native index.
+    /// The receipt and custody are supplied only by Mini's inspected plan.
+    Continue {
+        created_index: String,
+    },
 }
 
 impl LaunchBeginAction {
-    fn kind(self) -> &'static str {
+    fn kind(&self) -> &'static str {
         match self {
             Self::Install => "install",
             Self::Create(_) => "start",
+            Self::Continue { .. } => "continue",
         }
     }
 
-    fn create_index(self) -> Value {
+    fn author_kind(&self) -> &'static str {
+        match self {
+            Self::Continue { .. } => "application-lifecycle-launch-continue-request",
+            _ => "application-lifecycle-launch-begin-request",
+        }
+    }
+
+    fn create_index(&self) -> Value {
         match self {
             Self::Install => Value::Null,
             Self::Create(index) => Value::String(index.to_string()),
+            Self::Continue { .. } => Value::Null,
         }
     }
 
-    fn selected_digest<'a>(self, launch: &'a SourceBoundLaunch<'_>) -> io::Result<Option<&'a str>> {
+    fn selected_digest<'a>(
+        &self,
+        launch: &'a SourceBoundLaunch<'_>,
+    ) -> io::Result<Option<&'a str>> {
         match self {
             Self::Install => Ok(None),
             Self::Create(index) => launch
                 .descriptor()
                 .create_digests
-                .get(index)
+                .get(*index)
                 .map(String::as_str)
                 .map(Some)
                 .ok_or_else(|| invalid("v3 BEGIN create index absent from signed descriptor")),
+            Self::Continue { created_index } => {
+                if !decimal(created_index) {
+                    return Err(invalid("v3 BEGIN created index noncanonical"));
+                }
+                Ok(Some(&launch.descriptor().continue_digest))
+            }
         }
     }
 }
 
 fn request_json(
-    action: LaunchBeginAction,
+    action: &LaunchBeginAction,
     client_operation_id: &str,
     launch: &SourceBoundLaunch<'_>,
 ) -> io::Result<Value> {
@@ -200,12 +223,25 @@ fn request_json(
         return Err(invalid("v3 BEGIN client operation or descriptor refused"));
     }
     action.selected_digest(launch)?;
-    Ok(json!({
-        "kind":action.kind(),
-        "clientOperationId":client_operation_id,
-        "descriptor":hex(&launch.descriptor().canonical),
-        "createIndex":action.create_index(),
-    }))
+    Ok(match action {
+        LaunchBeginAction::Continue { created_index } => json!({
+            "clientOperationId":client_operation_id,
+            "descriptor":hex(&launch.descriptor().canonical),
+            "createdIndex":created_index,
+        }),
+        _ => json!({
+            "kind":action.kind(),
+            "clientOperationId":client_operation_id,
+            "descriptor":hex(&launch.descriptor().canonical),
+            "createIndex":action.create_index(),
+        }),
+    })
+}
+
+#[derive(Clone)]
+pub(crate) struct CreatedWitness {
+    pub receipt_hex: String,
+    pub custody_hex: String,
 }
 
 #[derive(Deserialize)]
@@ -287,10 +323,10 @@ impl FixedLaunchBeginSigners {
         view: &'a Value,
         plan: &[u8],
         request: &[u8],
-        action: LaunchBeginAction,
+        action: &LaunchBeginAction,
         client_operation_id: &str,
         launch: &SourceBoundLaunch<'_>,
-    ) -> io::Result<&'a [Value]> {
+    ) -> io::Result<(&'a [Value], Option<CreatedWitness>)> {
         let descriptor = launch.descriptor();
         let selected = action.selected_digest(launch)?;
         let nested = view
@@ -300,10 +336,15 @@ impl FixedLaunchBeginSigners {
             || text(view, "canonicalPlanHex")? != hex(plan)
             || text(view, "canonicalRequestHex")? != hex(request)
             || text(nested, "canonicalRequestHex")? != hex(request)
+            || text(nested, "type")?
+                != if matches!(action, LaunchBeginAction::Continue { .. }) {
+                    "application-lifecycle-launch-continue-request-v1"
+                } else {
+                    "application-lifecycle-launch-begin-request-v1"
+                }
             || text(nested, "kind")? != action.kind()
             || text(nested, "clientOperationId")? != client_operation_id
             || text(nested, "descriptorHex")? != hex(&descriptor.canonical)
-            || nested.get("createIndex") != Some(&action.create_index())
             || text(view, "app")? != self.app
             || text(view, "packageManifest")? != self.package_manifest
             || text(view, "snapshotManifest")? != self.snapshot_manifest
@@ -322,6 +363,37 @@ impl FixedLaunchBeginSigners {
         {
             return Err(invalid("v3 BEGIN plan differs from fixed signed launch"));
         }
+        let prior_create = match action {
+            LaunchBeginAction::Continue { created_index } => {
+                if text(nested, "createdIndex")? != created_index {
+                    return Err(invalid("v3 BEGIN created index differs from request"));
+                }
+                let prior = view
+                    .get("priorCreate")
+                    .ok_or_else(|| invalid("v3 BEGIN prior create witness absent"))?;
+                let receipt_hex = text(prior, "receiptHex")?;
+                let custody_hex = text(prior, "custodyHex")?;
+                if receipt_hex.is_empty()
+                    || custody_hex.is_empty()
+                    || !lowercase_hex(receipt_hex)
+                    || !lowercase_hex(custody_hex)
+                {
+                    return Err(invalid("v3 BEGIN prior create witness malformed"));
+                }
+                Some(CreatedWitness {
+                    receipt_hex: receipt_hex.to_owned(),
+                    custody_hex: custody_hex.to_owned(),
+                })
+            }
+            _ => {
+                if nested.get("createIndex") != Some(&action.create_index())
+                    || view.get("priorCreate") != Some(&Value::Null)
+                {
+                    return Err(invalid("v3 BEGIN unexpected prior create witness"));
+                }
+                None
+            }
+        };
         checked_physical_identity(view, launch)?;
         let slots = view
             .get("slots")
@@ -330,7 +402,7 @@ impl FixedLaunchBeginSigners {
         if slots.len() != self.signers.len() {
             return Err(invalid("v3 BEGIN signing slot count differs"));
         }
-        Ok(slots)
+        Ok((slots, prior_create))
     }
 
     fn signatures(
@@ -338,22 +410,26 @@ impl FixedLaunchBeginSigners {
         view: &Value,
         plan: &[u8],
         request: &[u8],
-        action: LaunchBeginAction,
+        action: &LaunchBeginAction,
         client_operation_id: &str,
         launch: &SourceBoundLaunch<'_>,
-    ) -> io::Result<Value> {
-        let slots =
+    ) -> io::Result<(Value, Option<CreatedWitness>)> {
+        let (slots, prior_create) =
             self.checked_plan_slots(view, plan, request, action, client_operation_id, launch)?;
-        sign_pinned_slots(slots, &self.signers)
+        Ok((sign_pinned_slots(slots, &self.signers)?, prior_create))
     }
 }
 
 pub(crate) struct AcceptedLaunchBegin {
     pub ingress: Vec<u8>,
     pub action: LaunchBeginAction,
+    pub prior_create: Option<CreatedWitness>,
     pub client_operation_id: String,
     pub authorization_operation_id: String,
     pub volume_id_hex: String,
+    pub snapshot_manifest: String,
+    pub process_generation: String,
+    pub process_identity_hex: String,
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
@@ -378,11 +454,11 @@ pub(crate) fn submit_once(
     private_dir(parent)?;
     DirBuilder::new().mode(0o700).create(attempt_dir)?;
     let client_operation_id = allocate_operation_id(ledger)?;
-    let source = request_json(action, &client_operation_id, launch)?;
+    let source = request_json(&action, &client_operation_id, launch)?;
     let source_path = write_new(attempt_dir, "request.json", &serde_json::to_vec(&source)?)?;
     let request = operator.tool(
         "author",
-        "application-lifecycle-launch-begin-request",
+        action.author_kind(),
         &source_path,
         &attempt_dir.join("request.bin"),
     )?;
@@ -408,8 +484,8 @@ pub(crate) fn submit_once(
         &attempt_dir.join("plan.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspection)?;
-    let signatures =
-        fixed.signatures(&view, plan, &request, action, &client_operation_id, launch)?;
+    let (signatures, prior_create) =
+        fixed.signatures(&view, plan, &request, &action, &client_operation_id, launch)?;
     let signatures_path = write_new(
         attempt_dir,
         "signatures.json",
@@ -466,9 +542,13 @@ pub(crate) fn submit_once(
     Ok(AcceptedLaunchBegin {
         ingress,
         action,
+        prior_create,
         client_operation_id,
         authorization_operation_id: text(&view, "authorizationOperationId")?.to_owned(),
         volume_id_hex: text(&view, "volumeIdHex")?.to_owned(),
+        snapshot_manifest: text(&view, "snapshotManifest")?.to_owned(),
+        process_generation: text(&view, "processGeneration")?.to_owned(),
+        process_identity_hex: text(&view, "processIdentityHex")?.to_owned(),
         transaction_id: receipt("transactionId")?,
         event_id: receipt("eventId")?,
         accepted_count: receipt("acceptedCount")?,
@@ -532,13 +612,31 @@ mod tests {
     #[test]
     fn request_requires_source_owned_launch_and_exact_create_selection() {
         let launch = launch();
-        let install = request_json(LaunchBeginAction::Install, "7", &launch).unwrap();
+        let install = request_json(&LaunchBeginAction::Install, "7", &launch).unwrap();
         assert_eq!(install["createIndex"], Value::Null);
         assert_eq!(install["descriptor"], "6c61756e6368");
-        let create = request_json(LaunchBeginAction::Create(0), "7", &launch).unwrap();
+        let create = request_json(&LaunchBeginAction::Create(0), "7", &launch).unwrap();
         assert_eq!(create["createIndex"], "0");
-        assert!(request_json(LaunchBeginAction::Create(1), "7", &launch).is_err());
-        assert!(request_json(LaunchBeginAction::Install, "07", &launch).is_err());
+        assert!(request_json(&LaunchBeginAction::Create(1), "7", &launch).is_err());
+        assert!(request_json(&LaunchBeginAction::Install, "07", &launch).is_err());
+        let continued = request_json(
+            &LaunchBeginAction::Continue {
+                created_index: "12345678901234567890".into(),
+            },
+            "7",
+            &launch,
+        )
+        .unwrap();
+        assert_eq!(continued["createdIndex"], "12345678901234567890");
+        assert!(continued.get("createIndex").is_none());
+        assert!(request_json(
+            &LaunchBeginAction::Continue {
+                created_index: "01".into(),
+            },
+            "7",
+            &launch
+        )
+        .is_err());
     }
 
     #[test]
@@ -590,6 +688,7 @@ mod tests {
             "canonicalPlanHex":hex(plan),
             "canonicalRequestHex":hex(request),
             "request":{
+                "type":"application-lifecycle-launch-begin-request-v1",
                 "canonicalRequestHex":hex(request), "kind":"install",
                 "clientOperationId":"7", "descriptorHex":hex(&launch.descriptor().canonical),
                 "createIndex":null
@@ -603,14 +702,14 @@ mod tests {
             "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
             "imageBoundary":"10", "height":"11",
-            "selectedCommandDigest":null, "slots":[]
+            "selectedCommandDigest":null, "priorCreate":null, "slots":[]
         });
         fixed
             .checked_plan_slots(
                 &view,
                 plan,
                 request,
-                LaunchBeginAction::Install,
+                &LaunchBeginAction::Install,
                 "7",
                 &launch,
             )
@@ -621,7 +720,7 @@ mod tests {
                 &view,
                 plan,
                 request,
-                LaunchBeginAction::Install,
+                &LaunchBeginAction::Install,
                 "7",
                 &launch
             )
@@ -633,10 +732,63 @@ mod tests {
                 &view,
                 plan,
                 request,
-                LaunchBeginAction::Install,
+                &LaunchBeginAction::Install,
                 "7",
                 &launch
             )
+            .is_err());
+    }
+
+    #[test]
+    fn continue_plan_requires_retained_created_witness_and_exact_digest() {
+        let launch = launch();
+        let fixed = FixedLaunchBeginSigners {
+            protocol: "mini-spk-resident-begin-management-v1".into(),
+            app: "8401".into(),
+            package_manifest: "17".into(),
+            snapshot_manifest: "18".into(),
+            management_subject: "19".into(),
+            signers: vec![],
+        };
+        let action = LaunchBeginAction::Continue {
+            created_index: "77".into(),
+        };
+        let plan = b"source-plan";
+        let request = b"source-request";
+        let mut view = json!({
+            "type":"application-lifecycle-launch-begin-plan-v1",
+            "canonicalPlanHex":hex(plan), "canonicalRequestHex":hex(request),
+            "request":{
+                "type":"application-lifecycle-launch-continue-request-v1",
+                "canonicalRequestHex":hex(request), "kind":"continue",
+                "clientOperationId":"7", "descriptorHex":hex(&launch.descriptor().canonical),
+                "createdIndex":"77"
+            },
+            "unsignedIngressHex":"01", "app":"8401",
+            "packageManifest":"17", "snapshotManifest":"18",
+            "managementSubject":"19", "authorizationOperationId":"123",
+            "volumeIdHex":"a".repeat(64), "descriptorRoot":"22", "packageRoot":"22",
+            "beforeGeneration":"1", "processGeneration":"2",
+            "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
+            "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
+            "imageBoundary":"10", "height":"11",
+            "selectedCommandDigest":"44",
+            "priorCreate":{"receiptHex":"abcd","custodyHex":"ef01"}, "slots":[]
+        });
+        let (_, witness) = fixed
+            .checked_plan_slots(&view, plan, request, &action, "7", &launch)
+            .unwrap();
+        let witness = witness.unwrap();
+        assert_eq!(witness.receipt_hex, "abcd");
+        assert_eq!(witness.custody_hex, "ef01");
+        view["priorCreate"]["custodyHex"] = json!("XX");
+        assert!(fixed
+            .checked_plan_slots(&view, plan, request, &action, "7", &launch)
+            .is_err());
+        view["priorCreate"]["custodyHex"] = json!("ef01");
+        view["selectedCommandDigest"] = json!("33");
+        assert!(fixed
+            .checked_plan_slots(&view, plan, request, &action, "7", &launch)
             .is_err());
     }
 
