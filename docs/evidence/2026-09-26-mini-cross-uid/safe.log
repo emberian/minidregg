@@ -1,0 +1,56 @@
+Cross-UID signed Mini acceptance, private fresh Store, 2026-09-26
+Source commits: Host d413 certified; Mini client d52077e; frontend source SHA d4f8941256185eb2745517e4aac1814e78a76b27763f701a37c3dd2dfbf3c7d7
+d413081bb6c6ac1c0699b5fdc22cf3a13fb87930ff49ac147ae994e2c364e7a3  /tmp/mini-cross-account-bin-20260926/host
+fee5bc861d74c9e432db2374ede36b62852a80346a46f1dc89133dfa79bf11eb  /tmp/mini-cross-account-bin-20260926/mini-v2-current
+0675e61e6ae9517439f2eec29fa8c740c069f9f1f52e25e84ba463e6192140dd  /tmp/mini-cross-account-bin-20260926/host-frontend-qualified
+d4f8941256185eb2745517e4aac1814e78a76b27763f701a37c3dd2dfbf3c7d7  /tmp/mini-cross-account-front-20260926/source/host-frontend.rs
+Fresh provision signed final initial view:
+{"root":"97349327118568466779609446662939988221287696762075284738918673226692685974561","entries":0}
+Task UIDs and public/private path permissions:
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+/tmp/mini-cross-account-signed-20260926-r1 ember:ember 700
+/tmp/mini-cross-uid-gate-20260926/private ember:ember 700
+/tmp/mini-cross-front-nobody-signed-20260926 ember:ember 710
+/tmp/mini-cross-front-daemon-signed-20260926 ember:ember 710
+/tmp/mini-cross-task-nobody-20260926 nobody:nogroup 700
+/tmp/mini-cross-task-daemon-20260926 daemon:daemon 700
+A initial read:
+{"root":"97349327118568466779609446662939988221287696762075284738918673226692685974561","entries":0}
+A create outcome and call SHA:
+{"type":"confirmed","confirmation":"installed","acceptedCount":"10"}
+72909f1444757620e864124371b22b3be024aaf5ffd52413fde04dc048a41688  /tmp/mini-cross-task-nobody-20260926/a-create-attempt/call.bin
+B read after A:
+{"root":"50285950846470776696093012463001984693164252299238213771378138103374475932470","entries":1,"creator":{"capability":"95","capabilityKind":"object","subject":"8"}}
+B edit outcome and call SHA:
+{"type":"confirmed","confirmation":"installed","acceptedCount":"11"}
+b719b98d8d1f6759518e3debda833833417d25b49dec379d80c96ff4240a038b  /tmp/mini-cross-task-daemon-20260926/b-edit-attempt/call.bin
+Final independent signed reads:
+{"root":"114747236347917914506268887728013117709482223438691102631235357426231257003243","entries":1}
+{"root":"114747236347917914506268887728013117709482223438691102631235357426231257003243","entries":1}
+Cross-grant refusals; signed observation hashes; no view files:
+3c533cdd19f17f173fa7696cd387ff0d731f0b8ed066efa5498e218a2de5c13c  /tmp/mini-cross-task-nobody-20260926/a-cross-grant-denied/signed-observation.bin
+e70e5de97192115bc1fe82cd277e4b9aa2b3e4bf3e4aecfe5f348c51f087969c  /tmp/mini-cross-task-daemon-20260926/b-cross-grant-denied/signed-observation.bin
+PASS: both cross-grant queries had signed observation refused and no view
+Privacy check:
+PASS: nobody own public config readable; other key/config and operator config/Store denied
+PASS: daemon own public config readable; other key/config and operator config/Store denied
+Physical services:
+MainPID=509695
+Id=mini-cross-signed-host-20260926.service
+ActiveState=active
+
+MainPID=541186
+Id=mini-cross-signed-front-nobody-20260926.service
+ActiveState=active
+
+MainPID=541187
+Id=mini-cross-signed-front-daemon-20260926.service
+ActiveState=active
+Exact native outcome and signed final view hashes:
+a76ecbddb6fe41964a49035389a1483f9fd76383ff200982150e5018969da8d7  /tmp/mini-cross-task-nobody-20260926/a-create-attempt/outcome.bin
+d74bf343a567c5f9cc3077e48f528ef6e68cbdb271874e1434097fb063f1856e  /tmp/mini-cross-task-nobody-20260926/a-after-b/signed-observation.bin
+8c2ec006367d917a703775f616587beb13937b6c96de44c772cd777db6f36118  /tmp/mini-cross-task-nobody-20260926/a-after-b/view.bin
+09640e27f84aa9b62cc7791d946f890b3d6fc99a125feca0a02a3a0c9442cc70  /tmp/mini-cross-task-daemon-20260926/b-edit-attempt/outcome.bin
+7a6fa522f8f942104bcb694d945feb7fedf81c326f1cc08b987886a5bcb1b517  /tmp/mini-cross-task-daemon-20260926/b-final/signed-observation.bin
+8c2ec006367d917a703775f616587beb13937b6c96de44c772cd777db6f36118  /tmp/mini-cross-task-daemon-20260926/b-final/view.bin
