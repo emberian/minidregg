@@ -23,6 +23,10 @@ done
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 command -v rustc >/dev/null 2>&1 || { echo "rustc is required for the one-shot drop-reply proxy" >&2; exit 2; }
 [ ! -e "$EVIDENCE" ] || { echo "refusing existing evidence directory" >&2; exit 2; }
+case ${SELECTED_RELEASE_STOP_AFTER_ORIGINAL:-0} in
+  0|1) ;;
+  *) echo "SELECTED_RELEASE_STOP_AFTER_ORIGINAL must be 0 or 1" >&2; exit 2 ;;
+esac
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
@@ -222,7 +226,7 @@ build_candidate() {
     --arg nonce "$owner_nonce" --arg message "<$label@mini.invalid>" \
     '{signedQueryHex:$query,atom:$atom,destinationDomain:"8612",
       destinationSemantics:$semantics,destinationTarget:"600",
-      group:"fn.selected.test",messageId:$message,policyRoot:$policy,
+      group:"fn.test",messageId:$message,policyRoot:$policy,
       keysetRoot:"0",epoch:"2",ownerSubject:"7",ownerNonce:$nonce,
       expiresAt:"1000000",from:"owner@example.invalid",
       date:"Sun, 27 Sep 2026 12:00:00 +0000",subject:"Selected public note"}' \
@@ -287,6 +291,15 @@ start_recipient
 
 build_candidate original 7401 99001 "$EVIDENCE/owner.key"
 build_ingress original current
+if [ "${SELECTED_RELEASE_STOP_AFTER_ORIGINAL:-0}" = 1 ]; then
+  # Private fixture handoff only: the selected candidate is not source
+  # publication authority, and recipient op20 has not been submitted.
+  shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+    "$HERE/selected-release-drop-reply.rs" >"$EVIDENCE/final-input-sha256.txt"
+  cmp "$EVIDENCE/input-sha256.txt" "$EVIDENCE/final-input-sha256.txt"
+  printf 'selected candidate prepared without publication or receiving: %s\n' "$EVIDENCE"
+  exit 0
+fi
 "$MINI" selected-release-submit --host "$HOST" --config "$RECIPIENT_CONFIG" \
   --socket "$RECIPIENT_SOCKET" --ingress "$EVIDENCE/candidate-original/ingress.bin" \
   --dir "$EVIDENCE/recipient/original-attempt" >"$EVIDENCE/recipient/original.stdout"
