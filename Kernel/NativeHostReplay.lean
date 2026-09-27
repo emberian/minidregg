@@ -21,6 +21,7 @@ import Kernel.ApplicationLifecycleClaimCore
 import Kernel.ApplicationLifecycleClaimV2Core
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueGrainReceiver
+import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
 import Kernel.ApplicationDispatchHistoricalCore
 import Kernel.ApplicationDispatchAgentCore
 import Kernel.FnConsumerFrontierReplay
@@ -50,6 +51,7 @@ next physical image. The index records where that step entered the history. -/
 structure PriorIssue (config : Config) where
   private mk ::
   index : Nat
+  receipt : NativeHostCodec.Receipt
   evidence : ApplicationDispatchHistoricalCore.IssuedEvidence config
 
 /-- An original ordinary invocation is retained as compact reserve-eligible
@@ -279,6 +281,41 @@ theorem DispatchAt.event_version {config : Config} {opened : Opened config}
     admitted.intent.event.codecVersion = 11 :=
   ApplicationDispatchPending.candidateIntent_event_version admitted.checked.checked
 
+/-- Event27 joins a verified original event22 ticket issue to a fresh grant
+birth and current signed app delegation on this same opened image. The old
+ticket's parent generation is provenance, never the new execution witness. -/
+structure LifetimeGrantIssueAt (config : Config) (opened : Opened config)
+    (ingress : ApplicationAgentLifetimeGrantSource.Ingress) where
+  private mk ::
+  prior : PriorIssue config
+  originalEvent22 : prior.evidence.record.event.codecVersion = 22
+  originalIndex : prior.index = ingress.spec.grant.source.issueIndex
+  originalReceipt : prior.receipt = ingress.spec.grant.source.issueReceipt
+  present : opened.durable.image.accepted[prior.index]? = some prior.evidence.record
+  scope : ingress.spec.grant.matchesIssued prior.evidence.spec prior.index prior.receipt = true
+  current : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile config
+    opened.pins opened.durable (logicalHeight config opened.durable) ingress
+
+def LifetimeGrantIssueAt.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (admitted : LifetimeGrantIssueAt config opened ingress) : DataIntent rootBytes :=
+  ApplicationAgentLifetimeGrantIntentTemplate.template admitted.current
+
+theorem LifetimeGrantIssueAt.original_scope {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (admitted : LifetimeGrantIssueAt config opened ingress) :
+    ingress.spec.grant.source.ticketResource = admitted.prior.evidence.spec.ticket.resource ∧
+    ingress.spec.grant.participant.app = admitted.prior.evidence.spec.ticket.scope.app ∧
+    ingress.spec.grant.participant.session =
+      admitted.prior.evidence.spec.ticket.participant.session ∧
+    ingress.spec.grant.participant.subject =
+      admitted.prior.evidence.spec.ticket.participant.subject ∧
+    admitted.prior.evidence.spec.ticket.participant.origin = .agent
+      ingress.spec.grant.participant.parentTask
+      ingress.spec.grant.participant.originalGeneration ∧
+    ingress.spec.grant.approval.ceiling = admitted.prior.evidence.spec.ticket.ceiling :=
+  ApplicationAgentLifetimeGrant.matchesIssued_scope _ _ _ _ admitted.scope
+
 /-- Paid agent dispatch joins two prior certificates from this exact replay
 walk, then performs fresh app and delegated-payer admission at `opened`.
 Original reserve membership and no later purse write cannot be caller flags. -/
@@ -355,6 +392,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         opened.pins opened.durable
         ⟨config.federation, logicalHeight config opened.durable⟩ ingress) :
       NativeAdmission config opened (ApplicationShareIssueGrainReceiver.intent accepted)
+  | applicationAgentLifetimeGrantIssue
+      {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+      (admitted : LifetimeGrantIssueAt config opened ingress) :
+      NativeAdmission config opened admitted.intent
   | applicationDispatch {ingress : ApplicationDispatchAdmissionIngress.Ingress}
       (admitted : DispatchAt config opened ingress) :
       NativeAdmission config opened admitted.intent
@@ -520,6 +561,18 @@ private def priorIssueFor (config : Config)
     decide (ingress.issueIngressBytes =
       issue.evidence.ingressBytes))
 
+/-- Select only the event22 source whose verified original index and complete
+receipt are named by the grant. A structurally similar legacy event15 ticket
+cannot issue a lifetime route. -/
+private def priorIssueForLifetimeGrant (config : Config)
+    (issues : List (PriorIssue config))
+    (ingress : ApplicationAgentLifetimeGrantSource.Ingress) :
+    Option (PriorIssue config) :=
+  issues.find? fun issue => decide
+    (issue.index = ingress.spec.grant.source.issueIndex ∧
+      issue.receipt = ingress.spec.grant.source.issueReceipt ∧
+      issue.evidence.record.event.codecVersion = 22)
+
 private def priorBeginFor (config : Config) (begins : List (PriorBegin config))
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
     Option (PriorBegin config) :=
@@ -547,6 +600,49 @@ private theorem priorIssueFor_empty (config : Config)
 private theorem priorBeginFor_empty (config : Config)
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
     priorBeginFor config [] ingress = none := rfl
+
+private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)
+    (issues : List (PriorIssue config))
+    (ingress : ApplicationAgentLifetimeGrantSource.Ingress) :
+    IO (Except String (LifetimeGrantIssueAt config opened ingress)) := do
+  let some prior := priorIssueForLifetimeGrant config issues ingress
+    | return .error "agent lifetime grant original event22 issue absent"
+  if originalEvent22 : prior.evidence.record.event.codecVersion = 22 then
+    if originalIndex : prior.index = ingress.spec.grant.source.issueIndex then
+      if originalReceipt : prior.receipt = ingress.spec.grant.source.issueReceipt then
+        if scope : ingress.spec.grant.matchesIssued prior.evidence.spec
+            prior.index prior.receipt = true then
+          if recordBytes : (opened.durable.image.accepted[prior.index]?.map
+              DurableReceiverCodec.intentStream.encode) =
+              some (DurableReceiverCodec.intentStream.encode prior.evidence.record) then
+            have present : opened.durable.image.accepted[prior.index]? =
+                some prior.evidence.record := by
+              cases found : opened.durable.image.accepted[prior.index]? with
+              | none => simp [found] at recordBytes
+              | some record =>
+                simp only [found, Option.map_some, Option.some.injEq] at recordBytes
+                have exact := (lawful_encode_injective
+                  DurableReceiverCodec.intentStream.toLawful) recordBytes
+                simpa only [found, Option.some.injEq] using exact
+            match ← ApplicationAgentLifetimeGrantAdmission.admitNative config.profile
+                config opened.pins config.signature opened.durable
+                (logicalHeight config opened.durable) ingress.canonicalBytes with
+            | .error _ => return .error "agent lifetime grant native admission refused"
+            | .ok ⟨decoded, accepted⟩ =>
+              if same : decoded = ingress then
+                have current : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile
+                    config opened.pins opened.durable
+                    (logicalHeight config opened.durable) ingress := by
+                  cases same
+                  exact accepted
+                return .ok ⟨prior, originalEvent22, originalIndex,
+                  originalReceipt, present, scope, current⟩
+              else return .error "agent lifetime grant ingress changed at native admission"
+          else return .error "agent lifetime grant original record differs"
+        else return .error "agent lifetime grant exceeds original ticket scope"
+      else return .error "agent lifetime grant original receipt differs"
+    else return .error "agent lifetime grant original issue index differs"
+  else return .error "agent lifetime grant original ticket was not event22"
 
 private def admitDispatchAt (config : Config) (opened : Opened config)
     (issues : List (PriorIssue config))
@@ -804,6 +900,11 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
           .applicationGrainShareIssue accepted, some (.grain issueIngress accepted rfl),
           none, none, none, none⟩
+  if let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes then
+    match ← admitLifetimeGrantIssueAt config opened issues ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok ⟨admitted.intent,
+        .applicationAgentLifetimeGrantIssue admitted, none, none, none, none, none⟩
   if let some ingress := ApplicationDispatchAgentIngress.codec.decode bytes then
     match ← admitAgentDispatchAt config opened issues reserves ingress with
     | .error detail => return .error detail
@@ -924,6 +1025,7 @@ record matches the accepted intent. The caller invokes this after the durable
 advance and native post-image validation have succeeded. -/
 private def issuesAfter (config : Config) (opened : Opened config)
     (issues : List (PriorIssue config)) (record : DurableReceiver.IntentRecord)
+    (receipt : NativeHostCodec.Receipt)
     (derived : Derived config opened)
     (matched : recordMatches record derived.intent = true) :
     List (PriorIssue config) :=
@@ -934,7 +1036,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
           (ApplicationShareIssueReceiver.intent accepted) := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length,
+      ⟨opened.durable.image.accepted.length, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config opened.pins
           opened.durable (logicalHeight config opened.durable) ingress accepted record
           recordExact⟩ :: issues
@@ -943,7 +1045,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
           (ApplicationShareIssueGrainReceiver.intent accepted) := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length,
+      ⟨opened.durable.image.accepted.length, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromGrainAccepted config opened.pins
           opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
           ingress accepted record recordExact⟩ :: issues
@@ -1048,9 +1150,10 @@ private def claimsV2After (config : Config) (opened : Opened config)
 old exact tip. In particular, `extendVerified` retains its old context. -/
 private theorem issuesAfter_preserves_prior (config : Config) (opened : Opened config)
     (issues : List (PriorIssue config)) (record : DurableReceiver.IntentRecord)
+    (receipt : NativeHostCodec.Receipt)
     (derived : Derived config opened)
     (matched : recordMatches record derived.intent = true) :
-    ∀ prior, prior ∈ issues → prior ∈ issuesAfter config opened issues record derived matched := by
+    ∀ prior, prior ∈ issues → prior ∈ issuesAfter config opened issues record receipt derived matched := by
   intro prior member
   cases issue : derived.issue with
   | none => simpa [issuesAfter, issue] using member
@@ -1259,7 +1362,7 @@ private def walk (config : Config) (opened : Opened config)
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
                   index + 1, imageBoundary config next.image⟩
-              let nextIssues := issuesAfter config opened issues record derived matched
+              let nextIssues := issuesAfter config opened issues record receipt derived matched
               let nextReserves := reservesAfter config opened reserves record receipt derived matched
               let nextBegins := beginsAfter config opened begins record derived matched
               let nextBeginsV2 := beginsV2After config opened beginsV2 record derived matched
@@ -1484,7 +1587,7 @@ def extendExact {config : Config} {oldTarget : Durable}
       (old.receipts ++ [receipt])
     rw [old.image_exact]
     exact old.admitted.append (.cons step (.nil readback.after))
-  let issues := issuesAfter config old.opened old.issues record readback.derived matched
+  let issues := issuesAfter config old.opened old.issues record receipt readback.derived matched
   let reserves := reservesAfter config old.opened old.reserves record receipt
     readback.derived matched
   let begins := beginsAfter config old.opened old.begins record readback.derived matched
