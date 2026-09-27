@@ -1,0 +1,9 @@
+{
+  "attemptManifestSha256": "3fb977f49be139562d60441e351d2ca484ce97ba988ef834666f42ddb32b47ba",
+  "frameSha256": "982b6883ba27ea0bd246fece52ba8e625e8337a0f173e7eb3cc1f1e68b7e75fa",
+  "hostConfigSha256": "180a439c4e67d2e90e297fcf6e5d27f223c5e4cb568922aec31464f8910517b0",
+  "operation": 1,
+  "requestSha256": "d12da4fa12c36a4952405c3d46bd808a8cde349d3b27277c4c7f082c8cf89c45",
+  "stage": "prepare",
+  "type": "minidregg-pre-submit-refusal-v1"
+}

@@ -1,0 +1,57 @@
+   Compiling minidregg-grain-runtime v0.1.0 (/tmp/minidregg-grain-runtime-e213b4f-src/native/grain-runtime)
+    Finished `release` profile [optimized] target(s) in 9.93s
+────────────
+ Nextest run ID 4f4a0a05-8026-48a7-b2d2-2efd66dfcf4b with nextest profile: default
+    Starting 50 tests across 1 binary
+        PASS [   0.024s] ( 1/50) minidregg-grain-runtime::bin/grain-runtime control::tests::framed_attachment_escapes_model_text_and_binds_events_to_attachment
+        PASS [   0.044s] ( 2/50) minidregg-grain-runtime::bin/grain-runtime control::tests::admin_requests_use_a_separate_socket
+        PASS [   0.024s] ( 3/50) minidregg-grain-runtime::bin/grain-runtime control::tests::hard_eof_interrupts_once_and_soft_reconnects
+        PASS [   0.004s] ( 4/50) minidregg-grain-runtime::bin/grain-runtime legacy_custody_audit::tests::no_call_inventory_rejects_later_stage_and_fabricated_marker
+        PASS [   0.024s] ( 5/50) minidregg-grain-runtime::bin/grain-runtime control::tests::mode_connector_reports_busy_attachment_without_waiting_for_ssh_input
+        PASS [   0.034s] ( 6/50) minidregg-grain-runtime::bin/grain-runtime mcp::tests::broker_deadline_reports_unknown_delivery_without_claiming_settlement
+        PASS [   0.104s] ( 7/50) minidregg-grain-runtime::bin/grain-runtime mcp::tests::proxy_read_has_total_deadline_and_preserves_unknown_outcome
+        PASS [   0.104s] ( 8/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::client_reset_before_local_reply_never_retries_upstream
+        PASS [   0.245s] ( 9/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::cached_replay_never_contacts_upstream_or_claims_a_new_delivery
+        PASS [   0.064s] (10/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::concurrent_request_gets_bounded_busy_reply_without_a_second_reserve
+        PASS [   0.044s] (11/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::expired_worker_deadline_rejects_late_send_boundary_ack
+        PASS [   0.004s] (12/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::final_response_requires_one_actual_content_type
+        PASS [   0.124s] (13/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::expired_worker_deadline_rejects_late_reserve_without_upstream_send
+        PASS [   0.185s] (14/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::hard_revoke_during_slow_outcome_ack_never_delivers_response
+        PASS [   0.085s] (15/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::local_provider_receives_only_after_permit_and_boundary_ack
+        PASS [   0.285s] (16/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::lost_outcome_ack_does_not_deliver_or_send_again
+        PASS [   0.546s] (17/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::hard_revoke_kills_inflight_transport_without_waiting_for_controller
+        PASS [   0.085s] (18/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::lost_upstream_reply_is_retained_as_uncertain_without_resend
+        PASS [   0.064s] (19/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::refused_reserve_and_revoked_token_never_reach_upstream
+        PASS [   0.167s] (20/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::missing_or_duplicate_upstream_content_type_is_uncertain
+        PASS [   0.004s] (21/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::upstream_endpoint_is_exact_and_openrouter_path_is_supported
+        PASS [   0.084s] (22/50) minidregg-grain-runtime::bin/grain-runtime provider::tests::upstream_echo_of_custody_key_is_never_returned_to_worker
+        PASS [   0.005s] (23/50) minidregg-grain-runtime::bin/grain-runtime provider_profile::tests::scoped_worker_refuses_upstream_mcp_default_before_reserve
+        PASS [   0.012s] (24/50) minidregg-grain-runtime::bin/grain-runtime provider_profile::tests::profile_holds_gateway_token_and_never_provider_key
+        PASS [   0.099s] (25/50) minidregg-grain-runtime::bin/grain-runtime publication_refusal_tests::restart_recognizes_pre_submit_refusal_but_keeps_confirmed_hold
+        PASS [   0.524s] (26/50) minidregg-grain-runtime::bin/grain-runtime publication_refusal_tests::retained_native_prepare_refusal_releases_tool_hold_without_publication
+        PASS [   0.909s] (27/50) minidregg-grain-runtime::bin/grain-runtime publication_refusal_tests::definitive_refusal_releases_hold_for_same_prompt_read_and_retry
+        PASS [   0.490s] (28/50) minidregg-grain-runtime::bin/grain-runtime publication_refusal_tests::uncertain_disconnect_after_release_retains_exact_attempt_and_blocks_tools
+        PASS [   0.003s] (29/50) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::accepts_only_exact_allowlisted_name_argument
+        PASS [   0.003s] (30/50) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::refuses_unbounded_view
+        PASS [   0.003s] (31/50) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::rejects_publication_authority_and_ambiguous_names
+        PASS [   0.009s] (32/50) minidregg-grain-runtime::bin/grain-runtime terminal::tests::bounded_input_and_frames_refuse_oversize_and_malformed_data
+        PASS [   0.003s] (33/50) minidregg-grain-runtime::bin/grain-runtime terminal::tests::command_parser_requires_bounded_explicit_identity
+        PASS [   0.003s] (34/50) minidregg-grain-runtime::bin/grain-runtime terminal::tests::model_text_is_prefixed_and_terminal_controls_are_visible
+        PASS [   0.003s] (35/50) minidregg-grain-runtime::bin/grain-runtime terminal::tests::stale_control_request_cannot_mark_new_prompt_complete
+        PASS [   0.004s] (36/50) minidregg-grain-runtime::bin/grain-runtime terminal::tests::status_projection_hides_private_journal_fields
+        PASS [   0.005s] (37/50) minidregg-grain-runtime::bin/grain-runtime tests::acp_frame_refuses_oversized_line_before_json_allocation
+        PASS [   0.004s] (38/50) minidregg-grain-runtime::bin/grain-runtime tests::configured_systemd_scope_uses_camel_case
+        PASS [   0.342s] (39/50) minidregg-grain-runtime::bin/grain-runtime publication_refusal_tests::uncertain_zero_charge_release_retains_hold_and_blocks_same_prompt_tools
+        PASS [   0.004s] (40/50) minidregg-grain-runtime::bin/grain-runtime tests::joint_grants_match_native_observation_footprint
+        PASS [   0.004s] (41/50) minidregg-grain-runtime::bin/grain-runtime tests::legacy_launcher_cannot_arm_a_recoverable_worker
+        PASS [   0.003s] (42/50) minidregg-grain-runtime::bin/grain-runtime tests::metered_audit_never_turns_uncertain_send_into_zero_charge
+        PASS [   0.003s] (43/50) minidregg-grain-runtime::bin/grain-runtime tests::metered_quote_binds_tariff_hold_and_source_settle_charge
+        PASS [   0.005s] (44/50) minidregg-grain-runtime::bin/grain-runtime tests::metered_recovery_accepts_only_the_exact_fenced_reservation
+        PASS [   0.148s] (45/50) minidregg-grain-runtime::bin/grain-runtime tests::hard_stop_reaps_a_descendant_after_the_group_leader_exits
+        PASS [   0.049s] (46/50) minidregg-grain-runtime::bin/grain-runtime tests::prepare_refusal_requires_exact_attempt_and_native_inspection
+        PASS [   0.003s] (47/50) minidregg-grain-runtime::bin/grain-runtime tests::provider_send_requires_confirmed_reserved_coordinates
+        PASS [   0.039s] (48/50) minidregg-grain-runtime::bin/grain-runtime tests::provider_retry_replays_exact_retained_response_without_new_reserve
+        PASS [   0.004s] (49/50) minidregg-grain-runtime::bin/grain-runtime tests::retained_lookup_uses_next_native_retry_result
+        PASS [   0.252s] (50/50) minidregg-grain-runtime::bin/grain-runtime tests::publish_returns_only_its_own_confirmed_receipt_without_reporting_it
+────────────
+     Summary [   2.762s] 50 tests run: 50 passed, 0 skipped

@@ -1,0 +1,27 @@
+{
+  "height": "20",
+  "imageBoundary": "100999699207520661447473549849087045066180609397470192809051161362836262596666",
+  "grants": [
+    {
+      "capability": "55",
+      "kind": "object",
+      "target": "10"
+    },
+    {
+      "capability": "42",
+      "kind": "account",
+      "target": "8"
+    },
+    {
+      "capability": "81",
+      "kind": "object",
+      "target": "7902"
+    },
+    {
+      "capability": "73",
+      "kind": "object",
+      "target": "7901"
+    }
+  ],
+  "sourceType": "grain-birth"
+}

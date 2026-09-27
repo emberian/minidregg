@@ -1,0 +1,21 @@
+Persvati private dedicated-account operator stack, fresh Store only.
+Installer source SHA256 1c000513bd138ff9d50f384daffdfc8786757064547f01c87e12a6e9c1d8c907; bash -n/shellcheck PASS.
+Host ELF d413081bb6c6ac1c0699b5fdc22cf3a13fb87930ff49ac147ae994e2c364e7a3; Mini fee5bc861d74c9e432db2374ede36b62852a80346a46f1dc89133dfa79bf11eb.
+Private signed-read callback SHA256 6187ebc0f21bd6f0da8e9fe9a11de49986b9ae1150007f000522b7edac6ac46a; it emits only the decimal content root and uses UID1001's task key privately.
+
+Before transition: signed A cap96 root 56640510124634512405133386310248957445866959012628426531175294065387003551223, signed observation c7c7ae8fa83c8547159ad74e090d39b5c6407171f931c6727d2c199829db4a94.
+After stopping task controllers: both inactive MainPID0; journals child/pending/toolPending/toolHold/parentHold/providerPending/providerHold/providerAttempt/settlementDue null, unresolvedExternal []; no worker cgroup. Signed root unchanged, observation fd4798b0cfa28a162afb6fb75f48c394f8e6809726f25304cef3a4e7b5e2d772.
+Old five operator transients: stopped, MainPID0, no Host/frontend Unix listeners.
+Installed exact operator user units: Host + frontend A/B + deterministic provider A/B; `systemd-analyze --user verify` PASS.
+Initial `start`: FAIL CLOSED at frontend A readiness. `/usr/bin/test -r/-w` false under named ACL; actual UID1001 config read and `nc -U -z` public connect succeeded, private connect denied. Safe-abort stopped all five units; task controllers stayed stopped. Narrow source fix replaced only ACL access probe; exact ACL and listener-PID checks remained.
+Corrected `start`: PASS. `status`: exact active operator units PASS. Signed root unchanged, observation c6c682cf84040452a8778d7372da4c1400be4440271854fdfb27a62a608f80a1.
+Task controllers @7801 UID1001 and @7803 UID1002 restarted; exact quiescence PASS.
+Explicit `restart`: PASS. Pre signed observation 0eaf760d0d5abd2b7eebc24c4c2db3db625ff864b3228e29ee78c1f1e9246c66; post signed observation 3f0f2e5d7624c50ba44b1f13664c47bfaeaf23e8ff37a33eb6cb12be1dedb7c3. Both returned the root above; all five signed reads returned identical view.bin SHA256 692b69da1b11e6b8c853eaa9f2d1ca3d0178f76c007b4ee8d8783c5eff05df3f.
+Final exact `status`:
+  mini-offer-host-20260926.service active MainPID1596019
+  mini-offer-front-a-20260926.service active MainPID1596895
+  mini-offer-front-b-20260926.service active MainPID1597742
+  mini-offer-provider-a-20260926.service active MainPID1598661
+  mini-offer-provider-b-20260926.service active MainPID1599533
+Final `quiescence`: mini-grain-controller@7801.service UID1001 PASS; @7803 UID1002 PASS; no worker.
+systemctl is-enabled mini-offer-host-20260926.service: static. No boot enable, public listener, friend SSH key, or paid provider.

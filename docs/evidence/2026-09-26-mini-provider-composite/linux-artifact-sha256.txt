@@ -1,0 +1,4 @@
+c6c21859e54b3ef96e0ff60b345ef705a6a3b3e359345a26894fd054aa248c5a  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-provider-composite
+682071c920e9c412b748fdb64b0e9ca2de1061dfeaf6bbe37bbf206f8072bddb  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite/minidregg-host.rsp
+1ec81959a53b8ad32060bca64687ef42f8efaeec9036da2a4ee6abb308c0adfa  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite/transitive-imports.json
+aec0454343ca48408942e299ae5ffc7318d130e8643f170c3fe7eb19e73322f5  /home/ember/build/minidregg-overnight-20260926/evidence/build-linux-provider-composite/reusable-artifact-sha256.txt
