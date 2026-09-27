@@ -1,0 +1,10 @@
+{
+  "type": "minidregg-gitweb-verified-spk-v1",
+  "rawSha256": "2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa",
+  "rawLength": "14045864",
+  "signedAppId": "6va4cjamc21j0znf5h5rrgnv0rpyvh1vaxurkrgknefvj0x63ash",
+  "signedAppVersion": "10",
+  "manifestSha256": "3ef23992c6ee79e5b684cec632d4552c5b34889348ae63acaaedb42b9616024f",
+  "bridgeConfigSha256": "49d196f64ca2ce672a378581a8376ada53b27614bba522bbaec042237f0e70a2",
+  "bridgeApiPath": "/repo.git/"
+}

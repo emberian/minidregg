@@ -1,7 +1,10 @@
 #!/bin/sh
 # Source-owned share-ticket issue over a fresh metered app/session birth.
-# PACKAGE_ROOT, INTERFACE_ROOT and SCHEMA_ROOT are explicit selected commitments;
-# this test alone does not prove their installed package/manifest correspondence.
+# The positive-fee ticket is deliberately scoped to the fresh app's current
+# packageVersion 0. Roots come from the prospective signed GitWeb version-1
+# identity, but this issue/receipt gate cannot claim an installed package or a
+# dispatch-capable final ticket. The final version-1 ticket needs lifecycle
+# install in a separate integrated Store.
 set -eu
 umask 077
 
@@ -20,6 +23,7 @@ PREPARED_BASE=${PREPARED_BASE:-}
 PACKAGE_ROOT=${PACKAGE_ROOT:?set the source-selected package commitment}
 INTERFACE_ROOT=${INTERFACE_ROOT:?set the source-selected interface root}
 SCHEMA_ROOT=${SCHEMA_ROOT:?set the source-selected schema root}
+IDENTITY_ROOTS=${IDENTITY_ROOTS:?set source-authored GitWeb roots.json}
 for value in "$PACKAGE_ROOT" "$INTERFACE_ROOT" "$SCHEMA_ROOT"; do
   case "$value" in ''|0*|*[!0-9]*) echo "invalid selected root" >&2; exit 2 ;; esac
 done
@@ -27,13 +31,29 @@ for executable in "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
     "$FEE_INSPECTOR"; do
   [ -x "$executable" ] || { echo "not executable: $executable" >&2; exit 2; }
 done
-[ -f "$BASE_SCRIPT" ] && [ ! -e "$EVIDENCE" ] || exit 2
+[ -f "$BASE_SCRIPT" ] && [ -f "$IDENTITY_ROOTS" ] &&
+  [ ! -e "$EVIDENCE" ] || exit 2
 command -v jq >/dev/null
 command -v xxd >/dev/null
+# This fixture selects the exact bounded Lean author output from the signed
+# GitWeb descriptor; matching caller-provided root strings alone is not enough.
+IDENTITY_ROOTS_SHA=$(shasum -a 256 "$IDENTITY_ROOTS" | cut -d ' ' -f 1)
+[ "$IDENTITY_ROOTS_SHA" = \
+  0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f ] || {
+    echo "unexpected source-authored GitWeb roots file" >&2; exit 2;
+  }
+jq -e --arg package "$PACKAGE_ROOT" --arg interface "$INTERFACE_ROOT" \
+  --arg schema "$SCHEMA_ROOT" \
+  '.app == "8401" and .prospectivePackageVersion == "1" and
+   .packageRoot == $package and .webInterfaceRoot == $interface and
+   .schemaRoot == $schema' "$IDENTITY_ROOTS" >/dev/null
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 shasum -a 256 "$0" "$BASE_SCRIPT" "$HOST" "$MINI" "$STORE_BINARY" \
-  "$SIGNATURE_BINARY" "$FEE_INSPECTOR" >"$EVIDENCE/input-sha256.txt"
+  "$SIGNATURE_BINARY" "$FEE_INSPECTOR" "$IDENTITY_ROOTS" \
+  >"$EVIDENCE/input-sha256.txt"
+shasum -a 256 -c "$EVIDENCE/input-sha256.txt" \
+  >"$EVIDENCE/input-precheck.txt"
 
 if [ -n "$PREPARED_BASE" ]; then
   BASE=$(CDPATH='' cd -- "$PREPARED_BASE" && pwd)

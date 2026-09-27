@@ -25,6 +25,15 @@ Set `MINI_LEAN_ROOT` and `FEE_SOURCE` for `inspect-signed-fee.sh`; it claims one
 Lean seat and runs from the source-qualified build tree. Pin every executable
 and source hash in the resulting evidence before interpreting a verdict.
 
-`PACKAGE_ROOT`, `INTERFACE_ROOT`, and `SCHEMA_ROOT` must come from the exact
-signed GitWeb SPK descriptor and installed Mini manifest. The issue test alone
-does not establish package installation, runtime launch, or HTTP dispatch.
+Set `IDENTITY_ROOTS` to the `roots.json` authored by
+`author-gitweb-identity.lean` and set `PACKAGE_ROOT`, `INTERFACE_ROOT`, and
+`SCHEMA_ROOT` to its matching package, web-interface, and schema roots. The
+script compares all three before creating a Store and retains the roots-file
+hash; it also pins the exact GitWeb author output `roots.json` SHA-256
+`0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f`.
+This positive-fee test issues a **version-0** ticket against the fresh
+app state to establish the native fee, Book, receipt, and recovery behavior.
+The roots describe the prospective signed GitWeb package, but the test does
+not establish that package's installation or make this ticket dispatchable.
+A final GitWeb ticket must be scoped to **version 1** after a separately
+accepted lifecycle installation of the exact descriptor and manifest.
