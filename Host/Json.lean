@@ -10,6 +10,7 @@ import Kernel.CapabilityRevocationController
 import Kernel.ContentResource
 import Kernel.ApplicationGrainBirth
 import Kernel.ApplicationGrainSessionBirth
+import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -1420,6 +1421,8 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-birth-intent" => intentCodec.encode <$> applicationBirthIntent "$" json
   | "application-session-birth" => draftCodec.encode <$> applicationSessionBirth "$" json
   | "application-session-birth-intent" => intentCodec.encode <$> applicationSessionBirthIntent "$" json
+  | "application-permission-schema" => do
+      pure (← ApplicationPermissionSchemaAuthoring.author json).1
   | "grain-birth" => draftCodec.encode <$> grainBirth "$" json
   | "grain-birth-intent" => intentCodec.encode <$> grainBirthIntent "$" json
   | "content" => ContentResource.commandCodec.encode <$> contentCommand "$" json
@@ -1436,7 +1439,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
-      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
+      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], application-permission-schema, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
 
 private def authorRefused (kind : String) (value : Lean.Json) : Bool :=
   match author kind value with
@@ -1668,6 +1671,24 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "challenge" => challengeJson <$> decoded "challenge" challengeCodec bytes
   | "plan" => planJson <$> decoded "plan" signingPlanCodec bytes
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
+  | "application-permission-schema" => do
+      let schema ← decoded "application-permission-schema"
+        ApplicationPermissionSchema.schemaCodec bytes
+      unless schema.valid do
+        failAt "application-permission-schema" "invalid permission schema"
+      pure <| .mkObj [
+        ("type", "minidregg-application-permission-schema-v1"),
+        ("version", decimal schema.version),
+        ("root", decimal schema.root.value),
+        ("canonical", hexJson bytes),
+        ("permissions", .arr <| schema.permissions.toArray.map fun p => .mkObj [
+          ("name", String.fromUTF8! p.name.toByteArray),
+          ("obsolete", .bool p.obsolete)]),
+        ("roles", .arr <| schema.roles.toArray.map fun role => .mkObj [
+          ("permissions", .arr <| role.permissions.toArray.map (fun bit => .bool bit)),
+          ("obsolete", .bool role.obsolete),
+          ("default", .bool role.default)]),
+        ("denied", .arr <| schema.denied.toArray.map (fun bit => .bool bit))]
   | "view-resource" => do
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
@@ -1687,6 +1708,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, view-resource, view-policy, or view-capability"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, or view-capability"
 
 end Minidregg.Host.Json

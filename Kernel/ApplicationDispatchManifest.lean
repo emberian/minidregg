@@ -6,6 +6,7 @@ package-manifest content cell, decode these bytes there, and bind its exact
 cell root before using `matches`; birth/version numbers alone do not do so.
 -/
 import Kernel.ApplicationDispatchCodec
+import Kernel.ApplicationPermissionSchema
 
 namespace Minidregg.Kernel.ApplicationDispatchManifest
 
@@ -18,17 +19,18 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Kernel.ApplicationDispatchCodec
+open Minidregg.Kernel.ApplicationPermissionSchema
 
 set_option autoImplicit false
 
-/-- The permission order is semantically significant: bit `i` names the
-permission at index `i`. The installed SPK parser must produce this exact
-order, including an explicit distinction between web and API interfaces. -/
+/-- The full ordered role-relevant ViewInfo projection is bound to each
+interface. Bit `i` names permission `i`; web and API interface kinds remain
+distinct. This descriptor is not itself an installed grant. -/
 structure Interface where
   id : Nat
   version : Nat
   kind : InterfaceKind
-  permissions : List (List UInt8)
+  schema : Schema
   deriving DecidableEq, Repr
 
 def interfaceStream : StreamCodec Interface :=
@@ -36,15 +38,15 @@ def interfaceStream : StreamCodec Interface :=
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product interfaceKindStream
-          (StreamCodec.list bytesStream))))
+          schemaStream)))
     (fun interface => (interface.id, interface.version,
-      interface.kind, interface.permissions))
-    (fun (interfaceId, version, kind, permissions) =>
-      ⟨interfaceId, version, kind, permissions⟩)
+      interface.kind, interface.schema))
+    (fun (interfaceId, version, kind, schema) =>
+      ⟨interfaceId, version, kind, schema⟩)
     (by intro interface; cases interface; rfl)
 
 private def interfaceFrame : List UInt8 :=
-  "DREGG/APPLICATION/INTERFACE/v1".toUTF8.toList
+  "DREGG/APPLICATION/INTERFACE/v2".toUTF8.toList
 
 private def rawInterfaceCodec : LawfulCodec Interface where
   encode interface := interfaceFrame ++ interfaceStream.encode interface
@@ -61,12 +63,11 @@ def interfaceCodec : LawfulCodec Interface :=
   ResourceBirthCodec.strictCodec rawInterfaceCodec
 
 def Interface.root (interface : Interface) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/INTERFACE-ROOT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG/APPLICATION/INTERFACE-ROOT/v2".toUTF8.toList
     (interfaceCodec.encode interface)).digest
 
 def Interface.permissionSchemaRoot (interface : Interface) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/PERMISSION-SCHEMA/v1".toUTF8.toList
-    ((StreamCodec.list bytesStream).encode interface.permissions)).digest
+  interface.schema.root
 
 structure Manifest where
   app : Nat
@@ -87,7 +88,7 @@ def manifestStream : StreamCodec Manifest :=
     (by intro manifest; cases manifest; rfl)
 
 private def manifestFrame : List UInt8 :=
-  "DREGG/APPLICATION/MANIFEST/v1".toUTF8.toList
+  "DREGG/APPLICATION/MANIFEST/v2".toUTF8.toList
 
 private def rawManifestCodec : LawfulCodec Manifest where
   encode manifest := manifestFrame ++ manifestStream.encode manifest
@@ -107,12 +108,11 @@ theorem manifest_decode_encode (manifest : Manifest) :
     manifestCodec.decode (manifestCodec.encode manifest) = some manifest :=
   manifestCodec.decode_encode manifest
 
-/-- Interface and permission names have one meaning in this descriptor. -/
+/-- Every embedded schema is complete and unambiguous. The v1 names-only
+manifest frame is refused by `manifestCodec`; no such draft was admitted. -/
 def Manifest.valid (manifest : Manifest) : Bool :=
   decide ((manifest.interfaces.map Interface.id).Nodup) &&
-  manifest.interfaces.all (fun interface =>
-    decide (interface.permissions.Nodup) &&
-    decide (interface.permissions.length ≤ 256))
+  manifest.interfaces.all (fun interface => interface.schema.valid)
 
 /-- One stable typed atom slot per application. A package upgrade edits this
 atom's canonical payload, whose `packageVersion` is checked against the
@@ -159,7 +159,7 @@ def matchesDispatch (manifest : Manifest) (dispatch : Dispatch) : Bool :=
       decide (interface.kind = dispatch.session.kind) &&
       decide (interface.root = dispatch.app.interfaceRoot) &&
       decide (interface.permissionSchemaRoot = dispatch.identity.permissionSchemaRoot) &&
-      decide (dispatch.identity.permissionBits < 2 ^ interface.permissions.length)
+      decide (dispatch.identity.permissionBits < 2 ^ interface.schema.permissions.length)
 
 theorem matches_app (manifest : Manifest) (dispatch : Dispatch)
     (accepted : matchesDispatch manifest dispatch = true) :
