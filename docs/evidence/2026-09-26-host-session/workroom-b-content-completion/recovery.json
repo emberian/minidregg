@@ -1,0 +1,16 @@
+{
+  "confirmedFields": {
+    "acceptedCount": "3",
+    "eventId": "76255522961118423695046404792380634000584551157555388805752752222329055606806",
+    "imageBoundary": "29936162402506592586987268492039189617605932909123840279128651316255128051042",
+    "transactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180"
+  },
+  "lookupPath": "/tmp/mini-workroom-publisher-20260926/b-drain-state/pending/prepare-00000002/retry-0002.json",
+  "lookupSha256": "39e04ff688e63d0d8d568cd2ead0b652e7d723eff4f9bac8c36d2b88f169b822",
+  "priorAck": "ack-00000003",
+  "priorFrameSha256": "217a1ef9f85003e73119dc0e35c21a3f2985609cbe5f7c0e5cd48b4f300b03b8",
+  "priorReason": "retained ACK reply requires operator review: retained ACK frame is not a successful B ACK reply",
+  "scope": "one exact typed ACK retry; no Mini submit or new intent",
+  "transactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180",
+  "type": "minidregg-b-consumer-held-ack-recovery-v1"
+}

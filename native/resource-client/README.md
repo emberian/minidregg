@@ -213,11 +213,32 @@ submit`. A restart in `Sending` runs exact `lookup` first. Confirmed lookup
 uses the original receipt; definitive absence permits one resubmission of the
 same retained bytes under Mini's replay and current-authority checks. An
 uncertain lookup or resubmission holds the call for reconciliation. Once Mini confirms, the worker
-persists its transaction ID before fn ACK. A lost ACK reply is recovered from
-its complete retained frame when available, or triggers one exact transaction
-retry; further uncertainty holds for reconciliation. The operator must keep the same host, config bytes, socket,
+persists its transaction ID and the confirmed receipt before fn ACK. A durable
+accepted ACK frame can finish archival after a crash. A refused or missing ACK
+reply leaves the worker Held for explicit recovery; it does not create a new
+intent or submit another Mini call. The operator must keep the same host, config bytes, socket,
 and signing key; a changed pin refuses. The worker archives successful
 attempts by Mini transaction ID and removes idle poll attempts.
+
+After diagnosing a Held ACK and correcting the operator-controlled fn bridge,
+an operator can run one bounded retry of the same transaction:
+
+```sh
+mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json \
+  --socket /private/path/mini-session/host.sock --key CONSUMER.key \
+  --state-dir /private/path/b-consumer-worker
+```
+
+This requires the worker's v2 Host-image pin, an anchored confirmed receipt,
+and an existing Held publication or neutral-page skip with a complete typed
+fn-session refusal frame. A missing reply or other failure remains Held for
+operator diagnosis. The command preserves the prior ACK frame, checks the retained
+signed call and confirmed receipt, performs a read-only lookup under the pinned
+Host, and compares all four receipt fields before marking the one-shot retry
+durable and sending the exact typed fn ACK. If the reply is lost again, the
+worker stays Held; re-running the command cannot send a second ACK after the
+one-shot marker. A retained exact durable ACK can still finish archival. This
+command does not repair fn state or infer success from a transport error.
 
 One wake stops after a publication, a short neutral page, an idle poll, or
 the `--max-pages` cap. The fn ACK itself appends a Store event, so repeatedly
