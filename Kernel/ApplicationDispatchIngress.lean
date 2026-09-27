@@ -1,9 +1,10 @@
 /-
 A separate, canonical native ingress for an application dispatch candidate.
-The signed DRC command is retained in full. Admission must prove that its
-current-law-checked app/session/optional parent incidences and pending-journal
-content are exactly derived from `dispatch`; merely decoding this carrier is
-not authority to hand an HTTP request to a process.
+The signed DRC command is retained in full. App, package manifest and session
+enrollment are separately observed at current roots; the signed command has
+only a session witness and optional agent-parent witness. The accepted special
+event/nullifier is the durable pending request, not a generic content atom.
+Merely decoding this carrier is not authority to hand HTTP to a process.
 -/
 import Kernel.ApplicationDispatchCodec
 import Compiler.NativeHostCodec
@@ -27,8 +28,15 @@ structure Ingress where
   semantics : Digest
   dispatch : Dispatch
   signed : DeclaredResourceController.SignedCommand
+  appRoot : Digest
+  appObserveCapability : CapabilityId
+  appObservationEnvelope : List UInt8
   manifestObserveCapability : CapabilityId
   manifestObservationEnvelope : List UInt8
+  enrollmentResource : Nat
+  enrollmentRoot : Digest
+  enrollmentObserveCapability : CapabilityId
+  enrollmentObservationEnvelope : List UInt8
 
 def ingressStream : StreamCodec Ingress :=
   StreamCodec.xmap
@@ -36,16 +44,31 @@ def ingressStream : StreamCodec Ingress :=
       (StreamCodec.product digestStream
         (StreamCodec.product dispatchStream
           (StreamCodec.product NativeHostCodec.signedInvocationStream
-            (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream bytesStream)))))
+            (StreamCodec.product digestStream
+              (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+                (StreamCodec.product bytesStream
+                  (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+                    (StreamCodec.product bytesStream
+                      (StreamCodec.product StreamCodec.nat
+                        (StreamCodec.product digestStream
+                          (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+                            bytesStream))))))))))))
     (fun ingress => (ingress.domain, ingress.semantics, ingress.dispatch,
-      ingress.signed, ingress.manifestObserveCapability,
-      ingress.manifestObservationEnvelope))
-    (fun (domain, semantics, dispatch, signed, capability, envelope) =>
-      ⟨domain, semantics, dispatch, signed, capability, envelope⟩)
+      ingress.signed, ingress.appRoot, ingress.appObserveCapability,
+      ingress.appObservationEnvelope, ingress.manifestObserveCapability,
+      ingress.manifestObservationEnvelope, ingress.enrollmentResource,
+      ingress.enrollmentRoot, ingress.enrollmentObserveCapability,
+      ingress.enrollmentObservationEnvelope))
+    (fun (domain, semantics, dispatch, signed, appRoot, appCapability,
+          appEnvelope, manifestCapability, manifestEnvelope, enrollmentResource,
+          enrollmentRoot, enrollmentCapability, enrollmentEnvelope) =>
+      ⟨domain, semantics, dispatch, signed, appRoot, appCapability, appEnvelope,
+        manifestCapability, manifestEnvelope, enrollmentResource, enrollmentRoot,
+        enrollmentCapability, enrollmentEnvelope⟩)
     (by intro ingress; cases ingress; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-INGRESS/v1".toUTF8.toList
+  "DREGG/APPLICATION/DISPATCH-INGRESS/v2".toUTF8.toList
 
 private def rawCodec : LawfulCodec Ingress where
   encode ingress := frame ++ ingressStream.encode ingress
@@ -100,15 +123,26 @@ def keyDigest (ingress : Ingress) : Digest :=
   (Sp800185Cshake256.hash "DREGG/APPLICATION/DISPATCH-KEY/v1".toUTF8.toList
     (keyBytes ingress)).digest
 
-/-- The command signature must bind the complete app-visible request and
-identity, while the nullifier separately reserves the stable operation key.
-Changing bytes under one key therefore changes the signed command nonce and
-conflicts with the prior accepted event rather than reusing its authority. -/
+/-- The DRC command signature binds the complete app-visible request and the
+selected observation coordinates, never their signature envelopes (which
+would be circular). The nullifier separately reserves the stable operation
+key. Fresh admission must derive these coordinates from the current image and
+native-check each observation envelope against its source-owned request. -/
 def requestDigest (ingress : Ingress) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v2".toUTF8.toList
     ((StreamCodec.product digestStream
-      (StreamCodec.product digestStream bytesStream)).encode
-      (ingress.domain, ingress.semantics, ingress.dispatch.canonicalBytes))).digest
+      (StreamCodec.product digestStream
+        (StreamCodec.product bytesStream
+          (StreamCodec.product digestStream
+            (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+              (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
+                (StreamCodec.product StreamCodec.nat
+                  (StreamCodec.product digestStream
+                    CredentialAuthorityEntryCodec.capabilityIdStream)))))))).encode
+      (ingress.domain, ingress.semantics, ingress.dispatch.canonicalBytes,
+        ingress.appRoot, ingress.appObserveCapability,
+        ingress.manifestObserveCapability, ingress.enrollmentResource,
+        ingress.enrollmentRoot, ingress.enrollmentObserveCapability))).digest
 
 def nullifier (ingress : Ingress) : StableNullifier where
   codecVersion := 11
