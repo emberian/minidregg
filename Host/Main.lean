@@ -1797,6 +1797,8 @@ def verifyCatalogOwnR (config : NativeHost.Config)
   let (prepared, record) ← IO.ofExcept <|
     FnOriginOutbox.selectUniqueParent gateway config.deployment.domain
       config.profile.semantics projection.messageId opened.durable.image.accepted
+  unless sameBytes received prepared.carrier do
+    throw (IO.userError "A own-R poll differs from exact accepted R carrier")
   let (retainedVerified, retainedR, original) ←
     IO.FS.withTempDir fun directory => do
       let path := (directory / "accepted-r-carrier.eml").toString
