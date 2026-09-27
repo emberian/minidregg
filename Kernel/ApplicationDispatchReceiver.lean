@@ -113,6 +113,8 @@ def receiveVerified (config : Config) {target : Durable}
     (bytes : List UInt8) : IO (Result config) := do
   let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
     | return .rejected "noncanonical special dispatch ingress"
+  if ingress.dispatch.dispatch.session.origin != .human then
+    return .rejected "v1 committed dispatch permit requires human-origin session"
   let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
     | return .rejected "dispatch issue absent from verified chronological prefix"
   let derived := admitted.toDerived
