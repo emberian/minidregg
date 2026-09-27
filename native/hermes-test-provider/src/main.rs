@@ -17,6 +17,9 @@ const READ_ID: &str = "mini-fixture-read-1";
 const PUBLISH_ID: &str = "mini-fixture-publish-1";
 const CONTENT_ORIGINAL: &str = "Workroom research note: verify the source receipt before reuse.";
 const CONTENT_REVISED: &str = "Revised workroom note: Mini accepted the receipt; fn provenance remains a separate check.";
+const STALE_INTERVENING: &str = "Owner intervened after the tool's signed empty-room read.";
+const STALE_TOOL_NOTE: &str = "Tool retried only after Mini's fresh signed room read.";
+const STALE_DETAIL_HEX: &str = "696e766f636174696f6e207072657061726174696f6e3a204d696e6964726567672e4b65726e656c2e4465636c617265645265736f75726365436f6e74726f6c6c65722e52656a6563742e7374616c65546172676574";
 const PEER_A_NOTE: &str = "Peer A research note: review source receipts before sharing.";
 const PEER_B_REVIEW: &str = "Peer B reviewed the note and added cross-check evidence.";
 const PEER_A_RECONCILED: &str = "Peer A reconciled the note with the latest peer review.";
@@ -33,6 +36,7 @@ enum Mode {
     ContentPeerA,
     ContentPeerB,
     ContentReceipt8801,
+    ContentStale8901,
 }
 
 fn decimal(value: &str) -> bool {
@@ -240,6 +244,120 @@ fn receipt_8801_reply_for(request: &Value) -> Result<(Value, &'static str, Strin
     Ok((json!({"role":"assistant","content":null,
         "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
         "tool_calls", "8801 read empty room".into(), None))
+}
+
+fn explicit_stale_release(value: &Value, depth: usize) -> bool {
+    if depth > 12 { return false; }
+    match value {
+        Value::String(text) => {
+            if nested_json(text).is_some_and(|nested| explicit_stale_release(&nested, depth + 1)) {
+                return true;
+            }
+            let Some((_, tail)) = text.split_once("tool settle refused by Mini: ") else { return false; };
+            let Some((native, _)) = tail.split_once("; signed zero-charge tool release and disconnect confirmed") else { return false; };
+            serde_json::from_str::<Value>(native.trim()).is_ok_and(|outcome| {
+                outcome.get("type").and_then(Value::as_str) == Some("refused")
+                    && outcome.get("phase").and_then(Value::as_str) == Some("70726570617265")
+                    && outcome.get("detail").and_then(Value::as_str) == Some(STALE_DETAIL_HEX)
+            })
+        }
+        Value::Array(items) => items.iter().any(|item| explicit_stale_release(item, depth + 1)),
+        Value::Object(fields) => fields.values().any(|item| explicit_stale_release(item, depth + 1)),
+        _ => false,
+    }
+}
+
+fn stale_8901_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
+    if request.get("model").and_then(Value::as_str) != Some(MODEL) { return Err("unexpected model".into()); }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("current user prompt absent")?;
+    let prompt = messages[current_prompt].get("content").and_then(Value::as_str).ok_or("prompt text absent")?;
+    let prompt = peer_stage_prompt(prompt)?;
+    let current = &messages[current_prompt..];
+    match prompt {
+        "workroom-stale-capture" => {
+            if let Some(read) = tool_result(current, READ_ID) {
+                if tool_failed(read, 0) { return Err("Mini signed capture read failed".into()); }
+                let page = find_content_page(read, 0).ok_or("signed content8001 capture page absent")?;
+                if page.get("entries").and_then(Value::as_array).is_none_or(|entries| !entries.is_empty()) {
+                    return Err("capture requires signed empty content8001 page".into());
+                }
+                let root = page.get("root").and_then(Value::as_str).ok_or("capture root absent")?;
+                return Ok((json!({"role":"assistant","content":"Fixture retained the signed empty content8001 read for a later stale-root attempt."}),
+                    "stop", format!("8901 captured root={root}")));
+            }
+            let read = tool_name(request, "__mini_read_resource").ok_or("mini_read_resource absent")?;
+            Ok((json!({"role":"assistant","content":null,
+                "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
+                "tool_calls", "8901 signed empty read".into()))
+        }
+        "workroom-stale-attempt" => {
+            if let Some(published) = tool_result(current, PUBLISH_ID) {
+                if !tool_failed(published, 0) || !explicit_stale_release(published, 0) {
+                    return Err("Mini did not report native staleTarget prepare refusal with signed zero-charge release and disconnect".into());
+                }
+                return Ok((json!({"role":"assistant","content":"Fixture observed Mini staleTarget refusal and signed zero-charge cleanup."}),
+                    "stop", "8901 native stale refusal and cleanup".into()));
+            }
+            let capture = messages[..current_prompt].iter().rposition(|message| {
+                message.get("role").and_then(Value::as_str) == Some("user")
+                    && message.get("content").and_then(Value::as_str) == Some("workroom-stale-capture")
+            }).ok_or("earlier capture prompt absent")?;
+            let old_read = tool_result(&messages[capture..current_prompt], READ_ID)
+                .ok_or("earlier signed empty-room read absent")?;
+            if tool_failed(old_read, 0) { return Err("earlier signed read failed".into()); }
+            let page = find_content_page(old_read, 0).ok_or("earlier signed content page absent")?;
+            if page.get("entries").and_then(Value::as_array).is_none_or(|entries| !entries.is_empty()) {
+                return Err("earlier signed page was not empty".into());
+            }
+            let root = page.get("root").and_then(Value::as_str).ok_or("earlier root absent")?;
+            let publish = tool_name(request, "__mini_publish").ok_or("mini_publish absent")?;
+            let action = json!({"type":"createAtom","atom":"7402","kind":{"type":"text"},
+                "payload":hex_bytes(STALE_TOOL_NOTE)});
+            let args = json!({"publications":[{"kind":"object","target":"8001",
+                "expectedTargetRoot":root,"payload":{"type":"content","actions":[action]}}]});
+            Ok((json!({"role":"assistant","content":null,
+                "tool_calls":[call(publish, PUBLISH_ID, args)]}),
+                "tool_calls", format!("8901 stale publish oldRoot={root}")))
+        }
+        "workroom-stale-retry" => {
+            if let Some(published) = tool_result(current, PUBLISH_ID) {
+                if tool_failed(published, 0) || !has_peer_tool_ack(published, "8902", 0) {
+                    return Err("fresh-root retry did not return Mini tool acknowledgement".into());
+                }
+                return Ok((json!({"role":"assistant","content":"Fixture observed Mini accept the fresh-root retry."}),
+                    "stop", "8901 fresh retry tool ack".into()));
+            }
+            if let Some(read) = tool_result(current, READ_ID) {
+                if tool_failed(read, 0) { return Err("fresh signed read failed".into()); }
+                let page = find_content_page(read, 0).ok_or("fresh content8001 page absent")?;
+                let entries = page.get("entries").and_then(Value::as_array).ok_or("fresh entries absent")?;
+                if entries.len() != 1 || entries[0].get("type").and_then(Value::as_str) != Some("atom")
+                    || entries[0].get("id").and_then(Value::as_str) != Some("7401")
+                    || entries[0].get("document").and_then(Value::as_str) != Some("8001")
+                    || entries[0].pointer("/kind/type").and_then(Value::as_str) != Some("text")
+                    || entries[0].get("payload").and_then(Value::as_str) != Some(hex_bytes(STALE_INTERVENING).as_str())
+                    || entries[0].pointer("/createdBy/subject").and_then(Value::as_str) != Some("7")
+                    || entries[0].pointer("/createdBy/capability").and_then(Value::as_str) != Some("89")
+                { return Err("fresh read did not show expected owner intervention".into()); }
+                let root = page.get("root").and_then(Value::as_str).ok_or("fresh root absent")?;
+                let publish = tool_name(request, "__mini_publish").ok_or("mini_publish absent")?;
+                let action = json!({"type":"createAtom","atom":"7402","kind":{"type":"text"},
+                    "payload":hex_bytes(STALE_TOOL_NOTE)});
+                let args = json!({"publications":[{"kind":"object","target":"8001",
+                    "expectedTargetRoot":root,"payload":{"type":"content","actions":[action]}}]});
+                return Ok((json!({"role":"assistant","content":null,
+                    "tool_calls":[call(publish, PUBLISH_ID, args)]}),
+                    "tool_calls", format!("8901 fresh publish root={root}")));
+            }
+            let read = tool_name(request, "__mini_read_resource").ok_or("mini_read_resource absent")?;
+            Ok((json!({"role":"assistant","content":null,
+                "tool_calls":[call(read, READ_ID, json!({"name":"workroom"}))]}),
+                "tool_calls", "8901 reread after refusal".into()))
+        }
+        _ => Err("unsupported 8901 stale fixture prompt".into()),
+    }
 }
 
 fn persist_receipt_projection(path: &Path, projection: &Value) -> Result<(), String> {
@@ -620,6 +738,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             projection = receipt;
             (message, finish, stage)
         }),
+        Mode::ContentStale8901 => stale_8901_reply_for(&request),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -664,6 +783,7 @@ fn main() -> Result<(), String> {
         Some("--content-peer-a") => Mode::ContentPeerA,
         Some("--content-peer-b") => Mode::ContentPeerB,
         Some("--content-receipt-8801") => Mode::ContentReceipt8801,
+        Some("--content-stale-8901") => Mode::ContentStale8901,
         Some(_) => return Err("unknown fixture mode".into()),
     };
     let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {
@@ -749,6 +869,55 @@ mod tests {
         assert_eq!(args["publications"][0]["expectedTargetRoot"], "123");
         assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(CONTENT_ORIGINAL));
         assert!(next.3.is_none());
+    }
+
+    #[test]
+    fn stale_8901_reuses_signed_old_root_and_requires_native_cleanup() {
+        let empty = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"123","entries":[]}}});
+        let read = json!({"role":"tool","tool_call_id":READ_ID,"content":empty.to_string()});
+        let capture = json!({"role":"user","content":"workroom-stale-capture"});
+        let done = stale_8901_reply_for(&request(json!([capture,read]))).unwrap();
+        assert_eq!(done.1, "stop");
+        let history = json!([
+            {"role":"user","content":"workroom-stale-capture"},
+            {"role":"tool","tool_call_id":READ_ID,"content":empty.to_string()},
+            {"role":"assistant","content":"capture complete"},
+            {"role":"user","content":"workroom-stale-attempt"}
+        ]);
+        let publish = stale_8901_reply_for(&request(history.clone())).unwrap();
+        let args: Value = serde_json::from_str(publish.0["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "123");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["atom"], "7402");
+        let refusal = format!("tool settle refused by Mini: {{\"type\":\"refused\",\"phase\":\"70726570617265\",\"detail\":\"{STALE_DETAIL_HEX}\"}}; signed zero-charge tool release and disconnect confirmed; if this prompt remains active, a fresh signed read may precede a new publication");
+        let mut messages = history.as_array().unwrap().clone();
+        messages.push(json!({"role":"tool","tool_call_id":PUBLISH_ID,
+            "content":[{"type":"text","text":json!({"isError":true,"text":refusal}).to_string()}]}));
+        let accepted = stale_8901_reply_for(&request(json!(messages.clone()))).unwrap();
+        assert_eq!(accepted.1, "stop");
+        for altered in [
+            refusal.replace(STALE_DETAIL_HEX, "7374616c65546172676574"),
+            refusal.replace("signed zero-charge tool release and disconnect confirmed", "tool timed out"),
+            refusal.replace("70726570617265", "7375626d6974"),
+        ] {
+            *messages.last_mut().unwrap() = json!({"role":"tool","tool_call_id":PUBLISH_ID,
+                "content":[{"type":"text","text":json!({"isError":true,"text":altered}).to_string()}]});
+            assert!(stale_8901_reply_for(&request(json!(messages.clone()))).is_err());
+        }
+    }
+
+    #[test]
+    fn stale_8901_retry_reads_fresh_owner_atom() {
+        let fresh = json!({"kind":"object","target":"8001","view":{"page":{
+            "document":"8001","root":"456","entries":[{"type":"atom","id":"7401",
+                "document":"8001","kind":{"type":"text"},"payload":hex_bytes(STALE_INTERVENING),
+                "createdBy":{"subject":"7","capability":"89"}}]}}});
+        let messages = json!([{"role":"user","content":"workroom-stale-retry"},
+            {"role":"tool","tool_call_id":READ_ID,"content":fresh.to_string()}]);
+        let publish = stale_8901_reply_for(&request(messages)).unwrap();
+        let args: Value = serde_json::from_str(publish.0["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "456");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["atom"], "7402");
     }
 
     #[test]
