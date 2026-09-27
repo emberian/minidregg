@@ -1,0 +1,2 @@
+explicit foreground profile PASS; wrong provider subject REFUSED
+source-shaped HTTP response PASS; status500 and empty body REFUSED
