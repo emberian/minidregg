@@ -1,0 +1,4 @@
+244f85f4ae9e4e2c37eff37a658e8edc7b4886b7396cf6d2a6e6abec981ce22d  Host/ApplicationAgentLifetimePaidIngressInspection.lean
+505a81d45a0931aa8e87a3dcf8f4d911a4a3a199c22a8b643f50c9e2dcd1b6dc  Host/Main.lean
+9cfe9389ce4495b3d7e917e4ad1638e7b600ca51d0068993c4a34d806040b548  docs/evidence/2026-09-27-agent-lifetime-paid-ingress/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-agent-lifetime-paid-ingress/lean.log
