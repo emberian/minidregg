@@ -1,0 +1,38 @@
+   Compiling minidregg-grain-runtime v0.1.0 (/tmp/mini-shared-app-integration-check)
+warning: unused import: `super::*`
+ --> src/dispatch_runtime_tests.rs:1:5
+  |
+1 | use super::*;
+  |     ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `minidregg-grain-runtime` (bin "grain-runtime" test) generated 1 warning (run `cargo fix --bin "grain-runtime" -p minidregg-grain-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.33s
+────────────
+ Nextest run ID 0079729e-9a3c-432b-9a74-15470b642a5b with nextest profile: default
+    Starting 22 tests across 2 binaries (73 tests skipped)
+        PASS [   0.017s] ( 1/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::birth_selection_and_namespaces_are_bounded
+        PASS [   0.017s] ( 2/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::refuses_unbounded_view
+        PASS [   0.017s] ( 3/22) minidregg-grain-runtime::bin/grain-runtime application_tools::tests::app_and_session_sources_bind_signed_peers_and_complete_members
+        PASS [   0.017s] ( 4/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::accepts_only_exact_allowlisted_name_argument
+        PASS [   0.018s] ( 5/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::historical_receipt_requires_every_exact_native_field
+        PASS [   0.018s] ( 6/22) minidregg-grain-runtime::bin/grain-runtime application_tools::tests::fixed_peers_and_tariff_overflow_are_rejected
+        PASS [   0.018s] ( 7/22) minidregg-grain-runtime::bin/grain-runtime application_tools::tests::all_five_targets_and_ten_grants_are_reserved
+        PASS [   0.019s] ( 8/22) minidregg-grain-runtime::bin/grain-runtime application_tools::tests::session_family_accepts_only_registered_external_application_family
+        PASS [   0.023s] ( 9/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::rejects_publication_authority_and_ambiguous_names
+        PASS [   0.023s] (10/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::content_birth_uses_exact_factory_payer_tool_parent_footprint
+        PASS [   0.035s] (11/22) minidregg-grain-runtime::bin/grain-runtime resource_tools::tests::supervised_read_runner_can_refuse_before_native_spawn
+        PASS [   0.019s] (12/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::read_projection_cannot_replace_signed_target_or_complete_page
+        PASS [   0.019s] (13/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::only_bounded_unique_names_are_discovered
+        PASS [   0.019s] (14/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::retained_shared_selection_cannot_swap_names_targets_or_receipts
+        PASS [   0.019s] (15/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::tampered_receipt_or_cross_controller_grant_is_refused
+        PASS [   0.014s] (16/22) minidregg-grain-runtime::bin/grain-runtime terminal::tests::stale_control_request_cannot_mark_new_prompt_complete
+        PASS [   0.016s] (17/22) minidregg-grain-runtime::bin/grain-runtime terminal::tests::model_text_is_prefixed_and_terminal_controls_are_visible
+        PASS [   0.020s] (18/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::references_are_not_local_birth_records_or_owner_grants
+        PASS [   0.038s] (19/22) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::issue_lookup_can_use_current_public_socket_distinct_from_original_operator_socket
+        PASS [   0.015s] (20/22) minidregg-grain-runtime::bin/grain-runtime terminal::tests::status_projection_hides_private_journal_fields
+        PASS [   0.020s] (21/22) minidregg-grain-runtime::bin/grain-runtime terminal::tests::command_parser_requires_bounded_explicit_identity
+        PASS [   0.038s] (22/22) minidregg-grain-runtime::bin/grain-runtime terminal::tests::bounded_input_and_frames_refuse_oversize_and_malformed_data
+────────────
+     Summary [   0.057s] 22 tests run: 22 passed, 73 skipped
