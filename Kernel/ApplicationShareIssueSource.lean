@@ -136,20 +136,28 @@ instance validDecidable (spec : Spec) : Decidable spec.valid := by
   unfold Spec.valid
   infer_instance
 
-/-- The source-owned initial page has exactly one canonical share-ticket
-atom, with the born resource as document. No arbitrary initial content page is
-accepted from a caller. -/
+/-- Source-derived final page for the special atomic issue. Ordinary birth
+itself installs only `ContentResource.initialPage`; the special receiver
+incorporates this checked insertion into that birth's single final write. -/
 def ticketPage (domain : Digest) (spec : Spec) (operation : Nat) :
     Except ContentResource.Reject HyperdocumentContentPageMaterializer.Page :=
   ContentResource.step ⟨spec.issuer, .object, spec.ticketOwnerCapability⟩ ⟨⟨operation⟩⟩
     (ContentResource.initialPage domain spec.ticket.resource)
     (ApplicationDispatchAuthority.initialAction domain spec.ticket)
 
+private def bornCell (page : HyperdocumentContentPageMaterializer.Page) :
+    PackedCell CanonicalCellRegistry.registry :=
+  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
+    (HyperdocumentContentPageMaterializer.stateOfOption (some page))⟩
+
 structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
   private mk ::
   valid : spec.valid
   page : HyperdocumentContentPageMaterializer.Page
   pageExact : ticketPage domain spec operation = .ok page
+  payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
+    (bornCell (ContentResource.initialPage domain spec.ticket.resource))).length ≤
+    (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length
 
 def prepare {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
@@ -163,20 +171,72 @@ def prepare {F : Type} [Field F]
   if valid : spec.valid then
     match exact : ticketPage config.deployment.domain spec operation with
     | .error _ => .error "share ticket initial page refused"
-    | .ok page => .ok ⟨valid, page, exact⟩
+    | .ok page =>
+        if payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
+            (bornCell (ContentResource.initialPage config.deployment.domain
+              spec.ticket.resource))).length ≤
+            (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length then
+          .ok ⟨valid, page, exact, payloadAtLeast⟩
+        else .error "share ticket final payload shorter than empty birth"
   else .error "invalid share ticket selectors"
-
-private def bornCell (page : HyperdocumentContentPageMaterializer.Page) :
-    PackedCell CanonicalCellRegistry.registry :=
-  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption (some page))⟩
 
 variable {domain : Digest} {spec : Spec} {operation : Nat}
 
 def Ready.birth (ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
-      bornCell ready.page⟩, .object, spec.issuer⟩
+      bornCell (ContentResource.initialPage domain spec.ticket.resource)⟩,
+    .object, spec.issuer⟩
+
+/-- The initialized physical cell is never a second birth item. It is the
+one source-derived final post chosen by the special issue intent after native
+admission of the empty ordinary birth. -/
+def Ready.initializedCell (ready : Ready domain spec operation) :
+    PackedCell CanonicalCellRegistry.registry := bornCell ready.page
+
+def Ready.emptyPayloadBytes (ready : Ready domain spec operation) : Nat :=
+  (PackedCell.bytes CanonicalCellRegistry.registry ready.birth.create.cell).length
+
+def Ready.finalPayloadBytes (ready : Ready domain spec operation) : Nat :=
+  (PackedCell.bytes CanonicalCellRegistry.registry ready.initializedCell).length
+
+theorem Ready.empty_le_final (ready : Ready domain spec operation) :
+    ready.emptyPayloadBytes ≤ ready.finalPayloadBytes := ready.payloadAtLeast
+
+/-- The special issue's effective tariff is determined solely by the pinned
+factory tariff and the source-computed final ticket cell. The ordinary birth
+engine still proves its standard fee law under these derived pins. -/
+def Ready.effectiveTariff (ready : Ready domain spec operation)
+    (tariff : CreationTariff) : CreationTariff :=
+  { tariff with base := tariff.base + tariff.perInitialPayloadByte *
+      (ready.finalPayloadBytes - ready.emptyPayloadBytes) }
+
+def Ready.effectivePins (ready : Ready domain spec operation)
+    (pins : FactoryPins) : FactoryPins :=
+  { pins with tariff := ready.effectiveTariff pins.tariff }
+
+theorem Ready.effective_payload_quote (ready : Ready domain spec operation)
+    (tariff : CreationTariff) :
+    (ready.effectiveTariff tariff).base +
+      tariff.perInitialPayloadByte * ready.emptyPayloadBytes =
+    tariff.base + tariff.perInitialPayloadByte * ready.finalPayloadBytes := by
+  simp only [Ready.effectiveTariff]
+  rw [Nat.add_assoc, ← Nat.mul_add]
+  rw [Nat.sub_add_cancel ready.empty_le_final]
+
+theorem Ready.effective_collector (ready : Ready domain spec operation)
+    (tariff : CreationTariff) :
+    (ready.effectiveTariff tariff).collector = tariff.collector := by
+  simp [Ready.effectiveTariff]
+
+theorem Ready.effective_asset (ready : Ready domain spec operation)
+    (tariff : CreationTariff) :
+    (ready.effectiveTariff tariff).asset = tariff.asset := by
+  simp [Ready.effectiveTariff]
+
+theorem Ready.birth_empty (ready : Ready domain spec operation) :
+    (ContentResource.initialPage domain spec.ticket.resource).entries = [] := by
+  rfl
 
 def Ready.births (ready : Ready domain spec operation) :
     List (BirthItem CanonicalCellRegistry.registry) := [ready.birth]
@@ -248,9 +308,9 @@ def Ready.initialPolicies {F : Type} [Field F]
   let record := ready.policyRecord profile config
   [⟨record.policyId, PolicyRecordCodec.digest record, PolicyRecordCodec.encode record⟩]
 
-/-- The ordinary birth descriptor is source-authored from the exact ticket
-page and owner-locked policy. A later receiving step must additionally check
-the app delegation branch; this descriptor can never prove that by itself. -/
+/-- The ordinary signed birth descriptor installs an empty ticket page and
+owner-locked policy. The special receiver alone composes the source-derived
+first atom into that same allocation write after checking app delegation. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (authority : AuthState) (height : Nat)
@@ -271,7 +331,8 @@ def Ready.descriptor {F : Type} [Field F]
       authorityNullifier := identity.value,
       funding := funding,
       fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
-  { draft with fee := { draft.fee with amount := draft.quotedFee config.tariff } }
+  { draft with fee := { draft.fee with amount :=
+      (draft.quotedFee (ready.effectiveTariff config.tariff)) } }
 
 /-- Rebuild the one permissible birth descriptor from the selected issuer and
 exact ticket, retaining only the caller's payer/funding choices. The special

@@ -17,6 +17,7 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableCommitProtocol
 open Minidregg.Kernel.ApplicationShareIssueSource
 open Minidregg.Kernel.ApplicationShareIssueAdmission
+open Minidregg.Kernel.ApplicationShareIssueAtomicBirth
 set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
@@ -63,22 +64,54 @@ theorem readGuards_exact (accepted : Accepted profile config pins durable height
     subst guard
     exact ApplicationShareIssueDelegation.readGuard_current accepted.appPrepared
 
-/-- Charge includes the original resource birth and the extra signed app
-authority check, complete outer ingress, and app read guard. The accepted
-birth fee remains the only Book debit. -/
+def writes (accepted : Accepted profile config pins durable height ingress) :
+    List DataWrite := accepted.atomic.writes
+
+theorem writes_unique (accepted : Accepted profile config pins durable height ingress) :
+    ((writes accepted).map DataWrite.cellId).Nodup :=
+  accepted.atomic.unique accepted.birth.prepared.writesUnique
+
+theorem compositeGuards_readonly
+    (accepted : Accepted profile config pins durable height ingress)
+    (guard : ReadGuard) (member : guard ∈ readGuards accepted) :
+    guard.cellId ∉ (writes accepted).map DataWrite.cellId :=
+  accepted.atomic.readonly guard (readGuards_readonly accepted guard member)
+
+theorem composite_roots_bound
+    (accepted : Accepted profile config pins durable height ingress)
+    (write : DataWrite) (member : write ∈ writes accepted) :
+    ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost :=
+  accepted.atomic.roots_bound accepted.birth.prepared.write_roots_bound write member
+
+/-- Charge includes the original empty resource birth, the full initialized
+ticket post bytes, the extra signed app authority check, complete outer
+ingress, and app read guard. Counting the entire final post is conservative;
+the accepted birth fee remains the only Book debit. -/
 def charge (accepted : Accepted profile config pins durable height ingress) : Charge
   | .incidences => ResourceBirthReceiver.charge accepted.birth .incidences + 1
   | .turnBytes => ResourceBirthReceiver.charge accepted.birth .turnBytes +
-      (ingressCodec.encode ingress).length
+      (ingressCodec.encode ingress).length +
+      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
   | .memoryTouches => ResourceBirthReceiver.charge accepted.birth .memoryTouches + 1
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
-      ingress.appEnvelope.length
+      ingress.appEnvelope.length +
+      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
   | .storageBytes => ResourceBirthReceiver.charge accepted.birth .storageBytes +
-      (ingressCodec.encode ingress).length
-  | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount
+      (ingressCodec.encode ingress).length +
+      (initializedWrite accepted.sourceReady).canonicalPostBytes.length
+  | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
+
+theorem charge_fee_exact (accepted : Accepted profile config pins durable height ingress) :
+    charge accepted .feeDebit = accepted.birth.descriptor.fee.amount := rfl
+
+theorem charge_fee_source_quoted (accepted : Accepted profile config pins durable height ingress) :
+    charge accepted .feeDebit = accepted.birth.descriptor.quotedFee
+      (accepted.sourceReady.effectiveTariff config.tariff) := by
+  rw [charge_fee_exact]
+  exact accepted.special_fee_bound
 
 /-- The special event and nullifier distinguish this composite issue from an
 ordinary resource birth. Both prior-image admissions were checked at the same
@@ -89,15 +122,15 @@ actual native observe delegation before dispatch can use its ticket selector. -/
 def intent (accepted : Accepted profile config pins durable height ingress) :
     DataIntent ResourceBirthCodec.rootBytes where
   transactionId := accepted.birth.descriptor.transactionId
-  writes := accepted.birth.prepared.writes
+  writes := writes accepted
   readGuards := readGuards accepted
   nullifiers := ResourceBirthReceiver.birthNullifier config.deployment.domain
       accepted.birth.descriptor.authorityNullifier ::
     [issueNullifier config.deployment.domain ingress accepted.birth.descriptor]
   exactCharge := charge accepted
   event := event config.deployment.domain ingress
-  postRootsBound := accepted.birth.prepared.write_roots_bound
-  guardsReadOnly := readGuards_readonly accepted
+  postRootsBound := composite_roots_bound accepted
+  guardsReadOnly := compositeGuards_readonly accepted
 
 theorem intent_event_version (accepted : Accepted profile config pins durable height ingress) :
     (intent accepted).event.codecVersion = 15 := rfl

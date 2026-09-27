@@ -70,10 +70,13 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationShareIssueSource.prepare profile config spec
     | throw "share ticket source refused"
+  if opened.pins.tariff != config.tariff then
+    throw "share ticket factory tariff differs from loaded host"
   let draft := ready.expectedDescriptor profile config
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
-    profile.compilerProfile config.deployment opened.pins opened.durable draft
+    profile.compilerProfile config.deployment (ready.effectivePins opened.pins)
+      opened.durable draft
     | throw "share ticket birth preparation refused"
   let expected := { draft with auxiliaryCreates := prepared.prepared.grants.auxiliaryCreates }
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=
@@ -81,15 +84,28 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     throw "share ticket finalized birth differs from source"
   let .ok _pending := ResourceBirthPolicyController.Concrete.preparePending
     prepared.prepared height | throw "share ticket birth pending refused"
-  let birth ← (NativeHost.prepareLoaded config opened
-    (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode draft) sourceCapabilities)).mapError
-      (fun _ => "share ticket birth signing plan refused")
-  match birth.finalizedDraft with
-  | .birth finalized capabilities =>
-      unless finalized == CanonicalCellRegistry.sourceEncoding.codec.encode
-          prepared.descriptor && capabilities == sourceCapabilities do
-        throw "share ticket birth plan differs from current source"
-  | _ => throw "share ticket plan is not a birth"
+  if sourceCapabilities.length != prepared.descriptor.resourceBatch.operations.length then
+    throw "share ticket birth source capability count mismatch"
+  let birthSlot := fun (role index : Nat)
+      (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) => do
+    let wanted := ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
+      prepared.prepared height branch
+    let .ok header := CredentialSignatureAdmission.signingHeader
+        prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier wanted
+      | throw "share ticket birth signing key selection refused"
+    pure (⟨role, index, CredentialSignedEnvelopeController.headerCodec.encode header⟩ : SigningSlot)
+  let factory ← birthSlot 0 0 .factory
+  let authority ← birthSlot 1 0 .authority
+  let allocations ← (List.finRange prepared.descriptor.createRequests.length).mapM
+    (fun index => birthSlot 2 index.val (.allocation index))
+  let sources ← (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM
+    (fun index => birthSlot 3 index.val (.source index))
+  let birth : SigningPlan :=
+    ⟨config.deployment.domain, profile.semantics,
+      NativeHost.imageBoundary config opened.durable.image, height,
+      .birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor)
+        sourceCapabilities,
+      factory :: authority :: allocations ++ sources⟩
   let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
     ⟨prepared.prepared.directory, prepared.prepared.authority⟩
   let .ok app := ApplicationShareIssueDelegation.prepare context profile
