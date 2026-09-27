@@ -20,6 +20,7 @@ use tokio::task::LocalSet;
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CALL_TIME: Duration = Duration::from_secs(30);
+const MAX_CACHED_SESSIONS: usize = 32;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -91,6 +92,7 @@ struct CachedSession {
     fingerprint: [u8; 32],
     params: SessionParameters,
     client: web_session_capnp::web_session::Client,
+    last_use: u64,
 }
 
 fn same_projection(
@@ -103,6 +105,10 @@ fn same_projection(
 
 fn cache_matches(cached: &CachedSession, binding: &SessionBinding) -> bool {
     same_projection(&cached.fingerprint, &cached.params, binding)
+}
+
+fn oldest_by_use<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Option<K> {
+    entries.min_by_key(|(_, last_use)| *last_use).map(|(key, _)| key)
 }
 
 enum Command {
@@ -144,9 +150,6 @@ impl RpcDriver {
         generation: u64,
         stream: UnixStream,
     ) -> io::Result<Self> {
-        if app == 0 || generation == 0 {
-            return Err(invalid("invalid fixed app generation for fd3"));
-        }
         let (sender, mut receiver) = mpsc::channel::<Command>(8);
         let (ready_tx, ready_rx) = sync_mpsc::sync_channel(1);
         std::thread::Builder::new()
@@ -174,6 +177,7 @@ impl RpcDriver {
                 local.block_on(&runtime, async move {
                     let mut sessions: HashMap<SessionKey, CachedSession> = HashMap::new();
                     let mut sessions_created = 0_u64;
+                    let mut use_clock = 0_u64;
                     tokio::task::spawn_local(async move {
                         let _ = rpc.await;
                     });
@@ -201,12 +205,13 @@ impl RpcDriver {
                                     {
                                         sessions.remove(&key);
                                     }
-                                    let session = if let Some(cached) = sessions.get(&key) {
+                                    use_clock = use_clock.checked_add(1).ok_or_else(|| {
+                                        invalid("SPK session use counter exhausted")
+                                    })?;
+                                    let session = if let Some(cached) = sessions.get_mut(&key) {
+                                        cached.last_use = use_clock;
                                         cached.client.clone()
                                     } else {
-                                        if sessions.len() >= 32 {
-                                            return Err(invalid("SPK live session cache full"));
-                                        }
                                         let left = remaining(deadline)?;
                                         let client = tokio::time::timeout(left, async {
                                             match binding.kind {
@@ -217,12 +222,22 @@ impl RpcDriver {
                                         .await
                                         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK session timeout"))?
                                         .map_err(io::Error::other)?;
+                                        if sessions.len() >= MAX_CACHED_SESSIONS {
+                                            let old = oldest_by_use(
+                                                sessions.iter().map(|(key, cached)| (*key, cached.last_use))
+                                            )
+                                                .ok_or_else(|| invalid("SPK session cache drift"))?;
+                                            sessions.remove(&old);
+                                        }
                                         sessions.insert(key, CachedSession {
                                             fingerprint: binding.projection_fingerprint,
                                             params: binding.params.clone(),
                                             client: client.clone(),
+                                            last_use: use_clock,
                                         });
-                                        sessions_created += 1;
+                                        sessions_created = sessions_created.checked_add(1).ok_or_else(|| {
+                                            invalid("SPK session creation counter exhausted")
+                                        })?;
                                         client
                                     };
                                     let left = remaining(deadline)?;
@@ -313,9 +328,6 @@ impl RpcDriver {
         let deadline = self.check_bound(timeout)?;
         if binding.app != self.app
             || binding.process_generation != self.generation
-            || binding.session_resource == 0
-            || binding.subject == 0
-            || binding.projection_fingerprint == [0; 32]
             || max_response_bytes == 0
             || max_response_bytes > MAX_RESPONSE_BYTES
         {
@@ -394,6 +406,35 @@ mod tests {
             generation: 3,
             ..original.key()
         });
+    }
+
+    #[test]
+    fn zero_coordinates_are_source_domain_values_not_local_authority_tests() {
+        let (supervisor, app) = UnixStream::pair().unwrap();
+        drop(app);
+        let mut driver = RpcDriver::from_connected_stream(0, 0, supervisor).unwrap();
+        let mut zero = binding();
+        zero.app = 0;
+        zero.process_generation = 0;
+        zero.session_resource = 0;
+        zero.subject = 0;
+        zero.projection_fingerprint = [0; 32];
+        assert_eq!(zero.key().app, 0);
+        // The disconnected bridge fails as transport, not because an
+        // incidental fixture-era nonzero check rejected native Nat values.
+        assert!(driver.dispatch(zero, WebRequest {
+            method: minidregg_spk_rpc::Method::Get,
+            path_and_query: "".into(),
+            context: minidregg_spk_rpc::RequestContext::default(),
+            body: None,
+        }, 1, Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn bounded_cache_evicts_oldest_session_instead_of_exhausting() {
+        assert_eq!(oldest_by_use([(11, 3), (12, 1), (13, 2)].into_iter()), Some(12));
+        assert_eq!(oldest_by_use([(11, 3), (12, 4), (13, 2)].into_iter()), Some(13));
+        assert_eq!(oldest_by_use(std::iter::empty::<(u64, u64)>()), None);
     }
 
     #[test]

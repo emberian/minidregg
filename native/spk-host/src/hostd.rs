@@ -49,8 +49,7 @@ pub(crate) struct VerifiedBegin {
 
 impl VerifiedBegin {
     fn validate(&self) -> io::Result<()> {
-        if self.app == 0
-            || self.generation == 0
+        if self.generation == 0
             || !hex64(&self.transaction_id)
             || !hex64(&self.event_id)
             || !hex64(&self.package_sha256)

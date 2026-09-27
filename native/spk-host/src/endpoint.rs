@@ -57,11 +57,7 @@ fn valid_request_id(value: &str) -> bool {
 
 fn respond(journal: &Journal, bytes: &[u8]) -> io::Result<Vec<u8>> {
     let request: Request = serde_json::from_slice(bytes)?;
-    if request.protocol != PROTOCOL
-        || !valid_request_id(&request.request_id)
-        || request.app == 0
-        || request.generation == 0
-    {
+    if request.protocol != PROTOCOL || !valid_request_id(&request.request_id) {
         return Err(invalid("invalid hostd protocol or exact request identity"));
     }
     let mut response = Response {
@@ -276,6 +272,9 @@ mod tests {
         let request: Request = serde_json::from_slice(valid).unwrap();
         assert_eq!(request.app, 91);
         assert!(serde_json::from_slice::<Request>(br#"{"op":"status","accepted":true}"#).is_err());
+        let zero = br#"{"protocol":"mini-spk-hostd-v1","request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","app":0,"generation":0,"op":"status"}"#;
+        let zero: Request = serde_json::from_slice(zero).unwrap();
+        assert_eq!((zero.app, zero.generation), (0, 0));
     }
 
     #[test]
