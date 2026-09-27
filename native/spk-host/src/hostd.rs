@@ -130,8 +130,12 @@ impl Record {
         let manager = systemd_show(self.unit())?;
         if property(&manager, "ActiveState")? != "active"
             || !matches!(property(&manager, "Job")?, "0" | "")
+            || property(&manager, "MainPID")?
+                .parse::<u32>()
+                .map_err(|_| invalid("invalid app unit MainPID"))?
+                != std::process::id()
         {
-            return Err(invalid("app unit is not active and job-free"));
+            return Err(invalid("resident is not active unit MainPID and job-free"));
         }
         let child = self.child_pid.ok_or_else(|| invalid("Running app PID absent"))?;
         let child_group = fs::read_to_string(format!("/proc/{child}/cgroup"))?;
@@ -372,6 +376,10 @@ impl UnitInstance {
             || property(&manager, "LoadState")? != "loaded"
             || property(&manager, "InvocationID")? != instance.invocation_id
             || property(&manager, "ControlGroup")? != instance.control_group
+            || property(&manager, "MainPID")?
+                .parse::<u32>()
+                .map_err(|_| invalid("invalid systemd MainPID"))?
+                != std::process::id()
         {
             return Err(invalid(
                 "unit process identity differs from systemd manager",

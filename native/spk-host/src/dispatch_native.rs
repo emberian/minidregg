@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 const HOST_MAX_FRAME: usize = 12_102_760;
 const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
+const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(600);
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -154,6 +155,23 @@ impl PrivateOperator {
 
     fn tool(&self, command: &str, kind: &str, input: &Path, output: &Path) -> io::Result<Vec<u8>> {
         let _ = self.check_pin()?;
+        let cap = match command {
+            "author" => MAX_AUTHOR_JSON,
+            "inspect" => (HOST_MAX_FRAME - 1) as u64,
+            "signatures" => 1024 * 1024,
+            _ => return Err(invalid("Mini Host helper command unavailable")),
+        };
+        private_dir(input.parent().ok_or_else(|| invalid("helper input parent absent"))?)?;
+        let meta = fs::symlink_metadata(input)?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.permissions().mode() & 0o777 != 0o600
+            || meta.len() == 0
+            || meta.len() > cap
+        {
+            return Err(invalid("Mini Host helper input identity or size refused"));
+        }
         let mut process = Command::new(&self.host);
         process.arg(&self.config).arg(command);
         if !kind.is_empty() {
@@ -473,6 +491,17 @@ mod tests {
             [5, 0, 0, 0, 36, b'p', b'l', b'a', b'n']
         );
         server.join().unwrap();
+        let input = root.join("oversized-author.json");
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&input)
+            .unwrap();
+        file.set_len(MAX_AUTHOR_JSON + 1).unwrap();
+        assert!(operator
+            .tool("author", "application-dispatch-request", &input, &root.join("out.bin"))
+            .is_err());
         fs::write(&config, b"{\"fixture\":false}").unwrap();
         assert!(operator.invoke(36, b"source request").is_err());
         fs::remove_dir_all(root).unwrap();

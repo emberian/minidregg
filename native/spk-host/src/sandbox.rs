@@ -3,7 +3,7 @@
 //! The caller must first obtain Mini's app-lifecycle admission. This module does
 //! not decide whether an app may start or whether an RPC request may be delivered.
 
-use std::ffi::{CString, OsStr};
+use std::ffi::CString;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -87,7 +87,7 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
-fn directory_entry(root: RawFd, name: &str) -> io::Result<()> {
+pub(crate) fn directory_entry(root: RawFd, name: &str) -> io::Result<()> {
     let name = CString::new(name).expect("constant");
     let fd = unsafe {
         libc::openat(root, name.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
@@ -107,7 +107,7 @@ fn stat_fd(fd: RawFd) -> io::Result<libc::stat> {
     Ok(stat)
 }
 
-fn verify_var_volume(path: &Path, var_fd: RawFd, max_bytes: u64, app_uid: u32) -> io::Result<()> {
+pub(crate) fn verify_var_volume(path: &Path, var_fd: RawFd, max_bytes: u64, app_uid: u32) -> io::Result<()> {
     if max_bytes == 0 || max_bytes > 16 * 1024 * 1024 * 1024 {
         return Err(invalid("persistent /var size outside configured cap"));
     }
@@ -127,7 +127,7 @@ fn verify_var_volume(path: &Path, var_fd: RawFd, max_bytes: u64, app_uid: u32) -
     Ok(())
 }
 
-fn verify_executable(path: &Path, app_uid: u32) -> io::Result<()> {
+pub(crate) fn verify_executable(path: &Path, app_uid: u32) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| invalid("bubblewrap has no parent"))?;
     let parent_fd = open_protected_directory(parent, app_uid, false)?;
     let name = path.file_name().ok_or_else(|| invalid("bubblewrap has no filename"))?;
@@ -148,7 +148,7 @@ fn verify_executable(path: &Path, app_uid: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn inherited_fd(fd: RawFd) -> io::Result<OwnedFd> {
+pub(crate) fn inherited_fd(fd: RawFd) -> io::Result<OwnedFd> {
     let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10) };
     if duplicate < 0 {
         return Err(io::Error::last_os_error());
@@ -162,7 +162,7 @@ fn valid_env_key(key: &str) -> bool {
         && bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
-fn validate_command(argv: &[String], environ: &[(String, String)]) -> io::Result<()> {
+pub(crate) fn validate_command(argv: &[String], environ: &[(String, String)]) -> io::Result<()> {
     let Some(program) = argv.first() else { return Err(invalid("empty SPK command")); };
     if !program.starts_with('/') || program.as_bytes().contains(&0) {
         return Err(invalid("SPK command must use an absolute executable path"));
@@ -180,11 +180,36 @@ fn validate_command(argv: &[String], environ: &[(String, String)]) -> io::Result
     Ok(())
 }
 
+/// One exact argument sequence for both the private compatibility smoke and
+/// the operator resident gate. The package's ordered environment is retained.
+pub(crate) fn bwrap_args(spec: &SandboxSpec) -> io::Result<Vec<String>> {
+    validate_command(&spec.argv, &spec.environ)?;
+    let mut args: Vec<String> = [
+        "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid",
+        "--unshare-ipc", "--unshare-uts", "--unshare-cgroup", "--unshare-net",
+        "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
+        "--size", &TMP_BYTES.to_string(), "--tmpfs", "/tmp", "--proc", "/proc",
+        "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
+        "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    for (key, value) in &spec.environ {
+        args.push("--setenv".into());
+        args.push(key.clone());
+        args.push(value.clone());
+    }
+    args.push("--".into());
+    args.extend(spec.argv.iter().cloned());
+    Ok(args)
+}
+
 /// Spawn a package's real command in a package-rooted namespace. The child end of
 /// a private Unix socketpair becomes fd 3 in the packaged bridge. The returned
 /// host end must be passed to `spk-rpc`; it is never mounted as a pathname.
 pub fn spawn_sandbox(spec: &SandboxSpec) -> io::Result<SandboxedChild> {
-    validate_command(&spec.argv, &spec.environ)?;
+    let args = bwrap_args(spec)?;
     let app_uid = unsafe { libc::geteuid() };
     let image = open_protected_directory(&spec.image_root, app_uid, false)?;
     let persistent_var = open_protected_directory(&spec.persistent_var, app_uid, true)?;
@@ -206,24 +231,7 @@ pub fn spawn_sandbox(spec: &SandboxSpec) -> io::Result<SandboxedChild> {
 
     let mut command = Command::new(&spec.bwrap);
     command.env_clear();
-    command.args([
-        "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-ipc",
-        "--unshare-uts", "--unshare-cgroup", "--unshare-net", "--clearenv",
-        "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
-        "--size", &TMP_BYTES.to_string(), "--tmpfs", "/tmp",
-        "--proc", "/proc", "--dev", "/dev", "--chdir", "/",
-        "--setenv", "HOME", "/var", "--setenv", "TMPDIR", "/tmp",
-        "--setenv", "PATH", "/usr/bin:/bin",
-    ]);
-    // The package declares an ordered environment, including any deliberate
-    // override of the three fixed defaults above. Do not sort or coalesce it.
-    for (key, value) in &spec.environ {
-        command.arg("--setenv").arg(key).arg(value);
-    }
-    command.arg("--");
-    for arg in &spec.argv {
-        command.arg(OsStr::new(arg));
-    }
+    command.args(args);
     unsafe {
         command.pre_exec(move || {
             for (source, target) in [
@@ -253,6 +261,22 @@ mod tests {
         assert!(validate_command(&["/start".into()], &[("BAD=KEY".into(), "v".into())]).is_err());
         assert!(validate_command(&["/start".into()], &[("OK".into(), "x\0y".into())]).is_err());
         assert!(validate_command(&["/start".into()], &[("A".into(), "1".into()), ("A".into(), "2".into())]).is_ok());
+    }
+
+    #[test]
+    fn shared_bwrap_args_preserve_ordered_package_environment_and_fd_mounts() {
+        let spec = SandboxSpec {
+            bwrap: "/usr/bin/bwrap".into(),
+            image_root: "/image".into(),
+            persistent_var: "/volume".into(),
+            persistent_var_max_bytes: 1024,
+            argv: vec!["/bin/sh".into(), "continue.sh".into()],
+            environ: vec![("A".into(), "first".into()), ("A".into(), "last".into())],
+        };
+        let args = bwrap_args(&spec).unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("--unshare-net --clearenv --ro-bind-fd 4 / --bind-fd 5 /var"));
+        assert!(joined.contains("--setenv A first --setenv A last -- /bin/sh continue.sh"));
     }
 
     #[test]

@@ -840,6 +840,10 @@ fn handle_stream(
 ) -> io::Result<()> {
     let mut request = read_request(&mut stream)?;
     if request.path_and_query == BOOTSTRAP_PATH {
+        if policy.fixed_session_kind != EntranceKind::Browser {
+            stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")?;
+            return Ok(());
+        }
         let directory = directory.ok_or_else(|| refuse("bootstrap endpoint unavailable"))?;
         return match bootstrap(&stream, &request, policy, directory) {
             Err(error) if matches!(error.kind(), io::ErrorKind::InvalidData | io::ErrorKind::AlreadyExists) => {
@@ -996,6 +1000,13 @@ mod tests {
 
     #[test]
     fn transport_deadline_and_unavailable_response_do_not_deliver_app_call() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.write_all(b"GET /__mini/bootstrap HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").unwrap();
+        let worker = std::thread::spawn(move || unavailable(server, &api_policy()).unwrap());
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        worker.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"));
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(b"GET / HTTP/1.1\r\nHost: friend.example.test\r\nAuthorization: Bearer api-token-abcdefghijklmnopqrstuvwxyz123\r\n\r\n").unwrap();
         let worker = std::thread::spawn(move || unavailable(server, &api_policy()).unwrap());
