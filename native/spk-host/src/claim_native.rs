@@ -5,7 +5,7 @@
 //! and a structurally decodable frame cannot arm the physical journal.
 #![allow(dead_code)] // Resident CLI is staged separately from the native link.
 
-use crate::claim_descriptor::{compare_claim, MatchedPackage};
+use crate::claim_descriptor::{compare_claim, compare_install_claim, MatchedPackage};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::materialize::{signed_schema_source, InstalledPackage};
 use serde_json::json;
@@ -118,6 +118,25 @@ pub(crate) fn match_signed_package(
     captured: &CapturedClaim,
     attempt_dir: &Path,
 ) -> io::Result<MatchedPackage> {
+    match_signed_package_kind(operator, package, captured, attempt_dir, false)
+}
+
+pub(crate) fn match_signed_install_package(
+    operator: &PrivateOperator,
+    package: &InstalledPackage,
+    captured: &CapturedClaim,
+    attempt_dir: &Path,
+) -> io::Result<MatchedPackage> {
+    match_signed_package_kind(operator, package, captured, attempt_dir, true)
+}
+
+fn match_signed_package_kind(
+    operator: &PrivateOperator,
+    package: &InstalledPackage,
+    captured: &CapturedClaim,
+    attempt_dir: &Path,
+    install: bool,
+) -> io::Result<MatchedPackage> {
     private_dir(attempt_dir)?;
     let signed = package
         .signed_bridge_config
@@ -144,7 +163,12 @@ pub(crate) fn match_signed_package(
         &schema_path,
         &inspection_path,
     )?;
-    compare_claim(
+    let compare = if install {
+        compare_install_claim
+    } else {
+        compare_claim
+    };
+    compare(
         package,
         &captured.payload,
         &captured.inspection,

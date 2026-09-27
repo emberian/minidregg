@@ -11,6 +11,8 @@ mod claim_native;
 #[cfg(target_os = "linux")]
 mod completion_native;
 #[cfg(target_os = "linux")]
+mod descriptor_native;
+#[cfg(target_os = "linux")]
 mod dispatch_author;
 #[cfg(target_os = "linux")]
 mod dispatch_delivery;
@@ -28,6 +30,8 @@ pub mod hostd;
 pub mod http_entrance;
 #[cfg(target_os = "linux")]
 mod http_response;
+#[cfg(target_os = "linux")]
+pub mod install_service;
 #[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]

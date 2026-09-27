@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Offline, bounded operator phase around the separately root-owned SPK ingest.
+# PREPARE consumes Mini BEGIN/CLAIM; COMPLETE signs the exact materialized image.
+set -euo pipefail
+umask 077
+
+usage() {
+  echo 'usage: spk-install-phase install-prepare|install-complete HOST_BINARY HOST_SHA256 PRIVATE_CONFIG OPERATOR_UID' >&2
+  exit 2
+}
+
+(( $# == 5 )) || usage
+phase=$1 host_binary=$2 expected_sha=$3 config=$4 operator_uid=$5
+[[ $phase == install-prepare || $phase == install-complete ]] || usage
+[[ $expected_sha =~ ^[0-9a-f]{64}$ ]] || usage
+[[ $operator_uid =~ ^[1-9][0-9]{0,9}$ ]] || usage
+(( EUID == 0 )) || { echo 'spk-install-phase requires root' >&2; exit 1; }
+getent passwd "$operator_uid" >/dev/null || { echo 'unknown operator UID' >&2; exit 1; }
+
+safe_host() {
+  [[ $host_binary == /* && -f $host_binary && ! -L $host_binary && -x $host_binary ]] || {
+    echo 'host image is not an absolute executable' >&2; exit 1;
+  }
+  local part=/ component mode
+  IFS=/ read -ra components <<< "${host_binary#/}"
+  for component in "${components[@]}"; do
+    [[ -n $component && $component != . && $component != .. ]] || {
+      echo 'invalid host image path' >&2; exit 1;
+    }
+    part=${part%/}/$component
+    [[ ! -L $part && $(stat -c '%u' -- "$part") == 0 ]] || {
+      echo 'host image path is not root-owned and direct' >&2; exit 1;
+    }
+    mode=$(stat -c '%a' -- "$part")
+    (( (8#$mode & 8#022) == 0 )) || { echo 'writable host path' >&2; exit 1; }
+  done
+  local actual
+  actual=$(sha256sum -- "$host_binary")
+  [[ ${actual%% *} == "$expected_sha" ]] || { echo 'host image SHA drift' >&2; exit 1; }
+}
+safe_host
+
+[[ $config == /var/lib/minidregg/spk/install-ops/* && $config != */../* && $config != */./* ]] || {
+  echo 'INSTALL config outside operator-private install root' >&2; exit 1;
+}
+journal=$(dirname -- "$config")
+[[ $journal != /var/lib/minidregg/spk/install-ops && -f $config && ! -L $config ]] || {
+  echo 'INSTALL config is not a private regular file' >&2; exit 1;
+}
+[[ $(stat -c '%u:%a' -- "$journal") == "$operator_uid:700" &&
+   $(stat -c '%u:%a' -- "$config") == "$operator_uid:600" ]] || {
+  echo 'INSTALL config or journal owner/mode drift' >&2; exit 1;
+}
+part=/
+IFS=/ read -ra components <<< "${journal#/}"
+for component in "${components[@]}"; do
+  [[ -n $component && $component != . && $component != .. ]] || {
+    echo 'invalid INSTALL journal path' >&2; exit 1;
+  }
+  part=${part%/}/$component
+  [[ ! -L $part ]] || { echo 'INSTALL journal ancestor symlink' >&2; exit 1; }
+  owner=$(stat -c '%u' -- "$part") mode=$(stat -c '%a' -- "$part")
+  [[ $owner == 0 || $owner == "$operator_uid" ]] || {
+    echo 'INSTALL journal ancestor owner drift' >&2; exit 1;
+  }
+  (( (8#$mode & 8#022) == 0 )) || {
+    echo 'INSTALL journal ancestor writable by other account' >&2; exit 1;
+  }
+done
+
+unit=mini-spk-install-$(date -u +%Y%m%d%H%M%S)-$$
+stdout_log=$(mktemp /var/lib/minidregg/spk/.install-stdout.XXXXXXXX)
+stderr_log=$(mktemp /var/lib/minidregg/spk/.install-stderr.XXXXXXXX)
+cleanup() {
+  systemctl stop -- "$unit" >/dev/null 2>&1 || true
+  rm -f -- "$stdout_log" "$stderr_log"
+}
+trap cleanup EXIT
+run_rc=0
+timeout --kill-after=5s 930s systemd-run --unit="$unit" --wait --pipe --collect \
+  -p Type=exec \
+  -p "User=$operator_uid" \
+  -p NoNewPrivileges=yes \
+  -p PrivateNetwork=yes \
+  -p PrivateTmp=yes \
+  -p ProtectSystem=strict \
+  -p "ReadWritePaths=$journal" \
+  -p MemoryMax=1G \
+  -p CPUQuota=100% \
+  -p TasksMax=16 \
+  -p RuntimeMaxSec=900 \
+  -p LimitFSIZE=268435456 \
+  -p KillMode=control-group \
+  -- "$host_binary" "$phase" "$config" \
+  >"$stdout_log" 2>"$stderr_log" || run_rc=$?
+cat -- "$stdout_log"
+cat -- "$stderr_log" >&2
+if [[ $run_rc != 0 ]] ||
+  ! grep -Eq "^Running as unit: ${unit}[.]service(; invocation ID: [0-9a-f]{32})?$" "$stderr_log" ||
+  ! grep -Fxq 'Finished with result: success' "$stderr_log" ||
+  ! grep -Fxq 'Main processes terminated with: code=exited, status=0/SUCCESS' "$stderr_log"; then
+  echo 'bounded INSTALL phase did not finish successfully; retained attempts require audit' >&2
+  exit 1
+fi
+echo "install_phase_verified phase=$phase unit=$unit"

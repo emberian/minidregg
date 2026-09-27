@@ -15,6 +15,20 @@ fn main() {
     }
 
     let args: Vec<_> = std::env::args().collect();
+    if args.len() == 3 && matches!(args[1].as_str(), "install-prepare" | "install-complete") {
+        let result = if args[1] == "install-prepare" {
+            minidregg_spk_host::install_service::prepare(Path::new(&args[2]))
+        } else {
+            minidregg_spk_host::install_service::complete(Path::new(&args[2]))
+        };
+        match result {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("spk-host: INSTALL refused: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.len() == 3 && args[1] == "qualify" {
         match qualify_bridge_spk(Path::new(&args[2])) {
             Ok((package, bridge)) => {
@@ -75,7 +89,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | materialize VERIFIED_SPK OPERATOR_STORE APP_UID"
+        "usage: spk-host qualify VERIFIED_SPK | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG"
     );
     eprintln!("spk-host: application launch is unavailable until Mini admission is installed");
     std::process::exit(2);

@@ -388,7 +388,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     if !package_meta.is_file()
         || package_meta.file_type().is_symlink()
         || package_meta.nlink() != 1
-        || package_meta.uid() != unsafe { libc::geteuid() }
+        || (package_meta.uid() != 0 && package_meta.uid() != unsafe { libc::geteuid() })
         || package_meta.permissions().mode() & 0o777 != 0o444
     {
         return Err(invalid("installed SPK custody changed"));
@@ -407,7 +407,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     if !manifest_meta.is_file()
         || manifest_meta.file_type().is_symlink()
         || manifest_meta.nlink() != 1
-        || manifest_meta.uid() != unsafe { libc::geteuid() }
+        || (manifest_meta.uid() != 0 && manifest_meta.uid() != unsafe { libc::geteuid() })
         || manifest_meta.permissions().mode() & 0o777 != 0o444
         || manifest_meta.len() > 1024 * 1024
     {

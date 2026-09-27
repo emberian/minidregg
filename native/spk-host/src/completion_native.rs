@@ -1,9 +1,9 @@
-//! Physical START observation and separately pinned completion-custodian signature.
+//! Physical START/INSTALL observation and pinned completion-custodian signature.
 //!
-//! Rust observes the physical unit, signs only source-authored headers, and
-//! retains one-shot op38 evidence. This module does not mint a completion or
-//! bind HTTP; the resident caller requires a fresh installed receipt and
-//! physical recheck before opening its private entrance.
+//! Rust observes the running unit or a materialized protected image, signs
+//! only source-authored frames and headers, and retains one-shot op38 evidence.
+//! It does not mint a completion or bind HTTP; START requires a fresh installed
+//! receipt and physical recheck before opening its private entrance.
 #![allow(dead_code)] // Resident lifecycle route is still staged.
 
 use crate::dispatch_author::{private_signing_key, SignerPin};
@@ -357,6 +357,26 @@ pub(crate) fn submit_completion_once(
     ingress: &[u8],
     attempt_dir: &Path,
 ) -> io::Result<ConfirmedCompletion> {
+    submit_completion_inner(operator, Some(journal), ingress, attempt_dir)
+}
+
+/// INSTALL has no app process or Running journal. Its only physical action is
+/// the separately bounded, root-owned image publication; the caller verifies
+/// that exact image before invoking this one-shot native completion.
+pub(crate) fn submit_materialized_completion_once(
+    operator: &PrivateOperator,
+    ingress: &[u8],
+    attempt_dir: &Path,
+) -> io::Result<ConfirmedCompletion> {
+    submit_completion_inner(operator, None, ingress, attempt_dir)
+}
+
+fn submit_completion_inner(
+    operator: &PrivateOperator,
+    journal: Option<&Journal>,
+    ingress: &[u8],
+    attempt_dir: &Path,
+) -> io::Result<ConfirmedCompletion> {
     if ingress.is_empty() || ingress.len() >= MAX_FRAME {
         return Err(invalid("completion ingress bound refused"));
     }
@@ -374,10 +394,12 @@ pub(crate) fn submit_completion_once(
         "op38-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    journal
-        .read()?
-        .ok_or_else(|| invalid("resident journal absent"))?
-        .verify_running_instance()?;
+    if let Some(journal) = journal {
+        journal
+            .read()?
+            .ok_or_else(|| invalid("resident journal absent"))?
+            .verify_running_instance()?;
+    }
     let reply = operator.invoke(38, ingress)?;
     write_new(attempt_dir, "op38-frame.bin", &reply)?;
     let payload = reply_payload(&reply, 38)?;
@@ -392,7 +414,9 @@ pub(crate) fn submit_completion_once(
     if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
         || outcome.get("confirmation").and_then(Value::as_str) != Some("installed")
     {
-        return Err(invalid("native START completion was not freshly confirmed"));
+        return Err(invalid(
+            "native lifecycle completion was not freshly confirmed",
+        ));
     }
     let field = |name: &str| -> io::Result<String> {
         let value = outcome
@@ -410,10 +434,12 @@ pub(crate) fn submit_completion_once(
         accepted_count: field("acceptedCount")?,
         image_boundary: field("imageBoundary")?,
     };
-    journal
-        .read()?
-        .ok_or_else(|| invalid("resident journal absent"))?
-        .verify_running_instance()?;
+    if let Some(journal) = journal {
+        journal
+            .read()?
+            .ok_or_else(|| invalid("resident journal absent"))?
+            .verify_running_instance()?;
+    }
     Ok(confirmed)
 }
 
@@ -493,6 +519,93 @@ pub(crate) fn prepare_running_report(
         attempt_dir,
         "signed-report-source.json",
         &serde_json::to_vec(&signed_source)?,
+    )?;
+    let signed_report = operator.tool(
+        "author",
+        "application-lifecycle-completion-signed-report",
+        &signed_input,
+        &attempt_dir.join("signed-report.bin"),
+    )?;
+    Ok(PreparedRunningReport {
+        signed_report,
+        attempt_dir: attempt_dir.to_path_buf(),
+    })
+}
+
+/// Record an installed, signature-verified image without claiming an app
+/// process exists. The caller must compare the published image to the exact
+/// pre-ingest SPK and the retained op26 INSTALL frame before invoking this.
+/// Mini derives the installed Manifest from that original BEGIN/claim; Rust
+/// cannot supply or alter Manifest bytes in this report.
+pub(crate) struct MaterializedObservation<'a> {
+    pub unit: &'a str,
+    pub image_identity: &'a [u8],
+}
+
+pub(crate) fn prepare_materialized_report(
+    operator: &PrivateOperator,
+    begin: &[u8],
+    claim: &[u8],
+    observed: MaterializedObservation<'_>,
+    custodian_seed: &Path,
+    semantics: &str,
+    attempt_dir: &Path,
+) -> io::Result<PreparedRunningReport> {
+    if begin.is_empty()
+        || begin.len() > MAX_BEGIN
+        || claim.is_empty()
+        || claim.len() > MAX_REPORT
+        || observed.unit.is_empty()
+        || observed.unit.len() > 256
+        || observed.image_identity.len() != b"DREGG/SPK-IMAGE/v1".len() + 32
+        || !observed.image_identity.starts_with(b"DREGG/SPK-IMAGE/v1")
+    {
+        return Err(invalid(
+            "materialized report identity or source bound refused",
+        ));
+    }
+    let parent = attempt_dir
+        .parent()
+        .ok_or_else(|| invalid("materialized report attempt parent absent"))?;
+    private_dir(parent)?;
+    DirBuilder::new().mode(0o700).create(attempt_dir)?;
+    let (domain, semantics) = pinned_context(operator, custodian_seed, semantics)?;
+    let report_source = json!({
+        "begin":hex(begin), "claim":hex(claim), "nonce":fresh_nonce()?,
+        "unit":hex(observed.unit.as_bytes()),
+        "materializedImage":hex(observed.image_identity),
+        "outcome":"materialized", "invocationId":"", "controlGroup":"",
+        "pid":"0", "stopAudit":""
+    });
+    let source = write_new(
+        attempt_dir,
+        "report-source.json",
+        &serde_json::to_vec(&report_source)?,
+    )?;
+    let report = operator.tool(
+        "author",
+        "application-lifecycle-completion-report",
+        &source,
+        &attempt_dir.join("report.bin"),
+    )?;
+    let frame_input = write_new(
+        attempt_dir,
+        "signing-frame-source.json",
+        &serde_json::to_vec(&json!({"domain":domain,"semantics":semantics,
+            "begin":hex(begin),"report":hex(&report)}))?,
+    )?;
+    let frame = operator.tool(
+        "author",
+        "application-lifecycle-completion-signing-frame",
+        &frame_input,
+        &attempt_dir.join("signing-frame.bin"),
+    )?;
+    let signature = private_signing_key(custodian_seed)?.sign(&frame).to_bytes();
+    let signed_input = write_new(
+        attempt_dir,
+        "signed-report-source.json",
+        &serde_json::to_vec(&json!({"begin":hex(begin),"report":hex(&report),
+            "signature":hex(&signature)}))?,
     )?;
     let signed_report = operator.tool(
         "author",

@@ -44,16 +44,20 @@ pub(crate) struct MatchedPackage {
 
 const IMAGE_ID_PREFIX: &[u8] = b"DREGG/SPK-IMAGE/v1";
 
-fn verified_start_identity(inspected: &Value, raw_sha256: &[u8; 32]) -> io::Result<VerifiedBegin> {
-    if text(inspected, "kind")? != "start" {
-        return Err(invalid("resident launch requires a start claim"));
+fn verified_identity(
+    inspected: &Value,
+    raw_sha256: &[u8; 32],
+    expected_kind: &str,
+) -> io::Result<VerifiedBegin> {
+    if text(inspected, "kind")? != expected_kind {
+        return Err(invalid("resident claim kind differs from physical phase"));
     }
     let app = text(inspected, "app")?;
     let generation = text(inspected, "processGeneration")?;
     let operation_id = text(inspected, "operationId")?;
     if !canonical_decimal(app) || !canonical_decimal(generation) || !canonical_decimal(operation_id)
     {
-        return Err(invalid("source start coordinate is noncanonical"));
+        return Err(invalid("source lifecycle coordinate is noncanonical"));
     }
     let app: u64 = app
         .parse()
@@ -65,7 +69,7 @@ fn verified_start_identity(inspected: &Value, raw_sha256: &[u8; 32]) -> io::Resu
         .parse()
         .map_err(|_| invalid("operation exceeds host journal range"))?;
     if generation == 0 {
-        return Err(invalid("start generation is zero"));
+        return Err(invalid("resident process generation is zero"));
     }
     let unit = format!("mini-spk-a{app}-g{generation}.service");
     if text(inspected, "processIdentityHex")? != hex(unit.as_bytes()) {
@@ -103,12 +107,13 @@ fn verified_start_identity(inspected: &Value, raw_sha256: &[u8; 32]) -> io::Resu
 /// bytes it just source-authored from `signed_schema_source`. Comparing its
 /// canonical echo and role fields to the signed bridge closes the physical
 /// schema join without reimplementing Mini's cSHAKE/codec in Rust.
-pub(crate) fn compare_claim(
+fn compare_claim_kind(
     package: &InstalledPackage,
     committed_frame: &[u8],
     claim_inspection: &[u8],
     schema_bytes: &[u8],
     schema_inspection: &[u8],
+    expected_kind: &str,
 ) -> io::Result<MatchedPackage> {
     if committed_frame.is_empty() || committed_frame.len() > 12_102_759 {
         return Err(invalid("retained lifecycle claim frame size refused"));
@@ -142,7 +147,7 @@ pub(crate) fn compare_claim(
     {
         return Err(invalid("source lifecycle-v2 frame echo differs"));
     }
-    let begin = verified_start_identity(&inspected, &package.raw_sha256_bytes)?;
+    let begin = verified_identity(&inspected, &package.raw_sha256_bytes, expected_kind)?;
     let descriptor = inspected
         .get("descriptor")
         .ok_or_else(|| invalid("source descriptor inspection absent"))?;
@@ -210,6 +215,42 @@ pub(crate) fn compare_claim(
     })
 }
 
+pub(crate) fn compare_claim(
+    package: &InstalledPackage,
+    committed_frame: &[u8],
+    claim_inspection: &[u8],
+    schema_bytes: &[u8],
+    schema_inspection: &[u8],
+) -> io::Result<MatchedPackage> {
+    compare_claim_kind(
+        package,
+        committed_frame,
+        claim_inspection,
+        schema_bytes,
+        schema_inspection,
+        "start",
+    )
+}
+
+/// INSTALL uses the same source-owned descriptor and signed bridge equality
+/// check, but never arms the START process journal from this identity.
+pub(crate) fn compare_install_claim(
+    package: &InstalledPackage,
+    committed_frame: &[u8],
+    claim_inspection: &[u8],
+    schema_bytes: &[u8],
+    schema_inspection: &[u8],
+) -> io::Result<MatchedPackage> {
+    compare_claim_kind(
+        package,
+        committed_frame,
+        claim_inspection,
+        schema_bytes,
+        schema_inspection,
+        "install",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,15 +291,16 @@ mod tests {
             "processIdentityHex":hex(unit.as_bytes()), "imageIdentityHex":hex(&image),
             "receipt":{"transactionId":"123456", "eventId":"7890"}
         });
-        let begin = verified_start_identity(&source, &sha).unwrap();
+        let begin = verified_identity(&source, &sha, "start").unwrap();
         assert_eq!(begin.unit, unit);
         assert_eq!(begin.transaction_id, "123456");
         assert_eq!(begin.package_sha256, hex(&sha));
         let mut wrong_unit = source.clone();
         wrong_unit["processIdentityHex"] = json!(hex(b"mini-spk-a8401-g3.service"));
-        assert!(verified_start_identity(&wrong_unit, &sha).is_err());
-        let mut wrong_digest = source;
+        assert!(verified_identity(&wrong_unit, &sha, "start").is_err());
+        let mut wrong_digest = source.clone();
         wrong_digest["imageIdentityHex"] = json!(hex(b"sha256:5a"));
-        assert!(verified_start_identity(&wrong_digest, &sha).is_err());
+        assert!(verified_identity(&wrong_digest, &sha, "start").is_err());
+        assert!(verified_identity(&source, &sha, "install").is_err());
     }
 }
