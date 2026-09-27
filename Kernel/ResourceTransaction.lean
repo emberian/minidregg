@@ -122,9 +122,16 @@ theorem command_decode_canonical {bytes : List UInt8} {command : Command}
 def Command.first (command : Command) : Target :=
   command.targets.headD ⟨.object, 0, ⟨0⟩, 1, ⟨0⟩, .scalar [], none⟩
 
-def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
+def framedCommandBytes (domain semantics : Digest) (encodedCommand : List UInt8) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-    (domain, semantics, commandCodec.encode command)
+    (domain, semantics, encodedCommand)
+
+def commandBytes (domain semantics : Digest) (command : Command) : List UInt8 :=
+  framedCommandBytes domain semantics (commandCodec.encode command)
+
+theorem framedCommandBytes_exact (domain semantics : Digest) (command : Command) :
+    framedCommandBytes domain semantics (commandCodec.encode command) =
+      commandBytes domain semantics command := rfl
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList
@@ -144,7 +151,9 @@ def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
-def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+/-- The original expression is retained as a specification for the optimized
+request construction. It is not called by the production request path. -/
+def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (preRoot : Digest) : Request target.kind where
   domain := snapshot.domain
   semantics := semantics
@@ -162,6 +171,42 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
   policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
   policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
   cost := (commandCodec.encode command).length
+
+/-- Encode the canonical command and its domain/profile frame once per
+request. The same exact framed bytes feed both digest domains; the raw
+canonical command length remains the declared request cost. -/
+def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (preRoot : Digest) : Request target.kind :=
+  let encodedCommand := commandCodec.encode command
+  let framedBytes := framedCommandBytes snapshot.domain semantics encodedCommand
+  { domain := snapshot.domain
+    semantics := semantics
+    federation := ambient.federation
+    subject := command.subject
+    subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
+    target := ⟨target.target⟩
+    verb := ordinaryVerb target.kind
+    argsDigest := (Sp800185Cshake256.hash
+      "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
+    effectsDigest := (Sp800185Cshake256.hash
+      "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList framedBytes).digest
+    nonce := command.nonce
+    height := ambient.height
+    preStateRoot := preRoot
+    policyId := ⟨target.target⟩
+    policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
+    policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
+    cost := encodedCommand.length }
+
+/-- For every old authority snapshot and transaction input, caching only the
+two canonical byte strings changes no request field, digest, or cost. -/
+theorem requestFor_eq_reference (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (target : Target) (preRoot : Digest) :
+    requestFor snapshot semantics ambient command target preRoot =
+      requestForReference snapshot semantics ambient command target preRoot := by
+  rfl
+
+#print axioms requestFor_eq_reference
 
 def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (preRoot : Digest) : Request command.first.kind :=
