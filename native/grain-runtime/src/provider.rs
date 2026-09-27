@@ -79,6 +79,10 @@ pub enum ProviderOutcome {
     Received {
         status: u16,
         content_type: String,
+        /// Exact bounded curl final-response header spool, including any
+        /// interim 1xx blocks. The controller retains and hashes these bytes
+        /// before using status/Content-Type as metering metadata.
+        exact_headers: Vec<u8>,
         exact_body: Vec<u8>,
     },
     /// No network send was started after the permit was issued.
@@ -666,6 +670,7 @@ fn serve_client(
             status,
             content_type,
             exact_body,
+            ..
         } => Some((*status, content_type.clone(), exact_body.clone())),
         _ => None,
     };
@@ -812,44 +817,91 @@ fn read_bounded(path: &Path, bound: usize) -> Result<Vec<u8>, String> {
 
 fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "provider headers are not UTF-8")?;
-    let mut status = None;
-    let mut content_type = None;
-    for line in text.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.starts_with("HTTP/") {
-            let code = line
-                .split_whitespace()
-                .nth(1)
-                .ok_or("provider status absent")?;
-            let parsed = code.parse::<u16>().map_err(|_| "provider status invalid")?;
-            if !(100..=599).contains(&parsed) {
-                return Err("provider status invalid".into());
+    let normalized = text.replace("\r\n", "\n");
+    if normalized.contains('\r') || !normalized.ends_with("\n\n") {
+        return Err("provider header block is incomplete".into());
+    }
+    let mut final_response = None;
+    let mut blocks = 0usize;
+    for block in normalized.split("\n\n").filter(|block| !block.is_empty()) {
+        blocks += 1;
+        if blocks > 8 || final_response.is_some() {
+            return Err("provider response has ambiguous status blocks".into());
+        }
+        let mut lines = block.split('\n');
+        let status_line = lines.next().ok_or("provider status absent")?;
+        let mut words = status_line.split_ascii_whitespace();
+        let version = words.next().ok_or("provider status absent")?;
+        if !matches!(version, "HTTP/1.0" | "HTTP/1.1" | "HTTP/2" | "HTTP/2.0") {
+            return Err("provider status protocol invalid".into());
+        }
+        let code = words.next().ok_or("provider status absent")?;
+        if code.len() != 3 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err("provider status invalid".into());
+        }
+        let status = code.parse::<u16>().map_err(|_| "provider status invalid")?;
+        if !(100..=599).contains(&status) {
+            return Err("provider status invalid".into());
+        }
+        let mut content_type = None;
+        let mut content_encoding_seen = false;
+        for line in lines {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                return Err("provider folded response header refused".into());
             }
-            status = Some(parsed);
-            content_type = None;
-        } else if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("content-encoding")
-                && !value.trim().eq_ignore_ascii_case("identity")
+            let (name, value) = line
+                .split_once(':')
+                .ok_or("provider response header malformed")?;
+            // RFC 9110 §5.6.2: field-name is token, not just alnum/hyphen.
+            if name.is_empty()
+                || !name.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(
+                            byte,
+                            b'!' | b'#'
+                                | b'$'
+                                | b'%'
+                                | b'&'
+                                | b'\''
+                                | b'*'
+                                | b'+'
+                                | b'-'
+                                | b'.'
+                                | b'^'
+                                | b'_'
+                                | b'`'
+                                | b'|'
+                                | b'~'
+                        )
+                })
             {
-                return Err("provider response used unsupported content encoding".into());
+                return Err("provider response header name invalid".into());
+            }
+            if name.eq_ignore_ascii_case("content-encoding") {
+                if content_encoding_seen || !value.trim().eq_ignore_ascii_case("identity") {
+                    return Err("provider response used unsupported content encoding".into());
+                }
+                content_encoding_seen = true;
             }
             if name.eq_ignore_ascii_case("content-type") {
+                if content_type.is_some() {
+                    return Err("provider response has duplicate Content-Type".into());
+                }
                 let value = value.trim();
-                if value.len() > 128 || value.bytes().any(|b| !(0x20..=0x7e).contains(&b)) {
+                if value.is_empty()
+                    || value.len() > 128
+                    || value.bytes().any(|byte| !(0x20..=0x7e).contains(&byte))
+                {
                     return Err("provider content type invalid".into());
                 }
                 content_type = Some(value.to_owned());
             }
         }
+        if status >= 200 {
+            final_response = Some((status, content_type.ok_or("provider Content-Type absent")?));
+        }
     }
-    let status = status.ok_or("provider status absent")?;
-    if status < 200 {
-        return Err("provider final response absent".into());
-    }
-    Ok((
-        status,
-        content_type.unwrap_or_else(|| "application/json".into()),
-    ))
+    final_response.ok_or("provider final response absent".into())
 }
 
 fn curl_header_config(key: &str) -> String {
@@ -1074,9 +1126,12 @@ fn forward(
             }
         }
     };
-    if partial_body
+    if headers
         .windows(config.provider_key.len())
         .any(|part| part == config.provider_key.as_bytes())
+        || partial_body
+            .windows(config.provider_key.len())
+            .any(|part| part == config.provider_key.as_bytes())
         || content_type.contains(&config.provider_key)
     {
         return ProviderOutcome::Uncertain {
@@ -1087,6 +1142,7 @@ fn forward(
     ProviderOutcome::Received {
         status,
         content_type,
+        exact_headers: headers,
         exact_body: partial_body,
     }
 }
@@ -1143,6 +1199,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn final_response_requires_one_actual_content_type() {
+        let complete = b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=UTF-8\r\nContent-Length: 2\r\n\r\n";
+        assert_eq!(
+            response_headers(complete).unwrap(),
+            (200, "text/event-stream; charset=UTF-8".into())
+        );
+        assert!(
+            response_headers(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+                .unwrap_err()
+                .contains("Content-Type absent")
+        );
+        assert!(response_headers(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\ncontent-type: text/event-stream\r\n\r\n"
+        )
+        .unwrap_err()
+        .contains("duplicate Content-Type"));
+        assert!(
+            response_headers(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n").is_err()
+        );
+        assert!(response_headers(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        )
+        .is_err());
+        let token_names =
+            b"HTTP/1.1 200 OK\r\n!#$%&'*+-.^_`|~: token\r\nContent-Type: application/json\r\n\r\n";
+        assert_eq!(response_headers(token_names).unwrap().0, 200);
+        for malformed in [
+            b"HTTP/1.1 200 OK\r\nBad Name: x\r\nContent-Type: application/json\r\n\r\n".as_slice(),
+            b"HTTP/1.1 200 OK\r\nBad\x01Name: x\r\nContent-Type: application/json\r\n\r\n"
+                .as_slice(),
+            b"HTTP/1.1 200 OK\r\n: x\r\nContent-Type: application/json\r\n\r\n".as_slice(),
+        ] {
+            assert!(response_headers(malformed).is_err());
+        }
+    }
+
     fn post(address: SocketAddr, token: &str, body: &[u8]) -> String {
         let mut stream = TcpStream::connect(address).unwrap();
         stream
@@ -1160,6 +1253,22 @@ mod tests {
         deliveries: Arc<AtomicUsize>,
         close_without_reply: bool,
         reply_body: Vec<u8>,
+    ) -> JoinHandle<String> {
+        fake_upstream_with_headers(
+            listener,
+            deliveries,
+            close_without_reply,
+            reply_body,
+            "Content-Type: application/json\r\n",
+        )
+    }
+
+    fn fake_upstream_with_headers(
+        listener: TcpListener,
+        deliveries: Arc<AtomicUsize>,
+        close_without_reply: bool,
+        reply_body: Vec<u8>,
+        response_headers: &'static str,
     ) -> JoinHandle<String> {
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -1193,7 +1302,7 @@ mod tests {
                 bytes.extend_from_slice(&chunk[..n]);
             }
             if !close_without_reply {
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply_body.len()).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\n{response_headers}Content-Length: {}\r\nConnection: close\r\n\r\n", reply_body.len()).unwrap();
                 stream.write_all(&reply_body).unwrap();
             }
             format!(
@@ -1201,6 +1310,76 @@ mod tests {
                 String::from_utf8_lossy(&bytes[end..end + length])
             )
         })
+    }
+
+    fn ambiguous_header_exchange(headers: &'static str, expected_reason: &'static str) {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream_addr = upstream.local_addr().unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread = fake_upstream_with_headers(
+            upstream,
+            deliveries.clone(),
+            false,
+            br#"{"id":"local-provider"}"#.to_vec(),
+            headers,
+        );
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let controller = thread::spawn(move || {
+            let ProviderCommand::Reserve { request, reply } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("native reserve must precede provider send");
+            };
+            reply
+                .send(Ok(ForwardPermit::Fresh {
+                    attempt_id: 7,
+                    lease: request.lease,
+                    exact_body: request.exact_body,
+                }))
+                .unwrap();
+            let ProviderCommand::BeforeSend { reply, .. } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("durable send boundary absent");
+            };
+            reply.send(Ok(())).unwrap();
+            let ProviderCommand::Outcome { outcome, reply, .. } =
+                rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else {
+                panic!("upstream outcome absent");
+            };
+            match outcome {
+                ProviderOutcome::Uncertain { reason, .. } => {
+                    assert!(reason.contains(expected_reason), "{reason}");
+                }
+                _ => panic!("ambiguous Content-Type must not produce Received"),
+            }
+            reply.send(Ok(())).unwrap();
+        });
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"local"}]}"#;
+        let response = post(gateway.local_addr(), TOKEN, body);
+        assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+        controller.join().unwrap();
+        upstream_thread.join().unwrap();
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+        gateway.control().revoke();
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_or_duplicate_upstream_content_type_is_uncertain() {
+        ambiguous_header_exchange("", "Content-Type absent");
+        ambiguous_header_exchange(
+            "Content-Type: application/json\r\nContent-Type: text/event-stream\r\n",
+            "duplicate Content-Type",
+        );
     }
 
     #[test]
@@ -1257,9 +1436,15 @@ mod tests {
                     assert_eq!(attempt_id, 7);
                     match outcome {
                         ProviderOutcome::Received {
-                            status, exact_body, ..
+                            status,
+                            exact_headers,
+                            exact_body,
+                            ..
                         } => {
                             assert_eq!(status, 200);
+                            assert!(exact_headers
+                                .windows(b"Content-Type: application/json".len())
+                                .any(|window| window == b"Content-Type: application/json"));
                             assert_eq!(exact_body, br#"{"id":"local-provider"}"#);
                         }
                         _ => panic!("unexpected provider outcome"),
