@@ -28,6 +28,13 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+fn canonical_native_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && (value == "0" || !value.starts_with('0'))
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 fn hex64(value: &str) -> bool {
     value.len() == 64
         && value
@@ -53,8 +60,8 @@ pub(crate) struct VerifiedBegin {
 impl VerifiedBegin {
     fn validate(&self) -> io::Result<()> {
         if self.generation == 0
-            || !hex64(&self.transaction_id)
-            || !hex64(&self.event_id)
+            || !canonical_native_id(&self.transaction_id)
+            || !canonical_native_id(&self.event_id)
             || !hex64(&self.package_sha256)
             || self.image_identity.is_empty()
             || self.image_identity.len() > 512
@@ -114,6 +121,12 @@ impl Record {
     pub(crate) fn invocation_id(&self) -> Option<&str> {
         self.invocation_id.as_deref()
     }
+    pub(crate) fn control_group(&self) -> Option<&str> {
+        self.control_group.as_deref()
+    }
+    pub(crate) fn image_identity(&self) -> &str {
+        &self.identity.image_identity
+    }
     /// The resident hostd calls this from its own unit before a physical
     /// request. A durable Running row alone is not proof the same manager
     /// invocation and app cgroup are still present.
@@ -137,9 +150,14 @@ impl Record {
         {
             return Err(invalid("resident is not active unit MainPID and job-free"));
         }
-        let child = self.child_pid.ok_or_else(|| invalid("Running app PID absent"))?;
+        let child = self
+            .child_pid
+            .ok_or_else(|| invalid("Running app PID absent"))?;
         let child_group = fs::read_to_string(format!("/proc/{child}/cgroup"))?;
-        if !child_group.lines().any(|line| line == format!("0::{}", current.control_group)) {
+        if !child_group
+            .lines()
+            .any(|line| line == format!("0::{}", current.control_group))
+        {
             return Err(invalid("app child left exact unit cgroup"));
         }
         Ok(())
@@ -530,6 +548,12 @@ impl ChildHandle for BoundedChild {
 // separately testable without exposing an operator-minted launch command.
 #[allow(dead_code)]
 impl Journal {
+    /// Refuse a misinstalled resident unit before consuming a one-shot Mini
+    /// claim. The spawn path repeats this check under the journal lock.
+    pub(crate) fn preflight_current_unit(unit: &str) -> io::Result<()> {
+        UnitInstance::current(unit).map(|_| ())
+    }
+
     pub fn open(directory: &Path) -> io::Result<Self> {
         let uid = unsafe { libc::geteuid() };
         if !directory.is_absolute() {
@@ -1256,8 +1280,8 @@ mod tests {
             app: 91,
             generation: 2,
             operation_id: 7,
-            transaction_id: "a".repeat(64),
-            event_id: "b".repeat(64),
+            transaction_id: "123".into(),
+            event_id: "456".into(),
             package_sha256: "c".repeat(64),
             image_identity: "image".into(),
             process_identity: "unit-generation-2".into(),
@@ -1317,12 +1341,21 @@ mod tests {
         let path = scratch();
         let journal = Journal::open(&path).unwrap();
         assert_eq!(journal.allocate_dispatch_operation().unwrap(), "1");
-        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "2\n");
-        assert_eq!(fs::read_to_string(path.join("dispatch-id-1")).unwrap(), "1\n");
+        assert_eq!(
+            fs::read_to_string(path.join("dispatch-next-id")).unwrap(),
+            "2\n"
+        );
+        assert_eq!(
+            fs::read_to_string(path.join("dispatch-id-1")).unwrap(),
+            "1\n"
+        );
         drop(journal);
         let reopened = Journal::open(&path).unwrap();
         assert_eq!(reopened.allocate_dispatch_operation().unwrap(), "2");
-        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "3\n");
+        assert_eq!(
+            fs::read_to_string(path.join("dispatch-next-id")).unwrap(),
+            "3\n"
+        );
         fs::remove_file(path.join("dispatch-next-id")).unwrap();
         assert!(reopened.allocate_dispatch_operation().is_err());
         fs::remove_dir_all(path).unwrap();
@@ -1538,7 +1571,7 @@ mod tests {
         journal.arm(identity.clone()).unwrap();
         assert_eq!(journal.arm(identity.clone()).unwrap().phase, Phase::Armed);
         let mut conflict = identity.clone();
-        conflict.event_id = "d".repeat(64);
+        conflict.event_id = "789".into();
         assert!(journal.arm(conflict).is_err());
         journal.request_launch(&identity).unwrap();
         assert!(journal.request_launch(&identity).is_err());
@@ -1729,8 +1762,8 @@ mod tests {
             app: 991005,
             generation: 1,
             operation_id: 1,
-            transaction_id: "a".repeat(64),
-            event_id: "b".repeat(64),
+            transaction_id: "123".into(),
+            event_id: "456".into(),
             package_sha256: "c".repeat(64),
             image_identity: "harmless-systemd-audit-probe".into(),
             process_identity: "installed-unit".into(),

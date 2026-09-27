@@ -254,7 +254,7 @@ impl FixedAuthoring {
     }
 }
 
-fn private_signing_key(path: &Path) -> io::Result<SigningKey> {
+pub(crate) fn private_signing_key(path: &Path) -> io::Result<SigningKey> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("signer has no parent"))?;

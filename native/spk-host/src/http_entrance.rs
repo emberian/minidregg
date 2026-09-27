@@ -40,6 +40,17 @@ pub(crate) enum Method {
 }
 
 impl Method {
+    #[allow(dead_code)] // Consumed by the reviewed resident Mini HTTP caller.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
     fn parse(value: &str) -> io::Result<Self> {
         match value {
             "GET" => Ok(Self::Get),
@@ -590,7 +601,9 @@ impl CustodianPolicy {
                     return Err(refuse("browser transport credential refused"));
                 }
                 if self.fixed_session_kind != EntranceKind::Browser {
-                    return Err(refuse("browser cookie differs from fixed Mini session kind"));
+                    return Err(refuse(
+                        "browser cookie differs from fixed Mini session kind",
+                    ));
                 }
                 if !request.method.safe()
                     && request.origin.as_deref() != Some(expected_origin.as_str())
@@ -695,10 +708,21 @@ impl PrivateHttpEntrance {
     }
 
     pub fn serve_unavailable(&self) -> io::Result<()> {
+        self.serve_resident(|request, _, _| Ok(unavailable_response(request.method)))
+    }
+
+    /// The caller owns the sole resident RpcDriver and fixed participant
+    /// signer. This entrance authenticates transport before invoking it; the
+    /// callback must still obtain a fresh Mini permit for every request.
+    pub(crate) fn serve_resident(
+        &self,
+        mut dispatch: impl FnMut(ReceivedRequest, EntranceKind, &CustodianPolicy) -> io::Result<Vec<u8>>,
+    ) -> io::Result<()> {
         loop {
             let (stream, _) = self.listener.accept()?;
             if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
-                let _ = handle_stream(stream, &self.policy, self.socket.parent());
+                let _ =
+                    handle_stream_with(stream, &self.policy, self.socket.parent(), &mut dispatch);
             }
         }
     }
@@ -833,10 +857,30 @@ fn bootstrap(
     }
 }
 
+#[cfg(test)]
 fn handle_stream(
+    stream: UnixStream,
+    policy: &CustodianPolicy,
+    directory: Option<&Path>,
+) -> io::Result<()> {
+    handle_stream_with(stream, policy, directory, &mut |request, _, _| {
+        Ok(unavailable_response(request.method))
+    })
+}
+
+fn unavailable_response(method: Method) -> Vec<u8> {
+    let mut bytes = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 36\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".to_vec();
+    if method != Method::Head {
+        bytes.extend_from_slice(b"Mini dispatch admission unavailable\n");
+    }
+    bytes
+}
+
+fn handle_stream_with(
     mut stream: UnixStream,
     policy: &CustodianPolicy,
     directory: Option<&Path>,
+    dispatch: &mut impl FnMut(ReceivedRequest, EntranceKind, &CustodianPolicy) -> io::Result<Vec<u8>>,
 ) -> io::Result<()> {
     let mut request = read_request(&mut stream)?;
     if request.path_and_query == BOOTSTRAP_PATH {
@@ -852,13 +896,10 @@ fn handle_stream(
             other => other,
         };
     }
-    let _kind = policy.authenticate(&mut request)?;
-    // An authenticated transport request is still not a Mini permit.
-    stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 36\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")?;
-    if request.method != Method::Head {
-        stream.write_all(b"Mini dispatch admission unavailable\n")?;
-    }
-    Ok(())
+    let kind = policy.authenticate(&mut request)?;
+    let method = request.method;
+    let response = dispatch(request, kind, policy).unwrap_or_else(|_| unavailable_response(method));
+    stream.write_all(&response)
 }
 
 #[cfg(test)]
@@ -1001,7 +1042,9 @@ mod tests {
     #[test]
     fn transport_deadline_and_unavailable_response_do_not_deliver_app_call() {
         let (mut client, server) = UnixStream::pair().unwrap();
-        client.write_all(b"GET /__mini/bootstrap HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").unwrap();
+        client
+            .write_all(b"GET /__mini/bootstrap HTTP/1.1\r\nHost: friend.example.test\r\n\r\n")
+            .unwrap();
         let worker = std::thread::spawn(move || unavailable(server, &api_policy()).unwrap());
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();

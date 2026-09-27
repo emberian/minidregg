@@ -49,7 +49,7 @@ fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
     if bytes.is_empty() || bytes.len() > MAX_INSPECTION {
         return Err(invalid("private native artifact size refused"));
     }
@@ -66,7 +66,7 @@ fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> 
     Ok(path)
 }
 
-fn private_dir(path: &Path) -> io::Result<()> {
+pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !path.is_absolute()
         || !metadata.is_dir()
@@ -116,6 +116,10 @@ pub(crate) struct PrivateOperator {
 }
 
 impl PrivateOperator {
+    pub(crate) fn pinned_config(&self) -> io::Result<Vec<u8>> {
+        self.check_pin()
+    }
+
     fn check_pin(&self) -> io::Result<Vec<u8>> {
         let host = fs::symlink_metadata(&self.host)?;
         if !self.host.is_absolute() || !host.is_file() || host.permissions().mode() & 0o022 != 0 {
@@ -153,7 +157,13 @@ impl PrivateOperator {
         Ok(config)
     }
 
-    fn tool(&self, command: &str, kind: &str, input: &Path, output: &Path) -> io::Result<Vec<u8>> {
+    pub(crate) fn tool(
+        &self,
+        command: &str,
+        kind: &str,
+        input: &Path,
+        output: &Path,
+    ) -> io::Result<Vec<u8>> {
         let _ = self.check_pin()?;
         let cap = match command {
             "author" => MAX_AUTHOR_JSON,
@@ -161,7 +171,11 @@ impl PrivateOperator {
             "signatures" => 1024 * 1024,
             _ => return Err(invalid("Mini Host helper command unavailable")),
         };
-        private_dir(input.parent().ok_or_else(|| invalid("helper input parent absent"))?)?;
+        private_dir(
+            input
+                .parent()
+                .ok_or_else(|| invalid("helper input parent absent"))?,
+        )?;
         let meta = fs::symlink_metadata(input)?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -197,7 +211,7 @@ impl PrivateOperator {
         )
     }
 
-    fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
+    pub(crate) fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
         let config = self.check_pin()?;
         if payload.is_empty() || payload.len() >= HOST_MAX_FRAME {
             return Err(invalid("Mini operator request size refused"));
@@ -500,7 +514,12 @@ mod tests {
             .unwrap();
         file.set_len(MAX_AUTHOR_JSON + 1).unwrap();
         assert!(operator
-            .tool("author", "application-dispatch-request", &input, &root.join("out.bin"))
+            .tool(
+                "author",
+                "application-dispatch-request",
+                &input,
+                &root.join("out.bin")
+            )
             .is_err());
         fs::write(&config, b"{\"fixture\":false}").unwrap();
         assert!(operator.invoke(36, b"source request").is_err());

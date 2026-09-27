@@ -29,7 +29,6 @@ fn invalid(reason: &'static str) -> io::Error {
 pub(crate) struct ResidentHuman<'a> {
     pub operator: &'a PrivateOperator,
     pub custody: &'a FixedAuthoring,
-    pub policy: &'a CustodianPolicy,
     pub journal: &'a Journal,
     pub rpc: &'a mut RpcDriver,
     pub display_name: &'a str,
@@ -39,18 +38,19 @@ pub(crate) struct ResidentHuman<'a> {
 impl ResidentHuman<'_> {
     pub(crate) fn deliver_once(
         &mut self,
+        policy: &CustodianPolicy,
         http: &HttpProjection<'_>,
-        attempt_dir: &Path,
+        attempt_parent: &Path,
     ) -> io::Result<Vec<u8>> {
         let kind = match http.route {
             crate::dispatch_inspection::Route::Browser => EntranceKind::Browser,
             crate::dispatch_inspection::Route::Api { .. } => EntranceKind::Api,
         };
-        if self.policy.fixed_session_kind != kind
-            || self.policy.fixed_app != self.custody.app
-            || self.policy.fixed_subject != self.custody.subject
-            || self.policy.fixed_session != self.custody.session
-            || self.policy.fixed_ticket != self.custody.ticket_resource
+        if policy.fixed_session_kind != kind
+            || policy.fixed_app != self.custody.app
+            || policy.fixed_subject != self.custody.subject
+            || policy.fixed_session != self.custody.session
+            || policy.fixed_ticket != self.custody.ticket_resource
         {
             return Err(invalid("HTTP entrance differs from fixed Mini custody"));
         }
@@ -63,8 +63,14 @@ impl ResidentHuman<'_> {
         // The caller cannot choose or replay an operation ID. Even an
         // authoring refusal consumes this fsynced number across restarts.
         let operation_id = self.journal.allocate_dispatch_operation()?;
-        let committed =
-            author_and_submit(self.operator, self.custody, http, &operation_id, attempt_dir)?;
+        let attempt_dir = attempt_parent.join(format!("dispatch-op-{operation_id}"));
+        let committed = author_and_submit(
+            self.operator,
+            self.custody,
+            http,
+            &operation_id,
+            &attempt_dir,
+        )?;
         let physical = physical_web_input(
             &committed.matched,
             http,
