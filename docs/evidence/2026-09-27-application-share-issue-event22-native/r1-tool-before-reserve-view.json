@@ -1,0 +1,18 @@
+{"type": "resource",
+ "page":
+ {"shardNumber": "14",
+  "root":
+  "103000471889420338949017123213070844017148416555914469388508911855574338091494",
+  "grain":
+  {"task": "7902",
+   "status": "1",
+   "reserved": "0",
+   "remaining": "38",
+   "generation": "1"},
+  "entries":
+  [{"value": "1", "key": {"type": "object", "resource": "7902", "field": "0"}},
+   {"value": "1", "key": {"type": "object", "resource": "7902", "field": "1"}},
+   {"value": "38", "key": {"type": "object", "resource": "7902", "field": "2"}},
+   {"value": "0", "key": {"type": "object", "resource": "7902", "field": "3"}}],
+  "effectDomain": "8501"},
+ "balances": []}

@@ -69,7 +69,7 @@ CONTROLLER_PUBLIC="$BASE/workroom/controller.pub"
 STORE="$BASE/workroom/store"
 
 # The base has already settled its app/session births. Its worker tool is
-# active with remaining budget 38 and zero reservation, so a new source-
+# running hard with remaining budget 38 and zero reservation, so a new source-
 # admitted reserve of exactly the configured grain birth charge (2+1) is
 # required before event 22. The same-generation parent remains reserved 1.
 jq -n '{subject:"8",nonce:"85990",purpose:{type:"query",kind:"object",
@@ -80,7 +80,7 @@ jq -n '{subject:"8",nonce:"85990",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/tool-before-reserve-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-before-reserve" \
   >"$EVIDENCE/tool-before-reserve.stdout"
-jq -e '.page.grain.status == "3" and .page.grain.remaining == "38" and
+jq -e '.page.grain.status == "1" and .page.grain.remaining == "38" and
   .page.grain.reserved == "0"' "$EVIDENCE/tool-before-reserve/view.json" >/dev/null
 jq -n --slurpfile read "$EVIDENCE/tool-before-reserve/view.json" \
   --slurpfile challenge "$EVIDENCE/tool-before-reserve/challenge.json" \
@@ -323,7 +323,7 @@ jq -n '{subject:"8",nonce:"86002",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/tool-after-issue-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-after-issue" \
   >"$EVIDENCE/tool-after-issue.stdout"
-jq -e '.page.grain.status == "3" and .page.grain.remaining == "35" and
+jq -e '.page.grain.status == "1" and .page.grain.remaining == "35" and
   .page.grain.reserved == "0"' "$EVIDENCE/tool-after-issue/view.json" >/dev/null
 jq -n '{subject:"8",nonce:"86003",purpose:{type:"query",kind:"object",
     target:"7901",view:"resource"},
