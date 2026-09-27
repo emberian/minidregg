@@ -1,0 +1,7 @@
+# 007b513 event22 Mini client
+
+The immutable Linux client is `/tank/dregg-build/minidregg-007b513-client-evidence/bin/mini-007b513` on hbox (SHA-256 `a339b384f9a6c15d9c3f64e5df243b230da7e5a50d0b252cafbbcd94ad8e47ee`). It was built from the exact `007b513` Git archive (SHA-256 `6eaa2df08abe4a9f0b43c227bc4eb45ef6d3e1848fc847c51cab6a9e896fe45c`) extracted into a separate source tree. The source pins, release binary and log hashes are in the [manifest](manifest.txt) (SHA-256 `5418a6c02583e2f24af477ad159655551c3fdf55be2c3d962e8171dd8411b5f6`). No inherited `.git` metadata is used as code provenance.
+
+The first attempt reused the older `9746c47` Cargo target and returned in 0.22 seconds with the *unchanged older binary hash*, despite the new `grain_share_issue` module. That output was rejected and never released; its [diagnostic log](unqualified-cache-reuse.log) is retained. A fresh, independent Cargo target then compiled the actual `007b513` crate in 2m56s, and the copied executable has a distinct hash. The bounded [release build](build.log) passed with `--locked`. Focused [nextest](nextest.log) passed 83/83 tests against the same exact source tree in the test profile. The release binary and test executable are distinct artifacts; the test result does not by itself establish native fixture acceptance.
+
+The separate exact `9746c47` Host is required for the event22 fixture and remains under native build qualification. No live Store or service was changed by this client lane.

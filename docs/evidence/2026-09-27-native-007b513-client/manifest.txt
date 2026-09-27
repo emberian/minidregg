@@ -1,0 +1,12 @@
+source_cut=007b513
+source_archive_sha256=6eaa2df08abe4a9f0b43c227bc4eb45ef6d3e1848fc847c51cab6a9e896fe45c
+build=CARGO_BUILD_JOBS=2 cargo build --release --locked (fresh isolated target)
+test=cargo nextest run -p minidregg-resource-client
+d369b81a2aac42f1ebf58a8d6d1a39c7b7ebdc96d2d10bc60131020cf1c10a19  /tank/dregg-build/minidregg-007b513-source/native/resource-client/Cargo.toml
+0da51c6ee3145bb8443127f4f45471b10448f42c4a7762c601cdf174ec88b4ad  /tank/dregg-build/minidregg-007b513-source/native/resource-client/Cargo.lock
+5059dbcac9d49490c2c28b319f80e32397da71aa899c49b01c6cc230319c6c82  /tank/dregg-build/minidregg-007b513-source/native/resource-client/src/main.rs
+75ead7026798b1f2601ea25fc62eeaf681821825b8d8d201fbe327a71fcda258  /tank/dregg-build/minidregg-007b513-source/native/resource-client/src/transport.rs
+fd5d03d9a89e5d1995e35b6bc5859c6e86dd78e4ca9fee88b38c2d906be9331f  /tank/dregg-build/minidregg-007b513-source/native/resource-client/src/grain_share_issue.rs
+a339b384f9a6c15d9c3f64e5df243b230da7e5a50d0b252cafbbcd94ad8e47ee  bin/mini-007b513
+52f8a3d116ab2b124354ae972b530cf11dd7e81e4255f0a2cc23572c6615515c  build-fresh.log
+273cffaa1f1c1f9c20b7c7baa7d37583694cf9a5a030dafdea65d87cbbd198e7  nextest.log

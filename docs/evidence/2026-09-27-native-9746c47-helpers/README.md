@@ -1,0 +1,5 @@
+# 9746c47 Linux Store and signature helpers
+
+The immutable hbox helper binaries were built from the exact `9746c47` Git archive (SHA-256 `0e5741356c3a6ff206e7c5fe5d7c09214467f867b688d314a7349854ecf37e7c`) in the independent Host source snapshot. The SQLite Store is `/tank/dregg-build/minidregg-9746c47-helpers-evidence/bin/minidregg-link-sqlite-store-9746c47` (SHA-256 `9a5054813d9ad358ece337b99121cb37a36ba82b4b92ad0e287dcc7e529190e0`). The signature verifier is `/tank/dregg-build/minidregg-9746c47-helpers-evidence/bin/minidregg-credential-signature-verifier-9746c47` (SHA-256 `e80a0949d0ce16b24bcf24f2ac1306f4e194887ba11d328121b4c3345f8dfa1a`).
+
+Each crate used a separate Cargo target with one build job, `--release --locked`, and its [Store](store-build.log) and [signature](signature-build.log) release build passed. The [manifest](manifest.txt) (SHA-256 `8e83e6e455330572a78c155380caf41aebc95f28416ad8e126e9c469c6b7f092`) records exact crate source, lock, binary and log hashes. These are build-qualified helpers for a future private fixture; no native fixture or live Store was run by this lane.

@@ -1,0 +1,14 @@
+source_cut=9746c47
+source_archive_sha256=0e5741356c3a6ff206e7c5fe5d7c09214467f867b688d314a7349854ecf37e7c
+store_build=CARGO_BUILD_JOBS=1 cargo build --release --locked
+signature_build=CARGO_BUILD_JOBS=1 cargo build --release --locked
+f8a27dcbdd1fdcf23f89b4586a5cd162d71e863509ed2b880ae41990fd30fd50  /tank/dregg-build/minidregg-9746c47-20260927/native/hyperdocument-link-sqlite-store/Cargo.toml
+2e3aadd0897dfe6a1fbb082e10f04336f0ab85509cbdc46f10d4dff5e2f6d834  /tank/dregg-build/minidregg-9746c47-20260927/native/hyperdocument-link-sqlite-store/Cargo.lock
+b5402986d08bd7e0613865a91adda4efb8ab4cb859782863941b92fb5cb1685f  /tank/dregg-build/minidregg-9746c47-20260927/native/hyperdocument-link-sqlite-store/src/main.rs
+5eb455a099a8397142647fd6f87246e2bd40102b79dceed9806e6d56b3be12d6  /tank/dregg-build/minidregg-9746c47-20260927/native/credential-signature-verifier/Cargo.toml
+8ce42ad1b76f2b0ea1a0d852035fa9e406a3060c28da912558893d75ed3c1582  /tank/dregg-build/minidregg-9746c47-20260927/native/credential-signature-verifier/Cargo.lock
+7df0c7c7b2f2c57a488a8d1ea85b9c6cf53dc090b3ed6eb02deb2a404237bc3e  /tank/dregg-build/minidregg-9746c47-20260927/native/credential-signature-verifier/src/main.rs
+9a5054813d9ad358ece337b99121cb37a36ba82b4b92ad0e287dcc7e529190e0  bin/minidregg-link-sqlite-store-9746c47
+e80a0949d0ce16b24bcf24f2ac1306f4e194887ba11d328121b4c3345f8dfa1a  bin/minidregg-credential-signature-verifier-9746c47
+0429f733a25fe5c1a62e1c520937932227deac43cbb35bc58ea342951ee47619  store-build.log
+da8ff400b33181062ee57155bfd60ebda6295c002315ecd3fe1a963ff45c8e1c  signature-build.log
