@@ -17,6 +17,9 @@ import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
+import Host.ApplicationShareIssueGrainInspection
+import Kernel.ApplicationDispatchAgentReserveContext
+import Kernel.ApplicationDispatchCodec
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
@@ -858,6 +861,34 @@ def shareIssueRequest (json : Lean.Json) : Result (List UInt8) := do
      ← list "$.sourceCapabilities"
        (fun p j => return ⟨← nat p j⟩) (← field "$" "sourceCapabilities" obj)⟩
   pure (ApplicationShareIssueAuthoring.requestCodec.encode request)
+
+private def grainShareSelector (path : String) (json : Lean.Json) :
+    Result ApplicationShareIssueGrainAuthoring.GrainSelector := do
+  let obj ← exactObject path ["task", "capability", "observeCapability"] json
+  return ⟨← nat (path ++ ".task") (← field path "task" obj),
+    ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩,
+    ⟨← nat (path ++ ".observeCapability")
+      (← field path "observeCapability" obj)⟩⟩
+
+/-- Reuse the existing full ticket/spec/payer/funding parser, then add the
+two fixed grain selectors. No current task state or root comes from JSON. -/
+private def grainShareIssueRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["spec", "payer", "funding", "sourceCapabilities",
+    "tool", "parent"] json
+  let baseJson := Lean.Json.mkObj
+    [("spec", ← field "$" "spec" obj),
+     ("payer", ← field "$" "payer" obj),
+     ("funding", ← field "$" "funding" obj),
+     ("sourceCapabilities", ← field "$" "sourceCapabilities" obj)]
+  let baseBytes ← shareIssueRequest baseJson
+  let some base := ApplicationShareIssueAuthoring.requestCodec.decode baseBytes
+    | failAt "$" "noncanonical base share issue request"
+  let request : ApplicationShareIssueGrainAuthoring.Request :=
+    { spec := base.spec, payer := base.payer, funding := base.funding,
+      sourceCapabilities := base.sourceCapabilities,
+      tool := ← grainShareSelector "$.tool" (← field "$" "tool" obj),
+      parent := ← grainShareSelector "$.parent" (← field "$" "parent" obj) }
+  return ApplicationShareIssueGrainAuthoring.requestCodec.encode request
 
 private structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
@@ -1806,6 +1837,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-agent-reserve-request" => agentPaidReserveRequest json
   | "application-agent-paid-request" => agentPaidRequest json
   | "application-share-issue-request" => shareIssueRequest json
+  | "application-share-issue-grain-request" => grainShareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
       let raw ← object "$" json
@@ -2375,6 +2407,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       decoded "application-share-issue-plan" ApplicationShareIssueAuthoring.planCodec bytes
   | "application-share-issue-request" => shareIssueRequestJson <$>
       decoded "application-share-issue-request" ApplicationShareIssueAuthoring.requestCodec bytes
+  | "application-share-issue-grain-request" =>
+      ApplicationShareIssueGrainInspection.inspectRequest bytes
+  | "application-share-issue-grain-plan" =>
+      ApplicationShareIssueGrainInspection.inspectPlan bytes
   | "application-dispatch-request" => dispatchRequestJson <$>
       decoded "application-dispatch-request" ApplicationDispatchAuthoring.requestCodec bytes
   | "application-agent-reserve-request" => agentPaidReserveRequestJson <$>

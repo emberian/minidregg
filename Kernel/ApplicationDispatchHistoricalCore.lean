@@ -8,6 +8,7 @@ the upper live receiver uses the verifier-selected original prefix.
 -/
 import Kernel.ApplicationDispatchPending
 import Kernel.ApplicationShareIssueReceiver
+import Kernel.ApplicationShareIssueGrainReceiver
 import Kernel.NativeHostContext
 
 namespace Minidregg.Kernel.ApplicationDispatchHistoricalCore
@@ -30,18 +31,33 @@ physical image and admitted object retained only in proof-erased Prop. The
 record is not yet certified as belonging to the current history. -/
 structure IssuedEvidence (config : Config) where
   private mk ::
-  ingress : ApplicationShareIssueSource.Ingress
+  spec : ApplicationShareIssueSource.Spec
+  ingressBytes : List UInt8
   descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry
   record : DurableReceiver.IntentRecord
   sourceExact :
-    ∃ (pins : FactoryPins)
-      (original : ResourceBirthController.Concrete.Durable)
-      (height : Height)
-      (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-        pins original height ingress),
-      descriptor = accepted.birth.descriptor ∧
-        record = DurableReceiver.IntentRecord.ofIntent
-          (ApplicationShareIssueReceiver.intent accepted)
+    (∃ (pins : FactoryPins)
+       (original : ResourceBirthController.Concrete.Durable)
+       (height : Height)
+       (ingress : ApplicationShareIssueSource.Ingress)
+       (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
+         pins original height ingress),
+       spec = ingress.spec ∧
+         ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
+         descriptor = accepted.birth.descriptor ∧
+         record = DurableReceiver.IntentRecord.ofIntent
+           (ApplicationShareIssueReceiver.intent accepted)) ∨
+    (∃ (pins : FactoryPins)
+       (original : ResourceBirthController.Concrete.Durable)
+       (ambient : DeclaredResourceController.Ambient)
+       (ingress : ApplicationShareIssueGrainSource.Ingress)
+       (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
+         pins original ambient ingress),
+       spec = ingress.spec ∧
+         ingressBytes = ingress.canonicalBytes ∧
+         descriptor = accepted.decoded.source.birth ∧
+         record = DurableReceiver.IntentRecord.ofIntent
+           (ApplicationShareIssueGrainReceiver.intent accepted))
 
 /-- A bare ticket or event cannot call this factory: it needs the actual
 private native Accepted issue and exact equality of all recorded intent
@@ -55,30 +71,56 @@ def IssuedEvidence.fromAccepted (config : Config) (pins : FactoryPins)
     (record : DurableReceiver.IntentRecord)
     (exact : record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationShareIssueReceiver.intent accepted)) : IssuedEvidence config :=
-  ⟨ingress, accepted.birth.descriptor, record,
-    ⟨pins, original, height, accepted, rfl, exact⟩⟩
+  ⟨ingress.spec, ApplicationShareIssueSource.ingressCodec.encode ingress,
+    accepted.birth.descriptor, record,
+    Or.inl ⟨pins, original, height, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
+
+/-- The grain-backed issue is a separate admitted source with its own event22
+and full joint birth intent. Its evidence is never constructed through the
+legacy event15 accepted type. -/
+def IssuedEvidence.fromGrainAccepted (config : Config) (pins : FactoryPins)
+    (original : ResourceBirthController.Concrete.Durable)
+    (ambient : DeclaredResourceController.Ambient)
+    (ingress : ApplicationShareIssueGrainSource.Ingress)
+    (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
+      pins original ambient ingress)
+    (record : DurableReceiver.IntentRecord)
+    (exact : record = DurableReceiver.IntentRecord.ofIntent
+      (ApplicationShareIssueGrainReceiver.intent accepted)) : IssuedEvidence config :=
+  ⟨ingress.spec, ingress.canonicalBytes, accepted.decoded.source.birth, record,
+    Or.inr ⟨pins, original, ambient, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
 
 def IssuedEvidence.transactionId {config : Config} (issued : IssuedEvidence config) : Digest :=
   issued.descriptor.transactionId
 
 def IssuedEvidence.eventId {config : Config} (issued : IssuedEvidence config) : Digest :=
-  (ApplicationShareIssueReceiver.event config.deployment.domain issued.ingress).eventId
+  issued.record.event.eventId
 
 theorem IssuedEvidence.record_transaction {config : Config} (issued : IssuedEvidence config) :
     issued.record.transactionId = issued.transactionId := by
-  rcases issued.sourceExact with ⟨_, _, _, accepted, descriptorExact, recordExact⟩
-  rw [recordExact]
-  change (ApplicationShareIssueReceiver.intent accepted).transactionId =
-    issued.descriptor.transactionId
-  rw [descriptorExact]
-  rfl
+  rcases issued.sourceExact with
+    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩ |
+    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩
+  · rw [recordExact]
+    change (ApplicationShareIssueReceiver.intent accepted).transactionId =
+      issued.descriptor.transactionId
+    rw [descriptorExact]
+    rfl
+  · rw [recordExact]
+    change (ApplicationShareIssueGrainReceiver.intent accepted).transactionId =
+      issued.descriptor.transactionId
+    rw [descriptorExact]
+    rfl
 
-theorem IssuedEvidence.record_event {config : Config} (issued : IssuedEvidence config) :
-    issued.record.event =
-      ApplicationShareIssueReceiver.event config.deployment.domain issued.ingress := by
-  rcases issued.sourceExact with ⟨_, _, _, accepted, _, recordExact⟩
-  rw [recordExact]
-  rfl
+theorem IssuedEvidence.record_event_bytes {config : Config} (issued : IssuedEvidence config) :
+    issued.record.event.canonicalBytes = issued.ingressBytes := by
+  rcases issued.sourceExact with
+    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩ |
+    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩
+  · rw [recordExact, ingressExact]
+    rfl
+  · rw [recordExact, ingressExact]
+    rfl
 
 /-- Core selection is only a *current-image component*. The issue evidence
 must be added to a verifier-minted chronological context before this candidate
@@ -87,21 +129,19 @@ structure CheckedCandidate (config : Config) (durable : NativeHost.Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (issued : IssuedEvidence config) where
   private mk ::
-  issueBytesExact : ingress.issueIngressBytes =
-    ApplicationShareIssueSource.ingressCodec.encode issued.ingress
+  issueBytesExact : ingress.issueIngressBytes = issued.ingressBytes
   checked : ApplicationDispatchAdmission.CheckedCurrent config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config durable⟩ durable ingress
-    issued.ingress.spec issued.descriptor
+    issued.spec issued.descriptor
 
 def checkCurrent (config : Config) (durable : NativeHost.Durable)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (issued : IssuedEvidence config) :
     IO (Except String (CheckedCandidate config durable ingress issued)) := do
-  if issueBytesExact : ingress.issueIngressBytes =
-      ApplicationShareIssueSource.ingressCodec.encode issued.ingress then
+  if issueBytesExact : ingress.issueIngressBytes = issued.ingressBytes then
     match ← ApplicationDispatchAdmission.checkCurrent config.deployment config.profile
         ⟨config.federation, NativeHost.logicalHeight config durable⟩ config.signature
-        durable ingress issued.ingress.spec issued.descriptor with
+        durable ingress issued.spec issued.descriptor with
     | .error detail => return .error detail
     | .ok checked => return .ok ⟨issueBytesExact, checked⟩
   else return .error "dispatch issue ingress differs from admitted source"

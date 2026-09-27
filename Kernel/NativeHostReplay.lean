@@ -20,6 +20,7 @@ import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationLifecycleClaimCore
 import Kernel.ApplicationLifecycleClaimV2Core
 import Kernel.ApplicationShareIssueReceiver
+import Kernel.ApplicationShareIssueGrainReceiver
 import Kernel.ApplicationDispatchHistoricalCore
 import Kernel.ApplicationDispatchAgentCore
 import Kernel.FnConsumerFrontierReplay
@@ -349,6 +350,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
         opened.pins opened.durable (logicalHeight config opened.durable) ingress) :
       NativeAdmission config opened (ApplicationShareIssueReceiver.intent accepted)
+  | applicationGrainShareIssue {ingress : ApplicationShareIssueGrainSource.Ingress}
+      (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
+        opened.pins opened.durable
+        ⟨config.federation, logicalHeight config opened.durable⟩ ingress) :
+      NativeAdmission config opened (ApplicationShareIssueGrainReceiver.intent accepted)
   | applicationDispatch {ingress : ApplicationDispatchAdmissionIngress.Ingress}
       (admitted : DispatchAt config opened ingress) :
       NativeAdmission config opened admitted.intent
@@ -406,14 +412,22 @@ structure OrdinaryAt (config : Config) (opened : Opened config)
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   intentExact : intent = accepted.dataIntent shape
 
+inductive IssueAdmission (config : Config) (opened : Opened config)
+    (intent : DataIntent rootBytes) : Type where
+  | legacy (ingress : ApplicationShareIssueSource.Ingress)
+      (accepted : ApplicationShareIssueAdmission.Accepted config.profile config opened.pins
+        opened.durable (logicalHeight config opened.durable) ingress)
+      (intentExact : intent = ApplicationShareIssueReceiver.intent accepted)
+  | grain (ingress : ApplicationShareIssueGrainSource.Ingress)
+      (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config opened.pins
+        opened.durable ⟨config.federation, logicalHeight config opened.durable⟩ ingress)
+      (intentExact : intent = ApplicationShareIssueGrainReceiver.intent accepted)
+
 structure Derived (config : Config) (opened : Opened config) where
   private mk ::
   intent : DataIntent rootBytes
   admission : NativeAdmission config opened intent
-  issue : Option (Σ ingress : ApplicationShareIssueSource.Ingress,
-    { accepted : ApplicationShareIssueAdmission.Accepted config.profile config opened.pins
-        opened.durable (logicalHeight config opened.durable) ingress //
-      intent = ApplicationShareIssueReceiver.intent accepted })
+  issue : Option (IssueAdmission config opened intent)
   begin : Option (Σ ingress : ApplicationLifecycleBeginIngress.Ingress,
     { accepted : ApplicationLifecycleBeginReceiver.Accepted config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress //
@@ -504,7 +518,7 @@ private def priorIssueFor (config : Config)
     Option (PriorIssue config) :=
   issues.find? (fun issue =>
     decide (ingress.issueIngressBytes =
-      ApplicationShareIssueSource.ingressCodec.encode issue.evidence.ingress))
+      issue.evidence.ingressBytes))
 
 private def priorBeginFor (config : Config) (begins : List (PriorBegin config))
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
@@ -779,7 +793,17 @@ private def derive (config : Config) (opened : Opened config)
     | .error _ => return .error "historical application share issue admission refused"
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueReceiver.intent accepted,
-          .applicationShareIssue accepted, some ⟨issueIngress, ⟨accepted, rfl⟩⟩, none, none, none, none⟩
+          .applicationShareIssue accepted, some (.legacy issueIngress accepted rfl),
+          none, none, none, none⟩
+  if (ApplicationShareIssueGrainSource.codec.decode bytes).isSome then
+    let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
+    match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config opened.pins
+        config.signature opened.durable ambient bytes with
+    | .error _ => return .error "historical grain-backed application share issue refused"
+    | .ok ⟨issueIngress, accepted⟩ =>
+        return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
+          .applicationGrainShareIssue accepted, some (.grain issueIngress accepted rfl),
+          none, none, none, none⟩
   if let some ingress := ApplicationDispatchAgentIngress.codec.decode bytes then
     match ← admitAgentDispatchAt config opened issues reserves ingress with
     | .error detail => return .error detail
@@ -905,7 +929,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
     List (PriorIssue config) :=
   match derived.issue with
   | none => issues
-  | some ⟨ingress, ⟨accepted, intentExact⟩⟩ =>
+  | some (.legacy ingress accepted intentExact) =>
       let recordExact : record = DurableReceiver.IntentRecord.ofIntent
           (ApplicationShareIssueReceiver.intent accepted) := by
         rw [← intentExact]
@@ -914,6 +938,15 @@ private def issuesAfter (config : Config) (opened : Opened config)
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config opened.pins
           opened.durable (logicalHeight config opened.durable) ingress accepted record
           recordExact⟩ :: issues
+  | some (.grain ingress accepted intentExact) =>
+      let recordExact : record = DurableReceiver.IntentRecord.ofIntent
+          (ApplicationShareIssueGrainReceiver.intent accepted) := by
+        rw [← intentExact]
+        exact (recordMatches_iff record derived.intent).mp matched
+      ⟨opened.durable.image.accepted.length,
+        ApplicationDispatchHistoricalCore.IssuedEvidence.fromGrainAccepted config opened.pins
+          opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
+          ingress accepted record recordExact⟩ :: issues
 
 /-- A compact ordinary invocation enters the reserve-eligible chronological
 context only after the caller has matched its complete record, advanced, and
@@ -1022,8 +1055,13 @@ private theorem issuesAfter_preserves_prior (config : Config) (opened : Opened c
   cases issue : derived.issue with
   | none => simpa [issuesAfter, issue] using member
   | some value =>
-      simp only [issuesAfter, issue]
-      exact List.mem_cons_of_mem _ member
+      cases value with
+      | legacy ingress accepted intentExact =>
+          simp only [issuesAfter, issue]
+          exact List.mem_cons_of_mem _ member
+      | grain ingress accepted intentExact =>
+          simp only [issuesAfter, issue]
+          exact List.mem_cons_of_mem _ member
 
 /-- Byte equality does not stand in for a cryptographic collision assumption:
 the stored record must be exactly the source-derived accepted record. -/

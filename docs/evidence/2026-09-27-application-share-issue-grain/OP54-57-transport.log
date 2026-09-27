@@ -1,0 +1,7 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+────────────
+ Nextest run ID a49cf50c-fa06-47d2-a75e-de5aec730528 with nextest profile: default
+    Starting 1 test across 1 binary (77 tests skipped)
+        PASS [   0.008s] (1/1) minidregg-resource-client::bin/mini transport::tests::namespace_and_lifecycle_authoring_routes_stay_private_and_bounded
+────────────
+     Summary [   0.008s] 1 test run: 1 passed, 77 skipped

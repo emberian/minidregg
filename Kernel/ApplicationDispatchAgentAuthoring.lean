@@ -81,7 +81,7 @@ def prepareParentVerified (config : Config) {target : Durable}
   let some issue := verified.issues.find? (fun issue =>
       issue.index == request.base.issueIndex)
     | throw "agent share issue absent from verified prefix"
-  let ticket := issue.evidence.ingress.spec.ticket
+  let ticket := issue.evidence.spec.ticket
   if ticket.resource != request.base.ticketResource then
     throw "agent ticket differs from admitted issue"
   let generation ← match ticket.participant.origin with
@@ -102,7 +102,7 @@ def prepareParentVerified (config : Config) {target : Durable}
     ⟨request.task, state, request.parentCapability,
       cell.payload.root, request.parentObserveCapability⟩
   pure ⟨request, parent, ResourceBirthCodec.physicalRoot (.live cell),
-    ApplicationShareIssueSource.ingressCodec.encode issue.evidence.ingress⟩
+    issue.evidence.ingressBytes⟩
 
 def prepareParentRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target)

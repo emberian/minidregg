@@ -138,7 +138,7 @@ def prepareWithParent (config : Config) {target : Durable}
   let opened := verified.opened
   let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
     | throw "admitted share issue index unavailable"
-  let spec := prior.evidence.ingress.spec
+  let spec := prior.evidence.spec
   if spec.ticket.resource != request.ticketResource then
     throw "custodian ticket differs from admitted issue"
   let ticket := spec.ticket
@@ -218,8 +218,7 @@ def prepareWithParent (config : Config) {target : Durable}
       ticketRoot := ticketCell.payload.root
       ticketObserveCapability := ticket.participant.ticketObserveCapability
       ticketObservationEnvelope := []
-      issueIngressBytes := ApplicationShareIssueSource.ingressCodec.encode
-        prior.evidence.ingress }
+      issueIngressBytes := prior.evidence.ingressBytes }
   let selection : Selection :=
     ⟨opened.authority.snapshot.cell.root, sessionCell.payload.root,
       request.sessionObserveCapability⟩
@@ -263,7 +262,7 @@ def prepareVerified (config : Config) {target : Durable}
     Except String Plan := do
   let some prior := verified.issues.find? (fun issue => issue.index == request.issueIndex)
     | throw "admitted share issue index unavailable"
-  if prior.evidence.ingress.spec.ticket.participant.origin != .human then
+  if prior.evidence.spec.ticket.participant.origin != .human then
     throw "agent dispatch authoring requires an explicit parent plan"
   prepareWithParent config verified request none
 

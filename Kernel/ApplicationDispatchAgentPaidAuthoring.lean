@@ -142,7 +142,7 @@ def prepareReserveVerified (config : Config) {target : Durable}
   let some issue := verified.issues.find? (fun issue =>
       issue.index == request.base.base.issueIndex)
     | throw "admitted share issue absent from reserve plan"
-  let ticket := issue.evidence.ingress.spec.ticket
+  let ticket := issue.evidence.spec.ticket
   let ticketCell ← match verified.opened.directory.directory.slots ticket.resource with
     | .present cell => pure cell
     | _ => throw "current ticket unavailable for reserve plan"
@@ -261,7 +261,7 @@ def preparePaidVerified (config : Config) {target : Durable}
       issue.index == request.fixed.base.base.issueIndex)
     | throw "agent ticket issue absent from verified history"
   if !ApplicationDispatchAgentReserveContext.matchesIngress request.context
-      unsigned issue.evidence.ingress.spec.ticket.resource then
+      unsigned issue.evidence.spec.ticket.resource then
     throw "paid dispatch context differs from current source app plan"
   let some reserve := verified.reserves.find? (fun reserve =>
       reserve.index == request.reserveIndex)

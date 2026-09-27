@@ -61,7 +61,7 @@ def ofDispatchAt {config : Config} {opened : Opened config}
   { dispatch := dispatch
     effectiveBits := checked.bits
     sessionFingerprint := checked.sessionFingerprint
-    ticketResource := admitted.prior.evidence.ingress.spec.ticket.resource
+    ticketResource := admitted.prior.evidence.spec.ticket.resource
     ticketRoot := ingress.ticketRoot
     enrollmentResource := ingress.dispatch.enrollmentResource
     enrollmentRoot := ingress.dispatch.enrollmentRoot
@@ -87,7 +87,7 @@ def ofAgentDispatchAt {config : Config} {opened : Opened config}
   { dispatch := dispatch
     effectiveBits := checked.bits
     sessionFingerprint := checked.sessionFingerprint
-    ticketResource := admitted.issue.evidence.ingress.spec.ticket.resource
+    ticketResource := admitted.issue.evidence.spec.ticket.resource
     ticketRoot := ingress.dispatch.ticketRoot
     enrollmentResource := ingress.dispatch.dispatch.enrollmentResource
     enrollmentRoot := ingress.dispatch.dispatch.enrollmentRoot

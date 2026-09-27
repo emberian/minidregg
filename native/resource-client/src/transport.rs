@@ -139,7 +139,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 58, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -168,7 +168,9 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45 | 49 | 51 | 53 | 59, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+        [45 | 49 | 51 | 53 | 57 | 59, pair @ ..]
+            if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME =>
+        {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -1144,6 +1146,18 @@ mod tests {
             assert!(!allowed_operation(&assembly, true));
             assert!(!allowed_operator_operation(&[operation, 1, 0, 0, 0, b'P']));
         }
+
+        for operation in [54, 55, 56] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(!allowed_operation(&[operation, 1], true));
+        }
+        let mut grain_share_assembly = vec![57];
+        grain_share_assembly.extend(1u32.to_le_bytes());
+        grain_share_assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&grain_share_assembly));
+        assert!(!allowed_operation(&grain_share_assembly, true));
+        assert!(!allowed_operator_operation(&[57, 1, 0, 0, 0, b'P']));
     }
 
     #[test]

@@ -42,6 +42,9 @@ import Kernel.FnPortableSource
 import Kernel.FnSelectiveReleaseReceiver
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
+import Kernel.ApplicationShareIssueGrainAuthoring
+import Kernel.ApplicationShareIssueGrainReceiver
+import Kernel.ApplicationShareIssueGrainLookup
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
 import Kernel.ApplicationDispatchAgentReceiver
@@ -879,6 +882,47 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
           receipt.transactionId receipt.eventId with
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some historical => return .confirmed .replayed historical
+
+/-- Grain-backed issue is a distinct event-22 write. Its receiver combines
+the grain birth and app delegation in one native CAS. Historical lookup is
+handled separately after verifier-selected original-prefix re-admission. -/
+def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  let ambient : DeclaredResourceController.Ambient :=
+    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+  let result ← ApplicationShareIssueGrainReceiver.receiveLoaded config opened.pins
+    config.signature config.storage.transport opened.durable ambient payload
+  let outcome ← match result with
+    | .historical receipt =>
+        sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
+    | .confirmed kind receipt =>
+        sessionConfirmed config state kind receipt.transactionId receipt.eventId
+    | .rejected _ => pure (.refused "application-grain-share-issue".toUTF8.toList
+        "request refused".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return NativeHost.publicSubmissionOutcome outcome
+
+/-- Receipt recovery re-admits the exact event-22 intent at the verifier's
+original prefix. It never runs a birth, grain settlement or app delegation. -/
+def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let opened ← sessionOpened config state
+  match ← ApplicationShareIssueGrainLookup.lookupOriginal config opened.durable payload with
+  | .error .malformed =>
+      return .refused "application-grain-share-issue".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "original grain share issue history unavailable".toUTF8.toList
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
 
 /-- Historical dispatch lookup is receipt-only. It rechecks the original
 special event at its verifier-selected prefix and never mints a delivery
@@ -3886,7 +3930,8 @@ def run (arguments : List String) : IO UInt32 := do
           IO.println (profileDescription config (← IO.ofExcept settings.providerMeteringPin)).pretty
           pure 0
       | "author", [kind, input, output] =>
-          let source ← if kind == "application-dispatch-request" then
+          let source ← if kind == "application-dispatch-request" ||
+              kind == "application-share-issue-grain-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -3899,6 +3944,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-share-issue-grain-request" ||
+              kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
@@ -3909,6 +3956,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-share-issue-grain-request" ||
+              kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
             let serialized := value.compress
@@ -4009,6 +4058,14 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome ← applicationShareIssueLookupSession
                               pinnedConfig state payload
                             return ((29 : UInt8), outcomeCodec.encode outcome)
+                        | 54 =>
+                            let outcome ← applicationGrainShareIssueSubmitSession
+                              pinnedConfig state payload
+                            return ((54 : UInt8), outcomeCodec.encode outcome)
+                        | 55 =>
+                            let outcome ← applicationGrainShareIssueLookupSession
+                              pinnedConfig state payload
+                            return ((55 : UInt8), outcomeCodec.encode outcome)
                         | 30 =>
                             let intent ← applicationCurrentBirthIntentSession
                               pinnedConfig state true payload
@@ -4036,6 +4093,25 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "share issue ingress exceeds host frame bound")
                             return ((33 : UInt8), ingress)
+                        | 56 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationShareIssueGrainAuthoring.prepareRequestLoaded
+                                pinnedConfig opened payload
+                            let bytes := ApplicationShareIssueGrainAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "grain share issue plan exceeds host frame bound")
+                            return ((56 : UInt8), bytes)
+                        | 57 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationShareIssueGrainAuthoring.planCodec.decode planBytes
+                              | throw (IO.userError "noncanonical grain share issue signing plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationShareIssueGrainAuthoring.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "grain share issue ingress exceeds host frame bound")
+                            return ((57 : UInt8), ingress)
                         | 40 =>
                             let some selected := service
                               | return ((255 : UInt8), failure "fn-consumer-namespace"
@@ -4197,6 +4273,28 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "share issue ingress exceeds host frame bound")
           writeBytes output ingress
           pure 0
+      | "application-grain-share-issue-plan", [input, output] =>
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let request ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          let plan ← IO.ofExcept <|
+            ApplicationShareIssueGrainAuthoring.prepareRequestLoaded config opened request
+          let bytes := ApplicationShareIssueGrainAuthoring.planCodec.encode plan
+          unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+            throw (IO.userError "grain share issue plan exceeds host frame bound")
+          writeBytes output bytes
+          pure 0
+      | "application-grain-share-issue-assemble", [planPath, signaturesPath, output] =>
+          let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
+          let some plan := ApplicationShareIssueGrainAuthoring.planCodec.decode planBytes
+            | throw (IO.userError "noncanonical grain share issue signing plan")
+          let signatures ← decodeSignatures
+            (← readBoundedBytes signaturesPath FnEvidenceCodec.maxHostFrameBytes)
+          let ingress ← IO.ofExcept <|
+            ApplicationShareIssueGrainAuthoring.assemble plan signatures
+          unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+            throw (IO.userError "grain share issue ingress exceeds host frame bound")
+          writeBytes output ingress
+          pure 0
       | "challenge", [input, output] =>
           let challenge ← IO.ofExcept (← NativeHost.challenge config (← readBytes input))
           writeBytes output (NativeObservationCodec.challengeCodec.encode challenge)
@@ -4315,6 +4413,22 @@ def run (arguments : List String) : IO UInt32 := do
             let ingress ← readBoundedBytes input maxFrame
             writeBytes output (outcomeCodec.encode
               (← applicationShareIssueLookupSession pinnedConfig state ingress))
+            pure 0
+      | "application-grain-share-issue-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationGrainShareIssueSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "application-grain-share-issue-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationGrainShareIssueLookupSession pinnedConfig state ingress))
             pure 0
       | "selected-release-source-plan", [packetPath, capabilityText, specPath,
           headerPath, rootPath] =>

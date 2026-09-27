@@ -36,7 +36,7 @@ structure Checked (config : Config) (opened : Opened config)
   private mk ::
   contextExact : reserved.context = ingress.reserveContext
   scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
-    issued.ingress.spec.ticket.resource = true
+    issued.spec.ticket.resource = true
   base : ApplicationDispatchHistoricalCore.CheckedCandidate config
     opened.durable ingress.dispatch issued
   payer : ApplicationDispatchAgentPayer.Checked config opened ingress.reserveContext
@@ -65,7 +65,7 @@ def checkCurrent (config : Config) (opened : Opened config)
     IO (Except String (Checked config opened ingress issued reserved)) := do
   if contextExact : reserved.context = ingress.reserveContext then
     if scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
-        issued.ingress.spec.ticket.resource = true then
+        issued.spec.ticket.resource = true then
       match ← ApplicationDispatchHistoricalCore.checkCurrent config opened.durable
           ingress.dispatch issued with
       | .error detail => return .error detail
