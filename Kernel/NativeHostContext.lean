@@ -48,6 +48,9 @@ structure Config where
   signature : CredentialSignatureIO.NativeConfig
   fnGateway : Option FnGatewayPin := none
   grainBirthTariff : Option GrainBirthTariffPin := none
+  /-- Public Ed25519 key of the separately controlled physical host custodian.
+  Absence preserves the legacy profile and disables checked completion. -/
+  completionCustodianKey : Option (List UInt8) := none
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -67,17 +70,22 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
      config.federation.value, config.genesisHeight, config.tariff.base,
      config.tariff.perBirth, config.tariff.perGrant, config.tariff.perInitialPayloadByte,
      config.tariff.collector, config.tariff.asset] ++
-  match config.grainBirthTariff with
+  (match config.grainBirthTariff with
   | none => []
   | some tariff =>
       "DREGG/NATIVE-HOST/GRAIN-BIRTH-TARIFF/v1".toUTF8.toList ++
         (StreamCodec.product StreamCodec.nat StreamCodec.nat).encode
-          (tariff.base, tariff.perBirth)
+          (tariff.base, tariff.perBirth)) ++
+  (match config.completionCustodianKey with
+  | none => []
+  | some key =>
+      "DREGG/NATIVE-HOST/COMPLETION-CUSTODIAN/v1".toUTF8.toList ++
+        bytesStream.encode key)
 
 /-- Disabling the new mode preserves the complete pre-existing parameter
 preimage, hence its legacy semantics/profile and genesis interpretation. -/
-theorem Config.runtimeParameters_withoutGrainBirth (config : Config) :
-    ({ config with grainBirthTariff := none } : Config).runtimeParameters =
+theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
+    ({ config with grainBirthTariff := none, completionCustodianKey := none } : Config).runtimeParameters =
       "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
@@ -122,6 +130,8 @@ def check (condition : Bool) (detail : String) : Except String Unit :=
 def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) := do
   if config.grainBirthTariff.isSome then
     let _ ← config.grainBirthTariffValue
+  if let some key := config.completionCustodianKey then
+    check (decide (key.length = 32)) "physical completion custodian key must be 32 bytes"
   check (decide config.deployment.Valid) "invalid deployment role identities"
   check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
   let directory ← need "noncanonical native directory"
