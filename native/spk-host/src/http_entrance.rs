@@ -1,8 +1,8 @@
 //! Bounded Unix-only HTTP entrance for one participant credential custodian.
 //!
 //! Transport tokens authenticate use of that custodian; they are not Mini
-//! resource authority. The product response remains unavailable until a
-//! source-owned participant signer and current dispatch permit are wired.
+//! resource authority. The current public binary serves an unavailable
+//! response; the resident signer/permit path is staged separately.
 
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
@@ -89,6 +89,8 @@ pub(crate) struct CustodianPolicy {
     pub fixed_subject: String,
     #[allow(dead_code)]
     pub fixed_session: String,
+    /// Bound to the Mini session, never inferred from the bearer or cookie.
+    pub fixed_session_kind: EntranceKind,
     #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
@@ -104,6 +106,7 @@ struct PolicyFile {
     fixed_app: String,
     fixed_subject: String,
     fixed_session: String,
+    fixed_session_kind: String,
     fixed_ticket: String,
     browser_token_sha256: String,
     bootstrap_token_sha256: String,
@@ -199,6 +202,7 @@ impl CustodianPolicy {
             || !canonical_nat(&parsed.fixed_subject)
             || !canonical_nat(&parsed.fixed_session)
             || !canonical_nat(&parsed.fixed_ticket)
+            || !matches!(parsed.fixed_session_kind.as_str(), "web" | "api")
         {
             return Err(refuse("custodian origin or fixed Mini coordinate refused"));
         }
@@ -207,6 +211,11 @@ impl CustodianPolicy {
             fixed_app: parsed.fixed_app,
             fixed_subject: parsed.fixed_subject,
             fixed_session: parsed.fixed_session,
+            fixed_session_kind: if parsed.fixed_session_kind == "web" {
+                EntranceKind::Browser
+            } else {
+                EntranceKind::Api
+            },
             fixed_ticket: parsed.fixed_ticket,
             browser_token_sha256: hex_digest(&parsed.browser_token_sha256)?,
             bootstrap_token_sha256: hex_digest(&parsed.bootstrap_token_sha256)?,
@@ -246,8 +255,10 @@ pub fn initialize_custodian(
     subject: &str,
     session: &str,
     ticket: &str,
+    session_kind: &str,
 ) -> io::Result<()> {
     if !valid_expected_host(expected_host)
+        || !matches!(session_kind, "web" | "api")
         || ![app, subject, session, ticket]
             .into_iter()
             .all(canonical_nat)
@@ -270,6 +281,7 @@ pub fn initialize_custodian(
         fixed_app: app.into(),
         fixed_subject: subject.into(),
         fixed_session: session.into(),
+        fixed_session_kind: session_kind.into(),
         fixed_ticket: ticket.into(),
         browser_token_sha256: digest(&browser),
         bootstrap_token_sha256: digest(&bootstrap),
@@ -566,6 +578,9 @@ impl CustodianPolicy {
                 if !token_matches(token, &self.api_token_sha256) {
                     return Err(refuse("API transport credential refused"));
                 }
+                if self.fixed_session_kind != EntranceKind::Api {
+                    return Err(refuse("API token differs from fixed Mini session kind"));
+                }
                 Ok(EntranceKind::Api)
             }
             (None, Some(raw_cookie)) => {
@@ -573,6 +588,9 @@ impl CustodianPolicy {
                 let token = token.ok_or_else(|| refuse("browser session cookie missing"))?;
                 if !token_matches(&token, &self.browser_token_sha256) {
                     return Err(refuse("browser transport credential refused"));
+                }
+                if self.fixed_session_kind != EntranceKind::Browser {
+                    return Err(refuse("browser cookie differs from fixed Mini session kind"));
                 }
                 if !request.method.safe()
                     && request.origin.as_deref() != Some(expected_origin.as_str())
@@ -852,10 +870,18 @@ mod tests {
             fixed_app: "6100".into(),
             fixed_subject: "8".into(),
             fixed_session: "6208".into(),
+            fixed_session_kind: EntranceKind::Browser,
             fixed_ticket: "6408".into(),
             browser_token_sha256: hash("browser-token-abcdefghijklmnopqrstuvwxyz"),
             bootstrap_token_sha256: hash("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),
             api_token_sha256: hash("api-token-abcdefghijklmnopqrstuvwxyz123"),
+        }
+    }
+
+    fn api_policy() -> CustodianPolicy {
+        CustodianPolicy {
+            fixed_session_kind: EntranceKind::Api,
+            ..policy()
         }
     }
 
@@ -937,7 +963,7 @@ mod tests {
         let raw = "GET /repo.git/info/refs?service=git-upload-pack HTTP/1.1\r\nHost: friend.example.test\r\nAuthorization: Bearer api-token-abcdefghijklmnopqrstuvwxyz123\r\nContent-Length: 0\r\n\r\n";
         let mut request = parsed(raw).unwrap();
         assert_eq!(
-            policy().authenticate(&mut request).unwrap(),
+            api_policy().authenticate(&mut request).unwrap(),
             EntranceKind::Api
         );
         assert!(request.ordinary_headers.is_empty());
@@ -963,14 +989,16 @@ mod tests {
         .is_err());
         assert!(parsed(&raw.replace("/repo.git/info/refs", "/repo.git/\tinfo/refs")).is_err());
         let mut both = parsed(&raw.replace("Content-Length: 0", "Cookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\nContent-Length: 0")).unwrap();
-        assert!(policy().authenticate(&mut both).is_err());
+        assert!(api_policy().authenticate(&mut both).is_err());
+        let mut wrong_kind = parsed(raw).unwrap();
+        assert!(policy().authenticate(&mut wrong_kind).is_err());
     }
 
     #[test]
     fn transport_deadline_and_unavailable_response_do_not_deliver_app_call() {
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(b"GET / HTTP/1.1\r\nHost: friend.example.test\r\nAuthorization: Bearer api-token-abcdefghijklmnopqrstuvwxyz123\r\n\r\n").unwrap();
-        let worker = std::thread::spawn(move || unavailable(server, &policy()).unwrap());
+        let worker = std::thread::spawn(move || unavailable(server, &api_policy()).unwrap());
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();
         worker.join().unwrap();
@@ -978,7 +1006,7 @@ mod tests {
         assert!(response.ends_with("Mini dispatch admission unavailable\n"));
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(b"HEAD / HTTP/1.1\r\nHost: friend.example.test\r\nAuthorization: Bearer api-token-abcdefghijklmnopqrstuvwxyz123\r\n\r\n").unwrap();
-        let worker = std::thread::spawn(move || unavailable(server, &policy()).unwrap());
+        let worker = std::thread::spawn(move || unavailable(server, &api_policy()).unwrap());
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();
         worker.join().unwrap();
@@ -1006,6 +1034,7 @@ mod tests {
             "fixedApp": "6100",
             "fixedSubject": "8",
             "fixedSession": "6208",
+            "fixedSessionKind": "web",
             "fixedTicket": "6408",
             "browserTokenSha256": digest("browser-token-abcdefghijklmnopqrstuvwxyz"),
             "bootstrapTokenSha256": digest("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),
@@ -1017,7 +1046,7 @@ mod tests {
         let entrance = PrivateHttpEntrance::bind(&directory).unwrap();
         assert!(PrivateHttpEntrance::bind(&directory).is_err());
         let mut client = UnixStream::connect(directory.join("http.sock")).unwrap();
-        client.write_all(b"GET /repo.git/info/refs?service=git-upload-pack HTTP/1.1\r\nHost: friend.example.test\r\nAuthorization: Bearer api-token-abcdefghijklmnopqrstuvwxyz123\r\n\r\n").unwrap();
+        client.write_all(b"GET /gitweb.cgi HTTP/1.1\r\nHost: friend.example.test\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n").unwrap();
         let server = std::thread::spawn(move || {
             let (peer, _) = entrance.listener.accept().unwrap();
             assert_eq!(peer_uid(&peer), Some(unsafe { libc::geteuid() }));
@@ -1060,6 +1089,7 @@ mod tests {
             "8",
             "6208",
             "6408",
+            "web",
         )
         .unwrap();
         let socket = directory.join("http.sock");
@@ -1094,6 +1124,7 @@ mod tests {
             "8",
             "6208",
             "6408",
+            "web",
         )
         .unwrap();
         assert!(initialize_custodian(
@@ -1102,7 +1133,8 @@ mod tests {
             "6100",
             "8",
             "6208",
-            "6408"
+            "6408",
+            "web"
         )
         .is_err());
         let token = fs::read_to_string(directory.join("bootstrap.token")).unwrap();

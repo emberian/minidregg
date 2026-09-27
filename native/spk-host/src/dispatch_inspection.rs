@@ -147,6 +147,42 @@ pub(crate) struct MatchedInspection {
     pub method: String,
 }
 
+/// Browser targets are already canonical relative paths. API targets are
+/// external relative paths, prefixed only by the signature-verified bridge
+/// configuration. Authoring and post-CAS comparison share this transformation.
+pub(crate) fn app_route_path(http: &HttpProjection<'_>) -> io::Result<(String, String)> {
+    if http.path_and_query.starts_with('/')
+        || http.path_and_query.contains('#')
+        || http
+            .path_and_query
+            .bytes()
+            .filter(|byte| *byte == b'?')
+            .count()
+            > 1
+        || http.path_and_query.len() > 8192
+    {
+        return Err(invalid(
+            "authenticated HTTP path is not canonical relative form",
+        ));
+    }
+    let (path, query) = http
+        .path_and_query
+        .split_once('?')
+        .unwrap_or((http.path_and_query, ""));
+    let app_path = match http.route {
+        Route::Browser => path.to_owned(),
+        Route::Api { signed_path } => {
+            if signed_path != "/repo.git/" {
+                return Err(invalid(
+                    "signed API prefix differs from Mini bridge v1 mapping",
+                ));
+            }
+            format!("repo.git/{path}")
+        }
+    };
+    Ok((app_path, query.to_owned()))
+}
+
 /// `committed_payload` must be retained from this host's own fresh op34
 /// response. The function checks the inspector's byte echo first, then exact
 /// transport request coordinates and human-only v1 origin. It does not accept
@@ -209,35 +245,7 @@ pub(crate) fn match_inspection(
         ));
     }
     let request = member(&parsed, "request")?;
-    if http.path_and_query.starts_with('/')
-        || http.path_and_query.contains('#')
-        || http
-            .path_and_query
-            .bytes()
-            .filter(|byte| *byte == b'?')
-            .count()
-            > 1
-        || http.path_and_query.len() > 8192
-    {
-        return Err(invalid(
-            "authenticated HTTP path is not canonical relative form",
-        ));
-    }
-    let (path, query) = http
-        .path_and_query
-        .split_once('?')
-        .unwrap_or((http.path_and_query, ""));
-    let app_path = match http.route {
-        Route::Browser => path.to_owned(),
-        Route::Api { signed_path } => {
-            if signed_path != "/repo.git/" {
-                return Err(invalid(
-                    "signed API prefix differs from Mini bridge v1 mapping",
-                ));
-            }
-            format!("repo.git/{path}")
-        }
-    };
+    let (app_path, query) = app_route_path(http)?;
     if string(request, "methodHex")? != hex(http.method.as_bytes())
         || string(request, "pathHex")? != hex(app_path.as_bytes())
         || string(request, "queryHex")? != hex(query.as_bytes())

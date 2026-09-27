@@ -111,6 +111,35 @@ impl Record {
     pub fn event_id(&self) -> &str {
         &self.identity.event_id
     }
+    pub(crate) fn invocation_id(&self) -> Option<&str> {
+        self.invocation_id.as_deref()
+    }
+    /// The resident hostd calls this from its own unit before a physical
+    /// request. A durable Running row alone is not proof the same manager
+    /// invocation and app cgroup are still present.
+    pub(crate) fn verify_running_instance(&self) -> io::Result<()> {
+        if self.phase != Phase::Running {
+            return Err(invalid("app journal is not Running"));
+        }
+        let current = UnitInstance::current(self.unit())?;
+        if self.invocation_id.as_deref() != Some(current.invocation_id.as_str())
+            || self.control_group.as_deref() != Some(current.control_group.as_str())
+        {
+            return Err(invalid("resident app unit invocation drift"));
+        }
+        let manager = systemd_show(self.unit())?;
+        if property(&manager, "ActiveState")? != "active"
+            || !matches!(property(&manager, "Job")?, "0" | "")
+        {
+            return Err(invalid("app unit is not active and job-free"));
+        }
+        let child = self.child_pid.ok_or_else(|| invalid("Running app PID absent"))?;
+        let child_group = fs::read_to_string(format!("/proc/{child}/cgroup"))?;
+        if !child_group.lines().any(|line| line == format!("0::{}", current.control_group)) {
+            return Err(invalid("app child left exact unit cgroup"));
+        }
+        Ok(())
+    }
 
     fn validate(&self) -> io::Result<()> {
         if self.version != VERSION {
@@ -629,6 +658,101 @@ impl Journal {
 
     fn active_dispatch_path(&self) -> PathBuf {
         self.directory.join("dispatch-active.json")
+    }
+
+    /// Reserve a physical operation number before native authoring. The
+    /// counter is advanced and fsynced under the app lock, so a crash may
+    /// skip a number but can never reuse one after it was handed to a caller.
+    pub(crate) fn allocate_dispatch_operation(&self) -> io::Result<String> {
+        self.with_lock(|this| {
+            let path = this.directory.join("dispatch-next-id");
+            let next = match OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+            {
+                Ok(mut file) => {
+                    let meta = file.metadata()?;
+                    if !meta.is_file()
+                        || meta.nlink() != 1
+                        || meta.uid() != unsafe { libc::geteuid() }
+                        || meta.permissions().mode() & 0o777 != 0o600
+                        || meta.len() > 21
+                    {
+                        return Err(invalid("dispatch operation counter identity drift"));
+                    }
+                    let mut bytes = String::new();
+                    file.read_to_string(&mut bytes)?;
+                    let value = bytes
+                        .strip_suffix('\n')
+                        .ok_or_else(|| invalid("dispatch operation counter framing"))?;
+                    if !canonical_decimal(value) {
+                        return Err(invalid("dispatch operation counter is noncanonical"));
+                    }
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| invalid("dispatch operation counter overflow"))?
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    // Losing an established counter must not rearm old IDs.
+                    for entry in fs::read_dir(&this.directory)? {
+                        let name = entry?.file_name();
+                        let name = name.to_string_lossy();
+                        if name.starts_with("dispatch-op-")
+                            || name.starts_with("dispatch-id-")
+                            || name.starts_with("dispatch-permit-")
+                            || name == "dispatch-active.json"
+                        {
+                            return Err(invalid("dispatch operation counter missing after use"));
+                        }
+                    }
+                    1
+                }
+                Err(error) => return Err(error),
+            };
+            if next == 0 {
+                return Err(invalid("dispatch operation counter is zero"));
+            }
+            let following = next
+                .checked_add(1)
+                .ok_or_else(|| invalid("dispatch operation counter exhausted"))?;
+            // This per-ID marker survives even if a later counter rename is
+            // interrupted. An absent or rolled-back counter then fails closed.
+            let allocated = this.directory.join(format!("dispatch-id-{next}"));
+            let mut marker = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&allocated)?;
+            writeln!(marker, "{next}")?;
+            marker.sync_all()?;
+            File::open(&this.directory)?.sync_all()?;
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| invalid("clock before epoch"))?
+                .as_nanos();
+            let temporary = this
+                .directory
+                .join(format!(".dispatch-next-{}-{nonce}.tmp", std::process::id()));
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&temporary)?;
+            let result = (|| {
+                writeln!(file, "{following}")?;
+                file.sync_all()?;
+                fs::rename(&temporary, &path)?;
+                File::open(&this.directory)?.sync_all()
+            })();
+            if result.is_err() {
+                let _ = fs::remove_file(&temporary);
+            }
+            result?;
+            Ok(next.to_string())
+        })
     }
 
     fn dispatch_permit_path(&self, identity: &DispatchIdentity) -> PathBuf {
@@ -1178,6 +1302,22 @@ mod tests {
             )
             .unwrap();
         (path, journal, begin)
+    }
+
+    #[test]
+    fn dispatch_operation_ids_are_fsynced_and_never_reused_after_reopen() {
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        assert_eq!(journal.allocate_dispatch_operation().unwrap(), "1");
+        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "2\n");
+        assert_eq!(fs::read_to_string(path.join("dispatch-id-1")).unwrap(), "1\n");
+        drop(journal);
+        let reopened = Journal::open(&path).unwrap();
+        assert_eq!(reopened.allocate_dispatch_operation().unwrap(), "2");
+        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "3\n");
+        fs::remove_file(path.join("dispatch-next-id")).unwrap();
+        assert!(reopened.allocate_dispatch_operation().is_err());
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
