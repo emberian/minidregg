@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Render one task-UID controller from an exact hosted native base. No service
+# install/start and no Mini operation occurs here.
+set -euo pipefail
+umask 077
+if (($# != 1)); then
+  echo 'usage: offer-render-task ABS_TASK_MANIFEST_JSON' >&2
+  exit 64
+fi
+for tool in jq realpath stat sha256sum cmp find; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "offer-render-task: $*" >&2; exit 65; }
+manifest=$1
+safe() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsafe absolute path: $1"
+}
+existing() {
+  safe "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail "missing, linked, or noncanonical path: $1"
+}
+sha() { sha256sum -- "$1" | cut -d' ' -f1; }
+pin() {
+  existing "$1"
+  [[ -f $1 && $2 =~ ^[0-9a-f]{64}$ && $(sha "$1") == "$2" ]] ||
+    fail "SHA-256 pin mismatch: $1"
+}
+private() {
+  existing "$1"
+  [[ -f $1 && $(stat -c %u -- "$1") == "$(id -u)" &&
+     $(stat -c %a -- "$1") == 600 ]] || fail "not an owned 0600 file: $1"
+}
+owned_dir() {
+  existing "$1"
+  [[ -d $1 && $(stat -c %u -- "$1") == "$(id -u)" &&
+     $(stat -c %a -- "$1") == 700 ]] || fail "not an owned 0700 directory: $1"
+}
+overlap() { [[ $1 == "$2" || $1 == "$2"/* || $2 == "$1"/* ]]; }
+
+private "$manifest"
+jq -e '
+  .profile == "mini-offer-task-v1" and
+  (.peer == "a" or .peer == "b") and
+  ([.baseConfig,.frontConfig,.frontSocket,.mini,.host,.runtime,.launcher,
+    .unitDir,.outputDir,.stateDir,.cwd,.workspace,.runtimeRoot,
+    .controllerKey,.toolKey] |
+    all(type == "string" and startswith("/"))) and
+  ([.baseConfigSha256,.frontConfigSha256,.provisionConfigSha256,
+    .miniSha256,.hostSha256,
+    .runtimeSha256,.launcherSha256,.gateSha256,.hermesSha256,
+    .controllerKeySha256,.toolKeySha256,
+    .rendererSourceSha256,.installerSourceSha256] |
+    all(type == "string" and test("^[0-9a-f]{64}$"))) and
+  (.wallTimeSeconds | type == "number" and floor == . and . >= 1 and . <= 1800) and
+  (.reserve | type == "string" and test("^[1-9][0-9]*$")) and
+  (.charge | type == "string" and test("^(0|[1-9][0-9]*)$"))
+' "$manifest" >/dev/null || fail 'task manifest is incomplete or outside the fixed offering profile'
+v() { jq -er "$1" "$manifest"; }
+[[ $(v .frontConfigSha256) == "$(v .provisionConfigSha256)" ]] ||
+  fail 'frontend config differs from the provisioned Mini config pin'
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+pin "$here/offer-render-task" "$(v .rendererSourceSha256)"
+pin "$here/install-controller" "$(v .installerSourceSha256)"
+peer=$(v .peer)
+base=$(v .baseConfig)
+front_config=$(v .frontConfig)
+front_socket=$(v .frontSocket)
+mini=$(v .mini)
+host=$(v .host)
+runtime=$(v .runtime)
+launcher=$(v .launcher)
+gate=${launcher%/*}/launch-gate
+unit_dir=$(v .unitDir)
+output_dir=$(v .outputDir)
+state_dir=$(v .stateDir)
+cwd=$(v .cwd)
+workspace=$(v .workspace)
+runtime_root=$(v .runtimeRoot)
+controller_key=$(v .controllerKey)
+tool_key=$(v .toolKey)
+
+private "$base"
+pin "$base" "$(v .baseConfigSha256)"
+pin "$front_config" "$(v .frontConfigSha256)"
+pin "$mini" "$(v .miniSha256)"
+pin "$host" "$(v .hostSha256)"
+pin "$runtime" "$(v .runtimeSha256)"
+pin "$launcher" "$(v .launcherSha256)"
+pin "$gate" "$(v .gateSha256)"
+pin "$runtime_root/hermes-acp" "$(v .hermesSha256)"
+pin "$runtime_root/grain-runtime" "$(v .runtimeSha256)"
+[[ -x $mini && -x $host && -x $runtime && -x $launcher && -x $gate &&
+   -x $runtime_root/hermes-acp && -x $runtime_root/grain-runtime ]] ||
+  fail 'one selected executable is not executable'
+private "$controller_key"
+private "$tool_key"
+pin "$controller_key" "$(v .controllerKeySha256)"
+pin "$tool_key" "$(v .toolKeySha256)"
+[[ $controller_key != "$tool_key" && $mini != "$host" &&
+   ${launcher##*/} == bwrap ]] || fail 'keys or executable roles overlap'
+[[ $($launcher --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] ||
+  fail 'launcher/gate protocol mismatch'
+for directory in "$output_dir" "$state_dir" "$cwd" "$workspace"; do
+  owned_dir "$directory"
+done
+existing "$runtime_root"
+[[ -d $runtime_root && $(stat -c %u -- "$runtime_root") != "$(id -u)" &&
+   $(stat -c %a -- "$runtime_root") == 755 && ! -w $runtime_root ]] ||
+  fail 'runtime root must be a distinct operator-owned mode-0755 directory'
+for worker_file in "$runtime_root/hermes-acp" "$runtime_root/grain-runtime"; do
+  [[ $(stat -c %u -- "$worker_file") != "$(id -u)" &&
+     $(stat -c %a -- "$worker_file") == 755 && ! -w $worker_file ]] ||
+    fail 'worker executable must be operator-owned mode 0755'
+done
+ancestor=${runtime_root%/*}
+while [[ -n $ancestor && $ancestor != / ]]; do
+  [[ $(stat -c %u -- "$ancestor") != "$(id -u)" && ! -w $ancestor ]] ||
+    fail 'task account can replace an ancestor of the runtime root'
+  ancestor=${ancestor%/*}
+done
+existing "$unit_dir"
+[[ -d $unit_dir && -w $unit_dir ]] || fail 'unit directory is not writable'
+safe "$front_socket"
+[[ $(dirname -- "$front_socket") == "$(dirname -- "$front_config")" ]] ||
+  fail 'frontend socket/config must share one dedicated directory'
+[[ ! -e $front_socket || -S $front_socket ]] || fail 'frontend socket is not a socket'
+for mount in "$workspace" "$runtime_root"; do
+  for secret in "$controller_key" "$tool_key" "$manifest" "$base" \
+                "$state_dir" "$output_dir" "$unit_dir" \
+                "$front_config" "$front_socket" \
+                "$mini" "$host" "$runtime" "$launcher" "$gate"; do
+    overlap "$mount" "$secret" && fail "controller secret overlaps worker mount: $secret"
+  done
+done
+overlap "$workspace" "$runtime_root" && fail 'worker workspace and runtime root overlap'
+overlap "$cwd" "$workspace" && fail 'controller cwd overlaps worker workspace'
+overlap "$cwd" "$runtime_root" && fail 'controller cwd overlaps worker runtime root'
+[[ $(dirname -- "$front_config") != "$state_dir" ]] || fail 'frontend is inside controller state'
+
+if [[ $peer == a ]]; then
+  task=7801 subject=7 tool_task=7802 tool_subject=8 parent_cap=73
+  write_cap=95 read_cap=96
+else
+  task=7803 subject=9 tool_task=7804 tool_subject=10 parent_cap=113
+  write_cap=97 read_cap=98
+fi
+jq -e --arg task "$task" --arg subject "$subject" \
+  --arg tool "$tool_task" --arg toolSubject "$tool_subject" \
+  --arg parent "$parent_cap" --arg write "$write_cap" --arg read "$read_cap" \
+  --arg host "$host" --arg mini "$mini" '
+  .task == $task and .subject == $subject and .mini == $mini and .host == $host and
+  .toolTask.task == $tool and .toolTask.subject == $toolSubject and
+  .toolTask.parentCapability == $parent and .toolTask.parentObserveCapability == $parent and
+  .toolTask.allowedPublications == [{kind:"object",target:"8001",
+    capability:$write,observeCapability:$write}] and
+  .toolTask.allowedReads == [{name:"workroom",kind:"object",target:"8001",
+    observeCapability:$read,maxResultBytes:262144}] and .commands == []
+' "$base" >/dev/null || fail 'base config is not the fixed native peer profile'
+[[ -f $workspace/.hermes/config.yaml && ! -L $workspace/.hermes/config.yaml &&
+   $(stat -c %a -- "$workspace/.hermes/config.yaml") == 600 ]] ||
+  fail 'workspace lacks a private Hermes config'
+
+stage=$output_dir/stage.json
+if [[ -e $stage ]]; then
+  private "$stage"
+  jq -e --arg manifestSha "$(sha "$manifest")" \
+    --arg configSha "$(sha "$output_dir/runtime-config.json")" \
+    --arg pinsSha "$(sha "$output_dir/pins.json")" \
+    --arg unitSha "$(sha "$output_dir/rendered.service")" \
+    '.stage == "rendered-not-installed" and .manifestSha256 == $manifestSha and
+     .configSha256 == $configSha and .pinsSha256 == $pinsSha and .unitSha256 == $unitSha' \
+    "$stage" >/dev/null || fail 'existing rendered stage differs; review rather than overwrite'
+  printf 'already-rendered task=%s stage=%s\n' "$task" "$stage"
+  exit 0
+fi
+[[ -z $(find "$output_dir" -mindepth 1 -maxdepth 1 -print -quit) ]] ||
+  fail 'partial output exists without stage manifest; review or select a fresh output directory'
+
+cp -- "$base" "$output_dir/base-config.json"
+chmod 600 "$output_dir/base-config.json"
+jq --arg config "$front_config" --arg socket "$front_socket" \
+   --arg controller "$controller_key" --arg tool "$tool_key" \
+   --arg state "$state_dir" --arg control "$state_dir/control.sock" \
+   --arg cwd "$cwd" --arg launcher "$launcher" --arg work "$workspace" \
+   --arg agent "$runtime_root" --arg reserve "$(v .reserve)" \
+   --arg charge "$(v .charge)" --argjson wall "$(v .wallTimeSeconds)" '
+  .hostConfig=$config | .hostSocket=$socket | .custodyKey=$controller |
+  .toolTask.custodyKey=$tool | .stateDir=$state | .controlSocket=$control |
+  .cwd=$cwd | .commands=[{name:"hermes-acp",program:$launcher,
+    args:["--workspace",$work,"--runtime-root",$agent,"--network","host","--","/agent/hermes-acp"],
+    systemdScope:true,wallTimeSeconds:$wall,reserve:$reserve,charge:$charge}]
+' "$base" >"$output_dir/runtime-config.json"
+chmod 600 "$output_dir/runtime-config.json"
+sha256sum "$runtime" "$mini" "$host" "$launcher" "$gate" |
+  jq -Rn '[inputs | capture("^(?<sha256>[0-9a-f]{64})  (?<path>.*)$")] |
+    {artifacts:.}' >"$output_dir/pins.json"
+chmod 600 "$output_dir/pins.json"
+"$here/install-controller" --config "$output_dir/runtime-config.json" \
+  --runtime "$runtime" --pins "$output_dir/pins.json" --unit-dir "$unit_dir" \
+  --render-only >"$output_dir/rendered.service"
+chmod 600 "$output_dir/rendered.service"
+jq -n --arg task "$task" --arg manifestSha "$(sha "$manifest")" \
+  --arg configSha "$(sha "$output_dir/runtime-config.json")" \
+  --arg pinsSha "$(sha "$output_dir/pins.json")" \
+  --arg unitSha "$(sha "$output_dir/rendered.service")" '
+  {stage:"rendered-not-installed",task:$task,manifestSha256:$manifestSha,
+   configSha256:$configSha,pinsSha256:$pinsSha,unitSha256:$unitSha,
+   currentAuthorityVerified:false,friendReady:false}' >"$stage"
+chmod 600 "$stage"
+printf 'rendered task=%s stage=%s\n' "$task" "$stage"

@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Read-only, fixed-profile handoff check for scripts/workroom/hosted-provision.sh.
+# A retained signed snapshot is evidence of provision, not current authority.
+set -euo pipefail
+umask 077
+
+if (($# != 1)); then
+  echo 'usage: offer-check-provision ABS_OFFER_MANIFEST_JSON' >&2
+  exit 64
+fi
+for tool in jq realpath stat sha256sum cmp sed; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "offer-check-provision: $*" >&2; exit 65; }
+manifest=$1
+safe_path() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsafe path: $1"
+}
+existing() {
+  safe_path "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail "missing, linked, or noncanonical path: $1"
+}
+sha() { sha256sum -- "$1" | cut -d' ' -f1; }
+pin() {
+  local path=$1 expected=$2
+  existing "$path"
+  [[ -f $path && $expected =~ ^[0-9a-f]{64}$ && $(sha "$path") == "$expected" ]] ||
+    fail "SHA-256 pin mismatch: $path"
+}
+private_file() {
+  existing "$1"
+  [[ -f $1 && $(stat -c %u -- "$1") == "$(id -u)" &&
+     $(stat -c %a -- "$1") == 600 ]] || fail "not an owned 0600 file: $1"
+}
+
+private_file "$manifest"
+jq -e '
+  .profile == "mini-hosted-workroom-780x-v1" and
+  .fn.mode == "deferred" and
+  (.provision | type == "string" and startswith("/")) and
+  (.sourceRoot | type == "string" and startswith("/")) and
+  (.hostBuildManifest | type == "string" and startswith("/")) and
+  ([.hostBuildManifestSha256,.hostSha256,.miniSha256,.storeSha256,.signatureSha256,
+    .pinnedConfigSha256,.baseASha256,.baseBSha256,
+    .hostedProvisionSourceSha256,.baseProvisionSourceSha256] |
+    all(type == "string" and test("^[0-9a-f]{64}$")))
+' "$manifest" >/dev/null || fail 'manifest lacks fixed profile, deferred fn mode, or exact SHA pins'
+value() { jq -er "$1" "$manifest"; }
+provision=$(value .provision)
+existing "$provision"
+[[ -d $provision && $(stat -c %u -- "$provision") == "$(id -u)" &&
+   $(stat -c %a -- "$provision") == 700 ]] || fail 'provision must be an owned 0700 directory'
+host_build_manifest=$(value .hostBuildManifest)
+pin "$host_build_manifest" "$(value .hostBuildManifestSha256)"
+
+repo=$(value .sourceRoot)
+existing "$repo"
+[[ -d $repo ]] || fail 'source root is not a directory'
+pin "$repo/scripts/workroom/hosted-provision.sh" "$(value .hostedProvisionSourceSha256)"
+pin "$repo/scripts/workroom/provision.sh" "$(value .baseProvisionSourceSha256)"
+[[ $(value .baseProvisionSourceSha256) == \
+   4648f7222897de69e3454c8b7abad7022719697594c0b987fe24a0bb000ba9c8 ]] ||
+  fail 'hosted overlay was not reviewed against this base provisioner'
+
+private_file "$provision/operator.json"
+private_file "$provision/deployment/pinned-config.json"
+private_file "$provision/runtime-config-a.base.json"
+private_file "$provision/runtime-config-b.base.json"
+private_file "$provision/genesis.json"
+private_file "$provision/birth-intent.json"
+pin "$provision/deployment/pinned-config.json" "$(value .pinnedConfigSha256)"
+pin "$provision/runtime-config-a.base.json" "$(value .baseASha256)"
+pin "$provision/runtime-config-b.base.json" "$(value .baseBSha256)"
+host=$(jq -er .host "$provision/runtime-config-a.base.json")
+mini=$(jq -er .mini "$provision/runtime-config-a.base.json")
+store=$(jq -er .storageBinary "$provision/operator.json")
+signature=$(jq -er .signatureBinary "$provision/operator.json")
+pin "$host" "$(value .hostSha256)"
+pin "$mini" "$(value .miniSha256)"
+pin "$store" "$(value .storeSha256)"
+pin "$signature" "$(value .signatureSha256)"
+[[ -x $host && -x $mini && -x $store && -x $signature ]] ||
+  fail 'one pinned native executable is not executable'
+grep -Eq '^binary=/[A-Za-z0-9_./@-]+$' "$host_build_manifest" ||
+  fail 'host build manifest has no absolute linked artifact path'
+grep -Fxq "binary_sha256=$(value .hostSha256)" "$host_build_manifest" ||
+  fail 'host build manifest does not qualify these Host bytes'
+mapfile -t built_hosts < <(sed -n 's/^binary=//p' "$host_build_manifest")
+[[ ${#built_hosts[@]} == 1 ]] || fail 'host build manifest has no unique artifact path'
+pin "${built_hosts[0]}" "$(value .hostSha256)"
+grep -Fxq 'native_target=Linux:x86_64' "$host_build_manifest" ||
+  fail 'host build manifest does not record the Linux target'
+scratch=$(mktemp -d)
+trap 'rm -rf -- "$scratch"' EXIT
+inspect_same() {
+  local kind=$1 binary=$2 presentation=$3 rendered
+  rendered=$scratch/decoded.json
+  "$host" "$provision/deployment/pinned-config.json" inspect \
+    "$kind" "$binary" "$rendered" >/dev/null ||
+    fail "Host rejected noncanonical $kind bytes: $binary"
+  [[ $(jq -Sc . "$rendered") == "$(jq -Sc . "$presentation")" ]] ||
+    fail "retained JSON differs from canonical $kind bytes: $presentation"
+  rm -f -- "$rendered"
+}
+jq -e '
+  [.enrollments[] | [.key.subject,.accountId]] | sort ==
+  [["10","13"],["7","7"],["8","8"],["9","9"]]
+' "$provision/genesis.json" >/dev/null || fail 'four-principal genesis enrollment differs'
+jq -e '
+  [.birth.resources[] | [.target,.storage,.owner]] | sort ==
+  [["7003","declared","7"],["7801","grain","7"],
+   ["7802","grain","8"],["7803","grain","9"],
+   ["7804","grain","10"],["8001","content","7"]]
+' "$provision/birth-intent.json" >/dev/null || fail 'birth resource map differs'
+
+base_a=$provision/runtime-config-a.base.json
+base_b=$provision/runtime-config-b.base.json
+jq -e --arg host "$host" --arg mini "$mini" \
+  --arg cfg "$provision/deployment/pinned-config.json" \
+  --arg socket "$provision/runtime-host/host.sock" '
+  .host == $host and .mini == $mini and .hostConfig == $cfg and
+  .hostSocket == $socket and .commands == [] and
+  .task == "7801" and .subject == "7" and .capability == "71" and
+  .toolTask.task == "7802" and .toolTask.subject == "8" and
+  .toolTask.parentCapability == "73" and
+  .toolTask.allowedReads == [{name:"workroom",kind:"object",target:"8001",
+    observeCapability:"96",maxResultBytes:262144}] and
+  .toolTask.allowedPublications == [{kind:"object",target:"8001",
+    capability:"95",observeCapability:"95"}]
+' "$base_a" >/dev/null || fail 'A base config differs from reviewed native provision profile'
+jq -e --arg host "$host" --arg mini "$mini" \
+  --arg cfg "$provision/deployment/pinned-config.json" \
+  --arg socket "$provision/runtime-host/host.sock" '
+  .host == $host and .mini == $mini and .hostConfig == $cfg and
+  .hostSocket == $socket and .commands == [] and
+  .task == "7803" and .subject == "9" and .capability == "111" and
+  .toolTask.task == "7804" and .toolTask.subject == "10" and
+  .toolTask.parentCapability == "113" and
+  .toolTask.allowedReads == [{name:"workroom",kind:"object",target:"8001",
+    observeCapability:"98",maxResultBytes:262144}] and
+  .toolTask.allowedPublications == [{kind:"object",target:"8001",
+    capability:"97",observeCapability:"97"}]
+' "$base_b" >/dev/null || fail 'B base config differs from reviewed native provision profile'
+
+for file in controller.key tool.key controller-b.key tool-b.key; do
+  private_file "$provision/$file"
+done
+mapfile -t public_hashes < <(for file in controller.pub tool.pub controller-b.pub tool-b.pub; do
+  existing "$provision/$file"; sha "$provision/$file"; done)
+[[ ${#public_hashes[@]} == 4 &&
+   $(printf '%s\n' "${public_hashes[@]}" | sort -u | wc -l) == 4 ]] ||
+  fail 'hosted signers do not have four distinct public keys'
+
+# These are retained native receipts and signed-observation artifacts. Their
+# existence never proves that a capability is still current after provision.
+names=(birth delegation publication-delegation publication-read-delegation
+       workroom-delegation workroom-read-delegation b-parent-witness
+       b-content-write b-content-read)
+for i in "${!names[@]}"; do
+  name=${names[i]}
+  dir=$provision/$name-attempt
+  expected=$((i + 1))
+  for artifact in call.bin outcome.bin outcome.json; do existing "$dir/$artifact"; done
+  jq -e --arg count "$expected" \
+    '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == $count and
+     (.transactionId | type == "string") and (.eventId | type == "string") and
+     (.imageBoundary | type == "string")' "$dir/outcome.json" >/dev/null ||
+    fail "retained native $name receipt is not the expected confirmation"
+  inspect_same outcome "$dir/outcome.bin" "$dir/outcome.json"
+done
+for item in 'controller-born:7801' 'tool-born:7802' \
+            'b-parent-born:7803' 'b-tool-born:7804'; do
+  name=${item%%:*} task=${item#*:}
+  dir=$provision/$name
+  for artifact in signed-observation.bin observation-signatures.bin challenge.json view.bin view.json; do
+    existing "$dir/$artifact"
+  done
+  jq -e --arg task "$task" \
+    '.type == "resource" and .page.grain.task == $task and
+     .page.grain.generation == "0" and .page.grain.status == "0"' \
+    "$dir/view.json" >/dev/null || fail "retained born grain $task differs"
+  inspect_same view-resource "$dir/view.bin" "$dir/view.json"
+done
+for item in 'delegated-workroom:8' 'workroom-read:8' 'b-content-read:10'; do
+  name=${item%%:*} subject=${item#*:}
+  dir=$provision/$name
+  for artifact in signed-observation.bin observation-signatures.bin challenge.json view.bin view.json; do
+    existing "$dir/$artifact"
+  done
+  jq -e '.type == "resource" and .page.document == "8001"' \
+    "$dir/view.json" >/dev/null || fail "retained content $name view differs"
+  jq -e --arg subject "$subject" '.subject == $subject' \
+    "$dir/intent.json" >/dev/null || fail "retained content $name signer differs"
+  inspect_same view-resource "$dir/view.bin" "$dir/view.json"
+done
+for item in 'controller:7801' 'tool:7802' 'b-parent:7803' 'b-tool:7804'; do
+  name=${item%%:*} task=${item#*:}
+  dir=$provision/$name-policy
+  for artifact in signed-observation.bin observation-signatures.bin challenge.json view.bin view.json; do
+    existing "$dir/$artifact"
+  done
+  jq -e --arg task "$task" '.version == "0" and .predicate != null' \
+    "$dir/view.json" >/dev/null || fail "retained $task policy view differs"
+  inspect_same view-policy "$dir/view.bin" "$dir/view.json"
+done
+
+jq -n --arg profile mini-hosted-workroom-780x-v1 \
+  --arg provision "$provision" --arg hostSha "$(value .hostSha256)" \
+  --arg pinnedConfigSha "$(value .pinnedConfigSha256)" \
+  --arg birthTx "$(jq -er .transactionId "$provision/birth-attempt/outcome.json")" \
+  '{stage:"provision-snapshot-checked",profile:$profile,provision:$provision,
+    hostSha256:$hostSha,pinnedConfigSha256:$pinnedConfigSha,birthTransactionId:$birthTx,
+    canonicalRetainedProductsChecked:true,currentAuthorityVerified:false,friendReady:false}'

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Fresh signed Mini readback through one task's per-UID frontend. Read-only;
+# publication authority and actual Hermes behavior still need the MCP smoke.
+set -euo pipefail
+umask 077
+if (($# != 2)); then
+  echo 'usage: offer-check-authority ABS_TASK_MANIFEST_JSON NEW_ABS_EVIDENCE_DIR' >&2
+  exit 64
+fi
+for tool in jq realpath stat sha256sum cmp od; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "offer-check-authority: $*" >&2; exit 65; }
+manifest=$1 evidence=$2
+safe() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsafe absolute path: $1"
+}
+safe "$manifest"
+safe "$evidence"
+[[ -f $manifest && ! -L $manifest && $(realpath -e -- "$manifest") == "$manifest" &&
+   $(stat -c %u -- "$manifest") == "$(id -u)" &&
+   $(stat -c %a -- "$manifest") == 600 ]] || fail 'task manifest must be an owned 0600 file'
+[[ ! -e $evidence && ! -L $evidence ]] || fail 'evidence output already exists'
+v() { jq -er "$1" "$manifest"; }
+[[ $(v .profile) == mini-offer-task-v1 ]] || fail 'not an offering task manifest'
+peer=$(v .peer)
+case $peer in
+  a) parent=7801 owner=7 parent_cap=71 tool=7802 worker=8 tool_cap=81 witness=73 read_cap=96 ;;
+  b) parent=7803 owner=9 parent_cap=111 tool=7804 worker=10 tool_cap=121 witness=113 read_cap=98 ;;
+  *) fail 'unknown hosted peer' ;;
+esac
+mini=$(v .mini)
+host=$(v .host)
+config=$(v .frontConfig)
+socket=$(v .frontSocket)
+controller_key=$(v .controllerKey)
+tool_key=$(v .toolKey)
+for item in "$mini" "$host" "$config" "$socket" "$controller_key" "$tool_key"; do
+  safe "$item"
+  [[ -e $item && ! -L $item ]] || fail "missing or linked live entrance: $item"
+done
+[[ -S $socket ]] || fail 'per-UID frontend socket is not live'
+[[ $(sha256sum "$host" | cut -d' ' -f1) == "$(v .hostSha256)" &&
+   $(sha256sum "$mini" | cut -d' ' -f1) == "$(v .miniSha256)" &&
+   $(sha256sum "$config" | cut -d' ' -f1) == "$(v .frontConfigSha256)" &&
+   $(sha256sum "$controller_key" | cut -d' ' -f1) == "$(v .controllerKeySha256)" &&
+   $(sha256sum "$tool_key" | cut -d' ' -f1) == "$(v .toolKeySha256)" ]] ||
+  fail 'selected Host, Mini, frontend config, or custody bytes changed'
+mkdir -m 700 "$evidence"
+nonce() { od -An -tu8 -N8 /dev/urandom | tr -d ' \n'; }
+query() {
+  local name=$1 subject=$2 target=$3 capability=$4 key=$5 view=$6
+  jq -n --arg subject "$subject" --arg target "$target" \
+    --arg capability "$capability" --arg nonce "$(nonce)" --arg view "$view" \
+    '{subject:$subject,nonce:$nonce,purpose:{type:"query",kind:"object",
+      target:$target,view:$view},grants:[{kind:"object",target:$target,
+      capability:$capability}]}' >"$evidence/$name-intent.json"
+  "$mini" query --host "$host" --config "$config" --socket "$socket" \
+    --intent "$evidence/$name-intent.json" --key "$key" --view "$view" \
+    --dir "$evidence/$name" >"$evidence/$name.stdout"
+  [[ -s $evidence/$name/signed-observation.bin &&
+     -s $evidence/$name/view.bin && -s $evidence/$name/view.json ]] ||
+    fail "signed $name query did not retain its exact products"
+}
+query parent "$owner" "$parent" "$parent_cap" "$controller_key" resource
+query tool "$worker" "$tool" "$tool_cap" "$tool_key" resource
+query witness "$worker" "$parent" "$witness" "$tool_key" resource
+query content "$worker" 8001 "$read_cap" "$tool_key" resource
+query parent-policy "$owner" "$parent" "$parent_cap" "$controller_key" policy
+jq -e --arg task "$parent" \
+  '.page.grain == {task:$task,generation:"0",status:"0",
+    remaining:"100",reserved:"0"}' "$evidence/parent/view.json" >/dev/null ||
+  fail 'parent is not the fresh unheld grain'
+jq -e --arg task "$tool" \
+  '.page.grain == {task:$task,generation:"0",status:"0",
+    remaining:"50",reserved:"0"}' "$evidence/tool/view.json" >/dev/null ||
+  fail 'tool is not the fresh unheld grain'
+[[ $(jq -er .page.root "$evidence/witness/view.json") == "$(jq -er .page.root "$evidence/parent/view.json")" ]] ||
+  fail 'worker parent witness sees a different target root'
+jq -e '.page.document == "8001" and .page.entries == []' \
+  "$evidence/content/view.json" >/dev/null ||
+  fail 'shared content is not the fresh empty workroom'
+jq -n --arg owner "$owner" --arg worker "$worker" \
+  '{owner:$owner,workerSubject:$worker,workerGeneration:"1"}' \
+  >"$evidence/expected-policy.json"
+"$mini" author --host "$host" --config "$config" --socket "$socket" \
+  --kind grain-policy --input "$evidence/expected-policy.json" \
+  --output "$evidence/expected-policy.bin"
+jq '.predicate' "$evidence/parent-policy/view.json" >"$evidence/view-predicate.json"
+"$mini" author --host "$host" --config "$config" --socket "$socket" \
+  --kind predicate --input "$evidence/view-predicate.json" \
+  --output "$evidence/view-predicate.bin"
+cmp "$evidence/expected-policy.bin" "$evidence/view-predicate.bin" ||
+  fail 'signed current parent policy is not the source-authored generation-1 law'
+jq -e '.version == "0"' "$evidence/parent-policy/view.json" >/dev/null ||
+  fail 'parent policy is not the fresh birth version'
+jq -n --arg peer "$peer" --arg parent "$parent" --arg tool "$tool" \
+  --arg parentRoot "$(jq -er .page.root "$evidence/parent/view.json")" \
+  --arg contentRoot "$(jq -er .page.root "$evidence/content/view.json")" \
+  '{stage:"fresh-signed-readback",peer:$peer,parent:$parent,tool:$tool,
+    parentRoot:$parentRoot,contentRoot:$contentRoot,
+    publicationAdmissionVerified:false,friendReady:false}' >"$evidence/verdict.json"
+printf 'fresh signed readback task=%s evidence=%s\n' "$parent" "$evidence"

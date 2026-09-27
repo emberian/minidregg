@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Operator read-only cross-account handoff check before controller installation.
+set -euo pipefail
+if (($# != 5)); then
+  echo 'usage: offer-check-pair ABS_OPERATOR_OFFER_JSON ABS_TASK_A_JSON ABS_TASK_B_JSON ABS_SIGNED_A_DIR ABS_SIGNED_B_DIR' >&2
+  exit 64
+fi
+for tool in jq stat sha256sum realpath sort wc; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "offer-check-pair: $*" >&2; exit 65; }
+safe() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsafe path: $1"
+}
+existing() {
+  safe "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail "missing, linked, or noncanonical path: $1"
+}
+sha() { sha256sum -- "$1" | cut -d' ' -f1; }
+overlap() { [[ $1 == "$2" || $1 == "$2"/* || $2 == "$1"/* ]]; }
+offer=$1 a=$2 b=$3 ea=$4 eb=$5
+for path in "$offer" "$a" "$b" "$ea" "$eb"; do existing "$path"; done
+[[ -f $offer && $(stat -c %a -- "$offer") == 600 ]] ||
+  fail 'operator offer manifest must be mode 0600'
+[[ $a != "$b" && $ea != "$eb" ]] || fail 'pair paths overlap'
+for manifest in "$a" "$b"; do
+  [[ -f $manifest && $(stat -c %a -- "$manifest") == 600 ]] ||
+    fail 'task manifest must be mode 0600'
+done
+uid_a=$(stat -c %u -- "$a")
+uid_b=$(stat -c %u -- "$b")
+[[ $uid_a != 0 && $uid_b != 0 && $uid_a != "$uid_b" ]] ||
+  fail 'task manifests must belong to distinct non-root Unix users'
+offer_uid=$(stat -c %u -- "$offer")
+[[ $offer_uid != "$uid_a" && $offer_uid != "$uid_b" ]] ||
+  fail 'operator offer manifest belongs to a task account'
+jq -e '.profile == "mini-offer-task-v1" and .peer == "a"' "$a" >/dev/null ||
+  fail 'first manifest is not peer A'
+jq -e '.profile == "mini-offer-task-v1" and .peer == "b"' "$b" >/dev/null ||
+  fail 'second manifest is not peer B'
+for field in hostSha256 miniSha256 runtimeSha256 launcherSha256 gateSha256 frontConfigSha256; do
+  [[ $(jq -er ".$field" "$a") == "$(jq -er ".$field" "$b")" ]] ||
+    fail "A and B select different $field"
+done
+for pair in \
+  "hostSha256:hostSha256" \
+  "miniSha256:miniSha256" \
+  "frontConfigSha256:pinnedConfigSha256" \
+  "provisionConfigSha256:pinnedConfigSha256"; do
+  task_field=${pair%%:*} offer_field=${pair#*:}
+  selected=$(jq -er ".$offer_field" "$offer")
+  [[ $(jq -er ".$task_field" "$a") == "$selected" &&
+     $(jq -er ".$task_field" "$b") == "$selected" ]] ||
+    fail "task manifests differ from operator offer pin $offer_field"
+done
+[[ $(jq -er .baseConfigSha256 "$a") == "$(jq -er .baseASha256 "$offer")" &&
+   $(jq -er .baseConfigSha256 "$b") == "$(jq -er .baseBSha256 "$offer")" ]] ||
+  fail 'task bases differ from the operator provision pins'
+for field in frontSocket frontConfig controllerKey toolKey stateDir outputDir cwd workspace runtimeRoot; do
+  left=$(jq -er ".$field" "$a")
+  right=$(jq -er ".$field" "$b")
+  safe "$left"; safe "$right"
+  overlap "$left" "$right" && fail "A and B overlap $field"
+done
+mapfile -t key_hashes < <(jq -r '.controllerKeySha256,.toolKeySha256' "$a" "$b")
+[[ ${#key_hashes[@]} == 4 &&
+   $(printf '%s\n' "${key_hashes[@]}" | sort -u | wc -l) == 4 ]] ||
+  fail 'one custody key is reused across parent/tool roles or accounts'
+for mount_field in workspace runtimeRoot; do
+  for manifest in "$a" "$b"; do
+    mount=$(jq -er ".$mount_field" "$manifest")
+    other=$b
+    [[ $manifest == "$a" ]] || other=$a
+    for field in controllerKey toolKey stateDir outputDir unitDir frontConfig frontSocket; do
+      secret=$(jq -er ".$field" "$other")
+      overlap "$mount" "$secret" && fail 'one worker mount overlaps the other account boundary'
+    done
+  done
+done
+for item in "$a:$ea:7801" "$b:$eb:7803"; do
+  manifest=${item%%:*}
+  remainder=${item#*:}
+  evidence=${remainder%%:*}
+  task=${remainder#*:}
+  output=$(jq -er .outputDir "$manifest")
+  stage=$output/stage.json
+  existing "$stage"
+  expected_uid=$(stat -c %u -- "$manifest")
+  [[ $(stat -c %u -- "$output") == "$expected_uid" &&
+     $(stat -c %u -- "$stage") == "$expected_uid" &&
+     $(stat -c %u -- "$evidence") == "$expected_uid" ]] ||
+    fail "rendered/readback artifacts for $task are not task-account owned"
+  jq -e --arg task "$task" --arg manifestSha "$(sha "$manifest")" \
+    --arg configSha "$(sha "$output/runtime-config.json")" \
+    --arg pinsSha "$(sha "$output/pins.json")" \
+    --arg unitSha "$(sha "$output/rendered.service")" '
+    .stage == "rendered-not-installed" and .task == $task and
+    .manifestSha256 == $manifestSha and .configSha256 == $configSha and
+    .pinsSha256 == $pinsSha and .unitSha256 == $unitSha
+  ' "$stage" >/dev/null || fail "rendered stage for $task differs from its manifest"
+  existing "$evidence/verdict.json"
+  jq -e --arg task "$task" \
+    '.stage == "fresh-signed-readback" and .parent == $task and
+     .publicationAdmissionVerified == false and .friendReady == false' \
+    "$evidence/verdict.json" >/dev/null || fail "signed readback for $task is absent or wrong"
+  for name in parent tool witness content parent-policy; do
+    existing "$evidence/$name/signed-observation.bin"
+    existing "$evidence/$name/view.bin"
+  done
+done
+root_a=$(jq -er .contentRoot "$ea/verdict.json")
+root_b=$(jq -er .contentRoot "$eb/verdict.json")
+[[ $root_a == "$root_b" ]] || fail 'the peers observed different shared content roots'
+jq -n --arg a 7801 --arg b 7803 --arg root "$root_a" \
+  '{stage:"two-account-handoff-checked",parentA:$a,parentB:$b,
+    sharedContentRoot:$root,readbackIsSnapshot:true,
+    publicationAdmissionVerified:false,friendReady:false}'
