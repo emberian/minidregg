@@ -1,11 +1,11 @@
    Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-runtime-review-v3/native/spk-host)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.83s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.29s
 ────────────
- Nextest run ID c5c6336a-7443-4c69-8481-bdba4f190c43 with nextest profile: default
+ Nextest run ID 91e680a3-5bf7-4de7-94cb-28988951f75c with nextest profile: default
     Starting 4 tests across 1 binary (137 tests skipped)
-        PASS [   0.009s] (1/4) minidregg-spk-host agent_api_lifetime_v3::tests::committed_comparison_checks_exact_frame_receipt_and_original_descriptor
-        PASS [   0.009s] (2/4) minidregg-spk-host agent_api_lifetime_v3::tests::reserve_comparison_rejects_changed_http_and_physical_root
-        PASS [   0.010s] (3/4) minidregg-spk-host agent_api_lifetime_v3::tests::lineage_fingerprint_keeps_origin_and_current_generation_separate
-        PASS [   0.010s] (4/4) minidregg-spk-host agent_api_lifetime_v3::tests::paid_comparison_keeps_history_and_checks_new_purse_root
+        PASS [   0.007s] (1/4) minidregg-spk-host agent_api_lifetime_v3::tests::paid_comparison_keeps_history_and_checks_new_purse_root
+        PASS [   0.007s] (2/4) minidregg-spk-host agent_api_lifetime_v3::tests::committed_comparison_checks_exact_frame_receipt_and_original_descriptor
+        PASS [   0.007s] (3/4) minidregg-spk-host agent_api_lifetime_v3::tests::lineage_fingerprint_keeps_origin_and_current_generation_separate
+        PASS [   0.007s] (4/4) minidregg-spk-host agent_api_lifetime_v3::tests::reserve_comparison_rejects_changed_http_and_physical_root
 ────────────
-     Summary [   0.011s] 4 tests run: 4 passed, 137 skipped
+     Summary [   0.008s] 4 tests run: 4 passed, 137 skipped

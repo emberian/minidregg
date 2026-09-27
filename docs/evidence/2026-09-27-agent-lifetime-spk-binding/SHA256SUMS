@@ -1,5 +1,5 @@
-df0961b6cddd009d845c99f7d72a41cd7e78de997d28a5d4f1bf533ef67d374a  native/spk-host/src/agent_api_lifetime_v3.rs
-e419d2a7644d9e183d23448cd407026e5063c9aecc8a1e17d3daeb68be357cdd  native/spk-host/src/lib.rs
-8ae8c33ba7f5d8a48b1e14e2e7199dd5add1b573fdaddaac711bbf6472d5c55f  docs/evidence/2026-09-27-agent-lifetime-spk-binding/README.md
-c635d1f3094108b668fa904791972ae6633105ae48ba8ec477d9ad1f286ef960  docs/evidence/2026-09-27-agent-lifetime-spk-binding/nextest.log
-84b2eef9a70f0cd5ba32b515deb25dcbbfb8a6e64c5ce5cbebb7729bafc032b3  docs/evidence/2026-09-27-agent-lifetime-spk-binding/clippy.log
+74ad71b449a544340390f11deaa3c48a7df708a8c2d67869c294c2b869ddac7c  native/spk-host/src/agent_api_lifetime_v3.rs
+e7de2a45aa2092faa8609ad66659f99df31d87a644b84b4bd257a978a0b999ac  native/spk-host/src/lib.rs
+02fabc1fd131963ba0abf32a391dd9dd935579e7d3b11d4ec5224d59cf03cf76  docs/evidence/2026-09-27-agent-lifetime-spk-binding/README.md
+c220da18b4f2e410c789022cee72d14accc85659a5859d10ee8172a7f0715af2  docs/evidence/2026-09-27-agent-lifetime-spk-binding/nextest.log
+5385497b2f1475710e9b30db894823b067fdf4f92633f73fc3bb176e084d7540  docs/evidence/2026-09-27-agent-lifetime-spk-binding/clippy.log

@@ -152,7 +152,7 @@ impl LifetimeLineage {
     }
 }
 
-/// Claims from the current transport and signed current observations. They
+/// Claims from this *operation's* transport and signed current observations. They
 /// are never promoted to authority without a matching native source plan and
 /// a fresh installed committed permit. The purse physical root here is the
 /// pre-reserve root; a later committed comparison requires a separately signed
@@ -173,7 +173,7 @@ pub(crate) struct CurrentClaims {
 }
 
 impl CurrentClaims {
-    fn validate(&self) -> io::Result<()> {
+    pub(crate) fn validate(&self) -> io::Result<()> {
         if [
             &self.app_generation,
             &self.session_generation,
@@ -198,10 +198,12 @@ impl CurrentClaims {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// Stable Hello identity for one resident app incarnation. A hard reconnect
+/// does not rewrite event22's original origin or turn a prior task generation
+/// into a fresh one; the per-dispatch `CurrentClaims` supply that witness.
 pub(crate) struct LifetimeBinding {
     pub protocol: String,
     pub lineage: LifetimeLineage,
-    pub current: CurrentClaims,
     pub signed_api_path: String,
     pub host_unit: String,
     pub host_invocation: String,
@@ -210,7 +212,6 @@ pub(crate) struct LifetimeBinding {
 impl LifetimeBinding {
     pub(crate) fn validate(&self) -> io::Result<()> {
         self.lineage.validate()?;
-        self.current.validate()?;
         if self.protocol != "mini-spk-agent-lifetime-binding-v3"
             || !self.signed_api_path.starts_with('/')
             || !self.signed_api_path.ends_with('/')
@@ -245,17 +246,41 @@ impl LifetimeBinding {
     }
 }
 
+/// A journal coordinate for one exact request under one stable Hello. Fresh
+/// task generations/roots cannot be substituted into a retained attempt even
+/// if the caller reconnects through the same lifetime route.
+pub(crate) fn operation_fingerprint(
+    binding: &LifetimeBinding,
+    current: &CurrentClaims,
+    operation_id: &str,
+    request_sha256: &str,
+) -> io::Result<String> {
+    current.validate()?;
+    if !decimal(operation_id) || !hex64(request_sha256) {
+        return Err(refused("lifetime operation coordinate refused"));
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"DREGG/SPK-AGENT-LIFETIME-OPERATION/v3\0");
+    digest.update(binding.fingerprint()?.as_bytes());
+    digest.update(serde_json::to_vec(current)?);
+    digest.update(operation_id.as_bytes());
+    digest.update(request_sha256.as_bytes());
+    Ok(encode_hex(&digest.finalize()))
+}
+
 /// Compare source-owned op80 inspection with the exact received HTTP and
 /// current transport. Op80 projects the full app/session physical roots from
 /// its verified image; the ordinary purse reserve signature itself does not
 /// commit those roots and cannot authorize delivery without event26.
 pub(crate) fn match_reserve_plan(
     binding: &LifetimeBinding,
+    current: &CurrentClaims,
     inspected_request: &Value,
     inspected_plan: &Value,
     decoded_http: &Value,
 ) -> io::Result<()> {
     binding.validate()?;
+    current.validate()?;
     if field(inspected_request, "type")? != "application-agent-lifetime-author-request-v3"
         || field(inspected_plan, "type")? != "application-agent-lifetime-reserve-plan-v3"
         || inspected_request.get("http") != Some(decoded_http)
@@ -270,7 +295,6 @@ pub(crate) fn match_reserve_plan(
         .get("context")
         .ok_or_else(|| refused("lifetime context absent"))?;
     let lineage = &binding.lineage;
-    let current = &binding.current;
     let fixed = inspected_plan
         .get("fixedSelectors")
         .ok_or_else(|| refused("lifetime fixed selectors absent"))?;
@@ -335,6 +359,7 @@ pub(crate) fn match_reserve_plan(
 /// only a signing candidate, never the native committed dispatch permit.
 pub(crate) fn match_paid_plan(
     binding: &LifetimeBinding,
+    current: &CurrentClaims,
     reserve_plan: &Value,
     paid_plan: &Value,
     reserve_index: &str,
@@ -342,6 +367,7 @@ pub(crate) fn match_paid_plan(
     signed_post_reserve_purse_physical_root: &str,
 ) -> io::Result<()> {
     binding.validate()?;
+    current.validate()?;
     reserve_receipt.validate()?;
     if !decimal(reserve_index) || !decimal(signed_post_reserve_purse_physical_root) {
         return Err(refused("lifetime paid reserve coordinate noncanonical"));
@@ -360,6 +386,14 @@ pub(crate) fn match_paid_plan(
     let before = reserve_plan
         .get("bindings")
         .ok_or_else(|| refused("lifetime reserve bindings absent"))?;
+    for (name, expected) in [
+        ("appPhysicalRoot", &current.app_physical_root),
+        ("sessionPhysicalRoot", &current.session_physical_root),
+        ("parentPhysicalRoot", &current.parent_physical_root),
+        ("pursePhysicalRoot", &current.purse_physical_root),
+    ] {
+        same(before, name, expected)?;
+    }
     let after = paid_plan
         .get("bindings")
         .ok_or_else(|| refused("lifetime paid bindings absent"))?;
@@ -390,16 +424,30 @@ pub(crate) fn match_paid_plan(
 /// CAS, and verify current process/lease and signed task state before fd3.
 /// The post-reserve purse physical root is intentionally distinct from the
 /// binding's pre-reserve root.
-pub(crate) fn match_committed_inspection(
-    binding: &LifetimeBinding,
-    inspected: &Value,
-    decoded_http: &Value,
-    canonical_http_hex: &str,
-    expected_receipt: &ReceiptPin,
-    exact_frame: &[u8],
-    signed_post_reserve_purse_physical_root: &str,
-) -> io::Result<()> {
+pub(crate) struct CommittedMatch<'a> {
+    pub binding: &'a LifetimeBinding,
+    pub current: &'a CurrentClaims,
+    pub inspected: &'a Value,
+    pub decoded_http: &'a Value,
+    pub canonical_http_hex: &'a str,
+    pub expected_receipt: &'a ReceiptPin,
+    pub exact_frame: &'a [u8],
+    pub signed_post_reserve_purse_physical_root: &'a str,
+}
+
+pub(crate) fn match_committed_inspection(input: CommittedMatch<'_>) -> io::Result<()> {
+    let CommittedMatch {
+        binding,
+        current,
+        inspected,
+        decoded_http,
+        canonical_http_hex,
+        expected_receipt,
+        exact_frame,
+        signed_post_reserve_purse_physical_root,
+    } = input;
     binding.validate()?;
+    current.validate()?;
     expected_receipt.validate()?;
     if !decimal(signed_post_reserve_purse_physical_root) {
         return Err(refused("lifetime post-reserve purse root noncanonical"));
@@ -408,7 +456,6 @@ pub(crate) fn match_committed_inspection(
         return Err(refused("lifetime committed frame type refused"));
     }
     let lineage = &binding.lineage;
-    let current = &binding.current;
     let issue = inspected
         .get("originalIssue")
         .ok_or_else(|| refused("original issue absent"))?;
@@ -534,21 +581,24 @@ mod tests {
                 parent_task: "700".into(),
                 purse_task: "701".into(),
             },
-            current: CurrentClaims {
-                app_generation: "4".into(),
-                session_generation: "5".into(),
-                parent_generation: "6".into(),
-                purse_generation: "7".into(),
-                app_root: "100".into(),
-                session_root: "101".into(),
-                app_physical_root: "200".into(),
-                session_physical_root: "201".into(),
-                parent_physical_root: "202".into(),
-                purse_physical_root: "203".into(),
-            },
             signed_api_path: "/api/".into(),
             host_unit: "mini-app.service".into(),
             host_invocation: "ab".repeat(16),
+        }
+    }
+
+    fn current() -> CurrentClaims {
+        CurrentClaims {
+            app_generation: "4".into(),
+            session_generation: "5".into(),
+            parent_generation: "6".into(),
+            purse_generation: "7".into(),
+            app_root: "100".into(),
+            session_root: "101".into(),
+            app_physical_root: "200".into(),
+            session_physical_root: "201".into(),
+            parent_physical_root: "202".into(),
+            purse_physical_root: "203".into(),
         }
     }
 
@@ -557,9 +607,8 @@ mod tests {
             "queryHex":"","headers":[],"bodyHex":""})
     }
 
-    fn reserve_plan(binding: &LifetimeBinding) -> (Value, Value) {
+    fn reserve_plan(binding: &LifetimeBinding, current: &CurrentClaims) -> (Value, Value) {
         let lineage = &binding.lineage;
-        let current = &binding.current;
         let source_http = http();
         let fixed = json!({"issueIndex":lineage.original_issue_index,
             "ticketResource":lineage.ticket_resource,
@@ -604,9 +653,17 @@ mod tests {
     fn lineage_fingerprint_keeps_origin_and_current_generation_separate() {
         let binding = binding();
         let first = binding.fingerprint().unwrap();
+        let current = current();
+        let request_sha = "cd".repeat(32);
+        let op = operation_fingerprint(&binding, &current, "9", &request_sha).unwrap();
+        let mut next_current = current.clone();
+        next_current.parent_generation = "7".into();
+        assert_eq!(first, binding.fingerprint().unwrap());
+        assert_ne!(
+            op,
+            operation_fingerprint(&binding, &next_current, "9", &request_sha).unwrap()
+        );
         let mut next = binding.clone();
-        next.current.parent_generation = "7".into();
-        assert_ne!(first, next.fingerprint().unwrap());
         assert_eq!(next.lineage.original_parent_generation, "1");
         next.lineage.original_issue_receipt.accepted_count = "04".into();
         assert!(next.validate().is_err());
@@ -618,38 +675,44 @@ mod tests {
     #[test]
     fn reserve_comparison_rejects_changed_http_and_physical_root() {
         let binding = binding();
-        let (request, mut plan) = reserve_plan(&binding);
-        match_reserve_plan(&binding, &request, &plan, &http()).unwrap();
+        let current = current();
+        let (request, mut plan) = reserve_plan(&binding, &current);
+        match_reserve_plan(&binding, &current, &request, &plan, &http()).unwrap();
         plan["bindings"]["sessionPhysicalRoot"] = json!("999");
-        assert!(match_reserve_plan(&binding, &request, &plan, &http()).is_err());
-        let (_, plan) = reserve_plan(&binding);
+        assert!(match_reserve_plan(&binding, &current, &request, &plan, &http()).is_err());
+        let (_, plan) = reserve_plan(&binding, &current);
         let mut changed = http();
         changed["headers"] = json!([{"nameHex":"61","valueHex":"62","generated":false}]);
-        assert!(match_reserve_plan(&binding, &request, &plan, &changed).is_err());
+        assert!(match_reserve_plan(&binding, &current, &request, &plan, &changed).is_err());
     }
 
     #[test]
     fn paid_comparison_keeps_history_and_checks_new_purse_root() {
         let binding = binding();
-        let (_, reserve) = reserve_plan(&binding);
+        let current = current();
+        let (_, reserve) = reserve_plan(&binding, &current);
         let receipt = receipt("5");
         let mut paid = reserve.clone();
         paid["type"] = json!("application-agent-lifetime-paid-plan-v3");
         paid["reserveIndex"] = json!("4");
         paid["reserveReceipt"] = serde_json::to_value(&receipt).unwrap();
         paid["bindings"]["pursePhysicalRoot"] = json!("204");
-        match_paid_plan(&binding, &reserve, &paid, "4", &receipt, "204").unwrap();
+        match_paid_plan(&binding, &current, &reserve, &paid, "4", &receipt, "204").unwrap();
         let mut changed = paid.clone();
         changed["bindings"]["appPhysicalRoot"] = json!("999");
-        assert!(match_paid_plan(&binding, &reserve, &changed, "4", &receipt, "204").is_err());
-        assert!(match_paid_plan(&binding, &reserve, &paid, "4", &receipt, "203").is_err());
+        assert!(
+            match_paid_plan(&binding, &current, &reserve, &changed, "4", &receipt, "204").is_err()
+        );
+        assert!(
+            match_paid_plan(&binding, &current, &reserve, &paid, "4", &receipt, "203").is_err()
+        );
     }
 
     #[test]
     fn committed_comparison_checks_exact_frame_receipt_and_original_descriptor() {
         let binding = binding();
         let lineage = &binding.lineage;
-        let current = &binding.current;
+        let current = current();
         let receipt = receipt("5");
         let frame = b"native-frame";
         let mut inspected = json!({
@@ -682,41 +745,26 @@ mod tests {
                 "methodHex":"474554","pathHex":"6170692f",
                 "queryHex":"","bodyHex":""}
         });
-        match_committed_inspection(&binding, &inspected, &http(), "cd", &receipt, frame, "204")
-            .unwrap();
+        let received_http = http();
+        let check = |inspected: &Value, post_root: &str| {
+            match_committed_inspection(CommittedMatch {
+                binding: &binding,
+                current: &current,
+                inspected,
+                decoded_http: &received_http,
+                canonical_http_hex: "cd",
+                expected_receipt: &receipt,
+                exact_frame: frame,
+                signed_post_reserve_purse_physical_root: post_root,
+            })
+        };
+        check(&inspected, "204").unwrap();
         inspected["dispatchReceipt"]["acceptedCount"] = json!("6");
-        assert!(match_committed_inspection(
-            &binding,
-            &inspected,
-            &http(),
-            "cd",
-            &receipt,
-            frame,
-            "204"
-        )
-        .is_err());
+        assert!(check(&inspected, "204").is_err());
         inspected["dispatchReceipt"]["acceptedCount"] = json!("5");
         inspected["originalIssue"]["descriptorHex"] = json!("00");
-        assert!(match_committed_inspection(
-            &binding,
-            &inspected,
-            &http(),
-            "cd",
-            &receipt,
-            frame,
-            "204"
-        )
-        .is_err());
+        assert!(check(&inspected, "204").is_err());
         inspected["originalIssue"]["descriptorHex"] = json!(encode_hex(b"descriptor"));
-        assert!(match_committed_inspection(
-            &binding,
-            &inspected,
-            &http(),
-            "cd",
-            &receipt,
-            frame,
-            "203"
-        )
-        .is_err());
+        assert!(check(&inspected, "203").is_err());
     }
 }

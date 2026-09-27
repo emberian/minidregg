@@ -1,11 +1,15 @@
 # Agent lifetime SPK binding component (2026-09-27)
 
 `native/spk-host/src/agent_api_lifetime_v3.rs` SHA-256
-`df0961b6cddd009d845c99f7d72a41cd7e78de997d28a5d4f1bf533ef67d374a`
+`74ad71b449a544340390f11deaa3c48a7df708a8c2d67869c294c2b869ddac7c`
 is a separate v3 transport comparison module. `native/spk-host/src/lib.rs`
 registers it on Linux. The module keeps the original event22 session origin
 generation, issue index, descriptor digest and exact four-field receipt distinct
-from the current app, session, parent and purse coordinates. It also pins the
+from the current app, session, parent and purse coordinates. Stable Hello
+fingerprints only this lineage and the app process incarnation. A separate
+operation fingerprint commits fresh current coordinates, operation ID and
+exact request SHA, so reconnect cannot substitute a new generation into a
+retained uncertain request. It also pins the
 event27 grant resource, index, digest, initialized root and exact receipt.
 It checks source-inspected reserve, paid and committed projections against the
 retained HTTP bytes and current observations. The purse root after reserve is
@@ -28,7 +32,7 @@ The four focused tests cover historical/current generation separation, the
 exact 32-hex systemd invocation ID (with 64-hex refusal), changed
 HTTP and roots, a changed paid post-reserve purse root, and changed committed
 frame, receipt and original descriptor. Nextest run
-`c5c6336a-7443-4c69-8481-bdba4f190c43` passed 4/4; strict Clippy passed.
+`91e680a3-5bf7-4de7-94cb-28988951f75c` passed 4/4; strict Clippy passed.
 Exact logs are `nextest.log` and `clippy.log` in this directory, with hashes
 listed in `SHA256SUMS`.
 
