@@ -1714,7 +1714,7 @@ private def walk (config : Config) (opened : Opened config)
             | .ok after =>
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
-                  index + 1, imageBoundary config next.image⟩
+                  index + 1, imageBoundaryCanonical config next.bytes⟩
               let nextIssues := issuesAfter config opened issues record receipt derived matched
               let nextReserves := reservesAfter config opened reserves record receipt derived matched
               let nextBegins := beginsAfter config opened begins record derived matched
@@ -1732,7 +1732,9 @@ private def walk (config : Config) (opened : Opened config)
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
-                  ⟨derived, matched, next, advanced, validated, rfl⟩
+                  ⟨derived, matched, next, advanced, validated, by
+                    simp only [receipt, index]
+                    rw [imageBoundaryCanonical_loaded]⟩
                 let selectedAt :=
                   if selectIndex == some index then
                     let selected : SelectedStep config opened tail.final
