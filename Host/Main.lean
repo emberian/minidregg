@@ -23,6 +23,7 @@ import Kernel.FnPortableSource
 import Host.Json
 import Host.FnInboxView
 import Host.GrainOriginCommand
+import Host.ProviderUsage
 import Lean.Data.Json
 
 open Lean
@@ -142,6 +143,13 @@ structure FnReplyCatalogService where
   policyPath : String
   controlPath : String
 
+/-- Operator-pinned source-owned metering context. The socket caller can
+submit exact retained HTTP bytes but cannot select the provider cell or tariff. -/
+structure ProviderMeteringSettings where
+  providerResourceId : Nat
+  tariff : Lean.Json
+  deriving FromJson, ToJson
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -167,6 +175,7 @@ structure Settings where
   fnReplyPoll : Option FnReplyPollServiceSettings := none
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
   continuityProviderResourceId : Option Nat := none
+  providerMetering : Option ProviderMeteringSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -185,6 +194,13 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
+  if let some metering := settings.providerMetering then
+    unless metering.providerResourceId > 0 do
+      throw (IO.userError "provider metering resource ID must be positive")
+    discard <| IO.ofExcept (ProviderUsage.parseTariff metering.tariff.compress)
+    if let some continuityId := settings.continuityProviderResourceId then
+      unless continuityId == metering.providerResourceId do
+        throw (IO.userError "provider metering and continuity resource IDs differ")
   pure settings
 
 /-- Human-readable fn inbox projection is a pure presentation of the exact
@@ -2636,6 +2652,17 @@ def run (arguments : List String) : IO UInt32 := do
                               return ((255 : UInt8), failure "fn-origin-outbox"
                                 "A origin outbox service is not configured")
                             runFnOriginOutboxExportSession pinnedConfig state payload
+                        | 19 =>
+                            let some metering := settings.providerMetering
+                              | return ((255 : UInt8), failure "provider-metering"
+                                  "provider metering is not configured")
+                            let tariff ← IO.ofExcept <|
+                              ProviderUsage.parseTariff metering.tariff.compress
+                            match ProviderUsage.quotePayload metering.providerResourceId tariff payload with
+                            | .ok report =>
+                                return ((19 : UInt8), report.compress.toUTF8.toList)
+                            | .error reason =>
+                                return ((255 : UInt8), failure "provider-metering" reason)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
