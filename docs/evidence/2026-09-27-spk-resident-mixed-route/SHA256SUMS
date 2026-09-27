@@ -1,0 +1,7 @@
+38d0f899ae711f10dae9778d7e379108e6fbe6416be3727f92d80427dc06c18a  scripts/spk-platform/prepare-resident-config.sh
+b5358ef54d44fcf9b297c6546ce374abe99e77e212db6d9eeeaf526dcead8751  scripts/spk-platform/journey.sh
+e878f116062c9de7f82407f911d43e5a6168d191b85f192f15fbbf814dd55beb  native/spk-host/src/resident_service.rs
+ba4a014f0efa74c0f52c04655884445058328035bcb79dfc35d123e94b16b75c  docs/evidence/2026-09-27-spk-resident-mixed-route/schema-two-human-one-agent-v3.json
+81217b673342983b0a6053da7622274d6b0f023f10816376e1b688c2e023d588  docs/evidence/2026-09-27-spk-resident-mixed-route/schema-and-shell.log
+44d7048bc1e370a0e8e41f3ddba815d5487d3ed75c6bd3cf2d00cf72784ae26e  docs/evidence/2026-09-27-spk-resident-mixed-route/mini-spk-mixed-route-focused.log
+0e6d69d227a51da98b55a23185858512389f425e74f25fc7b7c1eb3061bd0741  docs/evidence/2026-09-27-spk-resident-mixed-route/mini-spk-mixed-route-clippy.log

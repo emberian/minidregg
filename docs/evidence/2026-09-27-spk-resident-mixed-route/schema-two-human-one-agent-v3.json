@@ -1,0 +1,42 @@
+{
+  "protocol": "mini-spk-resident-config-request-v1",
+  "spkHost": "/opt/qualified/spk-host",
+  "spkHostSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bwrap": "/usr/bin/bwrap",
+  "bwrapSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "appGid": 2401,
+  "unit": "mini-spk-a8401-g2.service",
+  "startAction": {
+    "kind": "create",
+    "index": 0
+  },
+  "entrances": [
+    {
+      "directory": "/run/mini-spk/alice",
+      "dispatchCustody": "/run/mini-spk/alice/dispatch.json",
+      "displayName": "Alice",
+      "preferredHandle": "alice"
+    },
+    {
+      "directory": "/run/mini-spk/bob",
+      "dispatchCustody": "/run/mini-spk/bob/dispatch.json",
+      "displayName": "Bob",
+      "preferredHandle": "bob"
+    }
+  ],
+  "agents": [
+    {
+      "protocol": "mini-spk-agent-api-v3",
+      "reverseTimeoutSeconds": 1440,
+      "controllerWorkerWallSeconds": 1500,
+      "socket": "/run/mini-spk/agent-a/api.sock",
+      "controllerUid": 2501,
+      "custody": "/etc/mini-spk/agent-a-custody.json",
+      "reverseSocket": "/run/mini-spk/agent-a/reverse.sock",
+      "routeName": "workroom-app",
+      "attemptDir": "/var/lib/minidregg/spk/resident-ops/new/agent-a",
+      "displayName": "Agent A",
+      "preferredHandle": "agent-a"
+    }
+  ]
+}

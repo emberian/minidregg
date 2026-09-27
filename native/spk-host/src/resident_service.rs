@@ -1522,6 +1522,23 @@ mod tests {
         file.sync_all().unwrap();
         assert!(ResidentConfig::load(&path).is_ok());
         assert_eq!(fs::read_dir(&journal).unwrap().count(), 1);
+        let mut mixed = config.clone();
+        mixed["entrances"].as_array_mut().unwrap().push(json!({
+            "directory":"/run/mini-spk/human-b",
+            "dispatchCustody":"/run/mini-spk/human-b/dispatch.json",
+            "displayName":"human-b",
+            "preferredHandle":"human-b"
+        }));
+        for agent in mixed["agents"].as_array_mut().unwrap() {
+            agent["protocol"] = json!("mini-spk-agent-api-v3");
+            agent["controllerWorkerWallSeconds"] = json!(1500);
+            agent["reverseTimeoutSeconds"] = json!(1440);
+        }
+        fs::write(&path, serde_json::to_vec(&mixed).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_ok());
+        mixed["agents"][0]["reverseTimeoutSeconds"] = json!(1441);
+        fs::write(&path, serde_json::to_vec(&mixed).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
         config["agents"][1]["socket"] = json!("/run/mini-spk/agent-a/other.sock");
         fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
         assert!(ResidentConfig::load(&path).is_err());

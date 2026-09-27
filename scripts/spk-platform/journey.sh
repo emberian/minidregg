@@ -219,8 +219,9 @@ case "$ACTION" in
     [ -s "$install_dir/install-completed-v2.json" ] || fail "INSTALL completion absent"
     [ ! -e "$resident_dir" ] || fail "resident attempt already exists"
     jq -e '.protocol == "mini-spk-resident-config-request-v1" and
-      .agents == []' "$request" >/dev/null ||
-      fail "v2 agent custody is not the required v3 agent route; prepare a human-only resident first"
+      (.agents | type == "array" and all(.[]; .protocol == "mini-spk-agent-api-v3"))' \
+      "$request" >/dev/null ||
+      fail "journey requires explicit v3 lifetime agent routes (or no agents)"
     claim prepare-resident-0001
     printf '%s\n' "$resident_dir" >"$STEP/resident-path.txt"
     sha256sum "$install_dir/install-completed-v2.json" "$request" \

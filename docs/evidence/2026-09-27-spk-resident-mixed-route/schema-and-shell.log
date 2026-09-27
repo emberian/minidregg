@@ -1,0 +1,6 @@
+v3 two-human/agent request PASS
+bad worker budget refused PASS
+missing v3 protocol refused PASS
+historical no-agent request PASS
+shellcheck PASS
+sh syntax PASS

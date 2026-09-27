@@ -56,7 +56,21 @@ jq -e '
     (.startAction.createdIndex | type == "string" and test("^(0|[1-9][0-9]*)$")) and
     (.createdJournal | type == "string"))) and
   (.entrances | type == "array" and length >= 1 and length <= 8) and
-  (.agents | type == "array" and length <= 8)
+  (.agents | type == "array" and length <= 8) and
+  all(.entrances[];
+    (keys | sort) == (["directory","dispatchCustody","displayName","preferredHandle"] | sort) and
+    (.directory|type == "string") and (.dispatchCustody|type == "string") and
+    (.displayName|type == "string" and length > 0 and length <= 256) and
+    (.preferredHandle|type == "string" and length > 0 and length <= 256)) and
+  all(.agents[];
+    ((keys | sort) == (["attemptDir","controllerUid","custody","displayName","preferredHandle","reverseSocket","routeName","socket"] | sort) or
+     ((keys | sort) == (["attemptDir","controllerUid","controllerWorkerWallSeconds","custody","displayName","preferredHandle","protocol","reverseSocket","reverseTimeoutSeconds","routeName","socket"] | sort) and
+      .protocol == "mini-spk-agent-api-v3" and
+      (.controllerWorkerWallSeconds | type == "number" and floor == . and . >= 120 and . <= 1800) and
+      (.reverseTimeoutSeconds | type == "number" and floor == . and . >= 60 and . <= 1740) and
+      .reverseTimeoutSeconds <= .controllerWorkerWallSeconds - 60)) and
+    (.controllerUid|type == "number" and . > 0 and floor == .) and
+    ([.socket,.custody,.reverseSocket,.routeName,.attemptDir,.displayName,.preferredHandle] | all(type == "string" and length > 0)))
   ' "$1" >/dev/null || fail "resident request shape refused"
 }
 
@@ -225,17 +239,7 @@ absolute "$MOUNT"
 
 # Private route files must already exist. Their source-selected subjects,
 # sessions and ticket receipts are checked again by resident dispatch.
-jq -e '
-  all(.entrances[];
-    (keys | sort) == (["directory","dispatchCustody","displayName","preferredHandle"] | sort) and
-    (.directory|type == "string") and (.dispatchCustody|type == "string") and
-    (.displayName|type == "string" and length > 0 and length <= 256) and
-    (.preferredHandle|type == "string" and length > 0 and length <= 256)) and
-  all(.agents[];
-    (keys | sort) == (["attemptDir","controllerUid","custody","displayName","preferredHandle","reverseSocket","routeName","socket"] | sort) and
-    (.controllerUid|type == "number" and . > 0 and floor == .) and
-    ([.socket,.custody,.reverseSocket,.routeName,.attemptDir,.displayName,.preferredHandle] | all(type == "string" and length > 0)))
-  ' "$REQUEST" >/dev/null || fail "participant route manifest refused"
+# validate_request_schema above is also the real route-manifest parser.
 jq -r '.entrances[] | [.directory,.dispatchCustody] | @tsv' "$REQUEST" | while IFS="$(printf '\t')" read -r directory custody; do
   absolute "$directory"; absolute "$custody"
   protected_chain "$directory"; private_file "$custody"; private_file "$directory/custodian.json"
@@ -252,19 +256,41 @@ jq -r '.entrances[] | [.directory,.dispatchCustody] | @tsv' "$REQUEST" | while I
      (.session == "8410" and .ticketResource == "8510" and .subject == "8" and .sessionKind == "api"))
     ' "$custody" >/dev/null || fail "participant custody differs from fixed source allocation: $custody"
 done
-jq -r '.agents[] | [.socket,.custody,.reverseSocket,.attemptDir] | @tsv' "$REQUEST" | while IFS="$(printf '\t')" read -r socket custody reverse attempt; do
+jq -r '.agents[] | [.socket,.custody,.reverseSocket,.attemptDir,(.protocol // "mini-spk-agent-api-v2")] | @tsv' "$REQUEST" | while IFS="$(printf '\t')" read -r socket custody reverse attempt protocol; do
   for path in "$socket" "$custody" "$reverse" "$attempt"; do absolute "$path"; done
   private_file "$custody"; protected_chain "${socket%/*}"; protected_chain "${reverse%/*}"
   [ ! -e "$attempt" ] && [ ! -L "$attempt" ] || fail "agent attempt already exists"
   [ "${attempt%/*}" = "$JOURNAL" ] || fail "agent attempt outside resident journal"
-  jq -e '.protocol == "mini-spk-agent-dispatch-custody-v2" and .app == "8401" and
-    .packageManifest == "8402" and .snapshotManifest == "8403" and
-    ((.session == "8420" and .ticketResource == "8520" and .subject == "10") or
-     (.session == "8422" and .ticketResource == "8521" and .subject == "20"))' \
-    "$custody" >/dev/null || fail "agent custody differs from fixed source allocation"
-  generation=$(jq -er .unit "$REQUEST" | sed -n 's/^mini-spk-a8401-g\([1-9][0-9]*\)[.]service$/\1/p')
-  jq -e --arg generation "$generation" '.appGeneration == $generation' \
-    "$custody" >/dev/null || fail "agent custody generation differs from candidate unit"
+  if [ "$protocol" = mini-spk-agent-api-v3 ]; then
+  jq -e '
+      .protocol == "mini-spk-agent-lifetime-custody-v3" and
+      .lineage.appResource == "8401" and
+      .packageManifest == "8402" and .snapshotManifest == "8403" and
+      ((.lineage.sessionResource == "8420" and
+        .lineage.ticketResource == "8520" and .lineage.grantResource == "8530" and
+        .lineage.participantSubject == "10" and .lineage.parentTask == "7920" and
+        .lineage.purseTask == "7940") or
+       (.lineage.sessionResource == "8422" and
+        .lineage.ticketResource == "8521" and .lineage.grantResource == "8531" and
+        .lineage.participantSubject == "20" and .lineage.parentTask == "7921" and
+        .lineage.purseTask == "7941")) and
+      (.lineage.originalIssueReceipt | type == "object") and
+      (.lineage.grantIssueReceipt | type == "object") and
+      (.appSigners | type == "array" and length > 0) and
+      (.grantSigner | type == "object") and
+      (.payerPins | type == "array" and length == 3)
+      ' "$custody" >/dev/null || fail "v3 agent lineage/custody differs from fixed source allocation"
+  else
+    [ "$protocol" = mini-spk-agent-api-v2 ] || fail "unknown agent API protocol"
+    jq -e '.protocol == "mini-spk-agent-dispatch-custody-v2" and .app == "8401" and
+      .packageManifest == "8402" and .snapshotManifest == "8403" and
+      ((.session == "8420" and .ticketResource == "8520" and .subject == "10") or
+       (.session == "8422" and .ticketResource == "8521" and .subject == "20"))' \
+      "$custody" >/dev/null || fail "v2 agent custody differs from fixed source allocation"
+    generation=$(jq -er .unit "$REQUEST" | sed -n 's/^mini-spk-a8401-g\([1-9][0-9]*\)[.]service$/\1/p')
+    jq -e --arg generation "$generation" '.appGeneration == $generation' \
+      "$custody" >/dev/null || fail "v2 agent custody generation differs from candidate unit"
+  fi
 done
 route_pins() {
   jq -r '.entrances[] | .dispatchCustody, (.directory + "/custodian.json")' "$REQUEST" |

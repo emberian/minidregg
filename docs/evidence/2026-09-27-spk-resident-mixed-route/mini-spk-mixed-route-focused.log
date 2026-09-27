@@ -1,0 +1,12 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.38s
+────────────
+ Nextest run ID d27896e3-fc09-4cac-8a37-dbc01eee8766 with nextest profile: default
+    Starting 5 tests across 1 binary (165 tests skipped)
+        PASS [   0.007s] (1/5) minidregg-spk-host resident_service::tests::parsed_api_root_and_discovery_keep_one_canonical_prefix
+        PASS [   0.008s] (2/5) minidregg-spk-host http_entrance::tests::auxiliary_poll_routes_two_agents_by_stable_index
+        PASS [   0.008s] (3/5) minidregg-spk-host resident_service::tests::retained_completion_requires_exact_source_evidence_after_restart
+        PASS [   0.008s] (4/5) minidregg-spk-host resident_service::tests::distinct_agent_uids_need_disjoint_socket_parent_acl_scopes
+        PASS [   0.009s] (5/5) minidregg-spk-host resident_service::tests::resident_config_refuses_two_agent_sockets_under_one_acl_parent
+────────────
+     Summary [   0.010s] 5 tests run: 5 passed, 165 skipped
