@@ -151,6 +151,11 @@ structure ProviderMeteringSettings where
   tariff : Lean.Json
   deriving FromJson, ToJson
 
+structure GrainBirthTariffSettings where
+  base : Nat
+  perBirth : Nat
+  deriving FromJson, ToJson
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -177,6 +182,7 @@ structure Settings where
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
   continuityProviderResourceId : Option Nat := none
   providerMetering : Option ProviderMeteringSettings := none
+  grainBirthTariff : Option GrainBirthTariffSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -190,6 +196,8 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   storage := ⟨settings.storageBinary, settings.storageRoot⟩
   signature := ⟨settings.signatureBinary⟩
   fnGateway := settings.fnGateway.map GatewayPinSettings.pin
+  grainBirthTariff := settings.grainBirthTariff.map fun tariff =>
+    ⟨tariff.base, tariff.perBirth⟩
 
 def Settings.providerMeteringPin (settings : Settings) :
     Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
@@ -207,6 +215,9 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
   discard <| IO.ofExcept settings.providerMeteringPin
+  if let some tariff := settings.grainBirthTariff then
+    unless 0 < tariff.base do
+      throw (IO.userError "grainBirthTariff.base must be positive")
   pure settings
 
 /-- Human-readable fn inbox projection is a pure presentation of the exact
@@ -250,7 +261,11 @@ def profileDescription (config : NativeHost.Config)
           ("inputMicroPerMillion", n tariff.inputMicroPerMillion),
           ("outputMicroPerMillion", n tariff.outputMicroPerMillion),
           ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)])]
-  Lean.Json.mkObj (base ++ meteringFields)
+  let grainBirthFields := match config.grainBirthTariff with
+    | none => []
+    | some tariff => [("grainBirthTariff", Lean.Json.mkObj
+        [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
+  Lean.Json.mkObj (base ++ grainBirthFields ++ meteringFields)
 
 def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
   let n := fun value : Nat => toJson (toString value)
@@ -261,7 +276,9 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("fieldModulus", n Minidregg.Compiler.babyBearP),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
-     ("operations", toJson (["birth", "invoke", "install", "delegate", "revoke"] : List String)),
+     ("operations", toJson
+       ((["birth", "invoke", "install", "delegate", "revoke"] : List String) ++
+         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 

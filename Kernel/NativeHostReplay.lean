@@ -13,6 +13,7 @@ wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
+import Kernel.GrainResourceBirthReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -34,6 +35,20 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       config.profile config.deployment opened.pins opened.durable
       (logicalHeight config opened.durable)) :
       NativeAdmission config opened (ResourceBirthReceiver.intent accepted)
+  | grainBirth {tariff : GrainResourceBirthController.Tariff}
+      {source : GrainResourceBirthController.Source}
+      {birth : GrainResourceBirthController.PreparedSourceBirth config.profile.compilerProfile
+        config.deployment opened.pins opened.durable config.profile.semantics tariff source}
+      {grain : GrainResourceBirthTransaction.PreparedTargets config.deployment
+        birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+        config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
+        (source.grainCommand tariff)}
+      {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+      (pinned : config.grainBirthTariffValue = .ok tariff)
+      (accepted : GrainResourceBirthAdmission.Accepted config.profile config.deployment
+        opened.pins opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
+        tariff source birth grain ingress) :
+      NativeAdmission config opened (GrainResourceBirthReceiver.intent accepted)
   | invoke {command : DeclaredResourceController.Command}
       (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command)
@@ -68,6 +83,27 @@ def derive (config : Config) (opened : Opened config) (bytes : List UInt8) :
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted⟩
+  if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
+    match pinned : config.grainBirthTariffValue with
+    | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"
+    | .ok tariff =>
+        let source := ingress.source
+        match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
+            config.deployment opened.pins opened.durable config.profile.semantics tariff source with
+        | .error reason => return .error s!"historical grain-backed birth preparation: {repr reason}"
+        | .ok birth =>
+            let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
+            match GrainResourceBirthTransaction.prepareTargets config.profile config.deployment
+                opened.pins opened.durable ambient tariff source birth with
+            | .error reason => return .error s!"historical grain target preparation: {repr reason}"
+            | .ok grain =>
+                match ← GrainResourceBirthAdmission.admitDecodedNative config.profile
+                    config.deployment opened.pins opened.durable ambient tariff source birth grain
+                    config.signature ingress with
+                | .error _ => return .error "historical grain-backed birth admission refused"
+                | .ok accepted =>
+                    return .ok ⟨GrainResourceBirthReceiver.intent accepted,
+                      .grainBirth pinned accepted⟩
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment

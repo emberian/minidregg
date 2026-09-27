@@ -8,6 +8,8 @@ against that exact image. Contention requires preparation/signing against the
 new state. Exact historical replay is looked up before fresh authorization.
 -/
 import Kernel.NativeHostContext
+import Kernel.NativeHostGrainBirth
+import Kernel.GrainResourceBirthReceiver
 import Kernel.NativeObservationController
 import Kernel.NativeHostReplay
 
@@ -68,26 +70,30 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
   let profile := config.profile
   let (finalized, slots) ← match draft with
     | .birth bytes capabilities => do
-        let descriptor ← need "noncanonical birth draft"
-          (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
-        let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-          config.deployment opened.pins opened.durable descriptor).mapError
-            (fun reason => s!"birth preparation: {repr reason}")
-        check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
-          "birth source capability count mismatch"
-        let forBranch := fun (role index : Nat)
-            (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) =>
-          slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier role index
-            (ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
-              prepared.prepared height branch)
-        let factory ← forBranch 0 0 .factory
-        let authority ← forBranch 1 0 .authority
-        let allocations ← (List.finRange prepared.descriptor.createRequests.length).mapM
-          (fun index => forBranch 2 index.val (.allocation index))
-        let sources ← (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM
-          (fun index => forBranch 3 index.val (.source index))
-        pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
-          factory :: authority :: allocations ++ sources)
+        if (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome then
+          let (finalized, slots) ← NativeHostGrainBirth.prepareLoaded config opened bytes capabilities
+          pure (.birth finalized capabilities, slots)
+        else do
+          let descriptor ← need "noncanonical birth draft"
+            (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
+          let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
+            config.deployment opened.pins opened.durable descriptor).mapError
+              (fun reason => s!"birth preparation: {repr reason}")
+          check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
+            "birth source capability count mismatch"
+          let forBranch := fun (role index : Nat)
+              (branch : ResourceBirthPolicyController.Concrete.Branch prepared.descriptor) =>
+            slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier role index
+              (ResourceBirthPolicyController.Concrete.branchRequest (profile := profile)
+                prepared.prepared height branch)
+          let factory ← forBranch 0 0 .factory
+          let authority ← forBranch 1 0 .authority
+          let allocations ← (List.finRange prepared.descriptor.createRequests.length).mapM
+            (fun index => forBranch 2 index.val (.allocation index))
+          let sources ← (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM
+            (fun index => forBranch 3 index.val (.source index))
+          pure (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor) capabilities,
+            factory :: authority :: allocations ++ sources)
     | .invoke bytes => do
         let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
         let prepared ← (DeclaredResourceController.prepare config.deployment profile
@@ -229,6 +235,39 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       | [envelope] => pure (.install (PolicyInstallReceiver.ingressCodec.encode ⟨subject, control, bytes, envelope⟩))
       | _ => .error "install signing slots mismatch"
   | .birth bytes capabilities => do
+      if let some finalized := GrainResourceBirthHostCodec.finalizedCodec.decode bytes then
+        let source ← need "noncanonical finalized grain birth source"
+          (GrainResourceBirthHostCodec.sourceCodec.decode finalized.sourceBytes)
+        let command ← need "noncanonical finalized grain command"
+          (DeclaredResourceController.commandCodec.decode finalized.commandBytes)
+        let allocationCount := source.birth.createRequests.length
+        let sourceCount := source.birth.resourceBatch.operations.length
+        let targetCount := command.targets.length
+        let bornCount := 2 + allocationCount + sourceCount
+        check (capabilities.length == sourceCount && targetCount == 2 &&
+          envelopes.length == bornCount + targetCount + targetCount)
+          "grain-backed birth signing slots mismatch"
+        let factory ← need "missing composite factory envelope" envelopes[0]?
+        let authority ← need "missing composite authority envelope" envelopes[1]?
+        let allocations := (envelopes.drop 2 |>.take allocationCount).map fun envelope =>
+          ({ capability := none, envelope := envelope } :
+            ResourceBirthPolicyController.Concrete.BranchCredential)
+        let sources := (capabilities.zip
+            (envelopes.drop (2 + allocationCount) |>.take sourceCount)).map
+          fun (capability, envelope) =>
+            ({ capability := some capability, envelope := envelope } :
+              ResourceBirthPolicyController.Concrete.BranchCredential)
+        let birthBytes := ResourceBirthPolicyController.Concrete.ingressCodec.encode
+          ⟨(ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
+            ⟨⟨none, factory⟩, ⟨none, authority⟩, allocations, sources⟩⟩
+        let grainSigned : DeclaredResourceController.SignedCommand :=
+          ⟨finalized.commandBytes,
+            envelopes.drop bornCount |>.take targetCount,
+            envelopes.drop (bornCount + targetCount) |>.take targetCount,
+            authority⟩
+        let grainBytes := DeclaredResourceController.signedBytes plan.domain plan.semantics grainSigned
+        return .birth (GrainResourceBirthPolicyController.ingressCodec.encode
+          ⟨finalized.sourceBytes, birthBytes, grainBytes⟩)
       let descriptor ← need "noncanonical finalized birth" (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
       let allocationCount := descriptor.createRequests.length
       let sourceCount := descriptor.resourceBatch.operations.length
@@ -315,6 +354,18 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .birth bytes =>
+      if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
+        let tariff := config.grainBirthTariffValue.toOption
+        let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
+        match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
+            opened.pins tariff ambient config.signature config.storage.transport
+            opened.durable bytes with
+        | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
+        | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
+        | .rejected _ => return refused "grain-birth" "request refused"
+        | .contention => return .contention
+        | .unavailable detail => return .unavailable detail.toUTF8.toList
+        | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
           config.signature config.storage.transport opened.durable height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId

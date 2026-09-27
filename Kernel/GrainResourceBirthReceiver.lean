@@ -113,6 +113,7 @@ structure Receipt where
 inductive Reject where
   | malformedIngress
   | transactionConflict
+  | tariffUnavailable
   | birthPreparation (reason : ResourceBirthController.Concrete.PreparationReject)
   | grainPreparation (reason : DeclaredResourceController.Reject)
   | admission (reason : GrainResourceBirthAdmission.Reject)
@@ -133,7 +134,7 @@ def receipt (domain : Digest)
 /-- An occupied birth transaction ID is a replay only for the exact complete
 composite event and both domain-bound replay nullifiers. A historical bare
 birth or a different grain command under the same ID is a conflict. -/
-def replay (domain semantics : Digest) (durable : Durable)
+def replay (durable : Durable)
     (ingress : GrainResourceBirthPolicyController.DecodedIngress) :
     Option (Except Reject Receipt) :=
   match Snapshot.lookupRecorded ingress.birth.descriptor.transactionId
@@ -141,57 +142,62 @@ def replay (domain semantics : Digest) (durable : Durable)
   | none => none
   | some recorded =>
       if recorded.transactionId = ingress.birth.descriptor.transactionId ∧
-          recorded.event.event = event domain ingress ∧
+          recorded.event.event = event ingress.grain.1 ingress ∧
           recorded.nullifiers =
-            [CredentialAuthorityReplay.nullifier domain
+            [CredentialAuthorityReplay.nullifier ingress.grain.1
                 ingress.birth.descriptor.authorityNullifier,
-              CredentialAuthorityReplay.nullifier domain
-                (DeclaredResourceController.operationMarker domain semantics ingress.command)] then
-        some (.ok (receipt domain ingress))
+              CredentialAuthorityReplay.nullifier ingress.grain.1
+                (DeclaredResourceController.operationMarker ingress.grain.1
+                  ingress.grain.2.1 ingress.command)] then
+        some (.ok (receipt ingress.grain.1 ingress))
       else some (.error .transactionConflict)
 
-theorem replay_only_exact (domain semantics : Digest) (durable : Durable)
+theorem replay_only_exact (durable : Durable)
     (ingress : GrainResourceBirthPolicyController.DecodedIngress)
-    (result : Receipt) (accepted : replay domain semantics durable ingress = some (.ok result)) :
-    result = receipt domain ingress ∧
+    (result : Receipt) (accepted : replay durable ingress = some (.ok result)) :
+    result = receipt ingress.grain.1 ingress ∧
       ∃ recorded,
         Snapshot.lookupRecorded ingress.birth.descriptor.transactionId
             durable.snapshot.model.journal = some recorded ∧
         recorded.transactionId = ingress.birth.descriptor.transactionId ∧
-        recorded.event.event = event domain ingress ∧
+        recorded.event.event = event ingress.grain.1 ingress ∧
         recorded.nullifiers =
-          [CredentialAuthorityReplay.nullifier domain
+          [CredentialAuthorityReplay.nullifier ingress.grain.1
               ingress.birth.descriptor.authorityNullifier,
-            CredentialAuthorityReplay.nullifier domain
-              (DeclaredResourceController.operationMarker domain semantics ingress.command)] := by
+            CredentialAuthorityReplay.nullifier ingress.grain.1
+              (DeclaredResourceController.operationMarker ingress.grain.1
+                ingress.grain.2.1 ingress.command)] := by
   unfold replay at accepted
   split at accepted
   · cases accepted
   · rename_i recorded found
     split at accepted
     · rename_i exactRecord
-      have same : receipt domain ingress = result := by simpa using accepted
+      have same : receipt ingress.grain.1 ingress = result := by simpa using accepted
       exact ⟨same.symm, recorded, found, exactRecord⟩
     · cases accepted
 
 /-- A historical result names only the exact recorded ingress; it does not
-re-admit the caller's current source or tariff. For a fresh call the caller
-pins `tariff` and `ambient`, source is matched byte-exactly to both signed
-components, and both targets are prepared from this loaded snapshot. -/
+re-admit the current tariff. For a fresh call the caller pins `tariff` and
+`ambient`; source comes only from the canonical outer ingress, is matched
+to both signed components, and both targets use this loaded snapshot. -/
 def receiveLoaded {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F)
     (deployment : Deployment) (pins : ResourceBirth.FactoryPins)
-    (tariff : Tariff) (ambient : Ambient) (source : Source)
+    (tariff : Option Tariff) (ambient : Ambient)
     (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (durable : Durable)
     (bytes : List UInt8) : IO Result := do
   match GrainResourceBirthPolicyController.decodeIngress bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
-      match replay deployment.domain profile.semantics durable ingress with
+      let source := ingress.source
+      match replay durable ingress with
       | some (.ok recorded) => return .historical recorded
       | some (.error reason) => return .rejected reason
       | none =>
+          let some tariff := tariff
+            | return .rejected .tariffUnavailable
           match GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
               deployment pins durable profile.semantics tariff source with
           | .error reason => return .rejected (.birthPreparation reason)
@@ -216,7 +222,7 @@ def receiveLoaded {F : Type} [Field F] [DecidableEq F]
 def receive {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F)
     (deployment : Deployment) (pins : ResourceBirth.FactoryPins)
-    (tariff : Tariff) (ambient : Ambient) (source : Source)
+    (tariff : Option Tariff) (ambient : Ambient)
     (native : CredentialSignatureIO.NativeConfig)
     (transport : DurableReceiverIO.Transport) (bytes : List UInt8) : IO Result := do
   match GrainResourceBirthPolicyController.decodeIngress bytes with
@@ -225,7 +231,7 @@ def receive {F : Type} [Field F] [DecidableEq F]
       match ← DurableReceiverIO.load transport rootBytes with
       | .error detail => return .unavailable detail
       | .ok durable =>
-          return ← receiveLoaded profile deployment pins tariff ambient source native
+          return ← receiveLoaded profile deployment pins tariff ambient native
             transport durable bytes
 
 end Minidregg.Kernel.GrainResourceBirthReceiver

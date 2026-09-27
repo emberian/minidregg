@@ -5,6 +5,7 @@ target, observation, and authority envelopes must still be checked against
 one current loaded image and one joint candidate before any durable intent.
 -/
 import Compiler.GrainResourceBirthController
+import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceBirthPolicyController
 import Kernel.DeclaredResourceController
 
@@ -17,18 +18,20 @@ open Minidregg.Theory.IndexedProgram
 set_option autoImplicit false
 
 structure SignedIngress where
+  sourceBytes : List UInt8
   birthBytes : List UInt8
   grainBytes : List UInt8
   deriving DecidableEq, Repr
 
 def ingressStream : StreamCodec SignedIngress :=
-  StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
-    (fun ingress => (ingress.birthBytes, ingress.grainBytes))
-    (fun pair => ⟨pair.1, pair.2⟩)
+  StreamCodec.xmap (StreamCodec.product bytesStream
+    (StreamCodec.product bytesStream bytesStream))
+    (fun ingress => (ingress.sourceBytes, ingress.birthBytes, ingress.grainBytes))
+    (fun pair => ⟨pair.1, pair.2.1, pair.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
 def ingressFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/SIGNED-INGRESS/v1".toUTF8.toList
+  "DREGG/GRAIN-RESOURCE-BIRTH/SIGNED-INGRESS/v2".toUTF8.toList
 
 def ingressRawCodec : LawfulCodec SignedIngress where
   encode ingress := ingressFrame ++ ingressStream.encode ingress
@@ -43,12 +46,20 @@ def ingressRawCodec : LawfulCodec SignedIngress where
 def ingressCodec : LawfulCodec SignedIngress :=
   ResourceBirthCodec.strictCodec ingressRawCodec
 
+/-- The new source carrier is bounded before nested descriptor decoding. This
+cap applies only to grain-backed birth, not to the legacy bare-birth route. -/
+def maxSourceBytes : Nat := 8 * 1024 * 1024
+
 structure DecodedIngress where
   private mk ::
   raw : SignedIngress
+  sourceSizeBound : raw.sourceBytes.length ≤ maxSourceBytes
+  source : GrainResourceBirthController.Source
   birth : ResourceBirthPolicyController.Concrete.DecodedIngress
   grain : DeclaredResourceController.SignedIngress
   command : DeclaredResourceController.Command
+  sourceExact : GrainResourceBirthHostCodec.sourceCodec.decode raw.sourceBytes = some source
+  sourceCanonical : GrainResourceBirthHostCodec.sourceCodec.encode source = raw.sourceBytes
   birthExact : birth.bytes = raw.birthBytes
   grainExact : DeclaredResourceController.signedBytes grain.1 grain.2.1 grain.2.2 = raw.grainBytes
   commandExact : DeclaredResourceController.commandCodec.encode command =
@@ -56,20 +67,26 @@ structure DecodedIngress where
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let raw ← ingressCodec.decode bytes
-  match born : ResourceBirthPolicyController.Concrete.decodeIngress raw.birthBytes with
+  if size : raw.sourceBytes.length ≤ maxSourceBytes then
+  match sourceDecoded : GrainResourceBirthHostCodec.sourceCodec.decode raw.sourceBytes with
   | none => none
-  | some birth =>
-      match signed : DeclaredResourceController.decodeSignedBytes raw.grainBytes with
+  | some source =>
+      match born : ResourceBirthPolicyController.Concrete.decodeIngress raw.birthBytes with
       | none => none
-      | some grain =>
-          match decoded : DeclaredResourceController.commandCodec.decode
-              grain.2.2.commandBytes with
+      | some birth =>
+          match signed : DeclaredResourceController.decodeSignedBytes raw.grainBytes with
           | none => none
-          | some command =>
-              some ⟨raw, birth, grain, command,
-                ResourceBirthPolicyController.Concrete.decodeIngress_canonical born,
-                DeclaredResourceController.decodeSignedBytes_canonical signed,
-                DeclaredResourceController.command_decode_canonical decoded⟩
+          | some grain =>
+              match decoded : DeclaredResourceController.commandCodec.decode
+                  grain.2.2.commandBytes with
+              | none => none
+              | some command =>
+                  some ⟨raw, size, source, birth, grain, command, sourceDecoded,
+                    GrainResourceBirthHostCodec.sourceCodec_canonical sourceDecoded,
+                    ResourceBirthPolicyController.Concrete.decodeIngress_canonical born,
+                    DeclaredResourceController.decodeSignedBytes_canonical signed,
+                    DeclaredResourceController.command_decode_canonical decoded⟩
+  else none
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.raw
@@ -84,16 +101,20 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       split at decoded <;> try contradiction
       split at decoded <;> try contradiction
       split at decoded <;> try contradiction
+      split at decoded <;> try contradiction
+      split at decoded <;> try contradiction
       cases Option.some.inj decoded
       exact ResourceBirthCodec.strictCodec_canonical ingressRawCodec parsed
 
-/-- This binds the two strict signed carriers to the source-derived command
-and the receiver's domain/semantics. The receiver must construct `source`
-from the current loaded tool and parent cells, not from an ingress assertion. -/
+/-- This binds the three strict carriers to the source-derived command and
+receiver domain/semantics. The caller obtains `source` from the canonical
+source carrier; current target preparation verifies both supplied old states
+against the same loaded cells before any fresh acceptance. -/
 def SourceBound (domain semantics : Minidregg.Theory.TypedAuthorization.Digest)
     (tariff : GrainResourceBirthController.Tariff)
     (source : GrainResourceBirthController.Source)
     (ingress : DecodedIngress) : Prop :=
+  ingress.raw.sourceBytes = GrainResourceBirthHostCodec.sourceCodec.encode source ∧
   ingress.birth.ingress.descriptorBytes =
     CanonicalCellRegistry.sourceEncoding.codec.encode source.birth ∧
   ingress.grain.2.2.commandBytes =
@@ -130,9 +151,20 @@ theorem sourceBound_birth_exact
     {source : GrainResourceBirthController.Source} {ingress : DecodedIngress}
     (bound : SourceBound domain semantics tariff source ingress) :
     ingress.birth.descriptor = source.birth := by
-  have bytes := bound.1
+  have bytes := bound.2.1
   have decoded := ingress.birth.descriptorExact
   rw [bytes, CanonicalCellRegistry.sourceEncoding.codec.decode_encode] at decoded
+  exact (Option.some.inj decoded).symm
+
+theorem sourceBound_source_exact
+    {domain semantics : Minidregg.Theory.TypedAuthorization.Digest}
+    {tariff : GrainResourceBirthController.Tariff}
+    {source : GrainResourceBirthController.Source} {ingress : DecodedIngress}
+    (bound : SourceBound domain semantics tariff source ingress) :
+    ingress.source = source := by
+  have bytes := bound.1
+  have decoded := ingress.sourceExact
+  rw [bytes, GrainResourceBirthHostCodec.sourceCodec.decode_encode] at decoded
   exact (Option.some.inj decoded).symm
 
 theorem sourceBound_command_exact
@@ -141,7 +173,7 @@ theorem sourceBound_command_exact
     {source : GrainResourceBirthController.Source} {ingress : DecodedIngress}
     (bound : SourceBound domain semantics tariff source ingress) :
     ingress.command = source.grainCommand tariff := by
-  have bytes := bound.2.1
+  have bytes := bound.2.2.1
   have decoded := ingress.commandExact
   rw [bytes] at decoded
   have canonical := DeclaredResourceController.commandCodec.decode_encode
@@ -150,5 +182,16 @@ theorem sourceBound_command_exact
   rw [decoded] at decodedIngress
   rw [canonical] at decodedIngress
   exact (Option.some.inj decodedIngress).symm
+
+theorem mismatched_command_refused
+    (domain semantics : Minidregg.Theory.TypedAuthorization.Digest)
+    (tariff : GrainResourceBirthController.Tariff)
+    (source : GrainResourceBirthController.Source) (ingress : DecodedIngress)
+    (different : ingress.command ≠ source.grainCommand tariff) :
+    checkSourceBound domain semantics tariff source ingress = none := by
+  unfold checkSourceBound
+  split
+  · exact False.elim (different (sourceBound_command_exact ‹SourceBound domain semantics tariff source ingress›))
+  · rfl
 
 end Minidregg.Kernel.GrainResourceBirthPolicyController

@@ -4,6 +4,7 @@ history verification imports this module; ordinary host APIs import the verifier
 There is one profile, one image-boundary commitment, and one validation path.
 -/
 import Compiler.NativeHostCodec
+import Compiler.GrainResourceBirthController
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -29,6 +30,13 @@ structure FnGatewayPin where
   policyAddress : Digest
   deriving DecidableEq, Repr
 
+/-- Permission micro-units charged to a previously reserved tool grain for a
+composite birth. This is independent of the conserved Book creation tariff. -/
+structure GrainBirthTariffPin where
+  base : Nat
+  perBirth : Nat
+  deriving DecidableEq, Repr
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -39,6 +47,15 @@ structure Config where
   storage : DurableReceiverIO.NativeConfig
   signature : CredentialSignatureIO.NativeConfig
   fnGateway : Option FnGatewayPin := none
+  grainBirthTariff : Option GrainBirthTariffPin := none
+
+def Config.grainBirthTariffValue (config : Config) :
+    Except String GrainResourceBirthController.Tariff := do
+  let some pinned := config.grainBirthTariff
+    | throw "grain-backed birth tariff is not enabled"
+  if positive : 0 < pinned.base then
+    pure ⟨pinned.base, pinned.perBirth, positive⟩
+  else throw "grain-backed birth tariff base must be positive"
 
 /-- This manifest enters runtime semantics. The seed commitment is separate
 because the genesis's source policies themselves contain that semantics. -/
@@ -49,7 +66,26 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
      config.deployment.resourceBookId, config.deployment.authorityCatalogueId,
      config.federation.value, config.genesisHeight, config.tariff.base,
      config.tariff.perBirth, config.tariff.perGrant, config.tariff.perInitialPayloadByte,
-     config.tariff.collector, config.tariff.asset]
+     config.tariff.collector, config.tariff.asset] ++
+  match config.grainBirthTariff with
+  | none => []
+  | some tariff =>
+      "DREGG/NATIVE-HOST/GRAIN-BIRTH-TARIFF/v1".toUTF8.toList ++
+        (StreamCodec.product StreamCodec.nat StreamCodec.nat).encode
+          (tariff.base, tariff.perBirth)
+
+/-- Disabling the new mode preserves the complete pre-existing parameter
+preimage, hence its legacy semantics/profile and genesis interpretation. -/
+theorem Config.runtimeParameters_withoutGrainBirth (config : Config) :
+    ({ config with grainBirthTariff := none } : Config).runtimeParameters =
+      "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
+        (StreamCodec.list StreamCodec.nat).encode
+          [config.deployment.domain.value, config.deployment.factoryId,
+           config.deployment.resourceBookId, config.deployment.authorityCatalogueId,
+           config.federation.value, config.genesisHeight, config.tariff.base,
+           config.tariff.perBirth, config.tariff.perGrant,
+           config.tariff.perInitialPayloadByte, config.tariff.collector,
+           config.tariff.asset] := by simp [Config.runtimeParameters]
 
 def Config.profile (config : Config) :=
   NativeHostProfile.profile config.template config.runtimeParameters
@@ -84,6 +120,8 @@ def check (condition : Bool) (detail : String) : Except String Unit :=
   if condition then .ok () else .error detail
 
 def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) := do
+  if config.grainBirthTariff.isSome then
+    let _ ← config.grainBirthTariffValue
   check (decide config.deployment.Valid) "invalid deployment role identities"
   check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
   let directory ← need "noncanonical native directory"

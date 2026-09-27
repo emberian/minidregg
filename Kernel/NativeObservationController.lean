@@ -12,6 +12,7 @@ neither the policy projection nor the returned value contains the shared Book.
 This is a snapshot read, not a timing-noninterference or malicious-host claim.
 -/
 import Compiler.NativeObservationCodec
+import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
 
 namespace Minidregg.Kernel.NativeObservationController
@@ -122,13 +123,23 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
       let kind ← need (declaredKind context declaration.source.policyId.value)
       pure [(kind, declaration.source.policyId.value)]
   | .prepare (.birth bytes _) =>
-      let descriptor ← need (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
-      require (descriptor.creator == intent.subject)
-      let current ← need (book context)
-      let sources := descriptor.resourceBatch.operations.filterMap fun operation =>
-        if operation.posting.source ∈ current.accounts then
-          some (.account, operation.posting.source) else none
-      pure ((.object, descriptor.factory.value) :: sources).eraseDups
+      if let some source := GrainResourceBirthHostCodec.sourceCodec.decode bytes then
+        require (source.birth.creator == intent.subject)
+        let current ← need (book context)
+        let sources : List Target := source.birth.resourceBatch.operations.filterMap fun operation =>
+          if operation.posting.source ∈ current.accounts then
+            some (.account, operation.posting.source) else none
+        pure (((ResourceKind.object, source.birth.factory.value) :: sources) ++
+          [(ResourceKind.object, source.toolTask),
+            (ResourceKind.object, source.parentTask)]).eraseDups
+      else
+        let descriptor ← need (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
+        require (descriptor.creator == intent.subject)
+        let current ← need (book context)
+        let sources := descriptor.resourceBatch.operations.filterMap fun operation =>
+          if operation.posting.source ∈ current.accounts then
+            some (.account, operation.posting.source) else none
+        pure ((.object, descriptor.factory.value) :: sources).eraseDups
 
 def footprintExact (context : Context deployment durable) (intent : Intent) : Except String Unit :=
   match requiredTargets context intent with
