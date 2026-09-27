@@ -47,6 +47,16 @@ WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902 \
   "$STAGE/provision.sh" "$HOST" "$EVIDENCE"
 cp "$STAGE/provision.sha256" "$EVIDENCE/overlay.sha256"
 cp "$STAGE/provision.sh" "$EVIDENCE/overlay-provision.sh"
+jq -e '.grainBirthTariff == {base:2,perBirth:1}' "$EVIDENCE/operator.json" >/dev/null
+jq -e '.factoryPredicate == {type:"any",predicates:[
+    {type:"eq",slot:"request/subject",value:"7"},
+    {type:"all",predicates:[
+      {type:"eq",slot:"request/subject",value:"8"},
+      {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}' \
+  "$EVIDENCE/genesis.json" >/dev/null
+jq -e '.birth.grainBirthTariff == {base:"2",perBirth:"1"} and
+    ([.birth.resources[].target] | index("8301") | not)' \
+  "$EVIDENCE/birth-intent.json" >/dev/null
 
 CONFIG="$EVIDENCE/deployment/pinned-config.json"
 mkdir -m 700 "$EVIDENCE/composite-session"
