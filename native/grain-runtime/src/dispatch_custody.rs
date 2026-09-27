@@ -16,9 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_REQUEST: usize = 22 * 1024 * 1024;
-// A 24 KiB forward HTTP body is hex-encoded in fixedRequestHex. Include the
-// source context and receipt without truncating or silently failing at 16 KiB.
-const MAX_RESPONSE: usize = 262_144;
+// V3 echoes both the exact fixed request and source reserve plan. At the
+// 64 KiB HTTP profile ceiling their hex encodings exceed the old 256 KiB cap.
+const MAX_RESPONSE: usize = 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
@@ -33,9 +33,25 @@ pub enum Command {
         forward_operation_id: String,
         fixed_request: Value,
     },
+    ReserveV3 {
+        route_name: String,
+        forward_operation_id: String,
+        binding_sha256: String,
+        worker_wall_seconds: u64,
+        fixed_request: Value,
+    },
     InspectV2 {
         route_name: String,
         forward_operation_id: String,
+    },
+    InspectV3 {
+        route_name: String,
+        forward_operation_id: String,
+    },
+    InspectSettlementV3 {
+        attempt_id: String,
+        binding_sha256: String,
+        operation_fingerprint: String,
     },
     SignPayerV2 {
         route_name: String,
@@ -44,12 +60,31 @@ pub enum Command {
         paid_plan_hex: String,
         source_inspection_json: Value,
     },
+    SignPayerV3 {
+        route_name: String,
+        forward_operation_id: String,
+        attempt_id: String,
+        paid_plan_hex: String,
+        source_inspection_json: Value,
+        operation_fingerprint: String,
+    },
     MarkSend {
         attempt_id: String,
         request_sha256: String,
         transaction_id: String,
         event_id: String,
         permit_sha256: String,
+    },
+    /// Event26 has a separate exact paid-ingress and fresh-permit custody
+    /// boundary. A v2 mark-send request can never authorize its fd3 write.
+    MarkSendV3 {
+        attempt_id: String,
+        binding_sha256: String,
+        operation_fingerprint: String,
+        request_sha256: String,
+        ingress_hex: String,
+        committed_frame_hex: String,
+        receipt: Value,
     },
     SettleDefinite {
         attempt_id: String,
@@ -61,6 +96,23 @@ pub enum Command {
     Inspect {
         attempt_id: String,
     },
+}
+
+impl Command {
+    fn reply_timeout(&self) -> Duration {
+        match self {
+            // This is a maximum for source replay and one native submit or
+            // lookup, not a promise that the physical worker lives this long.
+            // Hard cancellation stops in-flight work independently.
+            Self::ReserveV3 { .. }
+            | Self::InspectV3 { .. }
+            | Self::InspectSettlementV3 { .. }
+            | Self::SignPayerV3 { .. }
+            | Self::MarkSendV3 { .. }
+            | Self::SettleDefinite { .. } => Duration::from_secs(1800),
+            _ => Duration::from_secs(300),
+        }
+    }
 }
 
 pub struct Request {
@@ -178,7 +230,8 @@ fn serve_connection(mut stream: UnixStream, host_uid: u32, tx: SyncSender<Reques
             Ok(command) => {
                 let (reply, recv) = mpsc::channel();
                 let phase = Arc::new(AtomicU8::new(0));
-                let deadline = Instant::now() + Duration::from_secs(300);
+                let timeout = command.reply_timeout();
+                let deadline = Instant::now() + timeout;
                 if tx
                     .try_send(Request {
                         command,
@@ -190,7 +243,7 @@ fn serve_connection(mut stream: UnixStream, host_uid: u32, tx: SyncSender<Reques
                 {
                     json!({"type":"refused","detail":"dispatch RPC queue full"})
                 } else {
-                    match recv.recv_timeout(Duration::from_secs(300)) {
+                    match recv.recv_timeout(timeout) {
                         Ok(value) => value,
                         Err(_)
                             if phase
@@ -359,6 +412,24 @@ mod tests {
         let decoded: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(decoded, response);
         assert!(bytes.len() > 16 * 1024);
+    }
+
+    #[test]
+    fn v3_reserve_reply_carries_both_full_source_frames_without_truncation() {
+        let frame_hex = "ab".repeat(65_536);
+        let response = json!({"type":"dispatch-reserved-v3",
+            "fixedRequestHex":frame_hex,
+            "reservePlanHex":frame_hex,
+            "contextHex":"00",
+            "bindingSha256":"cd".repeat(32),
+            "operationFingerprint":"ef".repeat(32)});
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let expected = response.clone();
+        let send = thread::spawn(move || write_frame(&mut writer, &response));
+        let bytes = read_frame(&mut reader).unwrap();
+        send.join().unwrap().unwrap();
+        assert!(bytes.len() > 262_144);
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), expected);
     }
 
     #[cfg(target_os = "linux")]

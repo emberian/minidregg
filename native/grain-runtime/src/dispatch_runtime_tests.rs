@@ -242,6 +242,7 @@ esac
         reserve_v2_request_sha256: Some(sha256_file(&directory.join("request.bin")).unwrap()),
         reserve_v2_plan_sha256: Some(sha256_file(&directory.join("plan.bin")).unwrap()),
         reserve_v2_source_sha256: Some(sha256_file(&source).unwrap()),
+        lifetime: None,
         dispatch_generation: None,
         dispatch_post_root: None,
         no_send_release_started: false,

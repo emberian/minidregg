@@ -102,11 +102,17 @@ struct ToolTask {
     /// pin; the event21 native permit remains mandatory for every dispatch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_application_api_routes: Vec<application_api_tools::RoutePin>,
+    /// Event26 routes carry immutable event22/event27 receipt identity.
+    /// Current execution generations come from each source-inspected plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_application_lifetime_routes: Vec<application_api_tools::LifetimeRoutePin>,
     /// Only an explicitly certified Mini Host with the agent event21 route
     /// may enable the forward API tool. The SPK host still obtains and checks
     /// a fresh event21 permit for each request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_api_host_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lifetime_api_host_sha256: Option<String>,
     /// Explicit operator enablement for the qualified current-author Host
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,6 +159,45 @@ struct DispatchSignerPin {
     public_key: String,
     key_id: String,
     key_epoch: String,
+}
+
+/// A one-target observed `NativeHost.prepareLoaded (.invoke ...)` has the
+/// target, observation, and authority signing incidences in this order. They
+/// all use the controller's pinned payer identity; the resident never gets
+/// that key. V2's separate signing profile is unaffected.
+fn lifetime_purse_signers(
+    slots: &[Value],
+    signer: &DispatchSignerPin,
+    key_path: &Path,
+) -> Result<Vec<Value>> {
+    if !matches!(signer.role.as_str(), "4" | "8" | "1") || signer.index != "0" || slots.len() != 3 {
+        return Err("lifetime purse requires exact target/observe/authority slots".into());
+    }
+    let mut approved = Vec::with_capacity(3);
+    for (slot, role) in slots.iter().zip(["4", "8", "1"]) {
+        let signing = slot
+            .get("signing")
+            .ok_or("lifetime purse signing header absent")?;
+        if slot.get("role").and_then(Value::as_str) != Some(role)
+            || slot.get("index").and_then(Value::as_str) != Some("0")
+            || signing.get("decoded").and_then(Value::as_bool) != Some(true)
+            || signing.get("keyId").and_then(Value::as_str) != Some(signer.key_id.as_str())
+            || signing.get("keyEpoch").and_then(Value::as_str) != Some(signer.key_epoch.as_str())
+            || signing.get("algorithm").and_then(Value::as_str) != Some("1")
+        {
+            return Err("lifetime purse slot differs from pinned enrolled signer".into());
+        }
+        let header = dispatch_custody::decode_hex(
+            slot.get("headerHex")
+                .and_then(Value::as_str)
+                .ok_or("lifetime purse header hex absent")?,
+        )?;
+        approved.push(json!({"role":role,"index":"0",
+            "keyId":signer.key_id,"keyEpoch":signer.key_epoch,
+            "publicKey":signer.public_key,"headerSha256":sha256_bytes(&header)?,
+            "keyPath":key_path}));
+    }
+    Ok(approved)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -233,6 +278,26 @@ fn provider_command_route(command: &AllowedCommand, required_network: &str) -> b
             .args
             .get(7)
             .is_some_and(|arg| arg == "/agent/hermes-acp")
+}
+
+fn checked_lifetime_worker_wall(
+    selected: &AllowedCommand,
+    requested: u64,
+    prompt_active: bool,
+    child_alive: bool,
+    child_program: Option<&Path>,
+    foreground_active: bool,
+) -> Result<u64> {
+    let effective = selected.wall_time_seconds.unwrap_or(600);
+    if !prompt_active
+        || foreground_active
+        || !child_alive
+        || child_program != Some(selected.program.as_path())
+        || requested != effective
+    {
+        return Err("lifetime reserve worker wall differs from active Hermes worker".into());
+    }
+    Ok(effective)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -906,6 +971,10 @@ struct DispatchAttempt {
     reserve_v2_plan_sha256: Option<String>,
     #[serde(default)]
     reserve_v2_source_sha256: Option<String>,
+    /// Event26 has a distinct source/receipt/lookup chain. It must never
+    /// enter the event21 recovery path or reinterpret a v2 attempt directory.
+    #[serde(default)]
+    lifetime: Option<LifetimeDispatchCustody>,
     #[serde(default)]
     dispatch_generation: Option<String>,
     #[serde(default)]
@@ -927,6 +996,51 @@ struct DispatchAttempt {
     response_sha256: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifetimeDispatchCustody {
+    route_name: String,
+    #[serde(default)]
+    worker_wall_seconds: Option<u64>,
+    original_issue_index: String,
+    original_issue_receipt: application_api_tools::SourceReceiptPin,
+    grant_issue_receipt: application_api_tools::SourceReceiptPin,
+    grant_resource: String,
+    grant_issue_index: String,
+    grant_digest: String,
+    grant_initialized_root: String,
+    source_path: PathBuf,
+    source_sha256: String,
+    reserve_dir: PathBuf,
+    reserve_request_sha256: String,
+    reserve_plan_sha256: String,
+    context_hex: String,
+    app_generation: String,
+    session_generation: String,
+    parent_generation: String,
+    purse_generation: String,
+    app_physical_root: String,
+    session_physical_root: String,
+    parent_physical_root: String,
+    pre_reserve_purse_physical_root: String,
+    #[serde(default)]
+    reserve_index: Option<String>,
+    #[serde(default)]
+    reserve_receipt: Option<ReserveAnchor>,
+    #[serde(default)]
+    post_reserve_purse_physical_root: Option<String>,
+    #[serde(default)]
+    paid_dir: Option<PathBuf>,
+    #[serde(default)]
+    paid_plan_sha256: Option<String>,
+    #[serde(default)]
+    paid_ingress_sha256: Option<String>,
+    #[serde(default)]
+    committed_frame_sha256: Option<String>,
+    #[serde(default)]
+    committed_receipt: Option<ReserveAnchor>,
+}
+
 /// The controller persists this before any byte of the forward request can
 /// cross to the resident host. Socket errors after that point never allocate
 /// a replacement ID or resend the request.
@@ -942,12 +1056,136 @@ struct ApplicationApiAttempt {
     binding_sha256: Option<String>,
     #[serde(default)]
     host_invocation: Option<String>,
+    /// Source-derived per-dispatch current claims bind every v3 reply and
+    /// historical inspection. This is never copied from Hello alone.
+    #[serde(default)]
+    operation_fingerprint: Option<String>,
+    /// Event26 delivery lineage is recorded before fd3 ACK. A definite
+    /// response also needs the exact confirmed purse settlement below.
+    #[serde(default)]
+    lifetime_committed_receipt: Option<ReserveAnchor>,
+    #[serde(default)]
+    lifetime_settled_response_sha256: Option<String>,
+    #[serde(default)]
+    lifetime_settlement: Option<LifetimeDefiniteSettlement>,
     #[serde(default)]
     reply_path: Option<PathBuf>,
     #[serde(default)]
     reply_sha256: Option<String>,
     #[serde(default)]
     reported: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifetimeDefiniteSettlement {
+    dispatch_attempt_id: u64,
+    forward_operation_id: u64,
+    settlement: DispatchSettlement,
+}
+
+fn verified_lifetime_definite_reply(
+    attempt: &ApplicationApiAttempt,
+    reply: &Value,
+    native_unresolved: bool,
+) -> Result<()> {
+    let committed = attempt
+        .lifetime_committed_receipt
+        .as_ref()
+        .ok_or("lifetime definite reply lacks durable fresh permit lineage")?;
+    let settled = attempt
+        .lifetime_settled_response_sha256
+        .as_deref()
+        .ok_or("lifetime definite reply lacks confirmed purse settlement")?;
+    let settlement = attempt
+        .lifetime_settlement
+        .as_ref()
+        .ok_or("lifetime definite reply lacks durable native settlement record")?;
+    if native_unresolved
+        || settlement.forward_operation_id != attempt.operation_id
+        || settlement.settlement.operation != "dispatch settle"
+        || reply.get("committedReceipt") != Some(&json!(committed))
+        || reply.get("responseSha256").and_then(Value::as_str) != Some(settled)
+    {
+        return Err("lifetime definite reply differs from settled native dispatch".into());
+    }
+    Ok(())
+}
+
+fn recovered_lifetime_http(
+    attempt: &ApplicationApiAttempt,
+    inspection: &Value,
+    native_unresolved: bool,
+) -> Result<Option<Value>> {
+    if inspection.get("type").and_then(Value::as_str) != Some("inspection-v3")
+        || inspection.get("protocol").and_then(Value::as_str) != Some("mini-spk-agent-api-v3")
+        || inspection.get("operationId").and_then(Value::as_str)
+            != Some(attempt.operation_id.to_string().as_str())
+        || inspection.get("bindingSha256").and_then(Value::as_str)
+            != attempt.binding_sha256.as_deref()
+        || !matches!(
+            inspection.get("state").and_then(Value::as_str),
+            Some("not-seen" | "received" | "uncertain" | "definite")
+        )
+    {
+        return Err("lifetime historical inspection differs from retained operation".into());
+    }
+    match (
+        attempt.operation_fingerprint.as_deref(),
+        inspection.get("operationFingerprint"),
+    ) {
+        (None, None) => {}
+        (Some(saved), Some(Value::String(observed))) if saved == observed => {}
+        _ => return Err("lifetime historical fingerprint differs".into()),
+    }
+    let digest = inspection.get("definiteReplySha256");
+    let encoded = inspection.get("definiteReplyJsonHex");
+    let (Some(Value::String(digest)), Some(Value::String(encoded))) = (digest, encoded) else {
+        if digest.is_some()
+            || encoded.is_some()
+            || inspection.get("state").and_then(Value::as_str) == Some("definite")
+            || (inspection.get("retentionError").is_some()
+                && inspection.get("state").and_then(Value::as_str) != Some("uncertain"))
+        {
+            return Err("lifetime historical definite reply is incomplete".into());
+        }
+        return Ok(None);
+    };
+    if inspection.get("state").and_then(Value::as_str) != Some("definite")
+        || inspection.get("retentionError").is_some()
+        || encoded.len() > 2 * 262_144
+    {
+        return Err("lifetime historical definite reply is not cleanly retained".into());
+    }
+    let bytes = dispatch_custody::decode_hex(encoded)?;
+    if sha256_bytes(&bytes)? != *digest {
+        return Err("lifetime historical reply digest differs".into());
+    }
+    let reply: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("lifetime historical reply JSON: {error}"))?;
+    if reply.get("type").and_then(Value::as_str) != Some("http-v3")
+        || reply.get("protocol").and_then(Value::as_str) != Some("mini-spk-agent-api-v3")
+        || reply.get("operationId").and_then(Value::as_str)
+            != Some(attempt.operation_id.to_string().as_str())
+        || reply.get("bindingSha256") != inspection.get("bindingSha256")
+        || reply.get("operationFingerprint") != inspection.get("operationFingerprint")
+    {
+        return Err("lifetime historical HTTP reply differs from inspection".into());
+    }
+    verified_lifetime_definite_reply(attempt, &reply, native_unresolved)?;
+    Ok(Some(reply))
+}
+
+fn checked_lifetime_reserve_plan_hex(plan: &Value, plan_path: &Path) -> Result<String> {
+    let encoded = plan
+        .get("canonicalPlanHex")
+        .and_then(Value::as_str)
+        .ok_or("lifetime source plan hex absent")?;
+    if dispatch_custody::decode_hex(encoded)? != bounded_regular_file(plan_path, 10 * 1024 * 1024)?
+    {
+        return Err("lifetime source plan hex differs from retained bytes".into());
+    }
+    Ok(encoded.to_owned())
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -968,11 +1206,33 @@ enum ApplicationApiStep {
 
 struct ActiveApplicationApi {
     operation_id: u64,
-    route: application_api_tools::RoutePin,
+    route: ApplicationApiRoute,
+    lifetime_input: Option<application_api_tools::HttpInput>,
     request: Value,
     reply: mpsc::Sender<Value>,
     step: ApplicationApiStep,
     deadline: Instant,
+}
+
+enum ApplicationApiRoute {
+    V2(Box<application_api_tools::RoutePin>),
+    Lifetime(Box<application_api_tools::LifetimeRoutePin>),
+}
+
+impl ApplicationApiRoute {
+    fn socket_path(&self) -> &Path {
+        match self {
+            Self::V2(route) => &route.socket_path,
+            Self::Lifetime(route) => &route.socket_path,
+        }
+    }
+
+    fn host_uid(&self) -> u32 {
+        match self {
+            Self::V2(route) => route.host_uid,
+            Self::Lifetime(route) => route.host_uid,
+        }
+    }
 }
 
 fn cancel_application_api_on_acp_failure(
@@ -1257,6 +1517,15 @@ impl Journal {
                 )
             {
                 return Err("application API reported a nondefinite result".into());
+            }
+            if let Some(settled) = attempt.lifetime_settlement.as_ref() {
+                if settled.forward_operation_id != attempt.operation_id
+                    || settled.settlement.operation != "dispatch settle"
+                    || attempt.lifetime_settled_response_sha256.is_none()
+                    || attempt.lifetime_committed_receipt.is_none()
+                {
+                    return Err("application API retained lifetime settlement differs".into());
+                }
             }
         }
         Ok(())
@@ -2208,6 +2477,32 @@ fn validate(c: &Config) -> Result<()> {
         } else if t.agent_api_host_sha256.is_some() {
             return Err("application API Host pin has no operator route".into());
         }
+        if !t.allowed_application_lifetime_routes.is_empty() {
+            let dispatch = c
+                .dispatch_task
+                .as_ref()
+                .ok_or("lifetime API routes require a distinct dispatchTask")?;
+            if dispatch.operator_socket.is_none() || dispatch.reserve_signer.is_none() {
+                return Err("lifetime API routes require private dispatch custody".into());
+            }
+            application_api_tools::validate_lifetime_routes(
+                &t.allowed_application_lifetime_routes,
+                &t.allowed_application_api_routes,
+                &c.task,
+                &dispatch.task,
+                &c.subject,
+                dispatch.host_uid,
+            )?;
+            let expected = t
+                .lifetime_api_host_sha256
+                .as_deref()
+                .ok_or("lifetime API routes require an event26 Mini Host pin")?;
+            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+                return Err("lifetime API Mini Host or persistent socket differs from pin".into());
+            }
+        } else if t.lifetime_api_host_sha256.is_some() {
+            return Err("lifetime API Host pin has no operator route".into());
+        }
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -2713,6 +3008,20 @@ impl Runtime {
         {
             return Err("dispatch settlement differs from retained request/decision".into());
         }
+        self.verified_dispatch_settlement_record(saved)?;
+        Ok(actual)
+    }
+    fn verified_dispatch_settlement_record(&self, saved: &DispatchSettlement) -> Result<()> {
+        let pending = Pending {
+            operation_id: saved.operation_id,
+            operation: saved.operation.clone(),
+            attempt: saved.attempt.clone(),
+            uncertain: false,
+            publication: None,
+        };
+        if self.dispatch_settlement_record(&pending, &saved.outcome_path)? != *saved {
+            return Err("retained dispatch settlement evidence changed".into());
+        }
         let retry_result = next_retry_json(&saved.attempt)?;
         let mut args = vec![
             "retry",
@@ -2735,11 +3044,11 @@ impl Runtime {
                 lookup.get("confirmation").and_then(Value::as_str),
                 Some("installed" | "replayed")
             )
-            || ReserveAnchor::from_confirmed(&lookup)? != actual.receipt
+            || ReserveAnchor::from_confirmed(&lookup)? != saved.receipt
         {
             return Err("dispatch settlement is not confirmed in current native image".into());
         }
-        Ok(actual)
+        Ok(())
     }
     /// Audit-only reconstruction of a reserve that may have committed just
     /// before the wrapper copied its operation/gen/postroot into the attempt.
@@ -2749,6 +3058,92 @@ impl Runtime {
         attempt: &DispatchAttempt,
         hold: &HeldCharge,
     ) -> Result<(u64, ReserveAnchor)> {
+        if let Some(lifetime) = &attempt.lifetime {
+            let directory = &lifetime.reserve_dir;
+            let id = attempt
+                .reserve_operation_id
+                .ok_or("lifetime reserve ID absent")?;
+            if *directory
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("agent-lifetime-reserve-{:016}", attempt.id))
+                || lifetime.source_path
+                    != self
+                        .config
+                        .state_dir
+                        .join(format!("dispatch-lifetime-source-{id:016}.json"))
+                || !hold.reserve_confirmed
+                || hold.reserve_refused
+                || hold.reserve_attempt.as_ref() != Some(directory)
+                || sha256_file(&lifetime.source_path)? != lifetime.source_sha256
+                || hold.reserve_source_sha256.as_deref() != Some(lifetime.source_sha256.as_str())
+                || sha256_file(&directory.join("request.bin"))? != lifetime.reserve_request_sha256
+                || sha256_file(&directory.join("plan.bin"))? != lifetime.reserve_plan_sha256
+                || sha256_file(&directory.join("call.bin"))?
+                    != hold
+                        .reserve_call_sha256
+                        .as_deref()
+                        .ok_or("lifetime reserve call hash absent")?
+            {
+                return Err("lifetime reserve retained custody differs from journal".into());
+            }
+            let anchor = hold
+                .reserve_anchor
+                .as_ref()
+                .ok_or("lifetime reserve anchor absent")?;
+            if lifetime.reserve_receipt.as_ref() != Some(anchor) {
+                return Err("lifetime reserve anchor differs from attempt".into());
+            }
+            let outcome = hold
+                .reserve_outcome_path
+                .as_ref()
+                .ok_or("lifetime reserve outcome absent")?;
+            if outcome.parent() != Some(directory.as_path())
+                || sha256_file(outcome)?
+                    != hold
+                        .reserve_outcome_sha256
+                        .as_deref()
+                        .ok_or("lifetime outcome hash absent")?
+            {
+                return Err("lifetime reserve outcome differs from held anchor".into());
+            }
+            let observed: Value = serde_json::from_slice(&bounded_regular_file(
+                &outcome.with_extension("json"),
+                131_072,
+            )?)
+            .map_err(|error| format!("lifetime outcome JSON: {error}"))?;
+            if ReserveAnchor::from_confirmed(&observed)? != *anchor {
+                return Err("lifetime original outcome changed".into());
+            }
+            // This exact op3 is read-only; a second op2 is never issued.
+            self.command_output(
+                &self.config.mini,
+                &[
+                    "agent-lifetime-reserve-lookup",
+                    "--attempt",
+                    directory.to_str().ok_or("lifetime reserve path UTF-8")?,
+                ],
+            )?;
+            let receipt: Value = serde_json::from_slice(&bounded_regular_file(
+                &directory.join("receipt.json"),
+                4096,
+            )?)
+            .map_err(|error| format!("lifetime reserve receipt JSON: {error}"))?;
+            if receipt.get("transactionId").and_then(Value::as_str)
+                != Some(anchor.transaction_id.as_str())
+                || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
+                || receipt.get("acceptedCount").and_then(Value::as_str)
+                    != Some(anchor.accepted_count.as_str())
+                || receipt.get("imageBoundary").and_then(Value::as_str)
+                    != Some(anchor.image_boundary.as_str())
+                || receipt.get("reserveIndex").and_then(Value::as_str)
+                    != lifetime.reserve_index.as_deref()
+            {
+                return Err("lifetime historical reserve receipt differs".into());
+            }
+            return Ok((id, anchor.clone()));
+        }
         if let Some(directory) = &attempt.reserve_v2_dir {
             let id = attempt
                 .reserve_operation_id
@@ -3081,6 +3476,576 @@ impl Runtime {
         Ok((route, retained))
     }
 
+    /// Compare a v3 reverse reserve request with the exact durable forward
+    /// HTTP and immutable event22/event27 route pins before any purse signer
+    /// is opened. Fresh generations and roots are supplied later by the
+    /// source-owned op80 plan and current Mini observations, never by this
+    /// transport request or a copied v2 generation pin.
+    fn verified_reverse_lifetime_fixed_request(
+        &self,
+        route_name: &str,
+        forward_operation_id: &str,
+        binding_sha256: &str,
+        fixed_request: &Value,
+    ) -> Result<(application_api_tools::LifetimeRoutePin, Value)> {
+        decimal(forward_operation_id, "forward HTTP operation ID")?;
+        let forward_id = forward_operation_id
+            .parse::<u64>()
+            .map_err(|_| "forward HTTP operation ID exceeds u64")?;
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("no retained forward API attempt")?;
+        if (!self.prompt_active && self.foreground_operation.is_none())
+            || self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || attempt.operation_id != forward_id
+            || attempt.route_name != route_name
+            || attempt.phase != ApplicationApiPhase::DispatchStarted
+            || attempt.binding_sha256.as_deref() != Some(binding_sha256)
+            || sha256_file(&attempt.request_path)? != attempt.request_sha256
+        {
+            return Err(
+                "lifetime reverse reserve differs from active retained forward call".into(),
+            );
+        }
+        let route = self
+            .config
+            .tool_task
+            .as_ref()
+            .and_then(|task| {
+                task.allowed_application_lifetime_routes
+                    .iter()
+                    .find(|route| route.name == route_name)
+            })
+            .ok_or("lifetime reverse route is not operator-pinned")?
+            .clone();
+        let dispatch = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?;
+        if dispatch.operator_socket.is_none() || dispatch.reserve_signer.is_none() {
+            return Err("lifetime reserve lacks private operator socket or signer pin".into());
+        }
+        let retained: Value =
+            serde_json::from_slice(&bounded_regular_file(&attempt.request_path, 262_144)?)
+                .map_err(|error| format!("retained lifetime API request JSON: {error}"))?;
+        if retained.get("type").and_then(Value::as_str) != Some("dispatch-v3")
+            || retained.get("protocol").and_then(Value::as_str) != Some("mini-spk-agent-api-v3")
+            || retained.get("operationId").and_then(Value::as_str) != Some(forward_operation_id)
+            || retained.get("bindingSha256").and_then(Value::as_str) != Some(binding_sha256)
+        {
+            return Err("retained lifetime HTTP operation ID changed".into());
+        }
+        let expected = json!({
+            "fixed": {
+                "base": {
+                    "issueIndex":route.dispatch_selectors.issue_index,
+                    "ticketResource":route.ticket_resource,
+                    "packageManifest":route.dispatch_selectors.package_manifest,
+                    "snapshotManifest":route.dispatch_selectors.snapshot_manifest,
+                    "sessionObserveCapability":route.dispatch_selectors.session_observe,
+                    "manifestObserveCapability":route.dispatch_selectors.manifest_observe,
+                    "enrollmentObserveCapability":route.dispatch_selectors.enrollment_observe,
+                    "http":application_api_tools::routed_reserve_http(
+                        &retained, &route.signed_api_path)?,
+                },
+                "parentTask":self.config.task,
+                "parentCapability":dispatch.parent_capability,
+                "parentObserve":dispatch.parent_observe_capability,
+                "purseTask":dispatch.task,
+                "purseCapability":dispatch.capability,
+                "purseObserve":dispatch.query_capability,
+                "payerSubject":dispatch.subject,
+                "reserveAmount":dispatch.reserve,
+                "maximumCharge":dispatch.charge,
+                "reserveOperationId":"0",
+            },
+            "grantIssueIndex":route.grant_issue_index,
+            "grantResource":route.grant_resource,
+            "grantObserveCapability":route.grant_observe_capability,
+        });
+        if fixed_request != &expected {
+            return Err("lifetime reserve selectors or HTTP differ from operator intent".into());
+        }
+        Ok((route, retained))
+    }
+
+    /// Source-owned event26 reserve for one retained v3 forward call. The
+    /// exact op80 plan and current signed parent/purse are checked before the
+    /// protected signer is opened. The client durably marks one public op2;
+    /// any lost reply can only take the receipt-only op3 path.
+    fn dispatch_reserve_v3(
+        &mut self,
+        route_name: &str,
+        forward_operation_id: &str,
+        binding_sha256: &str,
+        worker_wall_seconds: u64,
+        fixed_request: &Value,
+    ) -> Result<Value> {
+        let selected = self
+            .config
+            .commands
+            .iter()
+            .find(|command| command.name == "hermes-acp")
+            .ok_or("selected Hermes worker command absent")?;
+        let effective_wall = checked_lifetime_worker_wall(
+            selected,
+            worker_wall_seconds,
+            self.prompt_active,
+            self.child.is_some(),
+            self.journal
+                .child
+                .as_ref()
+                .map(|child| child.program.as_path()),
+            self.foreground_operation.is_some(),
+        )?;
+        let (route, retained_forward) = self.verified_reverse_lifetime_fixed_request(
+            route_name,
+            forward_operation_id,
+            binding_sha256,
+            fixed_request,
+        )?;
+        if self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+        {
+            return Err("lifetime dispatch has an unresolved prior custody attempt".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let operator_socket = task
+            .operator_socket
+            .as_ref()
+            .ok_or("operator socket absent")?;
+        let public_socket = self
+            .config
+            .host_socket
+            .clone()
+            .ok_or("public socket absent")?;
+        let signer = task
+            .reserve_signer
+            .as_ref()
+            .ok_or("reserve signer absent")?;
+        let parent = self.query()?;
+        let parent_generation = parent
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("parent generation absent")?
+            .to_owned();
+        let parent_root = parent
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("parent physical root absent")?
+            .to_owned();
+        if !matches!(
+            parent.pointer("/grain/status").and_then(Value::as_str),
+            Some("3" | "4")
+        ) || self.journal.prompt_witness.is_none()
+        {
+            return Err("lifetime parent prompt is not reserved".into());
+        }
+        let authority = self.dispatch()?;
+        let mut purse = self.query_as(&authority)?;
+        let status = purse
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("dispatch purse status absent")?;
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "dispatch attach",
+                "agent lifetime dispatch attach",
+                vec![],
+            )?;
+            purse = self.query_as(&authority)?;
+        } else if status != "1" {
+            return Err("dispatch purse is not available for lifetime reserve".into());
+        }
+        if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+        {
+            return Err("lifetime purse is not running and unreserved".into());
+        }
+        let purse_generation = purse
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("purse generation absent")?
+            .to_owned();
+        let purse_root = purse
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("purse physical root absent")?
+            .to_owned();
+        let reserve_operation_id = self.next_id()?;
+        let attempt_id = self.next_id()?;
+        let mut source = fixed_request.clone();
+        source["fixed"]["reserveOperationId"] = json!(reserve_operation_id.to_string());
+        let source_path = self.config.state_dir.join(format!(
+            "dispatch-lifetime-source-{reserve_operation_id:016}.json"
+        ));
+        write_new(
+            &source_path,
+            &serde_json::to_vec(&source)
+                .map_err(|error| format!("lifetime source JSON: {error}"))?,
+        )?;
+        let directory = self
+            .config
+            .state_dir
+            .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
+        fn path(value: &Path) -> Result<&str> {
+            value
+                .to_str()
+                .ok_or_else(|| format!("{} is not UTF-8", value.display()))
+        }
+        self.check_not_cancelled()?;
+        let plan_stdout = self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-lifetime-reserve-plan",
+                "--host",
+                path(&self.config.host)?,
+                "--config",
+                path(&self.config.host_config)?,
+                "--operator-socket",
+                path(operator_socket)?,
+                "--public-socket",
+                path(&public_socket)?,
+                "--request",
+                path(&source_path)?,
+                "--dir",
+                path(&directory)?,
+            ]);
+            command
+        })?;
+        let read_json = |name: &str| -> Result<Value> {
+            serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
+                .map_err(|error| format!("retained lifetime {name}: {error}"))
+        };
+        let request = read_json("request-inspected.json")?;
+        let plan = read_json("plan-inspected.json")?;
+        if plan_stdout != plan {
+            return Err("lifetime plan stdout differs from retained source inspection".into());
+        }
+        let fixed_selectors = json!({
+            "issueIndex":route.dispatch_selectors.issue_index,
+            "ticketResource":route.ticket_resource,
+            "packageManifest":route.dispatch_selectors.package_manifest,
+            "snapshotManifest":route.dispatch_selectors.snapshot_manifest,
+            "sessionObserve":route.dispatch_selectors.session_observe,
+            "manifestObserve":route.dispatch_selectors.manifest_observe,
+            "enrollmentObserve":route.dispatch_selectors.enrollment_observe,
+            "parentTask":self.config.task,
+            "parentCapability":task.parent_capability,
+            "parentObserve":task.parent_observe_capability,
+            "purseTask":task.task,
+            "purseCapability":task.capability,
+            "purseObserve":task.query_capability,
+            "payerSubject":task.subject,
+            "reserveAmount":task.reserve,
+            "maximumCharge":task.charge,
+            "grantIssueIndex":route.grant_issue_index,
+            "grantResource":route.grant_resource,
+            "grantObserveCapability":route.grant_observe_capability,
+        });
+        let context = plan
+            .get("context")
+            .ok_or("lifetime reserve context absent")?;
+        let bindings = plan
+            .get("bindings")
+            .ok_or("lifetime reserve bindings absent")?;
+        let get = |object: &Value, field: &str| -> Result<String> {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| format!("lifetime source {field} absent"))
+        };
+        let app_generation = get(context, "appGeneration")?;
+        let session_generation = get(context, "sessionGeneration")?;
+        let app_physical_root = get(bindings, "appPhysicalRoot")?;
+        let session_physical_root = get(bindings, "sessionPhysicalRoot")?;
+        application_api_tools::verify_lifetime_reserve_inspection(
+            application_api_tools::LifetimeReserveInspection {
+                route: &route,
+                retained_forward: &retained_forward,
+                expected_selectors: &fixed_selectors,
+                reserve_operation_id: &reserve_operation_id.to_string(),
+                signed_parent_generation: &parent_generation,
+                signed_purse_generation: &purse_generation,
+                signed_app_physical_root: &app_physical_root,
+                signed_session_physical_root: &session_physical_root,
+                signed_parent_physical_root: &parent_root,
+                signed_purse_physical_root: &purse_root,
+                request: &request,
+                plan: &plan,
+            },
+        )?;
+        if request.get("canonicalRequestHex") != plan.get("canonicalRequestHex")
+            || request.get("http") != plan.get("http")
+            || get(context, "appGeneration")? != app_generation
+            || get(context, "sessionGeneration")? != session_generation
+        {
+            return Err("lifetime reserve request changed during planning".into());
+        }
+        let canonical_http = dispatch_custody::decode_hex(
+            plan.get("canonicalHttpHex")
+                .and_then(Value::as_str)
+                .ok_or("lifetime canonical HTTP absent")?,
+        )?;
+        if canonical_http.is_empty() || canonical_http.len() > 10 * 1024 * 1024 {
+            return Err("lifetime canonical HTTP exceeds retained bound".into());
+        }
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
+        write_new(&request_path, &canonical_http)?;
+        let request_sha256 = sha256_file(&request_path)?;
+        let claims = application_api_tools::LifetimeCurrentClaims {
+            app_generation: app_generation.clone(),
+            session_generation: session_generation.clone(),
+            parent_generation: parent_generation.clone(),
+            purse_generation: purse_generation.clone(),
+            app_physical_root: app_physical_root.clone(),
+            session_physical_root: session_physical_root.clone(),
+            parent_physical_root: parent_root.clone(),
+            purse_physical_root: purse_root.clone(),
+        };
+        let fingerprint = application_api_tools::lifetime_operation_fingerprint(
+            binding_sha256,
+            &claims,
+            forward_operation_id,
+            &request_sha256,
+        )?;
+        let slots = plan
+            .get("slots")
+            .and_then(Value::as_array)
+            .ok_or("lifetime reserve slots absent")?;
+        let signers = lifetime_purse_signers(slots, signer, &task.custody_key)?;
+        let approval = json!({
+            "type":"minidregg-agent-lifetime-reserve-approval-v1",
+            "requestSha256":sha256_file(&directory.join("request.bin"))?,
+            "planSha256":sha256_file(&directory.join("plan.bin"))?,
+            "fixedSelectors":fixed_selectors,
+            "context":context,
+            "bindings":bindings,
+            "canonicalHttpHex":plan.get("canonicalHttpHex"),
+            "signers":signers,
+        });
+        let approval_path = self.config.state_dir.join(format!(
+            "dispatch-lifetime-approval-{reserve_operation_id:016}.json"
+        ));
+        write_new(
+            &approval_path,
+            &serde_json::to_vec(&approval)
+                .map_err(|error| format!("lifetime reserve approval JSON: {error}"))?,
+        )?;
+        let forward = self
+            .journal
+            .application_api_attempt
+            .as_mut()
+            .ok_or("lifetime forward attempt disappeared")?;
+        if forward.operation_id.to_string() != forward_operation_id
+            || forward.operation_fingerprint.is_some()
+        {
+            return Err("lifetime forward fingerprint was already allocated".into());
+        }
+        forward.operation_fingerprint = Some(fingerprint.clone());
+        self.journal.dispatch_attempt = Some(DispatchAttempt {
+            id: attempt_id,
+            http_operation_id: forward_operation_id.into(),
+            parent_generation: parent_generation.clone(),
+            parent_root: parent_root.clone(),
+            request_path,
+            request_bytes: canonical_http.len(),
+            request_sha256,
+            source_request_digest: get(context, "requestDigest")?,
+            reserve_operation_id: Some(reserve_operation_id),
+            reserve_v2_dir: None,
+            reserve_v2_request_sha256: None,
+            reserve_v2_plan_sha256: None,
+            reserve_v2_source_sha256: None,
+            lifetime: Some(LifetimeDispatchCustody {
+                route_name: route_name.into(),
+                worker_wall_seconds: Some(effective_wall),
+                original_issue_index: route.dispatch_selectors.issue_index.clone(),
+                original_issue_receipt: route.original_issue_receipt.clone(),
+                grant_issue_receipt: route.grant_issue_receipt.clone(),
+                grant_resource: route.grant_resource.clone(),
+                grant_issue_index: route.grant_issue_index.clone(),
+                grant_digest: route.grant_digest.clone(),
+                grant_initialized_root: route.grant_initialized_root.clone(),
+                source_path: source_path.clone(),
+                source_sha256: sha256_file(&source_path)?,
+                reserve_dir: directory.clone(),
+                reserve_request_sha256: sha256_file(&directory.join("request.bin"))?,
+                reserve_plan_sha256: sha256_file(&directory.join("plan.bin"))?,
+                context_hex: get(context, "canonicalHex")?,
+                app_generation,
+                session_generation,
+                parent_generation: parent_generation.clone(),
+                purse_generation,
+                app_physical_root,
+                session_physical_root,
+                parent_physical_root: parent_root,
+                pre_reserve_purse_physical_root: purse_root,
+                reserve_index: None,
+                reserve_receipt: None,
+                post_reserve_purse_physical_root: None,
+                paid_dir: None,
+                paid_plan_sha256: None,
+                paid_ingress_sha256: None,
+                committed_frame_sha256: None,
+                committed_receipt: None,
+            }),
+            dispatch_generation: None,
+            dispatch_post_root: None,
+            no_send_release_started: false,
+            audited_charge: None,
+            settlement: None,
+            send_started: false,
+            committed_dispatch_transaction: None,
+            committed_dispatch_event: None,
+            committed_permit_sha256: None,
+            response_sha256: None,
+        });
+        self.save()?;
+        self.mark_hold_as(
+            AuthoritySlot::Dispatch,
+            &authority,
+            &task.reserve,
+            &task.charge,
+        )?;
+        self.check_not_cancelled()?;
+        self.work_output(
+            &self.config.mini,
+            &[
+                "agent-lifetime-reserve-seal",
+                "--attempt",
+                path(&directory)?,
+                "--approval",
+                path(&approval_path)?,
+            ],
+        )
+        .map_err(|error| format!("lifetime reserve seal: {error}"))?;
+        self.check_not_cancelled()?;
+        self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-lifetime-reserve-submit",
+                "--attempt",
+                path(&directory)?,
+            ]);
+            command
+        })?;
+        let receipt = read_json("receipt.json")?;
+        let original = read_json("submit.outcome.json")?;
+        let anchor = ReserveAnchor::from_confirmed(&original)?;
+        if receipt.get("transactionId").and_then(Value::as_str)
+            != Some(anchor.transaction_id.as_str())
+            || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
+            || receipt.get("acceptedCount").and_then(Value::as_str)
+                != Some(anchor.accepted_count.as_str())
+            || receipt.get("imageBoundary").and_then(Value::as_str)
+                != Some(anchor.image_boundary.as_str())
+            || receipt.get("reserveIndex").and_then(Value::as_str)
+                != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
+        {
+            return Err("lifetime reserve receipt differs from native outcome".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_mut()
+            .ok_or("lifetime hold disappeared")?;
+        hold.reserve_attempt = Some(directory.clone());
+        hold.reserve_confirmed = true;
+        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
+        hold.reserve_source_sha256 = Some(sha256_file(&source_path)?);
+        hold.reserve_outcome_path = Some(directory.join("submit.outcome.bin"));
+        hold.reserve_outcome_sha256 = Some(sha256_file(&directory.join("submit.outcome.bin"))?);
+        hold.reserve_anchor = Some(anchor.clone());
+        let saved = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("lifetime attempt disappeared")?;
+        saved
+            .lifetime
+            .as_mut()
+            .ok_or("lifetime custody absent")?
+            .reserve_index = receipt
+            .get("reserveIndex")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        saved.lifetime.as_mut().unwrap().reserve_receipt = Some(anchor.clone());
+        self.save()?;
+        // This lookup is read-only and requires the exact historical receipt.
+        self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-lifetime-reserve-lookup",
+                "--attempt",
+                path(&directory)?,
+            ]);
+            command
+        })?;
+        let state = self.query_as(&authority)?;
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+        {
+            return Err("lifetime reserve lacks signed held purse".into());
+        }
+        let generation = state
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("held purse generation absent")?
+            .to_owned();
+        let post_root = state
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("held purse root absent")?
+            .to_owned();
+        let saved = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("lifetime attempt disappeared")?;
+        saved.dispatch_generation = Some(generation);
+        saved.dispatch_post_root = Some(post_root.clone());
+        saved
+            .lifetime
+            .as_mut()
+            .ok_or("lifetime custody absent")?
+            .post_reserve_purse_physical_root = Some(post_root);
+        self.save()?;
+        let reserve_plan_hex =
+            checked_lifetime_reserve_plan_hex(&plan, &directory.join("plan.bin"))?;
+        Ok(json!({"type":"dispatch-reserved-v3",
+            "attemptId":attempt_id.to_string(),
+            "httpOperationId":forward_operation_id,
+            "bindingSha256":binding_sha256,
+            "operationFingerprint":fingerprint,
+            "currentClaims":claims,
+            "reserveOperationId":reserve_operation_id.to_string(),
+            "fixedRequestHex":request.get("canonicalRequestHex"),
+            "reservePlanHex":reserve_plan_hex,
+            "effectiveWorkerWallSeconds":effective_wall.to_string(),
+            "contextHex":context.get("canonicalHex"),
+            "reserveIndex":receipt.get("reserveIndex"),
+            "reserveReceipt":anchor}))
+    }
+
     /// Source-owned v2 reserve for exactly the active forward API call. The
     /// private op58/59 phases expose and seal a plan; only the marked public
     /// op2 phase can mutate Mini. A lost op2 reply remains in custody for op3
@@ -3352,6 +4317,7 @@ impl Runtime {
             reserve_v2_request_sha256: Some(sha256_file(&directory.join("request.bin"))?),
             reserve_v2_plan_sha256: Some(sha256_file(&directory.join("plan.bin"))?),
             reserve_v2_source_sha256: Some(sha256_file(&source_path)?),
+            lifetime: None,
             dispatch_generation: None,
             dispatch_post_root: None,
             no_send_release_started: false,
@@ -3555,6 +4521,351 @@ impl Runtime {
                 .and_then(Value::as_str).ok_or("v2 context absent")?,
             "reserveIndex":previous_accepted_index(&anchor.accepted_count)?,
             "reserveReceipt":anchor}))
+    }
+
+    fn dispatch_inspect_v3(&self, route_name: &str, forward_operation_id: &str) -> Result<Value> {
+        decimal(forward_operation_id, "lifetime forward operation ID")?;
+        let forward_id = forward_operation_id
+            .parse::<u64>()
+            .map_err(|_| "lifetime forward operation ID exceeds u64")?;
+        let forward = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("lifetime forward attempt absent")?;
+        if forward.operation_id != forward_id
+            || forward.route_name != route_name
+            || sha256_file(&forward.request_path)? != forward.request_sha256
+        {
+            return Err("lifetime inspect differs from retained forward call".into());
+        }
+        let binding = forward
+            .binding_sha256
+            .as_deref()
+            .ok_or("lifetime stable Hello binding absent")?;
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("lifetime reserve attempt absent")?;
+        let lifetime = attempt
+            .lifetime
+            .as_ref()
+            .ok_or("retained dispatch is not a lifetime reserve")?;
+        let worker_wall = lifetime
+            .worker_wall_seconds
+            .ok_or("retained lifetime worker wall absent")?;
+        if lifetime.route_name != route_name
+            || attempt.http_operation_id != forward_operation_id
+            || sha256_file(&attempt.request_path)? != attempt.request_sha256
+            || sha256_file(&lifetime.source_path)? != lifetime.source_sha256
+            || sha256_file(&lifetime.reserve_dir.join("request.bin"))?
+                != lifetime.reserve_request_sha256
+            || sha256_file(&lifetime.reserve_dir.join("plan.bin"))? != lifetime.reserve_plan_sha256
+        {
+            return Err("lifetime reserve source custody differs".into());
+        }
+        let current = application_api_tools::LifetimeCurrentClaims {
+            app_generation: lifetime.app_generation.clone(),
+            session_generation: lifetime.session_generation.clone(),
+            parent_generation: lifetime.parent_generation.clone(),
+            purse_generation: lifetime.purse_generation.clone(),
+            app_physical_root: lifetime.app_physical_root.clone(),
+            session_physical_root: lifetime.session_physical_root.clone(),
+            parent_physical_root: lifetime.parent_physical_root.clone(),
+            purse_physical_root: lifetime.pre_reserve_purse_physical_root.clone(),
+        };
+        let fingerprint = application_api_tools::lifetime_operation_fingerprint(
+            binding,
+            &current,
+            forward_operation_id,
+            &attempt.request_sha256,
+        )?;
+        if forward.operation_fingerprint.as_deref() != Some(fingerprint.as_str()) {
+            return Err("lifetime operation fingerprint differs from journal".into());
+        }
+        let Some(hold) = self.journal.dispatch_hold.as_ref() else {
+            return Ok(json!({"type":"dispatch-reserve-uncertain-v3",
+                "httpOperationId":forward_operation_id,
+                "bindingSha256":binding,
+                "operationFingerprint":fingerprint,
+                "attemptId":attempt.id.to_string()}));
+        };
+        if !hold.reserve_confirmed
+            || lifetime.reserve_receipt.is_none()
+            || attempt.dispatch_generation.is_none()
+        {
+            return Ok(json!({"type":"dispatch-reserve-uncertain-v3",
+                "httpOperationId":forward_operation_id,
+                "bindingSha256":binding,
+                "operationFingerprint":fingerprint,
+                "attemptId":attempt.id.to_string()}));
+        }
+        let (reserve_id, anchor) = self.verified_dispatch_reserve_hold(attempt, hold)?;
+        let request: Value = serde_json::from_slice(&bounded_regular_file(
+            &lifetime.reserve_dir.join("request-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("lifetime request inspection: {error}"))?;
+        let plan: Value = serde_json::from_slice(&bounded_regular_file(
+            &lifetime.reserve_dir.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("lifetime plan inspection: {error}"))?;
+        if plan
+            .pointer("/context/reserveOperationId")
+            .and_then(Value::as_str)
+            != Some(reserve_id.to_string().as_str())
+            || plan
+                .pointer("/context/canonicalHex")
+                .and_then(Value::as_str)
+                != Some(lifetime.context_hex.as_str())
+            || plan.get("canonicalRequestHex") != request.get("canonicalRequestHex")
+        {
+            return Err("lifetime retained plan differs from reserve custody".into());
+        }
+        let plan_hex =
+            checked_lifetime_reserve_plan_hex(&plan, &lifetime.reserve_dir.join("plan.bin"))?;
+        Ok(json!({"type":"dispatch-reserved-v3",
+            "attemptId":attempt.id.to_string(),
+            "httpOperationId":forward_operation_id,
+            "bindingSha256":binding,
+            "operationFingerprint":fingerprint,
+            "currentClaims":current,
+            "reserveOperationId":reserve_id.to_string(),
+            "fixedRequestHex":request.get("canonicalRequestHex"),
+            "reservePlanHex":plan_hex,
+            "effectiveWorkerWallSeconds":worker_wall.to_string(),
+            "contextHex":lifetime.context_hex,
+            "reserveIndex":lifetime.reserve_index,
+            "reserveReceipt":anchor}))
+    }
+
+    /// Return only detached payer signatures for this exact v3 source plan.
+    /// Resident app/grant keys never enter this process; op79 assembly and
+    /// fresh op76 delivery remain the resident's separate custody phase.
+    fn dispatch_sign_payer_v3(
+        &mut self,
+        route_name: &str,
+        forward_operation_id: &str,
+        attempt_id: &str,
+        paid_plan_hex: &str,
+        resident_inspection: &Value,
+        operation_fingerprint: &str,
+    ) -> Result<Value> {
+        let confirmed = self.dispatch_inspect_v3(route_name, forward_operation_id)?;
+        if confirmed.get("type").and_then(Value::as_str) != Some("dispatch-reserved-v3")
+            || confirmed.get("attemptId").and_then(Value::as_str) != Some(attempt_id)
+            || confirmed
+                .get("operationFingerprint")
+                .and_then(Value::as_str)
+                != Some(operation_fingerprint)
+        {
+            return Err("lifetime payer lacks exact confirmed reserve/fingerprint".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || (!self.prompt_active && self.foreground_operation.is_none())
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("lifetime parent no longer permits payer signing".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let signer = task
+            .reserve_signer
+            .as_ref()
+            .ok_or("protected payer signer absent")?;
+        let route = self
+            .config
+            .tool_task
+            .as_ref()
+            .and_then(|tool| {
+                tool.allowed_application_lifetime_routes
+                    .iter()
+                    .find(|route| route.name == route_name)
+            })
+            .ok_or("lifetime route absent")?
+            .clone();
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("lifetime dispatch attempt absent")?;
+        let lifetime = attempt.lifetime.as_ref().ok_or("lifetime custody absent")?;
+        if attempt.id.to_string() != attempt_id
+            || attempt.send_started
+            || attempt.no_send_release_started
+            || attempt.audited_charge.is_some()
+            || lifetime.paid_dir.is_some()
+        {
+            return Err("lifetime payer attempt is already used or unresolved".into());
+        }
+        let reserve_dir = lifetime.reserve_dir.clone();
+        let post_purse_root = lifetime
+            .post_reserve_purse_physical_root
+            .as_ref()
+            .ok_or("lifetime signed post-reserve purse root absent")?
+            .clone();
+        let state = self.query_as(&self.dispatch()?)?;
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+            || state.get("targetRoot").and_then(Value::as_str) != Some(post_purse_root.as_str())
+        {
+            return Err("lifetime payer lacks current signed held purse".into());
+        }
+        if paid_plan_hex.len() > 2 * 10 * 1024 * 1024 {
+            return Err("lifetime paid plan exceeds native bound".into());
+        }
+        let resident_bytes = dispatch_custody::decode_hex(paid_plan_hex)?;
+        if resident_bytes.is_empty() {
+            return Err("lifetime paid plan is empty".into());
+        }
+        let directory = self
+            .config
+            .state_dir
+            .join(format!("agent-lifetime-paid-{attempt_id}"));
+        fn path(value: &Path) -> Result<&str> {
+            value
+                .to_str()
+                .ok_or_else(|| format!("{} is not UTF-8", value.display()))
+        }
+        self.check_not_cancelled()?;
+        let current = self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-lifetime-paid-plan",
+                "--reserve-attempt",
+                path(&reserve_dir)?,
+                "--grant-attempt",
+                path(&route.grant_attempt_dir)?,
+                "--dir",
+                path(&directory)?,
+            ]);
+            command
+        })?;
+        if sha256_file(&directory.join("plan.bin"))? != sha256_bytes(&resident_bytes)?
+            || bounded_regular_file(&directory.join("plan.bin"), 10 * 1024 * 1024)?
+                != resident_bytes
+        {
+            return Err("resident lifetime paid bytes differ from source-owned op78".into());
+        }
+        let paid: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("lifetime paid inspection JSON: {error}"))?;
+        if current != paid
+            || &paid != resident_inspection
+            || paid.get("canonicalPlanHex").and_then(Value::as_str) != Some(paid_plan_hex)
+        {
+            return Err("resident lifetime paid inspection differs from source".into());
+        }
+        let reserve: Value = serde_json::from_slice(&bounded_regular_file(
+            &reserve_dir.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("lifetime original reserve plan JSON: {error}"))?;
+        let reserve_receipt: Value = serde_json::from_slice(&bounded_regular_file(
+            &reserve_dir.join("receipt.json"),
+            4096,
+        )?)
+        .map_err(|error| format!("lifetime original reserve receipt JSON: {error}"))?;
+        application_api_tools::verify_lifetime_paid_inspection(
+            application_api_tools::LifetimePaidInspection {
+                reserve: &reserve,
+                paid: &paid,
+                reserve_index: confirmed
+                    .get("reserveIndex")
+                    .and_then(Value::as_str)
+                    .ok_or("lifetime reserve index absent")?,
+                reserve_receipt: &json!({
+                    "transactionId":reserve_receipt.get("transactionId"),
+                    "eventId":reserve_receipt.get("eventId"),
+                    "acceptedCount":reserve_receipt.get("acceptedCount"),
+                    "imageBoundary":reserve_receipt.get("imageBoundary"),
+                }),
+                signed_post_purse_physical_root: &post_purse_root,
+            },
+        )?;
+        let slots = paid
+            .get("payerSlots")
+            .and_then(Value::as_array)
+            .ok_or("lifetime paid payer slots absent")?;
+        let payer_signers = lifetime_purse_signers(slots, signer, &task.custody_key)?;
+        let approval = json!({
+            "type":"minidregg-agent-lifetime-payer-approval-v1",
+            "requestSha256":sha256_file(&directory.join("request.bin"))?,
+            "planSha256":sha256_file(&directory.join("plan.bin"))?,
+            "fixedSelectors":paid.get("fixedSelectors"),
+            "context":paid.get("context"),
+            "bindings":paid.get("bindings"),
+            "canonicalHttpHex":paid.get("canonicalHttpHex"),
+            "reserveReceipt":paid.get("reserveReceipt"),
+            "grantIssueReceipt":paid.pointer("/bindings/grantIssueReceipt"),
+            "payerSigners":payer_signers,
+        });
+        let approval_path = self
+            .config
+            .state_dir
+            .join(format!("agent-lifetime-payer-approval-{attempt_id}.json"));
+        write_new(
+            &approval_path,
+            &serde_json::to_vec(&approval)
+                .map_err(|error| format!("lifetime payer approval JSON: {error}"))?,
+        )?;
+        let lifetime = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .and_then(|saved| saved.lifetime.as_mut())
+            .ok_or("lifetime attempt disappeared before signing")?;
+        lifetime.paid_dir = Some(directory.clone());
+        lifetime.paid_plan_sha256 = Some(sha256_file(&directory.join("plan.bin"))?);
+        self.save()?;
+        self.check_not_cancelled()?;
+        let result = self.supervised_json_command({
+            let mut command = Command::new(&self.config.mini);
+            command.args([
+                "agent-lifetime-paid-payer-sign",
+                "--attempt",
+                path(&directory)?,
+                "--approval",
+                path(&approval_path)?,
+            ]);
+            command
+        })?;
+        if result.get("type").and_then(Value::as_str)
+            != Some("minidregg-agent-lifetime-payer-signatures-v1")
+            || result.get("planSha256").and_then(Value::as_str)
+                != Some(sha256_file(&directory.join("plan.bin"))?.as_str())
+            || result
+                .get("signatures")
+                .and_then(Value::as_array)
+                .is_none_or(|list| {
+                    list.len() != 3
+                        || list.iter().any(|entry| {
+                            entry.as_str().is_none_or(|signature| {
+                                signature.len() != 128
+                                    || !signature.bytes().all(|byte| {
+                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                                    })
+                            })
+                        })
+                })
+        {
+            return Err("lifetime detached payer signatures differ from approved plan".into());
+        }
+        Ok(json!({"type":"payer-signatures-v3",
+            "attemptId":attempt_id,
+            "bindingSha256":confirmed.get("bindingSha256"),
+            "operationFingerprint":operation_fingerprint,
+            "signedPostReservePursePhysicalRoot":post_purse_root,
+            "planSha256":result.get("planSha256"),
+            "signatures":result.get("signatures")}))
     }
 
     /// The resident supplies an op48 paid plan, but only the controller's
@@ -3896,6 +5207,7 @@ impl Runtime {
             reserve_v2_request_sha256: None,
             reserve_v2_plan_sha256: None,
             reserve_v2_source_sha256: None,
+            lifetime: None,
             dispatch_generation: None,
             dispatch_post_root: None,
             no_send_release_started: false,
@@ -4067,6 +5379,12 @@ impl Runtime {
             .as_ref()
             .ok_or("no held dispatch attempt")?
             .clone();
+        if attempt.lifetime.is_some() {
+            return Err(
+                "event26 lifetime dispatch requires distinct v3 committed-permit verification"
+                    .into(),
+            );
+        }
         if attempt.id != attempt_id
             || attempt.send_started
             || attempt.no_send_release_started
@@ -4152,6 +5470,334 @@ impl Runtime {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_mark_send_v3(
+        &mut self,
+        attempt_id: &str,
+        binding_sha256: &str,
+        operation_fingerprint: &str,
+        request_sha256: &str,
+        ingress_hex: &str,
+        committed_frame_hex: &str,
+        receipt: &Value,
+    ) -> Result<Value> {
+        decimal(attempt_id, "lifetime mark-send attempt ID")?;
+        let id = attempt_id
+            .parse::<u64>()
+            .map_err(|_| "lifetime mark-send attempt ID exceeds u64")?;
+        for (label, value) in [
+            ("stable binding SHA-256", binding_sha256),
+            ("operation fingerprint", operation_fingerprint),
+            ("HTTP request SHA-256", request_sha256),
+        ] {
+            if value.len() != 64
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!("{label} must be 32 lowercase hex bytes"));
+            }
+        }
+        let exact_receipt: ReserveAnchor = serde_json::from_value(receipt.clone())
+            .map_err(|error| format!("lifetime committed receipt shape: {error}"))?;
+        for (label, value) in [
+            ("transaction ID", &exact_receipt.transaction_id),
+            ("event ID", &exact_receipt.event_id),
+            ("accepted count", &exact_receipt.accepted_count),
+            ("image boundary", &exact_receipt.image_boundary),
+        ] {
+            decimal(value, label)?;
+            if value.len() > 80 {
+                return Err(format!("lifetime {label} exceeds native bound"));
+            }
+        }
+        let ingress = dispatch_custody::decode_hex(ingress_hex)?;
+        let committed = dispatch_custody::decode_hex(committed_frame_hex)?;
+        if ingress.is_empty()
+            || ingress.len() > 10 * 1024 * 1024
+            || committed.is_empty()
+            || committed.len() > 10 * 1024 * 1024
+        {
+            return Err("lifetime committed custody bytes exceed native bound".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("lifetime dispatch attempt absent")?
+            .clone();
+        let lifetime = attempt
+            .lifetime
+            .as_ref()
+            .ok_or("mark-send-v3 requires event26 lifetime custody")?;
+        let forward = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("lifetime forward attempt absent")?;
+        if attempt.id != id
+            || attempt.send_started
+            || attempt.no_send_release_started
+            || attempt.audited_charge.is_some()
+            || attempt.request_sha256 != request_sha256
+            || forward.operation_id.to_string() != attempt.http_operation_id
+            || forward.binding_sha256.as_deref() != Some(binding_sha256)
+            || forward.operation_fingerprint.as_deref() != Some(operation_fingerprint)
+            || forward.lifetime_committed_receipt.is_some()
+            || forward.lifetime_settled_response_sha256.is_some()
+            || lifetime.paid_ingress_sha256.is_some()
+            || lifetime.committed_frame_sha256.is_some()
+            || lifetime.committed_receipt.is_some()
+            || lifetime.paid_dir.is_none()
+            || self.journal.dispatch_pending.is_some()
+            || !self
+                .journal
+                .dispatch_hold
+                .as_ref()
+                .is_some_and(|hold| hold.reserve_confirmed && hold.reserve_anchor.is_some())
+        {
+            return Err("lifetime attempt is not an exact confirmed unsent reserve".into());
+        }
+        if sha256_file(&attempt.request_path)? != request_sha256 {
+            return Err("lifetime retained HTTP request changed".into());
+        }
+        let paid_dir = lifetime
+            .paid_dir
+            .as_ref()
+            .ok_or("lifetime paid plan absent")?;
+        let paid_path = paid_dir.join("plan.bin");
+        if sha256_file(&paid_path)?
+            != lifetime
+                .paid_plan_sha256
+                .as_deref()
+                .ok_or("lifetime paid plan hash absent")?
+        {
+            return Err("lifetime paid plan changed after payer signing".into());
+        }
+        let paid: Value = serde_json::from_slice(&bounded_regular_file(
+            &paid_dir.join("plan-inspected.json"),
+            2_097_152,
+        )?)
+        .map_err(|error| format!("lifetime paid plan inspection: {error}"))?;
+        let (_, reserve_receipt) = self.verified_dispatch_reserve_hold(
+            &attempt,
+            self.journal
+                .dispatch_hold
+                .as_ref()
+                .ok_or("lifetime hold absent")?,
+        )?;
+        if paid.get("reserveReceipt") != Some(&json!(reserve_receipt)) {
+            return Err("lifetime paid plan reserve receipt differs".into());
+        }
+        let ingress_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-lifetime-ingress-{id:016}.bin"));
+        let committed_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-lifetime-committed-{id:016}.bin"));
+        let ingress_view_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-lifetime-ingress-{id:016}.json"));
+        let committed_view_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-lifetime-committed-{id:016}.json"));
+        if ingress_view_path.exists() || committed_view_path.exists() {
+            return Err("lifetime mark-send inspection already attempted".into());
+        }
+        retain_exact_private(&ingress_path, &ingress, 10 * 1024 * 1024)?;
+        retain_exact_private(&committed_path, &committed, 10 * 1024 * 1024)?;
+        let host = self
+            .config
+            .host
+            .to_str()
+            .ok_or("lifetime Host path UTF-8")?;
+        let config = self
+            .config
+            .host_config
+            .to_str()
+            .ok_or("lifetime config path UTF-8")?;
+        let plan_arg = paid_path.to_str().ok_or("lifetime plan path UTF-8")?;
+        let ingress_arg = ingress_path.to_str().ok_or("lifetime ingress path UTF-8")?;
+        let ingress_view_arg = ingress_view_path
+            .to_str()
+            .ok_or("lifetime ingress inspection path UTF-8")?;
+        let mut inspect_ingress = Command::new(host);
+        inspect_ingress.args([
+            config,
+            "inspect-agent-lifetime-paid-ingress",
+            plan_arg,
+            ingress_arg,
+            ingress_view_arg,
+        ]);
+        let inspected = self
+            .custody_gate
+            .run_capture(&self.cancelled, &mut inspect_ingress)
+            .map_err(|error| format!("lifetime ingress source inspection: {error}"))?;
+        if !inspected.status.success() {
+            return Err(format!(
+                "lifetime ingress source inspection refused: {}",
+                inspected.status
+            ));
+        }
+        let ingress_view: Value =
+            serde_json::from_slice(&bounded_regular_file(&ingress_view_path, 2_097_152)?)
+                .map_err(|error| format!("lifetime ingress inspection JSON: {error}"))?;
+        if ingress_view.get("type").and_then(Value::as_str)
+            != Some("application-agent-lifetime-paid-ingress-inspection-v3")
+            || ingress_view.get("authority").and_then(Value::as_str)
+                != Some("structural-only-not-fresh-admission")
+            || ingress_view
+                .get("canonicalIngressHex")
+                .and_then(Value::as_str)
+                != Some(ingress_hex)
+            || ingress_view.get("canonicalPlanHex") != paid.get("canonicalPlanHex")
+            || ingress_view.get("context") != paid.get("context")
+            || ingress_view.get("bindings") != paid.get("bindings")
+            || ingress_view.get("fixedSelectors") != paid.get("fixedSelectors")
+            || ingress_view.get("canonicalHttpHex") != paid.get("canonicalHttpHex")
+            || ingress_view.get("reserveReceipt") != paid.get("reserveReceipt")
+            || ingress_view.get("reserveIndex") != paid.get("reserveIndex")
+            || ingress_view.get("grantRoot") != paid.get("grantRoot")
+            || ingress_view.get("appSlots") != paid.get("appSlots")
+            || ingress_view.get("grantObservationSlot") != paid.get("grantObservationSlot")
+            || ingress_view.get("payerSlots") != paid.get("payerSlots")
+            || ingress_view
+                .get("reserveContextHex")
+                .and_then(Value::as_str)
+                != Some(lifetime.context_hex.as_str())
+        {
+            return Err("lifetime ingress differs from exact source paid plan".into());
+        }
+        let committed_arg = committed_path.to_str().ok_or("lifetime frame path UTF-8")?;
+        let committed_view_arg = committed_view_path
+            .to_str()
+            .ok_or("lifetime committed inspection path UTF-8")?;
+        let mut inspect_committed = Command::new(host);
+        inspect_committed.args([
+            config,
+            "inspect",
+            "application-agent-lifetime-dispatch-committed",
+            committed_arg,
+            committed_view_arg,
+        ]);
+        let inspected = self
+            .custody_gate
+            .run_capture(&self.cancelled, &mut inspect_committed)
+            .map_err(|error| format!("lifetime committed source inspection: {error}"))?;
+        if !inspected.status.success() {
+            return Err(format!(
+                "lifetime committed source inspection refused: {}",
+                inspected.status
+            ));
+        }
+        let committed_view: Value =
+            serde_json::from_slice(&bounded_regular_file(&committed_view_path, 2_097_152)?)
+                .map_err(|error| format!("lifetime committed inspection JSON: {error}"))?;
+        if committed_view.get("type").and_then(Value::as_str)
+            != Some("application-agent-lifetime-dispatch-committed-inspection-v3")
+            || committed_view.get("frameHex").and_then(Value::as_str) != Some(committed_frame_hex)
+            || committed_view.get("dispatchReceipt") != Some(&json!(exact_receipt))
+            || committed_view.pointer("/originalIssue/receipt")
+                != Some(&json!(lifetime.original_issue_receipt))
+            || committed_view
+                .pointer("/originalIssue/index")
+                .and_then(Value::as_str)
+                != Some(lifetime.original_issue_index.as_str())
+            || committed_view.pointer("/grant/issueReceipt")
+                != Some(&json!(lifetime.grant_issue_receipt))
+            || committed_view
+                .pointer("/grant/resource")
+                .and_then(Value::as_str)
+                != Some(lifetime.grant_resource.as_str())
+            || committed_view
+                .pointer("/grant/issueIndex")
+                .and_then(Value::as_str)
+                != Some(lifetime.grant_issue_index.as_str())
+            || committed_view
+                .pointer("/grant/digest")
+                .and_then(Value::as_str)
+                != Some(lifetime.grant_digest.as_str())
+            || committed_view
+                .pointer("/grant/initializedRoot")
+                .and_then(Value::as_str)
+                != Some(lifetime.grant_initialized_root.as_str())
+            || committed_view.pointer("/grant/currentPhysicalRoot")
+                != paid.pointer("/bindings/grantPhysicalRoot")
+            || committed_view.pointer("/purse/reserveReceipt") != paid.get("reserveReceipt")
+            || committed_view.pointer("/purse/reserveIndex") != paid.get("reserveIndex")
+            || committed_view.pointer("/request/canonicalHex") != paid.get("canonicalHttpHex")
+            || committed_view
+                .pointer("/request/operationId")
+                .and_then(Value::as_str)
+                != Some(attempt.http_operation_id.as_str())
+            || committed_view.pointer("/app/resource") != paid.pointer("/context/appResource")
+            || committed_view
+                .pointer("/app/generation")
+                .and_then(Value::as_str)
+                != Some(lifetime.app_generation.as_str())
+            || committed_view.pointer("/session/resource")
+                != paid.pointer("/context/sessionResource")
+            || committed_view
+                .pointer("/session/generation")
+                .and_then(Value::as_str)
+                != Some(lifetime.session_generation.as_str())
+            || committed_view.pointer("/session/originalOrigin")
+                != paid.pointer("/context/sessionOrigin")
+            || committed_view.pointer("/parent/physicalRoot")
+                != paid.pointer("/bindings/parentPhysicalRoot")
+            || committed_view.pointer("/purse/physicalRoot")
+                != paid.pointer("/bindings/pursePhysicalRoot")
+        {
+            return Err("lifetime committed frame differs from paid ingress custody".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || (!self.prompt_active && self.foreground_operation.is_none())
+        {
+            return Err("lifetime parent no longer permits fd3 handoff".into());
+        }
+        let ingress_sha256 = sha256_bytes(&ingress)?;
+        let committed_sha256 = sha256_bytes(&committed)?;
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("lifetime attempt disappeared before mark-send")?;
+        let lifetime = attempt
+            .lifetime
+            .as_mut()
+            .ok_or("lifetime custody disappeared before mark-send")?;
+        lifetime.paid_ingress_sha256 = Some(ingress_sha256.clone());
+        lifetime.committed_frame_sha256 = Some(committed_sha256.clone());
+        lifetime.committed_receipt = Some(exact_receipt.clone());
+        attempt.committed_dispatch_transaction = Some(exact_receipt.transaction_id.clone());
+        attempt.committed_dispatch_event = Some(exact_receipt.event_id.clone());
+        attempt.committed_permit_sha256 = Some(committed_sha256.clone());
+        attempt.send_started = true;
+        self.journal
+            .application_api_attempt
+            .as_mut()
+            .unwrap()
+            .lifetime_committed_receipt = Some(exact_receipt.clone());
+        self.save()?;
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("lifetime hard fence crossed after durable mark-send".into());
+        }
+        Ok(json!({"type":"dispatch-send-marked-v3",
+            "attemptId":attempt_id,"bindingSha256":binding_sha256,
+            "operationFingerprint":operation_fingerprint,
+            "requestSha256":request_sha256,
+            "ingressSha256":ingress_sha256,
+            "committedFrameSha256":committed_sha256,
+            "receipt":exact_receipt}))
+    }
+
     /// Only a definite response to this exact marked attempt permits the
     /// fixed operator charge. A lost fd3 reply leaves the reservation held.
     fn dispatch_settle_definite(
@@ -4188,6 +5834,26 @@ impl Runtime {
         {
             return Err("dispatch attempt lacks definite held send".into());
         }
+        let lifetime_forward = if attempt.lifetime.is_some() {
+            let forward = self
+                .journal
+                .application_api_attempt
+                .as_ref()
+                .ok_or("lifetime settled forward attempt absent")?;
+            if forward.operation_id.to_string() != attempt.http_operation_id
+                || forward.lifetime_committed_receipt.as_ref()
+                    != attempt
+                        .lifetime
+                        .as_ref()
+                        .and_then(|state| state.committed_receipt.as_ref())
+                || forward.lifetime_settled_response_sha256.is_some()
+            {
+                return Err("lifetime definite settlement lacks exact committed lineage".into());
+            }
+            true
+        } else {
+            false
+        };
         let task = self
             .config
             .dispatch_task
@@ -4207,12 +5873,109 @@ impl Runtime {
             "definite app response to retained dispatch attempt",
             vec![],
         )?;
+        if lifetime_forward {
+            let settled = self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.settlement.clone())
+                .ok_or("lifetime native settlement record absent")?;
+            if settled.operation != "dispatch settle" || settled.charge != task.charge {
+                return Err("lifetime native settlement differs from definite charge".into());
+            }
+            let forward = self
+                .journal
+                .application_api_attempt
+                .as_mut()
+                .ok_or("lifetime forward disappeared after settlement")?;
+            forward.lifetime_settled_response_sha256 = Some(response_sha256.into());
+            forward.lifetime_settlement = Some(LifetimeDefiniteSettlement {
+                dispatch_attempt_id: attempt_id,
+                forward_operation_id: forward.operation_id,
+                settlement: settled,
+            });
+        }
         self.journal.dispatch_attempt = None;
         self.save()?;
         Ok(
             json!({"type":"dispatch-settled-v1","attemptId":attempt_id.to_string(),
             "responseSha256":response_sha256,"charge":task.charge}),
         )
+    }
+    fn dispatch_inspect_settlement_v3(
+        &mut self,
+        attempt_id: u64,
+        binding_sha256: &str,
+        operation_fingerprint: &str,
+    ) -> Result<Value> {
+        for (label, value) in [
+            ("binding SHA-256", binding_sha256),
+            ("operation fingerprint", operation_fingerprint),
+        ] {
+            if value.len() != 64
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!("{label} must be 32 lowercase hex bytes"));
+            }
+        }
+        let uncertain = || {
+            json!({"type":"dispatch-settlement-uncertain-v3",
+            "attemptId":attempt_id.to_string(),
+            "bindingSha256":binding_sha256,
+            "operationFingerprint":operation_fingerprint})
+        };
+        let Some(forward) = self.journal.application_api_attempt.clone() else {
+            return Ok(uncertain());
+        };
+        if forward.binding_sha256.as_deref() != Some(binding_sha256)
+            || forward.operation_fingerprint.as_deref() != Some(operation_fingerprint)
+        {
+            return Err("lifetime settlement inspection differs from forward binding".into());
+        }
+        let Some(saved) = forward.lifetime_settlement.as_ref() else {
+            return Ok(uncertain());
+        };
+        if saved.dispatch_attempt_id != attempt_id
+            || saved.forward_operation_id != forward.operation_id
+            || saved.settlement.operation != "dispatch settle"
+            || saved.settlement.charge
+                != self
+                    .config
+                    .dispatch_task
+                    .as_ref()
+                    .ok_or("dispatchTask absent")?
+                    .charge
+            || forward.lifetime_settled_response_sha256.is_none()
+            || forward.lifetime_committed_receipt.is_none()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+        {
+            return Ok(uncertain());
+        }
+        let verified = (|| -> Result<()> {
+            self.verified_dispatch_settlement_record(&saved.settlement)?;
+            let state = self.query_as(&self.dispatch()?)?;
+            if !matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("1" | "6")
+            ) || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err("lifetime dispatch purse is not signed terminal".into());
+            }
+            Ok(())
+        })();
+        if verified.is_err() {
+            return Ok(uncertain());
+        }
+        Ok(json!({"type":"settled-v3",
+            "attemptId":attempt_id.to_string(),
+            "bindingSha256":binding_sha256,
+            "operationFingerprint":operation_fingerprint,
+            "responseSha256":forward.lifetime_settled_response_sha256,
+            "committedReceipt":forward.lifetime_committed_receipt}))
     }
     /// A definite pre-send refusal releases this one purse at zero. Once the
     /// send marker exists, only a definite response or audited reconciliation
@@ -4294,10 +6057,36 @@ impl Runtime {
                 forward_operation_id,
                 fixed_request,
             } => self.dispatch_reserve_v2(&route_name, &forward_operation_id, &fixed_request),
+            C::ReserveV3 {
+                route_name,
+                forward_operation_id,
+                binding_sha256,
+                worker_wall_seconds,
+                fixed_request,
+            } => self.dispatch_reserve_v3(
+                &route_name,
+                &forward_operation_id,
+                &binding_sha256,
+                worker_wall_seconds,
+                &fixed_request,
+            ),
             C::InspectV2 {
                 route_name,
                 forward_operation_id,
             } => self.dispatch_inspect_v2(&route_name, &forward_operation_id),
+            C::InspectV3 {
+                route_name,
+                forward_operation_id,
+            } => self.dispatch_inspect_v3(&route_name, &forward_operation_id),
+            C::InspectSettlementV3 {
+                attempt_id: id,
+                binding_sha256,
+                operation_fingerprint,
+            } => self.dispatch_inspect_settlement_v3(
+                attempt_id(&id)?,
+                &binding_sha256,
+                &operation_fingerprint,
+            ),
             C::SignPayerV2 {
                 route_name,
                 forward_operation_id,
@@ -4311,6 +6100,21 @@ impl Runtime {
                 &paid_plan_hex,
                 &source_inspection_json,
             ),
+            C::SignPayerV3 {
+                route_name,
+                forward_operation_id,
+                attempt_id,
+                paid_plan_hex,
+                source_inspection_json,
+                operation_fingerprint,
+            } => self.dispatch_sign_payer_v3(
+                &route_name,
+                &forward_operation_id,
+                &attempt_id,
+                &paid_plan_hex,
+                &source_inspection_json,
+                &operation_fingerprint,
+            ),
             C::MarkSend {
                 attempt_id: id,
                 request_sha256,
@@ -4323,6 +6127,23 @@ impl Runtime {
                 &transaction_id,
                 &event_id,
                 &permit_sha256,
+            ),
+            C::MarkSendV3 {
+                attempt_id,
+                binding_sha256,
+                operation_fingerprint,
+                request_sha256,
+                ingress_hex,
+                committed_frame_hex,
+                receipt,
+            } => self.dispatch_mark_send_v3(
+                &attempt_id,
+                &binding_sha256,
+                &operation_fingerprint,
+                &request_sha256,
+                &ingress_hex,
+                &committed_frame_hex,
+                &receipt,
             ),
             C::SettleDefinite {
                 attempt_id: id,
@@ -6131,6 +7952,26 @@ impl Runtime {
             );
         }
         let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+        let lifetime_names = tool
+            .allowed_application_lifetime_routes
+            .iter()
+            .map(|route| route.name.clone())
+            .collect::<Vec<_>>();
+        let mut all_names = tool
+            .allowed_application_api_routes
+            .iter()
+            .map(|route| route.name.clone())
+            .collect::<Vec<_>>();
+        all_names.extend(lifetime_names);
+        let selected = application_api_tools::parse_input(arguments, &all_names)?;
+        if let Some(route) = tool
+            .allowed_application_lifetime_routes
+            .iter()
+            .find(|route| route.name == selected.application)
+            .cloned()
+        {
+            return self.begin_application_lifetime_api(selected, route, reply);
+        }
         let expected_host = tool
             .agent_api_host_sha256
             .as_deref()
@@ -6202,6 +8043,10 @@ impl Runtime {
             phase: ApplicationApiPhase::Prepared,
             binding_sha256: None,
             host_invocation: None,
+            operation_fingerprint: None,
+            lifetime_committed_receipt: None,
+            lifetime_settled_response_sha256: None,
+            lifetime_settlement: None,
             reply_path: None,
             reply_sha256: None,
             reported: false,
@@ -6223,12 +8068,276 @@ impl Runtime {
         };
         Ok(ActiveApplicationApi {
             operation_id,
-            route,
+            route: ApplicationApiRoute::V2(Box::new(route)),
+            lifetime_input: None,
             request: dispatch,
             reply,
             step: ApplicationApiStep::Hello(hello),
             deadline,
         })
+    }
+
+    fn begin_application_lifetime_api(
+        &mut self,
+        input: application_api_tools::HttpInput,
+        route: application_api_tools::LifetimeRoutePin,
+        reply: mpsc::Sender<Value>,
+    ) -> Result<ActiveApplicationApi> {
+        let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+        let expected_host = tool
+            .lifetime_api_host_sha256
+            .as_deref()
+            .ok_or("lifetime application Host pin absent")?;
+        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+            return Err("lifetime application Host image or socket differs from pin".into());
+        }
+        let registered = tool
+            .registered_shared_applications
+            .iter()
+            .find(|reference| reference.name == route.name);
+        if let Some(reference) = registered {
+            if reference.app_target != route.app_resource
+                || reference.ticket_target != route.ticket_resource
+            {
+                return Err("lifetime route differs from registered app/ticket".into());
+            }
+        } else if self
+            .verified_born_named(&route.name)?
+            .is_none_or(|born| born.target != route.app_resource)
+        {
+            return Err("lifetime route has no confirmed local app birth".into());
+        }
+        if self
+            .verified_born_target("object", &route.session_resource)?
+            .is_none()
+        {
+            return Err("lifetime route has no confirmed local session birth".into());
+        }
+        let parent = self.query()?;
+        if route.parent_task != self.config.task
+            || !matches!(
+                parent.pointer("/grain/status").and_then(Value::as_str),
+                Some("3" | "4")
+            )
+            || self.journal.prompt_witness.is_none()
+        {
+            return Err("lifetime API parent is not currently reserved".into());
+        }
+        let operation_id = self.next_id()?;
+        self.application_api_send_gate.reset()?;
+        // Hello has no operation effect. The exact dispatch frame, including
+        // its stable binding digest, is created and saved only after Hello is
+        // checked. A crash during Hello therefore leaves no sendable attempt.
+        let deadline = Instant::now() + Duration::from_secs(1800);
+        let hello = application_api_tools::start_exchange_once(
+            &route.socket_path,
+            route.host_uid,
+            application_api_tools::lifetime_hello_request(),
+            deadline,
+            self.cancelled.clone(),
+        )
+        .map_err(|error| format!("lifetime application Hello: {error:?}"))?;
+        Ok(ActiveApplicationApi {
+            operation_id,
+            route: ApplicationApiRoute::Lifetime(Box::new(route)),
+            lifetime_input: Some(input),
+            request: Value::Null,
+            reply,
+            step: ApplicationApiStep::Hello(hello),
+            deadline,
+        })
+    }
+
+    fn poll_lifetime_application_api(
+        &mut self,
+        active: &mut Option<ActiveApplicationApi>,
+    ) -> Result<()> {
+        let Some(call) = active.as_mut() else {
+            return Ok(());
+        };
+        let ApplicationApiRoute::Lifetime(route) = &call.route else {
+            return Err("v2 route entered lifetime API poll".into());
+        };
+        let Some(result) = (match &call.step {
+            ApplicationApiStep::Hello(worker) | ApplicationApiStep::Dispatch(worker) => {
+                worker.poll()
+            }
+        }) else {
+            return Ok(());
+        };
+        let result = match result {
+            Ok(value) => value,
+            Err(error) => {
+                let before_send = matches!(call.step, ApplicationApiStep::Hello(_))
+                    || matches!(error, application_api_tools::TransportError::BeforeSend(_));
+                if !matches!(call.step, ApplicationApiStep::Hello(_)) {
+                    if before_send {
+                        self.finish_application_api_no_dispatch(call.operation_id)?;
+                    } else if let Some(attempt) = self.journal.application_api_attempt.as_mut() {
+                        attempt.phase = ApplicationApiPhase::Uncertain;
+                        self.save()?;
+                    }
+                }
+                let _ = call.reply.send(json!({"isError":true,
+                    "text":format!("lifetime API transport result: {error:?}")}));
+                *active = None;
+                return Ok(());
+            }
+        };
+        if matches!(call.step, ApplicationApiStep::Hello(_)) {
+            let (binding, invocation) =
+                match application_api_tools::verify_lifetime_binding_reply(result, route) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = call.reply.send(json!({"isError":true,"text":error}));
+                        *active = None;
+                        return Ok(());
+                    }
+                };
+            let input = call
+                .lifetime_input
+                .take()
+                .ok_or("lifetime HTTP input disappeared before dispatch")?;
+            let dispatch = application_api_tools::lifetime_dispatch_request(
+                call.operation_id,
+                &binding,
+                &input,
+            )?;
+            let bytes = serde_json::to_vec(&dispatch)
+                .map_err(|error| format!("lifetime forward JSON: {error}"))?;
+            let path = self
+                .config
+                .state_dir
+                .join(format!("application-api-{:016}.json", call.operation_id));
+            write_new(&path, &bytes)?;
+            self.journal.application_api_attempt = Some(ApplicationApiAttempt {
+                operation_id: call.operation_id,
+                route_name: route.name.clone(),
+                request_path: path,
+                request_sha256: sha256_bytes(&bytes)?,
+                phase: ApplicationApiPhase::BindingVerified,
+                binding_sha256: Some(binding),
+                host_invocation: Some(invocation),
+                operation_fingerprint: None,
+                lifetime_committed_receipt: None,
+                lifetime_settled_response_sha256: None,
+                lifetime_settlement: None,
+                reply_path: None,
+                reply_sha256: None,
+                reported: false,
+            });
+            self.save()?;
+            self.journal
+                .application_api_attempt
+                .as_mut()
+                .ok_or("lifetime forward attempt disappeared")?
+                .phase = ApplicationApiPhase::DispatchStarted;
+            self.save()?;
+            let worker = match application_api_tools::start_dispatch_once(
+                &route.socket_path,
+                route.host_uid,
+                dispatch.clone(),
+                call.deadline,
+                self.application_api_send_gate.clone(),
+                self.cancelled.clone(),
+            ) {
+                Ok(worker) => worker,
+                Err(error) => {
+                    self.finish_application_api_no_dispatch(call.operation_id)?;
+                    let _ = call.reply.send(json!({"isError":true,
+                        "text":format!("lifetime forward spawn: {error:?}")}));
+                    *active = None;
+                    return Ok(());
+                }
+            };
+            call.request = dispatch;
+            call.step = ApplicationApiStep::Dispatch(worker);
+            return Ok(());
+        }
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("lifetime forward attempt absent on reply")?;
+        let field = |name: &str| -> Result<&str> {
+            result
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("lifetime response {name} absent"))
+        };
+        let kind = field("type")?;
+        if field("protocol")? != "mini-spk-agent-api-v3"
+            || field("operationId")? != call.operation_id.to_string()
+            || Some(field("bindingSha256")?) != attempt.binding_sha256.as_deref()
+        {
+            return Err("lifetime response differs from retained forward binding".into());
+        }
+        if kind == "refused-v3" {
+            if result.get("operationFingerprint").is_some()
+                || attempt.operation_fingerprint.is_some()
+                || self.journal.dispatch_attempt.is_some()
+                || self.journal.dispatch_hold.is_some()
+                || self.journal.dispatch_pending.is_some()
+            {
+                return Err("lifetime refusal is not proven pre-reserve".into());
+            }
+            self.finish_application_api_no_dispatch(call.operation_id)?;
+            let _ = call
+                .reply
+                .send(json!({"isError":true,"text":result.to_string()}));
+            *active = None;
+            return Ok(());
+        }
+        let fingerprint = attempt
+            .operation_fingerprint
+            .as_deref()
+            .ok_or("lifetime response lacks retained source-derived fingerprint")?;
+        if field("operationFingerprint")? != fingerprint
+            || !matches!(kind, "http-v3" | "uncertain-v3")
+        {
+            return Err("lifetime response differs from exact dispatch fingerprint".into());
+        }
+        if kind == "http-v3" {
+            verified_lifetime_definite_reply(
+                attempt,
+                &result,
+                self.journal.dispatch_attempt.is_some()
+                    || self.journal.dispatch_hold.is_some()
+                    || self.journal.dispatch_pending.is_some(),
+            )?;
+        }
+        let path = self.config.state_dir.join(format!(
+            "application-api-reply-{:016}.json",
+            call.operation_id
+        ));
+        let bytes = serde_json::to_vec(&result)
+            .map_err(|error| format!("lifetime response JSON: {error}"))?;
+        write_new(&path, &bytes)?;
+        let definite = kind == "http-v3";
+        let saved = self.journal.application_api_attempt.as_mut().unwrap();
+        saved.reply_path = Some(path);
+        saved.reply_sha256 = Some(sha256_bytes(&bytes)?);
+        saved.phase = if definite {
+            ApplicationApiPhase::Definite
+        } else {
+            ApplicationApiPhase::Uncertain
+        };
+        self.save()?;
+        let delivered = call
+            .reply
+            .send(json!({"isError":!definite,"text":result.to_string()}))
+            .is_ok();
+        if definite && delivered {
+            let mut finished = self.journal.application_api_attempt.take().unwrap();
+            finished.reported = true;
+            if self.journal.application_api_history.len() >= 16 {
+                self.journal.application_api_history.remove(0);
+            }
+            self.journal.application_api_history.push(finished);
+            self.save()?;
+        }
+        *active = None;
+        Ok(())
     }
 
     fn finish_application_api_no_dispatch(&mut self, operation_id: u64) -> Result<()> {
@@ -6259,6 +8368,12 @@ impl Runtime {
     }
 
     fn poll_application_api(&mut self, active: &mut Option<ActiveApplicationApi>) -> Result<()> {
+        if active
+            .as_ref()
+            .is_some_and(|call| matches!(call.route, ApplicationApiRoute::Lifetime(_)))
+        {
+            return self.poll_lifetime_application_api(active);
+        }
         let Some(call) = active.as_mut() else {
             return Ok(());
         };
@@ -6301,16 +8416,18 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         if matches!(call.step, ApplicationApiStep::Hello(_)) {
-            let (digest, invocation) =
-                match application_api_tools::verify_binding(reply, &call.route) {
-                    Ok(binding) => binding,
-                    Err(error) => {
-                        self.finish_application_api_no_dispatch(call.operation_id)?;
-                        let _ = call.reply.send(json!({"isError":true,"text":error}));
-                        *active = None;
-                        return Ok(());
-                    }
-                };
+            let ApplicationApiRoute::V2(route) = &call.route else {
+                return Err("lifetime route entered v2 binding path".into());
+            };
+            let (digest, invocation) = match application_api_tools::verify_binding(reply, route) {
+                Ok(binding) => binding,
+                Err(error) => {
+                    self.finish_application_api_no_dispatch(call.operation_id)?;
+                    let _ = call.reply.send(json!({"isError":true,"text":error}));
+                    *active = None;
+                    return Ok(());
+                }
+            };
             let attempt = self
                 .journal
                 .application_api_attempt
@@ -6326,8 +8443,8 @@ impl Runtime {
                 ApplicationApiPhase::DispatchStarted;
             self.save()?;
             let worker = match application_api_tools::start_dispatch_once(
-                &call.route.socket_path,
-                call.route.host_uid,
+                call.route.socket_path(),
+                call.route.host_uid(),
                 call.request.clone(),
                 call.deadline,
                 self.application_api_send_gate.clone(),
@@ -6407,6 +8524,40 @@ impl Runtime {
         if sha256_file(&attempt.request_path)? != attempt.request_sha256 {
             return Err("retained application API request bytes changed".into());
         }
+        let Some(binding) = attempt.binding_sha256.as_deref() else {
+            // No forward dispatch frame can begin before a checked binding
+            // is durably saved. This is a local read-only custody report.
+            return Ok(json!({"operationId":attempt.operation_id.to_string(),
+                "phase":attempt.phase,"host":null,"recoveredHttp":null}));
+        };
+        if let Some(route) = self.config.tool_task.as_ref().and_then(|tool| {
+            tool.allowed_application_lifetime_routes
+                .iter()
+                .find(|route| route.name == attempt.route_name)
+        }) {
+            let mut request = json!({"type":"inspect-v3","protocol":"mini-spk-agent-api-v3",
+                "operationId":attempt.operation_id.to_string(),"bindingSha256":binding});
+            if let Some(fingerprint) = attempt.operation_fingerprint.as_deref() {
+                request["operationFingerprint"] = json!(fingerprint);
+            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let response = application_api_tools::exchange_once(
+                &route.socket_path,
+                route.host_uid,
+                &request,
+                deadline,
+            )
+            .map_err(|error| format!("lifetime application read-only inspect: {error:?}"))?;
+            let recovered = recovered_lifetime_http(
+                attempt,
+                &response,
+                self.journal.dispatch_attempt.is_some()
+                    || self.journal.dispatch_hold.is_some()
+                    || self.journal.dispatch_pending.is_some(),
+            )?;
+            return Ok(json!({"operationId":attempt.operation_id.to_string(),
+                "phase":attempt.phase,"host":response,"recoveredHttp":recovered}));
+        }
         let route = self
             .config
             .tool_task
@@ -6417,12 +8568,6 @@ impl Runtime {
                     .find(|route| route.name == attempt.route_name)
             })
             .ok_or("retained application API route is absent")?;
-        let Some(binding) = attempt.binding_sha256.as_deref() else {
-            // No forward dispatch frame can begin before a checked binding
-            // is durably saved. This is a local read-only custody report.
-            return Ok(json!({"operationId":attempt.operation_id.to_string(),
-                "phase":attempt.phase,"host":null,"recoveredHttp":null}));
-        };
         let deadline = Instant::now() + Duration::from_secs(30);
         let response = application_api_tools::exchange_once(
             &route.socket_path,
@@ -8567,34 +10712,52 @@ impl Runtime {
                 }
             }
             "mini_application_api" => {
-                let allowed = tool
+                let mut allowed = tool
                     .allowed_application_api_routes
                     .iter()
                     .map(|route| route.name.clone())
                     .collect::<Vec<_>>();
+                allowed.extend(
+                    tool.allowed_application_lifetime_routes
+                        .iter()
+                        .map(|route| route.name.clone()),
+                );
                 let input = application_api_tools::parse_input(arguments, &allowed)?;
-                let pin = tool.agent_api_host_sha256.as_deref().ok_or(
-                    "application API event21 Host pin is absent; agent delivery is unavailable",
-                )?;
+                let lifetime = tool
+                    .allowed_application_lifetime_routes
+                    .iter()
+                    .find(|route| route.name == input.application);
+                let pin = if lifetime.is_some() {
+                    tool.lifetime_api_host_sha256.as_deref().ok_or(
+                        "lifetime application Host pin absent; agent delivery is unavailable",
+                    )?
+                } else {
+                    tool.agent_api_host_sha256.as_deref().ok_or(
+                        "application API event21 Host pin is absent; agent delivery is unavailable",
+                    )?
+                };
                 if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
                     return Err(
                         "application API event21 Host image or socket differs from pin".into(),
                     );
                 }
-                let route = tool
-                    .allowed_application_api_routes
-                    .iter()
-                    .find(|route| route.name == input.application)
-                    .ok_or("application API route is absent")?;
+                let (name, app_target) = if let Some(route) = lifetime {
+                    (&route.name, &route.app_resource)
+                } else {
+                    let route = tool
+                        .allowed_application_api_routes
+                        .iter()
+                        .find(|route| route.name == input.application)
+                        .ok_or("application API route is absent")?;
+                    (&route.name, &route.app_resource)
+                };
                 if !tool
                     .registered_shared_applications
                     .iter()
-                    .any(|entry| entry.name == route.name)
-                    && !self
-                        .journal
-                        .born_resources
-                        .iter()
-                        .any(|born| born.pending.born.name == route.name)
+                    .any(|entry| entry.name == *name && entry.app_target == *app_target)
+                    && !self.journal.born_resources.iter().any(|born| {
+                        born.pending.born.name == *name && born.pending.born.target == *app_target
+                    })
                 {
                     return Err(
                         "application API route has no recorded app birth or shared registration"
@@ -9919,6 +12082,17 @@ impl Runtime {
                 tool.allowed_application_api_routes
                     .iter()
                     .map(|route| route.name.clone())
+                    .chain(
+                        tool.allowed_application_lifetime_routes
+                            .iter()
+                            .filter(|_| tool.lifetime_api_host_sha256.is_some())
+                            .map(|route| route.name.clone()),
+                    )
+                    .collect()
+            } else if tool.lifetime_api_host_sha256.is_some() {
+                tool.allowed_application_lifetime_routes
+                    .iter()
+                    .map(|route| route.name.clone())
                     .collect()
             } else {
                 Vec::new()
@@ -11009,6 +13183,218 @@ impl Runtime {
         self.save()
     }
 
+    fn recover_v3_dispatch_reserve(&mut self) -> Result<()> {
+        let Some(attempt) = self.journal.dispatch_attempt.clone() else {
+            return Ok(());
+        };
+        let Some(lifetime) = attempt.lifetime.as_ref() else {
+            return Ok(());
+        };
+        let directory = &lifetime.reserve_dir;
+        let id = attempt.reserve_operation_id.ok_or("v3 reserve ID absent")?;
+        if *directory
+            != self
+                .config
+                .state_dir
+                .join(format!("agent-lifetime-reserve-{:016}", attempt.id))
+            || lifetime.source_path
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("dispatch-lifetime-source-{id:016}.json"))
+            || sha256_file(&lifetime.source_path)? != lifetime.source_sha256
+            || sha256_file(&directory.join("request.bin"))? != lifetime.reserve_request_sha256
+            || sha256_file(&directory.join("plan.bin"))? != lifetime.reserve_plan_sha256
+        {
+            return Err("v3 reserve source custody changed on restart".into());
+        }
+        let authority = self.dispatch()?;
+        let marker = directory.join("submit-marker.json");
+        if !marker.exists() {
+            // The client writes this marker durably before public op2. Its
+            // absence proves this attempt did not cross native dispatch.
+            let hold = self
+                .journal
+                .dispatch_hold
+                .clone()
+                .ok_or("v3 pre-submit hold absent")?;
+            let state = self.query_as(&authority)?;
+            if hold.reserve_confirmed
+                || hold.reserve_attempt.is_some()
+                || state.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                || state.pointer("/grain/generation").and_then(Value::as_str)
+                    != Some(hold.before_generation.as_str())
+                || state.get("targetRoot").and_then(Value::as_str)
+                    != Some(hold.before_target_root.as_str())
+            {
+                return Err("v3 no-submit recovery differs from signed purse origin".into());
+            }
+            self.journal.dispatch_hold = None;
+            self.journal.dispatch_attempt = None;
+            // Keep the forward request terminal/uncertain. Even proven no
+            // native reserve cannot authorize retransmitting HTTP after an
+            // independent resident socket failure.
+            self.save()?;
+            return Ok(());
+        }
+        if self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .is_some_and(|hold| hold.reserve_confirmed)
+            && attempt.dispatch_generation.is_some()
+            && attempt.dispatch_post_root.is_some()
+        {
+            return Ok(());
+        }
+        self.command_output(
+            &self.config.mini,
+            &[
+                "agent-lifetime-reserve-lookup",
+                "--attempt",
+                directory.to_str().ok_or("v3 reserve path UTF-8")?,
+            ],
+        )?;
+        let receipt: Value = serde_json::from_slice(&bounded_regular_file(
+            &directory.join("receipt.json"),
+            4096,
+        )?)
+        .map_err(|error| format!("v3 recovered receipt JSON: {error}"))?;
+        let anchor = ReserveAnchor {
+            transaction_id: receipt
+                .get("transactionId")
+                .and_then(Value::as_str)
+                .ok_or("v3 receipt transaction absent")?
+                .into(),
+            event_id: receipt
+                .get("eventId")
+                .and_then(Value::as_str)
+                .ok_or("v3 receipt event absent")?
+                .into(),
+            accepted_count: receipt
+                .get("acceptedCount")
+                .and_then(Value::as_str)
+                .ok_or("v3 receipt count absent")?
+                .into(),
+            image_boundary: receipt
+                .get("imageBoundary")
+                .and_then(Value::as_str)
+                .ok_or("v3 receipt boundary absent")?
+                .into(),
+        };
+        for field in [
+            &anchor.transaction_id,
+            &anchor.event_id,
+            &anchor.accepted_count,
+            &anchor.image_boundary,
+        ] {
+            decimal(field, "v3 reserve receipt")?;
+        }
+        if receipt.get("reserveIndex").and_then(Value::as_str)
+            != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
+            || lifetime
+                .reserve_receipt
+                .as_ref()
+                .is_some_and(|saved| saved != &anchor)
+            || lifetime.reserve_index.as_deref().is_some_and(|saved| {
+                receipt.get("reserveIndex").and_then(Value::as_str) != Some(saved)
+            })
+        {
+            return Err("v3 recovered receipt differs from retained historical anchor".into());
+        }
+        let state = self.query_as(&authority)?;
+        let held = self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .ok_or("v3 reserve hold absent")?;
+        let before = held
+            .before_generation
+            .parse::<u64>()
+            .map_err(|_| "v3 purse generation malformed")?;
+        let next = before
+            .checked_add(1)
+            .ok_or("v3 purse generation overflow")?
+            .to_string();
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(held.reserve.as_str())
+            || state.pointer("/grain/generation").and_then(Value::as_str) != Some(next.as_str())
+            || attempt.dispatch_generation.as_ref().is_some_and(|saved| {
+                state.pointer("/grain/generation").and_then(Value::as_str) != Some(saved.as_str())
+            })
+            || attempt.dispatch_post_root.as_ref().is_some_and(|saved| {
+                state.get("targetRoot").and_then(Value::as_str) != Some(saved.as_str())
+            })
+        {
+            return Err("v3 recovered reserve lacks signed held purse".into());
+        }
+        let mut outcome = directory.join("submit.outcome.bin");
+        if !outcome.exists() || !outcome.with_extension("json").exists() {
+            let mut index = 0u16;
+            while directory
+                .join(format!("lookup-{index:04}.outcome.bin"))
+                .exists()
+            {
+                index = index.checked_add(1).ok_or("v3 lookup index overflow")?;
+            }
+            if index == 0 {
+                return Err("v3 lookup retained no exact outcome".into());
+            }
+            outcome = directory.join(format!("lookup-{:04}.outcome.bin", index - 1));
+        }
+        let observed: Value = serde_json::from_slice(&bounded_regular_file(
+            &outcome.with_extension("json"),
+            131_072,
+        )?)
+        .map_err(|error| format!("v3 original/replayed outcome JSON: {error}"))?;
+        if ReserveAnchor::from_confirmed(&observed)? != anchor {
+            return Err("v3 recovered outcome differs from exact receipt".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_mut()
+            .ok_or("v3 hold disappeared")?;
+        if hold.reserve_confirmed
+            && (hold.reserve_anchor.as_ref() != Some(&anchor)
+                || hold.reserve_call_sha256.as_deref()
+                    != Some(sha256_file(&directory.join("call.bin"))?.as_str()))
+        {
+            return Err("v3 confirmed hold differs from recovered call".into());
+        }
+        hold.reserve_attempt = Some(directory.clone());
+        hold.reserve_confirmed = true;
+        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
+        hold.reserve_source_sha256 = Some(lifetime.source_sha256.clone());
+        hold.reserve_outcome_path = Some(outcome.clone());
+        hold.reserve_outcome_sha256 = Some(sha256_file(&outcome)?);
+        hold.reserve_anchor = Some(anchor.clone());
+        let saved = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("v3 recovered attempt disappeared")?;
+        saved.dispatch_generation = Some(next);
+        saved.dispatch_post_root = Some(
+            state
+                .get("targetRoot")
+                .and_then(Value::as_str)
+                .ok_or("v3 recovered held root absent")?
+                .into(),
+        );
+        let lifetime = saved.lifetime.as_mut().ok_or("v3 custody disappeared")?;
+        lifetime.reserve_receipt = Some(anchor);
+        lifetime.reserve_index = receipt
+            .get("reserveIndex")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        lifetime.post_reserve_purse_physical_root = saved.dispatch_post_root.clone();
+        self.save()
+    }
+
     fn recover(&mut self) -> Result<()> {
         if let Some(record) = self.journal.child.clone() {
             let unit = record.unit.as_deref().ok_or(
@@ -11045,6 +13431,7 @@ impl Runtime {
             self.save()?;
         }
         self.recover_v2_dispatch_reserve()?;
+        self.recover_v3_dispatch_reserve()?;
         self.retry_pending_slot(AuthoritySlot::Dispatch)?;
         if self.journal.dispatch_pending.is_none()
             && self.journal.dispatch_hold.as_ref().is_some_and(|hold| {
@@ -11161,12 +13548,58 @@ impl Runtime {
                 .as_ref()
                 .is_some_and(|attempt| attempt.send_started && attempt.response_sha256.is_some())
         {
-            self.verified_dispatch_settlement(
-                self.journal
-                    .dispatch_attempt
+            let attempt = self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .ok_or("definite dispatch attempt disappeared")?
+                .clone();
+            self.verified_dispatch_settlement(&attempt)?;
+            if let Some(lifetime) = attempt.lifetime.as_ref() {
+                let forward = self
+                    .journal
+                    .application_api_attempt
+                    .as_mut()
+                    .ok_or("recovered lifetime forward attempt absent")?;
+                if forward.operation_id.to_string() != attempt.http_operation_id
+                    || forward.lifetime_committed_receipt.as_ref()
+                        != lifetime.committed_receipt.as_ref()
+                {
+                    return Err("recovered lifetime settlement lacks committed lineage".into());
+                }
+                let response_sha256 = attempt
+                    .response_sha256
                     .as_ref()
-                    .ok_or("definite dispatch attempt disappeared")?,
-            )?;
+                    .ok_or("recovered lifetime response hash absent")?;
+                if forward
+                    .lifetime_settled_response_sha256
+                    .as_ref()
+                    .is_some_and(|saved| saved != response_sha256)
+                {
+                    return Err("recovered lifetime response hash differs".into());
+                }
+                forward.lifetime_settled_response_sha256 = Some(response_sha256.clone());
+                let settlement = attempt
+                    .settlement
+                    .clone()
+                    .ok_or("recovered lifetime settlement record absent")?;
+                if settlement.operation != "dispatch settle"
+                    || settlement.charge
+                        != self
+                            .config
+                            .dispatch_task
+                            .as_ref()
+                            .ok_or("dispatchTask absent")?
+                            .charge
+                {
+                    return Err("recovered lifetime settlement charge differs".into());
+                }
+                forward.lifetime_settlement = Some(LifetimeDefiniteSettlement {
+                    dispatch_attempt_id: attempt.id,
+                    forward_operation_id: forward.operation_id,
+                    settlement,
+                });
+            }
             self.journal.dispatch_attempt = None;
             self.save()?;
         }
@@ -13067,6 +15500,292 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lifetime_reserve_wall_requires_selected_live_hermes_worker() {
+        let selected = AllowedCommand {
+            name: "hermes-acp".into(),
+            program: "/opt/mini/bwrap".into(),
+            args: Vec::new(),
+            systemd_scope: true,
+            wall_time_seconds: Some(1500),
+            reserve: "1".into(),
+            charge: "0".into(),
+        };
+        let program = selected.program.as_path();
+        assert_eq!(
+            checked_lifetime_worker_wall(&selected, 1500, true, true, Some(program), false)
+                .unwrap(),
+            1500
+        );
+        assert!(
+            checked_lifetime_worker_wall(&selected, 600, true, true, Some(program), false).is_err()
+        );
+        assert!(
+            checked_lifetime_worker_wall(&selected, 1500, false, true, Some(program), false)
+                .is_err()
+        );
+        assert!(checked_lifetime_worker_wall(
+            &selected,
+            1500,
+            true,
+            true,
+            Some(Path::new("/other/bwrap")),
+            false
+        )
+        .is_err());
+        assert!(
+            checked_lifetime_worker_wall(&selected, 1500, true, false, Some(program), false)
+                .is_err()
+        );
+        assert!(
+            checked_lifetime_worker_wall(&selected, 1500, true, true, Some(program), true).is_err()
+        );
+    }
+
+    #[test]
+    fn lifetime_settlement_record_survives_restart_validation() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-lifetime-settlement-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let request_path = directory.join("application-api-0000000000000009.json");
+        fs::write(&request_path, b"{}").unwrap();
+        let mut journal = Journal::fresh(json!({}));
+        journal.next_operation_id = 12;
+        journal.application_api_attempt = Some(ApplicationApiAttempt {
+            operation_id: 9,
+            route_name: "app".into(),
+            request_path,
+            request_sha256: sha256_bytes(b"{}").unwrap(),
+            phase: ApplicationApiPhase::Uncertain,
+            binding_sha256: Some("bb".repeat(32)),
+            host_invocation: Some("ab".repeat(16)),
+            operation_fingerprint: Some("cc".repeat(32)),
+            lifetime_committed_receipt: Some(ReserveAnchor {
+                transaction_id: "11".into(),
+                event_id: "12".into(),
+                accepted_count: "13".into(),
+                image_boundary: "14".into(),
+            }),
+            lifetime_settled_response_sha256: Some("dd".repeat(32)),
+            lifetime_settlement: Some(test_lifetime_settlement()),
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        });
+        let bytes = serde_json::to_vec(&journal).unwrap();
+        let mut restored: Journal = serde_json::from_slice(&bytes).unwrap();
+        restored.validate_application_api(&directory).unwrap();
+        restored
+            .application_api_attempt
+            .as_mut()
+            .unwrap()
+            .lifetime_settlement
+            .as_mut()
+            .unwrap()
+            .forward_operation_id = 8;
+        assert!(restored.validate_application_api(&directory).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn test_lifetime_settlement() -> LifetimeDefiniteSettlement {
+        LifetimeDefiniteSettlement {
+            dispatch_attempt_id: 10,
+            forward_operation_id: 9,
+            settlement: DispatchSettlement {
+                operation_id: 11,
+                operation: "dispatch settle".into(),
+                attempt: "/private/settle".into(),
+                charge: "1".into(),
+                source_sha256: "aa".repeat(32),
+                call_sha256: "bb".repeat(32),
+                outcome_path: "/private/settle/outcome.bin".into(),
+                outcome_sha256: "cc".repeat(32),
+                receipt: ReserveAnchor {
+                    transaction_id: "15".into(),
+                    event_id: "16".into(),
+                    accepted_count: "17".into(),
+                    image_boundary: "18".into(),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn lifetime_initial_reserve_plan_echo_requires_exact_retained_bytes() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-lifetime-plan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("plan.bin");
+        fs::write(&path, [0x00, 0xab, 0xff]).unwrap();
+        let plan = json!({"canonicalPlanHex":"00abff"});
+        assert_eq!(
+            checked_lifetime_reserve_plan_hex(&plan, &path).unwrap(),
+            "00abff"
+        );
+        assert!(checked_lifetime_reserve_plan_hex(&json!({}), &path).is_err());
+        assert!(
+            checked_lifetime_reserve_plan_hex(&json!({"canonicalPlanHex":"00abfe"}), &path)
+                .is_err()
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn lifetime_purse_signs_all_source_target_observe_authority_slots() {
+        let signer = DispatchSignerPin {
+            role: "1".into(),
+            index: "0".into(),
+            public_key: "ab".repeat(32),
+            key_id: "7007".into(),
+            key_epoch: "1".into(),
+        };
+        let slot = |role: &str| {
+            json!({"role":role,"index":"0","headerHex":"00",
+            "signing":{"decoded":true,"keyId":"7007","keyEpoch":"1",
+                "algorithm":"1"}})
+        };
+        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let approved =
+            lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
+        assert_eq!(approved.len(), 3);
+        assert_eq!(
+            approved
+                .iter()
+                .map(|v| v["role"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["4", "8", "1"]
+        );
+        let mut reordered = slots.clone();
+        reordered.swap(1, 2);
+        assert!(
+            lifetime_purse_signers(&reordered, &signer, Path::new("/private/payer.key")).is_err()
+        );
+        let mut wrong_key = slots.clone();
+        wrong_key[1]["signing"]["keyId"] = json!("8008");
+        assert!(
+            lifetime_purse_signers(&wrong_key, &signer, Path::new("/private/payer.key")).is_err()
+        );
+        assert!(
+            lifetime_purse_signers(&slots[..2], &signer, Path::new("/private/payer.key")).is_err()
+        );
+    }
+
+    #[test]
+    fn lifetime_http_reply_needs_durable_permit_and_definite_settlement() {
+        let receipt = ReserveAnchor {
+            transaction_id: "11".into(),
+            event_id: "12".into(),
+            accepted_count: "13".into(),
+            image_boundary: "14".into(),
+        };
+        let mut attempt = ApplicationApiAttempt {
+            operation_id: 9,
+            route_name: "app".into(),
+            request_path: "/private/forward.json".into(),
+            request_sha256: "aa".repeat(32),
+            phase: ApplicationApiPhase::DispatchStarted,
+            binding_sha256: Some("bb".repeat(32)),
+            host_invocation: None,
+            operation_fingerprint: Some("cc".repeat(32)),
+            lifetime_committed_receipt: None,
+            lifetime_settled_response_sha256: None,
+            lifetime_settlement: None,
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        };
+        let good = json!({"type":"http-v3","committedReceipt":receipt,
+            "responseSha256":"dd".repeat(32)});
+        assert!(verified_lifetime_definite_reply(&attempt, &good, false).is_err());
+        attempt.lifetime_committed_receipt = Some(receipt.clone());
+        assert!(verified_lifetime_definite_reply(&attempt, &good, false).is_err());
+        attempt.lifetime_settled_response_sha256 = Some("dd".repeat(32));
+        assert!(verified_lifetime_definite_reply(&attempt, &good, false).is_err());
+        attempt.lifetime_settlement = Some(test_lifetime_settlement());
+        assert!(verified_lifetime_definite_reply(&attempt, &good, false).is_ok());
+        assert!(verified_lifetime_definite_reply(&attempt, &good, true).is_err());
+        let wrong = json!({"type":"http-v3","committedReceipt":receipt,
+            "responseSha256":"ee".repeat(32)});
+        assert!(verified_lifetime_definite_reply(&attempt, &wrong, false).is_err());
+    }
+
+    #[test]
+    fn lifetime_historical_inspect_is_read_only_and_requires_settled_exact_reply() {
+        let receipt = ReserveAnchor {
+            transaction_id: "11".into(),
+            event_id: "12".into(),
+            accepted_count: "13".into(),
+            image_boundary: "14".into(),
+        };
+        let attempt = ApplicationApiAttempt {
+            operation_id: 9,
+            route_name: "app".into(),
+            request_path: "/private/forward.json".into(),
+            request_sha256: "aa".repeat(32),
+            phase: ApplicationApiPhase::Uncertain,
+            binding_sha256: Some("bb".repeat(32)),
+            host_invocation: Some("ab".repeat(16)),
+            operation_fingerprint: Some("cc".repeat(32)),
+            lifetime_committed_receipt: Some(receipt.clone()),
+            lifetime_settled_response_sha256: Some("dd".repeat(32)),
+            lifetime_settlement: Some(test_lifetime_settlement()),
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        };
+        let reply = json!({"type":"http-v3","protocol":"mini-spk-agent-api-v3",
+            "operationId":"9","bindingSha256":"bb".repeat(32),
+            "operationFingerprint":"cc".repeat(32),
+            "responseSha256":"dd".repeat(32),"committedReceipt":receipt});
+        let bytes = serde_json::to_vec(&reply).unwrap();
+        let encoded = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let inspection = json!({"type":"inspection-v3","protocol":"mini-spk-agent-api-v3",
+            "operationId":"9","bindingSha256":"bb".repeat(32),
+            "operationFingerprint":"cc".repeat(32),"state":"definite",
+            "definiteReplySha256":sha256_bytes(&bytes).unwrap(),
+            "definiteReplyJsonHex":encoded});
+        assert_eq!(
+            recovered_lifetime_http(&attempt, &inspection, false).unwrap(),
+            Some(reply)
+        );
+        assert!(recovered_lifetime_http(&attempt, &inspection, true).is_err());
+        let mut wrong = inspection.clone();
+        wrong["definiteReplySha256"] = json!("ee".repeat(32));
+        assert!(recovered_lifetime_http(&attempt, &wrong, false).is_err());
+        wrong = inspection.clone();
+        wrong["operationFingerprint"] = json!("ee".repeat(32));
+        assert!(recovered_lifetime_http(&attempt, &wrong, false).is_err());
+        wrong = inspection.clone();
+        wrong["state"] = json!("uncertain");
+        assert!(recovered_lifetime_http(&attempt, &wrong, false).is_err());
+        wrong.as_object_mut().unwrap().remove("definiteReplySha256");
+        wrong
+            .as_object_mut()
+            .unwrap()
+            .remove("definiteReplyJsonHex");
+        assert_eq!(
+            recovered_lifetime_http(&attempt, &wrong, false).unwrap(),
+            None
+        );
+        wrong["state"] = json!("definite");
+        assert!(recovered_lifetime_http(&attempt, &wrong, false).is_err());
+    }
+
+    #[test]
     fn foreground_result_identity_is_durable_and_not_a_hermes_session() {
         let directory = std::env::temp_dir().join(format!(
             "mini-foreground-journal-{}-{}",
@@ -13191,6 +15910,10 @@ mod tests {
             phase: ApplicationApiPhase::Prepared,
             binding_sha256: None,
             host_invocation: None,
+            operation_fingerprint: None,
+            lifetime_committed_receipt: None,
+            lifetime_settled_response_sha256: None,
+            lifetime_settlement: None,
             reply_path: None,
             reply_sha256: None,
             reported: false,
@@ -13217,6 +15940,10 @@ mod tests {
             phase: ApplicationApiPhase::Prepared,
             binding_sha256: None,
             host_invocation: None,
+            operation_fingerprint: None,
+            lifetime_committed_receipt: None,
+            lifetime_settled_response_sha256: None,
+            lifetime_settlement: None,
             reply_path: None,
             reply_sha256: None,
             reported: false,
@@ -13581,7 +16308,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 allowed_session_families: vec![],
                 registered_shared_applications: vec![],
                 allowed_application_api_routes: vec![],
+                allowed_application_lifetime_routes: vec![],
                 agent_api_host_sha256: None,
+                lifetime_api_host_sha256: None,
                 current_birth_host_sha256: None,
             }),
             provider_task: None,

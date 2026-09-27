@@ -27,6 +27,7 @@ const MAX_HEADERS: usize = 128;
 const MAX_FORWARD_FRAME: usize = 262_144;
 const MAX_INSPECT_REPLY_FRAME: usize = 1_048_576;
 const PROTOCOL: &str = "mini-spk-agent-api-v1";
+const LIFETIME_PROTOCOL: &str = "mini-spk-agent-api-v3";
 
 const ORDINARY_HEADERS: &[&str] = &[
     "cookie",
@@ -73,6 +74,26 @@ pub(crate) fn hello_request() -> Value {
     json!({"type":"hello","protocol":PROTOCOL})
 }
 
+pub(crate) fn lifetime_hello_request() -> Value {
+    json!({"type":"hello-v3","protocol":LIFETIME_PROTOCOL})
+}
+
+pub(crate) fn lifetime_dispatch_request(
+    operation_id: u64,
+    binding_sha256: &str,
+    input: &HttpInput,
+) -> Result<Value, String> {
+    if !lowercase_hex64(binding_sha256) {
+        return Err("lifetime binding digest is invalid".into());
+    }
+    Ok(json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL,
+        "operationId":operation_id.to_string(),"bindingSha256":binding_sha256,
+        "method":input.method,"path":input.path,"query":input.query,
+        "headers":input.ordered_headers.iter().map(|(name,value)|
+            json!({"name":name,"value":value})).collect::<Vec<_>>(),
+        "bodyHex":hex(&input.body)}))
+}
+
 pub(crate) fn inspect_request(operation_id: u64) -> Value {
     json!({"type":"inspect","protocol":PROTOCOL,"operation_id":operation_id.to_string()})
 }
@@ -112,8 +133,14 @@ pub(crate) fn routed_reserve_http(
     if signed_api_path != "/repo.git/" {
         return Err("signed API prefix differs from the first native bridge".into());
     }
+    let lifetime = retained_forward.get("type").and_then(Value::as_str) == Some("dispatch-v3")
+        && retained_forward.get("protocol").and_then(Value::as_str) == Some(LIFETIME_PROTOCOL);
     let operation_id = retained_forward
-        .get("operation_id")
+        .get(if lifetime {
+            "operationId"
+        } else {
+            "operation_id"
+        })
         .and_then(Value::as_str)
         .ok_or("retained forward operation ID absent")?;
     if !canonical_decimal(operation_id) {
@@ -128,7 +155,7 @@ pub(crate) fn routed_reserve_http(
     let method = field("method")?;
     let path = field("path")?;
     let query = field("query")?;
-    let body_hex = field("body_hex")?;
+    let body_hex = field(if lifetime { "bodyHex" } else { "body_hex" })?;
     if path.starts_with('/') || path.contains(['?', '#']) || query.contains('#') {
         return Err("retained forward path or query differs from API profile".into());
     }
@@ -196,6 +223,206 @@ pub(crate) struct RoutePin {
     pub dispatch_generation: String,
     pub signed_api_path: String,
     pub dispatch_selectors: DispatchSelectorPin,
+}
+
+/// Immutable native receipt identity. A lifetime route never accepts a
+/// caller-supplied current generation in place of either historical receipt.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceReceiptPin {
+    pub transaction_id: String,
+    pub event_id: String,
+    pub accepted_count: String,
+    pub image_boundary: String,
+}
+
+impl SourceReceiptPin {
+    fn valid(&self) -> bool {
+        [
+            &self.transaction_id,
+            &self.event_id,
+            &self.accepted_count,
+            &self.image_boundary,
+        ]
+        .iter()
+        .all(|value| canonical_native_nat(value))
+    }
+}
+
+/// An explicitly issued event27 route. These are stable selector and
+/// transport pins, never mutable app/session/parent/purse generation pins.
+/// A fresh source-inspected event26 plan and signed current task observations
+/// supply the latter at every use. V2 RoutePin keeps its old fixed semantics.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LifetimeRoutePin {
+    pub name: String,
+    pub socket_path: PathBuf,
+    pub host_uid: u32,
+    pub host_unit: String,
+    pub app_resource: String,
+    pub session_resource: String,
+    pub ticket_resource: String,
+    pub participant_subject: String,
+    pub parent_task: String,
+    /// Event22 origin is historical provenance, not this prompt's generation.
+    pub original_parent_generation: String,
+    pub original_descriptor_sha256: String,
+    pub purse_resource: String,
+    pub signed_api_path: String,
+    pub dispatch_selectors: DispatchSelectorPin,
+    pub grant_issue_index: String,
+    pub grant_resource: String,
+    pub grant_observe_capability: String,
+    /// Controller-owned sealed event27 attempt, required for detached paid
+    /// planning; it is not an authority grant by pathname alone.
+    pub grant_attempt_dir: PathBuf,
+    pub grant_digest: String,
+    pub grant_initialized_root: String,
+    pub original_issue_receipt: SourceReceiptPin,
+    pub grant_issue_receipt: SourceReceiptPin,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifetimeLineage {
+    app_resource: String,
+    session_resource: String,
+    participant_subject: String,
+    ticket_resource: String,
+    original_parent_task: String,
+    original_parent_generation: String,
+    original_issue_index: String,
+    original_issue_receipt: SourceReceiptPin,
+    original_descriptor_sha256: String,
+    grant_resource: String,
+    grant_issue_index: String,
+    grant_digest: String,
+    grant_initialized_root: String,
+    grant_issue_receipt: SourceReceiptPin,
+    parent_task: String,
+    purse_task: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifetimeBinding {
+    protocol: String,
+    lineage: LifetimeLineage,
+    signed_api_path: String,
+    host_unit: String,
+    host_invocation: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifetimeBindingReply {
+    #[serde(rename = "type")]
+    kind: String,
+    protocol: String,
+    binding: LifetimeBinding,
+    binding_sha256: String,
+}
+
+/// Exact order mirrors the resident v3 fingerprint preimage. These values
+/// come from the source-owned reserve plan and signed task observations, not
+/// from the forward dispatch frame or a static route generation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LifetimeCurrentClaims {
+    pub app_generation: String,
+    pub session_generation: String,
+    pub parent_generation: String,
+    pub purse_generation: String,
+    pub app_physical_root: String,
+    pub session_physical_root: String,
+    pub parent_physical_root: String,
+    pub purse_physical_root: String,
+}
+
+pub(crate) fn lifetime_operation_fingerprint(
+    binding_sha256: &str,
+    current: &LifetimeCurrentClaims,
+    operation_id: &str,
+    request_sha256: &str,
+) -> Result<String, String> {
+    if !lowercase_hex64(binding_sha256)
+        || !lowercase_hex64(request_sha256)
+        || !canonical_decimal(operation_id)
+        || ![
+            &current.app_generation,
+            &current.session_generation,
+            &current.parent_generation,
+            &current.purse_generation,
+            &current.app_physical_root,
+            &current.session_physical_root,
+            &current.parent_physical_root,
+            &current.purse_physical_root,
+        ]
+        .iter()
+        .all(|field| canonical_native_nat(field))
+    {
+        return Err("lifetime operation fingerprint coordinates are invalid".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"DREGG/SPK-AGENT-LIFETIME-OPERATION/v3\0");
+    digest.update(binding_sha256.as_bytes());
+    digest.update(
+        serde_json::to_vec(current)
+            .map_err(|error| format!("lifetime current claims canonical JSON: {error}"))?,
+    );
+    digest.update(operation_id.as_bytes());
+    digest.update(request_sha256.as_bytes());
+    Ok(hex(&digest.finalize()))
+}
+
+pub(crate) fn verify_lifetime_binding_reply(
+    reply: Value,
+    route: &LifetimeRoutePin,
+) -> Result<(String, String), String> {
+    let reply: LifetimeBindingReply = serde_json::from_value(reply)
+        .map_err(|error| format!("lifetime binding reply: {error}"))?;
+    let lineage = &reply.binding.lineage;
+    let invocation = &reply.binding.host_invocation;
+    if reply.kind != "binding-v3"
+        || reply.protocol != LIFETIME_PROTOCOL
+        || reply.binding.protocol != "mini-spk-agent-lifetime-binding-v3"
+        || lineage.app_resource != route.app_resource
+        || lineage.session_resource != route.session_resource
+        || lineage.participant_subject != route.participant_subject
+        || lineage.ticket_resource != route.ticket_resource
+        || lineage.original_parent_task != route.parent_task
+        || lineage.original_parent_generation != route.original_parent_generation
+        || lineage.original_issue_index != route.dispatch_selectors.issue_index
+        || lineage.original_issue_receipt != route.original_issue_receipt
+        || lineage.original_descriptor_sha256 != route.original_descriptor_sha256
+        || lineage.grant_resource != route.grant_resource
+        || lineage.grant_issue_index != route.grant_issue_index
+        || lineage.grant_digest != route.grant_digest
+        || lineage.grant_initialized_root != route.grant_initialized_root
+        || lineage.grant_issue_receipt != route.grant_issue_receipt
+        || lineage.parent_task != route.parent_task
+        || lineage.purse_task != route.purse_resource
+        || reply.binding.signed_api_path != route.signed_api_path
+        || reply.binding.host_unit != route.host_unit
+        || invocation.len() != 32
+        || !invocation
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !lowercase_hex64(&reply.binding_sha256)
+    {
+        return Err("lifetime host binding differs from operator lineage".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"DREGG/SPK-AGENT-LIFETIME-BINDING/v3\0");
+    digest.update(
+        serde_json::to_vec(&reply.binding)
+            .map_err(|error| format!("lifetime binding canonical JSON: {error}"))?,
+    );
+    if hex(&digest.finalize()) != reply.binding_sha256 {
+        return Err("lifetime host binding digest differs".into());
+    }
+    Ok((reply.binding_sha256, invocation.clone()))
 }
 
 /// Operator pins for every selection field the source reserve plan exposes.
@@ -523,6 +750,299 @@ fn canonical_decimal(value: &str) -> bool {
         && (value == "0" || !value.starts_with('0'))
         && value.bytes().all(|byte| byte.is_ascii_digit())
         && value.parse::<u64>().is_ok()
+}
+
+fn canonical_native_nat(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 78
+        && (value == "0" || !value.starts_with('0'))
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+pub(crate) fn validate_lifetime_routes(
+    routes: &[LifetimeRoutePin],
+    old_routes: &[RoutePin],
+    parent_task: &str,
+    purse_resource: &str,
+    participant_subject: &str,
+    host_uid: u32,
+) -> Result<(), String> {
+    if routes.len() > 16
+        || routes.len() + old_routes.len() > 16
+        || !canonical_decimal(parent_task)
+        || !canonical_decimal(purse_resource)
+        || !canonical_decimal(participant_subject)
+    {
+        return Err("lifetime API route count or dispatch authority is invalid".into());
+    }
+    for (index, route) in routes.iter().enumerate() {
+        if route.name.is_empty()
+            || route.name.len() > 64
+            || !route.name.ends_with("-app")
+            || !route
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || routes[..index].iter().any(|prior| prior.name == route.name)
+            || old_routes.iter().any(|old| old.name == route.name)
+            || !route.socket_path.is_absolute()
+            || route.host_uid != host_uid
+            || route.host_uid == 0
+            || route.host_unit.is_empty()
+            || route.host_unit.len() > 256
+            || !clean_text(&route.host_unit)
+            || !route.grant_attempt_dir.is_absolute()
+            || route.purse_resource != purse_resource
+            || route.parent_task != parent_task
+            || route.parent_task == route.purse_resource
+            || !canonical_decimal(&route.original_parent_generation)
+            || !lowercase_hex64(&route.original_descriptor_sha256)
+            || [
+                &route.app_resource,
+                &route.session_resource,
+                &route.ticket_resource,
+                &route.parent_task,
+                &route.purse_resource,
+            ]
+            .contains(&&route.grant_resource)
+            || route.participant_subject != participant_subject
+            || route.signed_api_path != "/repo.git/"
+        {
+            return Err("lifetime API route differs from operator dispatch binding".into());
+        }
+        for value in [
+            &route.app_resource,
+            &route.session_resource,
+            &route.ticket_resource,
+            &route.participant_subject,
+            &route.purse_resource,
+            &route.parent_task,
+            &route.grant_resource,
+            &route.grant_observe_capability,
+            &route.dispatch_selectors.package_manifest,
+            &route.dispatch_selectors.snapshot_manifest,
+            &route.dispatch_selectors.session_observe,
+            &route.dispatch_selectors.manifest_observe,
+            &route.dispatch_selectors.enrollment_observe,
+        ] {
+            if !canonical_decimal(value) || value == "0" {
+                return Err("lifetime API resource or capability is not canonical".into());
+            }
+        }
+        if !canonical_decimal(&route.dispatch_selectors.issue_index)
+            || !canonical_decimal(&route.grant_issue_index)
+            || route
+                .grant_issue_index
+                .parse::<u64>()
+                .ok()
+                .zip(route.dispatch_selectors.issue_index.parse::<u64>().ok())
+                .is_none_or(|(grant, issue)| grant <= issue)
+            || !canonical_native_nat(&route.grant_digest)
+            || !canonical_native_nat(&route.grant_initialized_root)
+            || !route.original_issue_receipt.valid()
+            || !route.grant_issue_receipt.valid()
+            || route.original_issue_receipt == route.grant_issue_receipt
+            || route
+                .dispatch_selectors
+                .issue_index
+                .parse::<u64>()
+                .ok()
+                .and_then(|index| index.checked_add(1))
+                .is_none_or(|count| {
+                    route.original_issue_receipt.accepted_count != count.to_string()
+                })
+            || route
+                .grant_issue_index
+                .parse::<u64>()
+                .ok()
+                .and_then(|index| index.checked_add(1))
+                .is_none_or(|count| route.grant_issue_receipt.accepted_count != count.to_string())
+        {
+            return Err("lifetime API historical grant identity is invalid".into());
+        }
+    }
+    Ok(())
+}
+
+/// The source author inspects its own canonical request and reserve plan.
+/// This check compares those decoded bytes with the controller's retained
+/// forward call and immutable route, before the private purse key is used.
+/// Current generations are *not* taken from the route: the caller supplies
+/// signed task observations and retains this exact plan for later native
+/// admission. This function itself does not confer a send permit.
+pub(crate) struct LifetimeReserveInspection<'a> {
+    pub route: &'a LifetimeRoutePin,
+    pub retained_forward: &'a Value,
+    pub expected_selectors: &'a Value,
+    pub reserve_operation_id: &'a str,
+    pub signed_parent_generation: &'a str,
+    pub signed_purse_generation: &'a str,
+    pub signed_app_physical_root: &'a str,
+    pub signed_session_physical_root: &'a str,
+    pub signed_parent_physical_root: &'a str,
+    pub signed_purse_physical_root: &'a str,
+    pub request: &'a Value,
+    pub plan: &'a Value,
+}
+
+pub(crate) fn verify_lifetime_reserve_inspection(
+    inspection: LifetimeReserveInspection<'_>,
+) -> Result<(), String> {
+    let LifetimeReserveInspection {
+        route,
+        retained_forward,
+        expected_selectors,
+        reserve_operation_id,
+        signed_parent_generation,
+        signed_purse_generation,
+        signed_app_physical_root,
+        signed_session_physical_root,
+        signed_parent_physical_root,
+        signed_purse_physical_root,
+        request,
+        plan,
+    } = inspection;
+    let expected_http = routed_reserve_http(retained_forward, &route.signed_api_path)?;
+    if request.get("type").and_then(Value::as_str)
+        != Some("application-agent-lifetime-author-request-v3")
+        || plan.get("type").and_then(Value::as_str)
+            != Some("application-agent-lifetime-reserve-plan-v3")
+        || request.get("fixedSelectors") != Some(expected_selectors)
+        || plan.get("fixedSelectors") != Some(expected_selectors)
+        || request.get("http") != Some(&expected_http)
+        || plan.get("http") != Some(&expected_http)
+        || request.get("canonicalRequestHex") != plan.get("canonicalRequestHex")
+        || request.get("canonicalHttpHex") != plan.get("canonicalHttpHex")
+    {
+        return Err("lifetime reserve source request differs from retained forward call".into());
+    }
+    let context = plan
+        .get("context")
+        .ok_or("lifetime source reserve context absent")?;
+    let bindings = plan
+        .get("bindings")
+        .ok_or("lifetime source reserve bindings absent")?;
+    let same = |object: &Value, field: &str, expected: &str| -> Result<(), String> {
+        if object.get(field).and_then(Value::as_str) != Some(expected) {
+            return Err(format!(
+                "lifetime source {field} differs from current/route pin"
+            ));
+        }
+        Ok(())
+    };
+    same(context, "appResource", &route.app_resource)?;
+    same(context, "sessionResource", &route.session_resource)?;
+    same(context, "participantSubject", &route.participant_subject)?;
+    same(context, "ticketResource", &route.ticket_resource)?;
+    same(context, "parentTask", &route.parent_task)?;
+    same(context, "parentGeneration", signed_parent_generation)?;
+    same(context, "purseTask", &route.purse_resource)?;
+    same(context, "purseGeneration", signed_purse_generation)?;
+    same(context, "grantResource", &route.grant_resource)?;
+    same(context, "grantIssueIndex", &route.grant_issue_index)?;
+    same(context, "grantDigest", &route.grant_digest)?;
+    same(context, "reserveOperationId", reserve_operation_id)?;
+    same(
+        context,
+        "httpOperationId",
+        retained_forward
+            .get("operation_id")
+            .and_then(Value::as_str)
+            .ok_or("retained lifetime forward operation ID absent")?,
+    )?;
+    if context.get("requestDigest") != request.get("requestDigest") {
+        return Err("lifetime reserve HTTP digest differs from source request".into());
+    }
+    let original = serde_json::to_value(&route.original_issue_receipt)
+        .map_err(|error| format!("original issue receipt pin: {error}"))?;
+    let grant = serde_json::to_value(&route.grant_issue_receipt)
+        .map_err(|error| format!("grant issue receipt pin: {error}"))?;
+    if bindings.get("originalIssueReceipt") != Some(&original)
+        || bindings.get("grantIssueReceipt") != Some(&grant)
+    {
+        return Err("lifetime reserve historical receipt differs from route".into());
+    }
+    same(
+        bindings,
+        "grantInitializedRoot",
+        &route.grant_initialized_root,
+    )?;
+    same(bindings, "grantPhysicalRoot", &route.grant_initialized_root)?;
+    for (field, expected) in [
+        ("appPhysicalRoot", signed_app_physical_root),
+        ("sessionPhysicalRoot", signed_session_physical_root),
+        ("parentPhysicalRoot", signed_parent_physical_root),
+        ("pursePhysicalRoot", signed_purse_physical_root),
+    ] {
+        if !canonical_native_nat(expected) {
+            return Err(format!("lifetime signed {field} is not canonical"));
+        }
+        same(bindings, field, expected)?;
+    }
+    Ok(())
+}
+
+/// The post-reserve purse is a different physical cell state. Compare the
+/// immutable ticket/grant, parent and exact HTTP bindings, but check the
+/// post-reserve purse root as its own current fence. The native event26
+/// receiver still proves the exact reserve chronology and current hold.
+pub(crate) struct LifetimePaidInspection<'a> {
+    pub reserve: &'a Value,
+    pub paid: &'a Value,
+    pub reserve_index: &'a str,
+    pub reserve_receipt: &'a Value,
+    pub signed_post_purse_physical_root: &'a str,
+}
+
+pub(crate) fn verify_lifetime_paid_inspection(
+    inspection: LifetimePaidInspection<'_>,
+) -> Result<(), String> {
+    let LifetimePaidInspection {
+        reserve,
+        paid,
+        reserve_index,
+        reserve_receipt,
+        signed_post_purse_physical_root,
+    } = inspection;
+    if reserve.get("type").and_then(Value::as_str)
+        != Some("application-agent-lifetime-reserve-plan-v3")
+        || paid.get("type").and_then(Value::as_str)
+            != Some("application-agent-lifetime-paid-plan-v3")
+        || paid.get("fixedSelectors") != reserve.get("fixedSelectors")
+        || paid.get("context") != reserve.get("context")
+        || paid.get("canonicalHttpHex") != reserve.get("canonicalHttpHex")
+        || paid.get("http") != reserve.get("http")
+        || paid.get("reserveIndex").and_then(Value::as_str) != Some(reserve_index)
+        || paid.get("reserveReceipt") != Some(reserve_receipt)
+    {
+        return Err("lifetime paid plan differs from exact confirmed reserve".into());
+    }
+    let pre = reserve
+        .get("bindings")
+        .ok_or("lifetime reserve source bindings absent")?;
+    let post = paid
+        .get("bindings")
+        .ok_or("lifetime paid source bindings absent")?;
+    for field in [
+        "originalIssueReceipt",
+        "grantIssueReceipt",
+        "grantInitializedRoot",
+        "grantPhysicalRoot",
+        "appPhysicalRoot",
+        "sessionPhysicalRoot",
+        "parentPhysicalRoot",
+    ] {
+        if post.get(field) != pre.get(field) {
+            return Err(format!("lifetime paid {field} differs from source reserve"));
+        }
+    }
+    if !canonical_native_nat(signed_post_purse_physical_root)
+        || post.get("pursePhysicalRoot").and_then(Value::as_str)
+            != Some(signed_post_purse_physical_root)
+    {
+        return Err("lifetime paid purse root differs from signed current view".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_routes(
@@ -1523,6 +2043,284 @@ mod tests {
         };
         changed.ticket_resource = "6408".into();
         assert!(validate_routes(&[changed], "6000", "6500", "8", 1001).is_err());
+    }
+
+    fn lifetime_route() -> LifetimeRoutePin {
+        let receipt = |count: &str| SourceReceiptPin {
+            transaction_id: "123456789012345678901234567890".into(),
+            event_id: "234567890123456789012345678901".into(),
+            accepted_count: count.into(),
+            image_boundary: "345678901234567890123456789012".into(),
+        };
+        LifetimeRoutePin {
+            name: "shared-app".into(),
+            socket_path: "/tmp/lifetime-host-agent.sock".into(),
+            host_uid: 1001,
+            host_unit: "spk-host@example.service".into(),
+            app_resource: "6100".into(),
+            session_resource: "6209".into(),
+            ticket_resource: "6408".into(),
+            participant_subject: "8".into(),
+            parent_task: "6000".into(),
+            original_parent_generation: "1".into(),
+            original_descriptor_sha256: "ab".repeat(32),
+            purse_resource: "6500".into(),
+            signed_api_path: "/repo.git/".into(),
+            dispatch_selectors: DispatchSelectorPin {
+                issue_index: "9".into(),
+                package_manifest: "6101".into(),
+                snapshot_manifest: "6102".into(),
+                session_observe: "81".into(),
+                manifest_observe: "82".into(),
+                enrollment_observe: "83".into(),
+            },
+            grant_issue_index: "13".into(),
+            grant_resource: "6600".into(),
+            grant_observe_capability: "84".into(),
+            grant_attempt_dir: "/tmp/grant-attempt".into(),
+            grant_digest: "456789012345678901234567890123".into(),
+            grant_initialized_root: "567890123456789012345678901234".into(),
+            original_issue_receipt: receipt("10"),
+            grant_issue_receipt: receipt("14"),
+        }
+    }
+
+    #[test]
+    fn lifetime_hello_pins_historical_lineage_and_forward_has_no_current_claim() {
+        let route = lifetime_route();
+        let binding = LifetimeBinding {
+            protocol: "mini-spk-agent-lifetime-binding-v3".into(),
+            lineage: LifetimeLineage {
+                app_resource: route.app_resource.clone(),
+                session_resource: route.session_resource.clone(),
+                participant_subject: route.participant_subject.clone(),
+                ticket_resource: route.ticket_resource.clone(),
+                original_parent_task: route.parent_task.clone(),
+                original_parent_generation: route.original_parent_generation.clone(),
+                original_issue_index: route.dispatch_selectors.issue_index.clone(),
+                original_issue_receipt: route.original_issue_receipt.clone(),
+                original_descriptor_sha256: route.original_descriptor_sha256.clone(),
+                grant_resource: route.grant_resource.clone(),
+                grant_issue_index: route.grant_issue_index.clone(),
+                grant_digest: route.grant_digest.clone(),
+                grant_initialized_root: route.grant_initialized_root.clone(),
+                grant_issue_receipt: route.grant_issue_receipt.clone(),
+                parent_task: route.parent_task.clone(),
+                purse_task: route.purse_resource.clone(),
+            },
+            signed_api_path: route.signed_api_path.clone(),
+            host_unit: route.host_unit.clone(),
+            host_invocation: "ab".repeat(16),
+        };
+        let mut digest = Sha256::new();
+        digest.update(b"DREGG/SPK-AGENT-LIFETIME-BINDING/v3\0");
+        digest.update(serde_json::to_vec(&binding).unwrap());
+        let sha = hex(&digest.finalize());
+        let reply = json!({"type":"binding-v3","protocol":LIFETIME_PROTOCOL,
+            "binding":binding,"bindingSha256":sha});
+        let (checked, invocation) = verify_lifetime_binding_reply(reply.clone(), &route).unwrap();
+        assert_eq!(checked, sha);
+        assert_eq!(invocation, "ab".repeat(16));
+        let mut changed = route.clone();
+        changed.original_parent_generation = "2".into();
+        assert!(verify_lifetime_binding_reply(reply.clone(), &changed).is_err());
+        changed = route.clone();
+        changed.original_descriptor_sha256 = "cd".repeat(32);
+        assert!(verify_lifetime_binding_reply(reply, &changed).is_err());
+        let forward = lifetime_dispatch_request(
+            9,
+            &sha,
+            &HttpInput {
+                application: route.name,
+                method: "GET".into(),
+                path: "info/refs".into(),
+                query: "service=git-upload-pack".into(),
+                ordered_headers: vec![],
+                body: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(forward["type"], "dispatch-v3");
+        assert_eq!(forward["bindingSha256"], sha);
+        assert!(forward.get("current").is_none());
+        assert_eq!(
+            routed_reserve_http(&forward, &route.signed_api_path).unwrap()["operationId"],
+            "9"
+        );
+    }
+
+    #[test]
+    fn lifetime_fingerprint_matches_resident_golden_vector() {
+        let current = LifetimeCurrentClaims {
+            app_generation: "4".into(),
+            session_generation: "5".into(),
+            parent_generation: "6".into(),
+            purse_generation: "7".into(),
+            app_physical_root: "200".into(),
+            session_physical_root: "201".into(),
+            parent_physical_root: "202".into(),
+            purse_physical_root: "203".into(),
+        };
+        assert_eq!(
+            lifetime_operation_fingerprint(
+                "35065312baf0eb84168bf6b6037d776907411e0ae571d0b16de64046ad081d46",
+                &current,
+                "9",
+                &"cd".repeat(32),
+            )
+            .unwrap(),
+            "2824c93080445e7846b388355db9bd0fab208b2fa311d4f2125b1650759f00f1"
+        );
+    }
+
+    #[test]
+    fn lifetime_route_pins_historical_receipts_without_current_generations() {
+        let route = lifetime_route();
+        assert!(validate_lifetime_routes(
+            std::slice::from_ref(&route),
+            &[],
+            "6000",
+            "6500",
+            "8",
+            1001
+        )
+        .is_ok());
+        let mut changed = route.clone();
+        changed.grant_issue_receipt.accepted_count = "13".into();
+        assert!(validate_lifetime_routes(&[changed], &[], "6000", "6500", "8", 1001).is_err());
+        let mut changed = route.clone();
+        changed.grant_digest = "0456789".into();
+        assert!(validate_lifetime_routes(&[changed], &[], "6000", "6500", "8", 1001).is_err());
+        assert!(
+            validate_lifetime_routes(&[route.clone(), route], &[], "6000", "6500", "8", 1001)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn lifetime_reserve_inspection_binds_exact_http_and_historical_grant() {
+        let route = lifetime_route();
+        let retained =
+            dispatch_request(37, &parse_input(&request(), &["workroom".into()]).unwrap());
+        let http = routed_reserve_http(&retained, &route.signed_api_path).unwrap();
+        let selectors = json!({"sourceBuiltExactSelectors":"test"});
+        let source = json!({
+            "type":"application-agent-lifetime-author-request-v3",
+            "fixedSelectors":selectors,
+            "http":http,
+            "canonicalRequestHex":"0102",
+            "canonicalHttpHex":"0304",
+            "requestDigest":"901"
+        });
+        let plan = json!({
+            "type":"application-agent-lifetime-reserve-plan-v3",
+            "fixedSelectors":selectors,
+            "http":http,
+            "canonicalRequestHex":"0102",
+            "canonicalHttpHex":"0304",
+            "context":{
+                "appResource":"6100","sessionResource":"6209",
+                "participantSubject":"8","ticketResource":"6408",
+                "parentTask":"6000","parentGeneration":"7",
+                "purseTask":"6500","purseGeneration":"6",
+                "grantResource":"6600","grantIssueIndex":"13",
+                "grantDigest":route.grant_digest,
+                "reserveOperationId":"88","httpOperationId":"37",
+                "requestDigest":"901"
+            },
+            "bindings":{
+                "originalIssueReceipt":route.original_issue_receipt,
+                "grantIssueReceipt":route.grant_issue_receipt,
+                "grantInitializedRoot":route.grant_initialized_root,
+                "grantPhysicalRoot":route.grant_initialized_root,
+                "appPhysicalRoot":"800",
+                "sessionPhysicalRoot":"801",
+                "parentPhysicalRoot":"802",
+                "pursePhysicalRoot":"803"
+            }
+        });
+        let verify = |request: &Value, plan: &Value| {
+            verify_lifetime_reserve_inspection(LifetimeReserveInspection {
+                route: &route,
+                retained_forward: &retained,
+                expected_selectors: &selectors,
+                reserve_operation_id: "88",
+                signed_parent_generation: "7",
+                signed_purse_generation: "6",
+                signed_app_physical_root: "800",
+                signed_session_physical_root: "801",
+                signed_parent_physical_root: "802",
+                signed_purse_physical_root: "803",
+                request,
+                plan,
+            })
+        };
+        verify(&source, &plan).unwrap();
+        let mut changed = source.clone();
+        changed["http"]["headers"][0]["generated"] = json!(true);
+        assert!(verify(&changed, &plan).is_err());
+        let mut changed = plan.clone();
+        changed["bindings"]["grantIssueReceipt"]["imageBoundary"] = json!("1");
+        assert!(verify(&source, &changed).is_err());
+        let mut changed = plan.clone();
+        changed["context"]["parentGeneration"] = json!("8");
+        assert!(verify(&source, &changed).is_err());
+        let mut changed = plan.clone();
+        changed["bindings"]["grantPhysicalRoot"] = json!("9");
+        assert!(verify(&source, &changed).is_err());
+        let mut changed = plan.clone();
+        changed["bindings"]["sessionPhysicalRoot"] = json!("9");
+        assert!(verify(&source, &changed).is_err());
+    }
+
+    #[test]
+    fn lifetime_paid_inspection_keeps_history_but_accepts_new_purse_root() {
+        let reserve = json!({
+            "type":"application-agent-lifetime-reserve-plan-v3",
+            "fixedSelectors":{"grantIssueIndex":"13"},
+            "context":{"canonicalHex":"abcd","parentGeneration":"7"},
+            "canonicalHttpHex":"0102",
+            "http":{"operationId":"37","bodyHex":"ff"},
+            "bindings":{
+                "originalIssueReceipt":{"acceptedCount":"10"},
+                "grantIssueReceipt":{"acceptedCount":"14"},
+                "grantInitializedRoot":"41",
+                "grantPhysicalRoot":"41",
+                "appPhysicalRoot":"50",
+                "sessionPhysicalRoot":"51",
+                "parentPhysicalRoot":"52",
+                "pursePhysicalRoot":"63"
+            }
+        });
+        let receipt = json!({"transactionId":"71","eventId":"72",
+            "acceptedCount":"15","imageBoundary":"73"});
+        let mut paid = reserve.clone();
+        paid["type"] = json!("application-agent-lifetime-paid-plan-v3");
+        paid["reserveIndex"] = json!("14");
+        paid["reserveReceipt"] = receipt.clone();
+        paid["bindings"]["pursePhysicalRoot"] = json!("64");
+        let verify = |paid: &Value| {
+            verify_lifetime_paid_inspection(LifetimePaidInspection {
+                reserve: &reserve,
+                paid,
+                reserve_index: "14",
+                reserve_receipt: &receipt,
+                signed_post_purse_physical_root: "64",
+            })
+        };
+        verify(&paid).unwrap();
+        let mut changed = paid.clone();
+        changed["bindings"]["grantPhysicalRoot"] = json!("42");
+        assert!(verify(&changed).is_err());
+        let mut changed = paid.clone();
+        changed["bindings"]["appPhysicalRoot"] = json!("55");
+        assert!(verify(&changed).is_err());
+        let mut changed = paid.clone();
+        changed["http"]["bodyHex"] = json!("ee");
+        assert!(verify(&changed).is_err());
+        let mut changed = paid.clone();
+        changed["reserveReceipt"]["eventId"] = json!("74");
+        assert!(verify(&changed).is_err());
     }
 
     #[test]
