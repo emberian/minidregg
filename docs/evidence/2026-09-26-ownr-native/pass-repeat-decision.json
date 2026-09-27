@@ -1,0 +1,13 @@
+{
+  "decision": {
+    "decision": "repeated",
+    "fromPosition": "0",
+    "outboxTransactionId": "102523788618122862176207276045306082475383265812923128534919609476203386523436",
+    "toPosition": "4",
+    "type": "fn-a-own-r-progress-decision-v1"
+  },
+  "intentBytes": 0,
+  "intentSha256": null,
+  "status": "skip-decision",
+  "type": "fn-a-reply-poll-session-v1"
+}

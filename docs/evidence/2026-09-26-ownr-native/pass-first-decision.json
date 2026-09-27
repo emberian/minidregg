@@ -1,0 +1,13 @@
+{
+  "decision": {
+    "decision": "proposed-fresh",
+    "fromPosition": "0",
+    "outboxTransactionId": "102523788618122862176207276045306082475383265812923128534919609476203386523436",
+    "toPosition": "4",
+    "type": "fn-a-own-r-progress-decision-v1"
+  },
+  "intentBytes": 1050312,
+  "intentSha256": "4bb7a1983a226d4f845ffa1db15af55f4cdc67999fe3cb4205db8b4f75424649",
+  "status": "skip-decision",
+  "type": "fn-a-reply-poll-session-v1"
+}

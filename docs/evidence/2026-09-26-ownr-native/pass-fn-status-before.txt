@@ -1,0 +1,1 @@
+consumer status accepted committed-ack=0 committed-journal-frontier=4 journal-event-distance=4

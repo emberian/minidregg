@@ -1,0 +1,35 @@
+{
+  "authoredRCarrierBytes": 351204,
+  "authoredRCarrierSha256": "d1dbf28e2ddbc1f7fd6c38094cf4bc50ccee274ad15050fde2cc5b8b93d7ab6b",
+  "authoredRSourceSha256": "31e2b475949eb80846d56b96631ab73a05bebbda43ae39ab129a45f1fcbee250",
+  "firstAck": {
+    "fnAck": "durable-accepted",
+    "fnCommittedAck": "4",
+    "fnStoreSequence": "3",
+    "fnStoreTransactionId": "3",
+    "kind": "own-r-skip"
+  },
+  "fnStatusUnchangedBeforeAck": true,
+  "fnStatusUnchangedOnEqualAckRepeat": true,
+  "fromPosition": "0",
+  "independentAcceptedHistorySelectorProbe": "pending",
+  "miniClientSha256": "9fc6a97ad5319e2d7f4c264ecfe40258e46d0c40ac077ec430106409ff28be8b",
+  "miniHostSha256": "c37a35073b9d19ac342d91ba0a071b3a732f51b0f5f0991fc995ec64573edcff",
+  "noSecondMiniSubmit": true,
+  "qualifiedFnImageSha256": "432622d29a28d59455e01f3e5b426036c5862db21d5f7d1205a9304ab11e3505",
+  "repeatAck": {
+    "fnAck": "durable-accepted",
+    "fnCommittedAck": "4",
+    "fnStoreSequence": "3",
+    "fnStoreTransactionId": "3",
+    "kind": "own-r-skip"
+  },
+  "repeatDecision": "repeated",
+  "repeatIntentAbsent": true,
+  "scope": "Fresh private A own-R native gate; distinct Mini and fn Stores from earlier reds",
+  "tag10TransactionId": "102523788618122862176207276045306082475383265812923128534919609476203386523436",
+  "tag9SignedCallBytes": 1051227,
+  "tag9SignedCallSha256": "7d0c097dbc17372792def84ca01983adbf2f9d0e69c63e1dc1d211fa32ed99ff",
+  "tag9TransactionId": "83965927255411638488738472153696102488673704232501823607901402660135498802420",
+  "toPosition": "4"
+}
