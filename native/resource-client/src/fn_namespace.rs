@@ -304,9 +304,8 @@ fn check_approval(
     if member(inspection, "signingAlgorithm")? != "1" {
         return Err("fn namespace credential algorithm is not Ed25519".into());
     }
-    if member(inspection, "signingAuthorityRoot")? != member(inspection, "expectedAuthorityRoot")? {
-        return Err("fn namespace signing header authority root differs from plan".into());
-    }
+    // The plan pins the durable outer authority root and the credential
+    // header's logical authority root separately. They need not be equal.
     let header_hex = member(inspection, "signingHeaderHex")?;
     let header = decode_hex(header_hex)?;
     if header.is_empty() || header.len() > 4096 || hex(&header) != header_hex {
@@ -660,7 +659,7 @@ mod tests {
             "controlBindingHex":"14","gatewaySubject":"8","gatewayTarget":"601",
             "gatewayCapability":"63","expectedAuthorityRoot":"15",
             "expectedTargetRoot":"16","signingKeyId":"77","signingKeyEpoch":"1",
-            "signingAlgorithm":"1","signingAuthorityRoot":"15",
+            "signingAlgorithm":"1","signingAuthorityRoot":"17",
             "signingHeaderHex":"010203"});
         let mut approval = inspection.clone();
         approval["type"] = json!(APPROVAL);
@@ -675,6 +674,9 @@ mod tests {
         assert!(check_approval(&changed, &inspection, &plan, &signing).is_err());
         changed = approval.clone();
         changed["planSha256"] = json!(digest(&[1, 2, 4]));
+        assert!(check_approval(&changed, &inspection, &plan, &signing).is_err());
+        changed = approval.clone();
+        changed["signingAuthorityRoot"] = json!("15");
         assert!(check_approval(&changed, &inspection, &plan, &signing).is_err());
     }
 
@@ -718,7 +720,7 @@ mod tests {
             "gatewaySubject":"8","gatewayTarget":"601","gatewayCapability":"63",
             "expectedAuthorityRoot":"15","expectedTargetRoot":"16",
             "signingKeyId":"77","signingKeyEpoch":"1","signingAlgorithm":"1",
-            "signingAuthorityRoot":"15","signingHeaderHex":"010203"});
+            "signingAuthorityRoot":"17","signingHeaderHex":"010203"});
         retain_json(&state.join("plan.json"), &inspection).unwrap();
         let host = root.join("host.sh");
         let script = format!("#!/bin/sh\nif [ \"$2\" != inspect ]; then exit 1; fi\nif [ \"$3\" = fn-consumer-namespace-plan ]; then cp '{}' \"$5\"; else printf '%s\\n' '{{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}}' > \"$5\"; fi\n", state.join("plan.json").display());

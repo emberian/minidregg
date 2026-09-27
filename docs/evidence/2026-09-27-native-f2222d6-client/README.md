@@ -1,0 +1,7 @@
+# f2222d6 namespace Mini client
+
+The immutable Linux client is `/home/ember/build/minidregg-f2222d6-client-evidence/bin/mini-f2222d6` (SHA-256 `a2a2a6aa0a9a33fdc8dfeb7b2f28ef6c94ca0766de3cc9a11e89d6fc68e3d189`). It was built from the exact `f2222d63a7d048f36779ac417bda51bf0bd8c399` Git archive (SHA-256 `a17a2a5b4676fdf2d7bcbf9506dee8c9724b4b60851a68e483215e75ac9b7e41`) in an independent source tree and Cargo target. The committed transport source was SHA-256 `bf67094de08d62b650cd29e44afa5949807b99e5e394127116055e2c2321b80a`; unrelated live op46/47 transport work was excluded. The new namespace source was SHA-256 `45ca1f36f10ec063ba09b46882967fabf9213e4cf792827f5b7cd3b5e41ea1cc`.
+
+Bounded `CARGO_BUILD_JOBS=2 cargo build --release --locked --manifest-path native/resource-client/Cargo.toml` passed. `cargo nextest run -p minidregg-resource-client` passed 74/74 tests, including lost-submit lookup recovery. The [source and artifact manifest](manifest.txt) has SHA-256 `84211109ce4eddab247480736cd8e59c3937eec1d5612511eea93a1b34b55f71`; [build](build.log) and [test](nextest.log) logs are retained. No live Store or service was changed.
+
+The separately certified `bf04c29` Host (SHA-256 `cf931aae46102755a97920feed13afa36c83ef4d1bfabd2fb17dee1c8bbfa943`) supports the op40–43 routes needed for the r3 event20 registration fixture. This record qualifies the client build and focused tests, not that native fixture's outcome.

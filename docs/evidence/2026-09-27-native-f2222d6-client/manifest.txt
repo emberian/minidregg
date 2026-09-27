@@ -1,0 +1,13 @@
+source_cut=f2222d63a7d048f36779ac417bda51bf0bd8c399
+source_archive_sha256=a17a2a5b4676fdf2d7bcbf9506dee8c9724b4b60851a68e483215e75ac9b7e41
+build=CARGO_BUILD_JOBS=2 cargo build --release --locked --manifest-path native/resource-client/Cargo.toml
+test=cargo nextest run -p minidregg-resource-client
+d369b81a2aac42f1ebf58a8d6d1a39c7b7ebdc96d2d10bc60131020cf1c10a19  /home/ember/build/minidregg-f2222d6-source/native/resource-client/Cargo.toml
+0da51c6ee3145bb8443127f4f45471b10448f42c4a7762c601cdf174ec88b4ad  /home/ember/build/minidregg-f2222d6-source/native/resource-client/Cargo.lock
+9169d22616a19331fd6ab3f7f7273adf2d4f04d38d07f56293a69ad157e29e7a  /home/ember/build/minidregg-f2222d6-source/native/resource-client/src/main.rs
+bf67094de08d62b650cd29e44afa5949807b99e5e394127116055e2c2321b80a  /home/ember/build/minidregg-f2222d6-source/native/resource-client/src/transport.rs
+45ca1f36f10ec063ba09b46882967fabf9213e4cf792827f5b7cd3b5e41ea1cc  /home/ember/build/minidregg-f2222d6-source/native/resource-client/src/fn_namespace.rs
+e1ccc61b8cbaa528aa8f696b2cc511126da30669c4c87bbb7afbfb7a96bcc1bb  /home/ember/build/minidregg-f2222d6-source/native/resource-client/src/historical_call_receipt.rs
+a2a2a6aa0a9a33fdc8dfeb7b2f28ef6c94ca0766de3cc9a11e89d6fc68e3d189  /home/ember/build/minidregg-f2222d6-client-evidence/bin/mini-f2222d6
+693ed266c18543228aa3479d20ec08afa43dba4f1b609f50fdb070f24b6a5a9a  /home/ember/build/minidregg-f2222d6-client-evidence/client-build.log
+3f1f2315b2ad10417047ca8b7b6070616c239b6e7edca7c3d34abadcc1d88473  /home/ember/build/minidregg-f2222d6-client-evidence/client-nextest.log
