@@ -120,6 +120,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        dispatch_task: None,
         tool_task: Some(ToolTask {
             task: "7102".into(),
             subject: "8".into(),
@@ -253,6 +254,7 @@ fn restart_recognizes_pre_submit_refusal_but_keeps_confirmed_hold() {
         reserve_refused: false,
         reserve_boundary: Some("300".into()),
         reserve_call_sha256: None,
+        reserve_source_sha256: None,
         reserve_outcome_path: None,
         reserve_outcome_sha256: None,
         reserve_anchor: None,

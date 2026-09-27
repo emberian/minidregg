@@ -5,6 +5,9 @@ mod application_tools;
 mod birth_lifecycle_tests;
 mod control;
 mod custody_gate;
+mod dispatch_custody;
+#[cfg(test)]
+mod dispatch_runtime_tests;
 mod legacy_custody_audit;
 mod mcp;
 mod provider;
@@ -54,6 +57,8 @@ struct Config {
     policy_control_capability: Option<String>,
     #[serde(default)]
     tool_task: Option<ToolTask>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dispatch_task: Option<DispatchTask>,
     #[serde(default)]
     provider_task: Option<ProviderTask>,
     /// A command must be selected by its configured name. Its arguments are
@@ -87,6 +92,24 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
+}
+
+/// A separate AgentGrain purse for app API attempts by this fixed agent
+/// custodian. It must not share the MCP tool task or parent prompt allowance.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchTask {
+    task: String,
+    subject: String,
+    capability: String,
+    query_capability: String,
+    custody_key: PathBuf,
+    parent_capability: String,
+    parent_observe_capability: String,
+    reserve: String,
+    charge: String,
+    socket_path: PathBuf,
+    host_uid: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -227,6 +250,12 @@ struct Journal {
     #[serde(default)]
     tool_hold: Option<HeldCharge>,
     #[serde(default)]
+    dispatch_pending: Option<Pending>,
+    #[serde(default)]
+    dispatch_hold: Option<HeldCharge>,
+    #[serde(default)]
+    dispatch_attempt: Option<DispatchAttempt>,
+    #[serde(default)]
     provider_hold: Option<HeldCharge>,
     #[serde(default)]
     provider_attempt: Option<ProviderAttempt>,
@@ -342,6 +371,12 @@ struct BirthPending {
 enum ApplicationBirthRoute {
     Application,
     Session,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DispatchFenceOutcome {
+    Released,
+    HeldForAudit,
 }
 
 impl BirthPending {
@@ -532,6 +567,8 @@ struct HeldCharge {
     #[serde(default)]
     reserve_call_sha256: Option<String>,
     #[serde(default)]
+    reserve_source_sha256: Option<String>,
+    #[serde(default)]
     reserve_outcome_path: Option<PathBuf>,
     #[serde(default)]
     reserve_outcome_sha256: Option<String>,
@@ -605,6 +642,55 @@ struct ProviderAttempt {
     meter_report_sha256: Option<String>,
     #[serde(default)]
     metered_charge: Option<String>,
+}
+
+/// One exact app dispatch attempt under the separate AgentGrain purse. The
+/// request is retained before reserve; `send_started` is durable before fd3.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchAttempt {
+    id: u64,
+    http_operation_id: String,
+    parent_generation: String,
+    parent_root: String,
+    request_path: PathBuf,
+    request_bytes: usize,
+    request_sha256: String,
+    source_request_digest: String,
+    reserve_operation_id: Option<u64>,
+    #[serde(default)]
+    dispatch_generation: Option<String>,
+    #[serde(default)]
+    dispatch_post_root: Option<String>,
+    #[serde(default)]
+    no_send_release_started: bool,
+    #[serde(default)]
+    audited_charge: Option<String>,
+    #[serde(default)]
+    settlement: Option<DispatchSettlement>,
+    send_started: bool,
+    #[serde(default)]
+    committed_dispatch_transaction: Option<String>,
+    #[serde(default)]
+    committed_dispatch_event: Option<String>,
+    #[serde(default)]
+    committed_permit_sha256: Option<String>,
+    #[serde(default)]
+    response_sha256: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchSettlement {
+    operation_id: u64,
+    operation: String,
+    attempt: PathBuf,
+    charge: String,
+    source_sha256: String,
+    call_sha256: String,
+    outcome_path: PathBuf,
+    outcome_sha256: String,
+    receipt: ReserveAnchor,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -796,6 +882,7 @@ struct ProviderReplay {
 enum AuthoritySlot {
     Parent,
     Tool,
+    Dispatch,
     Provider,
 }
 
@@ -874,6 +961,7 @@ impl Journal {
         match slot {
             AuthoritySlot::Parent => &self.pending,
             AuthoritySlot::Tool => &self.tool_pending,
+            AuthoritySlot::Dispatch => &self.dispatch_pending,
             AuthoritySlot::Provider => &self.provider_pending,
         }
     }
@@ -881,6 +969,7 @@ impl Journal {
         match slot {
             AuthoritySlot::Parent => &mut self.pending,
             AuthoritySlot::Tool => &mut self.tool_pending,
+            AuthoritySlot::Dispatch => &mut self.dispatch_pending,
             AuthoritySlot::Provider => &mut self.provider_pending,
         }
     }
@@ -888,6 +977,7 @@ impl Journal {
         match slot {
             AuthoritySlot::Parent => &self.parent_hold,
             AuthoritySlot::Tool => &self.tool_hold,
+            AuthoritySlot::Dispatch => &self.dispatch_hold,
             AuthoritySlot::Provider => &self.provider_hold,
         }
     }
@@ -895,6 +985,7 @@ impl Journal {
         match slot {
             AuthoritySlot::Parent => &mut self.parent_hold,
             AuthoritySlot::Tool => &mut self.tool_hold,
+            AuthoritySlot::Dispatch => &mut self.dispatch_hold,
             AuthoritySlot::Provider => &mut self.provider_hold,
         }
     }
@@ -912,6 +1003,9 @@ impl Journal {
             settlement_due: None,
             parent_hold: None,
             tool_hold: None,
+            dispatch_pending: None,
+            dispatch_hold: None,
+            dispatch_attempt: None,
             provider_hold: None,
             provider_attempt: None,
             provider_settlement: None,
@@ -1380,6 +1474,100 @@ fn validate(c: &Config) -> Result<()> {
     if c.tool_task.is_some() && c.policy_control_capability.is_none() {
         return Err("toolTask requires policyControlCapability for generation renewal".into());
     }
+    #[cfg(not(target_os = "linux"))]
+    if c.dispatch_task.is_some() {
+        return Err("dispatchTask requires Linux SO_PEERCRED".into());
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(d) = &c.dispatch_task {
+        if c.host_socket.is_none() || c.policy_control_capability.is_none() {
+            return Err(
+                "dispatchTask requires native host socket and parent generation renewal".into(),
+            );
+        }
+        if d.task == c.task
+            || c.tool_task.as_ref().is_some_and(|t| t.task == d.task)
+            || c.provider_task.as_ref().is_some_and(|p| p.task == d.task)
+        {
+            return Err("dispatchTask must be a distinct Mini resource".into());
+        }
+        if d.subject == c.subject
+            || c.tool_task.as_ref().is_some_and(|t| t.subject == d.subject)
+            || c.provider_task
+                .as_ref()
+                .is_some_and(|p| p.subject == d.subject)
+        {
+            return Err("dispatchTask requires a distinct delegated subject".into());
+        }
+        for (name, value) in [
+            ("dispatchTask.task", &d.task),
+            ("dispatchTask.subject", &d.subject),
+            ("dispatchTask.capability", &d.capability),
+            ("dispatchTask.queryCapability", &d.query_capability),
+            ("dispatchTask.parentCapability", &d.parent_capability),
+            (
+                "dispatchTask.parentObserveCapability",
+                &d.parent_observe_capability,
+            ),
+            ("dispatchTask.reserve", &d.reserve),
+            ("dispatchTask.charge", &d.charge),
+        ] {
+            decimal(value, name)?;
+        }
+        if !d.custody_key.is_absolute()
+            || d.custody_key == c.custody_key
+            || c.tool_task
+                .as_ref()
+                .is_some_and(|t| t.custody_key == d.custody_key)
+            || c.provider_task
+                .as_ref()
+                .is_some_and(|p| p.custody_key == d.custody_key)
+        {
+            return Err("dispatchTask requires a distinct absolute custody key path".into());
+        }
+        if !d.socket_path.is_absolute()
+            || d.socket_path.starts_with(&c.state_dir)
+            || d.socket_path == c.control_socket
+            || d.host_uid == 0
+            || d.host_uid == unsafe { libc::geteuid() }
+        {
+            return Err(
+                "dispatchTask requires external socket and distinct non-root host UID".into(),
+            );
+        }
+        let parent = d
+            .socket_path
+            .parent()
+            .ok_or("dispatchTask socket parent absent")?;
+        for (depth, directory_path) in parent.ancestors().enumerate() {
+            let directory = fs::symlink_metadata(directory_path)
+                .map_err(|e| format!("dispatchTask socket ancestor: {e}"))?;
+            // A root-owned sticky ancestor (not the socket parent) cannot
+            // rename a task-owned descendant, as with a private directory
+            // below /tmp in the isolated Linux fixture.
+            let safe_sticky_ancestor =
+                depth > 0 && directory.uid() == 0 && directory.mode() & 0o1000 != 0;
+            if !directory.file_type().is_dir()
+                || directory.file_type().is_symlink()
+                || (directory.mode() & 0o022 != 0 && !safe_sticky_ancestor)
+                || directory.mode() & 0o001 == 0
+                || (directory.uid() != 0 && directory.uid() != unsafe { libc::geteuid() })
+            {
+                return Err(format!(
+                    "dispatchTask socket ancestor {} must be real, root/task-owned and non-writable by other users (uid {}, mode {:o})",
+                    directory_path.display(), directory.uid(), directory.mode() & 0o7777
+                ));
+            }
+        }
+        if d.reserve
+            .parse::<u64>()
+            .ok()
+            .zip(d.charge.parse::<u64>().ok())
+            .is_none_or(|(reserve, charge)| charge > reserve)
+        {
+            return Err("dispatchTask charge exceeds reserve".into());
+        }
+    }
     for command in &c.commands {
         if command.name.is_empty()
             || !command
@@ -1485,6 +1673,15 @@ fn validate(c: &Config) -> Result<()> {
                 provider.query_capability.as_str(),
                 provider.parent_capability.as_str(),
                 provider.parent_observe_capability.as_str(),
+            ]);
+        }
+        if let Some(dispatch) = &c.dispatch_task {
+            peer_targets.push(&dispatch.task);
+            peer_capabilities.extend([
+                dispatch.capability.as_str(),
+                dispatch.query_capability.as_str(),
+                dispatch.parent_capability.as_str(),
+                dispatch.parent_observe_capability.as_str(),
             ]);
         }
         resource_tools::validate_birth_families(
@@ -1817,6 +2014,789 @@ impl Runtime {
             query_capability: t.query_capability.clone(),
             custody_key: t.custody_key.clone(),
         })
+    }
+    fn dispatch(&self) -> Result<Authority> {
+        let d = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask is not configured")?;
+        Ok(Authority {
+            task: d.task.clone(),
+            subject: d.subject.clone(),
+            capability: d.capability.clone(),
+            query_capability: d.query_capability.clone(),
+            custody_key: d.custody_key.clone(),
+        })
+    }
+    fn dispatch_settlement_record(
+        &self,
+        pending: &Pending,
+        outcome_path: &Path,
+    ) -> Result<DispatchSettlement> {
+        if !matches!(
+            pending.operation.as_str(),
+            "dispatch settle" | "dispatch release" | "dispatch audit settle"
+        ) {
+            return Err("dispatch settlement operation differs".into());
+        }
+        let source_path = self
+            .config
+            .state_dir
+            .join(format!("source-{:016}.json", pending.operation_id));
+        let source: Value = serde_json::from_slice(&bounded_regular_file(&source_path, 131_072)?)
+            .map_err(|e| format!("dispatch settlement source: {e}"))?;
+        let task = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?;
+        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
+            || source
+                .pointer("/grain/operation/type")
+                .and_then(Value::as_str)
+                != Some("settle")
+        {
+            return Err("dispatch settlement source targets another task/operation".into());
+        }
+        let charge = source
+            .pointer("/grain/operation/charge")
+            .and_then(Value::as_str)
+            .ok_or("dispatch settlement charge absent")?
+            .to_owned();
+        decimal(&charge, "dispatch settlement charge")?;
+        if charge != "0" && charge != task.charge {
+            return Err("dispatch settlement charge differs from fixed purse tariff".into());
+        }
+        let outcome: Value = serde_json::from_slice(&bounded_regular_file(outcome_path, 131_072)?)
+            .map_err(|e| format!("dispatch settlement outcome: {e}"))?;
+        Ok(DispatchSettlement {
+            operation_id: pending.operation_id,
+            operation: pending.operation.clone(),
+            attempt: pending.attempt.clone(),
+            charge,
+            source_sha256: sha256_file(&source_path)?,
+            call_sha256: sha256_file(&pending.attempt.join("call.bin"))?,
+            outcome_path: outcome_path.to_owned(),
+            outcome_sha256: sha256_file(&pending.attempt.join("outcome.bin"))?,
+            receipt: ReserveAnchor::from_confirmed(&outcome)?,
+        })
+    }
+    fn verified_dispatch_settlement(
+        &self,
+        attempt: &DispatchAttempt,
+    ) -> Result<DispatchSettlement> {
+        let saved = attempt
+            .settlement
+            .as_ref()
+            .ok_or("dispatch attempt lacks exact settlement receipt")?;
+        let pending = Pending {
+            operation_id: saved.operation_id,
+            operation: saved.operation.clone(),
+            attempt: saved.attempt.clone(),
+            uncertain: false,
+            publication: None,
+        };
+        let actual = self.dispatch_settlement_record(&pending, &saved.outcome_path)?;
+        if &actual != saved
+            || (attempt.no_send_release_started && actual.charge != "0")
+            || attempt
+                .audited_charge
+                .as_ref()
+                .is_some_and(|charge| charge != &actual.charge)
+        {
+            return Err("dispatch settlement differs from retained request/decision".into());
+        }
+        let retry_result = next_retry_json(&saved.attempt)?;
+        let mut args = vec![
+            "retry",
+            "--attempt",
+            saved
+                .attempt
+                .to_str()
+                .ok_or("dispatch settlement attempt path UTF-8")?,
+            "--mode",
+            "lookup",
+        ];
+        if let Some(socket) = &self.config.host_socket {
+            args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
+        }
+        self.command_output(&self.config.mini, &args)?;
+        let lookup: Value = serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
+            .map_err(|e| format!("dispatch settlement lookup: {e}"))?;
+        if lookup.get("type").and_then(Value::as_str) != Some("confirmed")
+            || !matches!(
+                lookup.get("confirmation").and_then(Value::as_str),
+                Some("installed" | "replayed")
+            )
+            || ReserveAnchor::from_confirmed(&lookup)? != actual.receipt
+        {
+            return Err("dispatch settlement is not confirmed in current native image".into());
+        }
+        Ok(actual)
+    }
+    /// Audit-only reconstruction of a reserve that may have committed just
+    /// before the wrapper copied its operation/gen/postroot into the attempt.
+    /// This never fills send coordinates or enables a late mark-send.
+    fn verified_dispatch_reserve_hold(
+        &self,
+        attempt: &DispatchAttempt,
+        hold: &HeldCharge,
+    ) -> Result<(u64, ReserveAnchor)> {
+        if !hold.reserve_confirmed
+            || hold.reserve_refused
+            || hold.reserve
+                != self
+                    .config
+                    .dispatch_task
+                    .as_ref()
+                    .ok_or("dispatchTask absent")?
+                    .reserve
+        {
+            return Err("dispatch audit lacks exact confirmed reserve hold".into());
+        }
+        let path = hold
+            .reserve_attempt
+            .as_ref()
+            .ok_or("dispatch reserve attempt path absent")?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("dispatch reserve attempt name invalid")?;
+        let encoded = name
+            .strip_prefix("attempt-")
+            .ok_or("dispatch reserve attempt name differs")?;
+        let id = encoded
+            .parse::<u64>()
+            .map_err(|_| "dispatch reserve operation ID malformed")?;
+        if encoded.len() != 16
+            || *path != self.config.state_dir.join(format!("attempt-{id:016}"))
+            || attempt
+                .reserve_operation_id
+                .is_some_and(|saved| saved != id)
+        {
+            return Err(
+                "dispatch reserve attempt path/operation differs from retained origin".into(),
+            );
+        }
+        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
+        if sha256_file(&source_path)?
+            != hold
+                .reserve_source_sha256
+                .as_deref()
+                .ok_or("dispatch reserve source digest absent")?
+        {
+            return Err("dispatch reserve signed source bytes changed".into());
+        }
+        let source: Value = serde_json::from_slice(&bounded_regular_file(&source_path, 131_072)?)
+            .map_err(|e| format!("dispatch reserve source: {e}"))?;
+        let task = self
+            .config
+            .dispatch_task
+            .as_ref()
+            .ok_or("dispatchTask absent")?;
+        let payload = format!(
+            "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{}",
+            attempt.source_request_digest
+        );
+        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
+            || source.pointer("/grain/subject").and_then(Value::as_str)
+                != Some(task.subject.as_str())
+            || source
+                .pointer("/grain/operation/type")
+                .and_then(Value::as_str)
+                != Some("reserve")
+            || source
+                .pointer("/grain/operation/amount")
+                .and_then(Value::as_str)
+                != Some(hold.reserve.as_str())
+            || source
+                .pointer("/grain/context/operationId")
+                .and_then(Value::as_str)
+                != Some(id.to_string().as_str())
+            || source
+                .pointer("/grain/context/payload")
+                .and_then(Value::as_str)
+                != Some(payload.as_str())
+            || source
+                .pointer("/grain/before/generation")
+                .and_then(Value::as_str)
+                != Some(hold.before_generation.as_str())
+            || source
+                .pointer("/grain/expectedTargetRoot")
+                .and_then(Value::as_str)
+                != Some(hold.before_target_root.as_str())
+        {
+            return Err("dispatch reserve source differs from exact held request".into());
+        }
+        let call_hash = hold
+            .reserve_call_sha256
+            .as_deref()
+            .ok_or("dispatch reserve call digest absent")?;
+        let outcome_path = hold
+            .reserve_outcome_path
+            .as_ref()
+            .ok_or("dispatch reserve outcome path absent")?;
+        let outcome_hash = hold
+            .reserve_outcome_sha256
+            .as_deref()
+            .ok_or("dispatch reserve outcome digest absent")?;
+        if sha256_file(&path.join("call.bin"))? != call_hash
+            || sha256_file(outcome_path)? != outcome_hash
+            || outcome_path.parent() != Some(path.as_path())
+        {
+            return Err("dispatch reserve retained native call/outcome changed".into());
+        }
+        let receipt_path = outcome_path.with_extension("json");
+        let original: Value =
+            serde_json::from_slice(&bounded_regular_file(&receipt_path, 131_072)?)
+                .map_err(|e| format!("dispatch reserve receipt: {e}"))?;
+        let anchor = hold
+            .reserve_anchor
+            .as_ref()
+            .ok_or("dispatch reserve anchor absent")?;
+        if ReserveAnchor::from_confirmed(&original)? != *anchor {
+            return Err("dispatch reserve receipt differs from retained anchor".into());
+        }
+        let retry_result = next_retry_json(path)?;
+        let mut args = vec![
+            "retry",
+            "--attempt",
+            path.to_str().ok_or("dispatch reserve attempt path UTF-8")?,
+            "--mode",
+            "lookup",
+        ];
+        if let Some(socket) = &self.config.host_socket {
+            args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
+        }
+        self.command_output(&self.config.mini, &args)?;
+        let current: Value = serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
+            .map_err(|e| format!("dispatch reserve lookup: {e}"))?;
+        if current.get("type").and_then(Value::as_str) != Some("confirmed")
+            || !matches!(
+                current.get("confirmation").and_then(Value::as_str),
+                Some("installed" | "replayed")
+            )
+            || ReserveAnchor::from_confirmed(&current)? != *anchor
+        {
+            return Err("dispatch reserve is absent from current native image".into());
+        }
+        Ok((id, anchor.clone()))
+    }
+    /// Retain one exact source-authored HTTP request before its separately
+    /// paid AgentGrain reserve. The source digest is checked against the full
+    /// request again by Mini's v2 dispatch admission; this receipt alone is
+    /// never permission to send to fd3.
+    fn dispatch_reserve(
+        &mut self,
+        canonical_request: &[u8],
+        source_request_digest: &str,
+        http_operation_id: &str,
+    ) -> Result<Value> {
+        decimal(source_request_digest, "source request digest")?;
+        decimal(http_operation_id, "HTTP operation ID")?;
+        if source_request_digest.len() > 78
+            || http_operation_id.parse::<u64>().is_err()
+            || canonical_request.is_empty()
+            || canonical_request.len() > 10 * 1024 * 1024
+        {
+            return Err("dispatch request coordinates exceed bounds".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || !self.prompt_active
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.journal.child.is_none()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+        {
+            return Err("dispatch task or parent prompt is unavailable".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let parent = self.query()?;
+        let parent_state = parent.get("grain").ok_or("parent grain absent")?;
+        let parent_generation = parent_state
+            .get("generation")
+            .and_then(Value::as_str)
+            .ok_or("parent generation absent")?;
+        let parent_root = parent
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("parent root absent")?;
+        if !matches!(
+            parent_state.get("status").and_then(Value::as_str),
+            Some("3" | "4")
+        ) || self.journal.prompt_witness.is_none()
+        {
+            return Err("parent prompt is not reserved".into());
+        }
+        let attempt_id = self.next_id()?;
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
+        write_new(&request_path, canonical_request)?;
+        self.journal.dispatch_attempt = Some(DispatchAttempt {
+            id: attempt_id,
+            http_operation_id: http_operation_id.into(),
+            parent_generation: parent_generation.into(),
+            parent_root: parent_root.into(),
+            request_path: request_path.clone(),
+            request_bytes: canonical_request.len(),
+            request_sha256: sha256_file(&request_path)?,
+            source_request_digest: source_request_digest.into(),
+            reserve_operation_id: None,
+            dispatch_generation: None,
+            dispatch_post_root: None,
+            no_send_release_started: false,
+            audited_charge: None,
+            settlement: None,
+            send_started: false,
+            committed_dispatch_transaction: None,
+            committed_dispatch_event: None,
+            committed_permit_sha256: None,
+            response_sha256: None,
+        });
+        self.save()?;
+        let authority = self.dispatch()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("dispatch grain status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "dispatch attach",
+                "agent app dispatch attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err(format!(
+                "dispatch task status {status} requires reconciliation"
+            ));
+        }
+        self.check_not_cancelled()?;
+        self.mark_hold_as(
+            AuthoritySlot::Dispatch,
+            &authority,
+            &task.reserve,
+            &task.charge,
+        )?;
+        let payload =
+            format!("DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{source_request_digest}");
+        self.transition_as(
+            &authority,
+            json!({"type":"reserve","amount":task.reserve}),
+            "dispatch reserve",
+            &payload,
+            vec![],
+        )?;
+        let dispatch_state = self.query_as(&authority)?;
+        if dispatch_state
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            != Some("3")
+            || dispatch_state
+                .pointer("/grain/reserved")
+                .and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+        {
+            return Err("confirmed dispatch reserve lacks exact signed reserved state".into());
+        }
+        let dispatch_generation = dispatch_state
+            .pointer("/grain/generation")
+            .and_then(Value::as_str)
+            .ok_or("dispatch generation absent after reserve")?
+            .to_owned();
+        let dispatch_post_root = dispatch_state
+            .get("targetRoot")
+            .and_then(Value::as_str)
+            .ok_or("dispatch root absent after reserve")?
+            .to_owned();
+        let hold = self
+            .journal
+            .dispatch_hold
+            .as_ref()
+            .filter(|hold| hold.reserve_confirmed)
+            .ok_or("dispatch reserve has no exact confirmed native hold")?;
+        let anchor = hold
+            .reserve_anchor
+            .as_ref()
+            .ok_or("dispatch reserve has no exact confirmed native anchor")?
+            .clone();
+        let reserve_path = hold
+            .reserve_attempt
+            .as_ref()
+            .ok_or("dispatch reserve attempt path absent")?;
+        let reserve_name = reserve_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("dispatch reserve attempt name invalid")?;
+        let encoded = reserve_name
+            .strip_prefix("attempt-")
+            .ok_or("dispatch reserve attempt name differs")?;
+        let reserve_operation_id = encoded
+            .parse::<u64>()
+            .map_err(|_| "dispatch reserve operation ID malformed")?;
+        if encoded.len() != 16
+            || *reserve_path
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("attempt-{reserve_operation_id:016}"))
+        {
+            return Err("dispatch reserve attempt path differs from retained source".into());
+        }
+        let reserve_index = anchor
+            .accepted_count
+            .parse::<u64>()
+            .ok()
+            .and_then(|count| count.checked_sub(1))
+            .ok_or("dispatch reserve receipt has no selected history index")?;
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("dispatch attempt disappeared")?;
+        attempt.reserve_operation_id = Some(reserve_operation_id);
+        attempt.dispatch_generation = Some(dispatch_generation.clone());
+        attempt.dispatch_post_root = Some(dispatch_post_root.clone());
+        self.save()?;
+        Ok(json!({
+            "type":"dispatch-reserved-v1",
+            "attemptId":attempt_id.to_string(),
+            "httpOperationId":http_operation_id,
+            "requestSha256":sha256_file(&request_path)?,
+            "sourceRequestDigest":source_request_digest,
+            "reserveOperationId":reserve_operation_id.to_string(),
+            "reserveIndex":reserve_index.to_string(),
+            "dispatchTask":task.task,
+            "dispatchSubject":task.subject,
+            "parentTask":self.config.task,
+            "parentGeneration":parent_generation,
+            "parentRoot":parent_root,
+            "dispatchGeneration":dispatch_generation,
+            "dispatchPostRoot":dispatch_post_root,
+            "reserve":task.reserve,
+            "charge":task.charge,
+            "reserveReceipt":anchor,
+        }))
+    }
+    /// Persist the one-shot external boundary before the physical host writes
+    /// to fd3. The host must already have inspected the exact committed Mini
+    /// permit; this marker does not inspect or mint that permit.
+    fn dispatch_mark_send(
+        &mut self,
+        attempt_id: u64,
+        request_sha256: &str,
+        transaction_id: &str,
+        event_id: &str,
+        permit_sha256: &str,
+    ) -> Result<Value> {
+        for (label, value) in [
+            ("dispatch request SHA-256", request_sha256),
+            ("dispatch permit SHA-256", permit_sha256),
+        ] {
+            if value.len() != 64
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!("{label} must be 32 lowercase hex bytes"));
+            }
+        }
+        decimal(transaction_id, "dispatch transaction")?;
+        decimal(event_id, "dispatch event")?;
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("no held dispatch attempt")?
+            .clone();
+        if attempt.id != attempt_id
+            || attempt.send_started
+            || attempt.no_send_release_started
+            || attempt.audited_charge.is_some()
+            || attempt.request_sha256 != request_sha256
+            || attempt.reserve_operation_id.is_none()
+            || self.journal.dispatch_pending.is_some()
+            || !self
+                .journal
+                .dispatch_hold
+                .as_ref()
+                .is_some_and(|hold| hold.reserve_confirmed && hold.reserve_anchor.is_some())
+        {
+            return Err("dispatch attempt is not a confirmed unsent reserve".into());
+        }
+        if sha256_file(&attempt.request_path)? != request_sha256 {
+            return Err("retained dispatch request bytes changed".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || !self.prompt_active
+        {
+            return Err("agent parent no longer permits app send".into());
+        }
+        let parent = self.query()?;
+        let parent_state = parent.get("grain").ok_or("parent grain absent")?;
+        if parent_state.get("generation").and_then(Value::as_str)
+            != Some(attempt.parent_generation.as_str())
+            || parent.get("targetRoot").and_then(Value::as_str)
+                != Some(attempt.parent_root.as_str())
+            || !matches!(
+                parent_state.get("status").and_then(Value::as_str),
+                Some("3" | "4")
+            )
+        {
+            return Err("agent parent generation changed before app send".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let state = self.query_as(&self.dispatch()?)?;
+        if state.pointer("/grain/status").and_then(Value::as_str) != Some("3")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(task.reserve.as_str())
+            || state.pointer("/grain/generation").and_then(Value::as_str)
+                != attempt.dispatch_generation.as_deref()
+            || state.get("targetRoot").and_then(Value::as_str)
+                != attempt.dispatch_post_root.as_deref()
+        {
+            return Err("dispatch purse is no longer reserved".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || !self.prompt_active
+        {
+            return Err("agent parent fenced during app send preparation".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("dispatch attempt disappeared")?;
+        attempt.committed_dispatch_transaction = Some(transaction_id.into());
+        attempt.committed_dispatch_event = Some(event_id.into());
+        attempt.committed_permit_sha256 = Some(permit_sha256.into());
+        attempt.send_started = true;
+        self.save()?;
+        Ok(
+            json!({"type":"dispatch-send-marked-v1","attemptId":attempt_id.to_string(),
+            "requestSha256":request_sha256,"transactionId":transaction_id,
+            "eventId":event_id,"permitSha256":permit_sha256}),
+        )
+    }
+
+    /// Only a definite response to this exact marked attempt permits the
+    /// fixed operator charge. A lost fd3 reply leaves the reservation held.
+    fn dispatch_settle_definite(
+        &mut self,
+        attempt_id: u64,
+        response_sha256: &str,
+    ) -> Result<Value> {
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("agent hard EOF requires audited dispatch reconciliation".into());
+        }
+        if response_sha256.len() != 64
+            || !response_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("response SHA-256 must be 32 lowercase hex bytes".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("no dispatch attempt")?;
+        if attempt.id != attempt_id
+            || !attempt.send_started
+            || attempt.response_sha256.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || !self
+                .journal
+                .dispatch_hold
+                .as_ref()
+                .is_some_and(|hold| hold.reserve_confirmed)
+        {
+            return Err("dispatch attempt lacks definite held send".into());
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let authority = self.dispatch()?;
+        self.journal
+            .dispatch_attempt
+            .as_mut()
+            .ok_or("dispatch attempt disappeared")?
+            .response_sha256 = Some(response_sha256.into());
+        self.save()?;
+        self.transition_as(
+            &authority,
+            json!({"type":"settle","charge":task.charge}),
+            "dispatch settle",
+            "definite app response to retained dispatch attempt",
+            vec![],
+        )?;
+        self.journal.dispatch_attempt = None;
+        self.save()?;
+        Ok(
+            json!({"type":"dispatch-settled-v1","attemptId":attempt_id.to_string(),
+            "responseSha256":response_sha256,"charge":task.charge}),
+        )
+    }
+    /// A definite pre-send refusal releases this one purse at zero. Once the
+    /// send marker exists, only a definite response or audited reconciliation
+    /// may settle it; an old HTTP operation cannot obtain a second attempt.
+    fn dispatch_abort_no_send(&mut self, attempt_id: u64) -> Result<Value> {
+        if self.cancelled.load(Ordering::SeqCst)
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+        {
+            return Err("agent hard EOF requires audited dispatch reconciliation".into());
+        }
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .as_ref()
+            .ok_or("no dispatch attempt")?;
+        if attempt.id != attempt_id
+            || attempt.send_started
+            || self.journal.dispatch_pending.is_some()
+        {
+            return Err("dispatch may have crossed an external boundary".into());
+        }
+        if let Some(hold) = self.journal.dispatch_hold.clone() {
+            let authority = self.dispatch()?;
+            if hold.reserve_confirmed && hold.reserve_anchor.is_some() {
+                self.journal
+                    .dispatch_attempt
+                    .as_mut()
+                    .ok_or("dispatch attempt disappeared before release")?
+                    .no_send_release_started = true;
+                self.save()?;
+                self.transition_as(
+                    &authority,
+                    json!({"type":"settle","charge":"0"}),
+                    "dispatch release",
+                    "definite refusal before app send",
+                    vec![],
+                )?;
+            } else if hold.reserve_refused || hold.reserve_attempt.is_none() {
+                let current = self.query_as(&authority)?;
+                if current.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                    || current.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                    || current.get("targetRoot").and_then(Value::as_str)
+                        != Some(hold.before_target_root.as_str())
+                {
+                    return Err("unsubmitted dispatch reserve differs from held origin".into());
+                }
+                self.journal.dispatch_hold = None;
+                self.save()?;
+            } else {
+                return Err("dispatch reserve may have committed; exact lookup required".into());
+            }
+        } else if attempt.reserve_operation_id.is_some() {
+            return Err("dispatch reserve marker disappeared without settlement".into());
+        }
+        self.journal.dispatch_attempt = None;
+        self.save()?;
+        Ok(json!({"type":"dispatch-aborted-before-send-v1",
+            "attemptId":attempt_id.to_string(),"charge":"0"}))
+    }
+    fn dispatch_rpc(&mut self, command: dispatch_custody::Command) -> Result<Value> {
+        use dispatch_custody::Command as C;
+        let attempt_id = |value: &str| -> Result<u64> {
+            decimal(value, "dispatch attempt ID")?;
+            value
+                .parse::<u64>()
+                .map_err(|_| "dispatch attempt ID exceeds u64".into())
+        };
+        match command {
+            C::Reserve {
+                http_operation_id,
+                source_request_digest,
+                canonical_request_hex,
+            } => {
+                let request = dispatch_custody::decode_hex(&canonical_request_hex)?;
+                self.dispatch_reserve(&request, &source_request_digest, &http_operation_id)
+            }
+            C::MarkSend {
+                attempt_id: id,
+                request_sha256,
+                transaction_id,
+                event_id,
+                permit_sha256,
+            } => self.dispatch_mark_send(
+                attempt_id(&id)?,
+                &request_sha256,
+                &transaction_id,
+                &event_id,
+                &permit_sha256,
+            ),
+            C::SettleDefinite {
+                attempt_id: id,
+                response_sha256,
+            } => self.dispatch_settle_definite(attempt_id(&id)?, &response_sha256),
+            C::AbortNoSend { attempt_id: id } => self.dispatch_abort_no_send(attempt_id(&id)?),
+            C::Inspect { attempt_id: id } => {
+                let id = attempt_id(&id)?;
+                let attempt = self
+                    .journal
+                    .dispatch_attempt
+                    .as_ref()
+                    .ok_or("no dispatch attempt")?;
+                if attempt.id != id {
+                    return Err("dispatch attempt ID differs".into());
+                }
+                let hold = self.journal.dispatch_hold.as_ref();
+                Ok(json!({"type":"dispatch-attempt-v1",
+                    "attemptId":id.to_string(),
+                    "httpOperationId":attempt.http_operation_id,
+                    "sourceRequestDigest":attempt.source_request_digest,
+                    "requestSha256":attempt.request_sha256,
+                    "parentGeneration":attempt.parent_generation,
+                    "reserveOperationId":attempt.reserve_operation_id.map(|n| n.to_string()),
+                    "reserveConfirmed":hold.is_some_and(|h| h.reserve_confirmed),
+                    "reserveReceipt":hold.and_then(|h| h.reserve_anchor.as_ref()),
+                    "sendStarted":attempt.send_started,
+                    "dispatchTransaction":attempt.committed_dispatch_transaction,
+                    "dispatchEvent":attempt.committed_dispatch_event,
+                    "permitSha256":attempt.committed_permit_sha256,
+                    "responseSha256":attempt.response_sha256}))
+            }
+        }
+    }
+    fn answer_dispatch(&mut self, request: dispatch_custody::Request) {
+        if Instant::now() >= request.deadline
+            || request
+                .phase
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+        {
+            let _ = request.reply.send(json!({"type":"refused",
+                "detail":"dispatch RPC expired before execution"}));
+            return;
+        }
+        let response = match self.dispatch_rpc(request.command) {
+            Ok(value) => value,
+            Err(detail) => json!({"type":"refused","detail":detail}),
+        };
+        request.phase.store(2, Ordering::SeqCst);
+        let _ = request.reply.send(response);
     }
     fn provider(&self) -> Result<Authority> {
         let p = self
@@ -2917,6 +3897,7 @@ impl Runtime {
             reserve_refused: false,
             reserve_boundary: None,
             reserve_call_sha256: None,
+            reserve_source_sha256: None,
             reserve_outcome_path: None,
             reserve_outcome_sha256: None,
             reserve_anchor: None,
@@ -2942,7 +3923,8 @@ impl Runtime {
             .and_then(Value::as_str)
             .ok_or("confirmed reserve lacks image boundary")?
             .to_owned();
-        let provider_evidence = if slot == AuthoritySlot::Provider {
+        let provider_evidence = if matches!(slot, AuthoritySlot::Provider | AuthoritySlot::Dispatch)
+        {
             let anchor = ReserveAnchor::from_confirmed(&receipt)?;
             let call = attempt.join("call.bin");
             let outcome = outcome_json.with_extension("bin");
@@ -2967,6 +3949,28 @@ impl Runtime {
         } else {
             None
         };
+        let dispatch_source_hash = if slot == AuthoritySlot::Dispatch {
+            let name = attempt
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("dispatch reserve attempt name invalid")?;
+            let encoded = name
+                .strip_prefix("attempt-")
+                .ok_or("dispatch reserve attempt name differs")?;
+            let id = encoded
+                .parse::<u64>()
+                .map_err(|_| "dispatch reserve operation ID malformed")?;
+            if encoded.len() != 16
+                || attempt != self.config.state_dir.join(format!("attempt-{id:016}"))
+            {
+                return Err("dispatch reserve attempt path differs from source".into());
+            }
+            Some(sha256_file(
+                &self.config.state_dir.join(format!("source-{id:016}.json")),
+            )?)
+        } else {
+            None
+        };
         let hold = self
             .journal
             .hold_for_mut(slot)
@@ -2977,6 +3981,7 @@ impl Runtime {
         }
         hold.reserve_confirmed = true;
         hold.reserve_boundary = Some(boundary);
+        hold.reserve_source_sha256 = dispatch_source_hash;
         if let Some((call_hash, outcome, outcome_hash, anchor)) = provider_evidence {
             hold.reserve_call_sha256 = Some(call_hash);
             hold.reserve_outcome_path = Some(outcome);
@@ -3007,6 +4012,8 @@ impl Runtime {
         let work_submit = label == "reserve"
             || label == "tool attach"
             || label == "tool reserve"
+            || label == "dispatch attach"
+            || label == "dispatch reserve"
             || label == "provider attach"
             || label == "provider reserve"
             || (label == "tool settle" && !publications.is_empty());
@@ -3019,6 +4026,13 @@ impl Runtime {
             .is_some_and(|tool| tool.task == authority.task)
         {
             AuthoritySlot::Tool
+        } else if self
+            .config
+            .dispatch_task
+            .as_ref()
+            .is_some_and(|dispatch| dispatch.task == authority.task)
+        {
+            AuthoritySlot::Dispatch
         } else if self
             .config
             .provider_task
@@ -3251,6 +4265,22 @@ impl Runtime {
                     self.journal.provider_settlement = Some(
                         self.provider_settlement_record(pending, &attempt.join("outcome.json"))?,
                     );
+                }
+                if slot == AuthoritySlot::Dispatch
+                    && op.get("type").and_then(Value::as_str) == Some("settle")
+                {
+                    let pending = self
+                        .journal
+                        .pending_for(slot)
+                        .as_ref()
+                        .ok_or("dispatch settlement pending disappeared")?;
+                    let settled =
+                        self.dispatch_settlement_record(pending, &attempt.join("outcome.json"))?;
+                    self.journal
+                        .dispatch_attempt
+                        .as_mut()
+                        .ok_or("dispatch settlement lost retained attempt")?
+                        .settlement = Some(settled);
                 }
                 *self.journal.pending_for_mut(slot) = None;
                 if op.get("type").and_then(Value::as_str) == Some("settle") {
@@ -5042,6 +6072,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
             || !self.prompt_active
         {
             return Err("Hermes task is not running under this controller".into());
@@ -5342,6 +6375,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
             || self.journal.settlement_due.is_some()
             || !self.journal.unresolved_external.is_empty()
         {
@@ -5382,6 +6418,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
             || !self.journal.unresolved_external.is_empty()
         {
             return Err("task is fenced or unresolved; cannot attach".into());
@@ -5531,8 +6570,15 @@ impl Runtime {
         // lookup remains unresolved; it is never a license to resubmit.
         let parent_retry = self.retry_pending(false);
         let tool_retry = self.retry_pending(true);
+        let dispatch_retry = self.retry_pending_slot(AuthoritySlot::Dispatch);
         let provider_retry = self.retry_pending_slot(AuthoritySlot::Provider);
         let tool_fenced = tool_retry.and_then(|_| self.fence_tool());
+        let dispatch_fenced = dispatch_retry.and_then(|_| match self.fence_dispatch()? {
+            DispatchFenceOutcome::Released => Ok(()),
+            DispatchFenceOutcome::HeldForAudit => {
+                Err("dispatch reservation remains held for private audit".into())
+            }
+        });
         let provider_fenced = provider_retry.and_then(|_| self.fence_provider());
         let fenced = parent_retry.and_then(|_| {
             let parent_state = self.query()?;
@@ -5583,16 +6629,77 @@ impl Runtime {
                 )
             }
         });
-        match (stopped.and(custody_stopped), fenced, tool_fenced, provider_fenced) {
-            (Ok(()), Ok(()), Ok(()), Ok(())) => {
+        match (stopped.and(custody_stopped), fenced, tool_fenced, dispatch_fenced, provider_fenced) {
+            (Ok(()), Ok(()), Ok(()), Ok(()), Ok(())) => {
                 self.journal.connection = Connection::Detached;
                 self.journal.hard_reconnect_pending = false;
                 self.journal.prompt_witness = None;
                 self.save()
             }
-            (a, b, c, d) => Err(format!(
-                "hard disconnect unresolved: local stop={a:?}; Mini fence={b:?}; tool fence={c:?}; provider fence={d:?}"
+            (a, b, c, d, e) => Err(format!(
+                "hard disconnect unresolved: local stop={a:?}; Mini fence={b:?}; tool fence={c:?}; dispatch fence={d:?}; provider fence={e:?}"
             )),
+        }
+    }
+    fn fence_dispatch(&mut self) -> Result<DispatchFenceOutcome> {
+        if self.config.dispatch_task.is_none() {
+            return Ok(DispatchFenceOutcome::Released);
+        }
+        let authority = self.dispatch()?;
+        let state = self.query_as(&authority)?;
+        let status = state
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("dispatch grain status absent")?;
+        if matches!(status, "1" | "3") {
+            self.transition_as(
+                &authority,
+                json!({"type":"disconnect"}),
+                "dispatch disconnect",
+                "parent hard connection lost",
+                vec![],
+            )?;
+        } else if !matches!(status, "0" | "5" | "6" | "7") {
+            return Err(format!("unexpected dispatch status {status}"));
+        }
+        let after = self.query_as(&authority)?;
+        match after.pointer("/grain/status").and_then(Value::as_str) {
+            Some("0" | "6") => Ok(DispatchFenceOutcome::Released),
+            Some("5" | "7") => {
+                let hold = self
+                    .journal
+                    .dispatch_hold
+                    .as_ref()
+                    .filter(|hold| hold.reserve_confirmed && hold.reserve_anchor.is_some())
+                    .ok_or("fenced dispatch reservation lacks confirmed native hold")?;
+                let before = hold
+                    .before_generation
+                    .parse::<u64>()
+                    .map_err(|_| "dispatch hold generation invalid")?;
+                let expected = before
+                    .checked_add(1)
+                    .ok_or("dispatch fence generation overflow")?
+                    .to_string();
+                if after.pointer("/grain/generation").and_then(Value::as_str)
+                    != Some(expected.as_str())
+                    || after.pointer("/grain/reserved").and_then(Value::as_str)
+                        != Some(hold.reserve.as_str())
+                {
+                    return Err("fenced dispatch state differs from confirmed hold".into());
+                }
+                let note = "dispatch reservation fenced; app send/response needs exact audit";
+                if !self
+                    .journal
+                    .unresolved_external
+                    .iter()
+                    .any(|entry| entry == note)
+                {
+                    self.journal.unresolved_external.push(note.into());
+                    self.save()?;
+                }
+                Ok(DispatchFenceOutcome::HeldForAudit)
+            }
+            other => Err(format!("unexpected dispatch status after fence {other:?}")),
         }
     }
     fn fence_provider(&mut self) -> Result<()> {
@@ -5686,6 +6793,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
         {
             return Err("task has unresolved work".into());
         }
@@ -5722,6 +6832,10 @@ impl Runtime {
                 }
                 Ok(Input::Admin(request)) => {
                     let _ = request.reply.send("worker reservation in progress".into());
+                }
+                Ok(Input::Dispatch(request)) => {
+                    let _ = request.reply.send(json!({"type":"refused",
+                        "detail":"worker reservation in progress"}));
                 }
                 _ => {}
             }
@@ -5873,6 +6987,10 @@ impl Runtime {
                         .reply
                         .send("worker is running; stop and fence it first".into());
                 }
+                Ok(Input::Dispatch(request)) => {
+                    let _ = request.reply.send(json!({"type":"refused",
+                        "detail":"agent dispatch requires an active Hermes prompt"}));
+                }
                 Ok(Input::SoftDetach) => {
                     self.stdin_gone = true;
                 }
@@ -5970,6 +7088,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
         {
             return Err("task has unresolved work".into());
         }
@@ -6171,6 +7292,10 @@ impl Runtime {
                 }
                 Ok(Input::Admin(request)) => {
                     let _ = request.reply.send("Hermes reservation in progress".into());
+                }
+                Ok(Input::Dispatch(request)) => {
+                    let _ = request.reply.send(json!({"type":"refused",
+                        "detail":"Hermes reservation in progress"}));
                 }
                 _ => {}
             }
@@ -6618,6 +7743,7 @@ impl Runtime {
                         .reply
                         .send("Hermes is running; stop and fence it first".into());
                 }
+                Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
                 Ok(Input::SoftDetach) => {
                     self.stdin_gone = true;
                 }
@@ -6702,6 +7828,144 @@ impl Runtime {
             ));
             self.save()?;
         }
+        self.retry_pending_slot(AuthoritySlot::Dispatch)?;
+        if self.journal.dispatch_pending.is_none()
+            && self.journal.dispatch_hold.as_ref().is_some_and(|hold| {
+                !hold.reserve_confirmed && (hold.reserve_attempt.is_none() || hold.reserve_refused)
+            })
+            && self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    !attempt.send_started && attempt.reserve_operation_id.is_none()
+                })
+        {
+            // No Mini reserve was submitted, or its exact retained outcome
+            // was definitively refused. A signed idle task corroborates that
+            // no purse amount is held. This clears no app-send marker.
+            let state = self.query_as(&self.dispatch()?)?;
+            if !matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "1" | "2" | "6")
+            ) || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err(
+                    "unsubmitted/refused dispatch reserve has changed signed task state".into(),
+                );
+            }
+            self.journal.dispatch_hold = None;
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+        }
+        if self.journal.dispatch_pending.is_none()
+            && self.journal.dispatch_hold.is_none()
+            && self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    !attempt.send_started
+                        && !attempt.no_send_release_started
+                        && attempt.reserve_operation_id.is_none()
+                })
+        {
+            let state = self.query_as(&self.dispatch()?)?;
+            if !matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "1")
+            ) || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err("pre-reserve dispatch attempt has changed signed task state".into());
+            }
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+        }
+        if self.journal.dispatch_pending.is_none()
+            && self.journal.dispatch_hold.is_none()
+            && self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .is_some_and(|attempt| attempt.no_send_release_started && !attempt.send_started)
+        {
+            // The hold is removed only in the same durable journal write as
+            // a confirmed ordinary zero-charge settlement. The separately
+            // saved release intent rules out interpreting an absent hold as
+            // permission to discard an uncertain reserve.
+            self.verified_dispatch_settlement(
+                self.journal
+                    .dispatch_attempt
+                    .as_ref()
+                    .ok_or("dispatch release attempt disappeared")?,
+            )?;
+            let state = self.query_as(&self.dispatch()?)?;
+            if state.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err("dispatch zero-release recovery lacks settled task state".into());
+            }
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+        }
+        if self.journal.dispatch_pending.is_none()
+            && self.journal.dispatch_hold.is_none()
+            && self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .is_some_and(|attempt| attempt.audited_charge.is_some())
+        {
+            // An audited charge is saved before the ordinary settlement. The
+            // confirmed settlement removes the hold in the same journal
+            // write; an absent hold without this marker proves nothing.
+            self.verified_dispatch_settlement(
+                self.journal
+                    .dispatch_attempt
+                    .as_ref()
+                    .ok_or("audited dispatch attempt disappeared")?,
+            )?;
+            let state = self.query_as(&self.dispatch()?)?;
+            if !matches!(
+                state.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "1" | "6")
+            ) || state.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            {
+                return Err("audited dispatch recovery lacks signed settled state".into());
+            }
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+        }
+        if self.journal.dispatch_pending.is_none()
+            && self.journal.dispatch_hold.is_none()
+            && self
+                .journal
+                .dispatch_attempt
+                .as_ref()
+                .is_some_and(|attempt| attempt.send_started && attempt.response_sha256.is_some())
+        {
+            self.verified_dispatch_settlement(
+                self.journal
+                    .dispatch_attempt
+                    .as_ref()
+                    .ok_or("definite dispatch attempt disappeared")?,
+            )?;
+            self.journal.dispatch_attempt = None;
+            self.save()?;
+        }
+        if self.journal.dispatch_hold.is_some() {
+            self.journal.connection = Connection::Fenced;
+            let note = "dispatch reservation survived controller restart; app delivery requires exact audit";
+            if !self
+                .journal
+                .unresolved_external
+                .iter()
+                .any(|entry| entry == note)
+            {
+                self.journal.unresolved_external.push(note.into());
+            }
+            self.save()?;
+        }
         self.retry_pending_slot(AuthoritySlot::Provider)?;
         if let Some(attempt) = &self.journal.provider_attempt {
             if attempt.send_started && attempt.outcome.is_none() {
@@ -6776,6 +8040,7 @@ impl Runtime {
         }
         if self.journal.connection == Connection::Fenced {
             let tool_fence = self.fence_tool();
+            let dispatch_fence = self.fence_dispatch();
             let provider_fence = self.fence_provider();
             let state = self.query()?;
             let status = state
@@ -6794,13 +8059,167 @@ impl Runtime {
                 ));
             }
             tool_fence?;
+            let dispatch_held = dispatch_fence? == DispatchFenceOutcome::HeldForAudit;
             provider_fence?;
-            self.journal.connection = Connection::Detached;
+            self.journal.connection = if dispatch_held {
+                Connection::Fenced
+            } else {
+                Connection::Detached
+            };
             self.journal.hard_reconnect_pending = false;
             self.journal.prompt_witness = None;
             self.save()?;
         }
         Ok(())
+    }
+    /// Operator-only recovery of one held dispatch request. The operator
+    /// chooses the fixed charge or zero after auditing external effects; an
+    /// uncertain fd3 send is never auto-settled or sent again. The decision
+    /// is durable before the signed ordinary AgentGrain settlement.
+    fn reconcile_dispatch_audited(&mut self, charge_fixed: bool) -> Result<()> {
+        if self.journal.connection != Connection::Fenced
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.dispatch_pending.is_some()
+        {
+            return Err(
+                "dispatch audit requires fenced stopped caller and resolved native attempts".into(),
+            );
+        }
+        let task = self
+            .config
+            .dispatch_task
+            .clone()
+            .ok_or("dispatchTask absent")?;
+        let attempt = self
+            .journal
+            .dispatch_attempt
+            .clone()
+            .ok_or("no retained dispatch attempt for audit")?;
+        retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            10 * 1024 * 1024,
+        )?;
+        if attempt.no_send_release_started && charge_fixed {
+            return Err("pre-send release can only be audited at zero charge".into());
+        }
+        if !attempt.send_started && charge_fixed {
+            return Err("unsent dispatch cannot incur app attempt charge".into());
+        }
+        let hold = self
+            .journal
+            .dispatch_hold
+            .clone()
+            .ok_or("audited dispatch settlement lacks retained hold")?;
+        let (reserve_id, reserve_anchor) = self.verified_dispatch_reserve_hold(&attempt, &hold)?;
+        let charge = if charge_fixed {
+            task.charge.clone()
+        } else {
+            "0".to_owned()
+        };
+        if let Some(previous) = &attempt.audited_charge {
+            if previous != &charge {
+                return Err("dispatch audit decision cannot be changed after persistence".into());
+            }
+        } else {
+            let id = self.next_id()?;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":id.to_string(), "authority":"dispatch",
+                "action":"settle-held-dispatch-audited",
+                "stage":"operator-audited-requested",
+                "attemptId":attempt.id.to_string(),
+                "httpOperationId":attempt.http_operation_id,
+                "requestPath":attempt.request_path,
+                "requestBytes":attempt.request_bytes,
+                "requestSha256":attempt.request_sha256,
+                "sourceRequestDigest":attempt.source_request_digest,
+                "reserveOperationId":reserve_id.to_string(),
+                "reserveReceipt":reserve_anchor,
+                "dispatchGeneration":attempt.dispatch_generation,
+                "dispatchPostRoot":attempt.dispatch_post_root,
+                "sendBoundaryDurable":attempt.send_started,
+                "dispatchTransactionId":attempt.committed_dispatch_transaction,
+                "dispatchEventId":attempt.committed_dispatch_event,
+                "permitSha256":attempt.committed_permit_sha256,
+                "responseSha256":attempt.response_sha256,
+                "auditedCharge":charge,
+                "externalEffectsAcknowledged":false
+            }));
+            self.journal
+                .dispatch_attempt
+                .as_mut()
+                .ok_or("dispatch attempt disappeared")?
+                .audited_charge = Some(charge.clone());
+            self.save()?;
+        }
+        let authority = self.dispatch()?;
+        let state = self.query_as(&authority)?;
+        let status = state
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("audited dispatch signed status absent")?;
+        if !matches!(status, "3" | "5" | "7")
+            || state.pointer("/grain/reserved").and_then(Value::as_str)
+                != Some(hold.reserve.as_str())
+        {
+            return Err("audited dispatch signed reservation differs".into());
+        }
+        let before = hold
+            .before_generation
+            .parse::<u64>()
+            .map_err(|_| "audited dispatch hold generation invalid")?;
+        let expected = before
+            .checked_add(u64::from(status != "3"))
+            .ok_or("audited dispatch generation overflow")?
+            .to_string();
+        if state.pointer("/grain/generation").and_then(Value::as_str) != Some(expected.as_str())
+            || (status == "3"
+                && attempt.dispatch_post_root.as_deref()
+                    != state.get("targetRoot").and_then(Value::as_str))
+            || attempt
+                .dispatch_generation
+                .as_ref()
+                .is_some_and(|generation| generation != &hold.before_generation)
+        {
+            return Err("audited dispatch generation/root differs from confirmed reserve".into());
+        }
+        if status == "3" && self.fence_dispatch()? != DispatchFenceOutcome::HeldForAudit {
+            return Err("audited dispatch fence did not retain reservation".into());
+        }
+        self.transition_as(
+            &authority,
+            json!({"type":"settle","charge":charge}),
+            "dispatch audit settle",
+            "operator audited exact dispatch attempt",
+            vec![],
+        )?;
+        let after = self.query_as(&authority)?;
+        if !matches!(
+            after.pointer("/grain/status").and_then(Value::as_str),
+            Some("0" | "1" | "6")
+        ) || after.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+        {
+            return Err("audited dispatch settlement lacks signed terminal state".into());
+        }
+        let note = format!(
+            "dispatch request {} external effects require explicit acknowledgement",
+            attempt.id
+        );
+        if !self.journal.unresolved_external.contains(&note) {
+            self.journal.unresolved_external.push(note);
+        }
+        self.journal.dispatch_attempt = None;
+        self.journal.reconciliation_log.push(json!({
+            "authority":"dispatch", "action":"settle-held-dispatch-audited",
+            "stage":"signed-settlement-confirmed", "attemptId":attempt.id.to_string(),
+            "auditedCharge":charge, "externalEffectsAcknowledged":false
+        }));
+        self.save()
     }
     fn reconcile_hold(&mut self, tool: bool, audited: bool) -> Result<()> {
         if tool && self.journal.birth_operation.is_some() {
@@ -6816,6 +8235,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
         {
             return Err(
                 "reconciliation requires no live worker or unresolved custody attempt".into(),
@@ -7270,6 +8692,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
         {
             return Err("cannot abort a hold with a child or unresolved native attempt".into());
         }
@@ -7308,6 +8733,9 @@ impl Runtime {
             || self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
             || self.journal.settlement_due.is_some()
         {
             return Err(
@@ -7406,7 +8834,7 @@ impl Runtime {
                     Ok(Some(refusal)) => {
                         if matches!(
                             p.operation.as_str(),
-                            "reserve" | "tool reserve" | "provider reserve"
+                            "reserve" | "tool reserve" | "dispatch reserve" | "provider reserve"
                         ) {
                             self.journal
                                 .hold_for_mut(slot)
@@ -7523,7 +8951,7 @@ impl Runtime {
             }
             if matches!(
                 p.operation.as_str(),
-                "reserve" | "tool reserve" | "provider reserve"
+                "reserve" | "tool reserve" | "dispatch reserve" | "provider reserve"
             ) {
                 self.record_reserve_confirmation(slot, &p.attempt, &retry_result)?;
             }
@@ -7532,12 +8960,23 @@ impl Runtime {
                 "settle"
                     | "tool settle"
                     | "tool release"
+                    | "dispatch settle"
+                    | "dispatch release"
+                    | "dispatch audit settle"
                     | "reconcile settle"
                     | "provider settle"
                     | "provider audit settle"
             ) {
                 if let Some(record) = provider_settlement {
                     self.journal.provider_settlement = Some(record);
+                }
+                if slot == AuthoritySlot::Dispatch {
+                    let settled = self.dispatch_settlement_record(&p, &retry_result)?;
+                    self.journal
+                        .dispatch_attempt
+                        .as_mut()
+                        .ok_or("dispatch settlement lost retained attempt")?
+                        .settlement = Some(settled);
                 }
                 *self.journal.hold_for_mut(slot) = None;
                 if slot == AuthoritySlot::Parent {
@@ -7560,6 +8999,7 @@ enum Input {
     Disconnect,
     SoftDetach,
     Admin(control::AdminRequest),
+    Dispatch(dispatch_custody::Request),
 }
 
 fn signal_group(pgid: i32, signal: i32) -> Result<()> {
@@ -7903,6 +9343,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
     let admin_path = rt.config.state_dir.join("admin.sock");
     clear_stale_control_socket(&admin_path)?;
     let admin = control::start_admin(&admin_path)?;
+    let dispatch_server = if let Some(task) = &rt.config.dispatch_task {
+        clear_stale_control_socket(&task.socket_path)?;
+        Some(dispatch_custody::start(&task.socket_path, task.host_uid)?)
+    } else {
+        None
+    };
     rt.output = Some(server.output_handle());
     let (tx, input) = mpsc::channel();
     let admin_tx = tx.clone();
@@ -7914,6 +9360,17 @@ fn serve(mut rt: Runtime) -> Result<()> {
             }
         }
     });
+    if let Some(dispatch_server) = dispatch_server {
+        let dispatch_tx = tx.clone();
+        thread::spawn(move || {
+            let _dispatch_server = &dispatch_server;
+            while let Ok(request) = dispatch_server.requests.recv() {
+                if dispatch_tx.send(Input::Dispatch(request)).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     thread::spawn(move || {
         let _server = &server;
         let mut current = None;
@@ -8009,6 +9466,8 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile parent audited" => rt.reconcile_hold(false, true),
                     "reconcile tool audited" => rt.reconcile_hold(true, true),
                     "reconcile provider audited" => rt.reconcile_provider_audited(),
+                    "reconcile dispatch audited fixed" => rt.reconcile_dispatch_audited(true),
+                    "reconcile dispatch audited zero" => rt.reconcile_dispatch_audited(false),
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
@@ -8024,6 +9483,10 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     Err(error) => format!("error: {error}"),
                 });
                 outcome
+            }
+            Input::Dispatch(request) => {
+                rt.answer_dispatch(request);
+                Ok(())
             }
             Input::Line(line) if line == "disconnect" => rt.disconnect(),
             Input::Line(line) if line.starts_with("run ") => {
@@ -8419,6 +9882,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             capability: "71".into(),
             query_capability: "74".into(),
             policy_control_capability: Some("72".into()),
+            dispatch_task: None,
             tool_task: Some(ToolTask {
                 task: "7102".into(),
                 subject: "8".into(),
@@ -8580,6 +10044,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             reserve_refused: false,
             reserve_boundary: Some("accepted-reserve-image".into()),
             reserve_call_sha256: None,
+            reserve_source_sha256: None,
             reserve_outcome_path: None,
             reserve_outcome_sha256: None,
             reserve_anchor: None,
@@ -8772,6 +10237,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             reserve_refused: false,
             reserve_boundary: None,
             reserve_call_sha256: None,
+            reserve_source_sha256: None,
             reserve_outcome_path: None,
             reserve_outcome_sha256: None,
             reserve_anchor: None,
