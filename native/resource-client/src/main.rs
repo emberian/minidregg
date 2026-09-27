@@ -16,6 +16,8 @@ mod current_birth;
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod fn_namespace;
+#[cfg(unix)]
 mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
@@ -141,6 +143,9 @@ usage:
   mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
   mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
+  mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
+  mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
+  mini fn-namespace-lookup --state-dir PRIVATE-DIR
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
@@ -2319,6 +2324,35 @@ fn run(mut args: Args) -> Result<()> {
                 [fields[0], fields[1], fields[2], fields[3]],
                 &directory,
             )
+        }
+        #[cfg(unix)]
+        "fn-namespace-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let directory = path(args.required("state-dir")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("fn-namespace-plan requires --socket")?;
+            fn_namespace::plan(&host, &config, socket, &directory)
+        }
+        #[cfg(unix)]
+        "fn-namespace-register" => {
+            let directory = path(args.required("state-dir")?);
+            let key = path(args.required("key")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            if SOCKET.get().is_some() {
+                return Err("fn-namespace-register uses its retained operator socket".into());
+            }
+            fn_namespace::register(&directory, &key, &approval)
+        }
+        #[cfg(unix)]
+        "fn-namespace-lookup" => {
+            let directory = path(args.required("state-dir")?);
+            args.finish()?;
+            if SOCKET.get().is_some() {
+                return Err("fn-namespace-lookup uses its retained operator socket".into());
+            }
+            fn_namespace::lookup_original(&directory)
         }
         "submit" => {
             let host = path(args.required("host")?);
