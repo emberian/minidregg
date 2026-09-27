@@ -68,13 +68,21 @@ recipient.
 
 Add a distinct, versioned `Release` message and receiving operation. Its
 domain-separated signed bytes should bind at least: source owner-policy
-identity and key epoch; source deployment/domain and a *claimed* private
-operation identity if one is shown; receiver deployment/domain; destination
-resource, group and audience; exact released content digest and byte length;
+identity and key epoch; source deployment/domain, semantics and resource
+coordinate, plus a *claimed* private operation identity if one is shown;
+receiver deployment/domain and semantics; destination resource and routing
+group; a separate audience visibility, policy/keyset root and epoch; exact
+released content bytes (or a digest and length checked against those bytes);
 parent/context commitment; one-use release nonce; and an expiry or explicit
 one-shot validity rule. The source owner or a delegated release principal
 signs those bytes. A declaration about a private source receipt remains a
 claim unless the historical proof above is also supplied.
+
+`recipientOnly` is signed audience intent, **not** confidentiality once bytes
+enter fn. A confidential delivery profile must encrypt before fn publication
+and sign the ciphertext, plaintext commitment and format; the receiver must
+check the intended recipient keyset before disclosure. This proposal does
+not define or approve an encryption suite.
 
 The recipient config or a governed receiver resource pins the owner-policy
 root. Its native receiver verifies the signature and complete bounded
