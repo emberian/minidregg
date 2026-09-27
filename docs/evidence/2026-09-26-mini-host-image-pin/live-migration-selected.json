@@ -1,0 +1,45 @@
+{
+  "migration": {
+    "type": "minidregg-b-consumer-host-upgrade-v1",
+    "scope": "operator-authorized rebind for one retained call; no submit or ACK",
+    "pendingPhase": "Sending",
+    "oldHostSha256": "919c3b7b64b7bff11d47a52993c7700b8028aa8596013cf396f41fd4f98c3038",
+    "newHostSha256": "49e8e6f05fd1f86c88e8920e66e3827b6a026bb265bd305e4438bc1fb2e4ed41",
+    "configSha256": "c54ce20f72d8ba64fc5c4a16db857e816628562b52eb6e18c084da3c0e49eda8",
+    "attemptConfigSha256": "c54ce20f72d8ba64fc5c4a16db857e816628562b52eb6e18c084da3c0e49eda8",
+    "callSha256": "4ceab566aeadb47ae29147aa53305482d56c8f3fc619043c5e863a516b628a23",
+    "confirmedFields": {
+      "acceptedCount": "3",
+      "eventId": "76255522961118423695046404792380634000584551157555388805752752222329055606806",
+      "imageBoundary": "29936162402506592586987268492039189617605932909123840279128651316255128051042",
+      "transactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180"
+    },
+    "newLookupSha256": "39e04ff688e63d0d8d568cd2ead0b652e7d723eff4f9bac8c36d2b88f169b822"
+  },
+  "retainedLookup": {
+    "type": "confirmed",
+    "confirmation": "replayed",
+    "acceptedCount": "3",
+    "transactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180",
+    "eventId": "76255522961118423695046404792380634000584551157555388805752752222329055606806",
+    "imageBoundary": "29936162402506592586987268492039189617605932909123840279128651316255128051042"
+  },
+  "retryTransport": {
+    "type": "minidregg-upgraded-retry-transport-v1",
+    "mode": "lookup",
+    "effectiveHostSha256": "49e8e6f05fd1f86c88e8920e66e3827b6a026bb265bd305e4438bc1fb2e4ed41",
+    "callSha256": "4ceab566aeadb47ae29147aa53305482d56c8f3fc619043c5e863a516b628a23",
+    "upgradeEvidenceSha256": "536dc60d936d6d02bfddced68712877fa6f97fba933dd4a8a58afb4e9c4840b9"
+  },
+  "firstAckRefusal": {
+    "type": "refused",
+    "phase": "666e2d73657373696f6e"
+  },
+  "observedWorkerState": {
+    "kind": "publication",
+    "phase": "Held",
+    "reason": "retained ACK reply requires operator review: retained ACK frame is not a successful B ACK reply",
+    "serial": 3,
+    "short": true
+  }
+}
