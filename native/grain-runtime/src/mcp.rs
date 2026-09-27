@@ -301,8 +301,8 @@ mod tests {
         let value: Value = serde_json::from_str(&reply).unwrap();
         assert_eq!(value["isError"], true);
         assert!(value["text"].as_str().unwrap().contains("outcome unknown"));
-        assert!(request.reply.send(json!({"isError":false})).is_err());
         worker.join().unwrap();
+        assert!(request.reply.send(json!({"isError":false})).is_err());
     }
 
     #[test]

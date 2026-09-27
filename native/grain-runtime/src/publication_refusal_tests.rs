@@ -2,7 +2,11 @@ use super::*;
 
 // A controlled native-client stub supplies view and submit response files.
 // These test the real tool_call, transition, journal, and read paths, not Mini admission.
-fn fixture(fail_release: bool, fail_disconnect: bool, pre_submit: bool) -> (Runtime, PathBuf) {
+pub(super) fn fixture(
+    fail_release: bool,
+    fail_disconnect: bool,
+    pre_submit: bool,
+) -> (Runtime, PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "grain-publication-refusal-{}-{}",
         std::process::id(),
@@ -140,6 +144,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 max_result_bytes: 1024,
                 fn_inbox_summary: false,
             }],
+            allowed_birth_families: vec![],
         }),
         provider_task: None,
         commands: vec![],

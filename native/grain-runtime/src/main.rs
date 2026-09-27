@@ -1,6 +1,9 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
+#[cfg(test)]
+mod birth_lifecycle_tests;
 mod control;
+mod custody_gate;
 mod legacy_custody_audit;
 mod mcp;
 mod provider;
@@ -11,6 +14,7 @@ mod resource_tools;
 mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::os::fd::AsRawFd;
@@ -72,6 +76,8 @@ struct ToolTask {
     allowed_publications: Vec<PublicationGrant>,
     #[serde(default)]
     allowed_reads: Vec<resource_tools::AllowedResourceRead>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_birth_families: Vec<resource_tools::AllowedBirthFamily>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -170,6 +176,16 @@ struct Journal {
     /// tool-result delivery. Never synthesize a tool response from this list.
     #[serde(default)]
     publication_receipts: Vec<PublicationReceipt>,
+    /// Ordinals are consumed before dispatch, including definitive refusals.
+    /// An uncertain pending attempt prevents allocating another ID.
+    #[serde(default)]
+    birth_next_ordinal: BTreeMap<String, u16>,
+    #[serde(default)]
+    birth_operation: Option<BirthOperation>,
+    #[serde(default)]
+    birth_pending: Option<BirthPending>,
+    #[serde(default)]
+    born_resources: Vec<BornResourceRecord>,
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
@@ -232,6 +248,43 @@ struct PublicationReceipt {
     reported: bool,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BirthPending {
+    operation_id: u64,
+    family: String,
+    ordinal: u16,
+    source_sha256: String,
+    born: resource_tools::BornResource,
+    tool_view: Value,
+    parent_view: Value,
+    prompt_operation_id: u64,
+    session_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BirthOperation {
+    family: String,
+    ordinal: u16,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BornResourceRecord {
+    pending: BirthPending,
+    attempt: PathBuf,
+    call_sha256: String,
+    outcome_path: PathBuf,
+    outcome_sha256: String,
+    transaction_id: String,
+    event_id: String,
+    accepted_count: String,
+    image_boundary: String,
+    #[serde(default)]
+    reported: bool,
+}
+
 fn same_publication_confirmation(a: &PublicationReceipt, b: &PublicationReceipt) -> bool {
     a.operation_id == b.operation_id
         && a.prompt_operation_id == b.prompt_operation_id
@@ -280,6 +333,14 @@ fn publication_receipt_json(record: &PublicationReceipt) -> Value {
         "imageBoundary":record.image_boundary,
         "publicationTargetIds":record.targets,
     })
+}
+
+fn birth_receipt_json(record: &BornResourceRecord) -> Value {
+    json!({"name":record.pending.born.name,"kind":record.pending.born.kind,
+        "target":record.pending.born.target,
+        "birthReceipt":{"operationId":record.pending.operation_id.to_string(),
+        "transactionId":record.transaction_id,"eventId":record.event_id,
+        "acceptedCount":record.accepted_count,"imageBoundary":record.image_boundary}})
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -595,6 +656,10 @@ impl Journal {
             provider_settlement: None,
             provider_replays: Vec::new(),
             publication_receipts: Vec::new(),
+            birth_next_ordinal: BTreeMap::new(),
+            birth_operation: None,
+            birth_pending: None,
+            born_resources: Vec::new(),
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -1140,6 +1205,40 @@ fn validate(c: &Config) -> Result<()> {
             decimal(&grant.observe_capability, "publication observe capability")?;
         }
         resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
+        let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
+        let mut peer_capabilities = vec![
+            c.capability.as_str(),
+            c.query_capability.as_str(),
+            t.capability.as_str(),
+            t.query_capability.as_str(),
+            t.parent_capability.as_str(),
+            t.parent_observe_capability.as_str(),
+        ];
+        if let Some(control) = &c.policy_control_capability {
+            peer_capabilities.push(control);
+        }
+        if let Some(provider) = &c.provider_task {
+            peer_targets.push(&provider.task);
+            peer_capabilities.extend([
+                provider.capability.as_str(),
+                provider.query_capability.as_str(),
+                provider.parent_capability.as_str(),
+                provider.parent_observe_capability.as_str(),
+            ]);
+        }
+        resource_tools::validate_birth_families(
+            &t.allowed_birth_families,
+            &t.allowed_reads,
+            &t.allowed_publications,
+            &peer_targets,
+            &peer_capabilities,
+        )?;
+        for family in &t.allowed_birth_families {
+            let charge = resource_tools::planned_birth_charge(family)?;
+            if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
+                return Err(format!("{} birth tariff exceeds tool reserve", family.name));
+            }
+        }
     }
     if let Some(p) = &c.provider_task {
         if c.host_socket.is_none() {
@@ -1274,6 +1373,7 @@ struct Runtime {
     hard_connection: Arc<AtomicBool>,
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
+    custody_gate: Arc<custody_gate::CustodyGate>,
     completion_phase: Arc<AtomicU8>,
     current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
@@ -1464,6 +1564,7 @@ impl Runtime {
             hard_connection: Arc::new(AtomicBool::new(false)),
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
+            custody_gate: Arc::new(custody_gate::CustodyGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
             provider_control: Arc::new(Mutex::new(None)),
@@ -1526,17 +1627,22 @@ impl Runtime {
         let targets = grain["publications"]
             .as_array()
             .ok_or("retained publication target list absent")?;
-        if targets.len() != origin.targets.len()
-            || !targets.iter().zip(&origin.targets).all(|(target, id)| {
-                target["target"].as_str() == Some(id.as_str())
-                    && target["kind"].as_str().is_some_and(|kind| {
-                        tool.allowed_publications
-                            .iter()
-                            .any(|allowed| allowed.kind == kind && allowed.target == *id)
-                    })
-            })
-        {
+        if targets.len() != origin.targets.len() {
             return Err("retained publication source targets differ from delegated origin".into());
+        }
+        for (target, id) in targets.iter().zip(&origin.targets) {
+            let kind = target["kind"]
+                .as_str()
+                .ok_or("retained publication kind absent")?;
+            if target["target"].as_str() != Some(id.as_str())
+                || !(tool
+                    .allowed_publications
+                    .iter()
+                    .any(|allowed| allowed.kind == kind && allowed.target == *id)
+                    || self.verified_born_target(kind, id)?.is_some())
+            {
+                return Err("retained publication target is not delegated".into());
+            }
         }
         let outcome: Value =
             serde_json::from_slice(&fs::read(outcome_path).map_err(|e| e.to_string())?)
@@ -1579,6 +1685,133 @@ impl Runtime {
             image_boundary: field("imageBoundary")?,
             reported: false,
         }))
+    }
+    fn confirmed_birth_record(
+        &self,
+        pending: &Pending,
+        origin: &BirthPending,
+        outcome_path: &Path,
+    ) -> Result<Option<BornResourceRecord>> {
+        if pending.operation != "tool birth" {
+            return Ok(None);
+        }
+        let tool = self.config.tool_task.as_ref().ok_or("tool task absent")?;
+        let family = tool
+            .allowed_birth_families
+            .iter()
+            .find(|family| family.name == origin.family)
+            .ok_or("resource birth family changed")?;
+        if pending.operation_id != origin.operation_id
+            || pending.attempt
+                != self
+                    .config
+                    .state_dir
+                    .join(format!("attempt-{:016}", pending.operation_id))
+        {
+            return Err("resource birth attempt differs from durable origin".into());
+        }
+        let source_path = self
+            .config
+            .state_dir
+            .join(format!("source-{:016}.json", pending.operation_id));
+        let source_bytes = bounded_regular_file(&source_path, 262_144)?;
+        if sha256_bytes(&source_bytes)? != origin.source_sha256 {
+            return Err("retained resource birth source changed".into());
+        }
+        let source: Value = serde_json::from_slice(&source_bytes)
+            .map_err(|e| format!("resource birth source: {e}"))?;
+        let (expected, born) = resource_tools::plan_content_birth(
+            family,
+            tool,
+            &self.config.task,
+            pending.operation_id,
+            origin.ordinal,
+            &origin.tool_view,
+            &origin.parent_view,
+        )?;
+        if source != expected || born != origin.born {
+            return Err("retained resource birth differs from operator family".into());
+        }
+        let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
+        let outcome: Value = serde_json::from_slice(&outcome_bytes)
+            .map_err(|e| format!("resource birth outcome: {e}"))?;
+        if outcome["type"] != "confirmed"
+            || !matches!(
+                outcome["confirmation"].as_str(),
+                Some("installed" | "replayed")
+            )
+        {
+            return Err("resource birth has no confirmed Mini receipt".into());
+        }
+        let field = |name: &str| -> Result<String> {
+            let value = outcome[name]
+                .as_str()
+                .ok_or_else(|| format!("resource birth receipt lacks {name}"))?;
+            decimal(value, name)?;
+            Ok(value.to_owned())
+        };
+        let call = pending.attempt.join("call.bin");
+        let binary = outcome_path.with_extension("bin");
+        Ok(Some(BornResourceRecord {
+            pending: origin.clone(),
+            attempt: pending.attempt.clone(),
+            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+            outcome_path: outcome_path.to_owned(),
+            outcome_sha256: sha256_bytes(&bounded_regular_file(&binary, 4_194_304)?)?,
+            transaction_id: field("transactionId")?,
+            event_id: field("eventId")?,
+            accepted_count: field("acceptedCount")?,
+            image_boundary: field("imageBoundary")?,
+            reported: false,
+        }))
+    }
+    fn verify_born_record(&self, record: &BornResourceRecord) -> Result<()> {
+        let pending = Pending {
+            operation_id: record.pending.operation_id,
+            operation: "tool birth".into(),
+            attempt: record.attempt.clone(),
+            uncertain: false,
+            publication: None,
+        };
+        let mut actual = self
+            .confirmed_birth_record(&pending, &record.pending, &record.outcome_path)?
+            .ok_or("born resource has no retained native receipt")?;
+        actual.reported = record.reported;
+        if &actual != record
+            || self
+                .journal
+                .birth_next_ordinal
+                .get(&record.pending.family)
+                .is_none_or(|next| *next <= record.pending.ordinal)
+        {
+            return Err("born resource registry differs from retained native evidence".into());
+        }
+        Ok(())
+    }
+    fn verified_born_named(&self, name: &str) -> Result<Option<resource_tools::BornResource>> {
+        let Some(record) = self
+            .journal
+            .born_resources
+            .iter()
+            .find(|record| record.pending.born.name == name)
+        else {
+            return Ok(None);
+        };
+        self.verify_born_record(record)?;
+        Ok(Some(record.pending.born.clone()))
+    }
+    fn verified_born_target(
+        &self,
+        kind: &str,
+        target: &str,
+    ) -> Result<Option<resource_tools::BornResource>> {
+        let Some(record) = self.journal.born_resources.iter().find(|record| {
+            record.pending.born.kind == kind && record.pending.born.target == target
+        }) else {
+            return Ok(None);
+        };
+        self.verify_born_record(record)?;
+        Ok(Some(record.pending.born.clone()))
     }
     fn provider_settlement_record(
         &self,
@@ -1710,7 +1943,13 @@ impl Runtime {
             .filter(|record| !record.reported)
             .cloned()
             .collect();
-        if pending.is_empty() {
+        if pending.is_empty()
+            && self
+                .journal
+                .born_resources
+                .iter()
+                .all(|record| record.reported)
+        {
             return Ok((String::new(), Vec::new()));
         }
         let mut lines = vec![
@@ -1777,6 +2016,61 @@ impl Runtime {
             ));
             ids.push(record.operation_id);
         }
+        for record in self
+            .journal
+            .born_resources
+            .iter()
+            .filter(|record| !record.reported)
+            .take(4usize.saturating_sub(ids.len()))
+        {
+            self.verify_born_record(record)?;
+            let retry_result = next_retry_json(&record.attempt)?;
+            let attempt = record
+                .attempt
+                .to_str()
+                .ok_or("resource birth attempt path UTF-8")?;
+            let mut args = vec!["retry", "--attempt", attempt, "--mode", "lookup"];
+            if let Some(socket) = &self.config.host_socket {
+                args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+            }
+            self.command_output(&self.config.mini, &args)?;
+            let mut observed = self
+                .confirmed_birth_record(
+                    &Pending {
+                        operation_id: record.pending.operation_id,
+                        operation: "tool birth".into(),
+                        attempt: record.attempt.clone(),
+                        uncertain: false,
+                        publication: None,
+                    },
+                    &record.pending,
+                    &retry_result,
+                )?
+                .ok_or("resource birth lookup has no confirmed receipt")?;
+            observed.reported = record.reported;
+            if observed.pending != record.pending
+                || observed.call_sha256 != record.call_sha256
+                || observed.transaction_id != record.transaction_id
+                || observed.event_id != record.event_id
+                || observed.accepted_count != record.accepted_count
+                || observed.image_boundary != record.image_boundary
+            {
+                return Err("exact resource birth lookup changed its confirmed receipt".into());
+            }
+            lines.push(format!(
+                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} bornResourceName={} bornTargetId={}",
+                if record.pending.session_id == session_id { "current" } else { "prior" },
+                record.pending.prompt_operation_id,
+                record.pending.operation_id,
+                record.transaction_id,
+                record.event_id,
+                record.accepted_count,
+                record.image_boundary,
+                record.pending.born.name,
+                record.pending.born.target,
+            ));
+            ids.push(record.pending.operation_id);
+        }
         let report = lines.join("\n");
         if report.len() > 4096 {
             return Err("Mini publication recovery report exceeds 4 KiB".into());
@@ -1801,6 +2095,28 @@ impl Runtime {
                 output.status,
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
+        }
+        Ok(())
+    }
+    fn work_output(
+        &self,
+        program: &Path,
+        args: &[&str],
+    ) -> std::result::Result<(), custody_gate::CustodyError> {
+        let mut command = Command::new(program);
+        command.args(args);
+        let output = self
+            .custody_gate
+            .run_capture(&self.cancelled, &mut command)?;
+        if !output.status.success() {
+            return Err(custody_gate::CustodyError::Uncertain(io::Error::other(
+                format!(
+                    "{} exited {}: {}",
+                    program.display(),
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            )));
         }
         Ok(())
     }
@@ -1859,7 +2175,8 @@ impl Runtime {
         Ok(
             json!({"grain":grain, "targetRoot":view.pointer("/page/root"),
             "authorityRoot":challenge.pointer("/signing/0/authorityRoot"),
-            "imageBoundary":challenge.get("imageBoundary")}),
+            "imageBoundary":challenge.get("imageBoundary"),
+            "height":challenge.get("height")}),
         )
     }
     fn query_policy(&mut self) -> Result<Value> {
@@ -2238,6 +2555,12 @@ impl Runtime {
         publications: Vec<Value>,
         witness_capabilities: Option<(String, String)>,
     ) -> Result<()> {
+        let work_submit = label == "reserve"
+            || label == "tool attach"
+            || label == "tool reserve"
+            || label == "provider attach"
+            || label == "provider reserve"
+            || (label == "tool settle" && !publications.is_empty());
         let slot = if authority.task == self.config.task {
             AuthoritySlot::Parent
         } else if self
@@ -2428,7 +2751,28 @@ impl Runtime {
         if let Some(socket) = &cfg.host_socket {
             args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
         }
-        let result = self.command_output(&cfg.mini, &args);
+        let result = if work_submit {
+            match self.work_output(&cfg.mini, &args) {
+                Ok(()) => Ok(()),
+                Err(custody_gate::CustodyError::BeforeSpawn) => {
+                    // The short spawn gate proves there was no Mini child.
+                    // Do not leave a phantom pending call or bill a held
+                    // delegated allowance for an unsubmitted tool action.
+                    *self.journal.pending_for_mut(slot) = None;
+                    if let Some(hold) = self.journal.hold_for_mut(slot).as_mut() {
+                        hold.charge = "0".into();
+                        if reserving {
+                            hold.reserve_attempt = None;
+                        }
+                    }
+                    self.save()?;
+                    return Err(format!("{label} canceled before Mini custody spawn"));
+                }
+                Err(error) => Err(error.to_string()),
+            }
+        } else {
+            self.command_output(&cfg.mini, &args)
+        };
         match result {
             Ok(()) => {
                 if let Some(record) = self.confirmed_publication_receipt(
@@ -3719,6 +4063,291 @@ impl Runtime {
         self.journal.provider_attempt = None;
         self.save()
     }
+    fn finish_no_birth(&mut self) -> Result<()> {
+        if self.journal.birth_operation.is_none() {
+            return Ok(());
+        }
+        if self.journal.birth_pending.is_some() || self.journal.tool_pending.is_some() {
+            return Err("resource birth still has an exact pending native attempt".into());
+        }
+        let authority = self.tool()?;
+        let observed = self.query_as(&authority)?;
+        let status = observed
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("no-birth tool status absent")?
+            .to_owned();
+        if let Some(hold) = self.journal.tool_hold.clone() {
+            if hold.reserve_confirmed && !hold.reserve_refused {
+                if observed.pointer("/grain/reserved").and_then(Value::as_str)
+                    != Some(hold.reserve.as_str())
+                    || !matches!(status.as_str(), "3" | "5")
+                {
+                    return Err("no-birth allowance differs from exact held reserve".into());
+                }
+                let before = hold
+                    .before_generation
+                    .parse::<u64>()
+                    .map_err(|_| "no-birth held generation invalid")?;
+                let expected = before
+                    .checked_add(u64::from(status == "5"))
+                    .ok_or("no-birth generation overflow")?;
+                if observed
+                    .pointer("/grain/generation")
+                    .and_then(Value::as_str)
+                    != Some(expected.to_string().as_str())
+                {
+                    return Err("no-birth reservation generation changed".into());
+                }
+                self.transition_as(
+                    &authority,
+                    json!({"type":"settle","charge":"0"}),
+                    "tool release",
+                    "no resource birth was dispatched or native birth was refused",
+                    vec![],
+                )?;
+            } else {
+                if !matches!(status.as_str(), "0" | "1")
+                    || observed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                    || observed.get("targetRoot").and_then(Value::as_str)
+                        != Some(hold.before_target_root.as_str())
+                {
+                    return Err("no-birth reserve refusal needs exact signed idle origin".into());
+                }
+                self.journal.tool_hold = None;
+                self.save()?;
+            }
+        } else if !matches!(status.as_str(), "0" | "1")
+            || observed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+        {
+            return Err("no-birth marker has an unexplained reserved tool".into());
+        }
+        let after = self.query_as(&authority)?;
+        if after.pointer("/grain/status").and_then(Value::as_str) == Some("1") {
+            self.transition_as(
+                &authority,
+                json!({"type":"disconnect"}),
+                "tool disconnect",
+                "no-birth zero-charge cleanup",
+                vec![],
+            )?;
+        }
+        let terminal = self.query_as(&authority)?;
+        if terminal.pointer("/grain/status").and_then(Value::as_str) != Some("0")
+            || terminal.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || self.journal.tool_hold.is_some()
+        {
+            return Err("no-birth zero-charge cleanup has no signed idle terminal".into());
+        }
+        self.journal.birth_operation = None;
+        self.save()
+    }
+
+    fn create_resource(&mut self, arguments: &Value) -> Result<Value> {
+        let tool = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask is not configured")?
+            .clone();
+        let family = resource_tools::select_birth(&tool.allowed_birth_families, arguments)?.clone();
+        if self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+        {
+            return Err("resource birth has an unresolved delegated attempt".into());
+        }
+        let ordinal = *self
+            .journal
+            .birth_next_ordinal
+            .get(&family.name)
+            .unwrap_or(&0);
+        if ordinal >= family.max_births {
+            return Err(format!(
+                "{} resource birth family is exhausted",
+                family.name
+            ));
+        }
+        if self.journal.born_resources.len() >= 8 * 1024 {
+            return Err("resource birth registry is full".into());
+        }
+        let prompt_operation_id = self
+            .journal
+            .child
+            .as_ref()
+            .ok_or("resource birth has no active worker")?
+            .operation_id;
+        let session_id = self
+            .journal
+            .hermes_session
+            .as_ref()
+            .ok_or("resource birth has no retained Hermes session")?
+            .id
+            .clone();
+        let next_ordinal = ordinal.checked_add(1).ok_or("birth ordinal exhausted")?;
+        self.journal
+            .birth_next_ordinal
+            .insert(family.name.clone(), next_ordinal);
+        self.journal.birth_operation = Some(BirthOperation {
+            family: family.name.clone(),
+            ordinal,
+        });
+        // Save the no-dispatch identity before even attaching or reserving.
+        // A crash before the exact composite pending save can only release
+        // this allowance at zero; it cannot prove a birth occurred.
+        self.save()?;
+        let authority = self.tool()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("tool grain status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "tool attach",
+                "Hermes delegated resource birth attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err(format!("tool task status {status} needs reconciliation"));
+        }
+        self.check_not_cancelled()?;
+        let charge = resource_tools::planned_birth_charge(&family)?;
+        self.mark_hold(true, &tool.reserve, &charge)?;
+        self.transition_as(
+            &authority,
+            json!({"type":"reserve","amount":tool.reserve}),
+            "tool reserve",
+            "Hermes delegated resource birth reserve",
+            vec![],
+        )?;
+        self.check_not_cancelled()?;
+        let tool_view = self.query_as(&authority)?;
+        let parent_view = self.query()?;
+        let id = self.next_id()?;
+        let (source, born) = resource_tools::plan_content_birth(
+            &family,
+            &tool,
+            &self.config.task,
+            id,
+            ordinal,
+            &tool_view,
+            &parent_view,
+        )?;
+        let attempt = self.config.state_dir.join(format!("attempt-{id:016}"));
+        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
+        write_new(
+            &source_path,
+            &serde_json::to_vec_pretty(&source).map_err(|e| e.to_string())?,
+        )?;
+        let origin = BirthPending {
+            operation_id: id,
+            family: family.name.clone(),
+            ordinal,
+            source_sha256: sha256_file(&source_path)?,
+            born,
+            tool_view,
+            parent_view,
+            prompt_operation_id,
+            session_id,
+        };
+        self.journal.birth_pending = Some(origin.clone());
+        self.journal.tool_pending = Some(Pending {
+            operation_id: id,
+            operation: "tool birth".into(),
+            attempt: attempt.clone(),
+            uncertain: false,
+            publication: None,
+        });
+        self.save()?;
+        let cfg = &self.config;
+        let mut args = vec![
+            "submit",
+            "--host",
+            cfg.host.to_str().ok_or("host path UTF-8")?,
+            "--config",
+            cfg.host_config.to_str().ok_or("config path UTF-8")?,
+            "--intent",
+            source_path.to_str().ok_or("source path UTF-8")?,
+            "--intent-kind",
+            "grain-birth-intent",
+            "--key",
+            authority.custody_key.to_str().ok_or("key path UTF-8")?,
+            "--dir",
+            attempt.to_str().ok_or("attempt path UTF-8")?,
+        ];
+        if let Some(socket) = &cfg.host_socket {
+            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+        }
+        match self.work_output(&cfg.mini, &args) {
+            Ok(()) => {
+                let pending = self
+                    .journal
+                    .tool_pending
+                    .as_ref()
+                    .ok_or("resource birth pending disappeared")?;
+                let record = self
+                    .confirmed_birth_record(pending, &origin, &attempt.join("outcome.json"))?
+                    .ok_or("resource birth confirmation absent")?;
+                self.journal.born_resources.push(record.clone());
+                self.journal.birth_operation = None;
+                self.journal.birth_pending = None;
+                self.journal.tool_pending = None;
+                self.journal.tool_hold = None;
+                self.save()?;
+                self.check_not_cancelled()?;
+                self.transition_as(
+                    &authority,
+                    json!({"type":"disconnect"}),
+                    "tool disconnect",
+                    "confirmed delegated resource birth",
+                    vec![],
+                )?;
+                Ok(birth_receipt_json(&record))
+            }
+            Err(custody_gate::CustodyError::BeforeSpawn) => {
+                // The gate proves that this controller never started a Mini
+                // custody child. Keep the durable operation marker so
+                // recovery releases its held allowance at zero.
+                self.journal.birth_pending = None;
+                self.journal.tool_pending = None;
+                self.save()?;
+                Err("hard connector closed before resource birth submission; exact zero-charge recovery required".into())
+            }
+            Err(error) => {
+                let explicit = fs::read(attempt.join("outcome.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                    .is_some_and(|outcome| outcome["type"] == "refused");
+                let prepared = inspected_pre_submit_refusal(&self.config, &attempt)
+                    .ok()
+                    .flatten();
+                if explicit || prepared.is_some() {
+                    // Keep birth_operation through the signed zero settlement.
+                    self.journal.birth_pending = None;
+                    self.journal.tool_pending = None;
+                    self.save()?;
+                    self.finish_no_birth()?;
+                    return Err(format!("resource birth refused by Mini: {error}"));
+                }
+                self.journal
+                    .tool_pending
+                    .as_mut()
+                    .ok_or("resource birth pending disappeared")?
+                    .uncertain = true;
+                self.save()?;
+                Err(format!(
+                    "resource birth outcome unknown: {error}; exact lookup is required before another birth"
+                ))
+            }
+        }
+    }
+
     fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -3731,7 +4360,11 @@ impl Runtime {
         {
             return Err("Hermes task is not running under this controller".into());
         }
-        if self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some() {
+        if self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+        {
             return Err(
                 "delegated tool has an unresolved native attempt or held allowance; exact lookup and owner reconciliation are required before another tool call".into(),
             );
@@ -3753,11 +4386,21 @@ impl Runtime {
                     .as_ref()
                     .ok_or("toolTask is not configured")?
                     .clone();
-                let read =
-                    resource_tools::select_read(&configured.allowed_reads, arguments)?.clone();
+                let mut reads = configured.allowed_reads.clone();
+                if let Some(name) = arguments.get("name").and_then(Value::as_str) {
+                    if let Some(born) = self.verified_born_named(name)? {
+                        reads.push(resource_tools::born_read(&born));
+                    }
+                }
+                // A factory-minted owner capability carries both observe and
+                // mutate verbs. Static validate_reads intentionally rejects
+                // that combination; dynamic entries enter only after their
+                // exact composite receipt is revalidated above.
+                let read = resource_tools::select_read(&reads, arguments)?.clone();
                 let nonce = self.next_id()?;
                 resource_tools::read_resource(&self.config, &configured, &read, nonce)
             }
+            "mini_create_resource" => self.create_resource(arguments),
             "mini_publish" => {
                 let supplied = arguments
                     .get("publications")
@@ -3799,11 +4442,18 @@ impl Runtime {
                         .get("target")
                         .and_then(Value::as_str)
                         .ok_or("publication target")?;
-                    let allowed = tool
+                    let allowed = if let Some(configured) = tool
                         .allowed_publications
                         .iter()
                         .find(|g| g.kind == kind && g.target == target)
-                        .ok_or("publication target is not delegated")?;
+                    {
+                        configured.clone()
+                    } else {
+                        let born = self
+                            .verified_born_target(kind, target)?
+                            .ok_or("publication target is not delegated")?;
+                        resource_tools::born_publication(&born)
+                    };
                     let root = source
                         .get("expectedTargetRoot")
                         .and_then(Value::as_str)
@@ -4178,6 +4828,11 @@ impl Runtime {
         // Signal first on detection; neither filesystem sync nor Mini's
         // potentially slow replay may precede local physical interruption.
         let stopped = self.kill_child();
+        let custody_stopped = self
+            .custody_gate
+            .cancel()
+            .map(|_| ())
+            .map_err(|error| format!("Mini custody child stop: {error}"));
         self.save()?;
         // Exact retained lookups settle any lost reply before we decide if a
         // second transport event needs a new transition. A missing or refused
@@ -4236,7 +4891,7 @@ impl Runtime {
                 )
             }
         });
-        match (stopped, fenced, tool_fenced, provider_fenced) {
+        match (stopped.and(custody_stopped), fenced, tool_fenced, provider_fenced) {
             (Ok(()), Ok(()), Ok(()), Ok(())) => {
                 self.journal.connection = Connection::Detached;
                 self.journal.hard_reconnect_pending = false;
@@ -5130,6 +5785,11 @@ impl Runtime {
                         record.reported = true;
                     }
                 }
+                for record in &mut self.journal.born_resources {
+                    if reported_publications.contains(&record.pending.operation_id) {
+                        record.reported = true;
+                    }
+                }
             }
             self.save()?;
         }
@@ -5289,7 +5949,20 @@ impl Runtime {
                 }
             }
         }
+        if self.journal.birth_pending.is_some() && self.journal.birth_operation.is_none() {
+            return Err("resource birth pending attempt has no lifecycle marker".into());
+        }
+        if self.journal.birth_pending.is_some()
+            != self
+                .journal
+                .tool_pending
+                .as_ref()
+                .is_some_and(|pending| pending.operation == "tool birth")
+        {
+            return Err("resource birth origin and tool pending attempt differ".into());
+        }
         self.retry_pending(true)?;
+        self.finish_no_birth()?;
         self.retry_pending(false)?;
         if self.journal.hard_reconnect_pending {
             self.journal.connection = Connection::Fenced;
@@ -5367,6 +6040,9 @@ impl Runtime {
         Ok(())
     }
     fn reconcile_hold(&mut self, tool: bool, audited: bool) -> Result<()> {
+        if tool && self.journal.birth_operation.is_some() {
+            return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
+        }
         if tool && legacy_custody_audit::zero_phase_active(self) {
             return Err("legacy B44 audit requires its exact zero-charge settlement".into());
         }
@@ -5821,6 +6497,9 @@ impl Runtime {
         self.save()
     }
     fn abort_unsubmitted_hold(&mut self, tool: bool) -> Result<()> {
+        if tool && self.journal.birth_operation.is_some() {
+            return Err("resource birth marker requires its own exact zero-charge recovery".into());
+        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -5983,6 +6662,19 @@ impl Runtime {
                             "outcome":refusal,
                             "heldAllowanceReleased":false
                         }));
+                        if p.operation == "tool birth" {
+                            let origin = self
+                                .journal
+                                .birth_pending
+                                .as_ref()
+                                .ok_or("pre-submit birth has no durable origin")?;
+                            if origin.operation_id != p.operation_id {
+                                return Err(
+                                    "pre-submit birth origin differs from pending attempt".into()
+                                );
+                            }
+                            self.journal.birth_pending = None;
+                        }
                         *self.journal.pending_for_mut(slot) = None;
                         self.save()?;
                         return Ok(());
@@ -6030,6 +6722,33 @@ impl Runtime {
                     self.journal.publication_receipts.remove(index);
                 }
                 self.journal.publication_receipts.push(record);
+            }
+            if p.operation == "tool birth" {
+                if slot != AuthoritySlot::Tool || self.journal.born_resources.len() >= 8 * 1024 {
+                    return Err("resource birth recovery registry is unavailable".into());
+                }
+                let origin = self
+                    .journal
+                    .birth_pending
+                    .as_ref()
+                    .ok_or("resource birth recovery has no durable origin")?;
+                let record = self
+                    .confirmed_birth_record(&p, origin, &retry_result)?
+                    .ok_or("resource birth recovery has no confirmed receipt")?;
+                if self
+                    .journal
+                    .born_resources
+                    .iter()
+                    .any(|existing| existing.pending.operation_id == record.pending.operation_id)
+                {
+                    return Err(
+                        "resource birth is already registered with a pending attempt".into(),
+                    );
+                }
+                self.journal.born_resources.push(record);
+                self.journal.birth_operation = None;
+                self.journal.birth_pending = None;
+                self.journal.tool_hold = None;
             }
             if matches!(
                 p.operation.as_str(),
@@ -6383,6 +7102,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
     let completion_phase = rt.completion_phase.clone();
     let current_unit = rt.current_unit.clone();
     let provider_control = rt.provider_control.clone();
+    let custody_gate = rt.custody_gate.clone();
     let state_dir = rt.config.state_dir.clone();
     let interrupt: control::HardInterrupt = Arc::new(move |_| {
         cancelled.store(true, Ordering::SeqCst);
@@ -6403,6 +7123,9 @@ fn serve(mut rt: Runtime) -> Result<()> {
             let _ = launch_gate(&state_dir, &program, &unit, "fence");
             let _ = kill_unit(&unit);
         }
+        // The systemd unit is the physical worker authority on Linux. Its
+        // stop/fence signals must precede even the brief Mini spawn gate.
+        let _ = custody_gate.cancel();
     });
     clear_stale_control_socket(&rt.config.control_socket)?;
     let server = control::start(&rt.config.control_socket, interrupt)?;
@@ -6860,6 +7583,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                     observe_capability: "94".into(),
                 }],
                 allowed_reads: vec![],
+                allowed_birth_families: vec![],
             }),
             provider_task: None,
             commands: vec![],
