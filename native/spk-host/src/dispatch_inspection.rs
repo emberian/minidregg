@@ -488,6 +488,28 @@ mod tests {
     }
 
     #[test]
+    fn signed_api_root_maps_to_canonical_relative_repo_root() {
+        let http = HttpProjection {
+            method: "GET",
+            path_and_query: "",
+            ordered_headers: &[],
+            body: b"",
+            route: Route::Api {
+                signed_path: "/repo.git/",
+            },
+        };
+        assert_eq!(
+            app_route_path(&http).unwrap(),
+            ("repo.git/".into(), "".into())
+        );
+        let browser = HttpProjection {
+            route: Route::Browser,
+            ..http
+        };
+        assert_eq!(app_route_path(&browser).unwrap(), ("".into(), "".into()));
+    }
+
+    #[test]
     fn decimal_digest_is_exact_little_endian_and_refuses_overflow() {
         assert_eq!(digest_nat_bytes("0").unwrap(), [0; 32]);
         assert_eq!(digest_nat_bytes("256").unwrap()[..2], [0, 1]);

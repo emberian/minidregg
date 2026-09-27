@@ -62,6 +62,15 @@ fn private_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FixedEntranceConfig {
+    directory: PathBuf,
+    dispatch_custody: PathBuf,
+    display_name: String,
+    preferred_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
     protocol: String,
     journal_dir: PathBuf,
@@ -88,10 +97,7 @@ struct ResidentConfig {
     completion_custodian_seed: PathBuf,
     completion_management_custody: PathBuf,
     completion_semantics: String,
-    dispatch_custody: PathBuf,
-    dispatch_attempt_parent: PathBuf,
-    display_name: String,
-    preferred_handle: String,
+    entrances: Vec<FixedEntranceConfig>,
 }
 
 fn hex64(value: &str) -> bool {
@@ -105,24 +111,20 @@ impl ResidentConfig {
     fn load(path: &Path) -> io::Result<Self> {
         let bytes = private_file(path, MAX_CONFIG)?;
         let config: Self = serde_json::from_slice(&bytes)?;
-        if config.protocol != "mini-spk-resident-start-v1"
+        if config.protocol != "mini-spk-resident-start-v2"
             || path.parent() != Some(config.journal_dir.as_path())
             || config.claim_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_sign_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_submit_attempt_dir.parent() != Some(config.journal_dir.as_path())
-            || config.dispatch_custody.parent() != Some(config.journal_dir.as_path())
-            || config.dispatch_attempt_parent != config.journal_dir
             || !hex64(&config.expected_raw_sha256)
             || !hex64(&config.bwrap_sha256)
             || !hex64(&config.mini_host_sha256)
             || !hex64(&config.mini_config_sha256)
             || config.app_uid == 0
             || config.app_gid == 0
-            || config.display_name.is_empty()
-            || config.display_name.len() > 256
-            || config.preferred_handle.is_empty()
-            || config.preferred_handle.len() > 256
+            || config.entrances.is_empty()
+            || config.entrances.len() > 8
             || config.persistent_var_max_bytes == 0
             || !config
                 .completion_semantics
@@ -145,6 +147,22 @@ impl ResidentConfig {
             .all(|path| path.is_absolute())
         {
             return Err(invalid("resident start config refused"));
+        }
+        for (index, entry) in config.entrances.iter().enumerate() {
+            if !entry.directory.is_absolute()
+                || !entry.dispatch_custody.is_absolute()
+                || entry.dispatch_custody.parent() != Some(entry.directory.as_path())
+                || entry.directory == config.journal_dir
+                || entry.display_name.is_empty()
+                || entry.display_name.len() > 256
+                || entry.preferred_handle.is_empty()
+                || entry.preferred_handle.len() > 256
+                || config.entrances[..index]
+                    .iter()
+                    .any(|prior| prior.directory == entry.directory)
+            {
+                return Err(invalid("resident entrance config refused"));
+            }
         }
         Ok(config)
     }
@@ -209,23 +227,35 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         MAX_CONFIG,
     )?)?;
     signers.validate(&operator, config.app_uid)?;
-    let custody_bytes = private_file(&config.dispatch_custody, MAX_CONFIG)?;
-    let custody: FixedAuthoring = serde_json::from_slice(&custody_bytes)?;
-    custody.validate()?;
-    private_dir(&config.dispatch_attempt_parent)?;
-    // Read the fixed transport binding without creating a listener. Binding
-    // and accepting must wait for confirmed native START completion.
-    let policy = CustodianPolicy::load(&config.journal_dir)?;
-    if policy.fixed_app != custody.app
-        || policy.fixed_subject != custody.subject
-        || policy.fixed_session != custody.session
-        || policy.fixed_ticket != custody.ticket_resource
-        || !matches!(
-            (policy.fixed_session_kind, custody.session_kind.as_str()),
-            (EntranceKind::Browser, "web") | (EntranceKind::Api, "api")
-        )
-    {
-        return Err(invalid("HTTP transport differs from fixed Mini custody"));
+    // Read every separately fixed transport/custody pair before consuming the
+    // one-shot claim. No HTTP socket is bound until START completion.
+    let mut custodies = Vec::with_capacity(config.entrances.len());
+    let mut policies = Vec::with_capacity(config.entrances.len());
+    for entry in &config.entrances {
+        open_protected_directory(&entry.directory, config.app_uid, false)?;
+        let custody: FixedAuthoring =
+            serde_json::from_slice(&private_file(&entry.dispatch_custody, MAX_CONFIG)?)?;
+        custody.validate()?;
+        let policy = CustodianPolicy::load(&entry.directory)?;
+        if policy.fixed_app != custody.app
+            || policy.fixed_subject != custody.subject
+            || policy.fixed_session != custody.session
+            || policy.fixed_ticket != custody.ticket_resource
+            || !matches!(
+                (policy.fixed_session_kind, custody.session_kind.as_str()),
+                (EntranceKind::Browser, "web") | (EntranceKind::Api, "api")
+            )
+            || policies.iter().any(|prior: &CustodianPolicy| {
+                prior.expected_host == policy.expected_host
+                    || (prior.fixed_app == policy.fixed_app
+                        && prior.fixed_session == policy.fixed_session
+                        && prior.fixed_ticket == policy.fixed_ticket)
+            })
+        {
+            return Err(invalid("HTTP transport differs from fixed Mini custody"));
+        }
+        policies.push(policy);
+        custodies.push(custody);
     }
     let ingress = private_file(&config.claim_ingress, MAX_INGRESS)?;
     let begin_ingress = private_file(&config.begin_ingress, MAX_INGRESS)?;
@@ -248,12 +278,19 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "source lifecycle unit differs from installed service",
         ));
     }
-    if policy.fixed_session_kind == EntranceKind::Api && matched.bridge.api_path.is_none() {
+    if policies
+        .iter()
+        .any(|policy| policy.fixed_session_kind == EntranceKind::Api)
+        && matched.bridge.api_path.is_none()
+    {
         return Err(invalid("signed package has no configured API interface"));
     }
-    if custody.app != matched.begin.app.to_string() {
+    if custodies
+        .iter()
+        .any(|custody| custody.app != matched.begin.app.to_string())
+    {
         return Err(invalid(
-            "fixed participant custody differs from claimed app",
+            "fixed participant custody differs from claimed shared app",
         ));
     }
     journal.arm(matched.begin.clone())?;
@@ -291,24 +328,29 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     )?;
     // A START completion is the first state that may expose transport. Native
     // admission remains decisive for every later HTTP request as well.
-    let entrance = PrivateHttpEntrance::bind(&config.journal_dir)?;
+    let entrances = config
+        .entrances
+        .iter()
+        .map(|entry| PrivateHttpEntrance::bind(&entry.directory))
+        .collect::<io::Result<Vec<_>>>()?;
     let api_path = matched.bridge.api_path;
-    let mut human = ResidentHuman {
-        operator: &operator,
-        custody: &custody,
-        journal: &journal,
-        rpc: &mut resident.rpc,
-        display_name: &config.display_name,
-        preferred_handle: &config.preferred_handle,
-    };
-    entrance.serve_resident(|request, kind, policy| {
+    PrivateHttpEntrance::serve_many(&entrances, |index, request, kind, policy| {
+        let entry = &config.entrances[index];
+        let mut human = ResidentHuman {
+            operator: &operator,
+            custody: &custodies[index],
+            journal: &journal,
+            rpc: &mut resident.rpc,
+            display_name: &entry.display_name,
+            preferred_handle: &entry.preferred_handle,
+        };
         deliver_request(
             &mut human,
             request,
             kind,
             policy,
             api_path.as_deref(),
-            &config.dispatch_attempt_parent,
+            &config.journal_dir,
         )
     })
 }
@@ -354,22 +396,66 @@ fn deliver_request(
     api_path: Option<&str>,
     attempt_parent: &Path,
 ) -> io::Result<Vec<u8>> {
-    let relative = request
-        .path_and_query
-        .strip_prefix('/')
-        .ok_or_else(|| invalid("HTTP target is not root-relative"))?;
+    let http = project_request(&request, kind, api_path)?;
+    human.deliver_once(policy, &http, attempt_parent)
+}
+
+fn project_request<'a>(
+    request: &'a ReceivedRequest,
+    kind: EntranceKind,
+    api_path: Option<&'a str>,
+) -> io::Result<HttpProjection<'a>> {
+    // The HTTP parser has already removed exactly one leading slash. Keep
+    // that canonical relative form, including the empty API-root path.
+    if request.path_and_query.starts_with('/') {
+        return Err(invalid("HTTP target is not canonical relative form"));
+    }
+    let relative = request.path_and_query.as_str();
     let route = match kind {
         EntranceKind::Browser => Route::Browser,
         EntranceKind::Api => Route::Api {
             signed_path: api_path.ok_or_else(|| invalid("signed SPK lacks API interface"))?,
         },
     };
-    let http = HttpProjection {
+    Ok(HttpProjection {
         method: request.method.as_str(),
         path_and_query: relative,
         ordered_headers: &request.ordinary_headers,
         body: &request.body,
         route,
-    };
-    human.deliver_once(policy, &http, attempt_parent)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dispatch_inspection::app_route_path;
+    use crate::http_entrance::read_request;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn parsed_api_root_and_discovery_keep_one_canonical_prefix() {
+        for (target, expected) in [
+            ("/", ("repo.git/", "")),
+            (
+                "/info/refs?service=git-upload-pack",
+                ("repo.git/info/refs", "service=git-upload-pack"),
+            ),
+        ] {
+            let (mut writer, mut reader) = UnixStream::pair().unwrap();
+            write!(
+                writer,
+                "GET {target} HTTP/1.1\r\nHost: app.example.test\r\n\r\n"
+            )
+            .unwrap();
+            let request = read_request(&mut reader).unwrap();
+            let projected =
+                project_request(&request, EntranceKind::Api, Some("/repo.git/")).unwrap();
+            assert_eq!(
+                app_route_path(&projected).unwrap(),
+                (expected.0.to_owned(), expected.1.to_owned())
+            );
+        }
+    }
 }

@@ -638,6 +638,69 @@ pub struct PrivateHttpEntrance {
 }
 
 impl PrivateHttpEntrance {
+    /// One resident process owns one fd3 RpcDriver and a bounded collection
+    /// of separately fixed participant origins. Native admission remains a
+    /// per-request duty of the callback; an entrance never supplies authority.
+    pub(crate) fn serve_many(
+        entrances: &[Self],
+        mut dispatch: impl FnMut(
+            usize,
+            ReceivedRequest,
+            EntranceKind,
+            &CustodianPolicy,
+        ) -> io::Result<Vec<u8>>,
+    ) -> io::Result<()> {
+        if entrances.is_empty() || entrances.len() > 8 {
+            return Err(refuse("resident entrance count refused"));
+        }
+        for (index, entrance) in entrances.iter().enumerate() {
+            if entrances[..index].iter().any(|other| {
+                other.policy.expected_host == entrance.policy.expected_host
+                    || (other.socket_dev, other.socket_ino)
+                        == (entrance.socket_dev, entrance.socket_ino)
+                    || (other.policy.fixed_app == entrance.policy.fixed_app
+                        && other.policy.fixed_session == entrance.policy.fixed_session
+                        && other.policy.fixed_ticket == entrance.policy.fixed_ticket)
+            }) {
+                return Err(refuse("resident participant origin or session duplicated"));
+            }
+        }
+        let mut polls: Vec<libc::pollfd> = entrances
+            .iter()
+            .map(|entrance| libc::pollfd {
+                fd: entrance.listener.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            })
+            .collect();
+        loop {
+            for poll in &mut polls {
+                poll.revents = 0;
+            }
+            if !poll_entrances(&mut polls, -1)? {
+                continue;
+            }
+            for (index, poll) in polls.iter().enumerate() {
+                if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                    return Err(refuse("resident entrance poll error"));
+                }
+                if poll.revents & libc::POLLIN == 0 {
+                    continue;
+                }
+                let entrance = &entrances[index];
+                let (stream, _) = entrance.listener.accept()?;
+                if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
+                    let _ = handle_stream_with(
+                        stream,
+                        &entrance.policy,
+                        entrance.socket.parent(),
+                        &mut |request, kind, policy| dispatch(index, request, kind, policy),
+                    );
+                }
+            }
+        }
+    }
+
     pub fn bind(directory: &Path) -> io::Result<Self> {
         let policy = CustodianPolicy::load(directory)?;
         let lock = OpenOptions::new()
@@ -726,6 +789,18 @@ impl PrivateHttpEntrance {
             }
         }
     }
+}
+
+fn poll_entrances(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<bool> {
+    let ready = unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as libc::nfds_t, timeout_ms) };
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::Interrupted {
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    Ok(ready > 0)
 }
 
 fn peer_uid(stream: &UnixStream) -> Option<u32> {
@@ -907,6 +982,38 @@ mod tests {
     use super::*;
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn two_private_poll_channels_report_only_the_ready_participant() {
+        let (mut a, mut a_writer) = UnixStream::pair().unwrap();
+        let (mut b, mut b_writer) = UnixStream::pair().unwrap();
+        let mut polls = [
+            libc::pollfd {
+                fd: a.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: b.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        b_writer.write_all(b"b").unwrap();
+        assert!(poll_entrances(&mut polls, 100).unwrap());
+        assert_eq!(polls[0].revents & libc::POLLIN, 0);
+        assert_ne!(polls[1].revents & libc::POLLIN, 0);
+        let mut consumed = [0u8; 1];
+        b.read_exact(&mut consumed).unwrap();
+        for poll in &mut polls {
+            poll.revents = 0;
+        }
+        a_writer.write_all(b"a").unwrap();
+        assert!(poll_entrances(&mut polls, 100).unwrap());
+        assert_ne!(polls[0].revents & libc::POLLIN, 0);
+        assert_eq!(polls[1].revents & libc::POLLIN, 0);
+        a.read_exact(&mut consumed).unwrap();
+    }
 
     fn policy() -> CustodianPolicy {
         let hash = |value: &str| Sha256::digest(value.as_bytes()).into();
