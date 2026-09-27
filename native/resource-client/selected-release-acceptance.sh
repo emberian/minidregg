@@ -181,8 +181,8 @@ confirmed "$EVIDENCE/source/create/outcome.json" installed
 query_resource source 8001 selected 30005
 jq -e --arg payload "$NOTE_HEX" --arg changed "$CHANGED_HEX" \
   '.page.entries | length == 2 and
-  any(.[]; .type == "atom" and .atom == "7401" and .payload == $payload) and
-  any(.[]; .type == "atom" and .atom == "7402" and .payload == $changed)' \
+  any(.[]; .type == "atom" and .id == "7401" and .payload == $payload) and
+  any(.[]; .type == "atom" and .id == "7402" and .payload == $changed)' \
   "$EVIDENCE/source/selected/view.json" >/dev/null
 
 # Replace the recipient birth law with the exact owner-subject lock required
