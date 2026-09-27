@@ -26,6 +26,7 @@ open Minidregg.Kernel
 open Minidregg.Compiler.Tower256ConcreteBackend
 
 set_option autoImplicit false
+set_option maxHeartbeats 1000000
 
 /-- A future receiver must obtain this tariff from its pinned profile, never
 from an untrusted birth request. The positive base rules out a free birth even
@@ -337,5 +338,24 @@ def prepareSourceBirth {F : Type} [Field F]
         (source.grainCommand tariff))
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
+
+/-- The composite authority patch is exactly the checked one-post edit list,
+including both the birth marker and the grain operation marker. -/
+def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {semantics : Digest} {tariff : Tariff} {source : Source}
+    (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
+    CellState.ValidatedPatch CredentialAuthorityStateCodec.materializer
+      prepared.prepared.pre.authority.snapshot.cell
+      (CredentialAuthorityDomain.editPatch prepared.prepared.pre.authority.snapshot
+        (source.authorityEdits prepared.prepared.pre.authority.snapshot semantics tariff)) := by
+  rw [Source.authorityEdits_eq_combined]
+  have domainExact : prepared.prepared.pre.authority.snapshot.domain = deployment.domain := by
+    simpa [CanonicalCellRegistry.Deployment.authorityAnchor] using
+      prepared.prepared.pre.authority.observed.1
+  rw [domainExact]
+  exact prepared.prepared.authorityCombined.checked.validated
 
 end Minidregg.Compiler.GrainResourceBirthController
