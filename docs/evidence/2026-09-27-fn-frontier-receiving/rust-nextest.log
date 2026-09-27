@@ -1,0 +1,12 @@
+   Compiling minidregg-resource-client v0.1.0 (/Users/ember/dev/minidregg/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+────────────
+ Nextest run ID 430ae411-5e21-4222-83e5-a932ffee8c27 with nextest profile: default
+    Starting 5 tests across 1 binary (85 tests skipped)
+        PASS [   0.009s] (1/5) minidregg-resource-client::bin/mini fn_frontier::tests::selected_and_empty_routes_are_distinct
+        PASS [   0.009s] (2/5) minidregg-resource-client::bin/mini fn_frontier::tests::receipt_refuses_noncanonical_decimal_fields
+        PASS [   0.009s] (3/5) minidregg-resource-client::bin/mini fn_frontier::tests::detached_signature_frame_requires_exact_raw_signature
+        PASS [   0.078s] (4/5) minidregg-resource-client::bin/mini fn_frontier::tests::durable_submit_marker_allows_only_exact_lookup_reentry
+        PASS [   0.100s] (5/5) minidregg-resource-client::bin/mini fn_frontier::tests::changed_host_or_config_refuses_retained_pin
+────────────
+     Summary [   0.101s] 5 tests run: 5 passed, 85 skipped

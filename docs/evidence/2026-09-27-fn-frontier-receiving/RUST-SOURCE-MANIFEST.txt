@@ -1,0 +1,6 @@
+9a5241ae664f85e353bdee62d143ccb5675302fda68f244ab4e2daec87851257  native/resource-client/src/fn_frontier.rs
+5c7658d99b0f9243287aa7e90befedac002147e01baa18aee4030e71498ce221  native/resource-client/src/main.rs
+5a5fd2c44f69e50340e558c7560f9cdd25e9daa45f30a650eb91314ce206073f  native/resource-client/src/transport.rs
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-fn-frontier-receiving/rust-fmt.log
+5d5e443d26190acd4d34c29045adac8cd62b7cec4d657783503caa44d8377780  docs/evidence/2026-09-27-fn-frontier-receiving/rust-nextest.log
+ecb4cb9f6e7a58f2cfbb0bc1faa669ef96c3398a30e75fd3653ef56767eeaf6d  docs/evidence/2026-09-27-fn-frontier-receiving/rust-clippy.log

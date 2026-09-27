@@ -20,6 +20,8 @@ mod current_birth;
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
+mod fn_frontier;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -157,6 +159,9 @@ usage:
   mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
   mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
   mini fn-namespace-lookup --state-dir PRIVATE-DIR
+  mini fn-frontier-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --kind selected|empty --transaction MINI-TX|- --state-dir NEW-PRIVATE-DIR
+  mini fn-frontier-advance --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
+  mini fn-frontier-lookup --state-dir PRIVATE-DIR
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
@@ -2484,6 +2489,46 @@ fn run(mut args: Args) -> Result<()> {
                 return Err("fn-namespace-lookup uses its retained operator socket".into());
             }
             fn_namespace::lookup_original(&directory)
+        }
+        #[cfg(unix)]
+        "fn-frontier-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let kind = args.required("kind")?;
+            let transaction = args.required("transaction")?;
+            let directory = path(args.required("state-dir")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("fn-frontier-plan requires --socket")?;
+            fn_frontier::plan(
+                &host,
+                &config,
+                socket,
+                kind.to_str().ok_or("fn frontier kind must be UTF-8")?,
+                transaction
+                    .to_str()
+                    .ok_or("fn frontier transaction must be UTF-8")?,
+                &directory,
+            )
+        }
+        #[cfg(unix)]
+        "fn-frontier-advance" => {
+            let directory = path(args.required("state-dir")?);
+            let key = path(args.required("key")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            if SOCKET.get().is_some() {
+                return Err("fn-frontier-advance uses its retained operator socket".into());
+            }
+            fn_frontier::advance(&directory, &key, &approval)
+        }
+        #[cfg(unix)]
+        "fn-frontier-lookup" => {
+            let directory = path(args.required("state-dir")?);
+            args.finish()?;
+            if SOCKET.get().is_some() {
+                return Err("fn-frontier-lookup uses its retained operator socket".into());
+            }
+            fn_frontier::lookup_original(&directory)
         }
         "submit" => {
             let host = path(args.required("host")?);

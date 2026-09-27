@@ -143,6 +143,17 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
+        // Event17/19 testimony and receipt-only lookups remain on the owner
+        // operator socket. The public listener cannot advance a fn frontier.
+        [60..=63, payload @ ..] => !payload.is_empty() && payload.len() <= 16_384,
+        // Strict Option Digest plan request; Host derives all other fields
+        // from its pinned local fn service and verified Mini history.
+        [64, payload @ ..] => !payload.is_empty() && payload.len() <= 128,
+        // One retained poll plan and one detached raw Ed25519 signature.
+        [65, pair @ ..] if pair.len() >= 4 + 1 + 64 && pair.len() < HOST_MAX_FRAME => {
+            let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            plan_length > 0 && plan_length < pair.len() - 4 && pair.len() - 4 - plan_length == 64
+        }
         // Op42 obtains all selectors from pinned operator settings and a live
         // local fn status/position call. No caller field enters its plan.
         [42] => true,
@@ -1158,6 +1169,19 @@ mod tests {
         assert!(allowed_operator_operation(&grain_share_assembly));
         assert!(!allowed_operation(&grain_share_assembly, true));
         assert!(!allowed_operator_operation(&[57, 1, 0, 0, 0, b'P']));
+
+        for operation in [60, 61, 62, 63, 64] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(!allowed_operation(&[operation, 1], true));
+        }
+        let mut fn_frontier_assembly = vec![65];
+        fn_frontier_assembly.extend(1u32.to_le_bytes());
+        fn_frontier_assembly.push(b'P');
+        fn_frontier_assembly.extend([7u8; 64]);
+        assert!(allowed_operator_operation(&fn_frontier_assembly));
+        assert!(!allowed_operation(&fn_frontier_assembly, true));
+        assert!(!allowed_operator_operation(&[65, 1, 0, 0, 0, b'P']));
     }
 
     #[test]
