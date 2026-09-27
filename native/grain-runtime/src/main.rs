@@ -501,6 +501,139 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(digest.to_ascii_lowercase())
 }
 
+/// A socket prepare refusal is definitive only when the custody client
+/// retained its exact op-255 reply before any call existed. The marker binds
+/// the attempt-local request, config, and manifest; Lean decodes the Outcome.
+/// Missing or inconsistent custody evidence is uncertainty, not a refusal.
+fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Option<Value>> {
+    let frame_path = attempt.join("pre-submit-refusal.frame");
+    let marker_path = attempt.join("pre-submit-refusal.json");
+    if !frame_path.exists() && !marker_path.exists() {
+        return Ok(None);
+    }
+    let read_bounded = |path: &Path, max: usize| -> Result<Vec<u8>> {
+        let named = fs::symlink_metadata(path)
+            .map_err(|e| format!("prepare refusal file {}: {e}", path.display()))?;
+        if !named.file_type().is_file() || named.len() > max as u64 {
+            return Err("prepare refusal file is not bounded regular data".into());
+        }
+        let file = File::open(path).map_err(|e| format!("prepare refusal open: {e}"))?;
+        let opened = file
+            .metadata()
+            .map_err(|e| format!("prepare refusal stat: {e}"))?;
+        if !opened.file_type().is_file()
+            || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
+        {
+            return Err("prepare refusal file changed while opening".into());
+        }
+        let mut bytes = Vec::new();
+        file.take((max + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("prepare refusal read: {e}"))?;
+        if bytes.len() > max {
+            return Err("prepare refusal file exceeded byte bound".into());
+        }
+        Ok(bytes)
+    };
+    let marker_bytes = read_bounded(&marker_path, 65_536)?;
+    let marker: Value = serde_json::from_slice(&marker_bytes)
+        .map_err(|e| format!("prepare refusal marker decode: {e}"))?;
+    if marker.as_object().is_none_or(|object| object.len() != 7)
+        || marker["type"] != "minidregg-pre-submit-refusal-v1"
+        || marker["stage"] != "prepare"
+        || marker["operation"] != 1
+    {
+        return Err("prepare refusal marker has the wrong contract".into());
+    }
+    let digest_field = |name: &str| -> Result<&str> {
+        let value = marker[name]
+            .as_str()
+            .ok_or("prepare refusal digest absent")?;
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err("prepare refusal digest is not lowercase SHA-256".into());
+        }
+        Ok(value)
+    };
+    if config.host_socket.is_none() {
+        return Err("prepare refusal did not use a pinned socket".into());
+    }
+    let manifest_path = attempt.join("attempt.json");
+    let manifest_bytes = read_bounded(&manifest_path, 65_536)?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("prepare refusal manifest decode: {e}"))?;
+    let copied_config = attempt.join("config.json");
+    if manifest["format"] != "minidregg-resource-client-attempt-v1"
+        || manifest["operation"] != "submit"
+        || manifest["host"].as_str().map(Path::new) != Some(config.host.as_path())
+        || manifest["config"].as_str().map(Path::new) != Some(copied_config.as_path())
+        || manifest["socket"].as_str().map(Path::new) != config.host_socket.as_deref()
+        || sha256_file(&manifest_path)? != digest_field("attemptManifestSha256")?
+    {
+        return Err("prepare refusal manifest differs from this operator-pinned submit".into());
+    }
+    let config_bytes = read_bounded(&copied_config, 65_536)?;
+    let operator_config = read_bounded(&config.host_config, 65_536)?;
+    if config_bytes != operator_config
+        || sha256_file(&copied_config)? != digest_field("hostConfigSha256")?
+    {
+        return Err("prepare refusal config differs from operator pin".into());
+    }
+    let request_path = attempt.join("signed-observation.bin");
+    let request = read_bounded(&request_path, 12_102_760)?;
+    if request.is_empty() || sha256_file(&request_path)? != digest_field("requestSha256")? {
+        return Err("prepare refusal signed observation differs from request pin".into());
+    }
+    for name in ["plan.bin", "call.bin", "outcome.bin", "outcome.json"] {
+        match fs::symlink_metadata(attempt.join(name)) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Ok(_) => return Err("prepare refusal attempt contains later-stage artifact".into()),
+            Err(e) => return Err(format!("prepare refusal artifact stat: {e}")),
+        }
+    }
+    let frame = read_bounded(&frame_path, 12_102_761)?;
+    if frame.len() < 2
+        || frame[0] != 255
+        || sha256_file(&frame_path)? != digest_field("frameSha256")?
+    {
+        return Err("prepare refusal frame differs from retained op-255 reply".into());
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("prepare refusal verification clock: {e}"))?
+        .as_nanos();
+    let inspect_dir = attempt.join(format!(
+        "prepare-refusal-verify-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&inspect_dir).map_err(|e| format!("prepare refusal inspect directory: {e}"))?;
+    let body = inspect_dir.join("outcome.bin");
+    let result = inspect_dir.join("outcome.json");
+    write_new(&body, &frame[1..])?;
+    let status = Command::new(&config.host)
+        .arg(&config.host_config)
+        .arg("inspect")
+        .arg("outcome")
+        .arg(&body)
+        .arg(&result)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("native prepare refusal inspection: {e}"))?;
+    if !status.success() {
+        return Err("native Host did not decode prepare refusal Outcome".into());
+    }
+    let value: Value = serde_json::from_slice(&read_bounded(&result, 65_536)?)
+        .map_err(|e| format!("native prepare refusal JSON: {e}"))?;
+    if value["type"] != "refused" || value["phase"] != "70726570617265" {
+        return Err("native Outcome is not a prepare-phase refusal".into());
+    }
+    Ok(Some(value))
+}
+
 fn next_retry_json(attempt: &Path) -> Result<PathBuf> {
     for index in 1..=9999 {
         let binary = attempt.join(format!("retry-{index:04}.bin"));
@@ -1977,6 +2110,19 @@ impl Runtime {
                     return Err(format!("{label} refused by Mini: {}", explicit.unwrap()));
                 }
                 if !attempt.join("call.bin").is_file() {
+                    let pre_submit = inspected_pre_submit_refusal(&self.config, &attempt);
+                    if let Ok(Some(refusal)) = pre_submit.as_ref() {
+                        if reserving {
+                            self.journal
+                                .hold_for_mut(slot)
+                                .as_mut()
+                                .ok_or("reserve marker disappeared")?
+                                .reserve_refused = true;
+                        }
+                        *self.journal.pending_for_mut(slot) = None;
+                        self.save()?;
+                        return Err(format!("{label} refused by Mini: {refusal}"));
+                    }
                     // A missing file after subprocess exit is still not a
                     // negative native receipt: an older client/host could
                     // have sent the call before its directory entry became
@@ -1985,7 +2131,12 @@ impl Runtime {
                         p.uncertain = true;
                     }
                     self.save()?;
-                    return Err(format!("{label} has no retained call.bin after custody failure; disposition requires audit: {e}"));
+                    let detail = match pre_submit {
+                        Ok(None) => "no durable prepare-refusal marker".to_owned(),
+                        Ok(Some(_)) => "unexpected prepare-refusal disposition".to_owned(),
+                        Err(reason) => reason,
+                    };
+                    return Err(format!("{label} has no retained call.bin after custody failure; {detail}; disposition requires audit: {e}"));
                 }
                 if let Some(p) = self.journal.pending_for_mut(slot) {
                     p.uncertain = true;
@@ -4786,6 +4937,38 @@ impl Runtime {
         let pending = self.journal.pending_for(slot);
         if let Some(p) = pending.clone() {
             if !p.attempt.join("call.bin").is_file() {
+                match inspected_pre_submit_refusal(&self.config, &p.attempt) {
+                    Ok(Some(refusal)) => {
+                        if matches!(
+                            p.operation.as_str(),
+                            "reserve" | "tool reserve" | "provider reserve"
+                        ) {
+                            self.journal
+                                .hold_for_mut(slot)
+                                .as_mut()
+                                .ok_or(
+                                    "reserve marker disappeared during prepare refusal recovery",
+                                )?
+                                .reserve_refused = true;
+                        }
+                        self.journal.reconciliation_log.push(json!({
+                            "action":"recognize-native-pre-submit-refusal",
+                            "stage":"before-signed-call",
+                            "operationId":p.operation_id.to_string(),
+                            "operation":p.operation,
+                            "attempt":p.attempt,
+                            "outcome":refusal,
+                            "heldAllowanceReleased":false
+                        }));
+                        *self.journal.pending_for_mut(slot) = None;
+                        self.save()?;
+                        return Ok(());
+                    }
+                    Ok(None) => {}
+                    Err(reason) => {
+                        return Err(format!("pending custody attempt has no call.bin and invalid prepare-refusal marker: {reason}; manual reconciliation required"));
+                    }
+                }
                 // A crashed custody subprocess may still assemble the call and
                 // dispatch later. Absence right now is not a negative receipt.
                 return Err("pending custody attempt has no call.bin; child lifetime is uncertain; manual reconciliation required".into());
@@ -5397,6 +5580,74 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepare_refusal_requires_exact_attempt_and_native_inspection() {
+        let root = std::env::temp_dir().join(format!(
+            "grain-pre-submit-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let attempt = root.join("attempt");
+        fs::create_dir_all(&attempt).unwrap();
+        let host = root.join("host");
+        fs::write(&host, b"#!/bin/sh\n[ \"$2\" = inspect ] && [ \"$3\" = outcome ] || exit 1\nprintf '{\"type\":\"refused\",\"phase\":\"70726570617265\",\"detail\":\"7374616c65546172676574\"}\\n' > \"$5\"\n").unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let original_config = root.join("operator-config.json");
+        let copied_config = attempt.join("config.json");
+        fs::write(&original_config, b"pinned config").unwrap();
+        fs::write(&copied_config, b"pinned config").unwrap();
+        let socket = root.join("mini.sock");
+        let config: Config = serde_json::from_value(json!({
+            "mini":root.join("mini"),"host":host,"hostConfig":original_config,
+            "hostSocket":socket,"controlSocket":root.join("control.sock"),
+            "custodyKey":root.join("parent.key"),"stateDir":root.join("state"),
+            "cwd":root,"task":"7101","subject":"7","capability":"71",
+            "queryCapability":"74","commands":[]
+        }))
+        .unwrap();
+        let request = attempt.join("signed-observation.bin");
+        fs::write(&request, b"retained signed observation").unwrap();
+        let manifest = attempt.join("attempt.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&json!({
+                "format":"minidregg-resource-client-attempt-v1", "operation":"submit",
+                "host":config.host,"config":copied_config,"socket":config.host_socket
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let frame = attempt.join("pre-submit-refusal.frame");
+        fs::write(&frame, b"\xffcanonical outcome bytes").unwrap();
+        let marker = attempt.join("pre-submit-refusal.json");
+        fs::write(
+            &marker,
+            serde_json::to_vec(&json!({
+                "type":"minidregg-pre-submit-refusal-v1","stage":"prepare","operation":1,
+                "frameSha256":sha256_file(&frame).unwrap(),
+                "requestSha256":sha256_file(&request).unwrap(),
+                "hostConfigSha256":sha256_file(&copied_config).unwrap(),
+                "attemptManifestSha256":sha256_file(&manifest).unwrap()
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let decoded = inspected_pre_submit_refusal(&config, &attempt)
+            .unwrap()
+            .unwrap();
+        assert_eq!(decoded["type"], "refused");
+        assert_eq!(decoded["phase"], "70726570617265");
+        fs::write(&request, b"altered signed observation").unwrap();
+        assert!(inspected_pre_submit_refusal(&config, &attempt).is_err());
+        fs::write(&request, b"retained signed observation").unwrap();
+        fs::write(attempt.join("call.bin"), b"a call may have been dispatched").unwrap();
+        assert!(inspected_pre_submit_refusal(&config, &attempt).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn publish_returns_only_its_own_confirmed_receipt_without_reporting_it() {
