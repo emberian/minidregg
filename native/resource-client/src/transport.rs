@@ -134,13 +134,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     }
 }
 
-// An unsigned share-issue plan discloses current app and factory signing
-// selectors. It is available only on the separately started operator socket.
+// These lifecycle, dispatch, and share-issue routes carry operator custody
+// selectors or may commit writes. They are available only on the separately
+// started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
+        [22 | 23 | 26 | 27 | 34 | 35, payload @ ..] => {
+            !payload.is_empty() && payload.len() < HOST_MAX_FRAME
+        }
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
         [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+            let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
+            plan_length > 0 && plan_length < pair.len() - 4
+        }
+        // The source request codec can carry an admitted 8 MiB HTTP body.
+        // Only the complete native Host frame limits this private author route.
+        [36, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [37, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -976,7 +987,7 @@ mod tests {
     fn unsigned_share_issue_plan_stays_off_public_socket() {
         let mut assembly = vec![33];
         assembly.extend(1u32.to_le_bytes());
-        assembly.extend([b'P', b'S']);
+        assembly.extend(*b"PS");
         for request in [&[32, 1][..], assembly.as_slice()] {
             assert!(!allowed_operation(request, false));
             assert!(allowed_operator_operation(request));
@@ -984,6 +995,55 @@ mod tests {
         assert!(!allowed_operator_operation(&[32]));
         assert!(!allowed_operator_operation(&[33, 1, 0, 0, 0, b'P']));
         assert!(!allowed_operator_operation(&[30, b'{', b'}']));
+    }
+
+    #[test]
+    fn lifecycle_and_dispatch_routes_are_bounded_and_operator_only() {
+        for operation in [22, 23, 26, 27, 34, 35] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operation(&[operation, 1], true));
+            assert!(!allowed_operator_operation(&[operation]));
+        }
+        let oversized = vec![1; HOST_MAX_FRAME];
+        for operation in [22, 23, 26, 27, 34, 35] {
+            let mut request = vec![operation];
+            request.extend_from_slice(&oversized);
+            assert!(!allowed_operator_operation(&request));
+        }
+
+        let author = [36, 1];
+        assert!(allowed_operator_operation(&author));
+        assert!(!allowed_operation(&author, true));
+        assert!(!allowed_operator_operation(&[36]));
+        // ApplicationDispatchAdmission admits an 8 MiB HTTP body. Its
+        // source-owned request envelope must fit above that body size.
+        let mut large_author = vec![36];
+        large_author.extend(vec![1; 8 * 1024 * 1024 + 4096]);
+        assert!(allowed_operator_operation(&large_author));
+        assert!(!allowed_operation(&large_author, true));
+        large_author.resize(HOST_MAX_FRAME, 1);
+        assert!(allowed_operator_operation(&large_author));
+        large_author.push(1);
+        assert!(!allowed_operator_operation(&large_author));
+
+        let mut assembly = vec![37];
+        assembly.extend(1u32.to_le_bytes());
+        assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&assembly));
+        assert!(!allowed_operation(&assembly, true));
+        assert!(!allowed_operator_operation(&[37, 1, 0, 0, 0, b'P']));
+        let mut empty_plan = assembly.clone();
+        empty_plan[1..5].copy_from_slice(&0u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&empty_plan));
+        let mut missing_signatures = assembly;
+        missing_signatures[1..5].copy_from_slice(&2u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&missing_signatures));
+
+        // A private operator service is not a generic tunnel into the public
+        // authoring, observation, or selected-release receiver operations.
+        for operation in [0, 1, 7, 8, 20, 21, 24, 25, 30, 31, 38] {
+            assert!(!allowed_operator_operation(&[operation, 1]));
+        }
     }
 
     #[test]
