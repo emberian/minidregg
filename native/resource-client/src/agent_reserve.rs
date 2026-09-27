@@ -14,8 +14,8 @@ const JSON_LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
 
 mod lifetime_v3;
 pub(super) use lifetime_v3::{
-    lifetime_lookup, lifetime_paid_lookup, lifetime_paid_plan, lifetime_paid_seal,
-    lifetime_paid_submit, lifetime_plan, lifetime_seal, lifetime_submit,
+    lifetime_lookup, lifetime_paid_lookup, lifetime_paid_payer_sign, lifetime_paid_plan,
+    lifetime_paid_seal, lifetime_paid_submit, lifetime_plan, lifetime_seal, lifetime_submit,
 };
 
 pub(super) fn digest(bytes: &[u8]) -> String {

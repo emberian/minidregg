@@ -1,0 +1,7 @@
+d7fbb4e728661a010d52f025683e5e92acfac0d13c130fd5d2391707bf217132  native/resource-client/src/agent_reserve.rs
+30f8216d7a449559d365722b73c77692fdd75081a2fe2b8dbadb9a80d755101d  native/resource-client/src/agent_reserve/lifetime_v3.rs
+e5798f4f8ff80ecf0dfbfcc0fcdbce7d966993b1e320a53a7fefe1d954dbc465  native/resource-client/src/agent_reserve/lifetime_v3/paid.rs
+2478a8504e08570018f40419c6ff6a09a08a1f51669762a69cacb78b97d99c94  native/resource-client/src/main.rs
+a99bdbedb6264d58c6e8684b204e6d9343cc5a05205277e99aa0998feeef326e  docs/evidence/2026-09-27-agent-lifetime-payer-only/README.md
+9bd1a58950eb47b038532ebb4e575a2656ad4c606369e266bcf6341101bbea60  docs/evidence/2026-09-27-agent-lifetime-payer-only/nextest.log
+4dac6c9bec3d87dfe273f067a308eecebc19b7754ad228849a54ddd0f32c1a83  docs/evidence/2026-09-27-agent-lifetime-payer-only/clippy.log

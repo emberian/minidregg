@@ -152,6 +152,7 @@ usage:
   mini agent-lifetime-reserve-submit --attempt PRIVATE-DIR
   mini agent-lifetime-reserve-lookup --attempt PRIVATE-DIR
   mini agent-lifetime-paid-plan --reserve-attempt PRIVATE-DIR --grant-attempt PRIVATE-DIR --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-paid-payer-sign --attempt PRIVATE-DIR --approval PAYER-ONLY-APPROVAL.json
   mini agent-lifetime-paid-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-paid-submit --attempt PRIVATE-DIR
   mini agent-lifetime-paid-lookup --attempt PRIVATE-DIR
@@ -2351,6 +2352,13 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("dir")?);
             args.finish()?;
             agent_reserve::lifetime_paid_plan(&reserve, &grant, &directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-paid-payer-sign" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            agent_reserve::lifetime_paid_payer_sign(&directory, &approval)
         }
         #[cfg(unix)]
         "agent-lifetime-paid-seal" => {

@@ -312,6 +312,129 @@ fn pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Sign only the payer slots under the controller's protected purse key.
+/// App and grant slots belong to the resident custodian and are never accepted
+/// in this approval. The exact op78 plan is re-observed before key use; this
+/// helper does not assemble op79 or submit public op76.
+pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -> Result<()> {
+    let directory = absolute(directory)?;
+    let pinned = paid_pin(&directory)?;
+    private_socket(&pinned.original.operator_socket)?;
+    let approval_bytes = private_bytes(approval_json, 65_536)?;
+    let approval: Value = serde_json::from_slice(&approval_bytes)
+        .map_err(|error| format!("invalid lifetime payer-only approval: {error}"))?;
+    let retained = bound_inspection(&directory, "plan-inspected.json")?;
+    let fresh = source_inspect(
+        &pinned.original.host,
+        &pinned.original.config,
+        PLAN_ROUTE,
+        &directory.join("plan.bin"),
+        &directory.join("payer-plan-inspected.json"),
+    )?;
+    if fresh != retained
+        || field(&approval, "type")? != "minidregg-agent-lifetime-payer-approval-v1"
+        || field(&approval, "requestSha256")? != digest(&pinned.request)
+        || field(&approval, "planSha256")? != digest(&pinned.plan)
+        || approval.get("fixedSelectors") != retained.get("fixedSelectors")
+        || approval.get("context") != retained.get("context")
+        || approval.get("bindings") != retained.get("bindings")
+        || approval.get("canonicalHttpHex") != retained.get("canonicalHttpHex")
+        || approval.get("reserveReceipt") != Some(&pinned.reserve_receipt)
+        || approval.get("grantIssueReceipt") != Some(&pinned.grant_receipt)
+        || approval.get("appSigners").is_some()
+        || approval.get("grantSigner").is_some()
+    {
+        return Err("lifetime payer approval differs from exact source plan".into());
+    }
+    let current = session_invoke(
+        &pinned.original.host,
+        &pinned.original.operator_socket,
+        &pinned.original.config,
+        78,
+        &pinned.request,
+    )?;
+    create_private(&directory.join("payer-current-plan.frame"), &current)?;
+    sync_directory_ancestors(&directory)?;
+    if expect_reply(&current, 78)? != pinned.plan {
+        return Err("lifetime payer plan changed at current verified image".into());
+    }
+    let slots = retained
+        .get("payerSlots")
+        .and_then(Value::as_array)
+        .ok_or("lifetime paid plan lacks payer slots")?;
+    let signers = approval
+        .get("payerSigners")
+        .and_then(Value::as_array)
+        .ok_or("lifetime payer approval lacks payer signers")?;
+    payer_slot_shape(slots, signers)?;
+    same_paid_pin(&directory, &pinned)?;
+    let signatures = Value::Array(
+        slots
+            .iter()
+            .zip(signers)
+            .map(|(slot, signer)| approve_slot(slot, signer).map(Value::String))
+            .collect::<Result<Vec<_>>>()?,
+    );
+    let bytes = serde_json::to_vec(&signatures)
+        .map_err(|error| format!("lifetime payer signatures JSON: {error}"))?;
+    create_private(&directory.join("payer-only-signatures.json"), &bytes)?;
+    source(
+        &pinned.original.host,
+        &pinned.original.config,
+        &[
+            OsStr::new("signatures"),
+            directory.join("payer-only-signatures.json").as_os_str(),
+            directory.join("payer-only-signatures.bin").as_os_str(),
+        ],
+    )?;
+    retain_generated(&directory.join("payer-only-signatures.bin"))?;
+    same_paid_pin(&directory, &pinned)?;
+    create_private(&directory.join("payer-only-approval.json"), &approval_bytes)?;
+    retain_json(
+        &directory.join("payer-only-result.json"),
+        &json!({
+            "type":"minidregg-agent-lifetime-payer-signatures-v1",
+            "planSha256":digest(&pinned.plan),
+            "requestSha256":digest(&pinned.request),
+            "reserveReceipt":pinned.reserve_receipt,
+            "grantIssueReceipt":pinned.grant_receipt,
+            "signatures":signatures,
+            "encodedSha256":digest(&private_bytes(
+                &directory.join("payer-only-signatures.bin"), 4096)?),
+        }),
+    )?;
+    print_json(
+        &serde_json::from_slice::<Value>(&private_bytes(
+            &directory.join("payer-only-result.json"),
+            65_536,
+        )?)
+        .map_err(|error| format!("lifetime payer result JSON: {error}"))?,
+    )
+}
+
+fn payer_slot_shape(slots: &[Value], signers: &[Value]) -> Result<()> {
+    if slots.len() != 3 || signers.len() != 3 {
+        return Err("lifetime payer requires exact target/observe/authority slots".into());
+    }
+    for ((slot, signer), role) in slots.iter().zip(signers).zip(["4", "8", "1"]) {
+        if field(slot, "role")? != role
+            || field(slot, "index")? != "0"
+            || field(signer, "role")? != role
+            || field(signer, "index")? != "0"
+        {
+            return Err("lifetime payer slot order or signer role differs".into());
+        }
+    }
+    for signer in signers.iter().skip(1) {
+        for name in ["keyId", "keyEpoch", "publicKey", "keyPath"] {
+            if field(signer, name)? != field(&signers[0], name)? {
+                return Err("lifetime payer slots use different custodians".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Result<()> {
     let directory = absolute(directory)?;
     let pinned = paid_pin(&directory)?;
@@ -613,6 +736,27 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn payer_only_approval_requires_three_ordered_source_incidence_slots() {
+        let slot = |role: &str| {
+            json!({"role":role,"index":"0",
+            "keyId":"7007","keyEpoch":"1","publicKey":"ab",
+            "keyPath":"/private/payer.key"})
+        };
+        let slots = vec![slot("4"), slot("8"), slot("1")];
+        assert!(payer_slot_shape(&slots, &slots).is_ok());
+        let mut swapped = slots.clone();
+        swapped.swap(1, 2);
+        assert!(payer_slot_shape(&swapped, &slots).is_err());
+        let mut foreign = slots.clone();
+        foreign[2]["index"] = json!("1");
+        assert!(payer_slot_shape(&slots, &foreign).is_err());
+        foreign = slots.clone();
+        foreign[2]["keyPath"] = json!("/private/other.key");
+        assert!(payer_slot_shape(&slots, &foreign).is_err());
+        assert!(payer_slot_shape(&slots[..2], &slots[..2]).is_err());
+    }
 
     #[test]
     fn lost_paid_submit_reply_never_reissues_and_lookups_are_numbered() {

@@ -4,7 +4,8 @@ use super::*;
 
 mod paid;
 pub(crate) use paid::{
-    lifetime_paid_lookup, lifetime_paid_plan, lifetime_paid_seal, lifetime_paid_submit,
+    lifetime_paid_lookup, lifetime_paid_payer_sign, lifetime_paid_plan, lifetime_paid_seal,
+    lifetime_paid_submit,
 };
 
 const FORMAT: &str = "minidregg-agent-lifetime-reserve-custody-v1";
