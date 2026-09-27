@@ -1,0 +1,16 @@
+{
+  "connection": "soft",
+  "child": null,
+  "pending": null,
+  "toolPending": null,
+  "toolHold": null,
+  "parentHold": null,
+  "settlementDue": null,
+  "pendingPrompt": null,
+  "unresolvedExternal": [],
+  "hermesSession": {
+    "id": "6c1ef374-f4a8-4c28-a0c0-8119f1808499",
+    "loadVerified": false,
+    "pendingPrompt": false
+  }
+}

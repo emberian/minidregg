@@ -1,0 +1,8 @@
+completion bytes=36954 stream=true stage=peer read workroom
+reject bytes=1351 reason=mini_read_resource is not advertised to Hermes
+completion bytes=38039 stream=true stage=peer publish stale=false root=97349327118568466779609446662939988221287696762075284738918673226692685974561
+completion bytes=40137 stream=true stage=peer tool ack
+reject bytes=2016 reason=mini_read_resource is not advertised to Hermes
+completion bytes=40972 stream=true stage=peer read workroom
+completion bytes=43011 stream=true stage=peer publish stale=false root=26760776260269641522270119337309908832380551657256697320396735441479852397557
+completion bytes=45515 stream=true stage=peer tool ack
