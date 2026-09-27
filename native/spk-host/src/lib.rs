@@ -6,3 +6,7 @@
 pub mod sandbox;
 #[cfg(target_os = "linux")]
 pub mod materialize;
+#[cfg(target_os = "linux")]
+pub mod hostd;
+#[cfg(target_os = "linux")]
+pub mod endpoint;
