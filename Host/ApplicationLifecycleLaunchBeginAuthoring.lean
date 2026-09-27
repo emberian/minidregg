@@ -88,6 +88,70 @@ def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-PLAN/v1".toUTF8.toList
   planStream
 
+/-- Only the verifier-selected latest running event25 may identify a physical
+STOP target. The receipt and exact incarnation are operator-private plan data;
+the signed BEGIN still binds the unit, and native replay reselects this prior
+before admitting STOP. -/
+structure RunningWitness where
+  index : Nat
+  receipt : NativeHostCodec.Receipt
+  generation : Int
+  unit : List UInt8
+  image : List UInt8
+  invocationId : List UInt8
+  controlGroup : List UInt8
+  custody : ApplicationLifecycleLaunchBinding.Custody
+  deriving DecidableEq
+
+def runningWitnessStream : StreamCodec RunningWitness :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product NativeHostCodec.receiptStream
+        (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+          (StreamCodec.product bytesStream
+            (StreamCodec.product bytesStream
+              (StreamCodec.product bytesStream
+                (StreamCodec.product bytesStream
+                  ApplicationLifecycleLaunchBinding.custodyStream)))))))
+    (fun witness => (witness.index, witness.receipt, witness.generation,
+      witness.unit, witness.image, witness.invocationId,
+      witness.controlGroup, witness.custody))
+    (fun (index, receipt, generation, unit, image, invocationId,
+          controlGroup, custody) =>
+      ⟨index, receipt, generation, unit, image, invocationId,
+        controlGroup, custody⟩)
+    (by intro witness; cases witness; rfl)
+
+structure StopPlan where
+  base : Plan
+  running : RunningWitness
+
+def stopPlanStream : StreamCodec StopPlan :=
+  StreamCodec.xmap (StreamCodec.product planStream runningWitnessStream)
+    (fun plan => (plan.base, plan.running))
+    (fun (base, running) => ⟨base, running⟩)
+    (by intro plan; cases plan; rfl)
+
+def stopPlanCodec : LawfulCodec StopPlan := NativeHostCodec.framed
+  "DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2".toUTF8.toList
+  stopPlanStream
+
+theorem stopPlan_decode_encode (plan : StopPlan) :
+    stopPlanCodec.decode (stopPlanCodec.encode plan) = some plan :=
+  stopPlanCodec.decode_encode plan
+
+
+def StopPlan.shape (plan : StopPlan) : Bool :=
+  let source := plan.base.unsigned.base.source
+  source.kind == .stop && plan.base.unsigned.start == none &&
+    plan.running.receipt.acceptedCount == plan.running.index + 1 &&
+    plan.running.generation == source.before.generation &&
+    plan.running.unit == source.processIdentity &&
+    plan.running.image == source.imageIdentity &&
+    !plan.running.invocationId.isEmpty &&
+    !plan.running.controlGroup.isEmpty &&
+    plan.running.custody.validFor plan.base.unsigned.volume
+
 private def cellAt {config : Config} (opened : Opened config) (resource : Nat) :
     Option (PackedCell CanonicalCellRegistry.registry) :=
   match opened.directory.directory.slots resource with
@@ -221,6 +285,8 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
 def prepareVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
     (request : Request) : Except String Plan := do
+  if request.kind == .stop then
+    throw "STOP requires the versioned running-witness operator plan"
   let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
       request.descriptorBytes
     | throw "noncanonical signed-SPK launch descriptor"
@@ -228,6 +294,45 @@ def prepareVerified (config : Config) {target : Durable}
   let start ← startBinding config.deployment.domain pin.app descriptor
     request.kind request.createIndex
   prepareSelectedVerified config verified pin request descriptor start
+
+/-- The op66 STOP plan carries the exact latest running completion certified
+by the same verified tip used for all current-image signing headers. A caller
+cannot supply or replace the physical incarnation in this request. -/
+def prepareStopVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) : Except String StopPlan := do
+  unless request.kind == .stop && request.createIndex == none do
+    throw "versioned STOP plan requires STOP without create action"
+  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+      request.descriptorBytes
+    | throw "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
+  let base ← prepareSelectedVerified config verified pin request descriptor none
+  let running ← verified.selectRunning base.unsigned.base.source
+  let prior := running.prior
+  let physical := prior.ingress.source.physical.report
+  let some custody := physical.volumeCustody
+    | throw "admitted running completion has no volume custody"
+  let plan : StopPlan :=
+    { base := base
+      running :=
+        { index := prior.index
+          receipt := prior.receipt
+          generation := prior.ingress.source.originalBegin.base.source.processGeneration
+          unit := physical.unit
+          image := physical.materializedImage
+          invocationId := physical.invocationId
+          controlGroup := physical.controlGroup
+          custody := custody } }
+  unless plan.shape do throw "STOP running-witness plan differs from verified source"
+  return plan
+
+def prepareStopRequestVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (bytes : List UInt8) : Except String StopPlan := do
+  let some request := requestCodec.decode bytes
+    | throw "noncanonical launch STOP operator request"
+  prepareStopVerified config verified pin request
 
 def prepareContinueRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
@@ -268,7 +373,7 @@ def prepareRequestVerified (config : Config) {target : Durable}
 
 /-- Detached assembly binds the same authorization ID, descriptor and action.
 Fresh event23 admission still rechecks current image, signatures and history. -/
-def assemble (plan : Plan) (signatures : List (List UInt8)) :
+private def assembleBase (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let unsigned := plan.unsigned
   unless unsigned.shape && unsigned.withAuthorizationId == unsigned &&
@@ -303,5 +408,18 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
   let base := { base with packageObservationEnvelope := packageEnvelope }
   return ApplicationLifecycleBeginV3Ingress.codec.encode
     { unsigned with base := base }
+
+/-- Legacy op67 plan shape remains byte-identical for INSTALL and START.
+STOP cannot be assembled from a v1 plan with no running-incarnation witness. -/
+def assemble (plan : Plan) (signatures : List (List UInt8)) :
+    Except String (List UInt8) := do
+  if plan.unsigned.base.source.kind == .stop then
+    throw "STOP requires the versioned running-witness operator plan"
+  assembleBase plan signatures
+
+def assembleStop (plan : StopPlan) (signatures : List (List UInt8)) :
+    Except String (List UInt8) := do
+  unless plan.shape do throw "STOP running-witness plan shape refused"
+  assembleBase plan.base signatures
 
 end Minidregg.Host.ApplicationLifecycleLaunchBeginAuthoring

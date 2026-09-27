@@ -182,4 +182,41 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("slots", .arr <| (plan.invocation.slots ++
        [plan.packageObservationSlot]).toArray.map slotJson)]
 
+/-- STOP inspection echoes the exact verifier-selected prior running event25
+receipt and physical incarnation alongside the source-authored v1 base plan.
+This is custody presentation, not a caller-supplied historical certificate. -/
+def inspectStopPlan (bytes : List UInt8) : Except String Json := do
+  let some plan := stopPlanCodec.decode bytes
+    | throw "noncanonical launch STOP running-witness plan-v2"
+  unless plan.shape do throw "launch STOP running-witness plan shape refused"
+  let base ← inspectPlan (planCodec.encode plan.base)
+  let source := plan.base.unsigned.base.source
+  let request := noActionRequest plan.base.unsigned
+  let witness := plan.running
+  pure <| .mkObj
+    [("type", "application-lifecycle-launch-stop-plan-v2"),
+     ("canonicalPlanHex", hex bytes),
+     ("canonicalRequestHex", hex <| requestCodec.encode request),
+     ("basePlan", base),
+     ("app", decimal source.app),
+     ("operationGeneration", signed source.processGeneration),
+     ("running", .mkObj
+       [("index", decimal witness.index),
+        ("receiptHex", hex <| NativeHostCodec.receiptStream.encode witness.receipt),
+        ("receipt", .mkObj
+          [("transactionId", decimal witness.receipt.transactionId.value),
+           ("eventId", decimal witness.receipt.eventId.value),
+           ("acceptedCount", decimal witness.receipt.acceptedCount),
+           ("imageBoundary", decimal witness.receipt.imageBoundary.value)]),
+        ("generation", signed witness.generation),
+        ("unitHex", hex witness.unit),
+        ("imageHex", hex witness.image),
+        ("invocationIdHex", hex witness.invocationId),
+        ("controlGroupHex", hex witness.controlGroup),
+        ("volumeIdHex", hex <| ApplicationLifecycleLaunchBinding.volumeIdBytes
+          plan.base.unsigned.base.domain source.app),
+        ("custodyHex", hex <|
+          ApplicationLifecycleLaunchBinding.custodyStream.encode witness.custody),
+        ("physicalWitnessHex", hex witness.custody.physicalWitness)])]
+
 end Minidregg.Host.ApplicationLifecycleLaunchBeginInspection
