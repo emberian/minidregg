@@ -1,0 +1,4 @@
+97bab3845be548d930f25cb064d70314031b9d418e1bc869797e0b5bb1a939fa  ../../../native/spk-host/src/lifecycle_v3_stop_native.rs
+5591d908ebbe7bdba4071212f28a8f3e1e29237e1035000827eb1d7d51f28a5c  README.md
+0ecee2095355f2d7f527f0df055eaa8e464538f6bdf68a6e6d60330bef3a4460  nextest.log
+1cf6413043e3809f5eac8a774d54e19db780dd08aec033f8ac36cae2326ce070  clippy.log
