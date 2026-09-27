@@ -1,0 +1,54 @@
+{
+  "type": "minidregg-event22-r3-native-verdict-v1",
+  "scope": "synthetic packageVersion 0 component ticket; no installed GitWeb package claim",
+  "privateRun": "/tank/dregg-build/minidregg-event22-r3-client-session/run-r1",
+  "preparation": {
+    "unit": "mini-event22-r3-client-session.service",
+    "status": "failed before op54 due wrong bare Lean toolchain; exact prepared ingress retained",
+    "totalTimeSha256": "a8eb9f3c2ce0070d4fa77229d34306d06d009abb93fda21d20bbe3c2409501b3"
+  },
+  "continuation": {
+    "unit": "mini-event22-r3-resume-client-session.service",
+    "invocation": "89129a2ef44649ef9f98717c75b58bb4",
+    "result": "success",
+    "exitStatus": 0,
+    "started": "2026-09-27T11:48:34-04:00",
+    "ended": "2026-09-27T11:55:32-04:00",
+    "cpuSecondsFromUnitJournal": 413.735,
+    "memoryPeakFromUnitJournal": "937.2M"
+  },
+  "sourceAndArtifacts": {
+    "hostSourceCommit": "f461f39",
+    "hostSha256": "3bbdc8474cca00a3a080f9120acba39ee551ca47d9506573dc37115dc26df55b",
+    "hostManifestSha256": "ccad83031e23c16090cc922be2a9dcda254f551d192c3acd367662768fcbf546",
+    "miniSourceCommit": "007b513",
+    "miniSha256": "a339b384f9a6c15d9c3f64e5df243b230da7e5a50d0b252cafbbcd94ad8e47ee",
+    "sqliteHelperSha256": "9a5054813d9ad358ece337b99121cb37a36ba82b4b92ad0e287dcc7e529190e0",
+    "signatureHelperSha256": "e80a0949d0ce16b24bcf24f2ac1306f4e194887ba11d328121b4c3345f8dfa1a",
+    "configSha256": "eeeb349d8ec639a49c2bdfb8e1cccc6a302d6aa39e9e23c16433329fc8e5b4d8",
+    "preparedIngressSha256": "74fae42a57c9e93146d39c165ad64af24d2c873a364940fdf71939ace66f6a05",
+    "continuationShellSha256": "47a21d82ef3aecddc61ec276634076eafb9d95814a3965618b2b2095f942adcd"
+  },
+  "nativeIssue": {
+    "submitMarkerToOutcomeWallSeconds": 92.29,
+    "submitFrameSha256": "7744742c7d038f758f2e5d2bbad8ad835fb79530c28449ad833c33c6f4bd8ac2",
+    "confirmation": "installed",
+    "acceptedCount": "18",
+    "ticket": "8500",
+    "signedTicketObservationSha256": "407ac45dfc3d85739a6df63de642d671745a9942a2b2fb083ae287d1c98fa6ca",
+    "ticketViewSha256": "8dedb33f4b8ef063957430afb1f5b3719f334305a6c1d7962d1531d667d308f5",
+    "ticketEntryCount": 1,
+    "ticketRoot": "49152250889693488177479786948134890246514908462884832495420066418788007824989",
+    "payerBefore": "989783",
+    "payerAfter": "989266",
+    "sourceFeeAndActualDebit": "517",
+    "beforeIssueImageSha256": "5f6551858c0eb6eafcede4cacb8becce9a366630601367d068288f0dbb822061"
+  },
+  "reopen": {
+    "lookupMarkerToOutcomeWallSeconds": 158.60,
+    "lookupFrameSha256": "23e9b7bb455eb26026d1ff2c42238ed99717f16273e2b947dc61d8d03084b34d",
+    "confirmation": "replayed",
+    "originalAndRecoveredFourFieldReceiptSha256": "637cce02698784dbf7b4e62f59dc94f055096d6a961a6c0d3e4646fcca323c03",
+    "beforeAndAfterWholeStoreImageSha256": "acfb61543836e9a4608248bc5deb802b396961fb9ccd1f894f376e60e8e9bbb6"
+  }
+}

@@ -66,5 +66,31 @@ wall intervals including process startup and replay, not isolated algorithm
 timings. Per-phase CPU was not recorded; the total CPU above and observed
 CPU-active native children do not justify finer attribution. `r2-total.time`
 and selected keyless refusals, views, reserve outcome, and verdict bind the
-terminal scope. A fresh repaired-Host run is still required for positive fee,
-one-shot receipt, and reopen claims.
+terminal scope.
+
+The fresh `run-r3` used the certified repaired Host `f461f39` (ELF SHA-256
+`3bbdc8474cca00a3a080f9120acba39ee551ca47d9506573dc37115dc26df55b`),
+exact `007b513` Mini and `9746c47` helpers. The base, source-admitted tool
+reserve, positive and refusal plans, and private signing preparation completed.
+Its first wrapper invocation stopped **before op54** because bare hbox `lean`
+selected a different toolchain and rejected `Init.olean`. The 252-byte error
+is retained privately; the prepared ingress, source Plan and Store were not
+rewritten. The corrected wrapper uses `lake env lean --run` in the qualified
+Lean 4.30 root and has idempotent seat cleanup. On the exact retained Plan
+(SHA-256 `6a0287c77c82e32508ece21a826d0125902b244c10fbf12ab1c07dfa43421e36`)
+it decoded the source fee **517** with exit 0 and empty stderr. Its 466.10-second
+wall interval was dominated by OLean import; `r3-fee-inspector-verdict.json`
+records exact source/output hashes and the earlier bounded timeout.
+
+The separate one-shot continuation used the original prepared ingress and a
+new private operator socket. Op54 installed ticket 8500 at acceptedCount 18;
+the payer's signed balance fell from 989783 to 989266, exactly the source fee.
+A signed query read the ticket's single entry. After reopening the service,
+op55 returned `replayed` with the original four receipt fields byte-equal;
+the full Store image SHA-256 remained
+`acfb61543836e9a4608248bc5deb802b396961fb9ccd1f894f376e60e8e9bbb6`.
+The bounded continuation unit exited 0. `r3-verdict.json` binds the Host,
+config, exact ingress, receipt/frame/read hashes and measured operation windows;
+the paired receipt projections and `r3-preparation-total.time` are portable.
+This is a positive **packageVersion 0 component ticket** in a private synthetic
+fixture. It is not an installed GitWeb version-1 ticket or resident dispatch.
