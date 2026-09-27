@@ -1,0 +1,22 @@
+{
+  "type": "mini-current-birth-hard-eof-continuation-refusal-v1",
+  "runtimeSource": "9e00fa0",
+  "rawJournalSha256": "53cbaa920b528ab8d2e77a84729f3a19b35426becfb1274ff768c01b1de245ca",
+  "sameHermesSessionId": "cdaa4d16-502f-4248-9ef3-383b84e10f6d",
+  "sessionLoadVerified": true,
+  "promptPending": false,
+  "providerFixtureStage": 2,
+  "toolError": "office resource birth family is exhausted",
+  "toolErrorLogLine": "2026-09-27 08:46:50,345 WARNING [cdaa4d16-502f-4248-9ef3-383b84e10f6d] agent.tool_executor: Tool mcp__mini_grain__mini_create_application returned error (26.06s): {\"error\": \"office resource birth family is exhausted\"}",
+  "birthNextOrdinal": {
+    "office": 1
+  },
+  "birthOperation": null,
+  "birthPending": null,
+  "bornResourceCount": 0,
+  "toolPending": null,
+  "toolHold": null,
+  "parentHold": null,
+  "providerHold": null,
+  "unresolvedExternal": []
+}
