@@ -1,0 +1,13 @@
+source_cut=7d03d5e00730ee11f283d8e851619cdd65709265
+source_archive_sha256=49949cf2447e7e3c1a9e00622963049aa2dc370e559af41c5b98ec291f534fb2
+build=CARGO_BUILD_JOBS=2 cargo build --release --locked --manifest-path native/resource-client/Cargo.toml
+test=cargo nextest run -p minidregg-resource-client
+d369b81a2aac42f1ebf58a8d6d1a39c7b7ebdc96d2d10bc60131020cf1c10a19  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/Cargo.toml
+0da51c6ee3145bb8443127f4f45471b10448f42c4a7762c601cdf174ec88b4ad  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/Cargo.lock
+9169d22616a19331fd6ab3f7f7273adf2d4f04d38d07f56293a69ad157e29e7a  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/src/main.rs
+101e6d71713fcb5253941244a2b544d94e20c6d244d92aaaa25d5e920150ce09  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/src/transport.rs
+63b530e868bd1c8a6dcb1e7784bcc51208f2d28f690097a9f4cdb048b8a787be  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/src/fn_namespace.rs
+e1ccc61b8cbaa528aa8f696b2cc511126da30669c4c87bbb7afbfb7a96bcc1bb  /home/ember/build/minidregg-7d03d5e-source/native/resource-client/src/historical_call_receipt.rs
+5bca4550a0a5b180ed5c78dc49bcf9f650a94afe2488caac1297911ca5c69974  /home/ember/build/minidregg-7d03d5e-client-evidence/bin/mini-7d03d5e
+87e341f274c80dcc897f138ffb9dcfd6289ded88ede550d56bd22a2530434d48  /home/ember/build/minidregg-7d03d5e-client-evidence/build.log
+66547583788bf2b0b96c7c2db3c9ff948eb910ade54ab19f5fd97b29cc1036b0  /home/ember/build/minidregg-7d03d5e-client-evidence/nextest.log
