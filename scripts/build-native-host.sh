@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -31,6 +31,13 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
   --allow-unchanged-restart
               permit an unchanged suffix-start source only with an explicitly
               declared insertion later in the freshly computed closure
+  --checkpoint-resume
+              record full input and per-module checkpoints for a possible
+              later failed-build resume; hashes large Lean library trees
+  --resume-failed BUILD_OUTPUT
+              resume the compiled prefix of a failed, non-umbrella full build
+              in this same snapshot, only after checkpointed source, Lean,
+              package, project, and toolchain hashes all still match
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -51,6 +58,8 @@ incremental_suffix_mode=0
 suffix_allowed_modules=()
 inserted_modules=()
 allow_unchanged_restart=0
+resume_failed_output=""
+checkpoint_resume=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -100,6 +109,16 @@ while [[ $# -gt 0 ]]; do
       allow_unchanged_restart=1
       shift
       ;;
+    --resume-failed)
+      [[ $# -ge 2 && -z "$resume_failed_output" ]] || { usage >&2; exit 64; }
+      resume_failed_output=$2
+      checkpoint_resume=1
+      shift 2
+      ;;
+    --checkpoint-resume)
+      checkpoint_resume=1
+      shift
+      ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
       output_dir=$2
@@ -125,6 +144,11 @@ if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
   printf 'build-native-host: --umbrella and incremental modes are exclusive\n' >&2
   exit 64
 fi
+if [[ "$checkpoint_resume" == 1 &&
+      ( "$build_umbrella" == 1 || -n "$incremental_baseline_root" ) ]]; then
+  printf 'build-native-host: checkpoint/resume is exclusive with other build modes\n' >&2
+  exit 64
+fi
 if [[ ${#suffix_allowed_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]]; then
   printf 'build-native-host: suffix change allowlist requires --incremental-suffix-from\n' >&2
   exit 64
@@ -147,7 +171,7 @@ for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
   done
 done
 
-for command in git jq lake file find sort join comm xargs shasum uname cmp head awk uniq; do
+for command in git jq lake file find sort join comm xargs shasum uname cmp head awk uniq realpath; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
@@ -209,6 +233,7 @@ fi
 seat_dir=""
 release_seat() {
   if [[ -n "$seat_dir" ]]; then
+    rm -f "$seat_dir/owner.txt"
     rmdir "$seat_dir" 2>/dev/null || true
     seat_dir=""
   fi
@@ -229,6 +254,9 @@ for seat_number in 1 2; do
   candidate="$cycle_dir/lean-seat-$seat_number"
   if mkdir "$candidate" 2>/dev/null; then
     seat_dir=$(cd "$candidate" && pwd -P)
+    printf 'pid=%s\nstarted_utc=%s\nroot=%s\n' \
+      "$BASHPID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
+      > "$seat_dir/owner.txt"
     break
   fi
 done
@@ -310,6 +338,148 @@ done < "$build_modules"
 if [[ -s "$unregistered" ]]; then
   printf 'build-native-host: Lake omitted locally resolvable imports; see %s\n' "$unregistered" >&2
   exit 65
+fi
+
+# A failed full build may have a useful compiled prefix. Capture the exact
+# external Lean inputs before compiling, then checkpoint each successful
+# module's source and generated artifacts. A later run may reuse only a
+# consecutive, byte-verified prefix in this same independent snapshot.
+module_checkpoint_paths() {
+  local stem=$1 directory leaf required link parent
+  leaf=${stem##*/}
+  parent=""
+  [[ "$stem" != */* ]] || parent=${stem%/*}
+  for required in "$stem.lean" \
+      ".lake/build/lib/lean/$stem.olean" \
+      ".lake/build/lib/lean/$stem.ilean" \
+      ".lake/build/ir/$stem.c"; do
+    [[ -f "$required" && ! -L "$required" ]] || {
+      printf 'build-native-host: missing or linked prefix artifact: %s\n' "$required" >&2
+      return 66
+    }
+  done
+  printf '%s\n' "$stem.lean"
+  for directory in ".lake/build/lib/lean${parent:+/$parent}" \
+      ".lake/build/ir${parent:+/$parent}"; do
+    while IFS= read -r link; do
+      [[ ! -L "$link" ]] || {
+        printf 'build-native-host: linked prefix artifact: %s\n' "$link" >&2
+        return 65
+      }
+      printf '%s\n' "$link"
+    done < <(find "$directory" -maxdepth 1 \( -type f -o -type l \) \
+      -name "$leaf.*" -print)
+  done | sort -u
+}
+
+resume_prefix=0
+resume_checkpoint_dir="$output_dir/resume-checkpoints"
+if [[ "$checkpoint_resume" == 1 ]]; then
+  mkdir -p "$resume_checkpoint_dir"
+  resume_inputs="$output_dir/resume-input-sha256.txt"
+  toolchain=$(lake env lean --print-prefix)
+  toolchain=$(cd "$toolchain" && pwd -P)
+  package_links="$output_dir/package-symlinks-recursive.txt"
+  find .lake/packages -type l -print > "$package_links"
+  if [[ -s "$package_links" ]]; then
+    printf 'build-native-host: checkpoint mode refuses nested package symlinks; see %s\n' \
+      "$package_links" >&2
+    exit 65
+  fi
+  toolchain_links="$output_dir/toolchain-symlinks.txt"
+  find "$toolchain" -type l -print | sort | while IFS= read -r link; do
+    target=$(realpath "$link") || exit 65
+    case "$target" in
+      "$toolchain"/*) printf '%s -> %s\n' "$link" "$target" ;;
+      *)
+        printf 'build-native-host: toolchain symlink leaves pinned tree: %s\n' \
+          "$link" >&2
+        exit 65
+        ;;
+    esac
+  done > "$toolchain_links"
+  {
+    for input in lake-manifest.json lakefile.lean lakefile.toml lean-toolchain \
+        scripts/build-native-host.sh; do
+      [[ -f "$input" ]] && shasum -a 256 "$input"
+    done
+    # Lean can load private/server OLeans, IR, compiled evaluators and native
+    # libraries in addition to the public OLean. Pin the complete toolchain
+    # and package Lean library trees rather than guessing an extension list.
+    find "$toolchain" -type f -print0 \
+      | sort -z | xargs -0 -n 50 shasum -a 256
+    find .lake/packages -type f -path '*/.lake/build/lib/*' -print0 \
+      | sort -z | xargs -0 -n 50 shasum -a 256
+  } > "$resume_inputs"
+  printf 'snapshot_root=%s\ntoolchain=%s\nmode=full-nonumbrella\n' "$root" "$toolchain" \
+    > "$output_dir/resume-contract.txt"
+
+  if [[ -n "$resume_failed_output" ]]; then
+    resume_failed_output=$(cd "$resume_failed_output" && pwd -P)
+    [[ "$resume_failed_output" != "$output_dir" &&
+       -f "$resume_failed_output/resume-contract.txt" &&
+       -f "$resume_failed_output/resume-input-sha256.txt" &&
+       -f "$resume_failed_output/build.log" &&
+       ! -e "$resume_failed_output/manifest.txt" ]] || {
+      printf 'build-native-host: failed output lacks a usable resume contract\n' >&2
+      exit 65
+    }
+    cmp -s "$resume_failed_output/resume-contract.txt" \
+      "$output_dir/resume-contract.txt" || {
+      printf 'build-native-host: resume snapshot or mode changed\n' >&2
+      exit 65
+    }
+    grep -q ' FAIL(' "$resume_failed_output/build.log" || {
+      printf 'build-native-host: prior run has no recorded Lean failure\n' >&2
+      exit 65
+    }
+    for list in source-modules.txt build-modules.txt package-modules.txt \
+        transitive-imports.json resume-input-sha256.txt toolchain-symlinks.txt \
+        package-symlinks-recursive.txt; do
+      cmp -s "$resume_failed_output/$list" "$output_dir/$list" || {
+        printf 'build-native-host: resume closure or external input changed: %s\n' \
+          "$list" >&2
+        exit 65
+      }
+    done
+    (cd "$root" && shasum -a 256 -c "$resume_failed_output/resume-input-sha256.txt") \
+      > "$output_dir/resume-input-check.log"
+    index=0
+    while IFS= read -r module; do
+      index=$((index + 1))
+      checkpoint="$resume_failed_output/resume-checkpoints/$(printf '%04d' "$index")-${module//./_}.sha256"
+      [[ -f "$checkpoint" ]] || break
+      stem=${module//./\/}
+      expected="$output_dir/resume-expected-paths.txt"
+      module_checkpoint_paths "$stem" > "$expected"
+      sed -n 's/^[[:xdigit:]]\{64\}  //p' "$checkpoint" > "$output_dir/resume-checkpoint-paths.txt"
+      cmp -s "$expected" "$output_dir/resume-checkpoint-paths.txt" || {
+        printf 'build-native-host: malformed prefix checkpoint: %s\n' "$checkpoint" >&2
+        exit 65
+      }
+      (cd "$root" && shasum -a 256 -c "$checkpoint") \
+        >> "$output_dir/resume-prefix-check.log" || {
+        printf 'build-native-host: compiled prefix changed: %s\n' "$checkpoint" >&2
+        exit 65
+      }
+      resume_prefix=$index
+    done < "$build_modules"
+    checkpoint_count=$(find "$resume_failed_output/resume-checkpoints" \
+      -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')
+    [[ "$resume_prefix" -gt 0 && "$checkpoint_count" == "$resume_prefix" &&
+       "$resume_prefix" -lt "$(wc -l < "$build_modules" | tr -d ' ')" ]] || {
+      printf 'build-native-host: resume checkpoints are empty or nonconsecutive\n' >&2
+      exit 65
+    }
+    cp "$resume_failed_output"/resume-checkpoints/*.sha256 "$resume_checkpoint_dir/"
+    printf 'failed_output=%s\nverified_prefix_modules=%s\n' \
+      "$resume_failed_output" "$resume_prefix" > "$output_dir/resume-validation.txt"
+    printf 'failed-build resume check PASS %s compiled prefix modules\n' \
+      "$resume_prefix" | tee -a "$output_dir/build.log"
+  fi
+elif [[ -n "$resume_failed_output" ]]; then
+  printf 'build-native-host: failed-build resume requires a full non-umbrella build\n' >&2
+  exit 64
 fi
 
 if [[ -n "$incremental_baseline_root" ]]; then
@@ -611,6 +781,10 @@ if [[ "$build_umbrella" == 0 ]]; then
   incremental_started=0
   total=$(wc -l < "$build_modules" | tr -d ' ')
   while IFS= read -r module; do
+    if [[ "$resume_prefix" -gt 0 && "$index" -lt "$resume_prefix" ]]; then
+      index=$((index + 1))
+      continue
+    fi
     if [[ -n "$incremental_baseline_root" && "$incremental_started" == 0 ]]; then
       if [[ "$module" == "$incremental_changed_module" ]]; then
         incremental_started=1
@@ -634,6 +808,14 @@ if [[ "$build_umbrella" == 0 ]]; then
         -c ".lake/build/ir/$stem.c" --json > "$log" 2>&1; then
       printf 'lean[%s/%s] %s PASS %ss\n' \
         "$index" "$total" "$module" "$(( $(date +%s) - one_start ))" | tee -a "$output_dir/build.log"
+      if [[ "$checkpoint_resume" == 1 ]]; then
+        checkpoint="$resume_checkpoint_dir/$(printf '%04d' "$index")-${module//./_}.sha256"
+        checkpoint_tmp="$checkpoint.tmp.$$"
+        module_checkpoint_paths "$stem" | while IFS= read -r artifact; do
+          shasum -a 256 "$artifact"
+        done > "$checkpoint_tmp"
+        mv "$checkpoint_tmp" "$checkpoint"
+      fi
     else
       code=$?
       printf 'lean[%s/%s] %s FAIL(%s) log=%s\n' \
@@ -1023,7 +1205,8 @@ git status --short > "$output_dir/git-status.txt"
   if [[ -n "$incremental_baseline_root" ]]; then
     printf 'compiled_source_modules=%s\n' "$compiled_sources"
   else
-    printf 'compiled_source_modules=%s\n' "$(wc -l < "$build_modules" | tr -d ' ')"
+    printf 'compiled_source_modules=%s\n' "$compiled_sources"
+    printf 'resumed_prefix_modules=%s\n' "$resume_prefix"
   fi
   printf 'source_modules=%s\n' "$(wc -l < "$source_modules" | tr -d ' ')"
   printf 'package_modules=%s\n' "$(wc -l < "$package_required" | tr -d ' ')"

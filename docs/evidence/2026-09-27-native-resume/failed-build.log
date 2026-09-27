@@ -1,0 +1,11 @@
+start_utc=2026-09-27T05:50:45Z
+root=/private/tmp/minidregg-resume-guard-20260927
+lean_threads=2
+native_jobs=2
+seat=/private/tmp/minidregg-overnight-20260926/lean-seat-1
+lean[1/187] Pred.Core start
+lean[1/187] Pred.Core PASS 2s
+lean[2/187] Compiler.Signature start
+lean[2/187] Compiler.Signature PASS 4s
+lean[3/187] Compiler.Air start
+lean[3/187] Compiler.Air FAIL(1) log=/private/tmp/minidregg-resume-guard-20260927-family-first/lean/0003-Compiler_Air.log

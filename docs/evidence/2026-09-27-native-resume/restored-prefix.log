@@ -1,0 +1,12 @@
+Pred/Core.lean: OK
+.lake/build/ir/Pred/Core.c: OK
+.lake/build/ir/Pred/Core.c.hash: OK
+.lake/build/ir/Pred/Core.c.o.export: OK
+.lake/build/ir/Pred/Core.c.o.export.hash: OK
+.lake/build/ir/Pred/Core.c.o.export.trace: OK
+.lake/build/ir/Pred/Core.setup.json: OK
+.lake/build/lib/lean/Pred/Core.ilean: OK
+.lake/build/lib/lean/Pred/Core.ilean.hash: OK
+.lake/build/lib/lean/Pred/Core.olean: OK
+.lake/build/lib/lean/Pred/Core.olean.hash: OK
+.lake/build/lib/lean/Pred/Core.trace: OK

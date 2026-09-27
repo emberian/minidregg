@@ -1,0 +1,4 @@
+warning: mathlib: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/batteries' has local changes
+shasum: WARNING: 1 computed checksum did NOT match
+build-native-host: compiled prefix changed: /private/tmp/minidregg-resume-guard-20260927-family-first/resume-checkpoints/0001-Pred_Core.sha256

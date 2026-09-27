@@ -1,0 +1,8 @@
+start_utc=2026-09-27T05:53:00Z
+root=/private/tmp/minidregg-resume-guard-20260927
+lean_threads=2
+native_jobs=2
+seat=/private/tmp/minidregg-overnight-20260926/lean-seat-1
+failed-build resume check PASS 2 compiled prefix modules
+lean[3/187] Compiler.Air start
+lean[3/187] Compiler.Air FAIL(1) log=/private/tmp/minidregg-resume-guard-20260927-family-resume/lean/0003-Compiler_Air.log

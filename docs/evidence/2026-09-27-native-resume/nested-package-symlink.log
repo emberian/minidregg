@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/batteries' has local changes
+build-native-host: checkpoint mode refuses nested package symlinks; see /private/tmp/minidregg-resume-guard-20260927-symlink-negative/package-symlinks-recursive.txt

@@ -1,0 +1,3 @@
+warning: mathlib: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/minidregg-resume-guard-20260927/.lake/packages/batteries' has local changes
+build-native-host: resume closure or external input changed: resume-input-sha256.txt
