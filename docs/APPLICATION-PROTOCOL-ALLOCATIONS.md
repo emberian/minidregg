@@ -35,6 +35,8 @@ retain its domain-separated canonical bytes and exact decoding checks.
 | 27 | Current lifecycle launch claim lookup (reserved) |
 | 28 | Application share-issue submit (reserved) |
 | 29 | Application share-issue lookup (reserved) |
+| 30 | Current-image application birth intent authoring (reserved; no commit) |
+| 31 | Current-image application-session birth intent authoring (reserved; no commit) |
 
 Replay must decode the original ingress, admit it against its original verified
 prefix, and compare the entire derived intent, including writes, read guards,
