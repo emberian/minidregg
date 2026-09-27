@@ -1,0 +1,24 @@
+Command exited with non-zero status 1
+	Command being timed: "/bin/sh /tank/dregg-build/minidregg-event22-fixture-a590a73-source/scripts/application-share-issue/native-grain-acceptance.sh /tank/dregg-build/minidregg-55d3868-evidence/minidregg-host-55d3868-r8 /tank/dregg-build/minidregg-event22-r2-client-session/run-r1"
+	User time (seconds): 1082.97
+	System time (seconds): 192.60
+	Percent of CPU this job got: 62%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 34:15.01
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 562228
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2924
+	Minor (reclaiming a frame) page faults: 9373577
+	Voluntary context switches: 11956
+	Involuntary context switches: 36070
+	Swaps: 0
+	File system inputs: 153268177
+	File system outputs: 10555
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1

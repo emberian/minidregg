@@ -1,0 +1,19 @@
+{
+  "type": "application-grain-share-issue-plan-v1",
+  "slotCount": 15,
+  "decodedCount": 15,
+  "canonicalMatches": 15,
+  "firstSignerFields": [
+    "algorithm",
+    "authorityRoot",
+    "canonical",
+    "codecVersion",
+    "decoded",
+    "domain",
+    "keyEpoch",
+    "keyId",
+    "message",
+    "nullifier",
+    "registryCommitment"
+  ]
+}
