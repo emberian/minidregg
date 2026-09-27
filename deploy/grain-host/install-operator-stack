@@ -238,6 +238,8 @@ for ((i=0; i<controller_count; i++)); do
   config_sha=$(jq -er "$base.config.sha256" "$manifest")
   runtime=$(jq -er "$base.runtime.path" "$manifest")
   runtime_sha=$(jq -er "$base.runtime.sha256" "$manifest")
+  worker_runtime=$(jq -er "$base.workerRuntime.path" "$manifest")
+  worker_runtime_sha=$(jq -er "$base.workerRuntime.sha256" "$manifest")
   fragment=$(jq -er "$base.fragment.path" "$manifest")
   fragment_sha=$(jq -er "$base.fragment.sha256" "$manifest")
   [[ $uid =~ ^[1-9][0-9]*$ && $task =~ ^[1-9][0-9]*$ &&
@@ -245,6 +247,10 @@ for ((i=0; i<controller_count; i++)); do
   jq -e --argjson uid "$uid" '[.frontends[].uid] | index($uid) != null' "$manifest" >/dev/null ||
     fail 'controller UID has no frontend'
   sha_pin "$runtime" "$runtime_sha"; [[ -x $runtime ]] || fail 'controller runtime not executable'
+  sha_pin "$worker_runtime" "$worker_runtime_sha"
+  operator_owned "$worker_runtime"
+  [[ -x $worker_runtime ]] || fail 'worker MCP runtime not executable'
+  [[ $worker_runtime_sha == "$runtime_sha" ]] || fail 'controller and worker MCP runtime images differ'
   safe_path "$config"
   if [[ $action != guard ]]; then
     user=$(id -nu "$uid")
@@ -260,6 +266,16 @@ for ((i=0; i<controller_count; i++)); do
       fail 'task controller hostSocket differs from frontend'
     [[ $(sudo -n -u "$user" jq -er .hostConfig "$config") == "$(jq -er --argjson uid "$uid" '.frontends[] | select(.uid == $uid) | .config.path' "$manifest")" ]] ||
       fail 'task controller hostConfig differs from frontend'
+    worker_root=$(sudo -n -u "$user" jq -er '
+      [.commands[] | select(.name == "hermes-acp") | .args as $args |
+        [$args | to_entries[] | select(.value == "--runtime-root") | .key] as $positions |
+        select(($positions | length) == 1) |
+        $args[$positions[0] + 1] |
+        select(type == "string" and startswith("/"))] |
+      if length == 1 then .[0] else empty end
+    ' "$config") || fail 'task command has no unique Hermes runtime root'
+    [[ $worker_runtime == "$worker_root/grain-runtime" ]] ||
+      fail 'worker MCP runtime path differs from configured Hermes runtime root'
   fi
   controller_uids+=("$uid"); controller_tasks+=("$task"); controller_units+=("$unit")
   controller_configs+=("$config"); controller_runtimes+=("$runtime"); controller_fragments+=("$fragment")

@@ -27,6 +27,7 @@ The operator supplies a mode-0600 JSON manifest in an operator-owned directory. 
   "controllers":[{
     "uid":1001,"task":"7801","unit":"mini-grain-controller@7801.service",
     "runtime":{"path":"/opt/mini/bin/grain-runtime","sha256":"<64 hex>"},
+    "workerRuntime":{"path":"/opt/mini/worker-a/grain-runtime","sha256":"<same runtime SHA>"},
     "config":{"path":"/home/friend-a/grain-7801/runtime-config.json","sha256":"<64 hex>"},
     "fragment":{"path":"/home/friend-a/.config/systemd/user/mini-grain-controller@7801.service","sha256":"<64 hex>"}
   }],
@@ -36,6 +37,8 @@ The operator supplies a mode-0600 JSON manifest in an operator-owned directory. 
 ```
 
 `host.config` must name the same pinned `storageBinary` and `signatureBinary`; its `storageRoot` and private socket directory stay operator-owned 0700 outside every worker mount. Each public frontend directory is operator-owned, mode 0700 before launch. The frontend binds its own socket and grants only its named UID directory traverse, config read, and socket connect. The installer checks exact ACLs and listener PIDs at `status`/`start`/`restart`. Task custody keys, state, workspace, and output belong to separate task accounts in mode-0700 homes. Paths to selected executables, configs, Store, sockets, logs, and units must have root/operator-owned, non-task-writable ancestors; root-owned sticky `/tmp` is accepted for bounded scratch but **cannot be boot-enabled**.
+
+Each `workerRuntime` pin must name the `grain-runtime` executable in that task's configured Hermes `--runtime-root`. Its SHA must equal the controller runtime SHA. This binds the keyless MCP process inside the worker to the controller image; the installer rechecks both worker files in its pre-exec guard. Changing a task config to point at a new runtime root also changes its durable journal binding, so an existing grain upgrade must retain the configured root path and replace its operator-owned executable only while the controller and all worker cgroups are stopped.
 
 As the operator, with a working user systemd manager, use:
 
