@@ -1,0 +1,3 @@
+2026-09-27 01:28:25 [INFO] agent.auxiliary_client: Auxiliary title_generation: using custom (mini-hermes-protocol-fixture) at http://127.0.0.1:18964/v1/
+2026-09-27 01:28:48 [ERROR] agent.conversation_loop: API call failed after 3 retries. Connection error. | provider=custom model=mini-hermes-protocol-fixture msgs=2 tokens=~1,286
+2026-09-27 01:28:48 [INFO] agent.auxiliary_client: Auxiliary title_generation: transient transport error (attempt 1/2); retrying same provider after 1.0s before fallback: Connection error.
