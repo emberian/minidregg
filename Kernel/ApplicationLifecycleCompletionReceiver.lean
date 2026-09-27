@@ -1,0 +1,102 @@
+/-
+Fresh checked physical lifecycle completion. The original v2 claim is bound
+to the same native-admitted chronological Replay context, the host custodian
+report and current law are checked, and the exact event-18 intent is submitted
+once through one CAS with complete physical post-image readback.
+-/
+import Kernel.NativeHostReplay
+
+namespace Minidregg.Kernel.ApplicationLifecycleCompletionReceiver
+
+open Minidregg.Compiler
+open Minidregg.Compiler.ResourceBirthCodec
+open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Kernel.NativeHost
+
+set_option autoImplicit false
+
+structure Confirmed (config : Config) where
+  private mk ::
+  target : Durable
+  old : NativeHostReplay.Verified config target
+  ingress : ApplicationLifecycleCompletionIngress.Ingress
+  admitted : NativeHostReplay.CompletionAt config old.opened ingress
+  readback : NativeHostReplay.ExactReadback config old
+  derivedExact : readback.derived.intent = admitted.intent
+  confirmation : DurableReceiverIO.Confirmation
+
+def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
+    NativeHostReplay.Verified config
+      (NativeHostReplay.exactCandidate confirmed.old
+        confirmed.readback.derived confirmed.readback.ready) :=
+  NativeHostReplay.extendExact confirmed.old confirmed.readback
+
+def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
+    NativeHostCodec.Receipt :=
+  let old := confirmed.old
+  let candidate := NativeHostReplay.exactCandidate old
+    confirmed.readback.derived confirmed.readback.ready
+  ⟨confirmed.readback.derived.intent.transactionId,
+    confirmed.readback.derived.intent.event.eventId,
+    old.opened.durable.image.accepted.length + 1,
+    imageBoundary config candidate.image⟩
+
+theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.derived.intent.event =
+      ApplicationLifecycleCompletionIngress.event confirmed.ingress := by
+  rw [confirmed.derivedExact]
+  exact ApplicationLifecycleCompletionCore.intent_event confirmed.admitted.conditional
+
+theorem Confirmed.postBytes_exact {config : Config} (confirmed : Confirmed config) :
+    confirmed.verified.opened.durable.bytes = confirmed.readback.physicalBytes :=
+  NativeHostReplay.extendExact_physicalBytes confirmed.old confirmed.readback
+
+inductive Result (config : Config) where
+  | confirmed (confirmed : Confirmed config)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+def receiveVerified (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (bytes : List UInt8) : IO (Result config) := do
+  let some ingress := ApplicationLifecycleCompletionIngress.codec.decode bytes
+    | return .rejected "noncanonical checked lifecycle completion ingress"
+  let .ok admitted ← NativeHostReplay.admitCompletionVerified old ingress
+    | return .rejected "checked lifecycle completion current/history admission refused"
+  let derived := admitted.toDerived
+  if old.opened.durable.image.accepted.findIdx?
+      (fun record => record.transactionId == derived.intent.transactionId) != none then
+    return .rejected "checked lifecycle completion transaction identity already used"
+  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+    ResourceBirthCodec.rootBytes old.opened.durable derived.intent
+  match result with
+  | .exact kind ready preparedEq readback readbackExact =>
+      let candidate := NativeHostReplay.exactCandidate old derived ready
+      match validated : validateLoaded config candidate with
+      | .error detail => return .uncertain s!"checked lifecycle completion post-image: {detail}"
+      | .ok after =>
+          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
+            let proof : NativeHostReplay.ExactReadback config old :=
+              { derived := derived
+                ready := ready
+                prepared := preparedEq
+                physicalBytes := readback
+                exactBytes := readbackExact
+                after := after
+                validated := validated
+                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+            return .confirmed ⟨target, old, ingress, admitted, proof,
+              admitted.toDerived_intent, kind⟩
+          else return .uncertain "checked lifecycle completion successor bytes changed"
+  | .ordinary ordinary =>
+      match ordinary with
+      | .confirmed _ _ =>
+          return .uncertain "checked lifecycle completion lacks exact post-CAS readback"
+      | .rejected _ => return .rejected "durable checked lifecycle completion refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
+
+end Minidregg.Kernel.ApplicationLifecycleCompletionReceiver

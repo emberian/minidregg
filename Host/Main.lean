@@ -12,7 +12,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 27=lifecycle claim receipt-only lookup, 28=app share issue submit,
 29=app share issue lookup, 34=fresh checked dispatch permit,
 35=historical dispatch receipt-only lookup, 36=private dispatch signing plan,
-37=private detached dispatch assembly. Op34 success uses a distinct
+37=private detached dispatch assembly, 38=checked lifecycle completion submit,
+39=lifecycle completion receipt-only lookup. Op34 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -38,7 +39,10 @@ import Kernel.ApplicationDispatchAuthoring
 import Kernel.ApplicationLifecycleBeginV2Receiver
 import Kernel.ApplicationLifecycleClaimV2Receiver
 import Kernel.ApplicationLifecycleV2Lookup
+import Kernel.ApplicationLifecycleCompletionReceiver
+import Kernel.ApplicationLifecycleCompletionLookup
 import Host.ApplicationDispatchInspection
+import Host.ApplicationLifecycleClaimInspection
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -180,6 +184,26 @@ structure GrainBirthTariffSettings where
   perBirth : Nat
   deriving FromJson, ToJson
 
+/-- Operator configuration pins the physical completion custodian's exact
+Ed25519 public key. It is never selected by an incoming request. -/
+structure CompletionCustodianKeySettings where
+  bytes : List UInt8
+  deriving Repr
+
+instance : FromJson CompletionCustodianKeySettings where
+  fromJson? json := do
+    let value ← json.getStr?
+    unless value.length == 64 do
+      throw "completionCustodianKey must be 32 bytes of canonical lowercase hex"
+    let bytes ← Minidregg.Host.Json.decodeHex "completionCustodianKey" json
+    unless bytes.length == 32 &&
+        Minidregg.Host.Json.encodeHex bytes == value do
+      throw "completionCustodianKey must be 32 bytes of canonical lowercase hex"
+    pure ⟨bytes⟩
+
+instance : ToJson CompletionCustodianKeySettings where
+  toJson value := .str (Minidregg.Host.Json.encodeHex value.bytes)
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -207,6 +231,7 @@ structure Settings where
   continuityProviderResourceId : Option Nat := none
   providerMetering : Option ProviderMeteringSettings := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
+  completionCustodianKey : Option CompletionCustodianKeySettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -222,6 +247,8 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   fnGateway := settings.fnGateway.map GatewayPinSettings.pin
   grainBirthTariff := settings.grainBirthTariff.map fun tariff =>
     ⟨tariff.base, tariff.perBirth⟩
+  completionCustodianKey := settings.completionCustodianKey.map
+    CompletionCustodianKeySettings.bytes
 
 def Settings.providerMeteringPin (settings : Settings) :
     Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
@@ -250,6 +277,8 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
   if kind == "fn-inbox-resource" then FnInboxView.render bytes
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
+  else if kind == "application-lifecycle-claim-committed-v2" then
+    ApplicationLifecycleClaimInspection.inspect bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -474,6 +503,44 @@ def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original lifecycle claim receipt unavailable".toUTF8.toList
+
+/-- A completion records the custodian's signed physical report only after
+current source/history admission and exact CAS readback. It does not itself
+launch or kill a process. -/
+def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationLifecycleCompletionReceiver.receiveVerified config
+    session.verified payload
+  match result with
+  | .confirmed confirmed =>
+      state.set (some ⟨_, confirmed.verified⟩)
+      return .confirmed confirmed.confirmation confirmed.receipt
+  | .rejected _ =>
+      return .refused "application-lifecycle-completion".toUTF8.toList
+        "request refused".toUTF8.toList
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Recovery selects only the original four-field receipt from a verified
+history. It never performs a physical completion or process effect. -/
+def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  match ApplicationLifecycleCompletionLookup.verified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-lifecycle-completion".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "original lifecycle completion receipt unavailable".toUTF8.toList
 
 /-- This records current source authorization for one selected content version.
 External fn delivery is a separate effect with its own uncertain outcome. -/
@@ -725,6 +792,12 @@ def dispatchSession (config : NativeHost.Config)
       let signatures ← decodeSignatures signaturesBytes
       let ingress ← IO.ofExcept (ApplicationDispatchAuthoring.assemble plan signatures)
       return (37, ingress)
+  | 38 =>
+      return (38, outcomeCodec.encode
+        (← applicationLifecycleCompletionSubmitSession config state payload))
+  | 39 =>
+      return (39, outcomeCodec.encode
+        (← applicationLifecycleCompletionLookupSession config state payload))
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -732,6 +805,10 @@ def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 /-- Inspection repeats the exact frame and full request as hex. A hostd
 consumer must cap this JSON separately from the smaller binary input. -/
 def maxDispatchInspectionJsonBytes : Nat := 8 * maxFrame
+
+/-- Eight MiB of exact HTTP body is sixteen MiB of JSON hex before headers.
+The private authoring CLI reads a bounded envelope before UTF-8/JSON parsing. -/
+def maxDispatchAuthorJsonBytes : Nat := 22 * 1024 * 1024
 
 partial def readExactly (input : IO.FS.Stream) (count : Nat) (acc : ByteArray := ByteArray.empty) :
     IO ByteArray := do
@@ -1978,6 +2055,12 @@ def writeBytes (path : String) (bytes : List UInt8) : IO Unit :=
 
 def readJson (path : String) : IO Lean.Json :=
   return ← IO.ofExcept (Minidregg.Host.Json.parse (← IO.FS.readFile path))
+
+def readDispatchAuthorJson (path : String) : IO Lean.Json := do
+  let bytes ← readBoundedBytes path maxDispatchAuthorJsonBytes
+  let some source := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "dispatch author request is not UTF-8")
+  IO.ofExcept (Minidregg.Host.Json.parse source)
 
 def writeJson (path : String) (value : Lean.Json) : IO Unit :=
   IO.FS.writeFile path value.pretty
@@ -3380,7 +3463,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
        ("fnAck", toJson status)]).compress.toUTF8.toList)
 
 def usage : String :=
-  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack FN-BINARY SCOPE.json CONTROL.sock CURSOR.fncu REPORT.fn-e MINI-TRANSACTION RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+  "minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack FN-BINARY SCOPE.json CONTROL.sock CURSOR.fncu REPORT.fn-e MINI-TRANSACTION RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -3392,17 +3475,21 @@ def run (arguments : List String) : IO UInt32 := do
           IO.println (profileDescription config (← IO.ofExcept settings.providerMeteringPin)).pretty
           pure 0
       | "author", [kind, input, output] =>
-          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind (← readJson input))
+          let source ← if kind == "application-dispatch-request" then
+            readDispatchAuthorJson input else readJson input
+          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
           let bytes ← if kind == "fn-inbox-resource" ||
               kind == "application-dispatch-committed" ||
+              kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
           if kind == "application-dispatch-committed" ||
+              kind == "application-lifecycle-claim-committed-v2" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
             let serialized := value.compress
@@ -3636,6 +3723,22 @@ def run (arguments : List String) : IO UInt32 := do
             let ingress ← readBoundedBytes input maxFrame
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleClaimLookupSession pinnedConfig state ingress))
+            pure 0
+      | "application-lifecycle-completion-submit", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationLifecycleCompletionSubmitSession pinnedConfig state ingress))
+            pure 0
+      | "application-lifecycle-completion-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationLifecycleCompletionLookupSession pinnedConfig state ingress))
             pure 0
       | "selected-source-publication-submit", [input, output] =>
           withPinnedSignature config fun pinnedConfig => do

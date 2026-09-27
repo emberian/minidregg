@@ -1,0 +1,6 @@
+Independent writable Persvati overlay: /home/ember/build/mini-main-inspect-overlay
+Source-only direct Lean verdict: PASS, four serial commands, exit 0 each.
+Order: Kernel.FnConsumerProgress, Kernel.ApplicationLifecycleCompletionReceiver,
+Kernel.ApplicationLifecycleCompletionLookup, Host.Main.
+Each command used lake env lean -R <source-root> -o <private OLean> <source>.
+Final Main diagnostic log: empty. No native link or runtime acceptance claim.
