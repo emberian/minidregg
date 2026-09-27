@@ -1,0 +1,10 @@
+Scope command line contains environment variable, which is not expanded by default for now, but will be expanded by default in the future. Use --expand-environment=yes/no to explicitly control it as needed.
+Running as unit: run-p1089021-i977964284.scope; invocation ID: c4d95d07350a485f8efc9815c1b9c37a
+'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes' depends on axioms: [propext, Classical.choice, Quot.sound]

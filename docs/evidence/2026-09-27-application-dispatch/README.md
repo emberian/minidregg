@@ -1,6 +1,6 @@
 # Dispatch current-image admission checkpoint (2026-09-27)
 
-Later source checkpoints are recorded in `PENDING.md`, `HISTORICAL-CORE.md`, and `UPPER-ROOT.md`. The selector limitation described below was repaired by the verifier-selected original-prefix API documented in `UPPER-ROOT.md`; the remaining receiver/CAS boundary is still open.
+Later source checkpoints are recorded in `PENDING.md`, `HISTORICAL-CORE.md`, `UPPER-ROOT.md`, and `RECEIVER.md`. The selector limitation described below was repaired by the verifier-selected original-prefix API documented in `UPPER-ROOT.md`; `RECEIVER.md` qualifies a warm exact-CAS receiver. Native Host and physical SPK/HTTP delivery remain separate integration gates.
 
 This checkpoint covers only the two new Mini dispatch admission modules. It is a current-image candidate check, not a committed dispatch receiver or a physical HTTP permit.
 
