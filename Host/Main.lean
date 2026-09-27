@@ -16,6 +16,7 @@ import Kernel.NativeHostGenesis
 import Kernel.FnEvidence
 import Kernel.FnConsumerOperation
 import Kernel.FnConsumerProgress
+import Kernel.FnCatalogOwnRProgress
 import Kernel.FnReplyPublication
 import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
@@ -1768,6 +1769,135 @@ def runReplyConsumerPollDecision (config : NativeHost.Config)
     rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath cursorPath
     reportPath carrierPath intentPath resultPath
 
+/-- An A poll of its own R is neutral only when the exact native-projected
+article joins one accepted local prepared outbox. Fresh progress re-admits
+the origin Mini package. Historical ACK reopens both accepted A records and
+re-verifies both native carriers without requiring the origin Store anew.
+The fn poll transport, rather than these portable bytes, establishes that the
+article came from this selected Store. -/
+def verifyCatalogOwnR (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (service : FnReplyCatalogService)
+    (projection : FnPollProjection) (carrierPath : String)
+    (readmitOrigin : Bool) :
+    IO (FnOriginOutbox.Prepared × DurableReceiver.IntentRecord) := do
+  let gateway ← requireGateway config
+  let rPinJson ← readJson service.rPinPath
+  IO.ofExcept (requireExactFields "R fn catalog pin"
+    ["fnBinary", "mlPublicKey", "principal", "edPublicKey", "mlPublicKeyHex"] rPinJson)
+  let rawPin : FnPortablePin ← IO.ofExcept (fromJson? rPinJson)
+  let rPin := rawPin.withExecution service.rExecutable service.rPublicKey
+  let (received, observed) ← verifyFnCarrierUnclaimed rPin carrierPath
+  let observedR ← IO.ofExcept (FnPortableSource.extract observed.source)
+  unless sameBytes received projection.received &&
+      sameBytes observed.source projection.source &&
+      observed.sourceIdentity == projection.sourceIdentity &&
+      observed.principal == projection.verdictPrincipal &&
+      observedR.messageId.toUTF8.toList == projection.messageId do
+    throw (IO.userError "A own-R poll differs from native verified article")
+  let (prepared, record) ← IO.ofExcept <|
+    FnOriginOutbox.selectUniqueParent gateway config.deployment.domain
+      config.profile.semantics projection.messageId opened.durable.image.accepted
+  let (retainedVerified, retainedR, original) ←
+    IO.FS.withTempDir fun directory => do
+      let path := (directory / "accepted-r-carrier.eml").toString
+      writeBytes path prepared.carrier
+      if readmitOrigin then
+        let (_, verified, extracted, package, receipt) ←
+          verifyRLocalOrigin service.originConfig rPin path
+        pure (verified, extracted, some (package, receipt))
+      else
+        let (_, verified) ← verifyFnCarrierUnclaimed rPin path
+        let extracted ← IO.ofExcept (FnPortableSource.extract verified.source)
+        pure (verified, extracted, none)
+  unless sameBytes retainedVerified.source observed.source &&
+      retainedVerified.sourceIdentity == observed.sourceIdentity &&
+      retainedVerified.principal == observed.principal &&
+      retainedVerified.edPublicKey == observed.edPublicKey &&
+      retainedVerified.mlPublicKey == observed.mlPublicKey &&
+      retainedR.messageId == observedR.messageId &&
+      retainedR.groups == observedR.groups &&
+      prepared.messageId == projection.messageId &&
+      prepared.sourceIdentity == observed.sourceIdentity &&
+      prepared.principal == observed.principal &&
+      prepared.edPublicKey == observed.edPublicKey &&
+      prepared.mlPublicKey == observed.mlPublicKey do
+    throw (IO.userError "A own-R poll differs from accepted prepared R origin")
+  if let some (originPackage, originReceipt) := original then
+    unless prepared.operation == FnConsumerOperation.originOperation originPackage &&
+        prepared.originReceipt == originReceipt &&
+        prepared.packageIdentity == FnOriginOutbox.packageIdentity retainedR.package &&
+        prepared.originCallIdentity == FnOriginOutbox.callIdentity originPackage.signedCall do
+      throw (IO.userError "A own-R poll differs from re-admitted Mini origin")
+  return (prepared, record)
+
+/-- A non-Q first matching article advances A only after Mini has accepted a
+separate tag-9 record. The qualified fn poll's first-match scan means every
+earlier event in this at-most-16-event window is neutral for the selected
+group; no matching Q can be hidden behind this own R. -/
+def runCatalogOwnRDecisionLoaded (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (service : FnReplyCatalogService)
+    (scope : FnPollScopePin) (before : FnConsumerStatus)
+    (cursorPath reportPath carrierPath : String)
+    (cursor event : List UInt8) (projection : FnPollProjection) :
+    IO (UInt8 × List UInt8) := do
+  let gateway ← requireGateway config
+  let (prepared, outbox) ← verifyCatalogOwnR config opened service projection carrierPath true
+  let (inspectedScope, position) ←
+    inspectFnConsumerCursor service.qExecutable cursorPath
+  let selectedScope ← IO.ofExcept scope.progressScope
+  let after ← queryFnConsumerStatus service.qExecutable scope service.controlPath
+  unless inspectedScope == selectedScope &&
+      before.committedAck == after.committedAck &&
+      position == projection.sequence + 1 &&
+      before.committedAck < position &&
+      position ≤ before.committedAck + FnConsumerProgress.maxPollScan &&
+      position ≤ after.frontier &&
+      cursor == (← readBoundedBytes cursorPath 346) &&
+      sameBytes event (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) &&
+      sameBytes projection.received
+        (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
+    throw (IO.userError "A own-R poll did not cover one unchanged first-match scan window")
+  let policyJson ← readJson service.policyPath
+  IO.ofExcept (requireExactFields "A fn catalog policy"
+    ["application", "subject", "target", "capability"] policyJson)
+  let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? policyJson)
+  let policy := policySource.policy
+  let targetRoot ← gatewayContentTargetRoot config opened policy
+  let portable : FnConsumerOperation.PortableInbox :=
+    ⟨projection.received, projection.sourceIdentity, prepared.principal,
+      prepared.edPublicKey, prepared.mlPublicKey⟩
+  let poll : FnConsumerOperation.StorePollInbox :=
+    ⟨cursor, event, true, projection.sourceIdentity, projection.sequence,
+      projection.transactionId, projection.messageId,
+      projection.verdictPrincipal, projection.verdictEvent,
+      FnConsumerOperation.pollControlBinding service.qExecutable service.controlPath⟩
+  let evidence : FnCatalogOwnRProgress.Evidence :=
+    ⟨policy.application, selectedScope, before.committedAck, position,
+      outbox.transactionId, portable, poll⟩
+  let report : FnCatalogOwnRProgress.Report :=
+    ⟨evidence, policy.subject, policy.target, policy.capability,
+      opened.authority.snapshot.cell.root, targetRoot⟩
+  let decision ← IO.ofExcept (FnCatalogOwnRProgress.evaluateVerified config
+    gateway policy selectedScope report opened)
+  let (decisionName, intent) ← match decision with
+    | .fresh _ =>
+        let some authored := decision.intent report
+          | throw (IO.userError "fresh own-R progress has no Mini intent")
+        pure ("proposed-fresh", Minidregg.Host.Json.encodeHex
+          (NativeObservationCodec.intentCodec.encode authored))
+    | .repeated => pure ("repeated", "")
+    | .refused _ => pure ("refused", "")
+  return (14, (Lean.Json.mkObj
+    [("type", toJson "fn-a-reply-poll-session-v1"),
+     ("status", toJson (if decisionName == "refused" then "refused" else "skip-decision")),
+     ("decision", Lean.Json.mkObj
+       [("type", toJson "fn-a-own-r-progress-decision-v1"),
+        ("decision", toJson decisionName),
+        ("fromPosition", toJson (toString before.committedAck)),
+        ("toPosition", toJson (toString position)),
+        ("outboxTransactionId", toJson (toString outbox.transactionId.value))]),
+     ("intentHex", toJson intent)]).compress.toUTF8.toList)
+
 /-- Q selects its R parent only after a real authenticated fn poll and native
 hybrid verification of Q. The selected R comes from A's accepted Mini outbox;
 its retained carrier and exact locally accepted origin package are verified
@@ -2447,13 +2577,17 @@ def runFnReplyCatalogPollSession (config : NativeHost.Config)
     unless sameBytes projectedEvent polledEvent do
       throw (IO.userError "A fn poll event changed before outbox projection")
     IO.FS.writeBinFile carrierPath projection.received.toByteArray
-    let extracted ← IO.ofExcept (FnReplySource.extract projection.source)
+    let opened ← sessionOpened config state
+    let extracted ← match FnReplySource.extract projection.source with
+      | .ok q => pure q
+      | .error _ =>
+          return ← runCatalogOwnRDecisionLoaded config opened service scope before
+            cursorPath reportPath carrierPath polledCursor polledEvent projection
     writeJson claimPath (Lean.Json.mkObj
       [("sourceIdentity", toJson
         (Minidregg.Host.Json.encodeHex projection.sourceIdentity)),
        ("messageId", toJson extracted.messageId),
        ("groups", toJson extracted.creation.newsgroup)])
-    let opened ← sessionOpened config state
     let exitCode ← runReplyConsumerCatalogDecisionLoaded config opened service
       claimPath cursorPath reportPath carrierPath intentPath resultPath
       (polledCursor, polledEvent)
@@ -2478,11 +2612,94 @@ def FnReplyCatalogService.ackService (service : FnReplyCatalogService) :
     service.qExecutable, service.qPublicKey, service.scopePath,
     service.policyPath, service.controlPath⟩
 
+/-- Settle only a previously accepted own-R progress record. Reopen the exact
+poll pair and accepted prepared R; no caller-supplied cursor can advance fn. -/
+def runCatalogOwnRAckSession (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (service : FnReplyCatalogService)
+    (pin : FnPortablePin) (scope : FnPollScopePin) (transaction : String)
+    (evidence : FnCatalogOwnRProgress.Evidence) : IO (UInt8 × List UInt8) := do
+  unless evidence.poll.controlBinding ==
+      FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath do
+    throw (IO.userError "A own-R ACK control differs from accepted Mini poll")
+  IO.FS.withTempDir fun directory => do
+    let cursorPath := (directory / "retained-own-r-cursor.fncu").toString
+    let eventPath := (directory / "retained-own-r-event.fn-e").toString
+    let carrierPath := (directory / "retained-own-r-carrier.eml").toString
+    writeBytes cursorPath evidence.poll.cursor
+    writeBytes eventPath evidence.poll.event
+    writeBytes carrierPath evidence.portable.carrier
+    let (inspectedScope, position) ← inspectFnConsumerCursor pin.executable cursorPath
+    let selectedScope ← IO.ofExcept scope.progressScope
+    unless inspectedScope == selectedScope && position == evidence.toPosition &&
+        evidence.poll.sequence + 1 == position do
+      throw (IO.userError "A own-R ACK cursor differs from accepted Mini progress")
+    let (cursor, event, projection) ← projectFnPoll pin.executable scope
+      cursorPath eventPath
+    unless cursor == evidence.poll.cursor && sameBytes event evidence.poll.event &&
+        projection.sourceIdentity == evidence.poll.sourceIdentity &&
+        projection.sequence == evidence.poll.sequence &&
+        projection.transactionId == evidence.poll.transactionId &&
+        projection.messageId == evidence.poll.messageId &&
+        projection.verdictPrincipal == evidence.poll.verdictPrincipal &&
+        sameBytes projection.verdictEvent evidence.poll.verdictEvent &&
+        sameBytes projection.received evidence.portable.carrier do
+      throw (IO.userError "A own-R ACK pair differs from accepted Mini progress")
+    let (_, outbox) ← verifyCatalogOwnR config opened service projection carrierPath false
+    unless outbox.transactionId == evidence.outboxTransaction do
+      throw (IO.userError "A own-R ACK selected a different accepted outbox")
+    let response := fun (status : String) (committedAck : Nat) =>
+      ((15 : UInt8), (Lean.Json.mkObj
+        [("type", toJson "fn-a-reply-ack-session-v1"),
+         ("kind", toJson "own-r-skip"),
+         ("miniTransactionId", toJson transaction),
+         ("outboxTransactionId", toJson (toString evidence.outboxTransaction.value)),
+         ("fnCursorPosition", toJson (toString position)),
+         ("fnCommittedAck", toJson (toString committedAck)),
+         ("fnStoreSequence", toJson (toString evidence.poll.sequence)),
+         ("fnStoreTransactionId", toJson (toString evidence.poll.transactionId)),
+         ("fnAck", toJson status)]).compress.toUTF8.toList)
+    let (currentPosition, currentStatus) ←
+      queryFnConsumerPosition pin.executable scope service.controlPath
+    if currentPosition ≥ position && currentStatus.committedAck > position then
+      return response "covered-by-durable-frontier" currentStatus.committedAck
+    let child ← IO.Process.spawn
+      { cmd := pin.executable,
+        args := #["--fn", "consumer", "ack", service.controlPath, cursorPath],
+        stdin := .null, stdout := .piped, stderr := .null }
+    let output ← try readBoundedLoop child.stdout 128
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    unless evidence.poll.cursor == (← readBoundedBytes cursorPath 346) &&
+        sameBytes evidence.poll.event
+          (← readBoundedBytes eventPath FnEvidenceCodec.maxStorePollEventBytes) do
+      throw (IO.userError "A own-R ACK inputs changed during local control call")
+    let status := if exitCode == 0 && output == "consumer accepted\n".toUTF8.toList then
+        "durable-accepted"
+      else if exitCode == 2 then "refused"
+      else if exitCode == 3 then "uncertain"
+      else "transport-fault"
+    if status == "refused" then
+      let (latestPosition, latestStatus) ←
+        queryFnConsumerPosition pin.executable scope service.controlPath
+      if latestPosition ≥ position && latestStatus.committedAck > position then
+        return response "covered-by-durable-frontier" latestStatus.committedAck
+    let committedAck ← if status == "durable-accepted" then do
+        let after ← queryFnConsumerStatus pin.executable scope service.controlPath
+        unless position ≤ after.committedAck do
+          throw (IO.userError "fn accepted own-R ACK without durable position advance")
+        pure after.committedAck
+      else pure currentStatus.committedAck
+    return response status committedAck
+
 /-- A reply ACK is selected by the accepted A Mini transaction alone. The
 retained inbox supplies the exact cursor, event, carrier, and signed source. -/
 def runFnReplyAckSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (service : FnReplyPollService) (payload : List UInt8) :
+    (service : FnReplyPollService) (catalog : Option FnReplyCatalogService)
+    (payload : List UInt8) :
     IO (UInt8 × List UInt8) := do
   unless !payload.isEmpty && payload.length ≤ 80 &&
       payload.all (fun byte => 48 ≤ byte.toNat && byte.toNat ≤ 57) do
@@ -2509,6 +2726,12 @@ def runFnReplyAckSession (config : NativeHost.Config)
       config.deployment.domain config.profile.semantics record then
     return ← runFnSkipAckSession pin scope service.controlPath transaction skipped
       15 "fn-a-reply-ack-session-v1"
+  if let some ownR := FnCatalogOwnRProgress.originalOwnR gateway selectedScope
+      config.deployment.domain config.profile.semantics record
+      opened.durable.image.accepted then
+    let some selected := catalog
+      | throw (IO.userError "A own-R ACK requires pinned catalog service")
+    return ← runCatalogOwnRAckSession config opened selected pin scope transaction ownR
   let some (_, inbox) := FnReplyConsumption.originalResult gateway
       config.deployment.domain config.profile.semantics record
     | throw (IO.userError "A reply result is not a reopened accepted operation")
@@ -2649,12 +2872,12 @@ def run (arguments : List String) : IO UInt32 := do
                                   runFnReplyCatalogPollSession pinnedConfig state selected payload
                                 else
                                   runFnReplyAckSession pinnedConfig state
-                                    selected.ackService payload
+                                    selected.ackService (some selected) payload
                             | none, some selected =>
                                 if operation == 14 then
                                   runFnReplyPollSession pinnedConfig state selected payload
                                 else
-                                  runFnReplyAckSession pinnedConfig state selected payload
+                                  runFnReplyAckSession pinnedConfig state selected none payload
                             | _, _ => return ((255 : UInt8), failure "fn-reply-poll"
                                 "exactly one A reply poll service must be configured")
                         | 16 =>
