@@ -12,11 +12,11 @@ const REQUEST_LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 // contains hex copies of the plan, request, context, and complete HTTP body.
 const JSON_LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
 
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let named = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if !named.file_type().is_file() || named.len() == 0 || named.len() > limit as u64 {
         return Err(format!("{} is not a bounded regular file", path.display()));
@@ -37,7 +37,7 @@ fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -57,7 +57,7 @@ fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     bounded(path, limit)
 }
 
-fn private_socket(path: &Path) -> Result<()> {
+pub(super) fn private_socket(path: &Path) -> Result<()> {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -77,7 +77,7 @@ fn private_socket(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn retain_generated(path: &Path) -> Result<()> {
+pub(super) fn retain_generated(path: &Path) -> Result<()> {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -102,7 +102,7 @@ fn retain_generated(path: &Path) -> Result<()> {
     sync_directory_ancestors(parent)
 }
 
-fn source(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
+pub(super) fn source(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
     let output = Command::new(host)
         .arg(config)
         .args(arguments)
@@ -117,7 +117,7 @@ fn source(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
     Ok(())
 }
 
-fn source_inspect(
+pub(super) fn source_inspect(
     host: &Path,
     config: &Path,
     kind: &str,
@@ -139,14 +139,14 @@ fn source_inspect(
         .map_err(|error| format!("invalid Host inspection: {error}"))
 }
 
-fn retain_json(path: &Path, value: &Value) -> Result<()> {
+pub(super) fn retain_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
     sync_directory_ancestors(path.parent().ok_or("reserve evidence has no parent")?)
 }
 
-fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
+pub(super) fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .get(name)
         .and_then(Value::as_str)
@@ -161,7 +161,7 @@ fn strict_hex(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn decode_hex(value: &str) -> Result<Vec<u8>> {
+pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     if !strict_hex(value) {
         return Err("noncanonical reserve hex".into());
     }
@@ -404,7 +404,7 @@ fn signing_key(path: &Path) -> Result<SigningKey> {
     Ok(SigningKey::from_bytes(&seed))
 }
 
-fn approve_slot(slot: &Value, signer: &Value) -> Result<String> {
+pub(super) fn approve_slot(slot: &Value, signer: &Value) -> Result<String> {
     if field(slot, "role")? != field(signer, "role")?
         || field(slot, "index")? != field(signer, "index")?
     {
@@ -433,6 +433,137 @@ fn approve_slot(slot: &Value, signer: &Value) -> Result<String> {
         return Err("agent reserve signer differs from approved public key".into());
     }
     Ok(hex(&key.sign(&header).to_bytes()))
+}
+
+/// A read-only witness for the payer signer. Re-inspect the exact original
+/// source plan and at least one retained native confirmation before exposing
+/// its context to the later, separately approved paid dispatch.
+pub(super) struct PayerAnchor {
+    pub host: PathBuf,
+    pub config: PathBuf,
+    pub operator_socket: PathBuf,
+    pub request: Vec<u8>,
+    plan_sha256: String,
+    pub plan_inspection: Value,
+    pub receipt: Value,
+}
+
+pub(super) fn payer_pin_still(directory: &Path, anchor: &PayerAnchor) -> Result<()> {
+    let directory = absolute(directory)?;
+    let current = pinned(&directory)?;
+    if current.host != anchor.host
+        || current.config != anchor.config
+        || current.operator_socket != anchor.operator_socket
+        || current.request != anchor.request
+        || digest(&current.plan) != anchor.plan_sha256
+        || serde_json::from_slice::<Value>(&private_bytes(
+            &directory.join("plan-inspected.json"),
+            JSON_LIMIT,
+        )?)
+        .map_err(|error| format!("invalid retained reserve inspection: {error}"))?
+            != anchor.plan_inspection
+        || serde_json::from_slice::<Value>(&private_bytes(&directory.join("receipt.json"), 4096)?)
+            .map_err(|error| format!("invalid retained reserve receipt: {error}"))?
+            != anchor.receipt
+    {
+        return Err("original reserve pin or confirmation changed during payer signing".into());
+    }
+    Ok(())
+}
+
+pub(super) fn payer_anchor(directory: &Path, evidence_dir: &Path) -> Result<PayerAnchor> {
+    let directory = absolute(directory)?;
+    let (pin, call) = sealed(&directory)?;
+    let marker: Value =
+        serde_json::from_slice(&private_bytes(&directory.join("submit-marker.json"), 4096)?)
+            .map_err(|error| format!("invalid agent reserve submit marker: {error}"))?;
+    if field(&marker, "type")? != "minidregg-agent-reserve-submit-attempt-v1"
+        || field(&marker, "callSha256")? != digest(&call)
+        || field(&marker, "publicSocket")? != utf8_path(&pin.public_socket)?
+    {
+        return Err("agent reserve submit marker differs from exact call".into());
+    }
+    let retained: Value = serde_json::from_slice(&private_bytes(
+        &directory.join("plan-inspected.json"),
+        JSON_LIMIT,
+    )?)
+    .map_err(|error| format!("invalid retained reserve plan inspection: {error}"))?;
+    let fresh = source_inspect(
+        &pin.host,
+        &pin.config,
+        "application-agent-reserve-plan",
+        &directory.join("plan.bin"),
+        &evidence_dir.join("reserve-plan-inspected.json"),
+    )?;
+    if retained != fresh
+        || field(&fresh, "type")? != "application-agent-reserve-plan-v2"
+        || field(&fresh, "canonicalPlanHex")? != hex(&pin.plan)
+        || field(&fresh, "canonicalRequestHex")? != hex(&pin.request)
+    {
+        return Err("original reserve plan or source inspection changed".into());
+    }
+    let receipt: Value =
+        serde_json::from_slice(&private_bytes(&directory.join("receipt.json"), 4096)?)
+            .map_err(|error| format!("invalid retained agent reserve receipt: {error}"))?;
+    let mut selected: Option<String> = None;
+    let mut inspected = 0usize;
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let stem = name.strip_suffix(".outcome.json");
+        let Some(stem) = stem else { continue };
+        if stem != "submit"
+            && !(stem.starts_with("lookup-")
+                && stem.len() == 11
+                && stem[7..].bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            continue;
+        }
+        inspected += 1;
+        if inspected > 10_001 {
+            return Err("agent reserve outcome evidence count exceeded".into());
+        }
+        let result: Value = serde_json::from_slice(&private_bytes(&entry.path(), 65_536)?)
+            .map_err(|error| format!("invalid retained reserve outcome: {error}"))?;
+        if let Ok(confirmed) = exact_receipt(&result) {
+            if confirmed != receipt {
+                return Err("retained agent reserve confirmations disagree".into());
+            }
+            selected.get_or_insert_with(|| stem.to_owned());
+        }
+    }
+    let stem = selected.ok_or("no retained native confirmation matches reserve receipt")?;
+    let binary_path = directory.join(format!("{stem}.outcome.bin"));
+    let binary = private_bytes(&binary_path, transport::HOST_MAX_FRAME)?;
+    let operation = if stem == "submit" { 2 } else { 3 };
+    let frame = private_bytes(
+        &directory.join(format!("{stem}.frame")),
+        transport::HOST_MAX_FRAME,
+    )?;
+    if frame != [vec![operation], binary].concat() {
+        return Err("agent reserve outcome differs from retained native frame".into());
+    }
+    let fresh_outcome = source_inspect(
+        &pin.host,
+        &pin.config,
+        "outcome",
+        &binary_path,
+        &evidence_dir.join("reserve-confirmation-inspected.json"),
+    )?;
+    same_pin(&directory, &pin)?;
+    if exact_receipt(&fresh_outcome)? != receipt {
+        return Err("source-inspected native reserve confirmation changed".into());
+    }
+    Ok(PayerAnchor {
+        host: pin.host,
+        config: pin.config,
+        operator_socket: pin.operator_socket,
+        request: pin.request,
+        plan_sha256: digest(&pin.plan),
+        plan_inspection: fresh,
+        receipt,
+    })
 }
 
 /// Phase two signs only the exact retained Host plan and never sends op2.
@@ -755,6 +886,26 @@ mod tests {
             .contains("already attempted"));
         assert_eq!(fs::read(directory.join("call.bin")).unwrap(), call);
         assert!(!directory.join("submit.frame").exists());
+        let inspected = json!({"context":{"canonicalHex":"aa"}});
+        let receipt = json!({"transactionId":"1","eventId":"2",
+            "acceptedCount":"3","imageBoundary":"4","reserveIndex":"2"});
+        retain_json(&directory.join("plan-inspected.json"), &inspected).unwrap();
+        retain_json(&directory.join("receipt.json"), &receipt).unwrap();
+        let anchor = PayerAnchor {
+            host,
+            config: config.clone(),
+            operator_socket: operator,
+            request: request.to_vec(),
+            plan_sha256: digest(plan),
+            plan_inspection: inspected,
+            receipt,
+        };
+        payer_pin_still(&directory, &anchor).unwrap();
+        fs::write(&config, b"{\"changed\":true}").unwrap();
+        assert!(payer_pin_still(&directory, &anchor).is_err());
+        fs::write(&config, b"{}").unwrap();
+        fs::write(directory.join("receipt.json"), b"{}\n").unwrap();
+        assert!(payer_pin_still(&directory, &anchor).is_err());
         fs::remove_dir_all(directory).unwrap();
     }
 }

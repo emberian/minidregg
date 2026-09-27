@@ -190,6 +190,40 @@ receipt and decimal `reserveIndex = acceptedCount − 1` in `receipt.json`.
 Event21 still rechecks that admitted reserve and the current purse before any
 dispatch; this custody command grants no delivery permit.
 
+For the later paid dispatch, the controller keeps the original reserve
+attempt and its confirmed receipt. It obtains a current source Plan through
+private op48, but the payer signer does not trust resident-supplied Plan
+bytes or inspection JSON. The owner-private approval has type
+`minidregg-agent-payer-approval-v1`, exact `planSha256` and
+`compactSelectorRequestSha256`, the complete `fixedSelectors` and `context`
+objects from the original reserve inspection, `canonicalHttpHex` for the
+original full HTTP request, decimal `reserveIndex`, exact `reserveReceipt`
+object from the original four-field receipt plus index, and ordered
+`signers`. Each signer pins `role`, `index`, `keyId`, `keyEpoch`, lowercase
+`publicKey`, and `headerSha256`; the controller supplies its private seed
+separately. It must check the intended HTTP and route against its retained
+request before issuing approval.
+
+```sh
+mini agent-payer-sign --host HOST --config PINNED-CONFIG.json \
+  --operator-socket /operator/private/host.sock \
+  --reserve-attempt /operator/private/reserve-attempt \
+  --plan /operator/private/paid-plan.bin \
+  --approval /operator/private/payer-approval.json \
+  --key /operator/private/dispatch-seed.bin \
+  --dir /operator/private/payer-sign-attempt
+```
+
+The helper re-inspects the exact original reserve Plan and a retained
+confirmed native outcome. The pinned Host authors the expected paid request
+from that original request, context and receipt index; private op48 must
+reproduce the supplied paid Plan byte-for-byte at the current image. Source
+inspection must then show the same full HTTP, context, fixed selectors and
+reserve index. Only after those checks does the client sign the ordered
+`payerSlots` headers into `payer-signatures.json`. `appSlots` belong to the
+resident and are never signed here. The helper neither assembles op49 nor
+submits op46, and a historical reserve receipt alone grants no dispatch.
+
 Selected public release uses a distinct Lean-authored canonical ingress and
 the same native receiver, through Host operations 20 and 21:
 

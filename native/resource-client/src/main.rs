@@ -12,6 +12,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+mod agent_payer;
+#[cfg(unix)]
 mod agent_reserve;
 #[cfg(unix)]
 mod current_birth;
@@ -141,6 +143,7 @@ usage:
   mini agent-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-reserve-submit --attempt PRIVATE-DIR
   mini agent-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
@@ -2284,6 +2287,28 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_reserve::lookup(&directory)
+        }
+        #[cfg(unix)]
+        "agent-payer-sign" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let operator_socket = path(args.required("operator-socket")?);
+            let reserve_attempt = path(args.required("reserve-attempt")?);
+            let plan = path(args.required("plan")?);
+            let approval = path(args.required("approval")?);
+            let key = path(args.required("key")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            agent_payer::sign(agent_payer::Inputs {
+                host: &host,
+                config: &config,
+                operator_socket: &operator_socket,
+                reserve_attempt: &reserve_attempt,
+                paid_plan: &plan,
+                approval_path: &approval,
+                key_path: &key,
+                directory: &directory,
+            })
         }
         #[cfg(unix)]
         "share-issue-prepare" => {

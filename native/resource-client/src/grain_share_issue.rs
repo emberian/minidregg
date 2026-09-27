@@ -259,7 +259,7 @@ fn approved_request(approval: &Value, request: &[u8], inspection: &Value) -> Res
     Ok(())
 }
 
-fn ordered_slots<'a>(plan: &'a Value) -> Result<&'a [Value]> {
+fn ordered_slots(plan: &Value) -> Result<&[Value]> {
     let birth = plan
         .get("birthSlots")
         .and_then(Value::as_array)
