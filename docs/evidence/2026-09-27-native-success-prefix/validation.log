@@ -1,0 +1,6 @@
+c455b3aa54555f5db45fe98a78ca4cb00d4a6f29fdbc2c58d28b40d406162557  scripts/build-native-host.sh
+072627bc718564a85c83676e8284b1740b6266f076dbf0aa81439b08a4ce5094  scripts/overnight-tests/native-success-prefix-guard.sh
+bash -n PASS
+shellcheck PASS
+PASS identical=3 dependency-change=0 middle-change=1 final-change=2 insertion=1 artifact-drift=refused artifact-symlink=refused
+git diff --check PASS

@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -38,6 +38,11 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
               resume the compiled prefix of a failed, non-umbrella full build
               in this same snapshot, only after checkpointed source, Lean,
               package, project, and toolchain hashes all still match
+  --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT
+              in a new independent snapshot, reuse the longest topological
+              prefix of a successful --checkpoint-resume build with an exact
+              source/artifact and external-input qualification; compile every
+              module from the first changed or inserted source onward
   --binary    output executable path (default: .lake/build/bin/minidregg-host)
 
 Environment:
@@ -60,6 +65,8 @@ inserted_modules=()
 allow_unchanged_restart=0
 resume_failed_output=""
 checkpoint_resume=0
+success_baseline_root=""
+success_baseline_output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umbrella)
@@ -119,6 +126,13 @@ while [[ $# -gt 0 ]]; do
       checkpoint_resume=1
       shift
       ;;
+    --reuse-success-prefix-from)
+      [[ $# -ge 3 && -z "$success_baseline_root" ]] || { usage >&2; exit 64; }
+      success_baseline_root=$2
+      success_baseline_output=$3
+      checkpoint_resume=1
+      shift 3
+      ;;
     --output)
       [[ $# -ge 2 ]] || { usage >&2; exit 64; }
       output_dir=$2
@@ -147,6 +161,10 @@ fi
 if [[ "$checkpoint_resume" == 1 &&
       ( "$build_umbrella" == 1 || -n "$incremental_baseline_root" ) ]]; then
   printf 'build-native-host: checkpoint/resume is exclusive with other build modes\n' >&2
+  exit 64
+fi
+if [[ -n "$success_baseline_root" && -n "$resume_failed_output" ]]; then
+  printf 'build-native-host: successful-prefix and failed-build resume are exclusive\n' >&2
   exit 64
 fi
 if [[ ${#suffix_allowed_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]]; then
@@ -358,24 +376,71 @@ module_checkpoint_paths() {
       return 66
     }
   done
+  for directory in ".lake/build/lib/lean${parent:+/$parent}" \
+      ".lake/build/ir${parent:+/$parent}"; do
+    link=$(find "$directory" -maxdepth 1 -type l -name "$leaf.*" -print -quit)
+    [[ -z "$link" ]] || {
+      printf 'build-native-host: linked prefix artifact: %s\n' "$link" >&2
+      return 65
+    }
+  done
   printf '%s\n' "$stem.lean"
   for directory in ".lake/build/lib/lean${parent:+/$parent}" \
       ".lake/build/ir${parent:+/$parent}"; do
-    while IFS= read -r link; do
-      [[ ! -L "$link" ]] || {
-        printf 'build-native-host: linked prefix artifact: %s\n' "$link" >&2
-        return 65
-      }
-      printf '%s\n' "$link"
-    done < <(find "$directory" -maxdepth 1 \( -type f -o -type l \) \
-      -name "$leaf.*" -print)
+    find "$directory" -maxdepth 1 -type f -name "$leaf.*" -print
   done | sort -u
+}
+
+# Return the longest common, byte-qualified prefix. A source change or a new
+# module starts the recompiled suffix. Artifact drift under unchanged source
+# is a refusal, not an excuse to trust a possibly stale imported OLean.
+select_qualified_success_prefix() {
+  local current_list=$1 baseline_list=$2 baseline_checkpoints=$3 evidence_dir=$4
+  local current_module baseline_module stem checkpoint expected recorded index=0
+  : > "$evidence_dir/success-prefix-artifact-check.log"
+  exec 7< "$current_list"
+  exec 8< "$baseline_list"
+  while IFS= read -r current_module <&7 && IFS= read -r baseline_module <&8; do
+    [[ "$current_module" == "$baseline_module" ]] || break
+    stem=${current_module//./\/}
+    [[ -f "$success_baseline_root/$stem.lean" && -f "$stem.lean" ]] || break
+    cmp -s "$success_baseline_root/$stem.lean" "$stem.lean" || break
+    index=$((index + 1))
+    checkpoint="$baseline_checkpoints/$(printf '%04d' "$index")-${current_module//./_}.sha256"
+    [[ -f "$checkpoint" ]] || {
+      printf 'build-native-host: successful baseline lacks prefix checkpoint: %s\n' \
+        "$checkpoint" >&2
+      return 65
+    }
+    expected="$evidence_dir/success-prefix-expected-paths.txt"
+    recorded="$evidence_dir/success-prefix-recorded-paths.txt"
+    module_checkpoint_paths "$stem" > "$expected" || return 65
+    sed -n 's/^[[:xdigit:]]\{64\}  //p' "$checkpoint" > "$recorded"
+    cmp -s "$expected" "$recorded" || {
+      printf 'build-native-host: successful prefix artifact set changed: %s\n' \
+        "$current_module" >&2
+      return 65
+    }
+    shasum -a 256 -c "$checkpoint" \
+      >> "$evidence_dir/success-prefix-artifact-check.log" || {
+      printf 'build-native-host: successful prefix artifact changed: %s\n' \
+        "$current_module" >&2
+      return 65
+    }
+  done
+  exec 7<&-
+  exec 8<&-
+  printf '%s\n' "$index"
 }
 
 resume_prefix=0
 resume_checkpoint_dir="$output_dir/resume-checkpoints"
 if [[ "$checkpoint_resume" == 1 ]]; then
   mkdir -p "$resume_checkpoint_dir"
+  source_inputs="$output_dir/source-input-sha256.txt"
+  while IFS= read -r module; do
+    shasum -a 256 "${module//./\/}.lean"
+  done < "$source_modules" > "$source_inputs"
   resume_inputs="$output_dir/resume-input-sha256.txt"
   toolchain=$(lake env lean --print-prefix)
   toolchain=$(cd "$toolchain" && pwd -P)
@@ -475,6 +540,123 @@ if [[ "$checkpoint_resume" == 1 ]]; then
     printf 'failed_output=%s\nverified_prefix_modules=%s\n' \
       "$resume_failed_output" "$resume_prefix" > "$output_dir/resume-validation.txt"
     printf 'failed-build resume check PASS %s compiled prefix modules\n' \
+      "$resume_prefix" | tee -a "$output_dir/build.log"
+  elif [[ -n "$success_baseline_root" ]]; then
+    success_baseline_root=$(cd "$success_baseline_root" && pwd -P)
+    success_baseline_output=$(cd "$success_baseline_output" && pwd -P)
+    [[ "$success_baseline_root" != "$root" &&
+       -f "$success_baseline_root/.minidregg-native-snapshot" ]] || {
+      printf 'build-native-host: successful baseline must be another independent snapshot\n' >&2
+      exit 73
+    }
+    for baseline_file in manifest.txt source-sha256.txt artifact-sha256.txt \
+        reusable-artifact-sha256.txt source-modules.txt package-modules.txt \
+        package-objects.txt resume-input-sha256.txt resume-contract.txt \
+        toolchain-symlinks.txt package-symlinks-recursive.txt \
+        source-input-sha256.txt success-checkpoint-sha256.txt; do
+      [[ -f "$success_baseline_output/$baseline_file" ]] || {
+        printf 'build-native-host: successful baseline lacks qualification: %s\n' \
+          "$baseline_file" >&2
+        exit 65
+      }
+    done
+    grep -qxF 'usage_exit=1' "$success_baseline_output/manifest.txt"
+    grep -qxF 'checkpointed_success=1' "$success_baseline_output/manifest.txt" || {
+      printf 'build-native-host: baseline was not a checkpointed successful build\n' >&2
+      exit 65
+    }
+    if ! grep -qxF "snapshot_root=$success_baseline_root" \
+        "$success_baseline_output/resume-contract.txt" ||
+        ! grep -qxF "toolchain=$toolchain" \
+          "$success_baseline_output/resume-contract.txt" ||
+        ! grep -qxF 'mode=full-nonumbrella' \
+          "$success_baseline_output/resume-contract.txt"; then
+      printf 'build-native-host: successful baseline contract does not match its snapshot or toolchain\n' >&2
+      exit 65
+    fi
+    grep -qxF "native_target=$(uname -s):$(uname -m)" \
+      "$success_baseline_output/manifest.txt"
+    baseline_binary=$(sed -n 's/^binary=//p' "$success_baseline_output/manifest.txt")
+    baseline_binary_hash=$(sed -n 's/^binary_sha256=//p' \
+      "$success_baseline_output/manifest.txt")
+    [[ -f "$baseline_binary" && -n "$baseline_binary_hash" &&
+       "$(shasum -a 256 "$baseline_binary" | cut -d ' ' -f 1)" == "$baseline_binary_hash" ]] || {
+      printf 'build-native-host: successful baseline executable identity changed\n' >&2
+      exit 65
+    }
+    shasum -a 256 -c "$success_baseline_output/artifact-sha256.txt" \
+      > "$output_dir/success-baseline-artifact-check.log"
+    (cd "$success_baseline_root" &&
+      shasum -a 256 -c "$success_baseline_output/source-sha256.txt") \
+      > "$output_dir/success-baseline-source-check.log"
+    (cd "$success_baseline_root" &&
+      shasum -a 256 -c "$success_baseline_output/reusable-artifact-sha256.txt") \
+      > "$output_dir/success-baseline-reusable-check.log"
+    shasum -a 256 -c "$success_baseline_output/success-checkpoint-sha256.txt" \
+      > "$output_dir/success-checkpoint-check.log"
+    for list in resume-input-sha256.txt toolchain-symlinks.txt \
+        package-symlinks-recursive.txt package-modules.txt; do
+      cmp -s "$success_baseline_output/$list" "$output_dir/$list" || {
+        printf 'build-native-host: successful baseline external input changed: %s\n' \
+          "$list" >&2
+        exit 65
+      }
+    done
+    # The baseline and current external-input manifests have identical paths
+    # and bytes, including package IR/private OLeans and toolchain libraries.
+    (cd "$root" &&
+      shasum -a 256 -c "$success_baseline_output/resume-input-sha256.txt") \
+      > "$output_dir/success-external-input-check.log"
+    while IFS= read -r object; do
+      package_root=${object%%/.lake/build/ir/*}
+      package_module=${object#"$package_root/.lake/build/ir/"}
+      package_module=${package_module%.c.o.export}
+      for path in "$object" "${object%.o.export}" \
+          "$package_root/.lake/build/lib/lean/$package_module.olean"; do
+        if [[ ! -f "$success_baseline_root/$path" || ! -f "$path" ]] ||
+            ! cmp -s "$success_baseline_root/$path" "$path"; then
+          printf 'build-native-host: successful baseline package artifact changed: %s\n' \
+            "$path" >&2
+          exit 65
+        fi
+      done
+    done < "$success_baseline_output/package-objects.txt"
+    # Reuse presumes that every project dependency precedes its importer in
+    # Lake's current closure. Check that order explicitly before selecting a
+    # prefix, including when a new import changed the topology.
+    ordered_prefix="$output_dir/ordered-project-prefix.txt"
+    : > "$ordered_prefix"
+    # The inner grep reopens the immutable module list while the outer loop
+    # reads it; neither command writes that list.
+    # shellcheck disable=SC2094
+    while IFS= read -r module; do
+      source=${module//./\/}.lean
+      while IFS= read -r imports; do
+        read -r -a import_tokens <<< "$imports"
+        for imported in "${import_tokens[@]}"; do
+          [[ "$imported" == --* ]] && break
+          [[ "$imported" == all ]] && continue
+          [[ "$imported" =~ ^[A-Za-z_][A-Za-z0-9_.]*$ ]] || continue
+          [[ -f "${imported//./\/}.lean" ]] || continue
+          if grep -qxF "$imported" "$source_modules" &&
+              ! grep -qxF "$imported" "$ordered_prefix"; then
+            printf 'build-native-host: current project closure is not topological: %s imports %s\n' \
+              "$module" "$imported" >&2
+            exit 65
+          fi
+        done
+      done < <(sed -nE \
+        's/^[[:space:]]*((public|meta)[[:space:]]+)*import[[:space:]]+//p' \
+        "$source")
+      printf '%s\n' "$module" >> "$ordered_prefix"
+    done < "$source_modules"
+    resume_prefix=$(select_qualified_success_prefix "$source_modules" \
+      "$success_baseline_output/source-modules.txt" \
+      "$success_baseline_output/resume-checkpoints" "$output_dir")
+    printf 'successful_baseline=%s\nverified_prefix_modules=%s\n' \
+      "$success_baseline_output" "$resume_prefix" \
+      > "$output_dir/success-prefix-validation.txt"
+    printf 'successful-prefix reuse check PASS %s compiled prefix modules\n' \
       "$resume_prefix" | tee -a "$output_dir/build.log"
   fi
 elif [[ -n "$resume_failed_output" ]]; then
@@ -981,9 +1163,15 @@ if [[ -n "$incremental_baseline_root" ]]; then
 fi
 
 export toolchain output_dir
+project_c_modules="$source_modules"
+if [[ -n "$success_baseline_root" ]]; then
+  project_c_modules="$output_dir/project-c-recompiled-modules.txt"
+  tail -n "+$((resume_prefix + 1))" "$source_modules" > "$project_c_modules"
+fi
 # This single-quoted text is the child bash body, not parent interpolation.
 # shellcheck disable=SC2016
-xargs -P "$native_jobs" -n 1 bash -c '
+if [[ -s "$project_c_modules" ]]; then
+  xargs -P "$native_jobs" -n 1 bash -c '
   set -euo pipefail
   module=$1
   stem=${module//./\/}
@@ -997,7 +1185,8 @@ xargs -P "$native_jobs" -n 1 bash -c '
     --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
     -O3 -DNDEBUG -DLEAN_EXPORTING \
     > "$output_dir/c/${module//./_}.log" 2>&1
-' build-module < "$source_modules"
+' build-module < "$project_c_modules"
+fi
 
 make_package_index() {
   find .lake/packages -type f -path '*/.lake/build/ir/*.c.o.export' -print | awk '
@@ -1171,9 +1360,44 @@ while IFS= read -r object; do
 done < "$output_dir/package-objects.txt"
 xargs -0 -n 50 shasum -a 256 < "$reusable_paths" \
   > "$output_dir/reusable-artifact-sha256.txt"
+if [[ "$checkpoint_resume" == 1 ]]; then
+  # Refresh checkpoints after C compilation: a warm copy may have carried
+  # older objects when the Lean-only checkpoint was first written.
+  index=0
+  while IFS= read -r module; do
+    index=$((index + 1))
+    stem=${module//./\/}
+    checkpoint="$resume_checkpoint_dir/$(printf '%04d' "$index")-${module//./_}.sha256"
+    checkpoint_tmp="$checkpoint.tmp.$$"
+    module_checkpoint_paths "$stem" | while IFS= read -r artifact; do
+      shasum -a 256 "$artifact"
+    done > "$checkpoint_tmp"
+    mv "$checkpoint_tmp" "$checkpoint"
+  done < "$source_modules"
+  find "$resume_checkpoint_dir" -maxdepth 1 -type f -name '*.sha256' -print0 \
+    | sort -z | xargs -0 -n 50 shasum -a 256 \
+    > "$output_dir/success-checkpoint-sha256.txt"
+  [[ "$(wc -l < "$output_dir/success-checkpoint-sha256.txt" | tr -d ' ')" == \
+     "$(wc -l < "$source_modules" | tr -d ' ')" ]] || {
+    printf 'build-native-host: successful checkpoint count differs from closure\n' >&2
+    exit 65
+  }
+  (cd "$root" && shasum -a 256 -c "$resume_inputs") \
+    > "$output_dir/success-external-input-check.log"
+  (cd "$root" && shasum -a 256 -c "$source_inputs") \
+    > "$output_dir/success-source-input-check.log"
+fi
 shasum -a 256 "$binary" "$response" "$closure" > "$output_dir/artifact-sha256.txt"
 shasum -a 256 "$output_dir/reusable-artifact-sha256.txt" \
   >> "$output_dir/artifact-sha256.txt"
+if [[ "$checkpoint_resume" == 1 ]]; then
+  shasum -a 256 "$resume_inputs" "$output_dir/resume-contract.txt" \
+    "$source_inputs" \
+    "$output_dir/toolchain-symlinks.txt" \
+    "$output_dir/package-symlinks-recursive.txt" \
+    "$output_dir/success-checkpoint-sha256.txt" \
+    >> "$output_dir/artifact-sha256.txt"
+fi
 if [[ "$build_umbrella" == 1 ]]; then
   shasum -a 256 "$umbrella_closure" >> "$output_dir/artifact-sha256.txt"
 fi
@@ -1213,6 +1437,15 @@ git status --short > "$output_dir/git-status.txt"
   printf 'response_objects=%s\n' "$(wc -l < "$response" | tr -d ' ')"
   printf 'reusable_artifact_manifest_sha256=%s\n' \
     "$(shasum -a 256 "$output_dir/reusable-artifact-sha256.txt" | cut -d ' ' -f 1)"
+  if [[ "$checkpoint_resume" == 1 ]]; then
+    printf 'checkpointed_success=1\n'
+    if [[ -n "$success_baseline_root" ]]; then
+      printf 'successful_baseline=%s\n' "$success_baseline_output"
+      printf 'reused_success_prefix_modules=%s\n' "$resume_prefix"
+      printf 'recompiled_project_c_modules=%s\n' \
+        "$(wc -l < "$project_c_modules" | tr -d ' ')"
+    fi
+  fi
   printf 'usage_exit=%s\n' "$usage_exit"
   printf 'binary=%s\n' "$binary"
   printf 'binary_sha256=%s\n' "$(shasum -a 256 "$binary" | awk '{print $1}')"
