@@ -24,11 +24,28 @@ reservation does not establish an implemented or accepted native path.
 | 23 | Source-bound launch BEGIN v3 | Reserved for signed package launch descriptor and per-grain volume/action binding; old event12 unchanged |
 | 24 | Source-bound launch claim v3 | Reserved for exact BEGIN/action claim and atomic first-create attempt marker; old event16 unchanged |
 | 25 | Source-bound launch completion v2 | Reserved for exact physical action/volume attestation and completed-create evidence; old event18 unchanged |
+| 26 | Paid agent dispatch under an explicit persistent agent grant | Reserved for current execution-generation witness joined to separately app-authorized task-level access; old event21 generation-bound semantics unchanged |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
 incrementing its event tag into another family's allocation. Each family must
 retain its domain-separated canonical bytes and exact decoding checks.
+
+Event26 is reserved for persistent agent access across prompt generations.
+Existing ticket/enrollment origin equality and event21 replay remain unchanged.
+An ordinary resource may store the new grant, but its birth or payload alone
+does not authorize app access. The new admission must verify an explicit,
+domain-separated app delegation signature over the exact grant, its original
+admitted ticket provenance, bounded permission ceiling, fixed deployment and
+never-recycled parent task, current installed grant and current app delegation
+law/capability. Tombstones, invalid edits, revoked delegation and schema drift
+must refuse. Current parent generation, reserved state, physical root and
+signed DRC witness remain per-dispatch fences, distinct from historical issue
+origin. Hard disconnect invalidates those in-flight witnesses without silently
+turning an old generation-bound ticket into a persistent grant. No new native
+opcode is allocated for this family yet; a host-side generation projection is
+not sufficient authority. This paragraph is a construction contract, not a
+qualified implementation.
 
 Event 21 is distinct from ordinary event 11: a private physical permit cannot
 add payment authority absent from the admitted durable intent. Its claim must
