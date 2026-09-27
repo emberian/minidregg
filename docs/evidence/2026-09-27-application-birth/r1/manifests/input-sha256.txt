@@ -1,0 +1,5 @@
+a5250511c51e3ad24da295939bb1e4dbc0c1596182bd556c1ee63b1c7eea554c  /Users/ember/dev/minidregg/native/resource-client/application-acceptance.sh
+6635b3560280c9d9af544feb3fc5e49a446e498082520bfc24fb78241c50267a  /tmp/minidregg-overnight-20260926/minidregg-host-appbirth-2e60a9c-bfb6
+5139e1e1d86e508ac5b318a85e1d87db5d24a0a8f13123ed62edfb4adab1fe5e  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/mini
+7420e41d1cc76ab3d98d4699e392f799e0d3c587a24c1a9c3f3c5b13d480b82a  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/minidregg-link-sqlite-store
+4f5a9095aa8401e538ac962a37de715b317e443dd35846317e2f068ae9829836  /tmp/minidregg-appbirth-2e60a9c-helpers/bin/minidregg-credential-signature-verifier

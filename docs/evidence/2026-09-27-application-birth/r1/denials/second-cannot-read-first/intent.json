@@ -1,0 +1,17 @@
+{
+  "subject": "9",
+  "nonce": "17009",
+  "purpose": {
+    "type": "query",
+    "kind": "object",
+    "target": "6208",
+    "view": "resource"
+  },
+  "grants": [
+    {
+      "kind": "object",
+      "target": "6208",
+      "capability": "201"
+    }
+  ]
+}

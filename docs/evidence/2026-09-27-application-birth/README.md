@@ -1,8 +1,13 @@
 # Two-subject application birth gate
 
-Status: **staged, not run**. The source-matched Host image containing the typed
-`application-birth[-intent]` and `application-session-birth[-intent]` author
-routes is being qualified separately. No result here is native acceptance yet.
+Status: **PASS for the native two-subject birth/read slice** on one fresh private
+Mac Store, September 27, 2026. The source-matched Host was built from committed
+`2e60a9c` plus the proof-only `bfb6b8b` repair. It passed 187/187 Lean modules
+and linked 3,120 native objects. The Host SHA-256 is
+`6635b3560280c9d9af544feb3fc5e49a446e498082520bfc24fb78241c50267a`;
+the Mini, SQLite store and signature helper SHAs are `5139e1e1`, `7420e41d`
+and `4f5a9095` respectively. Full source and artifact provenance is in
+[`r1/manifests`](r1/manifests/) and [`r1/SHA256SUMS`](r1/SHA256SUMS).
 
 The executable gate is
 [`native/resource-client/application-acceptance.sh`](../../../native/resource-client/application-acceptance.sh).
@@ -19,8 +24,9 @@ the existing `mini submit --intent-kind` path:
    the initial inactive Web/API tags and the shared app field.
 3. Subject 7 delegates **observe-only** application grants separately to 8 and
    9. Each subject must read the same signed application root with its own key
-   and grant. Cross-subject reads of the other's session must return Mini's
-   retained, signed `observation refused` result. The storage helper's exact
+   and grant. Cross-subject reads of the other's session must produce a native
+   `observation refused` error for a retained signed observation request; the
+   refusal text itself is not a signed receipt. The storage helper's exact
    logical image bytes must match before and after both denials.
 4. The pinned Host session is stopped and reopened over the same private Store.
    `mini retry --mode lookup` must replay one original session-birth receipt
@@ -40,13 +46,23 @@ native/resource-client/application-acceptance.sh \
   /private/new/application-acceptance
 ```
 
-The script refuses an existing evidence directory. Keep its `*.key`, Store and
-full attempts private. A successful run writes `application-acceptance.json`,
-retains exact `call.bin`/`outcome.bin`, signed challenge/view pairs, refusal
-attempts, service logs and the executable SHA-256 list. Publish a bounded,
-keyless projection only after reviewing those artifacts and pinning the Host
-source/build manifest. A timeout, missing reply or unclear submit outcome is
-held for exact lookup; do not rerun the birth as a fresh intent.
+The actual run is private at `/tmp/mga-appbirth-two-subject-20260927-r1`. The
+script refused any pre-existing directory. The keyless bounded package here
+retains five exact signed calls and outcomes, the historical replay, signed
+challenge/view pairs, both denied observation requests, source manifests and
+the result projection. It excludes `*.key`, the full Store and private logs.
+The first three installed receipts had accepted counts 1 (app), 2 (subject 8
+Web session) and 3 (subject 9 API session); the two delegations were installed
+at counts 4 and 5. The historical session-8 receipt replay matched its four
+original receipt fields. Both signed participant app reads had the same root.
+The storage helper's logical-image SHA-256 was
+`8a4c3a28df708b3426e71cacda34419588143ccd3ac6e51cfa2189f0277d97e1`
+before/after the denials and before/after Host reopen plus lookup. See
+[`r1/image-sha256.txt`](r1/image-sha256.txt) and
+[`r1/result.json`](r1/result.json).
+
+A future timeout, missing reply or unclear submit outcome must be held for
+exact lookup; do not rerun a birth as a fresh intent.
 
 This gate proves separate native identities, birth/fee admission, a shared
 application reference, bounded delegated observation and exact receipt

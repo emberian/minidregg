@@ -1,0 +1,4 @@
+8a4c3a28df708b3426e71cacda34419588143ccd3ac6e51cfa2189f0277d97e1  before-denied-image.bin
+8a4c3a28df708b3426e71cacda34419588143ccd3ac6e51cfa2189f0277d97e1  after-denied-image.bin
+8a4c3a28df708b3426e71cacda34419588143ccd3ac6e51cfa2189f0277d97e1  before-reopen-image.bin
+8a4c3a28df708b3426e71cacda34419588143ccd3ac6e51cfa2189f0277d97e1  after-reopen-image.bin
