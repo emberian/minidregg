@@ -210,6 +210,11 @@ done
 [ ! -e "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || exit 2
 install -m 600 "$ALLOCATION_SOURCE" "$SPK_AGENT_ALLOCATION"
 "$AGENT_OVERLAY" "$PROVISION_SOURCE" "$SPK_AGENT_ALLOCATION" "$AGENT_SOURCE"
+# The positive-fee base rewrites exactly the two original quoted balances.
+# The agent overlay adds one already-funded owner line, which must remain
+# separate from those substitutions.
+[ "$(rg -c '"initialBalance":"100"' "$AGENT_SOURCE")" -eq 2 ] || exit 2
+[ "$(rg -c 'initialBalance:"1000000",accountPredicate' "$AGENT_SOURCE")" -eq 1 ] || exit 2
 sha256sum "$ALLOCATION_SOURCE" "$AGENT_OVERLAY" "$SPK_AGENT_ALLOCATION" \
   "$PROVISION_SOURCE" "$AGENT_SOURCE" \
   >"$ROOT/source-stage/provision-agent-input-sha256.txt"

@@ -38,7 +38,7 @@ sed -e 's/"tariffPerInitialPayloadByte":0/"tariffPerInitialPayloadByte":1/' \
   "$PROVISION_SOURCE" >"$STAGE/scripts/workroom/provision.sh"
 [ "$(rg -c 'tariffPerInitialPayloadByte.*1' \
     "$STAGE/scripts/workroom/provision.sh")" -eq 2 ] || exit 2
-[ "$(rg -c 'initialBalance.*1000000' \
+[ "$(rg -c '"initialBalance":"1000000"' \
     "$STAGE/scripts/workroom/provision.sh")" -eq 2 ] || exit 2
 PROVISION_SHA=$(sha256sum "$STAGE/scripts/workroom/provision.sh" | cut -d ' ' -f 1)
 sed -e "s/^SOURCE_SHA=[0-9a-f]*$/SOURCE_SHA=$PROVISION_SHA/" \
