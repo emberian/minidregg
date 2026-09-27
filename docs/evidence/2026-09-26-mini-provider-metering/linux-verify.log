@@ -1,0 +1,7 @@
+source_171=PASS
+artifacts_4=PASS
+2fea10a496cfeb230b375e72d0193a5cb726f57144ed64e1a7afee5a112f55e5  Host/Main.lean
+d33b638402d70bcc6ca4c5f02e23dfc4f9401f1bdc5d98c5e9e81b9045cff99d  Kernel/ProviderMetering.lean
+a2699230117a8c2b2db3f90007e50e36973eb9214953022cd38dbba27e3b73d3  Host/ProviderUsage.lean
+f2987ac4d75f38d841029a7312fa17982691503cb32f61559b6bea69ab28d155  Host/ProviderUsageAudit.lean
+51f790fa55f734772c37330dc0ab7408f3438d4e168b74bd6432d0b1cdb111f6  /home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-provider-metering-op6

@@ -1,0 +1,16 @@
+end_utc=2026-09-27T00:38:45Z
+elapsed_seconds=987
+git_head=2aeaf6437365187e7d28a32eadcfce40b4654f70
+root=/private/tmp/minidregg-provider-metering-op6-native
+lean=Lean (version 4.30.0, arm64-apple-darwin24.6.0, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/Users/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Darwin:arm64
+umbrella=0
+compiled_source_modules=171
+source_modules=171
+package_modules=2933
+response_objects=3104
+reusable_artifact_manifest_sha256=3bf0a27eec0683058974e587f808c840bc3146757fd08ca565e02c5a16fa515e
+usage_exit=1
+binary=/private/tmp/minidregg-overnight-20260926/minidregg-host-provider-metering-op6
+binary_sha256=b7a0dd64e20aa2bdf1dc60c151152cee866d526e131beb1cd97fb4a6ade4c412

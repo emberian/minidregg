@@ -1,0 +1,16 @@
+end_utc=2026-09-27T00:35:03Z
+elapsed_seconds=799
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-overnight-20260926/source-provider-metering
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=171
+source_modules=171
+package_modules=2933
+response_objects=3104
+reusable_artifact_manifest_sha256=300390c06d84cca885a20add13a49425f0d1399e1d037c3f525a0205efe24416
+usage_exit=1
+binary=/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-provider-metering-op6
+binary_sha256=51f790fa55f734772c37330dc0ab7408f3438d4e168b74bd6432d0b1cdb111f6

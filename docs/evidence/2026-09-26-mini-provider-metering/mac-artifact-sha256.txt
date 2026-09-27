@@ -1,0 +1,4 @@
+b7a0dd64e20aa2bdf1dc60c151152cee866d526e131beb1cd97fb4a6ade4c412  /private/tmp/minidregg-overnight-20260926/minidregg-host-provider-metering-op6
+bb2f8b0ae27d8d4dd4c707f1d3a4e35efd93b5454f5b15192c69314c53ad4c1f  /private/tmp/minidregg-overnight-20260926/build-local-provider-metering-op6/minidregg-host.rsp
+c00b896b2890df3e0109cd929d823f6bef0c39087a1ebbe8a8147b160a45c9c6  /private/tmp/minidregg-overnight-20260926/build-local-provider-metering-op6/transitive-imports.json
+3bf0a27eec0683058974e587f808c840bc3146757fd08ca565e02c5a16fa515e  /private/tmp/minidregg-overnight-20260926/build-local-provider-metering-op6/reusable-artifact-sha256.txt
