@@ -1711,6 +1711,38 @@ private def lifecycleClaimOperatorRequest (json : Lean.Json) : Result (List UInt
       queryNonce := ← nat "$.queryNonce" (← field "$" "queryNonce" obj) }
   return ApplicationLifecycleClaimOperator.requestCodec.encode request
 
+/-- This authors Mini's fixed web/API mapping from the host's one verified
+signed-SPK parse. The caller supplies the signed ViewInfo projection, not Mini
+interface IDs, kinds, versions, or a chosen package root. Physical custody
+must independently compare every field with that same verified parse. -/
+private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["rawSha256", "rawLength", "signedAppId",
+    "signedAppVersion", "manifestSha256", "bridgeConfigSha256",
+    "bridgeApiPath", "signedSchema"] json
+  let rawSha ← decodeHex "$.rawSha256" (← field "$" "rawSha256" obj)
+  let manifestSha ← decodeHex "$.manifestSha256" (← field "$" "manifestSha256" obj)
+  let bridgeSha ← decodeHex "$.bridgeConfigSha256" (← field "$" "bridgeConfigSha256" obj)
+  let appId ← string "$.signedAppId" (← field "$" "signedAppId" obj)
+  let apiPath ← string "$.bridgeApiPath" (← field "$" "bridgeApiPath" obj)
+  let schema ← ApplicationPermissionSchemaAuthoring.decodeSource
+    (← field "$" "signedSchema" obj)
+  let web : ApplicationDispatchManifest.Interface := ⟨1, 1, .web, schema⟩
+  let interfaces : List ApplicationDispatchManifest.Interface :=
+    if apiPath.isEmpty then [web] else [web, ⟨2, 1, .api, schema⟩]
+  let descriptor : ApplicationSpkPackageIdentity.Descriptor :=
+    { rawSha256 := rawSha
+      rawLength := ← nat "$.rawLength" (← field "$" "rawLength" obj)
+      signedAppId := appId.toUTF8.toList
+      signedAppVersion := ← nat "$.signedAppVersion"
+        (← field "$" "signedAppVersion" obj)
+      manifestSha256 := manifestSha
+      bridgeConfigSha256 := bridgeSha
+      bridgeApiPath := apiPath.toUTF8.toList
+      interfaces := interfaces }
+  unless descriptor.valid do
+    failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
+  return descriptor.canonicalBytes
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
@@ -1725,6 +1757,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-completion-operator-request" => completionOperatorRequest json
   | "application-lifecycle-resident-begin-operator-request" => residentBeginOperatorRequest json
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
+  | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
@@ -2079,6 +2112,33 @@ private def lifecycleClaimOperatorPlanJson
      ("slots", .arr <| (plan.invocation.slots ++
         [plan.appObservationSlot, plan.packageObservationSlot]).toArray.map slotJson)]
 
+private def applicationSpkPackageIdentityJson
+    (descriptor : ApplicationSpkPackageIdentity.Descriptor) : Result Lean.Json := do
+  unless descriptor.valid do
+    failAt "application-spk-package-identity" "invalid descriptor or bridge mapping"
+  let interfaces := descriptor.interfaces.toArray.map fun interface => .mkObj
+    [("id", decimal interface.id),
+     ("version", decimal interface.version),
+     ("kind", match interface.kind with | .web => "web" | .api => "api"),
+     ("canonical", hexJson <| ApplicationDispatchManifest.interfaceCodec.encode interface),
+     ("root", decimal interface.root.value),
+     ("schemaRoot", decimal interface.schema.root.value),
+     ("schema", hexJson <| ApplicationPermissionSchema.schemaCodec.encode interface.schema)]
+  pure <| .mkObj
+    [("type", "application-spk-package-identity-v1"),
+     ("canonical", hexJson descriptor.canonicalBytes),
+     ("root", decimal descriptor.root.value),
+     ("imageIdentity", hexJson descriptor.imageIdentity),
+     ("rawSha256", hexJson descriptor.rawSha256),
+     ("rawLength", decimal descriptor.rawLength),
+     ("rawShaDigest", decimal descriptor.rawShaDigest.value),
+     ("signedAppId", hexJson descriptor.signedAppId),
+     ("signedAppVersion", decimal descriptor.signedAppVersion),
+     ("manifestSha256", hexJson descriptor.manifestSha256),
+     ("bridgeConfigSha256", hexJson descriptor.bridgeConfigSha256),
+     ("bridgeApiPath", hexJson descriptor.bridgeApiPath),
+     ("interfaces", .arr interfaces)]
+
 private def intentJson (value : Intent) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value), ("nonce", decimal value.nonce),
    ("purpose", match value.purpose with
@@ -2239,6 +2299,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let plan ← decoded "application-lifecycle-claim-operator-plan"
         ApplicationLifecycleClaimOperator.planCodec bytes
       lifecycleClaimOperatorPlanJson plan
+  | "application-spk-package-identity" => do
+      let descriptor ← decoded "application-spk-package-identity"
+        ApplicationSpkPackageIdentity.codec bytes
+      applicationSpkPackageIdentityJson descriptor
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"
