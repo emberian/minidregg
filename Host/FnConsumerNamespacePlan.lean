@@ -163,6 +163,23 @@ def assemble (config : NativeHost.Config) (opened : NativeHost.Opened config)
     throw "fn consumer registration envelope exceeds strict profile"
   pure ingress
 
+/-- Custody returns only a detached Ed25519 signature. The Host alone authors
+the credential envelope wire from the retained exact signing header. -/
+def assembleSignature (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (plan : Plan)
+    (signature : List UInt8) : Except String Ingress := do
+  unless signature.length == 64 do
+    throw "fn consumer gateway signature must contain exactly 64 bytes"
+  let some header := CredentialSignedEnvelopeController.headerCodec.decode
+      plan.signingHeader
+    | throw "fn consumer namespace signing header is not canonical"
+  unless CredentialSignedEnvelopeController.headerCodec.encode header ==
+      plan.signingHeader do
+    throw "fn consumer namespace signing header is not canonical"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
+    ⟨header, signature⟩
+  assemble config opened plan envelope
+
 private def hexDigit (n : Nat) : Char :=
   Char.ofNat (if n < 10 then '0'.toNat + n else 'a'.toNat + n - 10)
 
@@ -185,6 +202,12 @@ def inspectPlanBytes (bytes : List UInt8) : Except String Lean.Json := do
       plan.spec.initialPosition == 0 && plan.spec.legacyAnchor.isNone &&
       !plan.signingHeader.isEmpty && plan.signingHeader.length ≤ 4096 do
     throw "fn consumer namespace plan is not fresh or canonical"
+  let some header := CredentialSignedEnvelopeController.headerCodec.decode
+      plan.signingHeader
+    | throw "fn consumer namespace signing header is not canonical"
+  unless CredentialSignedEnvelopeController.headerCodec.encode header ==
+      plan.signingHeader do
+    throw "fn consumer namespace signing header is not canonical"
   let scope := plan.spec.consumerNamespace.scope
   let identity := (Sp800185Cshake256.hash
     "DREGG/FN/CONSUMER-NAMESPACE-PLAN-IDENTITY/v1".toUTF8.toList bytes).digest
@@ -209,6 +232,10 @@ def inspectPlanBytes (bytes : List UInt8) : Except String Lean.Json := do
     ,("gatewayCapability", toJson (Nat.repr plan.spec.gatewayCapability.value))
     ,("expectedAuthorityRoot", toJson (Nat.repr plan.expectedAuthorityRoot.value))
     ,("expectedTargetRoot", toJson (Nat.repr plan.expectedTargetRoot.value))
+    ,("signingKeyId", toJson (Nat.repr header.keyId))
+    ,("signingKeyEpoch", toJson (Nat.repr header.keyEpoch))
+    ,("signingAlgorithm", toJson (Nat.repr header.algorithm))
+    ,("signingAuthorityRoot", toJson (Nat.repr header.authorityRoot.value))
     ,("signingHeaderHex", toJson (encodeHex plan.signingHeader))]
 
 end Minidregg.Host.FnConsumerNamespacePlan

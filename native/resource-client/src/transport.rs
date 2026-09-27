@@ -139,19 +139,21 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 50, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 50 | 52, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
         // Op42 obtains all selectors from pinned operator settings and a live
         // local fn status/position call. No caller field enters its plan.
         [42] => true,
-        [43, pair @ ..] if pair.len() >= 6 && pair.len() <= 16 * 1024 => {
+        // Custody signs the source header and returns exactly one raw Ed25519
+        // signature. Lean constructs the canonical credential envelope.
+        [43, pair @ ..] if pair.len() >= 4 + 1 + 64 && pair.len() <= 4 + 8192 + 64 => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0
                 && plan_length <= 8192
                 && plan_length < pair.len() - 4
-                && pair.len() - 4 - plan_length <= 4096
+                && pair.len() - 4 - plan_length == 64
         }
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
@@ -166,7 +168,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45 | 51, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+        [45 | 51 | 53, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -1078,16 +1080,20 @@ mod tests {
 
         let mut namespace_assembly = vec![43];
         namespace_assembly.extend(1u32.to_le_bytes());
-        namespace_assembly.extend(*b"PE");
+        namespace_assembly.extend(b"P");
+        namespace_assembly.extend([0x5a; 64]);
         assert!(allowed_operator_operation(&namespace_assembly));
         assert!(!allowed_operation(&namespace_assembly, true));
-        assert!(!allowed_operator_operation(&[43, 1, 0, 0, 0, b'P']));
+        assert!(!allowed_operator_operation(&[43, 1, 0, 0, 0, b'P', 0x5a]));
         let mut empty_plan = namespace_assembly.clone();
         empty_plan[1..5].copy_from_slice(&0u32.to_le_bytes());
         assert!(!allowed_operator_operation(&empty_plan));
-        let mut missing_envelope = namespace_assembly;
-        missing_envelope[1..5].copy_from_slice(&2u32.to_le_bytes());
-        assert!(!allowed_operator_operation(&missing_envelope));
+        let mut wrong_signature_length = namespace_assembly;
+        wrong_signature_length[1..5].copy_from_slice(&2u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&wrong_signature_length));
+        let mut oversized_plan_length = wrong_signature_length;
+        oversized_plan_length[1..5].copy_from_slice(&8192u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&oversized_plan_length));
 
         assert!(allowed_operator_operation(&[44, 1]));
         assert!(!allowed_operator_operation(&[44]));
@@ -1108,6 +1114,16 @@ mod tests {
         assert!(allowed_operator_operation(&begin_assembly));
         assert!(!allowed_operation(&begin_assembly, true));
         assert!(!allowed_operator_operation(&[51, 1, 0, 0, 0, b'P']));
+
+        assert!(allowed_operator_operation(&[52, 1]));
+        assert!(!allowed_operator_operation(&[52]));
+        assert!(!allowed_operation(&[52, 1], true));
+        let mut claim_assembly = vec![53];
+        claim_assembly.extend(1u32.to_le_bytes());
+        claim_assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&claim_assembly));
+        assert!(!allowed_operation(&claim_assembly, true));
+        assert!(!allowed_operator_operation(&[53, 1, 0, 0, 0, b'P']));
     }
 
     #[test]

@@ -17,7 +17,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 41=fn consumer namespace receipt-only lookup, 42=operator-private namespace plan,
 43=operator-private namespace assembly, 44=operator-private completion plan,
 45=operator-private completion assembly, 50=operator-private resident BEGIN plan,
-51=operator-private resident BEGIN assembly. Op34 success uses a distinct
+51=operator-private resident BEGIN assembly, 52=operator-private lifecycle claim
+plan, 53=operator-private lifecycle claim assembly. Op34 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -50,6 +51,7 @@ import Host.ApplicationDispatchInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
@@ -295,6 +297,46 @@ def ResidentBeginManagementSettings.pin (settings : ResidentBeginManagementSetti
     appCapability := ⟨settings.appCapability⟩
     packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
 
+/-- Fixed operator custody for a descriptor-bound one-shot claim plan. The
+caller may name the historical BEGIN index and query nonce, but cannot select
+the app or management signing authority. -/
+structure ResidentClaimManagementSettings where
+  app : Nat
+  packageManifest : Nat
+  managementSubject : Nat
+  managementKeyId : Nat
+  appCapability : Nat
+  appObserveCapability : Nat
+  packageObserveCapability : Nat
+  deriving ToJson
+
+instance : FromJson ResidentClaimManagementSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["app", "packageManifest", "managementSubject",
+      "managementKeyId", "appCapability", "appObserveCapability",
+      "packageObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "residentClaimManagement has missing or unknown fields"
+    return ⟨← json.getObjValAs? Nat "app",
+      ← json.getObjValAs? Nat "packageManifest",
+      ← json.getObjValAs? Nat "managementSubject",
+      ← json.getObjValAs? Nat "managementKeyId",
+      ← json.getObjValAs? Nat "appCapability",
+      ← json.getObjValAs? Nat "appObserveCapability",
+      ← json.getObjValAs? Nat "packageObserveCapability"⟩
+
+def ResidentClaimManagementSettings.pin (settings : ResidentClaimManagementSettings) :
+    ApplicationLifecycleClaimOperator.Pin :=
+  { app := settings.app
+    packageManifest := settings.packageManifest
+    managementSubject := settings.managementSubject
+    managementKeyId := settings.managementKeyId
+    appCapability := ⟨settings.appCapability⟩
+    appObserveCapability := ⟨settings.appObserveCapability⟩
+    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -325,6 +367,7 @@ structure Settings where
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   completionManagement : Option CompletionManagementSettings := none
   residentBeginManagement : Option ResidentBeginManagementSettings := none
+  residentClaimManagement : Option ResidentClaimManagementSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -3811,7 +3854,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some selected := service
                               | return ((255 : UInt8), failure "fn-consumer-namespace"
                                   "fn consumer service is not configured")
-                            let (planBytes, gatewayEnvelope) ← splitPair payload
+                            let (planBytes, gatewaySignature) ← splitPair payload
                             let some plan := FnConsumerNamespacePlan.planCodec.decode planBytes
                               | throw (IO.userError "noncanonical fn namespace plan")
                             let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
@@ -3819,8 +3862,8 @@ def run (arguments : List String) : IO UInt32 := do
                                 plan.spec.consumerNamespace.controlBinding == binding do
                               throw (IO.userError "fn namespace plan differs from local consumer")
                             let opened ← sessionOpened pinnedConfig state
-                            let ingress ← IO.ofExcept <| FnConsumerNamespacePlan.assemble
-                              pinnedConfig opened plan gatewayEnvelope
+                            let ingress ← IO.ofExcept <| FnConsumerNamespacePlan.assembleSignature
+                              pinnedConfig opened plan gatewaySignature
                             let after ← fnNamespaceLocalZero pinnedConfig selected
                             unless after == (scope, binding) do
                               throw (IO.userError "fn namespace local status changed during assembly")
@@ -3872,6 +3915,29 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
                             return ((51 : UInt8), ingress)
+                        | 52 =>
+                            let some custody := settings.residentClaimManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-claim-author"
+                                  "resident claim management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationLifecycleClaimOperator.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload
+                            let bytes := ApplicationLifecycleClaimOperator.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "lifecycle claim plan exceeds host frame bound")
+                            return ((52 : UInt8), bytes)
+                        | 53 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleClaimOperator.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical lifecycle claim plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleClaimOperator.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
+                            return ((53 : UInt8), ingress)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
