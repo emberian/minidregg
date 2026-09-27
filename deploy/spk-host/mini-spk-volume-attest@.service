@@ -1,0 +1,23 @@
+[Unit]
+Description=Verify persistent SPK volume custody for resource %i
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/libexec/minidregg/spk-var-volume attest %i
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run/minidregg/spk/volume-attest
+RuntimeDirectory=minidregg/spk/volume-attest
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+PrivateTmp=yes
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+MemoryMax=128M
+TasksMax=16
+TimeoutStartSec=30s

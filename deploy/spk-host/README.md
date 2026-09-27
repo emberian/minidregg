@@ -43,22 +43,54 @@ selected `action.command`; wake uses `continueCommand`. A failed first creation
 is uncertain until Mini and the app's retained state reconcile; it must not be
 blindly repeated.
 
-`spk-var-volume create RESOURCE_ID APP_UID SIZE_MIB` is a separate privileged,
+`spk-var-volume create RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX` is a separate privileged,
 explicit operator action. It provisions a root-private backing image under
 `/var/lib/minidregg/spk/images`, mounts it at the task-traversable
 `/var/lib/minidregg/spk/vars/RESOURCE_ID`, and verifies the loop device,
 backing path, size, owner and ext4 type. `verify` only checks an existing mount.
-Sizes are 64 MiB–16 GiB. No public port, key, account, unit start or automatic
-enable is created by this helper. A system unit and lifecycle installer are not
-yet installed.
+Sizes are 64 MiB–16 GiB. `SOURCE_VOLUME_HEX` is the exact 32-byte lowercase-hex
+volume identity authored by Mini for the deployment domain and application;
+an arbitrary identifier or an empty directory is not launch authority.
 
-Persvati is the selected Linux host. The harmless namespace probe on Linux
+Before creating volumes, provision `/etc/minidregg/spk/host-identity` as a
+root-owned mode-0600 regular file with exactly two lines:
+
+```text
+deployment_id=<64 lowercase hexadecimal characters>
+host_id=<64 lowercase hexadecimal characters>
+```
+
+Both are stable operator-configured identities that the resident configuration
+must pin. Creation records them, the Mini source volume ID, app UID and quota
+in `/etc/minidregg/spk/volumes/RESOURCE_ID.conf`. Changing the global identity
+does not reassign existing registrations. Replacing or moving an established
+volume requires a separate migration contract; do not rewrite its registration
+to make a mismatch disappear.
+
+`spk-var-volume attest RESOURCE_ID` reads that protected registration and
+publishes `/run/minidregg/spk/volume-attest/RESOURCE_ID.witness`. It checks the
+backing filesystem's UUID or ZFS dataset GUID, backing inode/size, ext4 image
+UUID and mounted volume. The resident consumer checks the witness against its
+Mini-selected volume and fixed deployment/host pins, then checks the open mount
+before launch. A witness is physical custody evidence, not a Mini permit.
+The proposed `mini-spk-volume-attest@.service` is a one-shot producer; its handoff
+must survive unit exit so the resident can consume it. The helper and service
+must be installed at protected root-owned paths before use. No public port,
+account or automatic service enable is created by the helper.
+
+See the [bounded volume evidence](../../docs/evidence/2026-09-27-spk-volume-custody/README.md)
+for isolated physical checks. Source-qualified v3 BEGIN/claim/completion and
+the integrated resident launch remain required; these provisioning commands
+do not establish a running Mini-authorized grain.
+
+The initial Linux namespace qualification used persvati. Its probe on Linux
 6.17/systemd 257/bubblewrap 0.11 confirmed a private netns with UP loopback and
 no routes, fd 3 duplex through bubblewrap under a transient unit with
 `NoNewPrivileges=yes`, fd-backed root and `/var` mounts, read-only root, and
 tmpfs `/tmp`. Direct `unshare -Urn` was denied by Ubuntu AppArmor; it is not a
-valid proxy for the tested bubblewrap route. Persvati had about 214 GiB free;
-hbox `/tank` had about 3.4 GiB free and is not the persistent image lane.
+valid proxy for the tested bubblewrap route. That probe does not establish
+current host capacity. Recheck disk and resource budgets before provisioning;
+hbox storage work should use `/tank`.
 
 The retained real sample SPK with SHA-256
 `5830d70137cdae158118884da8790870fb095a07996cfe7708fb0155df45232e`
@@ -68,7 +100,7 @@ directory in the published root. Duplicate installation refused without a
 staging residue. This qualifies archive extraction only. It does not establish
 that the app launches, that its bridge speaks the pinned Cap'n Proto schema,
 that Mini admission is wired, or that the sandbox equals Sandstorm's seccomp
-profile. No third-party SPK process has been run by this lane.
+profile. This early extraction checkpoint did not run a third-party process.
 That early sample extraction used a private path-override build before the
 bounded `spk-ingest` wrapper existed; repeat it under the bounded unit after
 the hardened Bread parser revision is pinned.

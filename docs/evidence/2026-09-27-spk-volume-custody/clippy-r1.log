@@ -1,0 +1,8 @@
+Running as unit: mini-spk-volume-clippy-r1.service; invocation ID: 0f9a7ccef7fa48b78e6081fc01338e76
+    Checking minidregg-spk-host v0.1.0 (/tank/chreatures/mini-spk-resident-check-20260927/native/spk-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.18s
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 5.310s
+CPU time consumed: 9.260s
+Memory peak: 478.9M (swap: 0B)

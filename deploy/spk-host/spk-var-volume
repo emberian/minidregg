@@ -4,31 +4,39 @@
 set -euo pipefail
 
 usage() {
-  echo 'usage: spk-var-volume create|verify RESOURCE_ID APP_UID SIZE_MIB' >&2
+  echo 'usage: spk-var-volume create RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX | verify RESOURCE_ID APP_UID SIZE_MIB | attest RESOURCE_ID' >&2
   exit 2
 }
 
-(( $# == 4 )) || usage
-action=$1 resource=$2 app_uid=$3 size_mib=$4
-[[ $action == create || $action == verify ]] || usage
+(( $# == 5 || $# == 4 || $# == 2 )) || usage
+action=$1 resource=$2
+[[ $action == create && $# == 5 || $action == verify && $# == 4 ||
+   $action == attest && $# == 2 ]] || usage
 [[ $resource =~ ^[1-9][0-9]{0,17}$ ]] || usage
-[[ $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || usage
-[[ $size_mib =~ ^[1-9][0-9]{0,5}$ ]] || usage
-(( size_mib >= 64 && size_mib <= 16384 )) || usage
+if [[ $action == create ]]; then
+  volume_id=$5
+  [[ $volume_id =~ ^[0-9a-f]{64}$ ]] || usage
+fi
 (( EUID == 0 )) || { echo 'spk-var-volume requires root' >&2; exit 1; }
-getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
+
+config_dir=/etc/minidregg/spk/volumes
+config=$config_dir/$resource.conf
+if [[ $action == attest ]]; then
+  app_uid=0 size_mib=0
+else
+  app_uid=$3 size_mib=$4
+fi
 
 base=/var/lib/minidregg/spk
 image_dir=$base/images
 mount_dir=$base/vars
 image=$image_dir/$resource.ext4
 target=$mount_dir/$resource
-bytes=$(( size_mib * 1024 * 1024 ))
 
 safe_dir() {
-  local path=$1 mode=$2 actual
+  local path=$1 mode=$2 actual allow_create=${3:-false}
   if [[ ! -e $path && ! -L $path ]]; then
-    [[ $action == create ]] || { echo "missing $path" >&2; exit 1; }
+    [[ $action == create || $allow_create == true ]] || { echo "missing $path" >&2; exit 1; }
     install -d -o root -g root -m "$mode" -- "$path"
   fi
   [[ -d $path && ! -L $path ]] || { echo "unsafe directory $path" >&2; exit 1; }
@@ -45,17 +53,85 @@ safe_dir /var/lib/minidregg 755
 safe_dir "$base" 755
 safe_dir "$image_dir" 700
 safe_dir "$mount_dir" 711
+safe_dir /run 755
+safe_dir /run/minidregg 755 true
+safe_dir /run/minidregg/spk 755 true
+safe_dir /run/minidregg/spk/volume-attest 755 true
+handoff_dir=/run/minidregg/spk/volume-attest
+lock=$handoff_dir/$resource.lock
+exec 9> "$lock"
+chmod 600 -- "$lock"
+/usr/bin/flock -x 9
+if [[ $action == create || $action == attest ]]; then
+  safe_dir /etc 755
+  safe_dir /etc/minidregg 755
+  safe_dir /etc/minidregg/spk 700
+  safe_dir "$config_dir" 700
+
+  identity=/etc/minidregg/spk/host-identity
+  [[ -f $identity && ! -L $identity ]] || { echo 'protected host identity absent' >&2; exit 1; }
+  [[ $(stat -c '%u:%a:%h' -- "$identity") == '0:600:1' ]] || {
+    echo 'protected host identity drift' >&2; exit 1;
+  }
+  identity_before=$(stat -c '%d:%i:%s:%Y:%Z' -- "$identity")
+  mapfile -t identity_lines < "$identity"
+  [[ $(stat -c '%d:%i:%s:%Y:%Z' -- "$identity") == "$identity_before" ]] || {
+    echo 'protected host identity changed while read' >&2; exit 1;
+  }
+  (( ${#identity_lines[@]} == 2 )) || { echo 'protected host identity malformed' >&2; exit 1; }
+  [[ ${identity_lines[0]} =~ ^deployment_id=([0-9a-f]{64})$ ]] || { echo 'deployment identity malformed' >&2; exit 1; }
+  deployment_id=${BASH_REMATCH[1]}
+  [[ ${identity_lines[1]} =~ ^host_id=([0-9a-f]{64})$ ]] || { echo 'host identity malformed' >&2; exit 1; }
+  host_id=${BASH_REMATCH[1]}
+fi
+
+if [[ $action == attest ]]; then
+  [[ -f $config && ! -L $config ]] || { echo 'registered volume config absent' >&2; exit 1; }
+  [[ $(stat -c '%u:%a:%h' -- "$config") == '0:600:1' ]] || {
+    echo 'registered volume config identity drift' >&2; exit 1;
+  }
+  config_identity_before=$(stat -c '%d:%i:%s:%Y:%Z' -- "$config")
+  mapfile -t config_lines < "$config"
+  [[ $(stat -c '%d:%i:%s:%Y:%Z' -- "$config") == "$config_identity_before" ]] || {
+    echo 'registered volume config changed while read' >&2; exit 1;
+  }
+  (( ${#config_lines[@]} == 5 )) || { echo 'registered volume config malformed' >&2; exit 1; }
+  [[ ${config_lines[0]} =~ ^app_uid=([1-9][0-9]{0,9})$ ]] || { echo 'registered app UID malformed' >&2; exit 1; }
+  app_uid=${BASH_REMATCH[1]}
+  [[ ${config_lines[1]} =~ ^size_mib=([1-9][0-9]{0,5})$ ]] || { echo 'registered quota malformed' >&2; exit 1; }
+  size_mib=${BASH_REMATCH[1]}
+  [[ ${config_lines[2]} == "deployment_id=$deployment_id" &&
+     ${config_lines[3]} == "host_id=$host_id" ]] || {
+    echo 'volume registration belongs to another deployment or host' >&2; exit 1;
+  }
+  [[ ${config_lines[4]} =~ ^volume_id=([0-9a-f]{64})$ ]] || {
+    echo 'registered source volume ID malformed' >&2; exit 1;
+  }
+  volume_id=${BASH_REMATCH[1]}
+fi
+[[ $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || usage
+[[ $size_mib =~ ^[1-9][0-9]{0,5}$ ]] || usage
+(( size_mib >= 64 && size_mib <= 16384 )) || usage
+getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
+bytes=$(( size_mib * 1024 * 1024 ))
 
 if [[ $action == create ]]; then
+  [[ ! -e $config && ! -L $config ]] || { echo 'volume registration already exists' >&2; exit 1; }
   [[ ! -e $image && ! -L $image && ! -e $target && ! -L $target ]] || {
     echo 'resource image or mountpoint already exists; refusing overwrite' >&2; exit 1;
   }
   umask 077
-  : > "$image"
-  chmod 600 -- "$image"
-  chown root:root -- "$image"
-  fallocate -l "$bytes" -- "$image"
-  /usr/sbin/mkfs.ext4 -q -F -- "$image"
+  image_tmp=$(mktemp "$image_dir/.image.XXXXXXXX")
+  trap 'rm -f -- "$image_tmp"' EXIT
+  chmod 600 -- "$image_tmp"
+  chown root:root -- "$image_tmp"
+  fallocate -l "$bytes" -- "$image_tmp"
+  /usr/sbin/mkfs.ext4 -q -F -- "$image_tmp"
+  ln -- "$image_tmp" "$image"
+  /usr/bin/sync -f "$image_dir"
+  rm -- "$image_tmp"
+  /usr/bin/sync -f "$image_dir"
+  trap - EXIT
   install -d -o root -g root -m 700 -- "$target"
   /usr/bin/mount -t ext4 -o loop,nosuid,nodev,noatime -- "$image" "$target"
   chown "$app_uid:$app_uid" -- "$target"
@@ -77,4 +153,82 @@ backing=$(/usr/sbin/losetup -n -O BACK-FILE -- "$source_dev")
 [[ $(/usr/bin/findmnt -n -M "$target" -o FSTYPE) == ext4 ]] || {
   echo 'mounted /var is not ext4' >&2; exit 1;
 }
+
+if [[ $action == create ]]; then
+  [[ ! -e $config && ! -L $config ]] || { echo 'volume registration already exists' >&2; exit 1; }
+  config_tmp=$(mktemp "$config_dir/.volume.XXXXXXXX")
+  trap 'rm -f -- "$config_tmp"' EXIT
+  printf 'app_uid=%s\nsize_mib=%s\ndeployment_id=%s\nhost_id=%s\nvolume_id=%s\n' \
+    "$app_uid" "$size_mib" "$deployment_id" "$host_id" "$volume_id" > "$config_tmp"
+  chmod 600 -- "$config_tmp"
+  chown root:root -- "$config_tmp"
+  /usr/bin/sync -f "$config_tmp"
+  ln -- "$config_tmp" "$config"
+  /usr/bin/sync -f "$config_dir"
+  rm -- "$config_tmp"
+  /usr/bin/sync -f "$config_dir"
+  trap - EXIT
+fi
+
+if [[ $action == attest ]]; then
+  handoff=$handoff_dir/$resource.witness
+
+  collect_witness() {
+    local observed_loop observed_backing observed_inode observed_size backing_fs image_uuid
+    local backing_type backing_source backing_uuid backing_guid
+    [[ $(stat -c '%u:%a:%s:%h' -- "$image") == "0:600:$bytes:1" ]] || return 1
+    [[ $(stat -c '%u:%a' -- "$target") == "$app_uid:700" ]] || return 1
+    observed_loop=$(/usr/bin/findmnt -n -M "$target" -o SOURCE) || return 1
+    [[ $observed_loop == /dev/loop* ]] || return 1
+    observed_backing=$(/usr/sbin/losetup -n -O BACK-FILE -- "$observed_loop") || return 1
+    [[ $observed_backing == "$image" ]] || return 1
+    [[ $(/usr/bin/findmnt -n -M "$target" -o FSTYPE) == ext4 ]] || return 1
+    observed_inode=$(stat -c '%i' -- "$image") || return 1
+    observed_size=$(stat -c '%s' -- "$image") || return 1
+    backing_type=$(/usr/bin/findmnt -n -T "$image" -o FSTYPE) || return 1
+    case $backing_type in
+      ext4|btrfs)
+        backing_uuid=$(/usr/bin/findmnt -n -T "$image" -o UUID) || return 1
+        [[ $backing_uuid =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+        backing_fs=$backing_type:$backing_uuid
+        ;;
+      zfs)
+        backing_source=$(/usr/bin/findmnt -n -T "$image" -o SOURCE) || return 1
+        [[ $backing_source =~ ^[A-Za-z0-9_.:/-]+(\[/[A-Za-z0-9_.:/-]+\])?$ ]] || return 1
+        backing_source=${backing_source%%[*}
+        backing_guid=$(/usr/sbin/zfs get -H -o value guid "$backing_source") || return 1
+        [[ $backing_guid =~ ^[1-9][0-9]{0,19}$ ]] || return 1
+        backing_fs=zfs:$backing_guid
+        ;;
+      *) return 1 ;;
+    esac
+    image_uuid=$(/usr/sbin/blkid -p -s UUID -o value -- "$image") || return 1
+    [[ $image_uuid =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+    printf 'DREGG/SPK-VAR-CUSTODY/v1\ndeployment_id=%s\nhost_id=%s\nresource=%s\nvolume_id=%s\napp_uid=%s\nquota_bytes=%s\nbacking=%s\nbacking_fs=%s\nbacking_inode=%s\nbacking_size=%s\nimage_ext4_uuid=%s\nmount=%s\n' \
+      "$deployment_id" "$host_id" "$resource" "$volume_id" "$app_uid" "$bytes" "$image" \
+      "$backing_fs" "$observed_inode" "$observed_size" "$image_uuid" "$target"
+  }
+
+  witness=$(collect_witness) || { echo 'volume custody drift before handoff' >&2; exit 1; }
+  (( ${#witness} + 1 <= 4096 )) || { echo 'volume witness exceeds Mini bound' >&2; exit 1; }
+  handoff_tmp=$(mktemp "$handoff_dir/.witness.XXXXXXXX")
+  trap 'rm -f -- "$handoff_tmp"' EXIT
+  printf '%s\n' "$witness" > "$handoff_tmp"
+  chmod 644 -- "$handoff_tmp"
+  chown root:root -- "$handoff_tmp"
+  /usr/bin/sync -f "$handoff_tmp"
+  [[ $(collect_witness) == "$witness" ]] || { echo 'volume custody drift before publication' >&2; exit 1; }
+  mv -fT -- "$handoff_tmp" "$handoff"
+  /usr/bin/sync -f "$handoff_dir"
+  trap - EXIT
+  [[ $(collect_witness) == "$witness" ]] || {
+    rm -f -- "$handoff"
+    /usr/bin/sync -f "$handoff_dir"
+    echo 'volume custody drift after publication' >&2
+    exit 1
+  }
+  [[ $(stat -c '%u:%a:%h' -- "$handoff") == '0:644:1' ]] || {
+    echo 'volume witness file identity drift' >&2; exit 1;
+  }
+fi
 echo "verified resource=$resource uid=$app_uid size_mib=$size_mib mount=$target"

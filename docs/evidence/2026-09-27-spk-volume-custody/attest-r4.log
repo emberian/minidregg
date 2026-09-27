@@ -1,0 +1,25 @@
+Running as unit: mini-spk-var-attest-smoke-r4.service
+verified resource=991025 uid=65534 size_mib=64 mount=/var/lib/minidregg/spk/vars/991025
+first witness:
+DREGG/SPK-VAR-CUSTODY/v1
+deployment_id=0000000000000000000000000000000000000000000000000000000000000001
+host_id=0000000000000000000000000000000000000000000000000000000000000002
+resource=991025
+volume_id=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+app_uid=65534
+quota_bytes=67108864
+backing=/var/lib/minidregg/spk/images/991025.ext4
+backing_fs=zfs:2533678408435541861
+backing_inode=15478523
+backing_size=67108864
+image_ext4_uuid=d586ec67-3f0a-4d9a-9e8c-0d8a681ce0f7
+mount=/var/lib/minidregg/spk/vars/991025
+verified resource=991025 uid=65534 size_mib=64 mount=/var/lib/minidregg/spk/vars/991025
+same-host remount witness: identical
+changed deployment identity: refused
+fixture image and witness retained in root-owned private scratch
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 997ms
+CPU time consumed: 711ms
+Memory peak: 5.8M (swap: 0B)

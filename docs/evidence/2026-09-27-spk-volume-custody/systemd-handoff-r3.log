@@ -1,0 +1,6 @@
+Running as unit: mini-spk-handoff-check-a-20260927.service
+Running as unit: mini-spk-handoff-check-b-20260927.service
+after first oneshot stopped: both witnesses retained while second runs
+after both oneshots stopped: both witnesses retained
+first unit result: success
+second unit result: success

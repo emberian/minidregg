@@ -1,0 +1,21 @@
+Running as unit: mini-spk-volume-rust-r3.service
+   Compiling minidregg-spk-host v0.1.0 (/tank/chreatures/mini-spk-resident-check-20260927/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.06s
+────────────
+ Nextest run ID 9b8abe82-7657-4c59-a8a2-37145d7a5d08 with nextest profile: default
+    Starting 8 tests across 1 binary (106 tests skipped)
+        PASS [   0.008s] (1/8) minidregg-spk-host launch_descriptor_native::tests::command_bounds_refuse_nul_and_empty_executable
+        PASS [   0.008s] (2/8) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.034s] (3/8) minidregg-spk-host launch_descriptor_native::tests::offline_source_runs_without_socket_and_rejects_pin_drift
+        PASS [   0.008s] (4/8) minidregg-spk-host launch_descriptor_native::tests::source_preserves_create_order_and_duplicate_environment_names
+        PASS [   0.009s] (5/8) minidregg-spk-host volume_custody::tests::stable_witness_parses_exact_root_profile
+        PASS [   0.009s] (6/8) minidregg-spk-host volume_custody::tests::witness_refuses_path_and_field_ambiguity
+        PASS [   0.008s] (7/8) minidregg-spk-host volume_custody::tests::zfs_dataset_guid_is_stable_backing_identity
+        PASS [   0.162s] (8/8) minidregg-spk-host launch_descriptor_native::tests::offline_source_rechecks_input_after_child_and_reaps_timeout
+────────────
+     Summary [   0.171s] 8 tests run: 8 passed, 106 skipped
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 3.822s
+CPU time consumed: 4.184s
+Memory peak: 419.6M (swap: 0B)

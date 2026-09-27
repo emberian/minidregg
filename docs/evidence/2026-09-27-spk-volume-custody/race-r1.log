@@ -1,0 +1,13 @@
+Running as unit: mini-spk-var-attest-race-r1.service; invocation ID: 63e60374163e4e18955f051afe751fa9
+creator results: 1/0
+verified resource=991026 uid=65534 size_mib=64 mount=/var/lib/minidregg/spk/vars/991026
+winner image UUID:
+3daffb8f-0fe9-4b94-bd8c-01a5ba6f7c10
+losing creator refusal:
+volume registration already exists
+race fixture retained privately; no application process ran
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 835ms
+CPU time consumed: 565ms
+Memory peak: 10.1M (swap: 0B)
