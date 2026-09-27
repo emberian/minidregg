@@ -28,7 +28,7 @@ shasum -a 256 "$0" "$REPO/scripts/grain-birth/native-acceptance.sh" \
   >"$EVIDENCE/input-sha256.txt"
 
 MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
-  "$REPO/scripts/grain-birth/native-acceptance.sh" "$HOST" "$EVIDENCE/workroom" \
+  /bin/sh "$REPO/scripts/grain-birth/native-acceptance.sh" "$HOST" "$EVIDENCE/workroom" \
   >"$EVIDENCE/workroom.stdout" 2>"$EVIDENCE/workroom.stderr"
 CONFIG="$EVIDENCE/workroom/deployment/pinned-config.json"
 SERVICE_PID=
