@@ -28,6 +28,7 @@ import Kernel.FnPortableSource
 import Kernel.FnSelectiveReleaseReceiver
 import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationShareIssueReceiver
+import Kernel.ApplicationShareIssueAuthoring
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -3198,6 +3199,25 @@ def run (arguments : List String) : IO UInt32 := do
                             let intent ← applicationCurrentBirthIntentSession
                               pinnedConfig state false payload
                             return ((31 : UInt8), intent)
+                        | 32 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationShareIssueAuthoring.prepareRequestLoaded
+                                pinnedConfig opened payload
+                            let bytes := ApplicationShareIssueAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "share issue plan exceeds host frame bound")
+                            return ((32 : UInt8), bytes)
+                        | 33 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationShareIssueAuthoring.planCodec.decode planBytes
+                              | throw (IO.userError "noncanonical share issue signing plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationShareIssueAuthoring.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "share issue ingress exceeds host frame bound")
+                            return ((33 : UInt8), ingress)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
@@ -3211,6 +3231,28 @@ def run (arguments : List String) : IO UInt32 := do
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
           writeBytes output (signingPlanCodec.encode plan)
+          pure 0
+      | "application-share-issue-plan", [input, output] =>
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let request ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
+          let plan ← IO.ofExcept <|
+            ApplicationShareIssueAuthoring.prepareRequestLoaded config opened request
+          let bytes := ApplicationShareIssueAuthoring.planCodec.encode plan
+          unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+            throw (IO.userError "share issue plan exceeds host frame bound")
+          writeBytes output bytes
+          pure 0
+      | "application-share-issue-assemble", [planPath, signaturesPath, output] =>
+          let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
+          let some plan := ApplicationShareIssueAuthoring.planCodec.decode planBytes
+            | throw (IO.userError "noncanonical share issue signing plan")
+          let signatures ← decodeSignatures
+            (← readBoundedBytes signaturesPath FnEvidenceCodec.maxHostFrameBytes)
+          let ingress ← IO.ofExcept <|
+            ApplicationShareIssueAuthoring.assemble plan signatures
+          unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+            throw (IO.userError "share issue ingress exceeds host frame bound")
+          writeBytes output ingress
           pure 0
       | "challenge", [input, output] =>
           let challenge ← IO.ofExcept (← NativeHost.challenge config (← readBytes input))
