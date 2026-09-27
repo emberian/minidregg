@@ -1249,6 +1249,34 @@ structure AdmittedBundle [DecidableEq F]
   branches : (branch : Branch descriptor) → BranchAccepted pending branch
   inputsExact : ∀ branch, bundle.forBranch branch = some (branches branch).credential
 
+/-- Select one dependent branch directly from its finite index. -/
+private def directFinCases {n : Nat} {A : Fin (n + 1) → Type}
+    (head : A 0) (tail : (index : Fin n) → A index.succ)
+    (index : Fin (n + 1)) : A index :=
+  if zero : index = 0 then
+    zero.symm ▸ head
+  else
+    have positive : 0 < index.val := by
+      by_contra notPositive
+      have atZero : index.val = 0 := by omega
+      exact zero (Fin.ext atZero)
+    let previous : Fin n := ⟨index.val - 1, by omega⟩
+    have same : previous.succ = index := by
+      apply Fin.ext
+      simp only [Fin.succ, previous]
+      omega
+    same ▸ tail previous
+
+/-- The direct predecessor lookup preserves the full dependent `Fin.cases`
+selection while avoiding its eager induction at runtime. -/
+private theorem directFinCases_eq {n : Nat} {A : Fin (n + 1) → Type}
+    (head : A 0) (tail : (index : Fin n) → A index.succ) :
+    directFinCases head tail = Fin.cases head tail := by
+  funext index
+  cases index using Fin.cases with
+  | zero => simp [directFinCases]
+  | succ previous => simp [directFinCases]
+
 /-- A dependent finite sequence checks every branch before exposing any
 accepted bundle. Its callback is internal receiving code, never wire data. -/
 private def sequenceFin {E : Type} : {n : Nat} → {A : Fin n → Type} →
@@ -1261,7 +1289,7 @@ private def sequenceFin {E : Type} : {n : Nat} → {A : Fin n → Type} →
           match ← sequenceFin (A := fun index : Fin n => A index.succ)
               (fun index => action index.succ) with
           | .error error => return .error error
-          | .ok tail => return .ok (Fin.cases head tail)
+          | .ok tail => return .ok (directFinCases head tail)
 
 def Pending.admitBundleNative [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
