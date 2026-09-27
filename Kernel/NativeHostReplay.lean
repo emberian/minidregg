@@ -22,6 +22,7 @@ import Kernel.ApplicationLifecycleClaimV2Core
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueGrainReceiver
 import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
+import Kernel.ApplicationAgentLifetimeDispatchCore
 import Kernel.ApplicationDispatchHistoricalCore
 import Kernel.ApplicationDispatchAgentCore
 import Kernel.FnConsumerFrontierReplay
@@ -458,6 +459,36 @@ def LifetimeGrantIssueAt.intent {config : Config} {opened : Opened config}
     (admitted : LifetimeGrantIssueAt config opened ingress) : DataIntent rootBytes :=
   ApplicationAgentLifetimeGrantIntentTemplate.template admitted.current
 
+/-- Event27 grant authority is retained only after its complete source intent,
+record, receipt and successor were checked by this same history walk. The
+physical content root comes from the source-derived initialized birth write,
+never from a caller's current-root assertion. -/
+structure PriorLifetimeGrant (config : Config) where
+  private mk ::
+  index : Nat
+  receipt : NativeHostCodec.Receipt
+  ingress : ApplicationAgentLifetimeGrantSource.Ingress
+  record : DurableReceiver.IntentRecord
+  ticket : PriorIssue config
+  finalRoot : Digest
+  admitted : ∃ original : Opened config,
+    ∃ accepted : LifetimeGrantIssueAt config original ingress,
+      ticket = accepted.prior ∧
+      finalRoot = (ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
+        accepted.current.sourceReady).exactPost ∧
+      record = DurableReceiver.IntentRecord.ofIntent accepted.intent
+
+/-- The root offered to event26 is the exact post of a write in the admitted
+event27 record. This is stronger than decoding a grant from caller bytes. -/
+theorem PriorLifetimeGrant.finalRoot_in_record {config : Config}
+    (prior : PriorLifetimeGrant config) :
+    ∃ write ∈ prior.record.writes, write.exactPost = prior.finalRoot := by
+  rcases prior.admitted with ⟨original, accepted, _, rootExact, recordExact⟩
+  refine ⟨ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
+    accepted.current.sourceReady, ?_, rootExact.symm⟩
+  rw [recordExact]
+  exact accepted.current.atomic.initialized_present
+
 theorem LifetimeGrantIssueAt.original_scope {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
     (admitted : LifetimeGrantIssueAt config opened ingress) :
@@ -497,6 +528,38 @@ def AgentDispatchAt.intent {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     (admitted : AgentDispatchAt config opened ingress) : DataIntent rootBytes :=
   ApplicationDispatchAgentCore.candidateIntent admitted.checked
+
+/-- Event26 joins only certificates accumulated by the same verified walk:
+the event22 ticket, event27 initialized grant, and the original signed v3
+purse reserve. Its current dispatch is checked at the present image. -/
+structure LifetimeDispatchAt (config : Config) (opened : Opened config)
+    (ingress : ApplicationAgentLifetimeDispatchIngress.Ingress) where
+  private mk ::
+  issue : PriorIssue config
+  grant : PriorLifetimeGrant config
+  reserve : PriorDispatchReserve config
+  ticketExact : issue = grant.ticket
+  event22 : issue.evidence.record.event.codecVersion = 22
+  issueBeforeGrant : issue.index < grant.index
+  grantBeforeReserve : grant.index < reserve.index
+  reserveIndex : reserve.index = ingress.reserveIndex
+  issuePresent : opened.durable.image.accepted[issue.index]? = some issue.evidence.record
+  grantPresent : opened.durable.image.accepted[grant.index]? = some grant.record
+  reservePresent : opened.durable.image.accepted[reserve.index]? = some reserve.raw.record
+  untouched : dispatchPurseUntouched
+    (opened.durable.image.accepted.drop (reserve.index + 1))
+    ingress.reserveContext.base.purseTask
+  reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config
+  reservedExact : ApplicationAgentLifetimeDispatchReserveCore.bindContext
+    reserve.raw ingress.reserveContext = .ok reserved
+  checked : ApplicationAgentLifetimeDispatchCore.Checked config opened ingress
+    issue.evidence.spec issue.evidence.descriptor grant.ingress.spec.grant
+    issue.index issue.receipt issue.evidence.ingressBytes grant.index grant.finalRoot reserved
+
+def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
+    (admitted : LifetimeDispatchAt config opened ingress) : DataIntent rootBytes :=
+  ApplicationAgentLifetimeDispatchCore.candidateIntent admitted.checked
 
 /-- Evidence is one of the actual privately admitted receiving objects,
 not a supplied policy decision, signature Boolean, or arbitrary DataIntent. -/
@@ -558,6 +621,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened admitted.intent
   | applicationAgentDispatch {ingress : ApplicationDispatchAgentIngress.Ingress}
       (admitted : AgentDispatchAt config opened ingress) :
+      NativeAdmission config opened admitted.intent
+  | applicationAgentLifetimeDispatch
+      {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
+      (admitted : LifetimeDispatchAt config opened ingress) :
       NativeAdmission config opened admitted.intent
   | selectedSourcePublication {ingress : FnSelectiveReleaseSourcePublication.Ingress}
       (accepted : FnSelectiveReleaseSourceReceiver.Accepted config opened ingress) :
@@ -654,6 +721,8 @@ structure Derived (config : Config) (opened : Opened config) where
     { admitted : ClaimAtV3 config opened ingress // intent = admitted.intent }) := none
   completionV2 : Option (Σ ingress : ApplicationLifecycleCompletionV2Ingress.Ingress,
     { admitted : CompletionAtV2 config opened ingress // intent = admitted.intent }) := none
+  grantIssue : Option (Σ ingress : ApplicationAgentLifetimeGrantSource.Ingress,
+    { admitted : LifetimeGrantIssueAt config opened ingress // intent = admitted.intent }) := none
 
 /-- Retain the exact admitted ordinary invocation for the persistent native
 readback path. The constructor accepts the typed current-image admission, not
@@ -669,7 +738,7 @@ def Derived.ofInvoke {config : Config} {opened : Opened config}
     Derived config opened :=
   ⟨accepted.dataIntent shape, .invoke prepared signed shape accepted,
     none, none, none, none, some ⟨_, signed, prepared, shape, accepted, rfl⟩,
-    none, none, none⟩
+    none, none, none, none⟩
 
 /-- Reuse the very same typed dispatch admission for the exact CAS readback
 fast path. No second signature check or caller-created Derived is needed. -/
@@ -677,13 +746,24 @@ def DispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     (admitted : DispatchAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none,
-    none, none, none⟩
+    none, none, none, none⟩
 
 def AgentDispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     (admitted : AgentDispatchAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationAgentDispatch admitted, none, none, none, none, none,
-    none, none, none⟩
+    none, none, none, none⟩
+
+def LifetimeDispatchAt.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
+    (admitted : LifetimeDispatchAt config opened ingress) : Derived config opened :=
+  ⟨admitted.intent, .applicationAgentLifetimeDispatch admitted, none, none, none,
+    none, none, none, none, none, none⟩
+
+theorem LifetimeDispatchAt.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
+    (admitted : LifetimeDispatchAt config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
 
 theorem AgentDispatchAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
@@ -694,27 +774,27 @@ def ClaimAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
     (admitted : ClaimAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none,
-    none, none, none⟩
+    none, none, none, none⟩
 
 def ClaimAtV2.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV2Ingress.Ingress}
     (admitted : ClaimAtV2 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaimV2 admitted,
     none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none,
-    none, none, none⟩
+    none, none, none, none⟩
 
 def CompletionAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
     (admitted : CompletionAt config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleCompletion admitted,
-    none, none, none, none, none, none, none, none⟩
+    none, none, none, none, none, none, none, none, none⟩
 
 def ClaimAtV3.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
     (admitted : ClaimAtV3 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleClaimV3 admitted,
     none, none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩, none⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none⟩
 
 theorem ClaimAtV3.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleClaimV3Ingress.Ingress}
@@ -726,7 +806,7 @@ def CompletionAtV2.toDerived {config : Config} {opened : Opened config}
     (admitted : CompletionAtV2 config opened ingress) : Derived config opened :=
   ⟨admitted.intent, .applicationLifecycleCompletionV2 admitted,
     none, none, none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none⟩
 
 theorem CompletionAtV2.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleCompletionV2Ingress.Ingress}
@@ -932,6 +1012,83 @@ private def admitAgentDispatchAt (config : Config) (opened : Opened config)
     else return .error "agent dispatch reserve predates issued ticket"
   else return .error "agent dispatch reserve index differs"
 
+private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)
+    (grants : List (PriorLifetimeGrant config))
+    (reserves : List (PriorDispatchReserve config))
+    (ingress : ApplicationAgentLifetimeDispatchIngress.Ingress) :
+    IO (Except String (LifetimeDispatchAt config opened ingress)) := do
+  let some grant := grants.find? (fun prior => decide
+      (prior.index = ingress.reserveContext.grantIssueIndex ∧
+        prior.ticket.evidence.ingressBytes = ingress.dispatch.issueIngressBytes))
+    | return .error "lifetime dispatch certified grant absent from admitted prefix"
+  let issue := grant.ticket
+  let some reserve := reserves.find? (fun prior => prior.index == ingress.reserveIndex)
+    | return .error "lifetime dispatch signed reserve absent from admitted prefix"
+  if event22 : issue.evidence.record.event.codecVersion = 22 then
+    if issueBeforeGrant : issue.index < grant.index then
+      if grantBeforeReserve : grant.index < reserve.index then
+        if reserveIndex : reserve.index = ingress.reserveIndex then
+          if issueBytes : (opened.durable.image.accepted[issue.index]?.map
+              DurableReceiverCodec.intentStream.encode) =
+              some (DurableReceiverCodec.intentStream.encode issue.evidence.record) then
+            have issuePresent : opened.durable.image.accepted[issue.index]? =
+                some issue.evidence.record := by
+              cases found : opened.durable.image.accepted[issue.index]? with
+              | none => simp [found] at issueBytes
+              | some record =>
+                simp only [found, Option.map_some, Option.some.injEq] at issueBytes
+                have exact := (lawful_encode_injective
+                  DurableReceiverCodec.intentStream.toLawful) issueBytes
+                simpa only [found, Option.some.injEq] using exact
+            if grantBytes : (opened.durable.image.accepted[grant.index]?.map
+                DurableReceiverCodec.intentStream.encode) =
+                some (DurableReceiverCodec.intentStream.encode grant.record) then
+              have grantPresent : opened.durable.image.accepted[grant.index]? =
+                  some grant.record := by
+                cases found : opened.durable.image.accepted[grant.index]? with
+                | none => simp [found] at grantBytes
+                | some record =>
+                  simp only [found, Option.map_some, Option.some.injEq] at grantBytes
+                  have exact := (lawful_encode_injective
+                    DurableReceiverCodec.intentStream.toLawful) grantBytes
+                  simpa only [found, Option.some.injEq] using exact
+              if reserveBytes : (opened.durable.image.accepted[reserve.index]?.map
+                  DurableReceiverCodec.intentStream.encode) =
+                  some (DurableReceiverCodec.intentStream.encode reserve.raw.record) then
+                have reservePresent : opened.durable.image.accepted[reserve.index]? =
+                    some reserve.raw.record := by
+                  cases found : opened.durable.image.accepted[reserve.index]? with
+                  | none => simp [found] at reserveBytes
+                  | some record =>
+                    simp only [found, Option.map_some, Option.some.injEq] at reserveBytes
+                    have exact := (lawful_encode_injective
+                      DurableReceiverCodec.intentStream.toLawful) reserveBytes
+                    simpa only [found, Option.some.injEq] using exact
+                if untouched : dispatchPurseUntouched
+                    (opened.durable.image.accepted.drop (reserve.index + 1))
+                    ingress.reserveContext.base.purseTask then
+                  match reservedExact : ApplicationAgentLifetimeDispatchReserveCore.bindContext
+                      reserve.raw ingress.reserveContext with
+                  | .error detail => return .error detail
+                  | .ok reserved =>
+                    match ← ApplicationAgentLifetimeDispatchCore.checkCurrent config opened
+                        ingress issue.evidence.spec issue.evidence.descriptor
+                        grant.ingress.spec.grant issue.index issue.receipt
+                        issue.evidence.ingressBytes grant.index grant.finalRoot reserved with
+                    | .error detail => return .error detail
+                    | .ok checked =>
+                      return .ok ⟨issue, grant, reserve, rfl, event22, issueBeforeGrant,
+                        grantBeforeReserve, reserveIndex, issuePresent, grantPresent,
+                        reservePresent, untouched, reserved, reservedExact, checked⟩
+                else return .error "lifetime dispatch purse changed after reserve"
+              else return .error "lifetime dispatch original reserve record differs"
+            else return .error "lifetime dispatch original grant record differs"
+          else return .error "lifetime dispatch original ticket record differs"
+        else return .error "lifetime dispatch reserve index differs"
+      else return .error "lifetime dispatch reserve predates certified grant"
+    else return .error "lifetime dispatch grant predates original ticket"
+  else return .error "lifetime dispatch ticket was not event22"
+
 private def admitClaimAt (config : Config) (opened : Opened config)
     (begins : List (PriorBegin config))
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
@@ -1110,6 +1267,7 @@ private def derive (config : Config) (opened : Opened config)
     (beginsV3 : List (PriorBeginV3 config))
     (claimsV3 : List (PriorClaimV3 config))
     (createdV3 : List (PriorCreatedV3 config))
+    (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
     (bytes : List UInt8) :
@@ -1119,12 +1277,12 @@ private def derive (config : Config) (opened : Opened config)
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
-    | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none⟩
+    | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseAdmission.admit config opened ingress with
     | .error _ => return .error "historical selected release admission refused"
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨accepted.intent config opened ingress, .selectiveRelease accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode bytes then
     unless frontier.registrationAbsent ingress.spec.consumerNamespace do
       return .error "fn consumer namespace already registered"
@@ -1134,7 +1292,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened legacy ingress,
-          .fnConsumerNamespace accepted, none, none, none, none, none, none, none, none⟩
+          .fnConsumerNamespace accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectedPollCoverage.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
       | return .error "historical selected fn frontier is ambiguous"
@@ -1148,7 +1306,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened cursor original registration ingress,
-          .fnSelectedPoll accepted, none, none, none, none, none, none, none, none⟩
+          .fnSelectedPoll accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnEmptyPollProgressV2.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
       | return .error "historical empty fn frontier is ambiguous"
@@ -1159,7 +1317,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok accepted =>
         return .ok ⟨accepted.intent config opened cursor registration ingress,
-          .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none⟩
+          .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
     match ← ApplicationShareIssueAdmission.admitNative config.profile config opened.pins
         config.signature opened.durable height bytes with
@@ -1167,7 +1325,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueReceiver.intent accepted,
           .applicationShareIssue accepted, some (.legacy issueIngress accepted rfl),
-          none, none, none, none, none, none, none⟩
+          none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueGrainSource.codec.decode bytes).isSome then
     let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
     match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config opened.pins
@@ -1176,12 +1334,17 @@ private def derive (config : Config) (opened : Opened config)
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
           .applicationGrainShareIssue accepted, some (.grain issueIngress accepted rfl),
-          none, none, none, none, none, none, none⟩
+          none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes then
     match ← admitLifetimeGrantIssueAt config opened issues ingress with
     | .error detail => return .error detail
     | .ok admitted => return .ok ⟨admitted.intent,
-        .applicationAgentLifetimeGrantIssue admitted, none, none, none, none, none, none, none, none⟩
+        .applicationAgentLifetimeGrantIssue admitted, none, none, none, none, none,
+        none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩⟩
+  if let some ingress := ApplicationAgentLifetimeDispatchIngress.codec.decode bytes then
+    match ← admitLifetimeDispatchAt config opened grants reserves ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
   if let some ingress := ApplicationDispatchAgentIngress.codec.decode bytes then
     match ← admitAgentDispatchAt config opened issues reserves ingress with
     | .error detail => return .error detail
@@ -1190,33 +1353,33 @@ private def derive (config : Config) (opened : Opened config)
     match ← admitDispatchAt config opened issues ingress with
     | .error detail => return .error detail
     | .ok admitted =>
-        return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseSourceReceiver.admitLoaded config opened ingress with
     | .error _ => return .error "historical selected source publication admission refused"
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨accepted.intent config opened ingress, .selectedSourcePublication accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes then
     match ← admitCompletionV2At config opened claimsV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleCompletionV2 admitted,
           none, none, none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none⟩
   if let some ingress := ApplicationLifecycleClaimV3Ingress.codec.decode bytes then
     match ← admitClaimV3At config opened beginsV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleClaimV3 admitted,
           none, none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩, none⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes then
     match ← admitBeginV3At config opened createdV3 ingress with
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
           none, none, none, none, none,
-          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none⟩
+          some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none⟩
   if let some ingress := ApplicationLifecycleCompletionIngress.codec.decode bytes then
     match ← admitCompletionAt config opened claimsV2 ingress with
     | .error detail => return .error detail
@@ -1226,25 +1389,25 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok admitted =>
         return .ok ⟨admitted.intent, .applicationLifecycleClaimV2 admitted,
-          none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none⟩
+          none, none, none, some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleClaimIngress.codec.decode bytes then
     match ← admitClaimAt config opened begins ingress with
     | .error detail => return .error detail
     | .ok admitted =>
-        return .ok ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none, none, none, none⟩
+        return .ok ⟨admitted.intent, .applicationLifecycleClaim admitted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode bytes then
     match ← ApplicationLifecycleBeginV2Admission.admitNative config.deployment
         config.profile ⟨config.federation, height⟩ config.signature opened.durable ingress with
     | .error _ => return .error "historical descriptor-bound lifecycle BEGIN refused"
     | .ok accepted =>
         return .ok ⟨accepted.intent, .applicationLifecycleBeginV2 accepted,
-          none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none⟩
+          none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none⟩
   if let some ingress := ApplicationLifecycleBeginIngress.codec.decode bytes then
     match ← ApplicationLifecycleBeginReceiver.admitLoaded config.deployment config.profile
         ⟨config.federation, height⟩ config.signature opened.durable ingress with
     | .error _ => return .error "historical application lifecycle begin admission refused"
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
-        none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none⟩
+        none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
     match pinned : config.grainBirthTariffValue with
     | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"
@@ -1265,27 +1428,27 @@ private def derive (config : Config) (opened : Opened config)
                 | .error _ => return .error "historical grain-backed birth admission refused"
                 | .ok accepted =>
                     return .ok ⟨GrainResourceBirthReceiver.intent accepted,
-                      .grainBirth pinned accepted, none, none, none, none, none, none, none, none⟩
+                      .grainBirth pinned accepted, none, none, none, none, none, none, none, none, none⟩
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
           opened.pins config.signature opened.durable height ingress with
       | .error reason => return .error s!"birth admission refused: {repr reason}"
-      | .ok accepted => return .ok ⟨ResourceBirthReceiver.intent accepted, .birth accepted, none, none, none, none, none, none, none, none⟩
+      | .ok accepted => return .ok ⟨ResourceBirthReceiver.intent accepted, .birth accepted, none, none, none, none, none, none, none, none, none⟩
   | none =>
     match PolicyInstallReceiver.decodeIngress bytes with
     | some ingress =>
         match ← PolicyInstallReceiver.admitDecodedNative config.profile config.deployment config.signature
             opened.durable config.federation height ingress with
         | .error reason => return .error s!"policy installation refused: {repr reason}"
-        | .ok accepted => return .ok ⟨PolicyInstallReceiver.intent accepted, .install accepted, none, none, none, none, none, none, none, none⟩
+        | .ok accepted => return .ok ⟨PolicyInstallReceiver.intent accepted, .install accepted, none, none, none, none, none, none, none, none, none⟩
     | none =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
       | some ingress =>
           match ← CapabilityDelegationReceiver.admitDecodedNative config.deployment config.profile
               ⟨config.federation, height⟩ opened.durable config.signature ingress with
           | .error reason => return .error s!"delegation refused: {repr reason}"
-          | .ok accepted => return .ok ⟨CapabilityDelegationReceiver.intent accepted, .delegate accepted, none, none, none, none, none, none, none, none⟩
+          | .ok accepted => return .ok ⟨CapabilityDelegationReceiver.intent accepted, .delegate accepted, none, none, none, none, none, none, none, none, none⟩
       | none =>
         match DeclaredResourceController.decodeSignedBytes bytes with
         | none => return .error "unsupported or noncanonical signed historical ingress"
@@ -1304,7 +1467,7 @@ private def derive (config : Config) (opened : Opened config)
                   | .error reason => return .error s!"invocation admission refused: {repr reason}"
                   | .ok accepted => return .ok ⟨accepted.dataIntent shape,
                       .invoke prepared signed shape accepted, none, none, none, none,
-                      some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none⟩
+                      some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none, none⟩
                 else return .error "historical invocation physical shape refused"
 
 /-- Compare the complete existing canonical record codec. Function-valued
@@ -1492,6 +1655,25 @@ private def createdV3After (config : Config) (opened : Opened config)
           isCreated, ⟨opened, admitted.conditional, recordExact⟩⟩ :: created
       else created
 
+private def grantsAfter (config : Config) (opened : Opened config)
+    (grants : List (PriorLifetimeGrant config))
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
+    (derived : Derived config opened)
+    (matched : recordMatches record derived.intent = true) :
+    List (PriorLifetimeGrant config) :=
+  match derived.grantIssue with
+  | none => grants
+  | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
+      let recordExact : record = DurableReceiver.IntentRecord.ofIntent
+          admitted.intent := by
+        rw [← intentExact]
+        exact (recordMatches_iff record derived.intent).mp matched
+      let finalRoot := (ApplicationAgentLifetimeGrantAtomicBirth.initializedWrite
+        admitted.current.sourceReady).exactPost
+      ⟨opened.durable.image.accepted.length, receipt, ingress, record,
+        admitted.prior, finalRoot,
+        ⟨opened, admitted, rfl, rfl, recordExact⟩⟩ :: grants
+
 /-- A suffix admission cannot erase issue provenance already certified at the
 old exact tip. In particular, `extendVerified` retains its old context. -/
 private theorem issuesAfter_preserves_prior (config : Config) (opened : Opened config)
@@ -1628,6 +1810,7 @@ private structure Walked (config : Config) (start : Opened config)
   beginsV3 : List (PriorBeginV3 config)
   claimsV3 : List (PriorClaimV3 config)
   createdV3 : List (PriorCreatedV3 config)
+  grants : List (PriorLifetimeGrant config)
 
 /-- Called only after the original record was natively admitted, matched in
 full, advanced, and validated by this replay walk. A legacy tag9 is merely a
@@ -1691,17 +1874,18 @@ private def walk (config : Config) (opened : Opened config)
     (beginsV3 : List (PriorBeginV3 config))
     (claimsV3 : List (PriorClaimV3 config))
     (createdV3 : List (PriorCreatedV3 config))
+    (grants : List (PriorLifetimeGrant config))
     (frontier : FnConsumerFrontierReplay.Audit)
     (releases : List PriorSelectedRelease)
     (selectIndex : Option Nat) :
     (records : List DurableReceiver.IntentRecord) →
     IO (Except Failure (Walked config opened records))
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
-      frontier, releases, beginsV3, claimsV3, createdV3⟩)
+      frontier, releases, beginsV3, claimsV3, createdV3, grants⟩)
   | record :: rest => do
       let index := opened.durable.image.accepted.length
       match ← derive config opened issues reserves begins beginsV2 claimsV2
-          beginsV3 claimsV3 createdV3 frontier releases
+          beginsV3 claimsV3 createdV3 grants frontier releases
           record.event.canonicalBytes with
       | .error detail => return .error ⟨index, detail⟩
       | .ok derived =>
@@ -1724,11 +1908,13 @@ private def walk (config : Config) (opened : Opened config)
               let nextClaimsV3 := claimsV3After config opened claimsV3 record derived matched
               let nextCreatedV3 := createdV3After config opened createdV3 record receipt
                 derived matched
+              let nextGrants := grantsAfter config opened grants record receipt derived matched
               let .ok nextFrontier := frontierAfter config frontier record receipt
                 | return .error ⟨index, "fn consumer frontier transition refused"⟩
               let nextReleases := selectedReleaseAfter config after releases record receipt
               match ← walk config after nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
-                  nextBeginsV3 nextClaimsV3 nextCreatedV3 nextFrontier nextReleases selectIndex rest with
+                  nextBeginsV3 nextClaimsV3 nextCreatedV3 nextGrants
+                  nextFrontier nextReleases selectIndex rest with
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
@@ -1746,7 +1932,7 @@ private def walk (config : Config) (opened : Opened config)
                 return .ok ⟨tail.final, receipt :: tail.receipts,
                   .cons step tail.trace, selectedAt, tail.issues, tail.reserves, tail.begins,
                   tail.beginsV2, tail.claimsV2, tail.frontier, tail.releases,
-                  tail.beginsV3, tail.claimsV3, tail.createdV3⟩
+                  tail.beginsV3, tail.claimsV3, tail.createdV3, tail.grants⟩
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 
@@ -1771,6 +1957,7 @@ structure Verified (config : Config) (target : Durable) where
   beginsV3 : List (PriorBeginV3 config)
   claimsV3 : List (PriorClaimV3 config)
   createdV3 : List (PriorCreatedV3 config)
+  grants : List (PriorLifetimeGrant config)
 
 /-- Per-scope current frontier minted by this exact admitted-history walk.
 Ambiguous historical v1 progress refuses new ordered progress for that scope. -/
@@ -1806,7 +1993,7 @@ def deriveVerified {config : Config} {target : Durable}
     (old : Verified config target) (bytes : List UInt8) :
     IO (Except String (Derived config old.opened)) :=
   derive config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
-    old.beginsV3 old.claimsV3 old.createdV3 old.frontier old.releases bytes
+    old.beginsV3 old.claimsV3 old.createdV3 old.grants old.frontier old.releases bytes
 
 /-- A fresh v2 BEGIN is checked on the same verified current image and then
 converted to the exact native admission used by physical CAS readback. Its
@@ -1839,7 +2026,7 @@ def admitBeginV3Verified {config : Config} {target : Durable}
     | .ok admitted => pure admitted
   return .ok ⟨admitted.intent, .applicationLifecycleBeginV3 admitted,
     none, none, none, none, none,
-    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none⟩
+    some ⟨ingress, ⟨admitted, rfl⟩⟩, none, none, none⟩
 
 def beginV2Derived {config : Config} {target : Durable}
     (old : Verified config target)
@@ -1850,7 +2037,7 @@ def beginV2Derived {config : Config} {target : Durable}
       old.opened.durable ingress) : Derived config old.opened :=
   ⟨accepted.intent, .applicationLifecycleBeginV2 accepted,
     none, none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none,
-    none, none, none⟩
+    none, none, none, none⟩
 
 def admitCompletionVerified {config : Config} {target : Durable}
     (old : Verified config target)
@@ -1910,6 +2097,14 @@ def admitAgentDispatchVerified {config : Config} {target : Durable}
     (ingress : ApplicationDispatchAgentIngress.Ingress) :
     IO (Except String (AgentDispatchAt config old.opened ingress)) :=
   admitAgentDispatchAt config old.opened old.issues old.reserves ingress
+
+/-- Fresh event26 admission receives historical authority only from the exact
+verified tip's ticket, initialized grant and signed v3 reserve certificates. -/
+def admitLifetimeDispatchVerified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationAgentLifetimeDispatchIngress.Ingress) :
+    IO (Except String (LifetimeDispatchAt config old.opened ingress)) :=
+  admitLifetimeDispatchAt config old.opened old.grants old.reserves ingress
 
 /-- The final comparison binds the full finite image, not merely a digest or
 its materialized state. No collision-resistance hypothesis is involved. -/
@@ -1996,6 +2191,8 @@ def extendExact {config : Config} {oldTarget : Durable}
     record readback.derived matched
   let createdV3 := createdV3After config old.opened old.createdV3
     record receipt readback.derived matched
+  let grants := grantsAfter config old.opened old.grants
+    record receipt readback.derived matched
   -- Existing exact-readback callers are non-frontier operations. If a future
   -- caller extends a frontier event whose transition unexpectedly fails,
   -- poison all frontier projections rather than keeping the prior cursor.
@@ -2006,7 +2203,7 @@ def extendExact {config : Config} {oldTarget : Durable}
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
   exact ⟨old.origin, readback.after, exactBytes, old.receipts ++ [receipt], countExact,
     admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
-    beginsV3, claimsV3, createdV3⟩
+    beginsV3, claimsV3, createdV3, grants⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
 subsequent current tip will contain more accepted entries. -/
@@ -2119,7 +2316,7 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2127,7 +2324,7 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
             return .ok ⟨opened, walked.final, exactBytes, walked.receipts,
               countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
               walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
-              walked.beginsV3, walked.claimsV3, walked.createdV3⟩
+              walked.beginsV3, walked.claimsV3, walked.createdV3, walked.grants⟩
           else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
         else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
 
@@ -2172,7 +2369,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     match validateLoaded config initial with
     | .error detail => return .error ⟨0, s!"pinned genesis: {detail}"⟩
     | .ok opened =>
-      match ← walk config opened [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
+      match ← walk config opened [] [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
         if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2185,7 +2382,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
                   ⟨opened, walked.final, exactBytes, walked.receipts,
                     countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
                     walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
-                    walked.beginsV3, walked.claimsV3, walked.createdV3⟩
+                    walked.beginsV3, walked.claimsV3, walked.createdV3, walked.grants⟩
                 return .ok ⟨verified, selected, indexExact⟩
               else return .error ⟨index, "selected native checkpoint index mismatch"⟩
           else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
@@ -2211,7 +2408,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
         oldTarget.image.accepted then
     let suffix := target.image.accepted.drop count
     match ← walk config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
-        old.beginsV3 old.claimsV3 old.createdV3 old.frontier old.releases none suffix with
+        old.beginsV3 old.claimsV3 old.createdV3 old.grants old.frontier old.releases none suffix with
     | .error failure => return .error failure
     | .ok walked =>
       if exactBytes : walked.final.durable.bytes = target.bytes then
@@ -2234,7 +2431,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
           return .ok ⟨old.origin, walked.final, exactBytes, receipts, countExact,
             admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
             walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
-            walked.createdV3⟩
+            walked.createdV3, walked.grants⟩
         else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
       else return .error ⟨target.image.accepted.length, "verified canonical tip mismatch"⟩
   else
