@@ -193,7 +193,8 @@ jq -e '.page.document == "8303" and .page.entries == []' \
 
 # The same worker's ordinary bare birth has valid source-account authority,
 # but the installed factory law has no grain-backed mode slot on that route.
-# Require the native birth admission refusal, not an arbitrary CLI failure.
+# The public native submit boundary intentionally erases the internal refusal
+# reason; require that exact public admission refusal after a prepared call.
 jq --slurpfile observed "$EVIDENCE/owner-bare-content/challenge.json" \
   '{subject:"8",nonce:"42000",
     birth:(.grainBirth.birth | .nonce="42000" |
@@ -211,11 +212,13 @@ if "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$EVIDENCE/worker-bare.stdout" 2>"$EVIDENCE/worker-bare.stderr"; then
   echo "worker bare birth unexpectedly accepted" >&2; exit 1
 fi
-POLICY_REJECTION=$(printf '%s' \
-  'admission: Minidregg.Kernel.ResourceBirthPolicyController.Reject.policyRejected' \
-  | od -An -tx1 -v | tr -d ' \n')
-jq -e --arg policy_rejection "$POLICY_REJECTION" \
-  '.type == "refused" and .phase == "6269727468" and
-    .detail == $policy_rejection' \
+test -s "$EVIDENCE/worker-bare-attempt/plan.bin"
+test -s "$EVIDENCE/worker-bare-attempt/call.bin"
+jq -e '.type == "refused" and .phase == "61646d697373696f6e" and
+  .detail == "726571756573742072656675736564"' \
   "$EVIDENCE/worker-bare-attempt/outcome.json" >/dev/null
+query worker-bare-post 7 8303 103 "$EVIDENCE/controller.key" 42010
+jq -e --slurpfile before "$EVIDENCE/owner-bare-content/challenge.json" \
+  '.imageBoundary == $before[0].imageBoundary' \
+  "$EVIDENCE/worker-bare-post/challenge.json" >/dev/null
 echo "grain-backed resource birth native acceptance PASS"

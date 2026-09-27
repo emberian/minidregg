@@ -30,4 +30,10 @@ the independent Persvati snapshot, log `/tmp/grain-birth-host-json-height.log`
 (SHA-256 `b7f13027a7525cb9ada3a5ffd8ae1f2ed5e91ff7b0928d9c3ddaf10d8cd368a0`,
 final line `Build completed successfully (3109 jobs).`); fixed source SHA-256 is
 `31f400a1d483e0e9fb400fd5a2790f0cfdb497dc5ab9b4f6a2d989a22d863a06`.
-No successful r3 or hosted Hermes result is claimed by these artifacts.
+
+The distinct [r3 native result](r3/README.md) used the height-fixed Host.
+It installed a grain-backed content birth and an owner bare-birth control.
+The original script then exited on an over-specific internal-refusal
+assertion; a separate read-only signed check confirmed the exact public
+refusal and unchanged logical image. No hosted Hermes resource birth is
+claimed by these artifacts.
