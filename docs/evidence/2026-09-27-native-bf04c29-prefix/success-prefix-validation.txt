@@ -1,0 +1,2 @@
+successful_baseline=/home/ember/build/minidregg-overnight-20260927-operator-evidence/build-r1
+verified_prefix_modules=254

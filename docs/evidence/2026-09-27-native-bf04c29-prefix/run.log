@@ -1,0 +1,62 @@
+successful-prefix reuse check PASS 254 compiled prefix modules
+lean[255/274] Host.ApplicationLifecycleBeginOperator start
+lean[255/274] Host.ApplicationLifecycleBeginOperator PASS 6s
+lean[256/274] Host.ApplicationLifecycleClaimOperator start
+lean[256/274] Host.ApplicationLifecycleClaimOperator PASS 3s
+lean[257/274] Host.FnConsumerNamespacePlan start
+lean[257/274] Host.FnConsumerNamespacePlan PASS 4s
+lean[258/274] Kernel.ApplicationGrainBirth start
+lean[258/274] Kernel.ApplicationGrainBirth PASS 3s
+lean[259/274] Kernel.ApplicationGrainSessionBirth start
+lean[259/274] Kernel.ApplicationGrainSessionBirth PASS 3s
+lean[260/274] Host.ApplicationPermissionSchemaAuthoring start
+lean[260/274] Host.ApplicationPermissionSchemaAuthoring PASS 3s
+lean[261/274] Host.Json start
+lean[261/274] Host.Json PASS 8s
+lean[262/274] Kernel.FnSelectiveReleaseArticle start
+lean[262/274] Kernel.FnSelectiveReleaseArticle PASS 3s
+lean[263/274] Host.FnSelectiveReleaseAuthoring start
+lean[263/274] Host.FnSelectiveReleaseAuthoring PASS 4s
+lean[264/274] Host.FnSelectiveReleaseSourceAuthoring start
+lean[264/274] Host.FnSelectiveReleaseSourceAuthoring PASS 3s
+lean[265/274] Host.FnSelectiveReleaseFnReceiving start
+lean[265/274] Host.FnSelectiveReleaseFnReceiving PASS 3s
+lean[266/274] Host.FnSelectiveReleaseFnAck start
+lean[266/274] Host.FnSelectiveReleaseFnAck PASS 3s
+lean[267/274] Host.ApplicationCurrentBirthAuthoring start
+lean[267/274] Host.ApplicationCurrentBirthAuthoring PASS 3s
+lean[268/274] Host.FnInboxView start
+lean[268/274] Host.FnInboxView PASS 3s
+lean[269/274] Host.GrainOriginSource start
+lean[269/274] Host.GrainOriginSource PASS 3s
+lean[270/274] Host.GrainOriginPreparation start
+lean[270/274] Host.GrainOriginPreparation PASS 3s
+lean[271/274] Host.GrainOriginCommand start
+lean[271/274] Host.GrainOriginCommand PASS 2s
+lean[272/274] Kernel.ProviderMetering start
+lean[272/274] Kernel.ProviderMetering PASS 3s
+lean[273/274] Host.ProviderUsage start
+lean[273/274] Host.ProviderUsage PASS 3s
+lean[274/274] Host.Main start
+lean[274/274] Host.Main PASS 15s
+end_utc=2026-09-27T10:05:07Z
+elapsed_seconds=309
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-overnight-20260927-claim-next
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=20
+resumed_prefix_modules=254
+source_modules=274
+package_modules=2933
+response_objects=3207
+reusable_artifact_manifest_sha256=fd78508b492ece622586b97ea3e0b1967701a6c540b8c8586a7364a9848bfd0c
+checkpointed_success=1
+successful_baseline=/home/ember/build/minidregg-overnight-20260927-operator-evidence/build-r1
+reused_success_prefix_modules=254
+recompiled_project_c_modules=20
+usage_exit=1
+binary=/home/ember/build/minidregg-overnight-20260927-claim-evidence/minidregg-host-bf04c29-prefix-r1
+binary_sha256=cf931aae46102755a97920feed13afa36c83ef4d1bfabd2fb17dee1c8bbfa943
