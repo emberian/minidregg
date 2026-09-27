@@ -1,0 +1,17 @@
+end_utc=2026-09-27T14:22:26Z
+elapsed_seconds=932
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-cacc4ae-full-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=338
+resumed_prefix_modules=0
+source_modules=338
+package_modules=2933
+response_objects=3271
+reusable_artifact_manifest_sha256=c35dcdf30427ea8898de1830e366ac096c907c09ecbcf4a5df33c12641e6c5dc
+usage_exit=1
+binary=/home/ember/build/minidregg-cacc4ae-full-evidence/minidregg-host-cacc4ae-r1
+binary_sha256=0fc79b5904a7919f46ea1564041ee5199a620b2a8dd9dd7a175a4b50dcd0a996
