@@ -1,0 +1,13 @@
+{
+  "type": "minidregg-application-permission-schema-source-v1",
+  "version": "7",
+  "permissions": [
+    { "name": "read", "obsolete": false },
+    { "name": "edit", "obsolete": true }
+  ],
+  "roles": [
+    { "permissions": [true, false], "obsolete": false, "default": true },
+    { "permissions": [true, true], "obsolete": true, "default": false }
+  ],
+  "denied": [false, true]
+}

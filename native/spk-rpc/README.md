@@ -38,6 +38,12 @@ rejects duplicate/invalid permission names and multiple defaults. It preserves
 bitset lengths rather than treating missing bits as an authorization rule;
 the Mini controller must reconcile a committed descriptor with current sharing
 authority before it supplies session permissions.
+`permission_schema_source_bytes` projects those exact ordered role-relevant
+fields to bounded JSON for Lean authoring, with an explicitly supplied schema
+version because ViewInfo has none. The source JSON is untrusted; the Lean
+`Host.ApplicationPermissionSchemaAuthoring` parser validates it and emits the
+strict canonical schema bytes/root. This crate does not hash an authoritative
+schema or pack effective permission bits into a dispatch identity.
 The latter sends exact typed request content, cookies, accept/encoding,
 ETag preconditions, and whitelisted additional headers. It returns the
 Sandstorm response union, status where the union defines one, response

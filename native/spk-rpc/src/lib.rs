@@ -4,8 +4,10 @@
 //! must check resource, generation, subject, grant and exact operation before
 //! giving it an approved session. There is no public listener here.
 
+mod permission_schema;
 mod protocol;
 mod web;
+pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};
 pub use protocol::{
     InlineResponse, LocalizedText, PermissionDefinition, RoleDefinition, SessionParameters,
     SupervisorConnection, ViewInfo,

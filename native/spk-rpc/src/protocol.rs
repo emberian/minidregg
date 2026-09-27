@@ -634,6 +634,19 @@ mod tests {
                 assert!(info.roles[0].default);
                 assert_eq!(info.roles[1].permissions, [true, true]);
                 assert!(info.roles[1].obsolete);
+                let source = crate::permission_schema_source_bytes(&info, 7).unwrap();
+                let value: serde_json::Value = serde_json::from_slice(&source).unwrap();
+                assert_eq!(value["version"], "7");
+                assert_eq!(value["permissions"][0]["name"], "read");
+                assert_eq!(value["permissions"][1]["obsolete"], true);
+                assert_eq!(value["roles"][0]["permissions"], serde_json::json!([true, false]));
+                assert_eq!(value["roles"][0]["default"], true);
+                assert_eq!(value["denied"], serde_json::json!([false, true]));
+                let pinned_source: serde_json::Value = serde_json::from_str(include_str!(
+                    "../tests/fixtures/permission-schema-source-v1.json"
+                ))
+                .unwrap();
+                assert_eq!(value, pinned_source);
                 observed.borrow_mut().view_fault = 1;
                 assert!(host.get_view_info().await.is_err());
                 observed.borrow_mut().view_fault = 2;

@@ -210,4 +210,39 @@ def withinCeiling (requested ceiling : List Bool) : Prop :=
 theorem withinCeiling_refl (bits : List Bool) : withinCeiling bits bits := by
   simp [withinCeiling]
 
+/-- Mini dispatch packs permission ID `i` into Nat bit `2^i`. This explicit
+mapping is distinct from Cap'n Proto's wire encoding of `List(Bool)`. -/
+def bitsToNat : List Bool → Nat
+  | [] => 0
+  | bit :: rest => (if bit then 1 else 0) + 2 * bitsToNat rest
+
+def natToBits : Nat → Nat → List Bool
+  | 0, _ => []
+  | width + 1, value => (value % 2 == 1) :: natToBits width (value / 2)
+
+theorem bitsToNat_width (bits : List Bool) : bitsToNat bits < 2 ^ bits.length := by
+  induction bits with
+  | nil => simp [bitsToNat]
+  | cons bit rest ih =>
+      cases bit <;> simp [bitsToNat, pow_succ] <;> omega
+
+theorem natToBits_bitsToNat (bits : List Bool) :
+    natToBits bits.length (bitsToNat bits) = bits := by
+  induction bits with
+  | nil => rfl
+  | cons bit rest ih =>
+      cases bit with
+      | false => simpa [bitsToNat, natToBits] using ih
+      | true =>
+          have div : (1 + 2 * bitsToNat rest) / 2 = bitsToNat rest := by omega
+          simpa [bitsToNat, natToBits, div] using ih
+
+theorem bitsToNat_injective_at_width (left right : List Bool)
+    (sameWidth : left.length = right.length)
+    (sameValue : bitsToNat left = bitsToNat right) : left = right := by
+  calc
+    left = natToBits left.length (bitsToNat left) := (natToBits_bitsToNat left).symm
+    _ = natToBits right.length (bitsToNat right) := by rw [sameWidth, sameValue]
+    _ = right := natToBits_bitsToNat right
+
 end Minidregg.Kernel.ApplicationPermissionSchema
