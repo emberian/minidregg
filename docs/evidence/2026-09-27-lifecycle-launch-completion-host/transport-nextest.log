@@ -1,0 +1,8 @@
+   Compiling minidregg-resource-client v0.1.0 (/Users/ember/dev/minidregg/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.70s
+────────────
+ Nextest run ID 2cc79cec-02ca-4bb4-a7d4-8d7dafa1c4f3 with nextest profile: default
+    Starting 1 test across 1 binary (89 tests skipped)
+        PASS [   0.009s] (1/1) minidregg-resource-client::bin/mini transport::tests::namespace_and_lifecycle_authoring_routes_stay_private_and_bounded
+────────────
+     Summary [   0.010s] 1 test run: 1 passed, 89 skipped

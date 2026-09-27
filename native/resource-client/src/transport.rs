@@ -140,7 +140,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
-        | 66 | 68, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        | 66 | 68 | 70, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
         // Event17/19 testimony and receipt-only lookups remain on the owner
         // operator socket. The public listener cannot advance a fn frontier.
@@ -178,7 +178,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45 | 49 | 51 | 53 | 57 | 59 | 67 | 69, pair @ ..]
+        [45 | 49 | 51 | 53 | 57 | 59 | 67 | 69 | 71, pair @ ..]
             if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME =>
         {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
@@ -1169,7 +1169,7 @@ mod tests {
         assert!(!allowed_operation(&grain_share_assembly, true));
         assert!(!allowed_operator_operation(&[57, 1, 0, 0, 0, b'P']));
 
-        for operation in [60, 61, 62, 63, 64, 66, 68] {
+        for operation in [60, 61, 62, 63, 64, 66, 68, 70] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operator_operation(&[operation]));
             assert!(!allowed_operation(&[operation, 1], true));
@@ -1193,6 +1193,12 @@ mod tests {
         assert!(allowed_operator_operation(&launch_claim_assembly));
         assert!(!allowed_operation(&launch_claim_assembly, true));
         assert!(!allowed_operator_operation(&[69, 1, 0, 0, 0, b'P']));
+        let mut launch_completion_assembly = vec![71];
+        launch_completion_assembly.extend(1u32.to_le_bytes());
+        launch_completion_assembly.extend(*b"PS");
+        assert!(allowed_operator_operation(&launch_completion_assembly));
+        assert!(!allowed_operation(&launch_completion_assembly, true));
+        assert!(!allowed_operator_operation(&[71, 1, 0, 0, 0, b'P']));
     }
 
     #[test]

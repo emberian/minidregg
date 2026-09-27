@@ -26,7 +26,8 @@ plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch
 63=empty fn progress receipt-only lookup, 64=private fn frontier plan,
 65=private fn frontier detached assembly, 66=private source-bound launch BEGIN
 plan, 67=private source-bound launch BEGIN detached assembly, 68=private launch
-claim plan, 69=private launch claim detached assembly. Op34/46 success uses a distinct
+claim plan, 69=private launch claim detached assembly, 70=private launch completion plan,
+71=private launch completion detached assembly. Op34/46 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -78,6 +79,9 @@ import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimAuthoring
 import Host.ApplicationLifecycleLaunchClaimInspection
+import Host.ApplicationLifecycleLaunchCompletionAuthoring
+import Host.ApplicationLifecycleLaunchCompletionInspection
+import Host.ApplicationLifecycleClaimV3Inspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Host.FnConsumerFrontierPlan
@@ -514,6 +518,8 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
     ApplicationLifecycleClaimInspection.inspect bytes
+  else if kind == "application-lifecycle-claim-committed-v3" then
+    ApplicationLifecycleClaimV3Inspection.inspect bytes
   else if kind == "fn-consumer-namespace-plan" then
     FnConsumerNamespacePlan.inspectPlanBytes bytes
   else if kind == "fn-consumer-frontier-plan" then
@@ -534,6 +540,10 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleLaunchClaimInspection.inspectRequest bytes
   else if kind == "application-lifecycle-launch-claim-plan" then
     ApplicationLifecycleLaunchClaimInspection.inspectPlan bytes
+  else if kind == "application-lifecycle-launch-completion-request" then
+    ApplicationLifecycleLaunchCompletionInspection.inspectRequest bytes
+  else if kind == "application-lifecycle-launch-completion-plan" then
+    ApplicationLifecycleLaunchCompletionInspection.inspectPlan bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -4318,7 +4328,8 @@ def run (arguments : List String) : IO UInt32 := do
           let source ← if kind == "application-dispatch-request" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-lifecycle-launch-begin-request" ||
-              kind == "application-lifecycle-launch-continue-request" then
+              kind == "application-lifecycle-launch-continue-request" ||
+              kind == "application-lifecycle-launch-completion-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4327,6 +4338,7 @@ def run (arguments : List String) : IO UInt32 := do
           let bytes ← if kind == "fn-inbox-resource" ||
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
+              kind == "application-lifecycle-claim-committed-v3" ||
               kind == "fn-consumer-namespace-plan" ||
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
@@ -4336,6 +4348,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-begin-plan" ||
               kind == "application-lifecycle-launch-claim-request" ||
               kind == "application-lifecycle-launch-claim-plan" ||
+              kind == "application-lifecycle-launch-completion-request" ||
+              kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4344,6 +4358,7 @@ def run (arguments : List String) : IO UInt32 := do
           let value ← IO.ofExcept (inspectHost kind bytes)
           if kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
+              kind == "application-lifecycle-claim-committed-v3" ||
               kind == "fn-consumer-namespace-plan" ||
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
@@ -4353,6 +4368,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-begin-plan" ||
               kind == "application-lifecycle-launch-claim-request" ||
               kind == "application-lifecycle-launch-claim-plan" ||
+              kind == "application-lifecycle-launch-completion-request" ||
+              kind == "application-lifecycle-launch-completion-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4725,6 +4742,29 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch claim ingress exceeds host frame bound")
                             return ((69 : UInt8), ingress)
+                        | 70 =>
+                            let some custody := settings.completionManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-launch-completion-author"
+                                  "completion management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload)
+                            let bytes := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch completion plan exceeds host frame bound")
+                            return ((70 : UInt8), bytes)
+                        | 71 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical launch completion plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleLaunchCompletionAuthoring.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch completion ingress exceeds host frame bound")
+                            return ((71 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"
