@@ -1,0 +1,447 @@
+start_utc=2026-09-27T07:21:04Z
+root=/home/ember/build/minidregg-overnight-20260927-success-prefix-base
+lean_threads=2
+native_jobs=2
+seat=/home/ember/build/minidregg-overnight-20260927-success-prefix-evidence/cycle-r2/lean-seat-1
+lean[1/212] Pred.Core start
+lean[1/212] Pred.Core PASS 1s
+lean[2/212] Compiler.Signature start
+lean[2/212] Compiler.Signature PASS 1s
+lean[3/212] Compiler.Air start
+lean[3/212] Compiler.Air PASS 2s
+lean[4/212] Compiler.AirRange start
+lean[4/212] Compiler.AirRange PASS 2s
+lean[5/212] Compiler.PredOrderGadget start
+lean[5/212] Compiler.PredOrderGadget PASS 2s
+lean[6/212] Compiler.PredCompile start
+lean[6/212] Compiler.PredCompile PASS 5s
+lean[7/212] Theory.BinaryTower start
+lean[7/212] Theory.BinaryTower PASS 2s
+lean[8/212] Theory.BinaryTowerFanPaar start
+lean[8/212] Theory.BinaryTowerFanPaar PASS 3s
+lean[9/212] Theory.BinaryTowerTrace start
+lean[9/212] Theory.BinaryTowerTrace PASS 2s
+lean[10/212] Theory.Bignum start
+lean[10/212] Theory.Bignum PASS 2s
+lean[11/212] Theory.IndexedProgram start
+lean[11/212] Theory.IndexedProgram PASS 2s
+lean[12/212] Theory.BinaryTowerFanPaarCodec start
+lean[12/212] Theory.BinaryTowerFanPaarCodec PASS 5s
+lean[13/212] Theory.BinaryTowerCodec start
+lean[13/212] Theory.BinaryTowerCodec PASS 2s
+lean[14/212] Compiler.AirFlatten start
+lean[14/212] Compiler.AirFlatten PASS 2s
+lean[15/212] Compiler.AirHash start
+lean[15/212] Compiler.AirHash PASS 2s
+lean[16/212] Compiler.AirMembership start
+lean[16/212] Compiler.AirMembership PASS 2s
+lean[17/212] Compiler.NoteSpend start
+lean[17/212] Compiler.NoteSpend PASS 2s
+lean[18/212] Compiler.Emit start
+lean[18/212] Compiler.Emit PASS 2s
+lean[19/212] Compiler.AirBignum start
+lean[19/212] Compiler.AirBignum PASS 3s
+lean[20/212] Compiler.BabyBear start
+lean[20/212] Compiler.BabyBear PASS 3s
+lean[21/212] Compiler.EmitSerialize start
+lean[21/212] Compiler.EmitSerialize PASS 2s
+lean[22/212] Theory.CrossModulus start
+lean[22/212] Theory.CrossModulus PASS 2s
+lean[23/212] Compiler.AirModularView start
+lean[23/212] Compiler.AirModularView PASS 5s
+lean[24/212] Compiler.BignumKernelABI start
+lean[24/212] Compiler.BignumKernelABI PASS 3s
+lean[25/212] Theory.TypedAuthorization start
+lean[25/212] Theory.TypedAuthorization PASS 3s
+lean[26/212] Theory.AuthorizationDeclaration start
+lean[26/212] Theory.AuthorizationDeclaration PASS 3s
+lean[27/212] Compiler.SemanticManifest start
+lean[27/212] Compiler.SemanticManifest PASS 4s
+lean[28/212] Compiler.NativeKernelPlan start
+lean[28/212] Compiler.NativeKernelPlan PASS 3s
+lean[29/212] Selvage.CorrelatedAgreement start
+lean[29/212] Selvage.CorrelatedAgreement PASS 4s
+lean[30/212] Selvage.ReedSolomon start
+lean[30/212] Selvage.ReedSolomon PASS 3s
+lean[31/212] Selvage.ConstrainedCode start
+lean[31/212] Selvage.ConstrainedCode PASS 2s
+lean[32/212] Selvage.Accumulator start
+lean[32/212] Selvage.Accumulator PASS 3s
+lean[33/212] Selvage.Decider start
+lean[33/212] Selvage.Decider PASS 2s
+lean[34/212] Selvage.Commitment start
+lean[34/212] Selvage.Commitment PASS 2s
+lean[35/212] Compiler.AuthenticatedColumnPlan start
+lean[35/212] Compiler.AuthenticatedColumnPlan PASS 4s
+lean[36/212] Selvage.Rbr start
+lean[36/212] Selvage.Rbr PASS 2s
+lean[37/212] Selvage.Depth start
+lean[37/212] Selvage.Depth PASS 4s
+lean[38/212] Selvage.Sumcheck start
+lean[38/212] Selvage.Sumcheck PASS 2s
+lean[39/212] Selvage.SumcheckReduction start
+lean[39/212] Selvage.SumcheckReduction PASS 2s
+lean[40/212] Selvage.MultilinearExtension start
+lean[40/212] Selvage.MultilinearExtension PASS 3s
+lean[41/212] Selvage.BinaryLookup start
+lean[41/212] Selvage.BinaryLookup PASS 1s
+lean[42/212] Compiler.Tower256CshakeMerkleController start
+lean[42/212] Compiler.Tower256CshakeMerkleController PASS 3s
+lean[43/212] Compiler.TranscriptController start
+lean[43/212] Compiler.TranscriptController PASS 2s
+lean[44/212] Theory.EffectDeclaration start
+lean[44/212] Theory.EffectDeclaration PASS 3s
+lean[45/212] Compiler.DeclaredEffectArtifact start
+lean[45/212] Compiler.DeclaredEffectArtifact PASS 2s
+lean[46/212] Theory.PrivacyProfile start
+lean[46/212] Theory.PrivacyProfile PASS 2s
+lean[47/212] Theory.DisclosureDeclaration start
+lean[47/212] Theory.DisclosureDeclaration PASS 2s
+lean[48/212] Theory.GuardedAdvice start
+lean[48/212] Theory.GuardedAdvice PASS 2s
+lean[49/212] Theory.ReactiveReceipt start
+lean[49/212] Theory.ReactiveReceipt PASS 2s
+lean[50/212] Theory.ReactiveController start
+lean[50/212] Theory.ReactiveController PASS 2s
+lean[51/212] Compiler.SemanticArtifactBundle start
+lean[51/212] Compiler.SemanticArtifactBundle PASS 3s
+lean[52/212] Compiler.MinidreggV1Artifact start
+lean[52/212] Compiler.MinidreggV1Artifact PASS 2s
+lean[53/212] Compiler.BinaryTower256Profile start
+lean[53/212] Compiler.BinaryTower256Profile PASS 1s
+lean[54/212] Compiler.Sp800185Cshake256Core start
+lean[54/212] Compiler.Sp800185Cshake256Core PASS 1s
+lean[55/212] Compiler.Sp800185Cshake256 start
+lean[55/212] Compiler.Sp800185Cshake256 PASS 2s
+lean[56/212] Compiler.Tower256ConcreteBackend start
+lean[56/212] Compiler.Tower256ConcreteBackend PASS 2s
+lean[57/212] Theory.CellState start
+lean[57/212] Theory.CellState PASS 3s
+lean[58/212] Theory.DeclaredTurn start
+lean[58/212] Theory.DeclaredTurn PASS 2s
+lean[59/212] Theory.ReactiveCellTransition start
+lean[59/212] Theory.ReactiveCellTransition PASS 3s
+lean[60/212] Theory.CanonicalTransition start
+lean[60/212] Theory.CanonicalTransition PASS 2s
+lean[61/212] Theory.PrivateComputationDeclaration start
+lean[61/212] Theory.PrivateComputationDeclaration PASS 2s
+lean[62/212] Theory.AcceptedCellEffect start
+lean[62/212] Theory.AcceptedCellEffect PASS 3s
+lean[63/212] Theory.PolicyInstall start
+lean[63/212] Theory.PolicyInstall PASS 2s
+lean[64/212] Kernel.Turn start
+lean[64/212] Kernel.Turn PASS 2s
+lean[65/212] Kernel.MultiCellHyperedge start
+lean[65/212] Kernel.MultiCellHyperedge PASS 3s
+lean[66/212] Compiler.CanonicalPolicyAdmission start
+lean[66/212] Compiler.CanonicalPolicyAdmission PASS 4s
+lean[67/212] Compiler.TypedAuthorizationRequestCodec start
+lean[67/212] Compiler.TypedAuthorizationRequestCodec PASS 5s
+lean[68/212] Theory.CredentialSigningKey start
+lean[68/212] Theory.CredentialSigningKey PASS 2s
+lean[69/212] Compiler.CredentialSigningKeyCodec start
+lean[69/212] Compiler.CredentialSigningKeyCodec PASS 2s
+lean[70/212] Theory.CredentialAuthorityFamily start
+lean[70/212] Theory.CredentialAuthorityFamily PASS 2s
+lean[71/212] Theory.CredentialAuthorityState start
+lean[71/212] Theory.CredentialAuthorityState PASS 2s
+lean[72/212] Compiler.CredentialAuthorityEntryCodec start
+lean[72/212] Compiler.CredentialAuthorityEntryCodec PASS 2s
+lean[73/212] Compiler.CredentialAuthorityPageMaterializer start
+lean[73/212] Compiler.CredentialAuthorityPageMaterializer PASS 4s
+lean[74/212] Theory.CausalVersionDag start
+lean[74/212] Theory.CausalVersionDag PASS 2s
+lean[75/212] Theory.Hyperdocument start
+lean[75/212] Theory.Hyperdocument PASS 3s
+lean[76/212] Theory.HyperdocumentOperationIntent start
+lean[76/212] Theory.HyperdocumentOperationIntent PASS 2s
+lean[77/212] Theory.StableRanges start
+lean[77/212] Theory.StableRanges PASS 3s
+lean[78/212] Theory.HyperdocumentOperations start
+lean[78/212] Theory.HyperdocumentOperations PASS 2s
+lean[79/212] Compiler.HyperdocumentCodec start
+lean[79/212] Compiler.HyperdocumentCodec PASS 3s
+lean[80/212] Compiler.HyperdocumentContentPageMaterializer start
+lean[80/212] Compiler.HyperdocumentContentPageMaterializer PASS 4s
+lean[81/212] Kernel.SparseAuthenticatedState start
+lean[81/212] Kernel.SparseAuthenticatedState PASS 3s
+lean[82/212] Kernel.HyperdocumentEventLog start
+lean[82/212] Kernel.HyperdocumentEventLog PASS 2s
+lean[83/212] Compiler.HyperdocumentEventPageMaterializer start
+lean[83/212] Compiler.HyperdocumentEventPageMaterializer PASS 3s
+lean[84/212] Compiler.BoundedPageExtensionCatalog start
+lean[84/212] Compiler.BoundedPageExtensionCatalog PASS 3s
+lean[85/212] Kernel.DeclaredHyperedge start
+lean[85/212] Kernel.DeclaredHyperedge PASS 3s
+lean[86/212] Kernel.TypedCellHyperedge start
+lean[86/212] Kernel.TypedCellHyperedge PASS 3s
+lean[87/212] Theory.MaterializerCardinality start
+lean[87/212] Theory.MaterializerCardinality PASS 2s
+lean[88/212] Theory.SparseLogicalState start
+lean[88/212] Theory.SparseLogicalState PASS 2s
+lean[89/212] Theory.DeployedMaterializerWitness start
+lean[89/212] Theory.DeployedMaterializerWitness PASS 4s
+lean[90/212] Theory.TypedAuthorizationWitness start
+lean[90/212] Theory.TypedAuthorizationWitness PASS 2s
+lean[91/212] Kernel.DeclaredHyperedgeWitness start
+lean[91/212] Kernel.DeclaredHyperedgeWitness PASS 2s
+lean[92/212] Theory.ResourceCost start
+lean[92/212] Theory.ResourceCost PASS 2s
+lean[93/212] Theory.DeclaredActionLowering start
+lean[93/212] Theory.DeclaredActionLowering PASS 4s
+lean[94/212] Compiler.DeclaredEffectPageMaterializer start
+lean[94/212] Compiler.DeclaredEffectPageMaterializer PASS 42s
+lean[95/212] Compiler.FiniteDependentMapCodec start
+lean[95/212] Compiler.FiniteDependentMapCodec PASS 4s
+lean[96/212] Compiler.CredentialAuthorityStateCodec start
+lean[96/212] Compiler.CredentialAuthorityStateCodec PASS 4s
+lean[97/212] Compiler.CredentialAuthorityDomain start
+lean[97/212] Compiler.CredentialAuthorityDomain PASS 6s
+lean[98/212] Theory.CanonicalResourceKernel start
+lean[98/212] Theory.CanonicalResourceKernel PASS 4s
+lean[99/212] Compiler.CanonicalResourcePageMaterializer start
+lean[99/212] Compiler.CanonicalResourcePageMaterializer PASS 8s
+lean[100/212] Theory.CellSlot start
+lean[100/212] Theory.CellSlot PASS 5s
+lean[101/212] Theory.ResourceBirth start
+lean[101/212] Theory.ResourceBirth PASS 6s
+lean[102/212] Compiler.ResourceBirthCodec start
+lean[102/212] Compiler.ResourceBirthCodec PASS 6s
+lean[103/212] Compiler.PolicyRecordCodec start
+lean[103/212] Compiler.PolicyRecordCodec PASS 6s
+lean[104/212] Compiler.PolicySourceCell start
+lean[104/212] Compiler.PolicySourceCell PASS 4s
+lean[105/212] Theory.CanonicalResourceBookInvariant start
+lean[105/212] Theory.CanonicalResourceBookInvariant PASS 3s
+lean[106/212] Compiler.CanonicalCellRegistry start
+lean[106/212] Compiler.CanonicalCellRegistry PASS 6s
+lean[107/212] Kernel.DurableCommitProtocol start
+lean[107/212] Kernel.DurableCommitProtocol PASS 13s
+lean[108/212] Kernel.DurableDataIntent start
+lean[108/212] Kernel.DurableDataIntent PASS 5s
+lean[109/212] Compiler.CredentialAuthorityReplay start
+lean[109/212] Compiler.CredentialAuthorityReplay PASS 5s
+lean[110/212] Kernel.CanonicalPolicyRegistry start
+lean[110/212] Kernel.CanonicalPolicyRegistry PASS 8s
+lean[111/212] Kernel.CredentialSignedEnvelopeController start
+lean[111/212] Kernel.CredentialSignedEnvelopeController PASS 10s
+lean[112/212] Compiler.CredentialSignatureIO start
+lean[112/212] Compiler.CredentialSignatureIO PASS 5s
+lean[113/212] Compiler.CredentialSignatureAdmission start
+lean[113/212] Compiler.CredentialSignatureAdmission PASS 6s
+lean[114/212] Compiler.CanonicalRuntimeProfile start
+lean[114/212] Compiler.CanonicalRuntimeProfile PASS 3s
+lean[115/212] Compiler.NativeHostProfile start
+lean[115/212] Compiler.NativeHostProfile PASS 3s
+lean[116/212] Kernel.DurableReceiver start
+lean[116/212] Kernel.DurableReceiver PASS 3s
+lean[117/212] Compiler.DurableReceiverCodec start
+lean[117/212] Compiler.DurableReceiverCodec PASS 2s
+lean[118/212] Compiler.DurableReceiverIO start
+lean[118/212] Compiler.DurableReceiverIO PASS 5s
+lean[119/212] Theory.CredentialLineageAdmission start
+lean[119/212] Theory.CredentialLineageAdmission PASS 3s
+lean[120/212] Theory.CredentialAuthorityEffects start
+lean[120/212] Theory.CredentialAuthorityEffects PASS 8s
+lean[121/212] Theory.ResourceBirthAuthority start
+lean[121/212] Theory.ResourceBirthAuthority PASS 8s
+lean[122/212] Compiler.CredentialAuthorityDomainReceiver start
+lean[122/212] Compiler.CredentialAuthorityDomainReceiver PASS 10s
+lean[123/212] Compiler.CredentialAuthorityPolicyRegistry start
+lean[123/212] Compiler.CredentialAuthorityPolicyRegistry PASS 11s
+lean[124/212] Compiler.GrainResourceBirthAuthority start
+lean[124/212] Compiler.GrainResourceBirthAuthority PASS 5s
+lean[125/212] Kernel.CanonicalResourceEffect start
+lean[125/212] Kernel.CanonicalResourceEffect PASS 5s
+lean[126/212] Kernel.ResourceBirthController start
+lean[126/212] Kernel.ResourceBirthController PASS 8s
+lean[127/212] Kernel.DeclaredResourceProjection start
+lean[127/212] Kernel.DeclaredResourceProjection PASS 4s
+lean[128/212] Kernel.DeclaredResourceScalar start
+lean[128/212] Kernel.DeclaredResourceScalar PASS 4s
+lean[129/212] Kernel.ContentResource start
+lean[129/212] Kernel.ContentResource PASS 4s
+lean[130/212] Kernel.ResourceTransaction start
+lean[130/212] Kernel.ResourceTransaction PASS 5s
+lean[131/212] Compiler.ResourceTargetAdmission start
+lean[131/212] Compiler.ResourceTargetAdmission PASS 3s
+lean[132/212] Compiler.CanonicalAccountView start
+lean[132/212] Compiler.CanonicalAccountView PASS 2s
+lean[133/212] Compiler.ResourceAuthorityProjection start
+lean[133/212] Compiler.ResourceAuthorityProjection PASS 4s
+lean[134/212] Kernel.ResourceObservationAdmission start
+lean[134/212] Kernel.ResourceObservationAdmission PASS 3s
+lean[135/212] Kernel.DeclaredResourceController start
+lean[135/212] Kernel.DeclaredResourceController PASS 8s
+lean[136/212] Compiler.DeclaredHyperedgeArtifact start
+lean[136/212] Compiler.DeclaredHyperedgeArtifact PASS 3s
+lean[137/212] Kernel.PolicyInstallController start
+lean[137/212] Kernel.PolicyInstallController PASS 5s
+lean[138/212] Kernel.PolicyInstallReceiver start
+lean[138/212] Kernel.PolicyInstallReceiver PASS 7s
+lean[139/212] Kernel.ResourceBirthPolicyController start
+lean[139/212] Kernel.ResourceBirthPolicyController PASS 8s
+lean[140/212] Kernel.ResourceBirthReceiver start
+lean[140/212] Kernel.ResourceBirthReceiver PASS 4s
+lean[141/212] Kernel.CapabilityDelegationController start
+lean[141/212] Kernel.CapabilityDelegationController PASS 5s
+lean[142/212] Kernel.CapabilityDelegationReceiver start
+lean[142/212] Kernel.CapabilityDelegationReceiver PASS 2s
+lean[143/212] Kernel.CapabilityRevocationController start
+lean[143/212] Kernel.CapabilityRevocationController PASS 3s
+lean[144/212] Kernel.CapabilityRevocationReceiver start
+lean[144/212] Kernel.CapabilityRevocationReceiver PASS 4s
+lean[145/212] Compiler.NativeHostCodec start
+lean[145/212] Compiler.NativeHostCodec PASS 3s
+lean[146/212] Kernel.AgentGrain start
+lean[146/212] Kernel.AgentGrain PASS 32s
+lean[147/212] Compiler.GrainResourceBirthController start
+lean[147/212] Compiler.GrainResourceBirthController PASS 3s
+lean[148/212] Kernel.NativeHostContext start
+lean[148/212] Kernel.NativeHostContext PASS 2s
+lean[149/212] Compiler.GrainResourceBirthHostCodec start
+lean[149/212] Compiler.GrainResourceBirthHostCodec PASS 2s
+lean[150/212] Kernel.GrainResourceBirthPolicyController start
+lean[150/212] Kernel.GrainResourceBirthPolicyController PASS 2s
+lean[151/212] Kernel.GrainResourceBirthFamilies start
+lean[151/212] Kernel.GrainResourceBirthFamilies PASS 2s
+lean[152/212] Kernel.GrainResourceBirthTransaction start
+lean[152/212] Kernel.GrainResourceBirthTransaction PASS 3s
+lean[153/212] Kernel.GrainResourceBirthAdmission start
+lean[153/212] Kernel.GrainResourceBirthAdmission PASS 6s
+lean[154/212] Kernel.NativeHostGrainBirth start
+lean[154/212] Kernel.NativeHostGrainBirth PASS 2s
+lean[155/212] Kernel.GrainResourceBirthReceiver start
+lean[155/212] Kernel.GrainResourceBirthReceiver PASS 2s
+lean[156/212] Compiler.NativeObservationCodec start
+lean[156/212] Compiler.NativeObservationCodec PASS 3s
+lean[157/212] Kernel.NativeObservationController start
+lean[157/212] Kernel.NativeObservationController PASS 3s
+lean[158/212] Compiler.FnEvidenceCodec start
+lean[158/212] Compiler.FnEvidenceCodec PASS 3s
+lean[159/212] Kernel.FnSelectiveRelease start
+lean[159/212] Kernel.FnSelectiveRelease PASS 3s
+lean[160/212] Kernel.FnGatewayPolicy start
+lean[160/212] Kernel.FnGatewayPolicy PASS 3s
+lean[161/212] Kernel.FnSelectiveReleaseSignature start
+lean[161/212] Kernel.FnSelectiveReleaseSignature PASS 3s
+lean[162/212] Kernel.FnSelectiveReleaseIngress start
+lean[162/212] Kernel.FnSelectiveReleaseIngress PASS 3s
+lean[163/212] Kernel.FnSelectiveReleaseAdmission start
+lean[163/212] Kernel.FnSelectiveReleaseAdmission PASS 4s
+lean[164/212] Kernel.FnSelectiveReleaseSourcePublication start
+lean[164/212] Kernel.FnSelectiveReleaseSourcePublication PASS 4s
+lean[165/212] Kernel.PhysicalResourceReadGuard start
+lean[165/212] Kernel.PhysicalResourceReadGuard PASS 3s
+lean[166/212] Kernel.FnSelectiveReleaseSourceAuthority start
+lean[166/212] Kernel.FnSelectiveReleaseSourceAuthority PASS 5s
+lean[167/212] Kernel.FnSelectiveReleaseSourceReceiver start
+lean[167/212] Kernel.FnSelectiveReleaseSourceReceiver PASS 3s
+lean[168/212] Kernel.ApplicationGrain start
+lean[168/212] Kernel.ApplicationGrain PASS 3s
+lean[169/212] Kernel.ApplicationLifecycleBegin start
+lean[169/212] Kernel.ApplicationLifecycleBegin PASS 2s
+lean[170/212] Kernel.ApplicationLifecycleBeginIngress start
+lean[170/212] Kernel.ApplicationLifecycleBeginIngress PASS 3s
+lean[171/212] Kernel.ApplicationDispatchCodec start
+lean[171/212] Kernel.ApplicationDispatchCodec PASS 3s
+lean[172/212] Kernel.ApplicationGrainSession start
+lean[172/212] Kernel.ApplicationGrainSession PASS 3s
+lean[173/212] Kernel.ApplicationGrainSessionEnrollment start
+lean[173/212] Kernel.ApplicationGrainSessionEnrollment PASS 3s
+lean[174/212] Kernel.ApplicationPermissionSchema start
+lean[174/212] Kernel.ApplicationPermissionSchema PASS 2s
+lean[175/212] Kernel.ApplicationDispatchManifest start
+lean[175/212] Kernel.ApplicationDispatchManifest PASS 2s
+lean[176/212] Kernel.ApplicationLifecycleBeginReceiver start
+lean[176/212] Kernel.ApplicationLifecycleBeginReceiver PASS 3s
+lean[177/212] Kernel.ApplicationDispatchAuthority start
+lean[177/212] Kernel.ApplicationDispatchAuthority PASS 3s
+lean[178/212] Kernel.ApplicationShareIssueSource start
+lean[178/212] Kernel.ApplicationShareIssueSource PASS 3s
+lean[179/212] Kernel.ApplicationShareIssueDelegation start
+lean[179/212] Kernel.ApplicationShareIssueDelegation PASS 3s
+lean[180/212] Kernel.ApplicationShareIssueAdmission start
+lean[180/212] Kernel.ApplicationShareIssueAdmission PASS 2s
+lean[181/212] Kernel.ApplicationShareIssueReceiver start
+lean[181/212] Kernel.ApplicationShareIssueReceiver PASS 3s
+lean[182/212] Kernel.NativeHostReplay start
+lean[182/212] Kernel.NativeHostReplay PASS 4s
+lean[183/212] Kernel.NativeHost start
+lean[183/212] Kernel.NativeHost PASS 4s
+lean[184/212] Kernel.NativeHostSession start
+lean[184/212] Kernel.NativeHostSession PASS 2s
+lean[185/212] Kernel.NativeReserveContinuity start
+lean[185/212] Kernel.NativeReserveContinuity PASS 3s
+lean[186/212] Kernel.NativeHostGenesis start
+lean[186/212] Kernel.NativeHostGenesis PASS 4s
+lean[187/212] Kernel.FnEvidence start
+lean[187/212] Kernel.FnEvidence PASS 2s
+lean[188/212] Kernel.FnConsumerOperation start
+lean[188/212] Kernel.FnConsumerOperation PASS 3s
+lean[189/212] Kernel.FnConsumerProgress start
+lean[189/212] Kernel.FnConsumerProgress PASS 3s
+lean[190/212] Kernel.FnOriginOutbox start
+lean[190/212] Kernel.FnOriginOutbox PASS 3s
+lean[191/212] Kernel.FnCatalogOwnRProgress start
+lean[191/212] Kernel.FnCatalogOwnRProgress PASS 2s
+lean[192/212] Kernel.FnReplyPublication start
+lean[192/212] Kernel.FnReplyPublication PASS 2s
+lean[193/212] Kernel.FnPortableSource start
+lean[193/212] Kernel.FnPortableSource PASS 2s
+lean[194/212] Kernel.FnReplySource start
+lean[194/212] Kernel.FnReplySource PASS 2s
+lean[195/212] Kernel.FnReplyConsumption start
+lean[195/212] Kernel.FnReplyConsumption PASS 3s
+lean[196/212] Kernel.FnSelectiveReleaseReceiver start
+lean[196/212] Kernel.FnSelectiveReleaseReceiver PASS 3s
+lean[197/212] Kernel.ApplicationShareIssueAuthoring start
+lean[197/212] Kernel.ApplicationShareIssueAuthoring PASS 2s
+lean[198/212] Kernel.ApplicationGrainBirth start
+lean[198/212] Kernel.ApplicationGrainBirth PASS 2s
+lean[199/212] Kernel.ApplicationGrainSessionBirth start
+lean[199/212] Kernel.ApplicationGrainSessionBirth PASS 3s
+lean[200/212] Host.ApplicationPermissionSchemaAuthoring start
+lean[200/212] Host.ApplicationPermissionSchemaAuthoring PASS 2s
+lean[201/212] Host.Json start
+lean[201/212] Host.Json PASS 6s
+lean[202/212] Kernel.FnSelectiveReleaseArticle start
+lean[202/212] Kernel.FnSelectiveReleaseArticle PASS 3s
+lean[203/212] Host.FnSelectiveReleaseAuthoring start
+lean[203/212] Host.FnSelectiveReleaseAuthoring PASS 2s
+lean[204/212] Host.FnSelectiveReleaseSourceAuthoring start
+lean[204/212] Host.FnSelectiveReleaseSourceAuthoring PASS 3s
+lean[205/212] Host.ApplicationCurrentBirthAuthoring start
+lean[205/212] Host.ApplicationCurrentBirthAuthoring PASS 2s
+lean[206/212] Host.FnInboxView start
+lean[206/212] Host.FnInboxView PASS 3s
+lean[207/212] Host.GrainOriginSource start
+lean[207/212] Host.GrainOriginSource PASS 2s
+lean[208/212] Host.GrainOriginPreparation start
+lean[208/212] Host.GrainOriginPreparation PASS 3s
+lean[209/212] Host.GrainOriginCommand start
+lean[209/212] Host.GrainOriginCommand PASS 2s
+lean[210/212] Kernel.ProviderMetering start
+lean[210/212] Kernel.ProviderMetering PASS 2s
+lean[211/212] Host.ProviderUsage start
+lean[211/212] Host.ProviderUsage PASS 3s
+lean[212/212] Host.Main start
+lean[212/212] Host.Main PASS 12s
+end_utc=2026-09-27T07:37:55Z
+elapsed_seconds=1011
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-overnight-20260927-success-prefix-base
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=212
+resumed_prefix_modules=0
+source_modules=212
+package_modules=2933
+response_objects=3145
+reusable_artifact_manifest_sha256=9a990c561f6da928c450fd55401ad5a933aab24c7c672808d3f9a712b4a6d4aa
+checkpointed_success=1
+usage_exit=1
+binary=/home/ember/build/minidregg-overnight-20260927-success-prefix-evidence/minidregg-host-9aec865-checkpoint-r2
+binary_sha256=47e09c5589667ef3f5dc5e630601b85ca4a5a76062509fdf562525dd04aa9a25
