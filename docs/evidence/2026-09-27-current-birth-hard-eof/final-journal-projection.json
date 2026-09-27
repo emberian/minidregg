@@ -1,0 +1,70 @@
+{
+  "type": "mini-current-birth-hard-eof-final-journal-projection-v1",
+  "rawJournalSha256": "77b8fb721a6afaef8a25af6991b523993b3fd3bfe4aaff42223e8b61bba85cd0",
+  "format": "minidregg-grain-runtime-v1",
+  "nextOperationId": 114,
+  "connection": "soft",
+  "pending": null,
+  "toolPending": null,
+  "providerPending": null,
+  "hardReconnectPending": false,
+  "child": null,
+  "settlementDue": null,
+  "parentHold": null,
+  "toolHold": null,
+  "providerHold": null,
+  "providerAttempt": null,
+  "providerSettlement": {
+    "charge": "1",
+    "receipt": {
+      "transactionId": "14246260904104656279154613191885384844846459611455433960573247622691166683150",
+      "eventId": "31434483153026873499353240117619933539517348072845604202100487541485902479670",
+      "acceptedCount": "21",
+      "imageBoundary": "110367135241516251355904006575744287531285050303395437466499297810852843881045"
+    },
+    "outcomeSha256": "f99e533fd067f735ecf83f7e7cfcce23a011361d707454f2387cf5178b5badb0"
+  },
+  "birthNextOrdinal": {
+    "office": 1
+  },
+  "birthOperation": null,
+  "birthPending": null,
+  "bornResources": [],
+  "reconciliationLog": [
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "100",
+      "externalEffectsAcknowledged": false,
+      "originAudited": true,
+      "reserveAttempt": "attempt-0000000000000048",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "100",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "acknowledge-external-effects",
+      "decisionId": "107",
+      "details": [
+        "delegated tool reservation fenced with uncertain external effects",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    }
+  ],
+  "hermesSession": {
+    "id": "cdaa4d16-502f-4248-9ef3-383b84e10f6d",
+    "workspace": "private worker-work",
+    "loadVerified": false,
+    "stateFingerprint": null,
+    "retentionIssue": "first prompt has not yet been retained",
+    "pendingPrompt": true
+  },
+  "unresolvedExternal": []
+}

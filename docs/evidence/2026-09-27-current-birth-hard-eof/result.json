@@ -1,0 +1,46 @@
+{
+  "type": "mini-current-birth-hard-eof-gate-v1",
+  "authorChildPid": "2444072",
+  "authorChildReaped": true,
+  "authorIntentAbsent": true,
+  "birthCallAbsent": true,
+  "providerFixtureStage": 1,
+  "connection": "soft",
+  "birthOperation": null,
+  "birthPending": null,
+  "toolPending": null,
+  "toolHold": null,
+  "parentHold": null,
+  "providerHold": null,
+  "unresolvedExternal": [],
+  "bornResourceCount": 0,
+  "toolGrain": {
+    "generation": "2",
+    "remaining": "50",
+    "reserved": "0",
+    "status": "0",
+    "task": "9602"
+  },
+  "parentGrain": {
+    "generation": "6",
+    "remaining": "99",
+    "reserved": "0",
+    "status": "0",
+    "task": "9601"
+  },
+  "providerGrain": {
+    "generation": "2",
+    "remaining": "99",
+    "reserved": "0",
+    "status": "0",
+    "task": "9604"
+  },
+  "toolZeroRelease": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "transactionId": "79573663439673369687977912377280961713548051357457881860208723851057258111081",
+    "eventId": "17316961286539539712672776817420856377857461057014572380834601361552931846209",
+    "acceptedCount": "27",
+    "imageBoundary": "71909819179174173485404173990846799128438925600664134290191599601145266467261"
+  }
+}

@@ -1,0 +1,18 @@
+author-child pid=2444072 liveness=absent
+author-intent-path-count=0
+77b8fb721a6afaef8a25af6991b523993b3fd3bfe4aaff42223e8b61bba85cd0  /tmp/mini-current-birth-hard-eof-9601-r5-20260927/runtime-state/journal.json
+dd17ed4e0bbacdd504cf9d06960979171c3b5cfe52c56e83173bfd65fec8af08  /tmp/mini-current-birth-hard-eof-9601-r5-20260927/runtime-state/attempt-0000000000000091/outcome.bin
+6ecd7d204d973913ce0cd5aed2217e59c51937978680f2449b12b9b875918d92  /tmp/mini-current-birth-hard-eof-9601-r5-20260927/tool-after/view.bin
+f108b4d38a4f046e43775d2edaaa84fb262b1f7d30ccf2b4803a0ae499b7a31f  /tmp/mini-current-birth-hard-eof-9601-r5-20260927/parent-after/view.bin
+6733ad0e24ec084137e12c56601a282e05bfcddf7b76f8faba8b56f5d535bd2c  /tmp/mini-current-birth-hard-eof-9601-r5-20260927/provider-after/view.bin
+MainPID=2332667
+Id=mini-grain-controller@9601.service
+ActiveState=active
+
+MainPID=2324924
+Id=mini-host-hard-eof-9601-r5.service
+ActiveState=active
+
+MainPID=2324926
+Id=mini-provider-hard-eof-9601-r5.service
+ActiveState=active
