@@ -1,0 +1,13 @@
+START Kernel.ApplicationPermissionSchema 2026-09-27T05:34:46Z
+PASS Kernel.ApplicationPermissionSchema 2026-09-27T05:34:50Z
+START Kernel.ApplicationDispatchManifest 2026-09-27T05:34:50Z
+PASS Kernel.ApplicationDispatchManifest 2026-09-27T05:34:53Z
+START Kernel.ApplicationLifecycleBegin 2026-09-27T05:34:53Z
+PASS Kernel.ApplicationLifecycleBegin 2026-09-27T05:34:56Z
+START Kernel.ApplicationLifecycleBeginIngress 2026-09-27T05:34:56Z
+PASS Kernel.ApplicationLifecycleBeginIngress 2026-09-27T05:34:59Z
+START Kernel.ApplicationLifecycleBeginReceiver 2026-09-27T05:34:59Z
+PASS Kernel.ApplicationLifecycleBeginReceiver 2026-09-27T05:35:02Z
+START Kernel.ApplicationLifecycleBeginCheck 2026-09-27T05:35:02Z
+PASS Kernel.ApplicationLifecycleBeginCheck 2026-09-27T05:35:05Z
+PASS narrow lifecycle current closure
