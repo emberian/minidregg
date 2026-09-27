@@ -1,0 +1,49 @@
+{
+  "type": "minidregg-selected-candidate-receiving-v2",
+  "sourcePublicationAuthorized": false,
+  "source": {
+    "domain": "8611",
+    "resource": "8001",
+    "selectedAtom": "7401",
+    "root": "22794905631061850424080666234330728012123059529779525013957534946890442914680"
+  },
+  "recipient": {
+    "domain": "8612",
+    "resource": "600",
+    "root": "41452080751390714833957178060877412964144480313814857296165714866785457424883",
+    "logicalImageSha256": "643b9328d2525161eb01289cbce897a118f30370d60edec6fc941811391f95e5"
+  },
+  "inputSha256": {
+    "script": "14d7d0fd651af1650cae15b6992a2dce953421e495316795c50151a3eecf4102",
+    "proxy": "e0fff9e91d7de2e756c7660cc7f8ccb7cadcf1c750a74b7e50a357daf6c6ace9",
+    "host": "4b99f44e5cefb95599e59d4c565f01d6be3aa2f1e1cc1bcc8d0384315552c27a",
+    "mini": "5597e6cfc7809460b773799795ffefb206546e8925f94d48a1e68e119eff2dfd",
+    "originalIngress": "029ba72c7ca921c29d8564e1e6f84c21bd5ef2b508edb04979116f4efca9d7fd",
+    "lostIngress": "0399b6f7db10225beba2532e2cdca1893940b0a33d46fd28c34933810d54815b"
+  },
+  "original": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "transactionId": "83864244686922144240948296670894154203744325640036892828419235922826649345523",
+    "eventId": "36397243470726003940797017945937795161117277144609409568365847761808920034744",
+    "acceptedCount": "3",
+    "imageBoundary": "108196477470085269229503849018376185315324801787829787254533024250809216576507"
+  },
+  "lostReplyNative": {
+    "type": "confirmed",
+    "confirmation": "installed",
+    "transactionId": "8924577047641687818522250450427918616022380103488876510005969136528735888616",
+    "eventId": "50783151994958715989293170846171604963313288696642705022504057911122649633929",
+    "acceptedCount": "4",
+    "imageBoundary": "52706484286784333368963385491916455949166392784224839718413115604420570394316"
+  },
+  "checks": [
+    "same-key conflict",
+    "wrong signer",
+    "absent lookup no write",
+    "lost reply exact lookup",
+    "stale current law",
+    "historical receipt after reopen",
+    "complete logical image equality after refusals and reopen"
+  ]
+}
