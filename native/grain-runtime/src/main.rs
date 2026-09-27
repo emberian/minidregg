@@ -1,5 +1,6 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
+mod application_tools;
 #[cfg(test)]
 mod birth_lifecycle_tests;
 mod control;
@@ -78,6 +79,14 @@ struct ToolTask {
     allowed_reads: Vec<resource_tools::AllowedResourceRead>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_birth_families: Vec<resource_tools::AllowedBirthFamily>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_application_families: Vec<application_tools::ApplicationFamily>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_session_families: Vec<application_tools::SessionFamily>,
+    /// Explicit operator enablement for the qualified current-author Host
+    /// image. The family allowlists alone never enable op30/31 delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    current_birth_host_sha256: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -96,6 +105,12 @@ struct ProviderTask {
     /// charge remains available only when this is absent or false.
     #[serde(default)]
     metering: bool,
+    /// External provider/model accounting ceilings. They are an operator
+    /// contract, not inferred from request byte length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
     model: String,
     upstream_url: String,
     provider_key_file: PathBuf,
@@ -305,10 +320,92 @@ struct BirthPending {
     ordinal: u16,
     source_sha256: String,
     born: resource_tools::BornResource,
+    /// Legacy records omit these fields and remain one-resource births. A
+    /// multi-resource birth retains its ordered complete source-derived set
+    /// under one exact operation, call and native receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    route: Option<ApplicationBirthRoute>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    born_bundle: Vec<resource_tools::BornResource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_application: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authored_intent_sha256: Option<String>,
     tool_view: Value,
     parent_view: Value,
     prompt_operation_id: u64,
     session_id: String,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ApplicationBirthRoute {
+    Application,
+    Session,
+}
+
+impl BirthPending {
+    fn members(&self) -> &[resource_tools::BornResource] {
+        if self.born_bundle.is_empty() {
+            std::slice::from_ref(&self.born)
+        } else {
+            &self.born_bundle
+        }
+    }
+
+    fn validate_members(&self) -> Result<()> {
+        let expected = match self.route {
+            None => {
+                if !self.born_bundle.is_empty() {
+                    return Err("legacy resource birth carries an unexpected bundle".into());
+                }
+                1
+            }
+            Some(ApplicationBirthRoute::Application) => 3,
+            Some(ApplicationBirthRoute::Session) => 2,
+        };
+        let members = self.members();
+        if members.len() != expected || members.first() != Some(&self.born) {
+            return Err("birth bundle has the wrong member count or primary resource".into());
+        }
+        if (self.route == Some(ApplicationBirthRoute::Session))
+            != self.selected_application.is_some()
+            || self
+                .selected_application
+                .as_ref()
+                .is_some_and(String::is_empty)
+            || self.route.is_some() != self.authored_intent_sha256.is_some()
+        {
+            return Err("birth bundle has an invalid application selector".into());
+        }
+        let mut names = std::collections::HashSet::new();
+        let mut targets = std::collections::HashSet::new();
+        let mut grants = std::collections::HashSet::new();
+        for member in members {
+            if member.name.is_empty()
+                || member.kind != "object"
+                || member.max_result_bytes == 0
+                || member.max_result_bytes > 4 * 1024 * 1024
+                || !names.insert(&member.name)
+            {
+                return Err("birth bundle has an invalid or duplicate member".into());
+            }
+            for (id, label) in [
+                (&member.target, "born target"),
+                (&member.owner_capability, "born owner capability"),
+                (&member.control_capability, "born control capability"),
+            ] {
+                decimal(id, label)?;
+            }
+            if !targets.insert(&member.target)
+                || !grants.insert(&member.owner_capability)
+                || !grants.insert(&member.control_capability)
+            {
+                return Err("birth bundle has duplicate targets or grants".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -385,6 +482,15 @@ fn publication_receipt_json(record: &PublicationReceipt) -> Value {
 }
 
 fn birth_receipt_json(record: &BornResourceRecord) -> Value {
+    if let Some(route) = record.pending.route {
+        return json!({"type":"confirmed-mini-application-birth-v1",
+            "scope":"historical-accepted-transition",
+            "route":route,
+            "bornResources":record.pending.members(),
+            "birthReceipt":{"operationId":record.pending.operation_id.to_string(),
+            "transactionId":record.transaction_id,"eventId":record.event_id,
+            "acceptedCount":record.accepted_count,"imageBoundary":record.image_boundary}});
+    }
     json!({"type":"confirmed-mini-resource-birth-v1",
         "scope":"historical-accepted-transition",
         "name":record.pending.born.name,"kind":record.pending.born.kind,
@@ -541,6 +647,37 @@ struct ProviderMeteringPin {
     model: String,
     tariff_version: String,
     tariff_digest: String,
+    #[serde(default)]
+    input_micro_per_million: String,
+    #[serde(default)]
+    output_micro_per_million: String,
+    #[serde(default)]
+    max_input_tokens: Option<u32>,
+    #[serde(default)]
+    max_output_tokens: Option<u32>,
+}
+
+fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
+    let input_rate = pin
+        .input_micro_per_million
+        .parse::<u128>()
+        .map_err(|_| "provider input tariff rate exceeds u128")?;
+    let output_rate = pin
+        .output_micro_per_million
+        .parse::<u128>()
+        .map_err(|_| "provider output tariff rate exceeds u128")?;
+    let total = u128::from(input)
+        .checked_mul(input_rate)
+        .and_then(|amount| {
+            u128::from(output)
+                .checked_mul(output_rate)
+                .and_then(|other| amount.checked_add(other))
+        })
+        .ok_or("provider maximum charge bound overflows")?;
+    total
+        .checked_add(999_999)
+        .map(|value| value / 1_000_000)
+        .ok_or("provider maximum charge rounding overflows".into())
 }
 
 fn provider_quote_charge(
@@ -604,6 +741,27 @@ fn provider_quote_charge(
         }
         decimal(value, name)?;
     }
+    let prompt_tokens = report
+        .get("promptTokens")
+        .and_then(Value::as_str)
+        .ok_or("provider quote lacks promptTokens")?
+        .parse::<u128>()
+        .map_err(|_| "provider quote promptTokens exceeds u128")?;
+    let completion_tokens = report
+        .get("completionTokens")
+        .and_then(Value::as_str)
+        .ok_or("provider quote lacks completionTokens")?
+        .parse::<u128>()
+        .map_err(|_| "provider quote completionTokens exceeds u128")?;
+    if prompt_tokens > u128::from(pin.max_input_tokens.ok_or("metered input ceiling absent")?)
+        || completion_tokens
+            > u128::from(
+                pin.max_output_tokens
+                    .ok_or("metered output ceiling absent")?,
+            )
+    {
+        return Err("provider-reported usage exceeds operator-pinned token ceiling".into());
+    }
     Ok(charge.to_owned())
 }
 
@@ -660,6 +818,58 @@ struct HermesSession {
 }
 
 impl Journal {
+    fn validate_birth_registry(&self) -> Result<()> {
+        let mut operations = std::collections::HashSet::new();
+        let mut names = std::collections::HashSet::new();
+        let mut targets = std::collections::HashSet::new();
+        let mut grants = std::collections::HashSet::new();
+        let mut count = 0usize;
+        for record in &self.born_resources {
+            record.pending.validate_members()?;
+            if !operations.insert(record.pending.operation_id) {
+                return Err("born registry repeats an operation ID".into());
+            }
+            count = count
+                .checked_add(record.pending.members().len())
+                .ok_or("born registry count overflow")?;
+            for member in record.pending.members() {
+                if !names.insert(&member.name)
+                    || !targets.insert(&member.target)
+                    || !grants.insert(&member.owner_capability)
+                    || !grants.insert(&member.control_capability)
+                {
+                    return Err("born registry repeats a name, target or grant".into());
+                }
+            }
+        }
+        if count > 8 * 1024 {
+            return Err("born registry exceeds resource capacity".into());
+        }
+        if let Some(pending) = &self.birth_pending {
+            pending.validate_members()?;
+            if count + pending.members().len() > 8 * 1024 {
+                return Err("pending birth exceeds resource capacity".into());
+            }
+            for member in pending.members() {
+                if names.contains(&member.name)
+                    || targets.contains(&member.target)
+                    || grants.contains(&member.owner_capability)
+                    || grants.contains(&member.control_capability)
+                {
+                    return Err("pending birth overlaps the installed registry".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn born_resource_count(&self) -> usize {
+        self.born_resources
+            .iter()
+            .map(|record| record.pending.members().len())
+            .sum()
+    }
+
     fn pending_for(&self, slot: AuthoritySlot) -> &Option<Pending> {
         match slot {
             AuthoritySlot::Parent => &self.pending,
@@ -1284,10 +1494,48 @@ fn validate(c: &Config) -> Result<()> {
             &peer_targets,
             &peer_capabilities,
         )?;
+        application_tools::validate_families(
+            &t.allowed_application_families,
+            &t.allowed_session_families,
+            &t.allowed_birth_families,
+            &t.allowed_reads,
+            &t.allowed_publications,
+            &peer_targets,
+            &peer_capabilities,
+        )?;
         for family in &t.allowed_birth_families {
             let charge = resource_tools::planned_birth_charge(family)?;
             if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
                 return Err(format!("{} birth tariff exceeds tool reserve", family.name));
+            }
+        }
+        for family in &t.allowed_application_families {
+            let charge = application_tools::planned_charge(&family.profile, 3)?;
+            if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
+                return Err(format!(
+                    "{} application birth tariff exceeds tool reserve",
+                    family.name
+                ));
+            }
+        }
+        for family in &t.allowed_session_families {
+            let charge = application_tools::planned_charge(&family.profile, 2)?;
+            if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
+                return Err(format!(
+                    "{} session birth tariff exceeds tool reserve",
+                    family.name
+                ));
+            }
+        }
+        if !t.allowed_application_families.is_empty() || !t.allowed_session_families.is_empty() {
+            let expected = t.current_birth_host_sha256.as_deref().ok_or(
+                "current application birth requires an operator-pinned qualified Host image",
+            )?;
+            if c.host_socket.is_none() || expected != sha256_file(&c.host)? {
+                return Err(
+                    "current application birth Host image or socket differs from operator pin"
+                        .into(),
+                );
             }
         }
     }
@@ -1349,6 +1597,19 @@ fn validate(c: &Config) -> Result<()> {
                 "metered providerTask requires charge 0; only the Lean quote may settle usage"
                     .into(),
             );
+        }
+        if p.metering {
+            if !p
+                .max_input_tokens
+                .is_some_and(|value| (1..=131_072).contains(&value))
+                || !p
+                    .max_output_tokens
+                    .is_some_and(|value| (1..=8_192).contains(&value))
+            {
+                return Err("metered providerTask requires maxInputTokens 1..131072 and maxOutputTokens 1..8192".into());
+            }
+        } else if p.max_input_tokens.is_some() || p.max_output_tokens.is_some() {
+            return Err("fixed-charge providerTask cannot set metered token ceilings".into());
         }
         provider_max_iterations(p.max_iterations)?;
         let bind = p
@@ -1610,6 +1871,7 @@ impl Runtime {
             if j.binding != binding {
                 return Err("controller config differs from journal binding".into());
             }
+            j.validate_birth_registry()?;
             j
         } else {
             let j = Journal::fresh(binding);
@@ -1758,12 +2020,8 @@ impl Runtime {
         if pending.operation != "tool birth" {
             return Ok(None);
         }
+        origin.validate_members()?;
         let tool = self.config.tool_task.as_ref().ok_or("tool task absent")?;
-        let family = tool
-            .allowed_birth_families
-            .iter()
-            .find(|family| family.name == origin.family)
-            .ok_or("resource birth family changed")?;
         if pending.operation_id != origin.operation_id
             || pending.attempt
                 != self
@@ -1783,17 +2041,113 @@ impl Runtime {
         }
         let source: Value = serde_json::from_slice(&source_bytes)
             .map_err(|e| format!("resource birth source: {e}"))?;
-        let (expected, born) = resource_tools::plan_content_birth(
-            family,
-            tool,
-            &self.config.task,
-            pending.operation_id,
-            origin.ordinal,
-            &origin.tool_view,
-            &origin.parent_view,
-        )?;
-        if source != expected || born != origin.born {
+        let (expected, born) = match origin.route {
+            None => {
+                let family = tool
+                    .allowed_birth_families
+                    .iter()
+                    .find(|family| family.name == origin.family)
+                    .ok_or("resource birth family changed")?;
+                let (source, born) = resource_tools::plan_content_birth(
+                    family,
+                    tool,
+                    &self.config.task,
+                    pending.operation_id,
+                    origin.ordinal,
+                    &origin.tool_view,
+                    &origin.parent_view,
+                )?;
+                (source, vec![born])
+            }
+            Some(ApplicationBirthRoute::Application) => {
+                let family = tool
+                    .allowed_application_families
+                    .iter()
+                    .find(|family| family.name == origin.family)
+                    .ok_or("application birth family changed")?;
+                application_tools::plan_application_birth(
+                    family,
+                    tool,
+                    &self.config.task,
+                    pending.operation_id,
+                    origin.ordinal,
+                    &origin.tool_view,
+                    &origin.parent_view,
+                )?
+            }
+            Some(ApplicationBirthRoute::Session) => {
+                let family = tool
+                    .allowed_session_families
+                    .iter()
+                    .find(|family| family.name == origin.family)
+                    .ok_or("session birth family changed")?;
+                let app_name = origin
+                    .selected_application
+                    .as_deref()
+                    .ok_or("session birth has no retained application selector")?;
+                let app_record = self
+                    .journal
+                    .born_resources
+                    .iter()
+                    .find(|record| {
+                        record.pending.route == Some(ApplicationBirthRoute::Application)
+                            && record.pending.family == family.application_family
+                            && record.pending.born.name == app_name
+                    })
+                    .ok_or("session birth selected application is not retained")?;
+                self.verify_born_record(app_record)?;
+                application_tools::plan_session_birth(
+                    family,
+                    tool,
+                    &self.config.task,
+                    &app_record.pending.born.target,
+                    application_tools::BirthIndex {
+                        nonce: pending.operation_id,
+                        ordinal: origin.ordinal,
+                    },
+                    &origin.tool_view,
+                    &origin.parent_view,
+                )?
+            }
+        };
+        if source != expected || born != origin.members() {
             return Err("retained resource birth differs from operator family".into());
+        }
+        if let Some(route) = origin.route {
+            let author = self
+                .config
+                .state_dir
+                .join(format!("current-author-{:016}", pending.operation_id));
+            if bounded_regular_file(&author.join("source.json"), 262_144)? != source_bytes
+                || bounded_regular_file(&author.join("config.json"), 65_536)?
+                    != bounded_regular_file(&pending.attempt.join("config.json"), 65_536)?
+            {
+                return Err(
+                    "current birth author source or config differs from signed submit".into(),
+                );
+            }
+            let frame = bounded_regular_file(&author.join("reply.frame"), 4_194_305)?;
+            let opcode = match route {
+                ApplicationBirthRoute::Application => 30,
+                ApplicationBirthRoute::Session => 31,
+            };
+            if frame.first() != Some(&opcode) || frame.len() < 2 {
+                return Err("retained current birth author reply is not successful".into());
+            }
+            let intent = bounded_regular_file(&author.join("intent.bin"), 4_194_304)?;
+            if frame[1..] != intent
+                || sha256_bytes(&intent)?
+                    != origin
+                        .authored_intent_sha256
+                        .as_deref()
+                        .ok_or("current birth intent digest absent")?
+                || bounded_regular_file(&pending.attempt.join("intent-source.bin"), 4_194_304)?
+                    != intent
+            {
+                return Err(
+                    "retained current birth intent differs from signed submit input".into(),
+                );
+            }
         }
         let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
         let outcome: Value = serde_json::from_slice(&outcome_bytes)
@@ -1852,16 +2206,22 @@ impl Runtime {
         Ok(())
     }
     fn verified_born_named(&self, name: &str) -> Result<Option<resource_tools::BornResource>> {
-        let Some(record) = self
-            .journal
-            .born_resources
-            .iter()
-            .find(|record| record.pending.born.name == name)
-        else {
+        let Some(record) = self.journal.born_resources.iter().find(|record| {
+            record
+                .pending
+                .members()
+                .iter()
+                .any(|born| born.name == name)
+        }) else {
             return Ok(None);
         };
         self.verify_born_record(record)?;
-        Ok(Some(record.pending.born.clone()))
+        Ok(record
+            .pending
+            .members()
+            .iter()
+            .find(|born| born.name == name)
+            .cloned())
     }
     fn verified_born_target(
         &self,
@@ -1869,12 +2229,21 @@ impl Runtime {
         target: &str,
     ) -> Result<Option<resource_tools::BornResource>> {
         let Some(record) = self.journal.born_resources.iter().find(|record| {
-            record.pending.born.kind == kind && record.pending.born.target == target
+            record
+                .pending
+                .members()
+                .iter()
+                .any(|born| born.kind == kind && born.target == target)
         }) else {
             return Ok(None);
         };
         self.verify_born_record(record)?;
-        Ok(Some(record.pending.born.clone()))
+        Ok(record
+            .pending
+            .members()
+            .iter()
+            .find(|born| born.kind == kind && born.target == target)
+            .cloned())
     }
     fn provider_settlement_record(
         &self,
@@ -2120,8 +2489,26 @@ impl Runtime {
             {
                 return Err("exact resource birth lookup changed its confirmed receipt".into());
             }
+            let member_summary = if let Some(route) = record.pending.route {
+                let members = record
+                    .pending
+                    .members()
+                    .iter()
+                    .map(|member| json!({"name":member.name,"target":member.target}))
+                    .collect::<Vec<_>>();
+                format!(
+                    "route={} bornResources={}",
+                    serde_json::to_string(&route).map_err(|e| e.to_string())?,
+                    serde_json::to_string(&members).map_err(|e| e.to_string())?
+                )
+            } else {
+                format!(
+                    "bornResourceName={} bornTargetId={}",
+                    record.pending.born.name, record.pending.born.target
+                )
+            };
             lines.push(format!(
-                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} bornResourceName={} bornTargetId={}",
+                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} {}",
                 if record.pending.session_id == session_id { "current" } else { "prior" },
                 record.pending.prompt_operation_id,
                 record.pending.operation_id,
@@ -2129,8 +2516,7 @@ impl Runtime {
                 record.event_id,
                 record.accepted_count,
                 record.image_boundary,
-                record.pending.born.name,
-                record.pending.born.target,
+                member_summary,
             ));
             ids.push(record.pending.operation_id);
         }
@@ -3099,6 +3485,24 @@ impl Runtime {
             return Err("provider request differs from pinned model or size".into());
         }
         let metering_pin = self.provider_metering_pin(&task)?;
+        if let Some(pin) = &metering_pin {
+            let maximum = provider_max_charge_bound(
+                pin,
+                task.max_input_tokens
+                    .ok_or("metered input ceiling absent")?,
+                task.max_output_tokens
+                    .ok_or("metered output ceiling absent")?,
+            )?;
+            let reserve = task
+                .reserve
+                .parse::<u128>()
+                .map_err(|_| "provider reserve exceeds u128")?;
+            if maximum > reserve {
+                return Err(
+                    "operator-pinned provider maximum charge exceeds signed reserve".into(),
+                );
+            }
+        }
         if self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
@@ -3254,6 +3658,10 @@ impl Runtime {
                 .to_owned(),
             tariff_version: field("tariffVersion")?,
             tariff_digest: field("tariffDigest")?,
+            input_micro_per_million: field("inputMicroPerMillion")?,
+            output_micro_per_million: field("outputMicroPerMillion")?,
+            max_input_tokens: task.max_input_tokens,
+            max_output_tokens: task.max_output_tokens,
         };
         if pin.provider_resource_id != task.task
             || pin.model != task.model
@@ -4206,14 +4614,90 @@ impl Runtime {
         self.save()
     }
 
-    fn create_resource(&mut self, arguments: &Value) -> Result<Value> {
+    fn create_resource(
+        &mut self,
+        arguments: &Value,
+        route: Option<ApplicationBirthRoute>,
+    ) -> Result<Value> {
         let tool = self
             .config
             .tool_task
             .as_ref()
             .ok_or("toolTask is not configured")?
             .clone();
-        let family = resource_tools::select_birth(&tool.allowed_birth_families, arguments)?.clone();
+        let object = arguments
+            .as_object()
+            .ok_or("birth tool arguments must be an object")?;
+        let expected_fields = if route == Some(ApplicationBirthRoute::Session) {
+            2
+        } else {
+            1
+        };
+        if object.len() != expected_fields {
+            return Err("birth tool has unexpected arguments".into());
+        }
+        let family_name = object
+            .get("family")
+            .and_then(Value::as_str)
+            .ok_or("birth family must be a name")?;
+        let selected_application = if route == Some(ApplicationBirthRoute::Session) {
+            let name = object
+                .get("application")
+                .and_then(Value::as_str)
+                .ok_or("session birth requires a named application")?;
+            if name.is_empty() || name.len() > 64 {
+                return Err("session application name exceeds bound".into());
+            }
+            Some(name.to_owned())
+        } else {
+            None
+        };
+        let (max_births, member_count, charge) = match route {
+            None => {
+                let family = resource_tools::select_birth(&tool.allowed_birth_families, arguments)?;
+                (
+                    family.max_births,
+                    1,
+                    resource_tools::planned_birth_charge(family)?,
+                )
+            }
+            Some(ApplicationBirthRoute::Application) => {
+                let family = tool
+                    .allowed_application_families
+                    .iter()
+                    .find(|family| family.name == family_name)
+                    .ok_or("application family is not allowlisted")?;
+                (
+                    family.max_births,
+                    3,
+                    application_tools::planned_charge(&family.profile, 3)?,
+                )
+            }
+            Some(ApplicationBirthRoute::Session) => {
+                let family = tool
+                    .allowed_session_families
+                    .iter()
+                    .find(|family| family.name == family_name)
+                    .ok_or("session family is not allowlisted")?;
+                (
+                    family.max_births,
+                    2,
+                    application_tools::planned_charge(&family.profile, 2)?,
+                )
+            }
+        };
+        if route.is_some() {
+            let expected = tool
+                .current_birth_host_sha256
+                .as_deref()
+                .ok_or("current application birth is not enabled by operator Host pin")?;
+            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+                return Err(
+                    "current application birth Host image or socket differs from operator pin"
+                        .into(),
+                );
+            }
+        }
         if self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
             || self.journal.tool_pending.is_some()
@@ -4221,18 +4705,45 @@ impl Runtime {
         {
             return Err("resource birth has an unresolved delegated attempt".into());
         }
+        // A caller-selected application must already be a complete exact
+        // locally accepted bundle. Reject an unknown/stale selector before
+        // consuming an ordinal, attaching, or holding any allowance.
+        let selected_app_birth = if route == Some(ApplicationBirthRoute::Session) {
+            let family = tool
+                .allowed_session_families
+                .iter()
+                .find(|family| family.name == family_name)
+                .ok_or("session family is not allowlisted")?;
+            let name = selected_application
+                .as_deref()
+                .ok_or("session application selector absent")?;
+            let record = self
+                .journal
+                .born_resources
+                .iter()
+                .find(|record| {
+                    record.pending.route == Some(ApplicationBirthRoute::Application)
+                        && record.pending.family == family.application_family
+                        && record.pending.born.name == name
+                })
+                .ok_or("session application has no confirmed local birth")?;
+            self.verify_born_record(record)?;
+            Some(record.pending.born.clone())
+        } else {
+            None
+        };
         let ordinal = *self
             .journal
             .birth_next_ordinal
-            .get(&family.name)
+            .get(family_name)
             .unwrap_or(&0);
-        if ordinal >= family.max_births {
+        if ordinal >= max_births {
             return Err(format!(
                 "{} resource birth family is exhausted",
-                family.name
+                family_name
             ));
         }
-        if self.journal.born_resources.len() >= 8 * 1024 {
+        if self.journal.born_resource_count() + member_count > 8 * 1024 {
             return Err("resource birth registry is full".into());
         }
         let prompt_operation_id = self
@@ -4251,9 +4762,9 @@ impl Runtime {
         let next_ordinal = ordinal.checked_add(1).ok_or("birth ordinal exhausted")?;
         self.journal
             .birth_next_ordinal
-            .insert(family.name.clone(), next_ordinal);
+            .insert(family_name.to_owned(), next_ordinal);
         self.journal.birth_operation = Some(BirthOperation {
-            family: family.name.clone(),
+            family: family_name.to_owned(),
             ordinal,
         });
         // Save the no-dispatch identity before even attaching or reserving.
@@ -4280,7 +4791,6 @@ impl Runtime {
             return Err(format!("tool task status {status} needs reconciliation"));
         }
         self.check_not_cancelled()?;
-        let charge = resource_tools::planned_birth_charge(&family)?;
         self.mark_hold(true, &tool.reserve, &charge)?;
         self.transition_as(
             &authority,
@@ -4293,32 +4803,121 @@ impl Runtime {
         let tool_view = self.query_as(&authority)?;
         let parent_view = self.query()?;
         let id = self.next_id()?;
-        let (source, born) = resource_tools::plan_content_birth(
-            &family,
-            &tool,
-            &self.config.task,
-            id,
-            ordinal,
-            &tool_view,
-            &parent_view,
-        )?;
+        let (source, born) = match route {
+            None => {
+                let family = resource_tools::select_birth(&tool.allowed_birth_families, arguments)?;
+                let (source, born) = resource_tools::plan_content_birth(
+                    family,
+                    &tool,
+                    &self.config.task,
+                    id,
+                    ordinal,
+                    &tool_view,
+                    &parent_view,
+                )?;
+                (source, vec![born])
+            }
+            Some(ApplicationBirthRoute::Application) => {
+                let family = tool
+                    .allowed_application_families
+                    .iter()
+                    .find(|family| family.name == family_name)
+                    .ok_or("application family changed during birth")?;
+                application_tools::plan_application_birth(
+                    family,
+                    &tool,
+                    &self.config.task,
+                    id,
+                    ordinal,
+                    &tool_view,
+                    &parent_view,
+                )?
+            }
+            Some(ApplicationBirthRoute::Session) => {
+                let family = tool
+                    .allowed_session_families
+                    .iter()
+                    .find(|family| family.name == family_name)
+                    .ok_or("session family changed during birth")?;
+                let app = selected_app_birth
+                    .as_ref()
+                    .ok_or("session application selection disappeared")?;
+                let read = resource_tools::born_read(app);
+                let read_nonce = self.next_id()?;
+                let observation =
+                    resource_tools::read_resource(&self.config, &tool, &read, read_nonce)?;
+                if observation.get("target").and_then(Value::as_str) != Some(app.target.as_str()) {
+                    return Err("fresh signed application read differs from retained birth".into());
+                }
+                application_tools::plan_session_birth(
+                    family,
+                    &tool,
+                    &self.config.task,
+                    &app.target,
+                    application_tools::BirthIndex { nonce: id, ordinal },
+                    &tool_view,
+                    &parent_view,
+                )?
+            }
+        };
         let attempt = self.config.state_dir.join(format!("attempt-{id:016}"));
         let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
         write_new(
             &source_path,
             &serde_json::to_vec_pretty(&source).map_err(|e| e.to_string())?,
         )?;
+        let (intent_path, authored_intent_sha256) = if let Some(route) = route {
+            let author = self
+                .config
+                .state_dir
+                .join(format!("current-author-{id:016}"));
+            let command = match route {
+                ApplicationBirthRoute::Application => "current-application-intent",
+                ApplicationBirthRoute::Session => "current-session-intent",
+            };
+            let cfg = &self.config;
+            let socket = cfg
+                .host_socket
+                .as_ref()
+                .ok_or("current birth socket absent")?;
+            self.command_output(
+                &cfg.mini,
+                &[
+                    command,
+                    "--host",
+                    cfg.host.to_str().ok_or("host path UTF-8")?,
+                    "--config",
+                    cfg.host_config.to_str().ok_or("config path UTF-8")?,
+                    "--socket",
+                    socket.to_str().ok_or("socket path UTF-8")?,
+                    "--source",
+                    source_path.to_str().ok_or("source path UTF-8")?,
+                    "--dir",
+                    author.to_str().ok_or("author path UTF-8")?,
+                ],
+            )?;
+            let intent = author.join("intent.bin");
+            let digest = sha256_bytes(&bounded_regular_file(&intent, 4_194_304)?)?;
+            (intent, Some(digest))
+        } else {
+            (source_path.clone(), None)
+        };
         let origin = BirthPending {
             operation_id: id,
-            family: family.name.clone(),
+            family: family_name.to_owned(),
             ordinal,
             source_sha256: sha256_file(&source_path)?,
-            born,
+            born: born[0].clone(),
+            route,
+            born_bundle: if route.is_some() { born } else { Vec::new() },
+            selected_application,
+            authored_intent_sha256,
             tool_view,
             parent_view,
             prompt_operation_id,
             session_id,
         };
+        origin.validate_members()?;
         self.journal.birth_pending = Some(origin.clone());
         self.journal.tool_pending = Some(Pending {
             operation_id: id,
@@ -4336,9 +4935,13 @@ impl Runtime {
             "--config",
             cfg.host_config.to_str().ok_or("config path UTF-8")?,
             "--intent",
-            source_path.to_str().ok_or("source path UTF-8")?,
+            intent_path.to_str().ok_or("intent path UTF-8")?,
             "--intent-kind",
-            "grain-birth-intent",
+            if route.is_some() {
+                "binary"
+            } else {
+                "grain-birth-intent"
+            },
             "--key",
             authority.custody_key.to_str().ok_or("key path UTF-8")?,
             "--dir",
@@ -4463,7 +5066,13 @@ impl Runtime {
                 let nonce = self.next_id()?;
                 resource_tools::read_resource(&self.config, &configured, &read, nonce)
             }
-            "mini_create_resource" => self.create_resource(arguments),
+            "mini_create_resource" => self.create_resource(arguments, None),
+            "mini_create_application" => {
+                self.create_resource(arguments, Some(ApplicationBirthRoute::Application))
+            }
+            "mini_create_application_session" => {
+                self.create_resource(arguments, Some(ApplicationBirthRoute::Session))
+            }
             "mini_publish" => {
                 let supplied = arguments
                     .get("publications")
@@ -5397,6 +6006,8 @@ impl Runtime {
                     private_dir: self.config.state_dir.clone(),
                     max_request_bytes: task.max_request_bytes,
                     max_response_bytes: task.max_response_bytes,
+                    max_input_tokens: task.max_input_tokens,
+                    max_output_tokens: task.max_output_tokens,
                     timeout: Duration::from_secs(task.timeout_seconds),
                 },
                 tx,
@@ -5409,6 +6020,7 @@ impl Runtime {
                 &token,
                 spec.wall_time_seconds.unwrap_or(600) - 60,
                 provider_max_iterations(task.max_iterations)?,
+                task.max_input_tokens,
             )?;
             *self
                 .provider_control
@@ -6800,7 +7412,15 @@ impl Runtime {
                 self.journal.publication_receipts.push(record);
             }
             if p.operation == "tool birth" {
-                if slot != AuthoritySlot::Tool || self.journal.born_resources.len() >= 8 * 1024 {
+                if slot != AuthoritySlot::Tool
+                    || self.journal.born_resource_count()
+                        + self
+                            .journal
+                            .birth_pending
+                            .as_ref()
+                            .map_or(1, |origin| origin.members().len())
+                        > 8 * 1024
+                {
                     return Err("resource birth recovery registry is unavailable".into());
                 }
                 let origin = self
@@ -7509,6 +8129,88 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    fn birth_member(
+        name: &str,
+        target: &str,
+        owner: &str,
+        control: &str,
+    ) -> resource_tools::BornResource {
+        resource_tools::BornResource {
+            name: name.into(),
+            kind: "object".into(),
+            target: target.into(),
+            owner_capability: owner.into(),
+            control_capability: control.into(),
+            max_result_bytes: 1024,
+        }
+    }
+
+    fn birth_pending_for_test() -> BirthPending {
+        BirthPending {
+            operation_id: 7,
+            family: "office".into(),
+            ordinal: 0,
+            source_sha256: "digest".into(),
+            born: birth_member("office-0-app", "100", "1000", "1001"),
+            route: None,
+            born_bundle: Vec::new(),
+            selected_application: None,
+            authored_intent_sha256: None,
+            tool_view: json!({}),
+            parent_view: json!({}),
+            prompt_operation_id: 1,
+            session_id: "s".into(),
+        }
+    }
+
+    #[test]
+    fn birth_bundle_shape_is_backward_compatible_and_complete() {
+        let legacy = birth_pending_for_test();
+        legacy.validate_members().unwrap();
+        let encoded = serde_json::to_value(&legacy).unwrap();
+        assert!(encoded.get("route").is_none() && encoded.get("bornBundle").is_none());
+        let decoded: BirthPending = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, legacy);
+
+        let mut app = legacy;
+        app.route = Some(ApplicationBirthRoute::Application);
+        app.authored_intent_sha256 = Some("abc".into());
+        app.born_bundle = vec![
+            app.born.clone(),
+            birth_member("office-0-package", "101", "1002", "1003"),
+            birth_member("office-0-snapshot", "102", "1004", "1005"),
+        ];
+        app.validate_members().unwrap();
+        let mut malformed = app.clone();
+        malformed.born_bundle[2].control_capability = "1002".into();
+        assert!(malformed.validate_members().is_err());
+        malformed = app.clone();
+        malformed.born_bundle.pop();
+        assert!(malformed.validate_members().is_err());
+        malformed = app.clone();
+        malformed.route = None;
+        assert!(malformed.validate_members().is_err());
+
+        let record = BornResourceRecord {
+            pending: app.clone(),
+            attempt: "attempt".into(),
+            call_sha256: "call".into(),
+            outcome_path: "outcome".into(),
+            outcome_sha256: "outcome-digest".into(),
+            transaction_id: "1".into(),
+            event_id: "2".into(),
+            accepted_count: "3".into(),
+            image_boundary: "4".into(),
+            reported: false,
+        };
+        let mut journal = Journal::fresh(json!({}));
+        journal.born_resources.push(record.clone());
+        assert_eq!(journal.born_resource_count(), 3);
+        journal.validate_birth_registry().unwrap();
+        journal.born_resources.push(record);
+        assert!(journal.validate_birth_registry().is_err());
+    }
+
     #[test]
     fn prepare_refusal_requires_exact_attempt_and_native_inspection() {
         let root = std::env::temp_dir().join(format!(
@@ -7660,6 +8362,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 }],
                 allowed_reads: vec![],
                 allowed_birth_families: vec![],
+                allowed_application_families: vec![],
+                allowed_session_families: vec![],
+                current_birth_host_sha256: None,
             }),
             provider_task: None,
             commands: vec![],
@@ -7905,6 +8610,10 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             model: "fixture".into(),
             tariff_version: "1".into(),
             tariff_digest: "123".into(),
+            input_micro_per_million: "1".into(),
+            output_micro_per_million: "2".into(),
+            max_input_tokens: Some(2),
+            max_output_tokens: Some(3),
         };
         let mut report = json!({
             "type":"minidregg-provider-metering-v1", "status":"quoted-reported-usage",
@@ -7931,6 +8640,30 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         report["tariffDigest"] = json!("123");
         report["responseBytes"] = json!("31");
         assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["responseBytes"] = json!("30");
+        report["promptTokens"] = json!("3");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["promptTokens"] = json!("2");
+        report["completionTokens"] = json!("4");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+    }
+
+    #[test]
+    fn metered_maximum_charge_uses_pinned_token_caps_and_rounds_up() {
+        let pin = ProviderMeteringPin {
+            provider_resource_id: "7004".into(),
+            model: "fixture".into(),
+            tariff_version: "1".into(),
+            tariff_digest: "123".into(),
+            input_micro_per_million: "500000".into(),
+            output_micro_per_million: "1000000".into(),
+            max_input_tokens: Some(3),
+            max_output_tokens: Some(2),
+        };
+        let maximum = provider_max_charge_bound(&pin, 3, 2).unwrap();
+        assert_eq!(maximum, 4);
+        assert!(maximum <= 4);
+        assert!(maximum > 3);
     }
 
     #[test]

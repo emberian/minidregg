@@ -144,8 +144,24 @@ not a measured provider invoice.
 Set `"metering":true` and `"charge":"0"` on `providerTask` to use the pinned
 Host provider tariff instead of the configured fixed charge. Before reserve,
 the controller checks the signed provider resource and the Host profile's
-provider resource and model. After an actual response, it retains the exact
-request, body, and raw final-response headers, including one upstream
+provider resource and model. Metered tasks also require operator-pinned
+`"maxInputTokens"` (1–131072) and `"maxOutputTokens"` (1–8192). The former
+must be a supported hard context ceiling for this exact provider/model and
+the generated Hermes profile uses it as `context_length`; the latter is
+inserted as `max_tokens` into the exact request before Reserve and forwarding,
+or a worker-supplied lower value is preserved. The gateway accepts only the
+supported text/function Chat Completions fields under this profile, rejects
+unknown vendor extensions, output-limit aliases, and multi-completion
+requests, and requires `stream_options.include_usage=true` for streams. If
+the final response lacks actual terminal usage, the later quote path retains
+the hold and refuses settlement.
+The controller uses the pinned tariff rates to check the maximum input plus
+output charge against the signed reserve before native admission. These
+ceilings bound Mini's pre-send allowance under the operator's provider/model
+accounting premise; they are not a universal tokenizer or a guarantee about
+an external provider invoice. A separately configured provider-account spend
+cap is still needed before a paid run. After an actual response, it retains
+the exact request, body, and raw final-response headers, including one upstream
 `Content-Type`. Read-only `mini meter` asks the Host to quote the retained
 bytes and signed reserve; only the source-authored charge may be signed into
 settlement. A missing terminal usage report, malformed headers, or uncertain

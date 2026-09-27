@@ -99,6 +99,7 @@ pub fn install_worker_profile(
     token: &str,
     mcp_timeout_seconds: u64,
     max_iterations: u8,
+    max_input_tokens: Option<u32>,
 ) -> Result<(), String> {
     if model.is_empty()
         || model.len() > 256
@@ -111,6 +112,7 @@ pub fn install_worker_profile(
         || gateway.port() == 0
         || !(1..=1740).contains(&mcp_timeout_seconds)
         || !(1..=6).contains(&max_iterations)
+        || max_input_tokens.is_some_and(|tokens| !(1..=131_072).contains(&tokens))
     {
         return Err("provider profile route, model, or token invalid".into());
     }
@@ -141,8 +143,9 @@ pub fn install_worker_profile(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("Hermes config metadata: {error}")),
     }
+    let context_length = max_input_tokens.unwrap_or(65_536);
     let text = format!(
-        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: 65536\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\ntimeouts:\n  mcp:\n    tool_call: {mcp_timeout_seconds}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nauxiliary:\n  title_generation:\n    enabled: false\nagent:\n  max_iterations: {max_iterations}\ntools:\n  tool_search:\n    enabled: false\n"
+        "{MARKER}model:\n  provider: custom\n  default: {model}\n  context_length: {context_length}\n  base_url: http://{gateway}/v1\n  api_key: {token}\n  api_mode: chat_completions\nmcp_servers: {{}}\ntimeouts:\n  mcp:\n    tool_call: {mcp_timeout_seconds}\nmemory:\n  memory_enabled: false\n  user_profile_enabled: false\nauxiliary:\n  title_generation:\n    enabled: false\nagent:\n  max_iterations: {max_iterations}\ntools:\n  tool_search:\n    enabled: false\n"
     );
     let tmp = home.join(".config.yaml.tmp");
     let mut file = OpenOptions::new()
@@ -178,6 +181,7 @@ mod tests {
             &token,
             540,
             2,
+            Some(8192),
         )
         .unwrap();
         let text = fs::read_to_string(home.join("config.yaml")).unwrap();
@@ -185,6 +189,7 @@ mod tests {
         assert!(text.contains(&format!("api_key: {token}")));
         assert!(text.contains("tool_call: 540"));
         assert!(text.contains("max_iterations: 2"));
+        assert!(text.contains("context_length: 8192"));
         assert!(text.contains("auxiliary:\n  title_generation:\n    enabled: false"));
         assert!(!text.contains("BYO_PROVIDER_KEY"));
         require_worker_mcp_timeout(&home, 600).unwrap();
@@ -194,7 +199,8 @@ mod tests {
             "127.0.0.1:18761".parse().unwrap(),
             &token,
             540,
-            2
+            2,
+            None,
         )
         .is_err());
         fs::remove_dir_all(home).unwrap();
@@ -215,6 +221,32 @@ mod tests {
                 &token,
                 540,
                 invalid,
+                None,
+            )
+            .is_err());
+            assert!(!home.join("config.yaml").exists());
+        }
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn profile_rejects_invalid_context_ceiling_before_writing() {
+        let home = std::env::temp_dir().join(format!(
+            "grain-provider-context-ceiling-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&home).unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        let token = "a".repeat(64);
+        for invalid in [0, 131_073] {
+            assert!(install_worker_profile(
+                &home,
+                "test-model",
+                "127.0.0.1:18761".parse().unwrap(),
+                &token,
+                540,
+                2,
+                Some(invalid),
             )
             .is_err());
             assert!(!home.join("config.yaml").exists());

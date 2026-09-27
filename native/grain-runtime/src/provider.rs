@@ -39,6 +39,13 @@ pub struct GatewayConfig {
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
     pub timeout: Duration,
+    /// Operator-pinned hard context ceiling for the selected provider/model.
+    /// The provider accounting contract, not JSON byte length, supplies this
+    /// premise; the controller checks its tariff against the signed reserve.
+    pub max_input_tokens: Option<u32>,
+    /// Controller-owned Chat Completions output ceiling. When present the
+    /// gateway pins `max_tokens` in the exact forwarded request before Reserve.
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -529,6 +536,16 @@ fn validate_config(config: &GatewayConfig) -> Result<(), String> {
     {
         return Err("invalid pinned provider model".into());
     }
+    if config.max_input_tokens.is_some() != config.max_output_tokens.is_some()
+        || config
+            .max_input_tokens
+            .is_some_and(|value| !(1..=131_072).contains(&value))
+        || config
+            .max_output_tokens
+            .is_some_and(|value| !(1..=8192).contains(&value))
+    {
+        return Err("provider token ceilings must be paired and within bounds".into());
+    }
     if config.provider_key.is_empty()
         || config.provider_key.len() > 4096
         || config
@@ -548,6 +565,135 @@ fn validate_config(config: &GatewayConfig) -> Result<(), String> {
         return Err("provider private dir must be owned real 0700".into());
     }
     Ok(())
+}
+
+/// Produce the exact bytes that both the native Reserve and the upstream
+/// transport will see. Re-serialization intentionally removes duplicate JSON
+/// keys: no downstream parser can select a different `max_tokens` or `n`.
+/// The input-token ceiling is a pinned provider/model contract checked by the
+/// controller against the tariff; this function does not infer tokens from
+/// wire bytes.
+fn bounded_chat_request(
+    mut value: Value,
+    output_ceiling: u32,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("Chat Completions request must be an object")?;
+    // The retained Hermes fixture uses model/messages/stream/stream_options/
+    // tools. Additional names here are standard text Chat Completions controls
+    // whose output remains inside the one `max_tokens` ceiling. Unknown vendor
+    // extensions may select a fallback model, hidden modality, or extra work.
+    const TEXT_FIELDS: &[&str] = &[
+        "model",
+        "messages",
+        "stream",
+        "stream_options",
+        "tools",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "tool_choice",
+        "parallel_tool_calls",
+        "response_format",
+        "seed",
+        "logit_bias",
+        "user",
+        "n",
+        "best_of",
+        "modalities",
+    ];
+    for name in object.keys() {
+        if !TEXT_FIELDS.contains(&name.as_str()) {
+            return Err(format!("unsupported provider request field {name}"));
+        }
+    }
+    for name in ["n", "best_of"] {
+        if object
+            .get(name)
+            .is_some_and(|value| value.as_u64() != Some(1))
+        {
+            return Err(format!("provider request {name} must be one"));
+        }
+    }
+    if object.get("modalities").is_some_and(|value| {
+        value
+            .as_array()
+            .is_none_or(|items| items.len() != 1 || items[0] != "text")
+    }) {
+        return Err("only text modality is supported by the metered profile".into());
+    }
+    let messages = object
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or("metered request needs messages")?;
+    if messages.is_empty()
+        || messages.iter().any(|message| {
+            let Some(message) = message.as_object() else {
+                return true;
+            };
+            message
+                .get("content")
+                .is_some_and(|content| !content.is_string() && !content.is_null())
+                || message.contains_key("audio")
+                || message.contains_key("image_url")
+        })
+    {
+        return Err("metered profile supports text messages only".into());
+    }
+    if object.get("tools").is_some_and(|tools| {
+        tools.as_array().is_none_or(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool.get("type").and_then(Value::as_str) != Some("function"))
+        })
+    }) {
+        return Err("metered profile supports function tools only".into());
+    }
+    if object
+        .get("stream")
+        .is_some_and(|value| !value.is_boolean())
+    {
+        return Err("metered stream flag must be boolean".into());
+    }
+    if object.get("stream_options").is_some_and(|value| {
+        value.as_object().is_none_or(|fields| {
+            fields.keys().any(|name| name != "include_usage")
+                || fields
+                    .get("include_usage")
+                    .is_some_and(|usage| !usage.is_boolean())
+        })
+    }) {
+        return Err("unsupported metered stream options".into());
+    }
+    if object.get("stream").and_then(Value::as_bool) == Some(true)
+        && object
+            .get("stream_options")
+            .and_then(|options| options.get("include_usage"))
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err("metered stream requires terminal usage".into());
+    }
+    match object.get("max_tokens") {
+        Some(value)
+            if value
+                .as_u64()
+                .is_some_and(|tokens| (1..=u64::from(output_ceiling)).contains(&tokens)) => {}
+        Some(_) => return Err("requested max_tokens exceeds operator ceiling".into()),
+        None => {
+            object.insert("max_tokens".into(), json!(output_ceiling));
+        }
+    }
+    let bytes = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
+    if bytes.len() > max_bytes {
+        return Err("bounded request exceeds byte ceiling after token pinning".into());
+    }
+    Ok(bytes)
 }
 
 fn validate_upstream(url: &str) -> Result<(), String> {
@@ -722,7 +868,7 @@ fn serve_client(
     shared: &Arc<Shared>,
     commands: &SyncSender<ProviderCommand>,
 ) {
-    let request = match read_request(stream, config.max_request_bytes) {
+    let mut request = match read_request(stream, config.max_request_bytes) {
         Ok(request) => request,
         Err(_) => {
             error_reply(stream, 400, "bounded Chat Completions request required");
@@ -746,6 +892,19 @@ fn serve_client(
     if value.get("model").and_then(Value::as_str) != Some(config.pinned_model.as_str()) {
         error_reply(stream, 403, "model is not pinned for this task");
         return;
+    }
+    if let Some(output_ceiling) = config.max_output_tokens {
+        request.body = match bounded_chat_request(value, output_ceiling, config.max_request_bytes) {
+            Ok(body) => body,
+            Err(_) => {
+                error_reply(
+                    stream,
+                    400,
+                    "metered Chat Completions request exceeds pinned profile",
+                );
+                return;
+            }
+        };
     }
     let (tx, rx) = mpsc::channel();
     let reserve = ProviderCommand::Reserve {
@@ -1406,7 +1565,116 @@ mod tests {
             max_request_bytes: 16_384,
             max_response_bytes: 16_384,
             timeout: Duration::from_secs(5),
+            max_input_tokens: None,
+            max_output_tokens: None,
         }
+    }
+
+    #[test]
+    fn metered_request_pins_exact_forwarded_output_ceiling() {
+        let original = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}"#;
+        let value: Value = serde_json::from_slice(original).unwrap();
+        let exact = bounded_chat_request(value, 64, 16_384).unwrap();
+        let normalized: Value = serde_json::from_slice(&exact).unwrap();
+        assert_eq!(normalized["max_tokens"], 64);
+        assert_eq!(normalized["stream_options"]["include_usage"], true);
+        assert_eq!(normalized["messages"][0]["content"], "hello");
+        assert!(bounded_chat_request(normalized, 64, exact.len() - 1).is_err());
+        let lower = json!({
+            "model": "operator-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 12
+        });
+        let lower_exact = bounded_chat_request(lower, 64, 16_384).unwrap();
+        let lower_forwarded: Value = serde_json::from_slice(&lower_exact).unwrap();
+        assert_eq!(lower_forwarded["max_tokens"], 12);
+    }
+
+    #[test]
+    fn metered_request_rejects_multipliers_aliases_and_unmetered_stream() {
+        let base = json!({"model":"operator-model","messages":[{"role":"user","content":"hello"}]});
+        for (key, value) in [
+            ("max_tokens", json!(65)),
+            ("max_tokens", json!(0)),
+            ("max_completion_tokens", json!(32)),
+            ("max_output_tokens", json!(32)),
+            ("n", json!(2)),
+            ("best_of", json!(2)),
+            ("audio", json!({})),
+            ("modalities", json!(["text", "audio"])),
+            ("stream", json!("true")),
+            ("models", json!(["unmetered-fallback-model"])),
+            ("provider", json!({"allow_fallbacks": true})),
+        ] {
+            let mut request = base.clone();
+            request[key] = value;
+            assert!(bounded_chat_request(request, 64, 16_384).is_err(), "{key}");
+        }
+        let mut stream = base.clone();
+        stream["stream"] = json!(true);
+        assert!(bounded_chat_request(stream, 64, 16_384).is_err());
+        let mut stream_extension = base;
+        stream_extension["stream_options"] = json!({
+            "include_usage": true,
+            "vendor_extra": true
+        });
+        assert!(bounded_chat_request(stream_extension, 64, 16_384).is_err());
+    }
+
+    #[test]
+    fn metered_overlimit_request_never_reaches_reserve_or_upstream() {
+        let dir = test_dir();
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.max_input_tokens = Some(8192);
+        settings.max_output_tokens = Some(64);
+        let (commands, requests) = mpsc::sync_channel(1);
+        let endpoint = GatewayEndpoint::start(settings, commands).unwrap();
+        endpoint
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}],"max_tokens":65}"#;
+        let response = post(endpoint.local_addr(), TOKEN, body);
+        assert!(response.starts_with("HTTP/1.1 400 "));
+        assert!(requests.try_recv().is_err());
+        let extension = br#"{"model":"operator-model","models":["unmetered-fallback"],"messages":[{"role":"user","content":"hello"}]}"#;
+        let response = post(endpoint.local_addr(), TOKEN, extension);
+        assert!(response.starts_with("HTTP/1.1 400 "));
+        assert!(requests.try_recv().is_err());
+        drop(endpoint);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn metered_gateway_reserves_the_exact_capped_request() {
+        let dir = test_dir();
+        let mut settings = config(dir.clone(), "127.0.0.1:1".parse().unwrap());
+        settings.max_input_tokens = Some(8192);
+        settings.max_output_tokens = Some(64);
+        let (commands, requests) = mpsc::sync_channel(1);
+        let endpoint = GatewayEndpoint::start(settings, commands).unwrap();
+        endpoint
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}]}"#;
+        let client = thread::spawn({
+            let address = endpoint.local_addr();
+            move || post(address, TOKEN, body)
+        });
+        let ProviderCommand::Reserve { request, reply } =
+            requests.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("first command must be Reserve");
+        };
+        let forwarded: Value = serde_json::from_slice(&request.exact_body).unwrap();
+        assert_eq!(forwarded["max_tokens"], 64);
+        assert_eq!(forwarded["messages"][0]["content"], "hello");
+        reply.send(Err("test refusal".into())).unwrap();
+        assert!(client.join().unwrap().starts_with("HTTP/1.1 503 "));
+        assert!(requests.try_recv().is_err());
+        drop(endpoint);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

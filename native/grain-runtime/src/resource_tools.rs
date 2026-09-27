@@ -16,7 +16,7 @@ const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
 // The typed view may be larger, but the returned JSON is nested as MCP text
 // before reaching the ACP peer. Leave room for that escaping and its envelope.
 const MAX_TOOL_RESULT_BYTES: usize = 256 * 1024;
-const MAX_BIRTH_SOURCE_BYTES: usize = 256 * 1024;
+pub(super) const MAX_BIRTH_SOURCE_BYTES: usize = 256 * 1024;
 
 /// An operator-approved, repeatable family of new content objects. The
 /// controller allocates fresh IDs within these bounded namespaces; Hermes
@@ -294,7 +294,12 @@ pub(super) fn planned_birth_charge(family: &AllowedBirthFamily) -> Result<String
         .ok_or("resource birth charge exceeds u64".into())
 }
 
-fn signed_grain_peer(view: &Value, task: &str, capability: &str, observe: &str) -> Result<Value> {
+pub(super) fn signed_grain_peer(
+    view: &Value,
+    task: &str,
+    capability: &str,
+    observe: &str,
+) -> Result<Value> {
     let root = view
         .get("targetRoot")
         .and_then(Value::as_str)
@@ -717,6 +722,9 @@ mod tests {
             allowed_publications: vec![],
             allowed_reads: vec![],
             allowed_birth_families: vec![],
+            allowed_application_families: vec![],
+            allowed_session_families: vec![],
+            current_birth_host_sha256: None,
         };
         let peer = |root: &str| {
             json!({"authorityRoot":"123","targetRoot":root,"height":"20",
