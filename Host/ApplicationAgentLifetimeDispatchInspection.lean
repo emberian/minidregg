@@ -83,6 +83,8 @@ def inspect (bytes : List UInt8) : Except String Json := do
        [("principalHex", hex identity.principal),
         ("permissionSchemaRoot", decimal identity.permissionSchemaRoot.value),
         ("permissionBits", decimal identity.permissionBits)]),
+     ("effectiveBits", .arr <| base.effectiveBits.toArray.map Json.bool),
+     ("sessionFingerprint", decimal base.sessionFingerprint.value),
      ("request", .mkObj
        [("operationId", decimal request.operationId),
         ("canonicalHex", hex <| requestStream.encode request),
