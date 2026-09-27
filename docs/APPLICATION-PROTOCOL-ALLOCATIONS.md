@@ -28,6 +28,9 @@ retain its domain-separated canonical bytes and exact decoding checks.
 | 21 | Selected-release lookup |
 | 22 | Lifecycle BEGIN submit (reserved) |
 | 23 | Lifecycle BEGIN lookup (reserved) |
+| 24 | Source-publication submit (reserved) |
+| 25 | Source-publication lookup (reserved) |
+| 26 | Current lifecycle launch claim (reserved) |
 
 Replay must decode the original ingress, admit it against its original verified
 prefix, and compare the entire derived intent, including writes, read guards,
