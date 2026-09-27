@@ -1,0 +1,124 @@
+'Minidregg.Host.Json.grainPolicy_plural_worker_clause' depends on axioms: [propext, Quot.sound]
+'Minidregg.Host.Json.grainPolicy_singleton_bytes' depends on axioms: [propext, Classical.choice, Quot.sound]
+Host/Json.lean:955:36: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [AgentGrain.witnessCaveat, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith, before, stale]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:965:27: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainWorkerClause, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject,
+  ̲  ̲ ̲ ̲Nat.cast_inj, different]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:990:25: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:990:50: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:997:29: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner, firstFalse]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:997:54: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner, firstFalse]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1001:29: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1001:54: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+'Minidregg.Host.Json.grainPolicy_stale_worker_refused' depends on axioms: [propext, Quot.sound]
+Host/Json.lean:1032:25: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1032:50: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1039:29: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner, firstFalse]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1039:54: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner, firstFalse]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1043:29: warning: This simp argument is unused:
+  Minidregg.Pred.eval_all
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵l̵l̵,̵ ̵Minidregg.Pred.eval_any, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Host/Json.lean:1043:54: warning: This simp argument is unused:
+  Minidregg.Pred.eval_any
+
+Hint: Omit it from the simp argument list.
+  simp [grainPolicy, Minidregg.Pred.eval_all, M̵i̵n̵i̵d̵r̵e̵g̵g̵.̵P̵r̵e̵d̵.̵e̵v̵a̵l̵_̵a̵n̵y̵,̵Minidregg.Pred.eval, Minidregg.Pred.evalWith,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲requestSubject, verb, Nat.cast_inj, notOwner]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+'Minidregg.Host.Json.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound]
+'Minidregg.Host.Json.grainPolicy_duplicate_workers_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ grainPolicy_duplicate_workers_refused._native.native_decide.ax_1_1]
+'Minidregg.Host.Json.grainPolicy_overbound_workers_refused' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ grainPolicy_overbound_workers_refused._native.native_decide.ax_1_1]
+'Minidregg.Host.Json.grainPolicy_mixed_worker_forms_refused' depends on axioms: [propext, Classical.choice, Quot.sound]

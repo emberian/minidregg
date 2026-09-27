@@ -24,7 +24,8 @@ plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch
 59=private agent reserve assembly, 60=selected fn coverage submit,
 61=selected fn coverage receipt-only lookup, 62=empty fn progress submit,
 63=empty fn progress receipt-only lookup, 64=private fn frontier plan,
-65=private fn frontier detached assembly. Op34/46 success uses a distinct
+65=private fn frontier detached assembly, 66=private source-bound launch BEGIN
+plan, 67=private source-bound launch BEGIN detached assembly. Op34/46 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -67,6 +68,8 @@ import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.ApplicationLifecycleLaunchBeginAuthoring
+import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Host.FnConsumerFrontierPlan
@@ -513,6 +516,10 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationDispatchAgentPaidInspection.inspectPaidPlan bytes
   else if kind == "application-agent-dispatch-committed" then
     ApplicationDispatchAgentInspection.inspect bytes
+  else if kind == "application-lifecycle-launch-begin-request" then
+    ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
+  else if kind == "application-lifecycle-launch-begin-plan" then
+    ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -4254,7 +4261,8 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "author", [kind, input, output] =>
           let source ← if kind == "application-dispatch-request" ||
-              kind == "application-share-issue-grain-request" then
+              kind == "application-share-issue-grain-request" ||
+              kind == "application-lifecycle-launch-begin-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4267,6 +4275,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-lifecycle-launch-begin-request" ||
+              kind == "application-lifecycle-launch-begin-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4279,6 +4289,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-lifecycle-launch-begin-request" ||
+              kind == "application-lifecycle-launch-begin-plan" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4600,6 +4612,29 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
+                        | 66 =>
+                            let some custody := settings.residentBeginManagement
+                              | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
+                                  "resident BEGIN management pin is not configured")
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationLifecycleLaunchBeginAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified custody.pin payload
+                            let bytes := ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch BEGIN plan exceeds host frame bound")
+                            return ((66 : UInt8), bytes)
+                        | 67 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationLifecycleLaunchBeginAuthoring.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical launch BEGIN plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let ingress ← IO.ofExcept <|
+                              ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
+                            return ((67 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"

@@ -15,6 +15,7 @@ import Kernel.ApplicationDispatchAuthoring
 import Host.ApplicationLifecycleCompletionAuthoring
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationShareIssueGrainInspection
@@ -1780,6 +1781,22 @@ private def residentBeginOperatorRequest (json : Lean.Json) : Result (List UInt8
       descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj) }
   return ApplicationLifecycleBeginOperator.requestCodec.encode request
 
+private def launchBeginOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["kind", "clientOperationId", "descriptor", "createIndex"] json
+  let kind ← string "$.kind" (← field "$" "kind" obj)
+  let kind ← match kind with
+    | "install" => pure ApplicationLifecycleBegin.Kind.install
+    | "start" => pure .start
+    | _ => failAt "$.kind" "expected install or start"
+  let request : ApplicationLifecycleLaunchBeginAuthoring.Request :=
+    { kind := kind
+      clientOperationId := ← nat "$.clientOperationId" (← field "$" "clientOperationId" obj)
+      descriptorBytes := ← decodeHex "$.descriptor" (← field "$" "descriptor" obj)
+      createIndex := ← optional "$.createIndex" nat (← field "$" "createIndex" obj) }
+  let bytes := ApplicationLifecycleLaunchBeginAuthoring.requestCodec.encode request
+  let _ ← ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
+  return bytes
+
 private def lifecycleClaimOperatorRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["originalIndex", "queryNonce"] json
   let request : ApplicationLifecycleClaimOperator.Request :=
@@ -1832,6 +1849,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-completion-ingress" => completionIngress json
   | "application-lifecycle-completion-operator-request" => completionOperatorRequest json
   | "application-lifecycle-resident-begin-operator-request" => residentBeginOperatorRequest json
+  | "application-lifecycle-launch-begin-request" => launchBeginOperatorRequest json
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "application-spk-launch-descriptor" =>
@@ -2433,6 +2451,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let plan ← decoded "application-lifecycle-resident-begin-operator-plan"
         ApplicationLifecycleBeginOperator.planCodec bytes
       residentBeginOperatorPlanJson plan
+  | "application-lifecycle-launch-begin-request" =>
+      ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
+  | "application-lifecycle-launch-begin-plan" =>
+      ApplicationLifecycleLaunchBeginInspection.inspectPlan bytes
   | "application-lifecycle-claim-operator-plan" => do
       let plan ← decoded "application-lifecycle-claim-operator-plan"
         ApplicationLifecycleClaimOperator.planCodec bytes
