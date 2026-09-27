@@ -45,3 +45,40 @@ receiving gate is included in this checkpoint. A generic gateway write to
 the same content resource must not be interpreted as an authorized release.
 Those are required before a receiver may act on this message; the design
 boundary is in [FN-SELECTIVE-ORIGIN-PROPOSAL.md](../../FN-SELECTIVE-ORIGIN-PROPOSAL.md).
+
+The next **narrow signature component** is
+`Kernel/FnSelectiveReleaseSignature.lean` SHA-256
+`4b76ba358968ff2fc487e676a0f1b2e61cdc8e0d1664e1e4f0c660de198ae261`.
+It defines a strict versioned owner packet and a private checked constructor.
+`verifyNative` selects the current signer key and exact owner-subject target
+law from the recipient Mini's complete opened authority, checks the signed
+destination and bounded release, checks key epoch/activation/revocation and
+expiry, then calls the pinned native Ed25519 verifier over the exact canonical
+release preimage. A false, malformed or unavailable native verdict does not
+mint `Checked`. This is deliberately a restricted recipient-local owner-law
+profile; it does not establish that the claimed source Mini accepted anything,
+that fn delivered a trustworthy history, or that `recipientOnly` encrypts
+content. It neither admits nor writes a release.
+
+The new module's one-compiler narrow command was:
+
+```sh
+lake env lean Kernel/FnSelectiveReleaseSignature.lean \
+  -o .lake/build/lib/lean/Kernel/FnSelectiveReleaseSignature.olean \
+  -i .lake/build/lib/lean/Kernel/FnSelectiveReleaseSignature.ilean \
+  -c .lake/build/ir/Kernel/FnSelectiveReleaseSignature.c --json
+```
+
+It exited zero in the same independent warm copy; bounded log
+`/tmp/minidregg-fn-selective-signature-narrow.log` SHA-256
+`325f4ad2d3a7ecc3368cb8e3df240f4bd2e780bafcb72bc69313a394201c0c2f`
+contains only package-local-change warnings. An external importing-module
+probe, `Kernel/FnSelectiveReleaseForgeProbe.lean` in that independent copy
+(SHA-256 `12cd7bcd04a280f3da4a4465563227eae7d934b1c1a8dfc39ef0a97ba045895f`),
+attempted `{ checked with verifier := ... }`; Lean refused with
+`constructor for Checked is marked as private`. The probe log is
+`/tmp/minidregg-fn-selective-forge-probe.log` SHA-256
+`32cae188cabafe5ffbefca80d5733ac9275af7b882202af952ad0ed79c0fc84b`.
+This tests that particular record-update route; it is not a cryptographic or
+physical receiving gate. A separate source-owned ingress, capability admission,
+durable nullifier and replay variant are still required.
