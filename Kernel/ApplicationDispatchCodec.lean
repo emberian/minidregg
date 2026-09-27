@@ -161,6 +161,15 @@ def requestStream : StreamCodec Request :=
       ⟨operationId, method, path, query, headers, body⟩)
     (by intro request; cases request; rfl)
 
+/-- Transport digest of the exact canonical method, path, query, ordered
+ordinary headers (including cookies), and full body. Placing it at the codec
+layer lets paid reserve signing bind this request before any replay-dependent
+projection is built. -/
+def requestDigest (request : Request) : Digest :=
+  (Sp800185Cshake256.hash
+    "DREGG/APPLICATION/PHYSICAL-WEB-REQUEST/v1".toUTF8.toList
+    (requestStream.encode request)).digest
+
 /-- App-facing identity and permission bitset. The received bytes are not a
 decision: special admission must derive these from the current governed
 participant grant, session policy and installed interface schema. -/

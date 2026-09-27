@@ -61,7 +61,7 @@ def candidateStream : StreamCodec Candidate :=
 
 def codec : LawfulCodec Candidate :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-DISPATCH-CANDIDATE/v2".toUTF8.toList candidateStream
+    "DREGG/APPLICATION/AGENT-DISPATCH-BASE-CANDIDATE/v2".toUTF8.toList candidateStream
 
 theorem decode_encode (candidate : Candidate) :
     codec.decode (codec.encode candidate) = some candidate :=
@@ -72,12 +72,12 @@ This projection additionally reads the same current physical cell so the
 host can fence by the full-cell root and reserved budget. No caller-provided
 parent state enters this function. -/
 def ofDispatchAt {config : Config} {opened : Opened config}
-    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
-    (admitted : NativeHostReplay.DispatchAt config opened ingress) :
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    (admitted : NativeHostReplay.AgentDispatchAt config opened ingress) :
     Option Candidate := do
-  let .agent task generation := ingress.dispatch.dispatch.session.origin
+  let .agent task generation := ingress.dispatch.dispatch.dispatch.session.origin
     | none
-  let claimed ← ingress.parent
+  let claimed ← ingress.dispatch.parent
   if claimed.task != task || claimed.state.generation != generation ||
       !(claimed.state.status == 3 || claimed.state.status == 4) then none else
   let cell ← match opened.directory.directory.slots task with
@@ -89,8 +89,44 @@ def ofDispatchAt {config : Config} {opened : Opened config}
   let state ← AgentGrain.readState task page
   if state != claimed.state || payload.root != claimed.root ||
       state.remaining < 0 || state.reserved < 0 then none else
-  some ⟨ApplicationDispatchProjection.ofDispatchAt admitted,
+  some ⟨ApplicationDispatchProjection.ofAgentDispatchAt admitted,
     ⟨task, state.generation, state.status, state.remaining, state.reserved,
       payload.root, ResourceBirthCodec.physicalRoot (.live cell)⟩⟩
+
+/-- Source-owned agent physical projection. The full canonical reserve context
+commits the distinct payer and exact HTTP request digest; the original reserve
+receipt comes from Replay, never from the HTTP caller. -/
+structure Paid where
+  candidate : Candidate
+  context : ApplicationDispatchAgentReserveContext.Context
+  reserveIndex : Nat
+  reserveReceipt : NativeHostCodec.Receipt
+  pursePhysicalRoot : Digest
+  deriving DecidableEq
+
+def paidStream : StreamCodec Paid :=
+  StreamCodec.xmap
+    (StreamCodec.product candidateStream
+      (StreamCodec.product ApplicationDispatchAgentReserveContext.contextStream
+        (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product NativeHostCodec.receiptStream digestStream))))
+    (fun paid => (paid.candidate, paid.context, paid.reserveIndex,
+      paid.reserveReceipt, paid.pursePhysicalRoot))
+    (fun (candidate, context, reserveIndex, reserveReceipt, pursePhysicalRoot) =>
+      ⟨candidate, context, reserveIndex, reserveReceipt, pursePhysicalRoot⟩)
+    (by intro paid; cases paid; rfl)
+
+def paidCodec : LawfulCodec Paid :=
+  NativeHostCodec.framed
+    "DREGG/APPLICATION/AGENT-DISPATCH-PAID-CANDIDATE/v2".toUTF8.toList paidStream
+
+def ofAgentDispatchAt {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    (admitted : NativeHostReplay.AgentDispatchAt config opened ingress) :
+    Option Paid := do
+  let candidate ← ofDispatchAt admitted
+  some ⟨candidate, ingress.reserveContext, admitted.reserve.index,
+    admitted.reserve.raw.receipt,
+    ResourceBirthCodec.physicalRoot (.live admitted.checked.payer.cell)⟩
 
 end Minidregg.Kernel.ApplicationDispatchAgentProjection

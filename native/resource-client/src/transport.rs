@@ -139,7 +139,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 50 | 52, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 50 | 52, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -1124,6 +1124,12 @@ mod tests {
         assert!(allowed_operator_operation(&claim_assembly));
         assert!(!allowed_operation(&claim_assembly, true));
         assert!(!allowed_operator_operation(&[53, 1, 0, 0, 0, b'P']));
+
+        for operation in [46, 47] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(!allowed_operation(&[operation, 1], true));
+        }
     }
 
     #[test]

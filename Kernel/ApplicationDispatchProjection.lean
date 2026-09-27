@@ -41,13 +41,13 @@ structure Candidate where
   physicalRequestDigest : Digest
   deriving DecidableEq
 
-/-- A transport digest over the exact checked method, path, query, ordered
-ordinary headers (including cookies), and full body. The complete request is
-also retained in `dispatch`; no digest substitutes for its bytes. -/
-def requestDigest (request : Request) : Digest :=
-  (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/PHYSICAL-WEB-REQUEST/v1".toUTF8.toList
-    (requestStream.encode request)).digest
+/-- Preserve the existing projection API and exact digest bytes. The one
+definition now lives below Replay so signed agent reserves can bind it. -/
+abbrev requestDigest (request : Request) : Digest :=
+  ApplicationDispatchCodec.requestDigest request
+
+theorem requestDigest_exact (request : Request) :
+    requestDigest request = ApplicationDispatchCodec.requestDigest request := rfl
 
 /-- The receiver projects from the same typed replay admission whose intent
 it submits to CAS. The prior issue was retained by the verifier's actual
@@ -70,6 +70,32 @@ def ofDispatchAt {config : Config} {opened : Opened config}
     sessionRoot := checked.selection.sessionRoot
     issueTransaction := admitted.prior.evidence.transactionId
     issueEvent := admitted.prior.evidence.eventId
+    dispatchTransaction := pending.transactionId
+    dispatchEvent := pending.event.eventId
+    currentImageBoundary := imageBoundary config opened.durable.image
+    physicalRequestDigest := requestDigest dispatch.request }
+
+/-- Event21 projects the same base app identity and rights from its distinct
+checked admission. The payer and reserve coordinates are carried by the
+agent-only outer projection. -/
+def ofAgentDispatchAt {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    (admitted : NativeHostReplay.AgentDispatchAt config opened ingress) : Candidate :=
+  let dispatch := ingress.dispatch.dispatch.dispatch
+  let checked := admitted.checked.base.checked
+  let pending := admitted.intent
+  { dispatch := dispatch
+    effectiveBits := checked.bits
+    sessionFingerprint := checked.sessionFingerprint
+    ticketResource := admitted.issue.evidence.ingress.spec.ticket.resource
+    ticketRoot := ingress.dispatch.ticketRoot
+    enrollmentResource := ingress.dispatch.dispatch.enrollmentResource
+    enrollmentRoot := ingress.dispatch.dispatch.enrollmentRoot
+    authorityRoot := checked.selection.authorityRoot
+    appRoot := ingress.dispatch.dispatch.appRoot
+    sessionRoot := checked.selection.sessionRoot
+    issueTransaction := admitted.issue.evidence.transactionId
+    issueEvent := admitted.issue.evidence.eventId
     dispatchTransaction := pending.transactionId
     dispatchEvent := pending.event.eventId
     currentImageBoundary := imageBoundary config opened.durable.image

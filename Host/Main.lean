@@ -18,7 +18,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 43=operator-private namespace assembly, 44=operator-private completion plan,
 45=operator-private completion assembly, 50=operator-private resident BEGIN plan,
 51=operator-private resident BEGIN assembly, 52=operator-private lifecycle claim
-plan, 53=operator-private lifecycle claim assembly. Op34 success uses a distinct
+plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch,
+47=paid agent dispatch receipt-only lookup. Op34/46 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -41,6 +42,8 @@ import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
+import Kernel.ApplicationDispatchAgentReceiver
+import Kernel.ApplicationDispatchAgentLookup
 import Kernel.ApplicationDispatchAuthoring
 import Kernel.ApplicationLifecycleBeginV2Receiver
 import Kernel.ApplicationLifecycleClaimV2Receiver
@@ -814,6 +817,24 @@ def applicationDispatchLookupSession (config : NativeHost.Config)
   | .error .nativeHistoryUnavailable =>
       return .uncertain "dispatch original history unavailable".toUTF8.toList
 
+/-- Event21 historical lookup returns only its original receipt. It cannot
+recover a fresh physical delivery permit or replay an external effect. -/
+def applicationAgentDispatchLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  match ApplicationDispatchAgentLookup.lookupVerified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-agent-dispatch".toUTF8.toList
+        "noncanonical paid dispatch lookup ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "paid dispatch transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "paid dispatch original history unavailable".toUTF8.toList
+
 /-- Author a current app/session birth intent from one verifier-opened image.
 The JSON is only a request for source selectors; the helper derives current
 height and grant epochs and checks the pinned genesis identity. -/
@@ -953,6 +974,9 @@ def dispatchSession (config : NativeHost.Config)
   | 35 =>
       return (35, outcomeCodec.encode
         (← applicationDispatchLookupSession config state payload))
+  | 47 =>
+      return (47, outcomeCodec.encode
+        (← applicationAgentDispatchLookupSession config state payload))
   | 36 =>
       let session ← sessionCurrent config state
       match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
@@ -1040,6 +1064,38 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
+/-- Op46 hands out the distinct paid agent permit only from an exact event21
+CAS/readback and a final point-in-time physical tip check. Historical op47 is
+receipt-only; neither result is a lease across an external fd3 delivery. -/
+def dispatchAgentSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationDispatchAgentReceiver.receiveVerified config session.verified payload
+  match result with
+  | .permitted permit =>
+      let handed ← permit.withFreshTip fun committedBytes =>
+        writeSessionFrame output 46 committedBytes
+      match handed with
+      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .error detail =>
+          writeSessionFrame output 46 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .rejected _ =>
+      writeSessionFrame output 46 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused "application-agent-dispatch".toUTF8.toList
+            "request refused".toUTF8.toList)
+  | .contention =>
+      writeSessionFrame output 46 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome .contention
+  | .unavailable detail =>
+      writeSessionFrame output 46 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .uncertain detail =>
+      writeSessionFrame output 46 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+
 /-- Op26 returns a launch reservation only inside the receiver's physical-tip
 callback. This is a point-in-time check, not a lease against later writes or
 proof that the external process has started. -/
@@ -1105,6 +1161,8 @@ partial def serveSession (config : NativeHost.Config)
     | operation :: payload => pure (operation, payload)
   if operation == 34 then
     dispatchApplicationSubmitSession config state payload output
+  else if operation == 46 then
+    dispatchAgentSubmitSession config state payload output
   else if operation == 26 then
     dispatchLifecycleClaimSubmitSession config state payload output
   else
