@@ -5,8 +5,9 @@
 #![allow(dead_code)]
 
 use crate::dispatch_native::{private_dir, write_new};
-use crate::hostd::{Phase, Record};
+use crate::hostd::{Journal, Phase, Record, StopIdentity, UnitStopAudit};
 use crate::lifecycle_v3_native::{decimal, hex, lowercase_hex, unhex};
+use crate::lifecycle_v3_stop_claim_native::FreshStopClaim;
 use crate::volume_custody::VolumeWitness;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -359,6 +360,39 @@ impl StopTarget {
         }
         volume.recheck_handoff()
     }
+
+    fn stop_identity(&self) -> StopIdentity {
+        StopIdentity {
+            app: self.app,
+            generation: self.running_generation,
+            unit: self.unit.clone(),
+            image_identity: self.image_hex.clone(),
+            invocation_id: self.invocation_id.clone(),
+            control_group: self.control_group.clone(),
+        }
+    }
+}
+
+/// Consume only the sealed fresh op26 STOP callback. The read-only historical
+/// inspector and a matching journal record cannot call this entry on their
+/// own. A private exact-attempt marker is durable before the manager fence;
+/// the journal hook then rechecks the same incarnation and volume under lock.
+pub(crate) fn fence_exact(
+    fresh: &FreshStopClaim,
+    journal: &Journal,
+    volume: &VolumeWitness,
+    attempt_dir: &Path,
+) -> io::Result<UnitStopAudit> {
+    let target = fresh.target();
+    let record = journal
+        .read()?
+        .ok_or_else(|| invalid("STOP running journal absent"))?;
+    target.compare_retained(&record, volume)?;
+    target.recheck_volume(volume)?;
+    target.persist_marker(attempt_dir)?;
+    target.check_marker(attempt_dir)?;
+    journal
+        .fence_and_stop_manager_checked(&target.stop_identity(), || target.recheck_volume(volume))
 }
 
 #[cfg(test)]
@@ -465,6 +499,13 @@ mod tests {
         assert_eq!(target.operation_generation, 7);
         assert_eq!(target.running_receipt_hex, "03");
         assert_eq!(target.custody, [4]);
+        let stop_identity = target.stop_identity();
+        assert_eq!(stop_identity.generation, 6);
+        assert_eq!(stop_identity.unit, "mini-spk-a8401-g6.service");
+        assert_eq!(
+            stop_identity.invocation_id,
+            "0123456789abcdef0123456789abcdef"
+        );
         assert!(checked(plan, b"other", begin, &view).is_err());
         assert!(checked(plan, committed, b"other", &view).is_err());
         view["claimReceipt"]["imageBoundary"] = json!("24");

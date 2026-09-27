@@ -1,0 +1,6 @@
+0e9f7e6e48ad02dab3f255479e6961c18d86b5a9cf92e0c9a8f59ab2a1896ab4  native/spk-host/src/lifecycle_v3_stop_native.rs
+e2449d98792875835b4cfe86778e3a83a8c71721beeb2e222c4829ba61670b4c  native/spk-host/src/lifecycle_v3_stop_claim_native.rs
+4e4b807f7ca8f8252f515125548602cf893c3cbbd94f99999f3f75259c134189  native/spk-host/src/hostd.rs
+c22ec67acbb300de7ea05daed7af79eee1328784eaad5df43bd9db303b3d4e6c  docs/evidence/2026-09-27-spk-lifecycle-stop-fence/README.md
+132e951723b6f206f430f63cfa9b90b490c8603f4927ee5b426d01dd9062f9d4  docs/evidence/2026-09-27-spk-lifecycle-stop-fence/nextest.log
+42dfc432c0f618a5f470e086cddb2df564a2f397a379d6f63207fdedc9d4efec  docs/evidence/2026-09-27-spk-lifecycle-stop-fence/clippy.log
