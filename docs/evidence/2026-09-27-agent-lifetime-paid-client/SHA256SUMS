@@ -1,0 +1,8 @@
+06724f969bcfbe4f99a26225b9a7bc15800b3bfccd7e41599b89ed46f3702f7c  native/resource-client/src/main.rs
+8d14fd966ed18c19a1fb1549bf23d09ca9690ea6fe4e18b27e70cd2afd53fcda  native/resource-client/src/agent_reserve.rs
+994d9c52518d0fffc5c7ad1d2a1a9ada0f58138572885a8f40610c36c1ec109d  native/resource-client/src/agent_reserve/lifetime_v3.rs
+bc750f449845335863fbe91c4f71e21812c0a1825caca8fffd6835163d5040bf  native/resource-client/src/agent_reserve/lifetime_v3/paid.rs
+f10e24d7ad3d73897fba04f899083c00256b951bee6c80c96beaa0db51dc17d4  docs/evidence/2026-09-27-agent-lifetime-paid-client/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-agent-lifetime-paid-client/fmt.log
+a41051563a4cb5fc1b1bcdd9aa0ba28ca80f7736d629d90cc138218756e8e3a9  docs/evidence/2026-09-27-agent-lifetime-paid-client/clippy.log
+f093dff75f1486a8a47850c1cc3aff089241a0eef160527fcbebfea7fea0695b  docs/evidence/2026-09-27-agent-lifetime-paid-client/nextest.log

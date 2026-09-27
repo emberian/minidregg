@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+────────────
+ Nextest run ID ed8d7782-4895-4bc7-b107-b51deeffe0e6 with nextest profile: default
+    Starting 4 tests across 1 binary (95 tests skipped)
+        PASS [   0.008s] (1/4) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::paid::tests::paid_plan_requires_original_grant_and_reserve_receipts
+        PASS [   0.008s] (2/4) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::paid::tests::paid_assembly_payload_has_exact_nested_host_pair_shape
+        PASS [   0.009s] (3/4) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::paid::tests::committed_permit_must_match_both_historical_receipts_and_http
+        PASS [   0.082s] (4/4) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::paid::tests::lost_paid_submit_reply_never_reissues_and_lookups_are_numbered
+────────────
+     Summary [   0.082s] 4 tests run: 4 passed, 95 skipped

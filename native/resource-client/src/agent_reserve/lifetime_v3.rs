@@ -2,6 +2,11 @@
 //! format and its op58/59 call remain historical and cannot be reinterpreted.
 use super::*;
 
+mod paid;
+pub(crate) use paid::{
+    lifetime_paid_lookup, lifetime_paid_plan, lifetime_paid_seal, lifetime_paid_submit,
+};
+
 const FORMAT: &str = "minidregg-agent-lifetime-reserve-custody-v1";
 const APPROVAL: &str = "minidregg-agent-lifetime-reserve-approval-v1";
 const SUBMIT_MARKER: &str = "minidregg-agent-lifetime-reserve-submit-attempt-v1";

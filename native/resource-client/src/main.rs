@@ -151,6 +151,10 @@ usage:
   mini agent-lifetime-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-reserve-submit --attempt PRIVATE-DIR
   mini agent-lifetime-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-paid-plan --reserve-attempt PRIVATE-DIR --grant-attempt PRIVATE-DIR --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-paid-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-paid-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-paid-lookup --attempt PRIVATE-DIR
   mini agent-lifetime-grant-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
@@ -2339,6 +2343,33 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_reserve::lifetime_lookup(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-paid-plan" => {
+            let reserve = path(args.required("reserve-attempt")?);
+            let grant = path(args.required("grant-attempt")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            agent_reserve::lifetime_paid_plan(&reserve, &grant, &directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-paid-seal" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            agent_reserve::lifetime_paid_seal(&directory, &approval)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-paid-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::lifetime_paid_submit(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-paid-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::lifetime_paid_lookup(&directory)
         }
         #[cfg(unix)]
         "agent-lifetime-grant-plan" => {
