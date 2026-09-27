@@ -1,0 +1,37 @@
+diff --git a/Kernel/CanonicalPolicyRegistry.lean b/Kernel/CanonicalPolicyRegistry.lean
+index a189f8e..f9a374d 100644
+--- a/Kernel/CanonicalPolicyRegistry.lean
++++ b/Kernel/CanonicalPolicyRegistry.lean
+@@ -368,10 +368,18 @@ theorem guardPolicyRegistry_preflight_ready
+     · have falseCheck : intent.readGuardsMatchCheck before = false :=
+         Bool.eq_false_of_not_eq_true ready
+       simp [DataIntent.preflight, falseCheck] at baseReady
++  have baseNotUnguarded :
++      ¬ (intent.writes = [] ∧ intent.nullifiers ≠ [] ∧ intent.readGuards = []) := by
++    intro eventOnly
++    rcases eventOnly with ⟨noWrites, hasClaim, noGuards⟩
++    have refused := DataIntent.unguarded_claim_only_rejected before intent
++      noWrites hasClaim noGuards
++    rw [refused] at baseReady
++    cases baseReady
+   have durableReady : intent.erase.preflight before.model = .ok () := by
+     cases durable : intent.erase.preflight before.model with
+     | error reason =>
+-        simp [DataIntent.preflight, baseGuardReady, durable] at baseReady
++        simp [DataIntent.preflight, baseGuardReady, baseNotUnguarded, durable] at baseReady
+     | ok result =>
+         cases result
+         rfl
+@@ -386,6 +394,12 @@ theorem guardPolicyRegistry_preflight_ready
+         baseGuardReady guard oldMember
+   simp only [DataIntent.preflight, guardedReady, Bool.not_true, Bool.false_eq_true,
+     ↓reduceIte]
++  have guardedNotUnguarded :
++      ¬ ((guardPolicyRegistry cell cellId digest intent readOnly).writes = [] ∧
++        (guardPolicyRegistry cell cellId digest intent readOnly).nullifiers ≠ [] ∧
++        (guardPolicyRegistry cell cellId digest intent readOnly).readGuards = []) := by
++    simp [guardPolicyRegistry]
++  simp only [guardedNotUnguarded, ↓reduceIte]
+   rw [guardPolicyRegistry_erased_preflight, durableReady]
+ 
+ /-- Stale-root tooth: policy mutation, address replacement, or epoch rotation
