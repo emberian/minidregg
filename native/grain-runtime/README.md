@@ -98,9 +98,14 @@ upstream `hermes-acp` executable. For example, alongside the tool task above:
   "providerKeyFile":"/var/lib/mini/grains/task-7001/provider.key",
   "gatewayBind":"127.0.0.1:18762",
   "maxRequestBytes":1048576, "maxResponseBytes":8388608,
-  "timeoutSeconds":30
+  "timeoutSeconds":30, "maxIterations":2
 }
 ```
+
+`maxIterations` is optional for provider-backed Hermes prompts. It accepts
+an integer from 1 through 6; omission preserves the generated six-iteration
+profile. This limits Hermes turn iterations, while the signed provider reserve,
+worker wall deadline, and external provider spending cap remain separate bounds.
 
 The real provider key stays in the private controller state directory. Each
 worker receives only a new prompt token and a generated local Hermes profile.

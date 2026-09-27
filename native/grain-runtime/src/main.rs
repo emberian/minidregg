@@ -103,6 +103,18 @@ struct ProviderTask {
     max_request_bytes: usize,
     max_response_bytes: usize,
     timeout_seconds: u64,
+    /// Limit Hermes iterations for this provider-backed prompt; omitted keeps
+    /// the established six-iteration profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_iterations: Option<u8>,
+}
+
+fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
+    let iterations = configured.unwrap_or(6);
+    if !(1..=6).contains(&iterations) {
+        return Err("providerTask maxIterations must be between 1 and 6".into());
+    }
+    Ok(iterations)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1301,6 +1313,7 @@ fn validate(c: &Config) -> Result<()> {
                     .into(),
             );
         }
+        provider_max_iterations(p.max_iterations)?;
         let bind = p
             .gateway_bind
             .parse::<std::net::SocketAddr>()
@@ -5345,6 +5358,7 @@ impl Runtime {
                 endpoint.local_addr(),
                 &token,
                 spec.wall_time_seconds.unwrap_or(600) - 60,
+                provider_max_iterations(task.max_iterations)?,
             )?;
             *self
                 .provider_control
@@ -7945,6 +7959,43 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             serde_json::to_value(bounded).unwrap()["wallTimeSeconds"],
             json!(1200)
         );
+    }
+
+    #[test]
+    fn provider_iteration_limit_preserves_default_and_refuses_invalid_values() {
+        assert_eq!(provider_max_iterations(None).unwrap(), 6);
+        assert_eq!(provider_max_iterations(Some(1)).unwrap(), 1);
+        assert_eq!(provider_max_iterations(Some(2)).unwrap(), 2);
+        assert_eq!(provider_max_iterations(Some(6)).unwrap(), 6);
+        assert!(provider_max_iterations(Some(0)).is_err());
+        assert!(provider_max_iterations(Some(7)).is_err());
+    }
+
+    #[test]
+    fn provider_iteration_config_accepts_only_bounded_integer_form() {
+        let base = json!({
+            "task":"7004", "subject":"9", "capability":"101",
+            "queryCapability":"101", "custodyKey":"/private/provider-task.key",
+            "parentCapability":"75", "parentObserveCapability":"75",
+            "reserve":"3", "charge":"0", "metering":true,
+            "model":"pinned-model", "upstreamUrl":"https://example.test/v1/chat/completions",
+            "providerKeyFile":"/private/provider.key", "gatewayBind":"127.0.0.1:18762",
+            "maxRequestBytes":1048576, "maxResponseBytes":8388608,
+            "timeoutSeconds":30
+        });
+        let omitted: ProviderTask = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(provider_max_iterations(omitted.max_iterations).unwrap(), 6);
+        let mut explicit = base;
+        explicit["maxIterations"] = json!(2);
+        let configured: ProviderTask = serde_json::from_value(explicit.clone()).unwrap();
+        assert_eq!(
+            provider_max_iterations(configured.max_iterations).unwrap(),
+            2
+        );
+        for invalid in [json!(-1), json!(1.5), json!("2"), json!(256)] {
+            explicit["maxIterations"] = invalid;
+            assert!(serde_json::from_value::<ProviderTask>(explicit.clone()).is_err());
+        }
     }
 
     #[test]
