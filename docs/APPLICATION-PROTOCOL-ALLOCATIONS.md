@@ -88,6 +88,13 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 55 | Grain-backed share-issue historical receipt-only lookup (reserved) |
 | 56 | Current-image grain-backed share-issue signing plan (reserved private authoring) |
 | 57 | Grain-backed share-issue detached signature assembly (reserved private authoring) |
+| 58 | Current-image event21 full-context purse reserve signing plan (reserved private authoring) |
+| 59 | Event21 full-context purse reserve detached signature assembly (reserved private authoring) |
+
+Operations58/59 author an ordinary signed reserve bound to the full event21
+context and a preallocated reserve operation ID. They do not submit it or
+authorize delivery. Operations48/49 subsequently author the paid dispatch using
+the admitted reserve; these two stages must not share a digest-only legacy nonce.
 
 Event22 and operations54–57 are additive. Existing event15 and operations28/29
 retain their original meaning. Dispatch may consume a grain-backed ticket only
