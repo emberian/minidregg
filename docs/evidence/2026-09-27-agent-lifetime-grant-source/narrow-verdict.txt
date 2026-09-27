@@ -1,0 +1,6 @@
+scope: source-only Lean check, no native Host route or event27 admission
+overlay: hbox:/tank/dregg-build/mini-lifetime-grant-review-20260927
+prefix manifest: a73745b5e4551ac4817bb392b582b890308b48aff33f45a32f44150ed166e845
+Kernel/ApplicationAgentLifetimeGrant.lean: exit 0; grant.log empty
+Kernel/ApplicationAgentLifetimeGrantSource.lean: exit 0; source.log empty
+verdict: narrow source compilation PASS
