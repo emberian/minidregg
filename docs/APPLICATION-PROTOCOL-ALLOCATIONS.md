@@ -138,10 +138,13 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 77 | Event26 historical receipt-only lookup (reserved; never a delivery permit) |
 | 78 | Verified-current-image event26 grant-bound dispatch signing plan (reserved private authoring) |
 | 79 | Event26 grant-bound dispatch detached signature assembly (reserved private authoring) |
+| 80 | Verified-current-image event26 grant-bound purse reserve signing plan (reserved private authoring) |
+| 81 | Event26 grant-bound purse reserve detached signature assembly (reserved private authoring) |
 
-The event26 authoring family may also need a distinct reserve plan and
-assembly pair. No opcode is allocated for that pair until its typed source API
-is reviewed; operations78/79 cover only the post-reserve dispatch plan.
+Operations80/81 prepare the separately signed reserve before the ordinary
+native invoke. Operations78/79 cover only the post-reserve dispatch plan. The
+reservation does not qualify either route or authorize Rust to encode Mini's
+ordinary invoke frame.
 
 Events23–25 and operations66–71 are reserved for the source-bound first-create
 and continued-launch contract. They are not implemented by this reservation.

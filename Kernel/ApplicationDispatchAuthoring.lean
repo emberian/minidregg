@@ -110,7 +110,10 @@ private def sessionState (session : Nat)
       ApplicationGrainSession.readState session page
   | _ => none
 
-private def observationSlot (config : Config) (opened : Opened config)
+/-- Source-derived unsigned observation header at one prepared dispatch tip.
+It grants no authority by itself; the special receiver checks its detached
+signature, current law, exact old root and immutable request context. -/
+def prepareObservationSlot (config : Config) (opened : Opened config)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (selection : Selection)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
@@ -241,13 +244,13 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
   if invocation.finalizedDraft !=
       .invoke (DeclaredResourceController.commandCodec.encode command) then
     throw "dispatch invocation plan differs from current source"
-  let appSlot ← observationSlot config opened unsigned selection prepared 0
+  let appSlot ← prepareObservationSlot config opened unsigned selection prepared 0
     appResource ticket.participant.appObserveCapability base.appRoot
-  let manifestSlot ← observationSlot config opened unsigned selection prepared 1
+  let manifestSlot ← prepareObservationSlot config opened unsigned selection prepared 1
     request.packageManifest request.manifestObserveCapability dispatch.app.manifestRoot
-  let enrollmentSlot ← observationSlot config opened unsigned selection prepared 2
+  let enrollmentSlot ← prepareObservationSlot config opened unsigned selection prepared 2
     enrollmentResource request.enrollmentObserveCapability base.enrollmentRoot
-  let ticketSlot ← observationSlot config opened unsigned selection prepared 3
+  let ticketSlot ← prepareObservationSlot config opened unsigned selection prepared 3
     ticket.resource ticket.participant.ticketObserveCapability unsigned.ticketRoot
   pure ⟨request, unsigned.canonicalBytes, invocation,
     [appSlot, manifestSlot, enrollmentSlot, ticketSlot]⟩
