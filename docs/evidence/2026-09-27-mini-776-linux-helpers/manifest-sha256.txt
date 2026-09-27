@@ -1,0 +1,2 @@
+568717989b3258b78814e3b64095686c0d675b6c78877382d7c842bc55d90331  /tmp/minidregg-776ba59-helpers-evidence/source-sha256.txt
+c81f099d4f068af5ae2006ae2d4308709f761fc2edd4db4108aa80bd094540c6  /tmp/minidregg-776ba59-helpers-evidence/binary-sha256.txt

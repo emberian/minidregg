@@ -1,0 +1,3 @@
+5597e6cfc7809460b773799795ffefb206546e8925f94d48a1e68e119eff2dfd  /tmp/minidregg-776ba59-helpers-evidence/bin/mini
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-link-sqlite-store
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-credential-signature-verifier

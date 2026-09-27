@@ -1,0 +1,56 @@
+   Compiling minidregg-resource-client v0.1.0 (/tmp/minidregg-776ba59-helpers-source/native/resource-client)
+    Finished `release` profile [optimized] target(s) in 5.31s
+────────────
+ Nextest run ID 95727217-c147-49a8-83c2-1c546adbfb66 with nextest profile: default
+    Starting 49 tests across 1 binary
+        PASS [   0.005s] ( 1/49) minidregg-resource-client::bin/mini drain::tests::upgrade_receipt_requires_all_four_canonical_fields
+        PASS [   0.005s] ( 2/49) minidregg-resource-client::bin/mini drain::tests::a_own_r_skip_continues_to_queued_q_with_unchanged_group
+        PASS [   0.003s] ( 3/49) minidregg-resource-client::bin/mini tests::continuity_reply_needs_typed_matching_verdict_and_anchor_shape
+        PASS [   0.004s] ( 4/49) minidregg-resource-client::bin/mini tests::historical_fn_decisions_need_no_new_mini_intent
+        PASS [   0.004s] ( 5/49) minidregg-resource-client::bin/mini tests::inspected_headers_are_signed_as_exact_bytes_in_order
+        PASS [   0.003s] ( 6/49) minidregg-resource-client::bin/mini tests::key_generation_refuses_to_clobber_existing_custody_files
+        PASS [   0.003s] ( 7/49) minidregg-resource-client::bin/mini tests::origin_outbox_requires_exact_status_intent_pair
+        PASS [   0.004s] ( 8/49) minidregg-resource-client::bin/mini tests::named_options_preserve_interleaved_fn_argument_order
+        PASS [   0.004s] ( 9/49) minidregg-resource-client::bin/mini tests::plan_slots_reject_presentation_without_exact_header_strings
+        PASS [   0.004s] (10/49) minidregg-resource-client::bin/mini tests::public_schema_inspection_requires_exact_canonical_input
+        PASS [   0.024s] (11/49) minidregg-resource-client::bin/mini tests::a_own_r_progress_is_bounded_and_never_accepted_as_b_skip
+        PASS [   0.006s] (12/49) minidregg-resource-client::bin/mini publisher::tests::accepted_result_survives_crash_before_final_marker
+        PASS [   0.006s] (13/49) minidregg-resource-client::bin/mini meter::tests::quote_requires_source_operation_and_provenance
+        PASS [   0.006s] (14/49) minidregg-resource-client::bin/mini publisher::tests::explicit_uncertainty_and_unrecorded_attempt_never_auto_repost
+        PASS [   0.006s] (15/49) minidregg-resource-client::bin/mini tests::ack_coverage_is_distinct_from_exact_durable_ack
+        PASS [   0.006s] (16/49) minidregg-resource-client::bin/mini publisher::tests::transport_loss_allows_one_exact_retry_only
+        PASS [   0.024s] (17/49) minidregg-resource-client::bin/mini prepare_refusal::tests::never_marks_non_refusal_or_existing_call
+        PASS [   0.025s] (18/49) minidregg-resource-client::bin/mini drain::tests::source_skip_page_bound_stops_short_page_and_rejects_history_without_txn
+        PASS [   0.007s] (19/49) minidregg-resource-client::bin/mini tests::a_own_r_ack_requires_selected_transaction_and_durable_cursor
+        PASS [   0.006s] (20/49) minidregg-resource-client::bin/mini tests::query_typed_inbox_presentation_is_resource_only
+        PASS [   0.005s] (21/49) minidregg-resource-client::bin/mini transport::tests::metering_requires_complete_bounded_byte_triple
+        PASS [   0.004s] (22/49) minidregg-resource-client::bin/mini transport::tests::public_fn_operations_have_no_path_payload
+        PASS [   0.005s] (23/49) minidregg-resource-client::bin/mini transport::tests::pinned_envelope_checks_config_and_host_before_exposing_request
+        PASS [   0.005s] (24/49) minidregg-resource-client::bin/mini transport::tests::fragmented_frames_are_reassembled_and_truncation_is_uncertain
+        PASS [   0.005s] (25/49) minidregg-resource-client::bin/mini transport::tests::pinned_invocation_sends_v2_without_fallback
+        PASS [   0.005s] (26/49) minidregg-resource-client::bin/mini transport::tests::socket_invocation_handles_fragmented_reply_and_marks_lost_reply_uncertain
+        PASS [   0.004s] (27/49) minidregg-resource-client::bin/mini worker::tests::ack_only_journal_changes_do_not_rewake_group_scheduler
+        PASS [   0.004s] (28/49) minidregg-resource-client::bin/mini worker::tests::group_hint_requires_exact_bounded_canonical_211_line
+        PASS [   0.004s] (29/49) minidregg-resource-client::bin/mini worker::tests::exact_carrier_post_dot_stuffs_without_changing_article_lines
+        PASS [   0.004s] (30/49) minidregg-resource-client::bin/mini worker::tests::post_reply_distinguishes_durable_duplicate_conflict_and_uncertainty
+        PASS [   0.014s] (31/49) minidregg-resource-client::bin/mini tests::selected_release_sign_requires_exact_host_checked_bytes_and_private_key
+        PASS [   0.016s] (32/49) minidregg-resource-client::bin/mini transport::tests::service_restart_reuses_exact_pin_and_only_recovers_a_stale_socket
+        PASS [   0.046s] (33/49) minidregg-resource-client::bin/mini drain::tests::live_service_lock_blocks_upgrade_before_any_host_probe
+        PASS [   0.025s] (34/49) minidregg-resource-client::bin/mini transport::tests::host_pipe_deadline_bounds_missing_reply
+        PASS [   0.027s] (35/49) minidregg-resource-client::bin/mini transport::tests::host_pipe_deadline_bounds_stalled_request_write
+        PASS [   0.039s] (36/49) minidregg-resource-client::bin/mini prepare_refusal::tests::retains_exact_pre_call_frame_and_all_four_file_bindings
+        PASS [   0.044s] (37/49) minidregg-resource-client::bin/mini publisher::tests::concurrent_post_claim_is_create_new
+        PASS [   0.035s] (38/49) minidregg-resource-client::bin/mini worker::tests::a_catalog_wake_requires_reply_type_and_matching_scope_query
+        PASS [   0.057s] (39/49) minidregg-resource-client::bin/mini selected_release::tests::bounded_ingress_and_absent_gate
+        PASS [   0.064s] (40/49) minidregg-resource-client::bin/mini tests::retry_reuses_retained_call_and_never_replaces_prior_evidence
+        PASS [   0.086s] (41/49) minidregg-resource-client::bin/mini drain::tests::orphaned_upgrade_files_do_not_activate_a_v1_pin
+        PASS [   0.098s] (42/49) minidregg-resource-client::bin/mini drain::tests::a_catalog_route_keeps_b_state_disjoint_and_classifies_own_r
+        PASS [   0.108s] (43/49) minidregg-resource-client::bin/mini drain::tests::a_reply_retained_ack_cannot_complete_a_b_pending_state
+        PASS [   0.134s] (44/49) minidregg-resource-client::bin/mini drain::tests::retained_ack_distinguishes_exact_coverage_and_missing_reply
+        PASS [   0.149s] (45/49) minidregg-resource-client::bin/mini drain::tests::durable_preparing_reserves_new_path_after_an_orphan
+        PASS [   0.163s] (46/49) minidregg-resource-client::bin/mini drain::tests::confirmed_anchor_survives_new_lookup_but_rejects_different_receipt
+        PASS [   0.183s] (47/49) minidregg-resource-client::bin/mini drain::tests::retained_exact_ack_archives_after_crash_without_resending
+        PASS [   0.191s] (48/49) minidregg-resource-client::bin/mini selected_release::tests::lost_or_mismatched_reply_keeps_exact_ingress_and_blocks_resubmit
+        PASS [   0.209s] (49/49) minidregg-resource-client::bin/mini drain::tests::upgraded_pin_binds_pending_call_but_allows_next_fresh_wake
+────────────
+     Summary [   0.227s] 49 tests run: 49 passed, 0 skipped
