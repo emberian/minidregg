@@ -139,7 +139,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // started owner-private operator socket, never on the public service socket.
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
-        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 50 | 52, payload @ ..] => {
+        [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 58, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -168,7 +168,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45 | 51 | 53, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
+        [45 | 49 | 51 | 53 | 59, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
@@ -1129,6 +1129,20 @@ mod tests {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operator_operation(&[operation]));
             assert!(!allowed_operation(&[operation, 1], true));
+        }
+
+        for operation in [48, 58] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(!allowed_operation(&[operation, 1], true));
+        }
+        for operation in [49, 59] {
+            let mut assembly = vec![operation];
+            assembly.extend(1u32.to_le_bytes());
+            assembly.extend(*b"PS");
+            assert!(allowed_operator_operation(&assembly));
+            assert!(!allowed_operation(&assembly, true));
+            assert!(!allowed_operator_operation(&[operation, 1, 0, 0, 0, b'P']));
         }
     }
 

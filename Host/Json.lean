@@ -16,6 +16,7 @@ import Host.ApplicationLifecycleCompletionAuthoring
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.ApplicationLifecycleClaimOperator
+import Host.ApplicationDispatchAgentPaidInspection
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
@@ -1584,6 +1585,49 @@ private def dispatchAuthorRequest (json : Lean.Json) : Result (List UInt8) := do
      ← dispatchHttpRequest "$.http" (← field "$" "http" obj)⟩
   pure (ApplicationDispatchAuthoring.requestCodec.encode request)
 
+private def agentPaidReserveRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["base", "parentTask", "parentCapability",
+    "parentObserve", "purseTask", "purseCapability", "purseObserve",
+    "payerSubject", "reserveAmount", "maximumCharge", "reserveOperationId"] json
+  let baseBytes ← dispatchAuthorRequest (← field "$" "base" obj)
+  let some dispatch := ApplicationDispatchAuthoring.requestCodec.decode baseBytes
+    | failAt "$.base" "noncanonical dispatch request"
+  let request : ApplicationDispatchAgentPaidAuthoring.Request :=
+    { base :=
+        { base := dispatch
+          task := ← nat "$.parentTask" (← field "$" "parentTask" obj)
+          parentCapability := ⟨← nat "$.parentCapability"
+            (← field "$" "parentCapability" obj)⟩
+          parentObserveCapability := ⟨← nat "$.parentObserve"
+            (← field "$" "parentObserve" obj)⟩ }
+      purseTask := ← nat "$.purseTask" (← field "$" "purseTask" obj)
+      purseCapability := ⟨← nat "$.purseCapability"
+        (← field "$" "purseCapability" obj)⟩
+      purseObserve := ⟨← nat "$.purseObserve"
+        (← field "$" "purseObserve" obj)⟩
+      payerSubject := ⟨← nat "$.payerSubject" (← field "$" "payerSubject" obj)⟩
+      reserveAmount := ← int "$.reserveAmount" (← field "$" "reserveAmount" obj)
+      maximumCharge := ← int "$.maximumCharge" (← field "$" "maximumCharge" obj)
+      reserveOperationId := ← nat "$.reserveOperationId"
+        (← field "$" "reserveOperationId" obj) }
+  unless request.reserveAmount >= 0 && request.maximumCharge >= 0 &&
+      request.maximumCharge <= request.reserveAmount do
+    failAt "$" "invalid fixed reserve or charge bound"
+  return ApplicationDispatchAgentPaidAuthoring.requestCodec.encode request
+
+private def agentPaidRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["fixedRequestHex", "contextHex", "reserveIndex"] json
+  let fixedBytes ← decodeHex "$.fixedRequestHex" (← field "$" "fixedRequestHex" obj)
+  let some fixed := ApplicationDispatchAgentPaidAuthoring.requestCodec.decode fixedBytes
+    | failAt "$.fixedRequestHex" "noncanonical paid fixed request"
+  let contextBytes ← decodeHex "$.contextHex" (← field "$" "contextHex" obj)
+  let some context := ApplicationDispatchAgentReserveContext.codec.decode contextBytes
+    | failAt "$.contextHex" "noncanonical reserve context"
+  let request : ApplicationDispatchAgentPaidAuthoring.PaidRequest :=
+    { fixed := fixed, context := context
+      reserveIndex := ← nat "$.reserveIndex" (← field "$" "reserveIndex" obj) }
+  return ApplicationDispatchAgentPaidAuthoring.paidRequestCodec.encode request
+
 private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
   return ⟨← nat path json⟩
 
@@ -1759,6 +1803,8 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "application-dispatch-request" => dispatchAuthorRequest json
+  | "application-agent-reserve-request" => agentPaidReserveRequest json
+  | "application-agent-paid-request" => agentPaidRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
@@ -1983,6 +2029,53 @@ private def dispatchRequestJson
            ("valueHex", hexJson header.value),
            ("generated", .bool header.generated)]),
         ("bodyHex", hexJson http.body)])]
+
+private def agentPaidReserveRequestJson
+    (request : ApplicationDispatchAgentPaidAuthoring.Request) : Lean.Json :=
+  .mkObj
+    [("type", "application-agent-reserve-request-v2"),
+     ("canonicalRequestHex", hexJson <|
+       ApplicationDispatchAgentPaidAuthoring.requestCodec.encode request),
+     ("base", dispatchRequestJson request.base.base),
+     ("parentTask", decimal request.base.task),
+     ("parentCapability", decimal request.base.parentCapability.value),
+     ("parentObserve", decimal request.base.parentObserveCapability.value),
+     ("purseTask", decimal request.purseTask),
+     ("purseCapability", decimal request.purseCapability.value),
+     ("purseObserve", decimal request.purseObserve.value),
+     ("payerSubject", decimal request.payerSubject.value),
+     ("reserveAmount", signedDecimal request.reserveAmount),
+     ("maximumCharge", signedDecimal request.maximumCharge),
+     ("reserveOperationId", decimal request.reserveOperationId),
+     ("httpRequestDigest", decimal <|
+       (ApplicationDispatchCodec.requestDigest request.base.base.http).value)]
+
+private def agentPaidRequestJson
+    (request : ApplicationDispatchAgentPaidAuthoring.PaidRequest) : Lean.Json :=
+  let context := request.context
+  .mkObj
+    [("type", "application-agent-paid-request-v2"),
+     ("canonicalRequestHex", hexJson <|
+       ApplicationDispatchAgentPaidAuthoring.paidRequestCodec.encode request),
+     ("fixed", agentPaidReserveRequestJson request.fixed),
+     ("canonicalContextHex", hexJson context.canonicalBytes),
+     ("reserveIndex", decimal request.reserveIndex),
+     ("appResource", decimal context.app.resource),
+     ("appGeneration", signedDecimal context.app.generation),
+     ("sessionResource", decimal context.session.resource),
+     ("sessionGeneration", signedDecimal context.session.generation),
+     ("ticketResource", decimal context.ticketResource),
+     ("ticketRoot", decimal context.ticketRoot.value),
+     ("parentTask", decimal context.parentTask),
+     ("parentGeneration", signedDecimal context.parentGeneration),
+     ("purseTask", decimal context.purseTask),
+     ("purseGeneration", signedDecimal context.purseGeneration),
+     ("payerSubject", decimal context.payerSubject.value),
+     ("reserveAmount", signedDecimal context.reserveAmount),
+     ("maximumCharge", signedDecimal context.maximumCharge),
+     ("reserveOperationId", decimal context.reserveOperationId),
+     ("httpOperationId", decimal context.httpOperationId),
+     ("httpRequestDigest", decimal context.requestDigest.value)]
 
 /-- Presentation of the complete detached challenge. It repeats the exact
 canonical request and ordered signing headers but confers no authority; op34
@@ -2284,6 +2377,12 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       decoded "application-share-issue-request" ApplicationShareIssueAuthoring.requestCodec bytes
   | "application-dispatch-request" => dispatchRequestJson <$>
       decoded "application-dispatch-request" ApplicationDispatchAuthoring.requestCodec bytes
+  | "application-agent-reserve-request" => agentPaidReserveRequestJson <$>
+      decoded "application-agent-reserve-request"
+        ApplicationDispatchAgentPaidAuthoring.requestCodec bytes
+  | "application-agent-paid-request" => agentPaidRequestJson <$>
+      decoded "application-agent-paid-request"
+        ApplicationDispatchAgentPaidAuthoring.paidRequestCodec bytes
   | "application-dispatch-plan" => do
       let plan ← decoded "application-dispatch-plan" ApplicationDispatchAuthoring.planCodec bytes
       dispatchPlanJson plan

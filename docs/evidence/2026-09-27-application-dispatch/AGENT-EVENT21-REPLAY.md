@@ -24,7 +24,9 @@ the base `NativeHostContext` source/OLean pair is
 | ApplicationDispatchAgentReceiver | `be5489034baecb6a11b5eeb9dc35545d893d97897f21e4b90d76dd64ae01decc` | `a955e7c50a6af3edf1327008127210ae514588681f9e6175eb95414aa94d33f1` |
 | ApplicationDispatchAgentLookup | `d4079bf347059f61284113c7f0c4ec620b541af18cc241d4e150d797b62a6661` | `8221396958e65d824da81881379a522f8a067c6328dcf21f9df270e0db2684d3` |
 | ApplicationDispatchAgentAuthoring | `f9d1c9a3a855479bf82921230a522f450bb44c995fce53f673ed7fc40a99c68d` | `c73e2b62228b45428e258ec8243961e1447ce722e44486cb68166218a914b5fc` |
-| ApplicationDispatchAgentPaidAuthoring | `4c0b86c4e9d7e447d65542d6d6b6d2840beccbde5a3438f5bfdf9145e615f510` | `9c9c41588618224535e73b073a222f46484971b803e07d4c021d73ac9c1fb549` |
+| ApplicationDispatchAgentPaidAuthoring | `d79aba4f397d9d506b502689a5a801b0ec34ca3c204bc1fa0eaf38fd72b21c95` | `44d987d9c22747f8073391e71018743dfbb6547c671402d73eb47e6c25d0389a` |
+| Host/ApplicationDispatchAgentPaidInspection | `dd0a9b82bffc1982b2749a11d4ab03dcab41c9b1a08fa25c7ed97ec0215c8631` | `632d503b4b6c73a0947e66eb3ef1b3deddc2debb45467bf7c82fbf3242ebef71` |
+| Host/ApplicationDispatchAgentInspection | `abcb5624e38b593adda408eb72934a26f9b834de1d8539e713946de27c33422c` | `df539644cedd4c0d35d9545a7efe5c1161a255eef51cf2d413b6e1d9255d8103` |
 
 The serial command for each module was, from the overlay directory:
 
@@ -35,12 +37,41 @@ LEAN_PATH="$PWD/lib:$base_path" LEAN_NUM_THREADS=2 /home/ember/.elan/bin/lean Ke
 
 Compilation order was Codec, ReserveContext, Payer, ReserveCore, Ingress,
 Core, Replay, Projection, AgentProjection, AgentReceiver, AgentLookup,
-AgentAuthoring, PaidAuthoring. Replay log
+AgentAuthoring, PaidAuthoring, PaidInspection, AgentInspection. Replay log
 `/tmp/NativeHostReplay-event21-join.log` on Persvati has SHA-256
 `3466e88f21218fe7c070c50a9908a0d67b1b5c726a8280006163c771fdbcd1e3`
 and no Lean errors. Final dependent logs `/tmp/<Module>-event21-final.log` are
 empty (SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`).
 No whole native link or physical integration was run for this cut.
+
+Root's 801168f checkpoint landed the lower event21/Replay/receiver/lookup
+and Main46/47 route. PaidAuthoring and both inspectors form a separate
+follow-up source cut. Before `FixedSelectors` was added, an uncommitted
+PaidAuthoring snapshot measured source/OLean
+`4c0b86c4e9d7e447d65542d6d6b6d2840beccbde5a3438f5bfdf9145e615f510` /
+`9c9c41588618224535e73b073a222f46484971b803e07d4c021d73ac9c1fb549`;
+that pair is superseded by the table above. `FixedSelectors` and
+`Request.matchesFixed` permit the
+private Host to pin all resource/capability/signing/allowance selectors at
+startup while canonical HTTP bytes and the newly allocated reserve operation
+ID vary per call. The read-only inspector exposes exact canonical plan bytes,
+context/digest and ordered signing headers; decoding its JSON grants nothing.
+The committed-frame inspector projects parent/purse fences, exact request,
+identity and original reserve receipt for the physical host. Its JSON does
+not establish op46 transport provenance.
+
+The first paid plan repeated an allowed eight-MiB HTTP body in three nested
+authoring records, exceeding the 12,102,760-byte private Host frame bound.
+The current `preparePaidVerified` emits a compact plan: the sole full HTTP
+request is in `app.unsignedIngress`; its two selector carriers retain the
+operation ID with empty method/path/query/headers/body. `assemblePaid` rejects
+noncompact carrier fields and recomputes the context/request join from the
+assembled app ingress. This is a source/codec correction; a near-limit
+encoded-body probe in the separate Main cut measured an 8,388,608-byte
+synthetic body encoding to 8,388,755 bytes, below the 12,102,760-byte Host
+frame bound (`docs/evidence/2026-09-27-agent-dispatch-host/OP48-49-58-59.md`).
+That probe is structural size evidence, not current-image paid preparation or
+native acceptance.
 
 Replay retains a compact original reserve certificate only for an exact
 single-target AgentGrain reserve shape, and only after native ordinary

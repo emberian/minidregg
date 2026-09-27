@@ -19,8 +19,10 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 45=operator-private completion assembly, 50=operator-private resident BEGIN plan,
 51=operator-private resident BEGIN assembly, 52=operator-private lifecycle claim
 plan, 53=operator-private lifecycle claim assembly, 46=fresh paid agent dispatch,
-47=paid agent dispatch receipt-only lookup. Op34/46 success uses a distinct
-committed-permit frame; all other op34 outcomes carry a strict Outcome.
+47=paid agent dispatch receipt-only lookup, 48=private paid dispatch plan,
+49=private paid dispatch assembly, 58=private agent reserve plan,
+59=private agent reserve assembly. Op34/46 success uses a distinct
+committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
@@ -44,6 +46,7 @@ import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
 import Kernel.ApplicationDispatchAgentReceiver
 import Kernel.ApplicationDispatchAgentLookup
+import Kernel.ApplicationDispatchAgentPaidAuthoring
 import Kernel.ApplicationDispatchAuthoring
 import Kernel.ApplicationLifecycleBeginV2Receiver
 import Kernel.ApplicationLifecycleClaimV2Receiver
@@ -51,6 +54,8 @@ import Kernel.ApplicationLifecycleV2Lookup
 import Kernel.ApplicationLifecycleCompletionReceiver
 import Kernel.ApplicationLifecycleCompletionLookup
 import Host.ApplicationDispatchInspection
+import Host.ApplicationDispatchAgentPaidInspection
+import Host.ApplicationDispatchAgentInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
@@ -340,6 +345,76 @@ def ResidentClaimManagementSettings.pin (settings : ResidentClaimManagementSetti
     appObserveCapability := ⟨settings.appObserveCapability⟩
     packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
 
+/-- Operator custody pins all non-HTTP selectors and the reserve/charge cap
+before any event21 signing headers are exposed. HTTP bytes and the fresh
+reserve operation ID vary, but the private signer must separately approve
+their exact source-inspected request and headers. -/
+structure AgentDispatchFixedSettings where
+  issueIndex : Nat
+  ticketResource : Nat
+  packageManifest : Nat
+  snapshotManifest : Nat
+  sessionObserve : Nat
+  manifestObserve : Nat
+  enrollmentObserve : Nat
+  parentTask : Nat
+  parentCapability : Nat
+  parentObserve : Nat
+  purseTask : Nat
+  purseCapability : Nat
+  purseObserve : Nat
+  payerSubject : Nat
+  reserveAmount : Int
+  maximumCharge : Int
+  deriving ToJson
+
+instance : FromJson AgentDispatchFixedSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["issueIndex", "ticketResource", "packageManifest",
+      "snapshotManifest", "sessionObserve", "manifestObserve",
+      "enrollmentObserve", "parentTask", "parentCapability",
+      "parentObserve", "purseTask", "purseCapability", "purseObserve",
+      "payerSubject", "reserveAmount", "maximumCharge"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "agentDispatchFixed has missing or unknown fields"
+    return ⟨← json.getObjValAs? Nat "issueIndex",
+      ← json.getObjValAs? Nat "ticketResource",
+      ← json.getObjValAs? Nat "packageManifest",
+      ← json.getObjValAs? Nat "snapshotManifest",
+      ← json.getObjValAs? Nat "sessionObserve",
+      ← json.getObjValAs? Nat "manifestObserve",
+      ← json.getObjValAs? Nat "enrollmentObserve",
+      ← json.getObjValAs? Nat "parentTask",
+      ← json.getObjValAs? Nat "parentCapability",
+      ← json.getObjValAs? Nat "parentObserve",
+      ← json.getObjValAs? Nat "purseTask",
+      ← json.getObjValAs? Nat "purseCapability",
+      ← json.getObjValAs? Nat "purseObserve",
+      ← json.getObjValAs? Nat "payerSubject",
+      ← json.getObjValAs? Int "reserveAmount",
+      ← json.getObjValAs? Int "maximumCharge"⟩
+
+def AgentDispatchFixedSettings.selectors (settings : AgentDispatchFixedSettings) :
+    ApplicationDispatchAgentPaidAuthoring.FixedSelectors :=
+  { issueIndex := settings.issueIndex
+    ticketResource := settings.ticketResource
+    packageManifest := settings.packageManifest
+    snapshotManifest := settings.snapshotManifest
+    sessionObserve := ⟨settings.sessionObserve⟩
+    manifestObserve := ⟨settings.manifestObserve⟩
+    enrollmentObserve := ⟨settings.enrollmentObserve⟩
+    parentTask := settings.parentTask
+    parentCapability := ⟨settings.parentCapability⟩
+    parentObserve := ⟨settings.parentObserve⟩
+    purseTask := settings.purseTask
+    purseCapability := ⟨settings.purseCapability⟩
+    purseObserve := ⟨settings.purseObserve⟩
+    payerSubject := ⟨settings.payerSubject⟩
+    reserveAmount := settings.reserveAmount
+    maximumCharge := settings.maximumCharge }
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -371,6 +446,7 @@ structure Settings where
   completionManagement : Option CompletionManagementSettings := none
   residentBeginManagement : Option ResidentBeginManagementSettings := none
   residentClaimManagement : Option ResidentClaimManagementSettings := none
+  agentDispatchFixed : Option AgentDispatchFixedSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -420,6 +496,12 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleClaimInspection.inspect bytes
   else if kind == "fn-consumer-namespace-plan" then
     FnConsumerNamespacePlan.inspectPlanBytes bytes
+  else if kind == "application-agent-reserve-plan" then
+    ApplicationDispatchAgentPaidInspection.inspectReservePlan bytes
+  else if kind == "application-agent-paid-dispatch-plan" then
+    ApplicationDispatchAgentPaidInspection.inspectPaidPlan bytes
+  else if kind == "application-agent-dispatch-committed" then
+    ApplicationDispatchAgentInspection.inspect bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -999,6 +1081,77 @@ def dispatchSession (config : NativeHost.Config)
       return (41, outcomeCodec.encode
         (← fnConsumerNamespaceLookupSession config state payload))
   | _ => fnDispatch operation payload
+
+/-- Operator-private paid-agent authoring. Exact fixed selectors come from the
+startup config and are compared before exposing any signing header, including
+on a retained detached plan supplied for assembly. The signed requests still
+need fresh ordinary reserve/event21 native admission. -/
+def agentDispatchAuthorSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (approved : ApplicationDispatchAgentPaidAuthoring.FixedSelectors)
+    (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 58 =>
+      let some request := ApplicationDispatchAgentPaidAuthoring.requestCodec.decode payload
+        | throw (IO.userError "noncanonical agent reserve author request")
+      unless request.matchesFixed approved do
+        throw (IO.userError "agent reserve request differs from operator pin")
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept <|
+        ApplicationDispatchAgentPaidAuthoring.prepareReserveVerified
+          config session.verified request
+      let bytes := ApplicationDispatchAgentPaidAuthoring.reservePlanCodec.encode plan
+      unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "agent reserve plan exceeds host frame bound")
+      return (58, bytes)
+  | 59 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := ApplicationDispatchAgentPaidAuthoring.reservePlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical agent reserve plan")
+      unless plan.request.matchesFixed approved do
+        throw (IO.userError "agent reserve plan differs from operator pin")
+      let signatures ← decodeSignatures signaturesBytes
+      let signed ← IO.ofExcept <|
+        ApplicationDispatchAgentPaidAuthoring.assembleReserve plan signatures
+      let some (domain, semantics, command) :=
+          DeclaredResourceController.decodeSignedBytes signed
+        | throw (IO.userError "noncanonical agent reserve signed ingress")
+      unless domain == config.deployment.domain &&
+          semantics == config.profile.semantics do
+        throw (IO.userError "agent reserve signed ingress differs from pinned profile")
+      let callBytes := NativeHostCodec.callCodec.encode (.invoke command)
+      unless callBytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "agent reserve native call exceeds host frame bound")
+      return (59, callBytes)
+  | 48 =>
+      let some request := ApplicationDispatchAgentPaidAuthoring.paidRequestCodec.decode payload
+        | throw (IO.userError "noncanonical paid agent dispatch author request")
+      unless request.fixed.matchesFixed approved do
+        throw (IO.userError "paid agent request differs from operator pin")
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept <|
+        ApplicationDispatchAgentPaidAuthoring.preparePaidVerified
+          config session.verified request
+      let bytes := ApplicationDispatchAgentPaidAuthoring.paidPlanCodec.encode plan
+      unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "paid agent dispatch plan exceeds host frame bound")
+      return (48, bytes)
+  | 49 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := ApplicationDispatchAgentPaidAuthoring.paidPlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical paid agent dispatch plan")
+      unless plan.request.fixed.matchesFixed approved do
+        throw (IO.userError "paid agent plan differs from operator pin")
+      let (appBytes, payerBytes) ← splitPair signaturesBytes
+      let appSignatures ← decodeSignatures appBytes
+      let payerSignatures ← decodeSignatures payerBytes
+      let ingress ← IO.ofExcept <|
+        ApplicationDispatchAgentPaidAuthoring.assemblePaid
+          plan appSignatures payerSignatures
+      unless ingress.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "paid agent dispatch ingress exceeds host frame bound")
+      return (49, ingress)
+  | _ => throw (IO.userError "unsupported paid agent authoring operation")
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 
@@ -3743,6 +3896,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "fn-consumer-namespace-plan" ||
+              kind == "application-agent-reserve-plan" ||
+              kind == "application-agent-paid-dispatch-plan" ||
+              kind == "application-agent-dispatch-committed" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
@@ -3750,6 +3906,9 @@ def run (arguments : List String) : IO UInt32 := do
           if kind == "application-dispatch-committed" ||
               kind == "application-lifecycle-claim-committed-v2" ||
               kind == "fn-consumer-namespace-plan" ||
+              kind == "application-agent-reserve-plan" ||
+              kind == "application-agent-paid-dispatch-plan" ||
+              kind == "application-agent-dispatch-committed" ||
               kind == "application-dispatch-plan" ||
               kind == "application-dispatch-request" then
             let serialized := value.compress
@@ -3996,6 +4155,12 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
+                        | 48 | 49 | 58 | 59 =>
+                            let some custody := settings.agentDispatchFixed
+                              | return ((255 : UInt8), failure "application-agent-dispatch-author"
+                                  "agent dispatch operator pin is not configured")
+                            agentDispatchAuthorSession pinnedConfig state custody.selectors
+                              operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
