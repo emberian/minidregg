@@ -76,7 +76,7 @@ test "$(sha256sum "$MEMBER" | cut -d ' ' -f 1)" = \
 test "$(sha256sum "$APP" | cut -d ' ' -f 1)" = \
   b62a2d4ae17b6aa85a663fada3779eca3be10e252bffea1b7066e501ee9015cd
 test "$(sha256sum "$POSITIVE" | cut -d ' ' -f 1)" = \
-  de9dcbed028d38843a6d3418c4cd81544f4c7dc2006e747773f530087eb45603
+  b867b3231840122ebf24b095fdcfd54b1d7aca27b3e90b0cb9feb1cac9b9985b
 test "$(sha256sum "$ROOTS" | cut -d ' ' -f 1)" = \
   0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f
 test "$(sha256sum "$PACKAGE" | cut -d ' ' -f 1)" = \
