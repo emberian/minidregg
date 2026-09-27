@@ -1583,6 +1583,11 @@ mod tests {
         repeated["decision"]["decision"] = json!("repeated");
         repeated["intentHex"] = json!("");
         assert!(classify_poll(&repeated).is_err());
+        repeated["decision"]["decision"] = json!("proposed-fresh");
+        repeated["decision"]["type"] = json!("fn-a-own-r-progress-decision-v1");
+        repeated["decision"]["outboxTransactionId"] = json!("42");
+        repeated["intentHex"] = json!("00");
+        assert!(classify_poll(&repeated).is_err());
     }
 
     #[test]

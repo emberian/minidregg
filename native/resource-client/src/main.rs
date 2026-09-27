@@ -1121,6 +1121,65 @@ fn historical_without_intent(value: &Value, route: ConsumerRoute) -> bool {
 }
 
 #[cfg(unix)]
+fn canonical_poll_decimal<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
+    let text = value
+        .get(field)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("fn progress lacks {field}"))?;
+    if text.is_empty()
+        || text.len() > 80
+        || !text.bytes().all(|byte| byte.is_ascii_digit())
+        || (text.len() > 1 && text.starts_with('0'))
+    {
+        return Err(format!("fn progress has noncanonical {field}"));
+    }
+    Ok(text)
+}
+
+#[cfg(unix)]
+fn validate_skip_decision(value: &Value, route: ConsumerRoute, intent: &[u8]) -> Result<()> {
+    let decision = value
+        .get("decision")
+        .ok_or("fn skip reply lacks decision")?;
+    let kind = decision
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or("fn skip reply lacks decision type")?;
+    let own_r = kind == "fn-a-own-r-progress-decision-v1";
+    if kind != "fn-empty-page-progress-decision-v1" && !(route.reply && own_r) {
+        return Err("fn skip decision type is unsupported for this consumer".into());
+    }
+    let fields = decision
+        .as_object()
+        .ok_or("fn skip decision is not an object")?;
+    if fields.len() != if own_r { 5 } else { 4 } {
+        return Err("fn skip decision fields differ from source schema".into());
+    }
+    let from = canonical_poll_decimal(decision, "fromPosition")?
+        .parse::<u128>()
+        .map_err(|_| "fn progress fromPosition exceeds u128")?;
+    let to = canonical_poll_decimal(decision, "toPosition")?
+        .parse::<u128>()
+        .map_err(|_| "fn progress toPosition exceeds u128")?;
+    if to > u32::MAX as u128
+        || !(1..=16).contains(
+            &to.checked_sub(from)
+                .ok_or("fn progress position reversed")?,
+        )
+    {
+        return Err("fn progress exceeds source poll scan bound".into());
+    }
+    if own_r {
+        canonical_poll_decimal(decision, "outboxTransactionId")?;
+    }
+    match decision.get("decision").and_then(Value::as_str) {
+        Some("proposed-fresh") if !intent.is_empty() => Ok(()),
+        Some("repeated") if intent.is_empty() => Ok(()),
+        _ => Err("fn progress decision and intent disagree".into()),
+    }
+}
+
+#[cfg(unix)]
 fn private_consumer_attempt(
     host: &Path,
     config: &Path,
@@ -1194,21 +1253,12 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRo
         {
             print_json(&value)
         }
-        "skip-decision"
-            if value.pointer("/decision/type").and_then(Value::as_str)
-                == Some("fn-empty-page-progress-decision-v1") =>
-        {
-            match value.pointer("/decision/decision").and_then(Value::as_str) {
-                Some("proposed-fresh") if !intent.is_empty() => {
-                    write_new(&directory.join("intent.bin"), &intent)?;
-                    print_json(&value)
-                }
-                Some("repeated") if intent.is_empty() => print_json(&value),
-                _ => Err(
-                    "inconsistent fn empty-page decision and intent; complete reply retained"
-                        .to_owned(),
-                ),
+        "skip-decision" => {
+            validate_skip_decision(&value, route, &intent)?;
+            if !intent.is_empty() {
+                write_new(&directory.join("intent.bin"), &intent)?;
             }
+            print_json(&value)
         }
         "refused" if intent.is_empty() => {
             print_json(&value)?;
@@ -1231,6 +1281,35 @@ fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> R
         || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
     {
         return Err("fn ack reply identity mismatch; complete reply retained".into());
+    }
+    let own_r = value.get("kind").and_then(Value::as_str) == Some("own-r-skip");
+    if own_r {
+        if !route.reply || value.as_object().is_none_or(|fields| fields.len() != 9) {
+            return Err("own-R ACK reply has wrong consumer or fields".into());
+        }
+        canonical_poll_decimal(value, "outboxTransactionId")?;
+        let sequence = canonical_poll_decimal(value, "fnStoreSequence")?
+            .parse::<u32>()
+            .map_err(|_| "own-R Store sequence exceeds u32")?;
+        canonical_poll_decimal(value, "fnStoreTransactionId")?
+            .parse::<u32>()
+            .map_err(|_| "own-R Store transaction exceeds u32")?;
+        let cursor = canonical_poll_decimal(value, "fnCursorPosition")?
+            .parse::<u32>()
+            .map_err(|_| "own-R ACK cursor exceeds u32")?;
+        if sequence.checked_add(1) != Some(cursor) {
+            return Err("own-R ACK cursor differs from Store sequence".into());
+        }
+        let committed = canonical_poll_decimal(value, "fnCommittedAck")?
+            .parse::<u32>()
+            .map_err(|_| "own-R committed ACK exceeds u32")?;
+        if matches!(
+            value.get("fnAck").and_then(Value::as_str),
+            Some("durable-accepted" | "covered-by-durable-frontier")
+        ) && committed < cursor
+        {
+            return Err("own-R ACK committed frontier precedes retained cursor".into());
+        }
     }
     match value.get("fnAck").and_then(Value::as_str) {
         Some("durable-accepted") => Ok(AckResult::Exact),
@@ -1256,10 +1335,10 @@ fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> R
             if decimal(cursor)? > decimal(committed)? {
                 return Err("fn coverage cursor exceeds committed ACK frontier".into());
             }
-            if !matches!(
-                value.get("kind").and_then(Value::as_str),
-                Some("empty-page-skip" | "article-prefix-coverage")
-            ) {
+            let kind = value.get("kind").and_then(Value::as_str);
+            if !(matches!(kind, Some("empty-page-skip" | "article-prefix-coverage"))
+                || (route.reply && kind == Some("own-r-skip")))
+            {
                 return Err("fn coverage lacks supported kind".into());
             }
             Ok(AckResult::Covered)
@@ -2168,6 +2247,75 @@ mod tests {
             AckResult::Exact
         );
         assert!(parse_ack_result(&value, B_CONSUMER, "124").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_own_r_progress_is_bounded_and_never_accepted_as_b_skip() {
+        let mut value = json!({"type":"fn-a-reply-poll-session-v1",
+            "status":"skip-decision", "intentHex":"00",
+            "decision":{"type":"fn-a-own-r-progress-decision-v1",
+                "decision":"proposed-fresh", "fromPosition":"16",
+                "toPosition":"17", "outboxTransactionId":"42"}});
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
+        assert!(validate_skip_decision(&value, B_CONSUMER, &[0]).is_err());
+        value["decision"]["toPosition"] = json!("33");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
+        value["decision"]["toPosition"] = json!("17");
+        value["decision"]["outboxTransactionId"] = json!("042");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
+        value["decision"]["outboxTransactionId"] = json!("42");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
+        value["decision"]["outboxTransactionId"] = json!("0");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
+        value["decision"]["toPosition"] = json!("4294967296");
+        value["decision"]["fromPosition"] = json!("4294967295");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
+        value["decision"]["toPosition"] = json!("17");
+        value["decision"]["fromPosition"] = json!("16");
+        value["decision"]["decision"] = json!("repeated");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_ok());
+        value["decision"]["decision"] = json!("refused");
+        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_own_r_ack_requires_selected_transaction_and_durable_cursor() {
+        let mut value = json!({"type":"fn-a-reply-ack-session-v1",
+            "kind":"own-r-skip", "miniTransactionId":"123", "outboxTransactionId":"42",
+            "fnCursorPosition":"17", "fnCommittedAck":"17", "fnStoreSequence":"16",
+            "fnStoreTransactionId":"16", "fnAck":"durable-accepted"});
+        assert_eq!(
+            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
+            AckResult::Exact
+        );
+        value["fnStoreSequence"] = json!("0");
+        value["fnStoreTransactionId"] = json!("0");
+        value["fnCursorPosition"] = json!("1");
+        value["fnCommittedAck"] = json!("1");
+        assert_eq!(
+            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
+            AckResult::Exact
+        );
+        value["fnCursorPosition"] = json!("17");
+        value["fnStoreSequence"] = json!("16");
+        value["fnCommittedAck"] = json!("17");
+        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "124").is_err());
+        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
+        value["fnCommittedAck"] = json!("16");
+        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
+        value["fnCommittedAck"] = json!("18");
+        value["fnAck"] = json!("covered-by-durable-frontier");
+        assert_eq!(
+            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
+            AckResult::Covered
+        );
+        value["outboxTransactionId"] = json!("042");
+        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
+        value["outboxTransactionId"] = json!("42");
+        value["fnStoreSequence"] = json!("15");
+        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
     }
 
     #[test]
