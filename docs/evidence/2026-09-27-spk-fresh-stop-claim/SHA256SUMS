@@ -1,0 +1,5 @@
+e2449d98792875835b4cfe86778e3a83a8c71721beeb2e222c4829ba61670b4c  native/spk-host/src/lifecycle_v3_stop_claim_native.rs
+e5c180036cbacf7c4a00d232601688b05609f584602700b5df986fbdcd646eeb  native/spk-host/src/lib.rs
+732db8f6154d117bc3e4cc3620c39749840ce99a058a5347b8c824d2147754da  docs/evidence/2026-09-27-spk-fresh-stop-claim/README.md
+04a0ed540631240fa3bcb15ba1d8e6326ed85554af2459267ed7fdc8e2c5fb2f  docs/evidence/2026-09-27-spk-fresh-stop-claim/nextest.log
+7821186cf7378575efcb88146ba5f60e66a3e01b8d778909c0bc15d22905c25d  docs/evidence/2026-09-27-spk-fresh-stop-claim/clippy.log
