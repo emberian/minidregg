@@ -1,0 +1,7 @@
+# Current application birth routing: narrow source gate
+
+This is an isolated Lean source check for the application birth and session-birth authoring routes. The private Persvati tree began with the certified `776ba59` baseline, then overlaid the share-issue route candidate and the 11 changed files in the [source manifest](source-sha256.txt), including `Host.Json` SHA `166506a6a6d53e34a895e6fb91c7cf54250ec03aea46a0d6acab185a70704773` and `Host.Main` SHA `06dbc205e3d7df71d6538b63a175369de2ff3c74bc48007821cda7db39545b8c`. The later `Host.Main` bytes were committed in `3ca4907`; this mixed private snapshot is **not** a claim that every source file equals that commit.
+
+The [verdict](verdict.log) records 14 serialized Lean PASS results: `ApplicationDispatchAuthority`; share-issue Source, Delegation, Admission, Receiver; selected-source Authoring; application GrainBirth and SessionBirth; NativeHostReplay, NativeHost, NativeHostSession; Host.Json, ApplicationCurrentBirthAuthoring, and Host.Main. The verdict SHA-256 is `1bbc798a859f75789b7a9a6a3aca99ab944bf16fa70e13561a078a7022196cd4`; the overlay manifest SHA-256 is `60e29e53aa12787e4a488b79131823950d8b2ddee6baaddd4b3499ba0c219cde`.
+
+This is a source/OLean gate only. It does not prove a linked native Host, a signed birth receipt, or participant dispatch. The private tree is `/home/ember/build/minidregg-overnight-20260927-currentbirth-narrow`; no live Mini Store was modified.
