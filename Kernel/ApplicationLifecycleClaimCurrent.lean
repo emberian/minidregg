@@ -6,6 +6,7 @@ on the same loaded image. This lower check does not submit a durable intent
 or permit a host launch.
 -/
 import Kernel.ApplicationLifecycleClaimHistory
+import Kernel.PhysicalResourceReadGuard
 import Kernel.ResourceObservationAdmission
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimCurrent
@@ -78,8 +79,9 @@ def observationRequest {F : Type} [Field F]
       ambient (command deployment.domain profile.semantics source) target root with
     verb := .observeObject }
 
-def observationGuard (resource : Nat) (root : Digest) : ReadGuard :=
-  ⟨⟨resource⟩, root⟩
+def observationGuard (resource : Nat)
+    (before : PackedCell CanonicalCellRegistry.registry) : ReadGuard :=
+  ⟨⟨resource⟩, ResourceBirthCodec.physicalRoot (.live before)⟩
 
 structure CheckedRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -97,7 +99,9 @@ structure CheckedRead {F : Type} [Field F] [DecidableEq F]
       (command deployment.domain profile.semantics source))
     capability source.canonicalBytes
   checked : ResourceObservationAdmission.Checked selected envelope
-  current : root = durable.snapshot.model.roots (observationGuard resource root).cellId
+  current : (observationGuard resource selected.observed.before).expectedRoot =
+    durable.snapshot.model.roots
+      (observationGuard resource selected.observed.before).cellId
 
 def checkRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -121,10 +125,12 @@ def checkRead {F : Type} [Field F] [DecidableEq F]
       match ← ResourceObservationAdmission.check native selected envelope with
       | .error _ => return .error "signed lifecycle claim observation refused"
       | .ok checked =>
-          if current : root = durable.snapshot.model.roots
-              (observationGuard resource root).cellId then
-            return .ok ⟨selected, checked, current⟩
-          else return .error "claim observation differs from loaded image"
+          have current : (observationGuard resource selected.observed.before).expectedRoot =
+              durable.snapshot.model.roots
+                (observationGuard resource selected.observed.before).cellId :=
+            PhysicalResourceReadGuard.current context.directory resource
+              selected.observed.before selected.observed.present
+          return .ok ⟨selected, checked, current⟩
 
 /-- All fresh authority is current: original mutation cap under today's v2
 management law, two separately signed observations and exact old physical
@@ -152,7 +158,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     ingress.source.currentPackageRoot ingress.packageObservationEnvelope
   packageReadOnly :
     (observationGuard ingress.source.begin.source.packageManifest
-      ingress.source.currentPackageRoot).cellId ∉
+      packageRead.selected.observed.before).cellId ∉
       (DeclaredResourceController.writes prepared).map DataWrite.cellId
   packageContent : packageRead.selected.observed.before.kind = .content
   installed : ApplicationLifecycleBeginReceiver.installedPackageMatches deployment
@@ -163,13 +169,15 @@ theorem stale_app_root_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
-    (stale : ingress.source.currentAppRoot ≠
-      durable.snapshot.model.roots
-        (observationGuard ingress.source.begin.source.app
-          ingress.source.currentAppRoot).cellId) :
+    (stale : ∀ before : PackedCell CanonicalCellRegistry.registry,
+      ingress.source.currentAppRoot = before.payload.root →
+        (observationGuard ingress.source.begin.source.app before).expectedRoot ≠
+          durable.snapshot.model.roots
+            (observationGuard ingress.source.begin.source.app before).cellId) :
     ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
   rintro ⟨accepted⟩
-  exact stale accepted.appRead.current
+  exact stale accepted.appRead.selected.observed.before
+    accepted.appRead.selected.observed.rootExact accepted.appRead.current
 
 theorem stale_image_boundary_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -218,7 +226,7 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
                       | .ok packageRead =>
                           if packageReadOnly :
                               (observationGuard source.begin.source.packageManifest
-                                source.currentPackageRoot).cellId ∉
+                                packageRead.selected.observed.before).cellId ∉
                                 (DeclaredResourceController.writes prepared).map DataWrite.cellId then
                             if packageContent : packageRead.selected.observed.before.kind = .content then
                               if installed : ApplicationLifecycleBeginReceiver.installedPackageMatches

@@ -14,6 +14,7 @@ open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Theory
+open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ResourceCost
 open Minidregg.Kernel.DurableDataIntent
@@ -42,9 +43,10 @@ def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
   | .error detail => return .error detail
   | .ok current => return .ok ⟨original, current⟩
 
-def packageGuard (source : Source) : ReadGuard :=
+def packageGuard (source : Source)
+    (before : PackedCell CanonicalCellRegistry.registry) : ReadGuard :=
   ApplicationLifecycleClaimCurrent.observationGuard
-    source.begin.source.packageManifest source.currentPackageRoot
+    source.begin.source.packageManifest before
 
 /-- The app's old root is already guarded by the DRC target write. Only the
 independent package observation contributes a new read-only guard. Both native
@@ -54,7 +56,8 @@ def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened 
     DataIntent rootBytes := by
   let current := conditional.current
   let ordinary := current.invocation.dataIntent current.shape
-  have guarded : ∀ guard ∈ ordinary.readGuards ++ [packageGuard ingress.source],
+  have guarded : ∀ guard ∈ ordinary.readGuards ++
+      [packageGuard ingress.source current.packageRead.selected.observed.before],
       guard.cellId ∉ ordinary.writes.map DataWrite.cellId := by
     intro guard member
     rcases List.mem_append.mp member with old | extra
@@ -65,7 +68,8 @@ def Conditional.intent {config : NativeHost.Config} {opened : NativeHost.Opened 
   exact
     { transactionId := ordinary.transactionId
       writes := ordinary.writes
-      readGuards := ordinary.readGuards ++ [packageGuard ingress.source]
+      readGuards := ordinary.readGuards ++
+        [packageGuard ingress.source current.packageRead.selected.observed.before]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier config.deployment.domain config.profile.semantics ingress.source]
       exactCharge := fun dimension => match dimension with
@@ -96,13 +100,15 @@ theorem Conditional.intent_writes {config : NativeHost.Config}
 theorem Conditional.intent_package_guard {config : NativeHost.Config}
     {opened : NativeHost.Opened config} {ingress : Ingress}
     (conditional : Conditional config opened ingress) :
-    packageGuard ingress.source ∈ conditional.intent.readGuards ∧
-      (packageGuard ingress.source).expectedRoot =
-        opened.durable.snapshot.model.roots (packageGuard ingress.source).cellId := by
+    packageGuard ingress.source conditional.current.packageRead.selected.observed.before ∈
+      conditional.intent.readGuards ∧
+      (packageGuard ingress.source conditional.current.packageRead.selected.observed.before).expectedRoot =
+        opened.durable.snapshot.model.roots
+          (packageGuard ingress.source conditional.current.packageRead.selected.observed.before).cellId := by
   constructor
-  · change packageGuard ingress.source ∈
+  · change packageGuard ingress.source conditional.current.packageRead.selected.observed.before ∈
       (conditional.current.invocation.dataIntent conditional.current.shape).readGuards ++
-        [packageGuard ingress.source]
+        [packageGuard ingress.source conditional.current.packageRead.selected.observed.before]
     simp
   · exact conditional.current.packageRead.current
 

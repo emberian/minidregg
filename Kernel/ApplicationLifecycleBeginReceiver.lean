@@ -5,6 +5,7 @@ admission and a separately authorized, same-image package observation. It
 does not launch, attest, complete, or reconcile a physical process.
 -/
 import Kernel.ApplicationLifecycleBeginIngress
+import Kernel.PhysicalResourceReadGuard
 import Kernel.ApplicationDispatchManifest
 import Kernel.ResourceObservationAdmission
 
@@ -162,8 +163,11 @@ def packageRequest {F : Type} [Field F]
       ambient (command deployment.domain profile.semantics source) target source.packageRoot with
     verb := .observeObject }
 
-def packageGuard (source : Source) : ReadGuard :=
-  ⟨⟨source.packageManifest⟩, source.packageRoot⟩
+/-- The signed package root selects the logical content state. Durable CAS
+guards the enclosing physical cell, whose root includes its materialization. -/
+def packageGuard (source : Source)
+    (before : PackedCell CanonicalCellRegistry.registry) : ReadGuard :=
+  ⟨⟨source.packageManifest⟩, ResourceBirthCodec.physicalRoot (.live before)⟩
 
 /-- Derive the durable payload from the checked DRC invocation. The old app
 write, authority write, and all source guards remain exactly those admitted
@@ -184,15 +188,16 @@ def intent {F : Type} [Field F] [DecidableEq F]
       (command deployment.domain profile.semantics source))
     (shape : DeclaredResourceController.PhysicalShape prepared)
     (accepted : DeclaredResourceController.AcceptedInvocation prepared ingress.signed)
+    (packageBefore : PackedCell CanonicalCellRegistry.registry)
     (_sourceExact : ingress.domain = deployment.domain ∧
       ingress.semantics = profile.semantics ∧ ingress.source = source)
-    (_guardCurrent : (packageGuard source).expectedRoot =
-      durable.snapshot.model.roots (packageGuard source).cellId)
-    (guardReadOnly : (packageGuard source).cellId ∉
+    (_guardCurrent : (packageGuard source packageBefore).expectedRoot =
+      durable.snapshot.model.roots (packageGuard source packageBefore).cellId)
+    (guardReadOnly : (packageGuard source packageBefore).cellId ∉
       (DeclaredResourceController.writes prepared).map DataWrite.cellId) :
     DataIntent rootBytes := by
   let ordinary := accepted.dataIntent shape
-  have guarded : ∀ guard ∈ ordinary.readGuards ++ [packageGuard source],
+  have guarded : ∀ guard ∈ ordinary.readGuards ++ [packageGuard source packageBefore],
       guard.cellId ∉ ordinary.writes.map DataWrite.cellId := by
     intro guard member
     rcases List.mem_append.mp member with old | extra
@@ -203,7 +208,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
   exact
     { transactionId := ordinary.transactionId
       writes := ordinary.writes
-      readGuards := ordinary.readGuards ++ [packageGuard source]
+      readGuards := ordinary.readGuards ++ [packageGuard source packageBefore]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier deployment.domain profile.semantics source]
       exactCharge := fun dimension => match dimension with
@@ -268,9 +273,10 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   content : selected.observed.before.kind = .content
   installed : installedPackageMatches deployment ingress.source selected.observed.before = true
   observed : ResourceObservationAdmission.Checked selected ingress.packageObservationEnvelope
-  guardCurrent : (packageGuard ingress.source).expectedRoot =
-    durable.snapshot.model.roots (packageGuard ingress.source).cellId
-  guardReadOnly : (packageGuard ingress.source).cellId ∉
+  guardCurrent : (packageGuard ingress.source selected.observed.before).expectedRoot =
+    durable.snapshot.model.roots
+      (packageGuard ingress.source selected.observed.before).cellId
+  guardReadOnly : (packageGuard ingress.source selected.observed.before).cellId ∉
     (DeclaredResourceController.writes prepared).map DataWrite.cellId
   invocation : DeclaredResourceController.AcceptedInvocation prepared ingress.signed
 
@@ -279,6 +285,7 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     {ambient : Ambient} {durable : Durable} {ingress : Ingress}
     (accepted : Accepted deployment profile ambient durable ingress) : DataIntent rootBytes :=
   ApplicationLifecycleBeginReceiver.intent accepted.prepared accepted.shape accepted.invocation
+    accepted.selected.observed.before
     ⟨accepted.profileExact.1, accepted.profileExact.2, rfl⟩
     accepted.guardCurrent accepted.guardReadOnly
 
@@ -304,24 +311,29 @@ theorem Accepted.intent_package_guard {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable} {ingress : Ingress}
     (accepted : Accepted deployment profile ambient durable ingress) :
-    packageGuard ingress.source ∈ accepted.intent.readGuards ∧
-      (packageGuard ingress.source).expectedRoot =
-        durable.snapshot.model.roots (packageGuard ingress.source).cellId := by
+    packageGuard ingress.source accepted.selected.observed.before ∈ accepted.intent.readGuards ∧
+      (packageGuard ingress.source accepted.selected.observed.before).expectedRoot =
+        durable.snapshot.model.roots
+          (packageGuard ingress.source accepted.selected.observed.before).cellId := by
   constructor
-  · change packageGuard ingress.source ∈
+  · change packageGuard ingress.source accepted.selected.observed.before ∈
       (accepted.invocation.dataIntent accepted.shape).readGuards ++
-        [packageGuard ingress.source]
+        [packageGuard ingress.source accepted.selected.observed.before]
     simp
   · exact accepted.guardCurrent
 
 theorem stale_package_root_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable} {ingress : Ingress}
-    (stale : (packageGuard ingress.source).expectedRoot ≠
-      durable.snapshot.model.roots (packageGuard ingress.source).cellId) :
+    (stale : ∀ before : PackedCell CanonicalCellRegistry.registry,
+      ingress.source.packageRoot = before.payload.root →
+      (packageGuard ingress.source before).expectedRoot ≠
+        durable.snapshot.model.roots
+          (packageGuard ingress.source before).cellId) :
     ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
   rintro ⟨accepted⟩
-  exact stale accepted.guardCurrent
+  exact stale accepted.selected.observed.before
+    accepted.selected.observed.rootExact accepted.guardCurrent
 
 theorem package_write_overlap_has_no_admission {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -329,7 +341,7 @@ theorem package_write_overlap_has_no_admission {F : Type} [Field F] [DecidableEq
     (overlap : ∀ prepared : DeclaredResourceController.PreparedInvocation deployment
       profile ambient durable
       (command deployment.domain profile.semantics ingress.source),
-      (packageGuard ingress.source).cellId ∈
+      ⟨ingress.source.packageManifest⟩ ∈
         (DeclaredResourceController.writes prepared).map DataWrite.cellId) :
     ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
   rintro ⟨accepted⟩
@@ -368,18 +380,23 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
                           ingress.packageObservationEnvelope with
                       | .error _ => return .error "signed package observation refused"
                       | .ok observed =>
-                          if guardCurrent : (packageGuard source).expectedRoot =
-                              durable.snapshot.model.roots (packageGuard source).cellId then
-                            if guardReadOnly : (packageGuard source).cellId ∉
+                          have guardCurrent :
+                              (packageGuard source selected.observed.before).expectedRoot =
+                                durable.snapshot.model.roots
+                                  (packageGuard source selected.observed.before).cellId :=
+                            PhysicalResourceReadGuard.current context.directory
+                              source.packageManifest selected.observed.before
+                              selected.observed.present
+                          if guardReadOnly :
+                              (packageGuard source selected.observed.before).cellId ∉
                                 (DeclaredResourceController.writes prepared).map DataWrite.cellId then
-                              match ← DeclaredResourceController.admit native prepared ingress.signed with
-                              | .error _ => return .error "current lifecycle begin authority refused"
-                              | .ok invocation =>
-                                  return .ok ⟨profileExact, sourceValid, prepared, linked, shape,
-                                    selected, content, installed, observed, guardCurrent,
-                                    guardReadOnly, invocation⟩
-                            else return .error "package observation overlaps lifecycle writes"
-                          else return .error "package observation differs from loaded image"
+                            match ← DeclaredResourceController.admit native prepared ingress.signed with
+                            | .error _ => return .error "current lifecycle begin authority refused"
+                            | .ok invocation =>
+                                return .ok ⟨profileExact, sourceValid, prepared, linked, shape,
+                                  selected, content, installed, observed, guardCurrent,
+                                  guardReadOnly, invocation⟩
+                          else return .error "package observation overlaps lifecycle writes"
                     else return .error "current installed package identity refused"
                   else return .error "package target is not content"
             else return .error "lifecycle begin physical write shape refused"
