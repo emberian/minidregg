@@ -278,12 +278,17 @@ impl GatewayControl {
     }
 
     /// Call synchronously from the hard-EOF callback, before native Mini I/O.
-    /// It never waits for a provider reply or controller command.
+    /// The lease lock is the revoke/send linearization point: once this method
+    /// acquires it, no later curl spawn can pass the send gate. A spawn that
+    /// acquired it first remains an uncertain in-flight external send and is
+    /// killed below. This never waits for a provider reply or Mini command.
     pub fn revoke(&self) {
-        self.shared.revoked.store(true, Ordering::SeqCst);
         if let Ok(mut state) = self.shared.lease.lock() {
+            self.shared.revoked.store(true, Ordering::SeqCst);
             state.active = None;
             state.worker_deadline = None;
+        } else {
+            self.shared.revoked.store(true, Ordering::SeqCst);
         }
         if let Ok(mut child) = self.shared.curl.lock() {
             if let Some(child) = child.as_mut() {
@@ -339,6 +344,30 @@ impl GatewayControl {
                 })
             })
             .unwrap_or(false)
+    }
+
+    /// Keep curl spawn and child registration inside the same short critical
+    /// section as revoke. The callback signals the physical worker before it
+    /// waits here; no provider or native response wait holds this lock.
+    fn with_send_gate<T>(
+        &self,
+        id: &LeaseId,
+        action: impl FnOnce() -> T,
+    ) -> Result<T, &'static str> {
+        let state = self
+            .shared
+            .lease
+            .lock()
+            .map_err(|_| "lease lock poisoned")?;
+        if self.shared.revoked.load(Ordering::SeqCst)
+            || state.active.as_ref().map(|active| &active.id) != Some(id)
+            || state
+                .worker_deadline
+                .is_none_or(|deadline| Instant::now() >= deadline)
+        {
+            return Err("prompt lease revoked before dispatch");
+        }
+        Ok(action())
     }
 }
 
@@ -1377,47 +1406,32 @@ fn forward(
             }
         });
     }
-    // The lease lock is the physical send linearization edge. If revoke gets
-    // it first, no curl can start. If spawn gets it first, revoke can kill
-    // the registered Child immediately; no PID is signalled after reap.
-    let mut child_stdin = {
-        let guard = match shared.lease.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return ProviderOutcome::NotSent {
-                    reason: "lease lock poisoned".into(),
-                }
-            }
-        };
-        if guard.active.as_ref().map(|active| &active.id) != Some(lease)
-            || guard
-                .worker_deadline
-                .is_none_or(|deadline| Instant::now() >= deadline)
-        {
-            return ProviderOutcome::NotSent {
-                reason: "prompt lease revoked before dispatch".into(),
-            };
-        }
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => {
-                return ProviderOutcome::NotSent {
-                    reason: format!("provider transport spawn: {error}"),
-                }
-            }
-        };
+    // If revoke wins the lease lock, curl is never spawned. If this critical
+    // section wins, the request crossed the external-send boundary and revoke
+    // kills the registered child while retaining outcome uncertainty.
+    let mut child_stdin = match control.with_send_gate(lease, || {
+        let mut child = command.spawn().map_err(|error| ProviderOutcome::NotSent {
+            reason: format!("provider transport spawn: {error}"),
+        })?;
         let stdin = child.stdin.take();
         if let Ok(mut slot) = shared.curl.lock() {
             *slot = Some(child);
         } else {
             let _ = child.kill();
-            return ProviderOutcome::Uncertain {
+            return Err(ProviderOutcome::Uncertain {
                 partial_body: Vec::new(),
                 reason: "transport custody lock poisoned".into(),
-            };
+            });
         }
-        drop(guard);
-        stdin
+        Ok(stdin)
+    }) {
+        Ok(Ok(stdin)) => stdin,
+        Ok(Err(outcome)) => return outcome,
+        Err(reason) => {
+            return ProviderOutcome::NotSent {
+                reason: reason.into(),
+            }
+        }
     };
     let credential_written = child_stdin.take().is_some_and(|mut stdin| {
         stdin
@@ -1878,6 +1892,63 @@ mod tests {
             },
             worker_token: token.into(),
         }
+    }
+
+    #[test]
+    fn hard_revoke_and_send_gate_have_one_locked_order() {
+        let dir = test_dir();
+        let (commands, _requests) = mpsc::sync_channel(1);
+        let gateway = GatewayEndpoint::start(
+            config(dir.clone(), "127.0.0.1:1".parse().unwrap()),
+            commands,
+        )
+        .unwrap();
+        let control = gateway.control();
+        let id = lease(1, TOKEN).id;
+        control
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(5))
+            .unwrap();
+
+        // The send side has entered the critical section. Revoke cannot
+        // linearize until the child-registration action releases this lock.
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let sending = control.clone();
+        let sending_id = id.clone();
+        let send = thread::spawn(move || {
+            sending
+                .with_send_gate(&sending_id, || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    7
+                })
+                .unwrap()
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let revoking = control.clone();
+        let (revoke_started_tx, revoke_started_rx) = mpsc::channel();
+        let revoke = thread::spawn(move || {
+            revoke_started_tx.send(()).unwrap();
+            revoking.revoke();
+        });
+        revoke_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert!(!control.shared.revoked.load(Ordering::SeqCst));
+        release_tx.send(()).unwrap();
+        assert_eq!(send.join().unwrap(), 7);
+        revoke.join().unwrap();
+        assert!(control.shared.revoked.load(Ordering::SeqCst));
+
+        // Once revoke won the lock, even an already queued send action is
+        // vetoed. This is the no-new-curl side of the same boundary.
+        let invoked = AtomicBool::new(false);
+        assert!(control
+            .with_send_gate(&id, || invoked.store(true, Ordering::SeqCst))
+            .is_err());
+        assert!(!invoked.load(Ordering::SeqCst));
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
