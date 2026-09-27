@@ -20,6 +20,30 @@ fn file_digest(path: &Path) -> Result<String> {
     }
 }
 
+fn bounded_catalog_digest(path: &Path, limit: u64) -> Result<String> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|e| format!("cannot inspect A catalog input {}: {e}", path.display()))?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > limit {
+        return Err(format!(
+            "A catalog input {} is not a bounded regular file",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    File::open(path)
+        .map_err(|e| format!("cannot open A catalog input {}: {e}", path.display()))?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read A catalog input {}: {e}", path.display()))?;
+    if bytes.is_empty() || bytes.len() as u64 > limit {
+        return Err(format!(
+            "A catalog input {} changed or exceeds its bound",
+            path.display()
+        ));
+    }
+    Ok(hex(&Sha256::digest(&bytes)))
+}
+
 pub(super) struct HostUpgrade {
     pub old_host: PathBuf,
     pub new_host: PathBuf,
@@ -276,6 +300,89 @@ pub(super) fn pin(
     Ok(())
 }
 
+fn a_reply_pin_identity(host: &Path, config: &Path, socket: &Path, key: &Path) -> Result<Value> {
+    let config_bytes =
+        fs::read(config).map_err(|e| format!("cannot read A operator config: {e}"))?;
+    let config_json: Value = serde_json::from_slice(&config_bytes)
+        .map_err(|e| format!("invalid A operator config: {e}"))?;
+    let catalog = config_json
+        .get("fnReplyCatalog")
+        .and_then(Value::as_object)
+        .ok_or("A reply worker requires fnReplyCatalog")?;
+    if config_json
+        .get("fnPoll")
+        .is_some_and(|value| !value.is_null())
+        || config_json
+            .get("fnReplyPoll")
+            .is_some_and(|value| !value.is_null())
+    {
+        return Err("A catalog worker config contains another consumer route".into());
+    }
+    let mut manifests = serde_json::Map::new();
+    for name in [
+        "originConfigPath",
+        "rPinPath",
+        "qPinPath",
+        "scopePath",
+        "policyPath",
+    ] {
+        let path = catalog
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("fnReplyCatalog lacks {name}"))?;
+        let path = Path::new(path);
+        if !path.is_absolute() {
+            return Err(format!("fnReplyCatalog {name} is not absolute"));
+        }
+        let bound = if name == "originConfigPath" {
+            65_536
+        } else {
+            8_192
+        };
+        manifests.insert(name.to_owned(), json!(bounded_catalog_digest(path, bound)?));
+    }
+    let control_path = catalog
+        .get("controlPath")
+        .and_then(Value::as_str)
+        .ok_or("fnReplyCatalog lacks controlPath")?;
+    if !Path::new(control_path).is_absolute() {
+        return Err("fnReplyCatalog controlPath is not absolute".into());
+    }
+    let public_key = read_secret(key)?.verifying_key().to_bytes();
+    Ok(json!({
+        "type":"minidregg-a-reply-consumer-worker-pin-v2", "route":"a-reply",
+        "host":utf8_path(&absolute(host)?)?, "hostSha256":file_digest(host)?,
+        "configPath":utf8_path(&absolute(config)?)?, "configHex":hex(&config_bytes),
+        "socket":utf8_path(&absolute(socket)?)?, "keyPath":utf8_path(&absolute(key)?)?,
+        "publicKey":hex(&public_key), "manifestSha256":Value::Object(manifests),
+        "controlPath":control_path
+    }))
+}
+
+pub(super) fn pin_route(
+    state_dir: &Path,
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    route: ConsumerRoute,
+) -> Result<()> {
+    if !route.reply {
+        return pin(state_dir, host, config, socket, key);
+    }
+    let expected = a_reply_pin_identity(host, config, socket, key)?;
+    let path = state_dir.join("pin.json");
+    if path.exists() {
+        if read_json(&path)? != expected {
+            return Err("A reply worker route or durable pin changed".into());
+        }
+    } else {
+        write_json_new(&path, &expected)?;
+        sync_directory_ancestors(state_dir)?;
+    }
+    Ok(())
+}
+
 fn load_upgrade(
     state_dir: &Path,
     pending: &Path,
@@ -417,6 +524,14 @@ pub(super) fn upgrade_host(request: UpgradeRequest<'_>) -> Result<()> {
     let pin_path = state_dir.join("pin.json");
     if !pin_path.is_file() {
         return Err("host upgrade requires an existing durable worker pin".into());
+    }
+    if read_json(&pin_path)?.get("type").and_then(Value::as_str)
+        == Some("minidregg-a-reply-consumer-worker-pin-v2")
+    {
+        return Err(
+            "A reply worker host upgrade is not supported; retain its original image and pending state for operator review"
+                .into(),
+        );
     }
     pin(state_dir, &old_host, &config, &socket, &key)?;
     let old_pin_bytes = fs::read(&pin_path).map_err(|e| e.to_string())?;
@@ -609,15 +724,17 @@ fn confirmed_after_retry(
     Ok(outcome_transaction(&json)?.map(|txn| (txn, value, json)))
 }
 
-fn retain_confirmed_anchor(
+fn retain_confirmed_anchor_route(
     pending: &Path,
     prepare: &Path,
     outcome_json: &Path,
     value: &Value,
+    route: ConsumerRoute,
 ) -> Result<()> {
     let outcome_bin = outcome_json.with_extension("bin");
     let anchor = json!({
-        "type":"minidregg-b-consumer-confirmed-anchor-v1",
+        "type":if route.reply {"minidregg-a-reply-consumer-confirmed-anchor-v1"}
+            else {"minidregg-b-consumer-confirmed-anchor-v1"},
         "prepare":utf8_path(prepare)?,
         "callSha256":file_digest(&prepare.join("call.bin"))?,
         "attemptManifestSha256":file_digest(&prepare.join("attempt.json"))?,
@@ -652,9 +769,19 @@ fn retain_confirmed_anchor(
     Ok(())
 }
 
-fn classify_poll(value: &Value) -> Result<(String, bool)> {
-    if value.get("type").and_then(Value::as_str) != Some(B_CONSUMER.poll_type) {
-        return Err("unexpected B poll response type".to_owned());
+#[cfg(test)]
+fn retain_confirmed_anchor(
+    pending: &Path,
+    prepare: &Path,
+    outcome_json: &Path,
+    value: &Value,
+) -> Result<()> {
+    retain_confirmed_anchor_route(pending, prepare, outcome_json, value, B_CONSUMER)
+}
+
+fn classify_poll_route(value: &Value, route: ConsumerRoute) -> Result<(String, bool)> {
+    if value.get("type").and_then(Value::as_str) != Some(route.poll_type) {
+        return Err("unexpected poll response type for worker route".to_owned());
     }
     let status = value
         .get("status")
@@ -668,14 +795,23 @@ fn classify_poll(value: &Value) -> Result<(String, bool)> {
         {
             Ok(("idle".into(), true))
         }
-        "skip-decision"
-            if value.pointer("/decision/type").and_then(Value::as_str)
-                == Some("fn-empty-page-progress-decision-v1") =>
-        {
+        "skip-decision" => {
             if value.pointer("/decision/decision").and_then(Value::as_str) != Some("proposed-fresh")
             {
                 return Err("historical skip has no transaction ID in poll response; operator reconciliation required".into());
             }
+            let intent_hex = value
+                .get("intentHex")
+                .and_then(Value::as_str)
+                .ok_or("skip lacks intentHex")?;
+            let intent = decode_hex(intent_hex)?;
+            if hex(&intent) != intent_hex {
+                return Err("skip intentHex is not canonical lowercase".into());
+            }
+            validate_skip_decision(value, route, &intent)?;
+            let own_r = route.reply
+                && value.pointer("/decision/type").and_then(Value::as_str)
+                    == Some("fn-a-own-r-progress-decision-v1");
             let from = value
                 .pointer("/decision/fromPosition")
                 .and_then(Value::as_str)
@@ -689,16 +825,26 @@ fn classify_poll(value: &Value) -> Result<(String, bool)> {
                 .parse::<u128>()
                 .map_err(|_| "invalid skip toPosition")?;
             let distance = to.checked_sub(from).ok_or("skip position reversed")?;
-            if !(1..=16).contains(&distance) {
+            if !(1..=16).contains(&distance) || to > u32::MAX as u128 {
                 return Err("skip page exceeds source poll scan bound".into());
             }
-            Ok(("skip".into(), distance < 16))
+            // An own-R skip selects one article; it says nothing about later Q
+            // articles already in the same GROUP snapshot. Only an empty-page
+            // scan proves a short page reached the current frontier.
+            Ok(("skip".into(), !own_r && distance < 16))
         }
         "accepted-decision"
             if value
                 .get("intentHex")
                 .and_then(Value::as_str)
-                .is_some_and(|s| !s.is_empty()) =>
+                .is_some_and(|s| !s.is_empty())
+                && (!route.reply
+                    || (value.pointer("/decision/type").and_then(Value::as_str)
+                        == Some("fn-a-reply-consumer-decision-v1")
+                        && matches!(
+                            value.pointer("/decision/decision").and_then(Value::as_str),
+                            Some("proposed-fresh" | "proposed-conflict")
+                        ))) =>
         {
             Ok(("publication".into(), true))
         }
@@ -707,6 +853,11 @@ fn classify_poll(value: &Value) -> Result<(String, bool)> {
             "B poll cannot be advanced safely; retained evidence requires operator review".into(),
         ),
     }
+}
+
+#[cfg(test)]
+fn classify_poll(value: &Value) -> Result<(String, bool)> {
+    classify_poll_route(value, B_CONSUMER)
 }
 
 fn finish(state_dir: &Path, pending: &Path, state: &Value) -> Result<()> {
@@ -727,11 +878,12 @@ fn ack_newly_confirmed(
     config: &Path,
     pending: &Path,
     state: &mut Value,
+    route: ConsumerRoute,
 ) -> Result<()> {
     let ack = attempt(pending, state, "ack")?;
-    match consumer_ack(host, config, field(state, "txn")?, &ack, B_CONSUMER) {
+    match consumer_ack(host, config, field(state, "txn")?, &ack, route) {
         Ok(()) => sync_directory_ancestors(&ack),
-        Err(_) => recover_acking(host, config, pending, state),
+        Err(_) => recover_acking_route(host, config, pending, state, route),
     }
 }
 
@@ -747,7 +899,11 @@ enum AckEvidence {
     TransportFault,
 }
 
-fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
+fn retained_ack_route(
+    pending: &Path,
+    state: &Value,
+    route: ConsumerRoute,
+) -> Result<Option<AckEvidence>> {
     let Some(name) = state.get("ack").and_then(Value::as_str) else {
         return Ok(None);
     };
@@ -768,8 +924,8 @@ fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
     }
     let frame = fs::read(&frame_path)
         .map_err(|error| format!("cannot read retained ACK frame: {error}"))?;
-    if frame.first() != Some(&B_CONSUMER.ack_opcode) {
-        return Err("retained ACK frame is not a successful B ACK reply".into());
+    if frame.first() != Some(&route.ack_opcode) {
+        return Err("retained ACK frame is not a successful reply for this route".into());
     }
     if json_path.exists()
         && fs::read(&json_path)
@@ -782,15 +938,15 @@ fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
         .map_err(|error| format!("retained ACK frame has invalid JSON: {error}"))?;
     match value.get("fnAck").and_then(Value::as_str) {
         Some("durable-accepted") => {
-            parse_ack_result(&value, B_CONSUMER, field(state, "txn")?)?;
+            parse_ack_result(&value, route, field(state, "txn")?)?;
             Ok(Some(AckEvidence::Exact))
         }
         Some("covered-by-durable-frontier") => {
-            parse_ack_result(&value, B_CONSUMER, field(state, "txn")?)?;
+            parse_ack_result(&value, route, field(state, "txn")?)?;
             Ok(Some(AckEvidence::Covered))
         }
         Some(status @ ("refused" | "uncertain" | "transport-fault")) => {
-            if value.get("type").and_then(Value::as_str) != Some(B_CONSUMER.ack_type)
+            if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
                 || value.get("miniTransactionId").and_then(Value::as_str)
                     != Some(field(state, "txn")?)
             {
@@ -806,8 +962,19 @@ fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
     }
 }
 
-fn recover_acking(host: &Path, config: &Path, pending: &Path, state: &mut Value) -> Result<()> {
-    match retained_ack(pending, state) {
+#[cfg(test)]
+fn retained_ack(pending: &Path, state: &Value) -> Result<Option<AckEvidence>> {
+    retained_ack_route(pending, state, B_CONSUMER)
+}
+
+fn recover_acking_route(
+    host: &Path,
+    config: &Path,
+    pending: &Path,
+    state: &mut Value,
+    route: ConsumerRoute,
+) -> Result<()> {
+    match retained_ack_route(pending, state, route) {
         Ok(Some(AckEvidence::Exact)) => return Ok(()),
         Ok(Some(AckEvidence::Covered)) => return hold(
             pending,
@@ -842,13 +1009,13 @@ fn recover_acking(host: &Path, config: &Path, pending: &Path, state: &mut Value)
     set(state, "ackRetryStarted", json!(true));
     save_state(pending, state)?;
     let ack = attempt(pending, state, "ack")?;
-    match consumer_ack(host, config, field(state, "txn")?, &ack, B_CONSUMER) {
+    match consumer_ack(host, config, field(state, "txn")?, &ack, route) {
         Ok(()) => {
             sync_directory_ancestors(&ack)?;
             Ok(())
         }
         Err(error) => {
-            let reason = match retained_ack(pending, state) {
+            let reason = match retained_ack_route(pending, state, route) {
                 Ok(Some(AckEvidence::Exact)) => {
                     return hold(pending, state,
                         "exact ACK reply exists but client reported an error; operator review required")
@@ -883,6 +1050,7 @@ fn held_ack_anchor(
     pending: &Path,
     state: &Value,
     host: &Path,
+    route: ConsumerRoute,
 ) -> Result<(Value, Option<HostUpgrade>)> {
     let prepare = pending.join(field(state, "prepare")?);
     let call = prepare.join("call.bin");
@@ -894,7 +1062,11 @@ fn held_ack_anchor(
     let expected = if anchor_path.exists() {
         let anchor = read_json(&anchor_path)?;
         if anchor.get("type").and_then(Value::as_str)
-            != Some("minidregg-b-consumer-confirmed-anchor-v1")
+            != Some(if route.reply {
+                "minidregg-a-reply-consumer-confirmed-anchor-v1"
+            } else {
+                "minidregg-b-consumer-confirmed-anchor-v1"
+            })
             || anchor.get("prepare").and_then(Value::as_str) != Some(utf8_path(&prepare)?)
             || anchor.get("callSha256").and_then(Value::as_str)
                 != Some(file_digest(&call)?.as_str())
@@ -930,8 +1102,13 @@ fn held_ack_anchor(
     Ok((expected, upgrade))
 }
 
-fn archive_exact_ack(state_dir: &Path, pending: &Path, state: &mut Value) -> Result<()> {
-    if retained_ack(pending, state)? != Some(AckEvidence::Exact) {
+fn archive_exact_ack_route(
+    state_dir: &Path,
+    pending: &Path,
+    state: &mut Value,
+    route: ConsumerRoute,
+) -> Result<()> {
+    if retained_ack_route(pending, state, route)? != Some(AckEvidence::Exact) {
         return Err("held ACK recovery lacks a retained exact durable reply".into());
     }
     set(state, "phase", json!("Acking"));
@@ -939,23 +1116,40 @@ fn archive_exact_ack(state_dir: &Path, pending: &Path, state: &mut Value) -> Res
     finish(state_dir, pending, state)
 }
 
-pub(super) fn resume_held_ack(
+#[cfg(test)]
+fn archive_exact_ack(state_dir: &Path, pending: &Path, state: &mut Value) -> Result<()> {
+    archive_exact_ack_route(state_dir, pending, state, B_CONSUMER)
+}
+
+fn require_pending_route(state: &Value, route: ConsumerRoute) -> Result<()> {
+    match (route.reply, state.get("route").and_then(Value::as_str)) {
+        (true, Some("a-reply")) | (false, None | Some("b")) => Ok(()),
+        _ => Err("pending consumer state belongs to another route".into()),
+    }
+}
+
+fn resume_held_ack_route(
     host: &Path,
     config: &Path,
     socket: &Path,
     key: &Path,
     state_dir: &Path,
+    route: ConsumerRoute,
 ) -> Result<()> {
     private_dir(state_dir)?;
     let socket_dir = socket.parent().ok_or("socket lacks parent")?;
     private_dir(socket_dir)?;
     let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
     let _worker = transport::service_lock(&state_dir.join("worker.lock"))?;
-    pin(state_dir, host, config, socket, key)?;
+    pin_route(state_dir, host, config, socket, key, route)?;
     if read_json(&state_dir.join("pin.json"))?
         .get("type")
         .and_then(Value::as_str)
-        != Some("minidregg-b-consumer-worker-pin-v2")
+        != Some(if route.reply {
+            "minidregg-a-reply-consumer-worker-pin-v2"
+        } else {
+            "minidregg-b-consumer-worker-pin-v2"
+        })
     {
         return Err("explicit held ACK recovery requires a v2 host image pin".into());
     }
@@ -963,11 +1157,12 @@ pub(super) fn resume_held_ack(
     let pending = state_dir.join("pending");
     private_dir(&pending)?;
     let mut state = read_json(&pending.join("state.json"))?;
+    require_pending_route(&state, route)?;
     if field(&state, "phase")? != "Held" {
-        return Err("explicit ACK recovery requires a held B decision".into());
+        return Err("explicit ACK recovery requires a held decision".into());
     }
     let poll = pending.join(field(&state, "poll")?);
-    let (retained_kind, _) = classify_poll(&read_json(&poll.join("decision.json"))?)?;
+    let (retained_kind, _) = classify_poll_route(&read_json(&poll.join("decision.json"))?, route)?;
     if !matches!(retained_kind.as_str(), "publication" | "skip")
         || field(&state, "kind")? != retained_kind
     {
@@ -976,10 +1171,10 @@ pub(super) fn resume_held_ack(
     if state.get("ackRetryStarted").and_then(Value::as_bool) == Some(true) {
         return Err("existing exact ACK retry is already exhausted".into());
     }
-    let (expected, upgrade) = held_ack_anchor(state_dir, &pending, &state, host)?;
+    let (expected, upgrade) = held_ack_anchor(state_dir, &pending, &state, host, route)?;
     if state.get("ackRecoveryStarted").and_then(Value::as_bool) == Some(true) {
-        if retained_ack(&pending, &state)? == Some(AckEvidence::Exact) {
-            return archive_exact_ack(state_dir, &pending, &mut state);
+        if retained_ack_route(&pending, &state, route)? == Some(AckEvidence::Exact) {
+            return archive_exact_ack_route(state_dir, &pending, &mut state, route);
         }
         return Err(
             "one exact held ACK recovery was already started without a complete exact reply".into(),
@@ -1017,7 +1212,8 @@ pub(super) fn resume_held_ack(
         return Err("recovery lookup transaction differs from retained ACK transaction".into());
     }
     let proof = json!({
-        "type":"minidregg-b-consumer-held-ack-recovery-v1",
+        "type":if route.reply {"minidregg-a-reply-consumer-held-ack-recovery-v1"}
+            else {"minidregg-b-consumer-held-ack-recovery-v1"},
         "priorAck":prior_ack, "priorFrameSha256":hex(&Sha256::digest(&prior_frame)),
         "priorReason":field(&state, "reason")?, "lookupPath":utf8_path(&lookup_json)?,
         "lookupSha256":file_digest(&lookup_json.with_extension("bin"))?,
@@ -1030,10 +1226,12 @@ pub(super) fn resume_held_ack(
     set(&mut state, "ackRecoveryPriorAck", json!(prior_ack));
     save_state(&pending, &state)?;
     let ack = attempt(&pending, &mut state, "ack")?;
-    let sent = consumer_ack(host, config, field(&state, "txn")?, &ack, B_CONSUMER);
-    if sent.is_ok() || retained_ack(&pending, &state).ok() == Some(Some(AckEvidence::Exact)) {
+    let sent = consumer_ack(host, config, field(&state, "txn")?, &ack, route);
+    if sent.is_ok()
+        || retained_ack_route(&pending, &state, route).ok() == Some(Some(AckEvidence::Exact))
+    {
         sync_directory_ancestors(&ack)?;
-        return archive_exact_ack(state_dir, &pending, &mut state);
+        return archive_exact_ack_route(state_dir, &pending, &mut state, route);
     }
     hold(
         &pending,
@@ -1045,12 +1243,42 @@ pub(super) fn resume_held_ack(
     )
 }
 
+pub(super) fn resume_held_ack(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+) -> Result<()> {
+    resume_held_ack_route(host, config, socket, key, state_dir, B_CONSUMER)
+}
+
+pub(super) fn resume_held_reply_ack(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+) -> Result<()> {
+    resume_held_ack_route(host, config, socket, key, state_dir, A_REPLY_CONSUMER)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Stop {
     Idle,
     ShortPage,
     Publication,
     PageCap,
+}
+
+fn completed_stop(state: &Value) -> Result<Option<Stop>> {
+    if field(state, "kind")? == "publication" {
+        Ok(Some(Stop::Publication))
+    } else if state.get("short").and_then(Value::as_bool) == Some(true) {
+        Ok(Some(Stop::ShortPage))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) fn run(
@@ -1061,25 +1289,57 @@ pub(super) fn run(
     state_dir: &Path,
     max_pages: u32,
 ) -> Result<()> {
-    private_dir(state_dir)?;
-    let socket_dir = socket.parent().ok_or("socket lacks parent")?;
-    private_dir(socket_dir)?;
-    let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
-    let _lock = transport::service_lock(&state_dir.join("worker.lock"))?;
-    let stop = run_locked(host, config, socket, key, state_dir, max_pages)?;
-    println!("consumer wake stopped: {stop:?}");
-    Ok(())
+    run_route(host, config, socket, key, state_dir, max_pages, B_CONSUMER)
 }
 
-pub(super) fn run_locked(
+pub(super) fn run_reply(
     host: &Path,
     config: &Path,
     socket: &Path,
     key: &Path,
     state_dir: &Path,
     max_pages: u32,
+) -> Result<()> {
+    run_route(
+        host,
+        config,
+        socket,
+        key,
+        state_dir,
+        max_pages,
+        A_REPLY_CONSUMER,
+    )
+}
+
+fn run_route(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+    max_pages: u32,
+    route: ConsumerRoute,
+) -> Result<()> {
+    private_dir(state_dir)?;
+    let socket_dir = socket.parent().ok_or("socket lacks parent")?;
+    private_dir(socket_dir)?;
+    let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
+    let _lock = transport::service_lock(&state_dir.join("worker.lock"))?;
+    let stop = run_locked_route(host, config, socket, key, state_dir, max_pages, route)?;
+    println!("consumer wake stopped: {stop:?}");
+    Ok(())
+}
+
+pub(super) fn run_locked_route(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+    max_pages: u32,
+    route: ConsumerRoute,
 ) -> Result<Stop> {
-    pin(state_dir, host, config, socket, key)?;
+    pin_route(state_dir, host, config, socket, key, route)?;
     pin_worker_host_image(state_dir)?;
     let pending = state_dir.join("pending");
     let mut pages = 0;
@@ -1089,7 +1349,11 @@ pub(super) fn run_locked(
         }
         if !pending.exists() {
             private_dir(&pending)?;
-            save_state(&pending, &json!({"phase":"Polling", "serial":0}))?;
+            let mut initial = json!({"phase":"Polling", "serial":0});
+            if route.reply {
+                initial["route"] = json!("a-reply");
+            }
+            save_state(&pending, &initial)?;
         }
         private_dir(&pending)?;
         let state_file = pending.join("state.json");
@@ -1107,13 +1371,18 @@ pub(super) fn run_locked(
                     "pending worker slot lacks durable state; operator review required".into(),
                 );
             }
-            save_state(&pending, &json!({"phase":"Polling", "serial":0}))?;
+            let mut initial = json!({"phase":"Polling", "serial":0});
+            if route.reply {
+                initial["route"] = json!("a-reply");
+            }
+            save_state(&pending, &initial)?;
         }
         let mut state = read_json(&state_file)?;
+        require_pending_route(&state, route)?;
         match field(&state, "phase")? {
             "Polling" => {
                 let path = attempt(&pending, &mut state, "poll")?;
-                if let Err(error) = consumer_poll(host, config, &path, B_CONSUMER) {
+                if let Err(error) = consumer_poll(host, config, &path, route) {
                     if path.join("reply.frame").exists() {
                         return hold(
                             &pending,
@@ -1124,7 +1393,7 @@ pub(super) fn run_locked(
                     return Err(error);
                 }
                 let value = read_json(&path.join("decision.json"))?;
-                let (kind, short) = match classify_poll(&value) {
+                let (kind, short) = match classify_poll_route(&value, route) {
                     Ok(classification) => classification,
                     Err(error) => return hold(&pending, &mut state, &error),
                 };
@@ -1182,18 +1451,15 @@ pub(super) fn run_locked(
                         )
                     }
                 };
-                retain_confirmed_anchor(&pending, &path, &outcome_path, &outcome)?;
+                retain_confirmed_anchor_route(&pending, &path, &outcome_path, &outcome, route)?;
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
                 save_state(&pending, &state)?;
-                ack_newly_confirmed(host, config, &pending, &mut state)?;
+                ack_newly_confirmed(host, config, &pending, &mut state, route)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication" {
-                    return Ok(Stop::Publication);
-                }
-                if state.get("short").and_then(Value::as_bool) == Some(true) {
-                    return Ok(Stop::ShortPage);
+                if let Some(stop) = completed_stop(&state)? {
+                    return Ok(stop);
                 }
             }
             "Sending" => {
@@ -1229,29 +1495,23 @@ pub(super) fn run_locked(
                     _ => return hold(&pending, &mut state,
                         "exact lookup did not confirm or prove absence; retained call requires operator reconciliation"),
                 };
-                retain_confirmed_anchor(&pending, &path, &anchor_path, &anchored)?;
+                retain_confirmed_anchor_route(&pending, &path, &anchor_path, &anchored, route)?;
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
                 save_state(&pending, &state)?;
-                ack_newly_confirmed(host, config, &pending, &mut state)?;
+                ack_newly_confirmed(host, config, &pending, &mut state, route)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication" {
-                    return Ok(Stop::Publication);
-                }
-                if state.get("short").and_then(Value::as_bool) == Some(true) {
-                    return Ok(Stop::ShortPage);
+                if let Some(stop) = completed_stop(&state)? {
+                    return Ok(stop);
                 }
             }
             "Acking" => {
-                recover_acking(host, config, &pending, &mut state)?;
+                recover_acking_route(host, config, &pending, &mut state, route)?;
                 finish(state_dir, &pending, &state)?;
                 pages += 1;
-                if field(&state, "kind")? == "publication" {
-                    return Ok(Stop::Publication);
-                }
-                if state.get("short").and_then(Value::as_bool) == Some(true) {
-                    return Ok(Stop::ShortPage);
+                if let Some(stop) = completed_stop(&state)? {
+                    return Ok(stop);
                 }
             }
             "Held" => {
@@ -1591,6 +1851,111 @@ mod tests {
     }
 
     #[test]
+    fn a_catalog_route_keeps_b_state_disjoint_and_classifies_own_r() {
+        let root = env::temp_dir().join(format!(
+            "mini-a-worker-pin-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let host = root.join("host");
+        let key = root.join("key");
+        let socket = root.join("host.sock");
+        let config = root.join("config.json");
+        create_private(&host, b"a-host-image").unwrap();
+        create_private(&key, &[9; 32]).unwrap();
+        let mut catalog = serde_json::Map::new();
+        for field in [
+            "originConfigPath",
+            "rPinPath",
+            "qPinPath",
+            "scopePath",
+            "policyPath",
+        ] {
+            let path = root.join(format!("{field}.json"));
+            create_private(&path, field.as_bytes()).unwrap();
+            catalog.insert(field.to_owned(), json!(utf8_path(&path).unwrap()));
+        }
+        catalog.insert(
+            "controlPath".into(),
+            json!(utf8_path(&root.join("fn-control.sock")).unwrap()),
+        );
+        write_json_new(
+            &config,
+            &json!({"fnReplyCatalog":catalog,
+            "fnPoll":null, "fnReplyPoll":null}),
+        )
+        .unwrap();
+        pin_route(&root, &host, &config, &socket, &key, A_REPLY_CONSUMER).unwrap();
+        assert_eq!(
+            read_json(&root.join("pin.json")).unwrap()["type"],
+            "minidregg-a-reply-consumer-worker-pin-v2"
+        );
+        assert!(pin_route(&root, &host, &config, &socket, &key, B_CONSUMER).is_err());
+        assert!(require_pending_route(&json!({"phase":"Polling"}), A_REPLY_CONSUMER).is_err());
+        assert!(
+            require_pending_route(&json!({"phase":"Polling","route":"a-reply"}), B_CONSUMER)
+                .is_err()
+        );
+        let own_r = json!({"type":"fn-a-reply-poll-session-v1", "status":"skip-decision",
+            "decision":{"type":"fn-a-own-r-progress-decision-v1",
+                "decision":"proposed-fresh", "fromPosition":"0", "toPosition":"1",
+                "outboxTransactionId":"0"}, "intentHex":"00"});
+        assert_eq!(
+            classify_poll_route(&own_r, A_REPLY_CONSUMER).unwrap(),
+            ("skip".into(), false)
+        );
+        assert!(classify_poll_route(&own_r, B_CONSUMER).is_err());
+        let mut historical = own_r;
+        historical["decision"]["decision"] = json!("repeated");
+        historical["intentHex"] = json!("");
+        assert!(classify_poll_route(&historical, A_REPLY_CONSUMER).is_err());
+        let q = json!({"type":"fn-a-reply-poll-session-v1", "status":"accepted-decision",
+            "decision":{"type":"fn-a-reply-consumer-decision-v1",
+                "decision":"proposed-fresh"}, "intentHex":"00"});
+        assert_eq!(
+            classify_poll_route(&q, A_REPLY_CONSUMER).unwrap(),
+            ("publication".into(), true)
+        );
+        let mut q_repeat = q;
+        q_repeat["decision"]["decision"] = json!("repeated");
+        q_repeat["intentHex"] = json!("");
+        assert!(classify_poll_route(&q_repeat, A_REPLY_CONSUMER).is_err());
+        fs::write(root.join("scopePath.json"), b"different scope").unwrap();
+        assert!(pin_route(&root, &host, &config, &socket, &key, A_REPLY_CONSUMER).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_own_r_skip_continues_to_queued_q_with_unchanged_group() {
+        let own_r = json!({"type":A_REPLY_CONSUMER.poll_type, "status":"skip-decision",
+            "decision":{"type":"fn-a-own-r-progress-decision-v1",
+                "decision":"proposed-fresh", "fromPosition":"2", "toPosition":"3",
+                "outboxTransactionId":"0"}, "intentHex":"00"});
+        let q = json!({"type":A_REPLY_CONSUMER.poll_type, "status":"accepted-decision",
+            "decision":{"type":"fn-a-reply-consumer-decision-v1",
+                "decision":"proposed-fresh"}, "intentHex":"00"});
+        let (first_kind, first_short) = classify_poll_route(&own_r, A_REPLY_CONSUMER).unwrap();
+        let first = json!({"kind":first_kind, "short":first_short});
+        assert_eq!(completed_stop(&first).unwrap(), None);
+        let (next_kind, next_short) = classify_poll_route(&q, A_REPLY_CONSUMER).unwrap();
+        let next = json!({"kind":next_kind, "short":next_short});
+        assert_eq!(completed_stop(&next).unwrap(), Some(Stop::Publication));
+        let empty = json!({"type":A_REPLY_CONSUMER.poll_type, "status":"skip-decision",
+            "decision":{"type":"fn-empty-page-progress-decision-v1",
+                "decision":"proposed-fresh", "fromPosition":"3", "toPosition":"4"},
+            "intentHex":"00"});
+        let (_, empty_short) = classify_poll_route(&empty, A_REPLY_CONSUMER).unwrap();
+        assert_eq!(
+            completed_stop(&json!({"kind":"skip", "short":empty_short})).unwrap(),
+            Some(Stop::ShortPage)
+        );
+    }
+
+    #[test]
     fn durable_preparing_reserves_new_path_after_an_orphan() {
         let root = env::temp_dir().join(format!(
             "mini-drain-test-{}-{}",
@@ -1682,6 +2047,50 @@ mod tests {
             retained_ack(&pending, &state).unwrap(),
             Some(AckEvidence::Refused)
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_reply_retained_ack_cannot_complete_a_b_pending_state() {
+        let root = env::temp_dir().join(format!(
+            "mini-a-ack-route-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let pending = root.join("pending");
+        private_dir(&pending).unwrap();
+        let mut state = json!({"phase":"Acking", "route":"a-reply", "serial":0, "txn":"123"});
+        let ack = attempt(&pending, &mut state, "ack").unwrap();
+        private_dir(&ack).unwrap();
+        let exact = json!({"type":A_REPLY_CONSUMER.ack_type,
+            "miniTransactionId":"123", "kind":"own-r-skip",
+            "outboxTransactionId":"0", "fnStoreSequence":"0",
+            "fnStoreTransactionId":"0", "fnCursorPosition":"1",
+            "fnCommittedAck":"1", "fnAck":"durable-accepted"});
+        let mut frame = vec![A_REPLY_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&exact).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        assert_eq!(
+            retained_ack_route(&pending, &state, A_REPLY_CONSUMER).unwrap(),
+            Some(AckEvidence::Exact)
+        );
+        assert!(retained_ack_route(&pending, &state, B_CONSUMER).is_err());
+        let mut wrong_transaction = exact;
+        wrong_transaction["miniTransactionId"] = json!("124");
+        fs::write(
+            ack.join("reply.frame"),
+            [
+                vec![A_REPLY_CONSUMER.ack_opcode],
+                serde_json::to_vec(&wrong_transaction).unwrap(),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        assert!(retained_ack_route(&pending, &state, A_REPLY_CONSUMER).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

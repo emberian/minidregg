@@ -87,7 +87,10 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
     let pin: Value =
         serde_json::from_slice(&fs::read(state_dir.join("pin.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-    if pin.get("type").and_then(Value::as_str) == Some("minidregg-b-consumer-worker-pin-v2") {
+    if matches!(
+        pin.get("type").and_then(Value::as_str),
+        Some("minidregg-b-consumer-worker-pin-v2" | "minidregg-a-reply-consumer-worker-pin-v2")
+    ) {
         let sha = pin
             .get("hostSha256")
             .and_then(Value::as_str)
@@ -132,9 +135,12 @@ usage:
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
+  mini reply-consumer-resume-ack --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
   mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
+  mini reply-consumer-worker --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -1842,7 +1848,8 @@ fn run(mut args: Args) -> Result<()> {
                 Err("provider metering requires Unix sockets".to_owned())
             }
         }
-        "consumer-drain-once" => {
+        "consumer-drain-once" | "reply-consumer-drain-once" => {
+            let reply = args.command == OsStr::new("reply-consumer-drain-once");
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let key = path(args.required("key")?);
@@ -1864,14 +1871,19 @@ fn run(mut args: Args) -> Result<()> {
                 let socket = SOCKET
                     .get()
                     .ok_or("consumer-drain-once requires --socket")?;
-                drain::run(&host, &config, socket, &key, &state_dir, max_pages)
+                if reply {
+                    drain::run_reply(&host, &config, socket, &key, &state_dir, max_pages)
+                } else {
+                    drain::run(&host, &config, socket, &key, &state_dir, max_pages)
+                }
             }
             #[cfg(not(unix))]
             {
                 Err("consumer-drain-once requires Unix sockets".to_owned())
             }
         }
-        "consumer-resume-ack" => {
+        "consumer-resume-ack" | "reply-consumer-resume-ack" => {
+            let reply = args.command == OsStr::new("reply-consumer-resume-ack");
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let key = path(args.required("key")?);
@@ -1882,7 +1894,11 @@ fn run(mut args: Args) -> Result<()> {
                 let socket = SOCKET
                     .get()
                     .ok_or("consumer-resume-ack requires --socket")?;
-                drain::resume_held_ack(&host, &config, socket, &key, &state_dir)
+                if reply {
+                    drain::resume_held_reply_ack(&host, &config, socket, &key, &state_dir)
+                } else {
+                    drain::resume_held_ack(&host, &config, socket, &key, &state_dir)
+                }
             }
             #[cfg(not(unix))]
             {
@@ -1923,7 +1939,8 @@ fn run(mut args: Args) -> Result<()> {
                 Err("consumer-host-upgrade requires Unix sockets".to_owned())
             }
         }
-        "consumer-worker" => {
+        "consumer-worker" | "reply-consumer-worker" => {
+            let reply = args.command == OsStr::new("reply-consumer-worker");
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
             let key = path(args.required("key")?);
@@ -1933,7 +1950,11 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(unix)]
             {
                 let socket = SOCKET.get().ok_or("consumer-worker requires --socket")?;
-                worker::run(&host, &config, socket, &key, &state_dir, &worker_config)
+                if reply {
+                    worker::run_reply(&host, &config, socket, &key, &state_dir, &worker_config)
+                } else {
+                    worker::run(&host, &config, socket, &key, &state_dir, &worker_config)
+                }
             }
             #[cfg(not(unix))]
             {

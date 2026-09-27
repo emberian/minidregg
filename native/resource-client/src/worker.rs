@@ -185,7 +185,7 @@ fn property<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("wake config lacks {key}"))
 }
 
-fn wake_config(path: &Path, host_config: &Path) -> Result<WakeConfig> {
+fn wake_config(path: &Path, host_config: &Path, route: ConsumerRoute) -> Result<WakeConfig> {
     let meta =
         fs::symlink_metadata(path).map_err(|e| format!("cannot inspect wake config: {e}"))?;
     if !meta.is_file() || meta.uid() != unsafe { geteuid() } || meta.mode() & 0o077 != 0 {
@@ -197,7 +197,13 @@ fn wake_config(path: &Path, host_config: &Path) -> Result<WakeConfig> {
     }
     let value: Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("invalid wake config: {e}"))?;
-    if property(&value, "type")? != "minidregg-b-consumer-wake-v1" {
+    if property(&value, "type")?
+        != if route.reply {
+            "minidregg-a-reply-consumer-wake-v1"
+        } else {
+            "minidregg-b-consumer-wake-v1"
+        }
+    {
         return Err("unsupported wake config type".into());
     }
     let port = value
@@ -249,9 +255,13 @@ fn wake_config(path: &Path, host_config: &Path) -> Result<WakeConfig> {
     )
     .map_err(|e| format!("invalid Host config: {e}"))?;
     let scope_path = host_json
-        .pointer("/fnPoll/scopePath")
+        .pointer(if route.reply {
+            "/fnReplyCatalog/scopePath"
+        } else {
+            "/fnPoll/scopePath"
+        })
         .and_then(Value::as_str)
-        .ok_or("Host config lacks fnPoll scopePath")?;
+        .ok_or("Host config lacks selected consumer scopePath")?;
     let scope_bytes = fs::read(scope_path).map_err(|e| format!("cannot read fn scope pin: {e}"))?;
     if scope_bytes.len() > 65_536 {
         return Err("fn scope pin exceeds 64 KiB".into());
@@ -613,8 +623,9 @@ fn tls_line<'a>(
     Err("protected NNTP response exceeds 4096 bytes".into())
 }
 
-fn wake_pin(state_dir: &Path, source: &Path, cfg: &WakeConfig) -> Result<()> {
-    let value = json!({"type":"minidregg-b-consumer-wake-pin-v1",
+fn wake_pin(state_dir: &Path, source: &Path, cfg: &WakeConfig, route: ConsumerRoute) -> Result<()> {
+    let value = json!({"type":if route.reply {"minidregg-a-reply-consumer-wake-pin-v1"}
+        else {"minidregg-b-consumer-wake-pin-v1"},
         "sourcePath":utf8_path(&absolute(source)?)?, "port":cfg.port,
         "certificatePath":utf8_path(&cfg.cert)?, "certificateSha256":hex(&Sha256::digest(&cfg.cert_pem)),
         "username":cfg.username, "passwordFile":utf8_path(&cfg.password_file)?,
@@ -686,8 +697,47 @@ pub(super) fn run(
     state_dir: &Path,
     worker_config: &Path,
 ) -> Result<()> {
+    run_route(
+        host,
+        config,
+        socket,
+        key,
+        state_dir,
+        worker_config,
+        B_CONSUMER,
+    )
+}
+
+pub(super) fn run_reply(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+    worker_config: &Path,
+) -> Result<()> {
+    run_route(
+        host,
+        config,
+        socket,
+        key,
+        state_dir,
+        worker_config,
+        A_REPLY_CONSUMER,
+    )
+}
+
+fn run_route(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+    worker_config: &Path,
+    route: ConsumerRoute,
+) -> Result<()> {
     QUIET_WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
-    let cfg = wake_config(worker_config, config)?;
+    let cfg = wake_config(worker_config, config, route)?;
     drain::private_dir(state_dir)?;
     drain::private_dir(socket.parent().ok_or("socket lacks parent")?)?;
     let _global = transport::service_lock(
@@ -697,8 +747,8 @@ pub(super) fn run(
             .join("consumer-worker.lock"),
     )?;
     let _state = transport::service_lock(&state_dir.join("worker.lock"))?;
-    drain::pin(state_dir, host, config, socket, key)?;
-    wake_pin(state_dir, worker_config, &cfg)?;
+    drain::pin_route(state_dir, host, config, socket, key, route)?;
+    wake_pin(state_dir, worker_config, &cfg, route)?;
     let mut remembered = remembered(state_dir)?;
     let mut needs_drain = remembered.is_none() || state_dir.join("pending").exists();
     loop {
@@ -716,7 +766,15 @@ pub(super) fn run(
         let mut rounds = 0;
         while needs_drain && rounds < 64 {
             let before = group_hint(&cfg)?;
-            let stop = drain::run_locked(host, config, socket, key, state_dir, cfg.max_pages)?;
+            let stop = drain::run_locked_route(
+                host,
+                config,
+                socket,
+                key,
+                state_dir,
+                cfg.max_pages,
+                route,
+            )?;
             rounds += 1;
             match stop {
                 drain::Stop::Publication | drain::Stop::PageCap => continue,
@@ -740,6 +798,47 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_catalog_wake_requires_reply_type_and_matching_scope_query() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-a-wake-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        drain::private_dir(&root).unwrap();
+        let cert = root.join("cert.pem");
+        let password = root.join("password");
+        let scope = root.join("scope.json");
+        let host = root.join("host.json");
+        let wake = root.join("wake.json");
+        fs::write(&cert, b"test certificate").unwrap();
+        fs::write(&password, b"test password").unwrap();
+        fs::write(&scope, br#"{"query":"666e2e74657374"}"#).unwrap();
+        fs::write(
+            &host,
+            json!({"fnReplyCatalog":{"scopePath":scope}}).to_string(),
+        )
+        .unwrap();
+        let mut settings = json!({
+            "type":"minidregg-a-reply-consumer-wake-v1", "port":11942,
+            "certificatePath":cert, "passwordFile":password,
+            "username":"observer", "group":"fn.test", "maxPages":16
+        });
+        create_private(&wake, settings.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            wake_config(&wake, &host, A_REPLY_CONSUMER).unwrap().group,
+            "fn.test"
+        );
+        assert!(wake_config(&wake, &host, B_CONSUMER).is_err());
+        settings["group"] = json!("fn.other");
+        fs::write(&wake, settings.to_string()).unwrap();
+        assert!(wake_config(&wake, &host, A_REPLY_CONSUMER).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn exact_carrier_post_dot_stuffs_without_changing_article_lines() {
         assert_eq!(

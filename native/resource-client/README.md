@@ -325,6 +325,55 @@ incarnation changes. The worker pins the complete fn scope digest and refuses
 local config drift, but an unchanged GROUP tuple alone cannot prove a remote
 Store incarnation; the next typed Mini poll performs the source-owned check.
 
+An A service using operator-owned `fnReplyCatalog` can use the same durable
+prepare, exact-call lookup, and typed ACK lifecycle with a separate state
+directory and route pin. The catalog pins the origin configuration, R and Q
+signer manifests, scope, policy, and the absolute fn control socket path. The
+control socket is an endpoint, so the worker does not read or hash it as a
+manifest. The five input manifests are bounded regular files. An A worker
+never accepts an existing B pin or B pending state as A state (or the reverse).
+
+```sh
+mini reply-consumer-drain-once --host HOST --config A-CATALOG-CONFIG.json \
+  --socket SOCKET --key REPLY-CONSUMER.key \
+  --state-dir /private/path/a-reply-worker --max-pages 16
+
+mini reply-consumer-worker --host HOST --config A-CATALOG-CONFIG.json \
+  --socket SOCKET --key REPLY-CONSUMER.key \
+  --state-dir /private/path/a-reply-worker \
+  --worker-config /private/path/a-reply-wake.json
+```
+
+The A wake file has the same `port`, `certificatePath`, `username`,
+`passwordFile`, `group`, `intervalSeconds`, and `maxPages` fields shown above,
+with `"type":"minidregg-a-reply-consumer-wake-v1"`. Its group must match the
+catalog's pinned scope query. A first wake polls unconditionally; later wakes
+use the protected NNTP `GROUP` tuple as a scheduling hint and recheck it after
+a short page or idle poll. ACK journal events alone do not change article
+count. A short neutral-page scan or own-R progress decision submits the exact
+Host-authored tag9 intent and ACKs its selected Mini transaction. An own-R
+decision continues the bounded wake because Q can already follow that R at
+an unchanged GROUP count; only a short empty-page scan proves the tip. A Q
+decision uses the same durable sequence, then ends that drain pass after
+publication; the worker continues draining within its wake budget.
+Historical repeated decisions without a fresh intent hold for operator
+reconciliation. An uncertain ACK gets at most one automatic exact retry;
+cursor coverage or a typed refusal holds.
+
+After correcting a typed fn-session refusal, the A counterpart to the B
+recovery command is:
+
+```sh
+mini reply-consumer-resume-ack --host HOST --config A-CATALOG-CONFIG.json \
+  --socket SOCKET --key REPLY-CONSUMER.key \
+  --state-dir /private/path/a-reply-worker
+```
+
+It requires the A v2 image pin and the retained exact-call confirmed receipt,
+then performs the same read-only four-field lookup and one-shot ACK recovery.
+The B `consumer-host-upgrade` command does not upgrade A state; an A image
+change with pending work currently requires operator review.
+
 For an already confirmed call stranded in the worker's `Sending` phase,
 `consumer-host-upgrade` changes the executable pin explicitly:
 
