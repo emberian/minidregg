@@ -5,6 +5,7 @@ Only the pinned gateway may write the record. The host must have obtained the
 cursor from an actual trusted local poll and checked its scope and positions
 before calling evaluateVerified; a user-supplied Bool is not an attestation.
 -/
+import Kernel.FnConsumerProgressHistory
 import Kernel.FnConsumerOperation
 
 namespace Minidregg.Kernel.FnConsumerProgress
@@ -20,98 +21,24 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 
 set_option autoImplicit false
 
-structure Scope where
-  history : List UInt8
-  incarnation : List UInt8
-  consumer : List UInt8
-  principal : List UInt8
-  query : List UInt8
-  queryVersion : Nat
-  viewVersion : Nat
-  registrationEpoch : Nat
-  deriving DecidableEq, Repr
+/-- The lower historical selector retains the existing operation name rule,
+exact signed-command bytes and transaction marker. The v1 wire is unchanged. -/
+theorem validName_legacy_exact (value : List UInt8) :
+    FnConsumerScope.validName value = FnConsumerOperation.validName value := by
+  rfl
 
-/-- The atom carries the exact continuation from a locally observed poll.
-There is deliberately no article, operation, result or reply field. -/
-structure Evidence where
-  application : List UInt8
-  scope : Scope
-  cursor : List UInt8
-  fromPosition : Nat
-  toPosition : Nat
-  controlBinding : List UInt8
-  pollCallObserved : Bool
-  deriving DecidableEq, Repr
+theorem exactSignedCommand_legacy_exact (signedBytes : List UInt8)
+    (expected : DeclaredResourceController.Command) :
+    exactSignedCommand signedBytes expected =
+      FnConsumerOperation.exactSignedCommand signedBytes expected := by
+  rfl
 
-structure Report where
-  evidence : Evidence
-  subject : SubjectId
-  target : Nat
-  capability : CapabilityId
-  expectedAuthorityRoot : Digest
-  expectedTargetRoot : Digest
-  deriving Repr
-
-def scopeStream : StreamCodec Scope :=
-  StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-      (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-        (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
-    (fun scope => (scope.history, scope.incarnation, scope.consumer,
-      scope.principal, scope.query, scope.queryVersion, scope.viewVersion,
-      scope.registrationEpoch))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1,
-      wire.2.2.2.2.2.2.2⟩)
-    (by intro value; cases value; rfl)
-
-def evidenceStream : StreamCodec Evidence :=
-  StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product scopeStream
-      (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product bytesStream StreamCodec.bool))))))
-    (fun evidence => (evidence.application, evidence.scope, evidence.cursor,
-      evidence.fromPosition, evidence.toPosition, evidence.controlBinding,
-      evidence.pollCallObserved))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
-    (by intro value; cases value; rfl)
-
-def evidenceCodec : LawfulCodec Evidence :=
-  NativeHostCodec.framed "DREGG/FN/EMPTY-PAGE-PROGRESS/v1".toUTF8.toList
-    evidenceStream
-
-def maxEvidenceBytes : Nat := 4096
-def maxPollScan : Nat := 16
-
-def Scope.valid (scope : Scope) : Bool :=
-  [scope.history, scope.incarnation, scope.consumer, scope.principal,
-    scope.query].all FnConsumerOperation.validName &&
-  scope.queryVersion ≤ 4294967295 && scope.viewVersion ≤ 4294967295 &&
-  scope.registrationEpoch > 0 && scope.registrationEpoch ≤ 4294967295
-
-def Evidence.valid (evidence : Evidence) : Bool :=
-  FnConsumerOperation.validName evidence.application &&
-  evidence.scope.valid &&
-  !evidence.cursor.isEmpty && evidence.cursor.length ≤ 346 &&
-  evidence.fromPosition < evidence.toPosition &&
-  evidence.toPosition ≤ evidence.fromPosition + maxPollScan &&
-  evidence.toPosition ≤ 4294967295 &&
-  evidence.pollCallObserved &&
-  !evidence.controlBinding.isEmpty && evidence.controlBinding.length ≤ 64 &&
-  (evidenceCodec.encode evidence).length ≤ maxEvidenceBytes
-
-/-- Every admissible empty page records actual forward scan progress within
-the selected local fn poll window; an idle cursor is not a skip record. -/
-theorem Evidence.valid_scan_window (evidence : Evidence)
-    (valid : evidence.valid = true) :
-    evidence.pollCallObserved = true ∧
-    evidence.fromPosition < evidence.toPosition ∧
-    evidence.toPosition ≤ evidence.fromPosition + maxPollScan := by
-  simp only [Evidence.valid, Bool.and_eq_true, decide_eq_true_eq] at valid
-  aesop
+theorem marker_legacy_exact (domain semantics : Digest)
+    (subject : SubjectId) (evidence : Evidence) :
+    marker domain semantics subject evidence =
+      FnConsumerOperation.marker domain semantics subject
+        (progressNonce domain semantics evidence) := by
+  rfl
 
 def Report.matchesGateway (report : Report) (pin : FnGatewayPolicy.Pin)
     (policy : FnConsumerOperation.Policy) : Bool :=
@@ -140,90 +67,6 @@ theorem checkReport_pinned (pin : FnGatewayPolicy.Pin)
     | true => rfl
   simp [Report.matchesGateway, FnConsumerOperation.Policy.matchesGateway] at pinned
   aesop
-
-def progressPreimage (domain semantics : Digest) (evidence : Evidence) : List UInt8 :=
-  (StreamCodec.product digestStream (StreamCodec.product digestStream
-    evidenceStream)).encode (domain, semantics, evidence)
-
-def progressHash (domain semantics : Digest) (evidence : Evidence) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.FN.EMPTY-PAGE-PROGRESS/v1".toUTF8.toList
-    (progressPreimage domain semantics evidence)).digest.value
-
-/-- Above the earlier operation, conflict and A-result nonce namespaces. -/
-def progressNonce (domain semantics : Digest) (evidence : Evidence) : Nat :=
-  2 ^ 270 + progressHash domain semantics evidence
-
-def progressAtom (domain semantics : Digest) (evidence : Evidence) : AtomId :=
-  ⟨⟨2 ^ 271 + progressHash domain semantics evidence⟩⟩
-
-def marker (domain semantics : Digest) (subject : SubjectId)
-    (evidence : Evidence) : Digest :=
-  FnConsumerOperation.marker domain semantics subject
-    (progressNonce domain semantics evidence)
-
-def progressCommand (domain semantics : Digest) (report : Report) :
-    DeclaredResourceController.Command :=
-  ⟨report.subject, report.expectedAuthorityRoot,
-    progressNonce domain semantics report.evidence,
-    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-      .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩]⟩
-
-/-- Historical recognition checks the entire signed command while taking
-authority and target roots from that historical command, never the current
-snapshot. In particular, target kind, schema, and observation grant cannot
-be omitted by a command that merely carries the progress atom. -/
-def matchesSignedShape (domain semantics : Digest)
-    (signedBytes : List UInt8) (command : DeclaredResourceController.Command)
-    (target : DeclaredResourceController.Target) (evidence : Evidence) : Bool :=
-  FnConsumerOperation.exactSignedCommand signedBytes
-    (progressCommand domain semantics
-    ⟨evidence, command.subject, target.target, target.capability,
-      command.expectedAuthorityRoot, target.expectedTargetRoot⟩)
-
-theorem matchesSignedShape_sound (domain semantics : Digest)
-    (signedBytes : List UInt8) (command : DeclaredResourceController.Command)
-    (target : DeclaredResourceController.Target) (evidence : Evidence)
-    (decoded : DeclaredResourceController.commandCodec.decode signedBytes = some command)
-    (matched : matchesSignedShape domain semantics signedBytes command target evidence = true) :
-    command = progressCommand domain semantics
-      ⟨evidence, command.subject, target.target, target.capability,
-        command.expectedAuthorityRoot, target.expectedTargetRoot⟩ := by
-  exact FnConsumerOperation.exactSignedCommand_sound signedBytes command _
-    decoded matched
-
-/-- The entire native write is exactly one progress atom, with no application
-operation, result, reply, or outbox action. -/
-theorem progressCommand_exact_action (domain semantics : Digest) (report : Report) :
-    (progressCommand domain semantics report).targets =
-      [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-        .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-          (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩] := rfl
-
-/-- Historical recovery derives gateway identity from the signed original
-call, never a current mutable atom or an unauthenticated caller claim. The
-current law is intentionally not rechecked for a previously accepted skip. -/
-def originalSkip (pin : FnGatewayPolicy.Pin) (scope : Scope)
-    (domain semantics : Digest) (record : DurableReceiver.IntentRecord) :
-    Option Evidence := do
-  let (recordDomain, recordSemantics, signed) ←
-    DeclaredResourceController.decodeSignedBytes record.event.canonicalBytes
-  if recordDomain != domain || recordSemantics != semantics then none else
-  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
-  let [target] := command.targets | none
-  let .content content := target.payload | none
-  let [.createAtom atom (.inlineObject ⟨9⟩) bytes] := content.actions | none
-  if bytes.length > maxEvidenceBytes then none else
-  let evidence ← evidenceCodec.decode bytes
-  if evidence.application == pin.application && evidence.scope == scope &&
-      evidence.valid && command.subject == pin.subject &&
-      target.target == pin.target && target.capability == pin.capability &&
-      matchesSignedShape domain semantics signed.commandBytes command target evidence &&
-      command.nonce == progressNonce domain semantics evidence &&
-      atom == progressAtom domain semantics evidence &&
-      record.transactionId == marker domain semantics command.subject evidence then
-    some evidence
-  else none
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command)
