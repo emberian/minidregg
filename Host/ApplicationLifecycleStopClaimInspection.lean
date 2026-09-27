@@ -24,6 +24,11 @@ private def nibble (value : Nat) : Char :=
 private def hex (bytes : List UInt8) : Json :=
   .str <| String.ofList <| bytes.flatMap fun byte =>
     [nibble (byte.toNat / 16), nibble (byte.toNat % 16)]
+private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
+  [("transactionId", decimal receipt.transactionId.value),
+   ("eventId", decimal receipt.eventId.value),
+   ("acceptedCount", decimal receipt.acceptedCount),
+   ("imageBoundary", decimal receipt.imageBoundary.value)]
 
 def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target)
@@ -77,7 +82,9 @@ def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     ("retainedPlanHex", hex planBytes),
     ("freshCommittedFrameHex", hex committedBytes),
     ("beginReceiptHex", hex (NativeHostCodec.receiptStream.encode beginReceipt)),
+    ("beginReceipt", receiptJson beginReceipt),
     ("claimReceiptHex", hex (NativeHostCodec.receiptStream.encode claimReceipt)),
+    ("claimReceipt", receiptJson claimReceipt),
     ("runningIndex", decimal selected.index),
     ("runningReceiptHex", hex (NativeHostCodec.receiptStream.encode selected.receipt)),
     ("plan", planView),

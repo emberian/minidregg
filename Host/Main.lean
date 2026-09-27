@@ -29,7 +29,10 @@ plan, 67=private source-bound launch BEGIN detached assembly, 68=private launch
 claim plan, 69=private launch claim detached assembly, 70=private launch completion plan,
 71=private launch completion detached assembly, 72=grant issue submit,
 73=grant issue receipt-only lookup, 74=private grant issue plan,
-75=private grant issue detached assembly. Op34/46 success uses a distinct
+75=private grant issue detached assembly, 76=fresh grant-bound paid agent dispatch,
+77=lifetime dispatch receipt-only lookup, 78=private lifetime paid plan,
+79=private lifetime paid assembly, 80=private lifetime reserve plan,
+81=private lifetime reserve assembly. Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -61,6 +64,9 @@ import Kernel.ApplicationDispatchLookup
 import Kernel.ApplicationDispatchAgentReceiver
 import Kernel.ApplicationDispatchAgentLookup
 import Kernel.ApplicationDispatchAgentPaidAuthoring
+import Kernel.ApplicationAgentLifetimeDispatchReceiver
+import Kernel.ApplicationAgentLifetimeDispatchLookup
+import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
 import Kernel.ApplicationDispatchAuthoring
 import Kernel.ApplicationLifecycleBeginV2Receiver
 import Kernel.ApplicationLifecycleBeginV3Receiver
@@ -75,6 +81,8 @@ import Kernel.ApplicationLifecycleCompletionV2Lookup
 import Host.ApplicationDispatchInspection
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationDispatchAgentInspection
+import Host.ApplicationAgentLifetimeDispatchInspection
+import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
@@ -444,6 +452,35 @@ def AgentDispatchFixedSettings.selectors (settings : AgentDispatchFixedSettings)
     reserveAmount := settings.reserveAmount
     maximumCharge := settings.maximumCharge }
 
+/-- Event26 has an additional fixed grant selector. Its payer and dispatchTask
+selectors remain the existing operator-approved event21 set. -/
+structure AgentLifetimeDispatchFixedSettings where
+  legacy : AgentDispatchFixedSettings
+  grantIssueIndex : Nat
+  grantResource : Nat
+  grantObserveCapability : Nat
+  deriving ToJson
+
+instance : FromJson AgentLifetimeDispatchFixedSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["legacy", "grantIssueIndex", "grantResource", "grantObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "agentLifetimeDispatchFixed has missing or unknown fields"
+    return ⟨← json.getObjValAs? AgentDispatchFixedSettings "legacy",
+      ← json.getObjValAs? Nat "grantIssueIndex",
+      ← json.getObjValAs? Nat "grantResource",
+      ← json.getObjValAs? Nat "grantObserveCapability"⟩
+
+def AgentLifetimeDispatchFixedSettings.selectors
+    (settings : AgentLifetimeDispatchFixedSettings) :
+    ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors :=
+  { legacy := settings.legacy.selectors
+    grantIssueIndex := settings.grantIssueIndex
+    grantResource := settings.grantResource
+    grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
+
 structure Settings where
   domain : Nat
   federation : Nat
@@ -476,6 +513,7 @@ structure Settings where
   residentBeginManagement : Option ResidentBeginManagementSettings := none
   residentClaimManagement : Option ResidentClaimManagementSettings := none
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
+  agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -535,6 +573,12 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationDispatchAgentPaidInspection.inspectPaidPlan bytes
   else if kind == "application-agent-dispatch-committed" then
     ApplicationDispatchAgentInspection.inspect bytes
+  else if kind == "application-agent-lifetime-reserve-plan" then
+    ApplicationAgentLifetimeDispatchPaidInspection.inspectReservePlan bytes
+  else if kind == "application-agent-lifetime-paid-plan" then
+    ApplicationAgentLifetimeDispatchPaidInspection.inspectPaidPlan bytes
+  else if kind == "application-agent-lifetime-dispatch-committed" then
+    ApplicationAgentLifetimeDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-launch-begin-request" then
     ApplicationLifecycleLaunchBeginInspection.inspectRequest bytes
   else if kind == "application-lifecycle-launch-continue-request" then
@@ -1138,6 +1182,24 @@ def applicationAgentDispatchLookupSession (config : NativeHost.Config)
   | .error .nativeHistoryUnavailable =>
       return .uncertain "paid dispatch original history unavailable".toUTF8.toList
 
+/-- Event26 recovery reports only the original receipt; it never recreates a
+fresh paid delivery permit. -/
+def applicationAgentLifetimeDispatchLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  match ApplicationAgentLifetimeDispatchLookup.lookupVerified session.verified payload with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-agent-lifetime-dispatch".toUTF8.toList
+        "noncanonical lifetime dispatch lookup ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "lifetime dispatch transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "lifetime dispatch original history unavailable".toUTF8.toList
+
 /-- Author a current app/session birth intent from one verifier-opened image.
 The JSON is only a request for source selectors; the helper derives current
 height and grant epochs and checks the pinned genesis identity. -/
@@ -1280,6 +1342,9 @@ def dispatchSession (config : NativeHost.Config)
   | 47 =>
       return (47, outcomeCodec.encode
         (← applicationAgentDispatchLookupSession config state payload))
+  | 77 =>
+      return (77, outcomeCodec.encode
+        (← applicationAgentLifetimeDispatchLookupSession config state payload))
   | 36 =>
       let session ← sessionCurrent config state
       match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
@@ -1373,6 +1438,81 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         throw (IO.userError "paid agent dispatch ingress exceeds host frame bound")
       return (49, ingress)
   | _ => throw (IO.userError "unsupported paid agent authoring operation")
+
+/-- Event26 has independent reserve and paid plans. Only operator-pinned
+selectors reach source planning; retained plans are checked again before
+detached signatures are assembled. The final native submit re-admits fresh. -/
+def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (approved : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
+  match operation with
+  | 80 =>
+      let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
+        | throw (IO.userError "noncanonical lifetime reserve request")
+      unless request.matchesFixed approved do
+        throw (IO.userError "lifetime reserve request differs from operator pin")
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept <|
+        ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
+          config session.verified request
+      let bytes := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.encode plan
+      unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "lifetime reserve plan exceeds host frame bound")
+      return (80, bytes)
+  | 81 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.decode
+          planBytes
+        | throw (IO.userError "noncanonical lifetime reserve plan")
+      unless plan.request.matchesFixed approved do
+        throw (IO.userError "lifetime reserve plan differs from operator pin")
+      let signatures ← decodeSignatures signaturesBytes
+      let signed ← IO.ofExcept <|
+        ApplicationAgentLifetimeDispatchPaidAuthoring.assembleReserve plan signatures
+      let some (domain, semantics, command) :=
+          DeclaredResourceController.decodeSignedBytes signed
+        | throw (IO.userError "noncanonical lifetime reserve signed ingress")
+      unless domain == config.deployment.domain &&
+          semantics == config.profile.semantics do
+        throw (IO.userError "lifetime reserve signed ingress differs from pinned profile")
+      let callBytes := NativeHostCodec.callCodec.encode (.invoke command)
+      unless callBytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "lifetime reserve native call exceeds host frame bound")
+      return (81, callBytes)
+  | 78 =>
+      let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.decode
+          payload
+        | throw (IO.userError "noncanonical lifetime paid dispatch request")
+      unless request.fixed.matchesFixed approved do
+        throw (IO.userError "lifetime paid request differs from operator pin")
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept <|
+        ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
+          config session.verified request
+      let bytes := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.encode plan
+      unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "lifetime paid plan exceeds host frame bound")
+      return (78, bytes)
+  | 79 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.decode planBytes
+        | throw (IO.userError "noncanonical lifetime paid dispatch plan")
+      unless plan.request.fixed.matchesFixed approved do
+        throw (IO.userError "lifetime paid plan differs from operator pin")
+      let (appBytes, grantAndPayer) ← splitPair signaturesBytes
+      let (grantSignature, payerBytes) ← splitPair grantAndPayer
+      unless grantSignature.length == 64 do
+        throw (IO.userError "lifetime grant observation signature must be 64 bytes")
+      let appSignatures ← decodeSignatures appBytes
+      let payerSignatures ← decodeSignatures payerBytes
+      let ingress ← IO.ofExcept <|
+        ApplicationAgentLifetimeDispatchPaidAuthoring.assemblePaid
+          plan appSignatures grantSignature payerSignatures
+      unless ingress.length < FnEvidenceCodec.maxHostFrameBytes do
+        throw (IO.userError "lifetime paid ingress exceeds host frame bound")
+      return (79, ingress)
+  | _ => throw (IO.userError "unsupported lifetime dispatch authoring operation")
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
 
@@ -1470,6 +1610,39 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
+/-- A fresh event26 CAS winner alone can emit the distinct lifetime permit.
+Historical lookup at op77 is receipt-only, so an uncertain handoff cannot
+resend a physical effect. -/
+def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationAgentLifetimeDispatchReceiver.receiveVerified
+    config session.verified payload
+  match result with
+  | .permitted permit =>
+      let handed ← permit.withFreshTip fun committedBytes =>
+        writeSessionFrame output 76 committedBytes
+      match handed with
+      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .error detail =>
+          writeSessionFrame output 76 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .rejected _ =>
+      writeSessionFrame output 76 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused "application-agent-lifetime-dispatch".toUTF8.toList
+            "request refused".toUTF8.toList)
+  | .contention =>
+      writeSessionFrame output 76 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome .contention
+  | .unavailable detail =>
+      writeSessionFrame output 76 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .uncertain detail =>
+      writeSessionFrame output 76 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+
 /-- Op26 returns a launch reservation only inside the receiver's physical-tip
 callback. This is a point-in-time check, not a lease against later writes or
 proof that the external process has started. -/
@@ -1556,6 +1729,8 @@ partial def serveSession (config : NativeHost.Config)
     dispatchApplicationSubmitSession config state payload output
   else if operation == 46 then
     dispatchAgentSubmitSession config state payload output
+  else if operation == 76 then
+    dispatchAgentLifetimeSubmitSession config state payload output
   else if operation == 26 then
     dispatchLifecycleClaimSubmitSession config state payload output
   else
@@ -4388,7 +4563,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-physical-report" ||
               kind == "application-lifecycle-launch-physical-signing-frame" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
-              kind == "application-agent-lifetime-grant-request" then
+              kind == "application-agent-lifetime-grant-request" ||
+              kind == "application-agent-lifetime-reserve-request" ||
+              kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source)
           writeBytes output bytes
@@ -4402,6 +4579,11 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-agent-lifetime-reserve-request" ||
+              kind == "application-agent-lifetime-paid-request" ||
+              kind == "application-agent-lifetime-reserve-plan" ||
+              kind == "application-agent-lifetime-paid-plan" ||
+              kind == "application-agent-lifetime-dispatch-committed" ||
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
@@ -4427,6 +4609,11 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-reserve-plan" ||
               kind == "application-agent-paid-dispatch-plan" ||
               kind == "application-agent-dispatch-committed" ||
+              kind == "application-agent-lifetime-reserve-request" ||
+              kind == "application-agent-lifetime-paid-request" ||
+              kind == "application-agent-lifetime-reserve-plan" ||
+              kind == "application-agent-lifetime-paid-plan" ||
+              kind == "application-agent-lifetime-dispatch-committed" ||
               kind == "application-lifecycle-launch-begin-request" ||
               kind == "application-lifecycle-launch-continue-request" ||
               kind == "application-lifecycle-launch-begin-plan" ||
@@ -4893,6 +5080,12 @@ def run (arguments : List String) : IO UInt32 := do
                                   "agent dispatch operator pin is not configured")
                             agentDispatchAuthorSession pinnedConfig state custody.selectors
                               operation payload
+                        | 78 | 79 | 80 | 81 =>
+                            let some custody := settings.agentLifetimeDispatchFixed
+                              | return ((255 : UInt8), failure "application-agent-lifetime-author"
+                                  "lifetime dispatch operator pin is not configured")
+                            agentLifetimeDispatchAuthorSession pinnedConfig state
+                              custody.selectors operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig

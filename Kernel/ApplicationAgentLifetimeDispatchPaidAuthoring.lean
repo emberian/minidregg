@@ -66,6 +66,8 @@ structure SourceBindings where
   grantIssueReceipt : NativeHostCodec.Receipt
   grantInitializedRoot : Digest
   grantPhysicalRoot : Digest
+  appPhysicalRoot : Digest
+  sessionPhysicalRoot : Digest
   parentPhysicalRoot : Digest
   pursePhysicalRoot : Digest
 
@@ -75,14 +77,19 @@ def sourceBindingsStream : StreamCodec SourceBindings :=
       (StreamCodec.product NativeHostCodec.receiptStream
         (StreamCodec.product digestStream
           (StreamCodec.product digestStream
-            (StreamCodec.product digestStream digestStream)))))
+            (StreamCodec.product digestStream
+              (StreamCodec.product digestStream
+                (StreamCodec.product digestStream digestStream)))))))
     (fun value => (value.originalIssueReceipt, value.grantIssueReceipt,
       value.grantInitializedRoot, value.grantPhysicalRoot,
+      value.appPhysicalRoot, value.sessionPhysicalRoot,
       value.parentPhysicalRoot, value.pursePhysicalRoot))
     (fun (originalIssueReceipt, grantIssueReceipt, grantInitializedRoot,
-          grantPhysicalRoot, parentPhysicalRoot, pursePhysicalRoot) =>
+          grantPhysicalRoot, appPhysicalRoot, sessionPhysicalRoot,
+          parentPhysicalRoot, pursePhysicalRoot) =>
       ⟨originalIssueReceipt, grantIssueReceipt, grantInitializedRoot,
-        grantPhysicalRoot, parentPhysicalRoot, pursePhysicalRoot⟩)
+        grantPhysicalRoot, appPhysicalRoot, sessionPhysicalRoot,
+        parentPhysicalRoot, pursePhysicalRoot⟩)
     (by intro value; cases value; rfl)
 
 structure ReservePlan where
@@ -153,6 +160,16 @@ def prepareReserveVerified (config : Config) {target : Durable}
     base.base.parentCapability base.base.parentObserveCapability
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode app.unsignedIngress
     | throw "lifetime reserve app plan is noncanonical"
+  let appCell ← match verified.opened.directory.directory.slots
+      unsigned.dispatch.dispatch.app.resource with
+    | .present cell => pure cell
+    | _ => throw "current lifetime app unavailable"
+  if appCell.payload.root != unsigned.dispatch.appRoot then
+    throw "current lifetime app differs from source plan"
+  let sessionCell ← match verified.opened.directory.directory.slots
+      unsigned.dispatch.dispatch.session.resource with
+    | .present cell => pure cell
+    | _ => throw "current lifetime session unavailable"
   let some parent := unsigned.parent
     | throw "lifetime reserve parent missing from source plan"
   let parentCell ← match verified.opened.directory.directory.slots parent.task with
@@ -203,6 +220,8 @@ def prepareReserveVerified (config : Config) {target : Durable}
       grantIssueReceipt := grant.receipt
       grantInitializedRoot := grant.finalRoot
       grantPhysicalRoot := ResourceBirthCodec.physicalRoot (.live grantCell)
+      appPhysicalRoot := ResourceBirthCodec.physicalRoot (.live appCell)
+      sessionPhysicalRoot := ResourceBirthCodec.physicalRoot (.live sessionCell)
       parentPhysicalRoot := ResourceBirthCodec.physicalRoot (.live parentCell)
       pursePhysicalRoot := ResourceBirthCodec.physicalRoot (.live purseCell) }
   pure ⟨request, context, bindings, invocation⟩
@@ -298,6 +317,16 @@ def preparePaidVerified (config : Config) {target : Durable}
     fixed.fixed.base.parentCapability fixed.fixed.base.parentObserveCapability
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode app.unsignedIngress
     | throw "lifetime paid app plan is noncanonical"
+  let appCell ← match verified.opened.directory.directory.slots
+      unsigned.dispatch.dispatch.app.resource with
+    | .present cell => pure cell
+    | _ => throw "current lifetime paid app unavailable"
+  if appCell.payload.root != unsigned.dispatch.appRoot then
+    throw "current lifetime paid app differs from source plan"
+  let sessionCell ← match verified.opened.directory.directory.slots
+      unsigned.dispatch.dispatch.session.resource with
+    | .present cell => pure cell
+    | _ => throw "current lifetime paid session unavailable"
   let probe : ApplicationAgentLifetimeDispatchIngress.Ingress :=
     { dispatch := unsigned, reserveContext := request.context
       reserveIndex := request.reserveIndex
@@ -372,6 +401,8 @@ def preparePaidVerified (config : Config) {target : Durable}
       grantIssueReceipt := grant.receipt
       grantInitializedRoot := grant.finalRoot
       grantPhysicalRoot := ResourceBirthCodec.physicalRoot (.live grantCell)
+      appPhysicalRoot := ResourceBirthCodec.physicalRoot (.live appCell)
+      sessionPhysicalRoot := ResourceBirthCodec.physicalRoot (.live sessionCell)
       parentPhysicalRoot := ResourceBirthCodec.physicalRoot (.live parentCell)
       pursePhysicalRoot := ResourceBirthCodec.physicalRoot (.live purseCell) }
   pure ⟨compactRequest, compactApp, grant.ingress.spec.grant,

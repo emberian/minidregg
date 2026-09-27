@@ -49,6 +49,8 @@ private def bindingsJson (bindings : SourceBindings) : Json := .mkObj
    ("grantIssueReceipt", receiptJson bindings.grantIssueReceipt),
    ("grantInitializedRoot", decimal bindings.grantInitializedRoot.value),
    ("grantPhysicalRoot", decimal bindings.grantPhysicalRoot.value),
+   ("appPhysicalRoot", decimal bindings.appPhysicalRoot.value),
+   ("sessionPhysicalRoot", decimal bindings.sessionPhysicalRoot.value),
    ("parentPhysicalRoot", decimal bindings.parentPhysicalRoot.value),
    ("pursePhysicalRoot", decimal bindings.pursePhysicalRoot.value)]
 

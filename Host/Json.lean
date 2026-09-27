@@ -22,6 +22,7 @@ import Host.ApplicationLifecycleLaunchReportAuthoring
 import Host.ApplicationAgentLifetimeGrantInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
+import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationShareIssueGrainInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
@@ -1741,6 +1742,33 @@ private def agentPaidRequest (json : Lean.Json) : Result (List UInt8) := do
       reserveIndex := ← nat "$.reserveIndex" (← field "$" "reserveIndex" obj) }
   return ApplicationDispatchAgentPaidAuthoring.paidRequestCodec.encode request
 
+private def agentLifetimeReserveRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["fixed", "grantIssueIndex", "grantResource",
+    "grantObserveCapability"] json
+  let fixedBytes ← agentPaidReserveRequest (← field "$" "fixed" obj)
+  let some fixed := ApplicationDispatchAgentPaidAuthoring.requestCodec.decode fixedBytes
+    | failAt "$.fixed" "noncanonical agent reserve request"
+  let request : ApplicationAgentLifetimeDispatchPaidAuthoring.Request :=
+    { fixed := fixed
+      grantIssueIndex := ← nat "$.grantIssueIndex" (← field "$" "grantIssueIndex" obj)
+      grantResource := ← nat "$.grantResource" (← field "$" "grantResource" obj)
+      grantObserveCapability := ⟨← nat "$.grantObserveCapability"
+        (← field "$" "grantObserveCapability" obj)⟩ }
+  return ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.encode request
+
+private def agentLifetimePaidRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["fixedRequestHex", "contextHex", "reserveIndex"] json
+  let fixedBytes ← decodeHex "$.fixedRequestHex" (← field "$" "fixedRequestHex" obj)
+  let some fixed := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode fixedBytes
+    | failAt "$.fixedRequestHex" "noncanonical lifetime reserve request"
+  let contextBytes ← decodeHex "$.contextHex" (← field "$" "contextHex" obj)
+  let some context := ApplicationAgentLifetimeDispatchReserveContext.codec.decode contextBytes
+    | failAt "$.contextHex" "noncanonical lifetime reserve context"
+  let request : ApplicationAgentLifetimeDispatchPaidAuthoring.PaidRequest :=
+    { fixed := fixed, context := context
+      reserveIndex := ← nat "$.reserveIndex" (← field "$" "reserveIndex" obj) }
+  return ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.encode request
+
 private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
   return ⟨← nat path json⟩
 
@@ -2035,6 +2063,8 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-agent-reserve-request" => agentPaidReserveRequest json
   | "application-agent-paid-request" => agentPaidRequest json
+  | "application-agent-lifetime-reserve-request" => agentLifetimeReserveRequest json
+  | "application-agent-lifetime-paid-request" => agentLifetimePaidRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "application-share-issue-grain-request" => grainShareIssueRequest json
   | "application-agent-lifetime-grant-request" => agentLifetimeGrantRequest json
@@ -2308,6 +2338,19 @@ private def agentPaidRequestJson
      ("reserveOperationId", decimal context.reserveOperationId),
      ("httpOperationId", decimal context.httpOperationId),
      ("httpRequestDigest", decimal context.requestDigest.value)]
+
+private def agentLifetimePaidRequestJson
+    (bytes : List UInt8)
+    (request : ApplicationAgentLifetimeDispatchPaidAuthoring.PaidRequest) : Result Lean.Json := do
+  let fixed ← ApplicationAgentLifetimeDispatchPaidInspection.inspectRequest
+    (ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.encode request.fixed)
+  pure <| .mkObj
+    [("type", "application-agent-lifetime-paid-request-v3"),
+     ("canonicalRequestHex", hexJson bytes),
+     ("fixed", fixed),
+     ("contextHex", hexJson <| ApplicationAgentLifetimeDispatchReserveContext.codec.encode
+       request.context),
+     ("reserveIndex", decimal request.reserveIndex)]
 
 /-- Presentation of the complete detached challenge. It repeats the exact
 canonical request and ordered signing headers but confers no authority; op34
@@ -2651,6 +2694,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "application-agent-paid-request" => agentPaidRequestJson <$>
       decoded "application-agent-paid-request"
         ApplicationDispatchAgentPaidAuthoring.paidRequestCodec bytes
+  | "application-agent-lifetime-reserve-request" =>
+      ApplicationAgentLifetimeDispatchPaidInspection.inspectRequest bytes
+  | "application-agent-lifetime-paid-request" =>
+      do
+        let request ← decoded "application-agent-lifetime-paid-request"
+          ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec bytes
+        agentLifetimePaidRequestJson bytes request
   | "application-dispatch-plan" => do
       let plan ← decoded "application-dispatch-plan" ApplicationDispatchAuthoring.planCodec bytes
       dispatchPlanJson plan
