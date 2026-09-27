@@ -1,0 +1,4 @@
+3bbdc8474cca00a3a080f9120acba39ee551ca47d9506573dc37115dc26df55b  /home/ember/build/minidregg-f461f39-next-evidence/minidregg-host-f461f39-r1
+5e597d1573266ef262ed75ec263fb255709e04621c913472ff0ff007962f061b  /home/ember/build/minidregg-f461f39-next-evidence/build-r1/minidregg-host.rsp
+7bad6225467436673dd6bc8ae03b5b92160fe908012efb9236db34fcdf8e1f2d  /home/ember/build/minidregg-f461f39-next-evidence/build-r1/transitive-imports.json
+5d1a3a5d91917ef5a0421c2773e2715f3e4174063217a0382b3b46b0840a6f0d  /home/ember/build/minidregg-f461f39-next-evidence/build-r1/reusable-artifact-sha256.txt
