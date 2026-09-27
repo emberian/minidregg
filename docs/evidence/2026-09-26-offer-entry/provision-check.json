@@ -1,0 +1,11 @@
+{
+  "stage": "provision-snapshot-checked",
+  "profile": "mini-hosted-workroom-780x-v1",
+  "provision": "/tmp/mini-offer-cross-uid-20260926-r1/provision",
+  "hostSha256": "d413081bb6c6ac1c0699b5fdc22cf3a13fb87930ff49ac147ae994e2c364e7a3",
+  "pinnedConfigSha256": "79931f6ac21fb529f9613569242bc8221f014f8f49c5d0f19e6e795092a6b2c3",
+  "birthTransactionId": "52874233208997382596394235333172568704532225823194388702225947175675283283795",
+  "canonicalRetainedProductsChecked": true,
+  "currentAuthorityVerified": false,
+  "friendReady": false
+}

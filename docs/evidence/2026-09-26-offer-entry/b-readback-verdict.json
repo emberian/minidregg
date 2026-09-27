@@ -1,0 +1,10 @@
+{
+  "stage": "fresh-signed-readback",
+  "peer": "b",
+  "parent": "7803",
+  "tool": "7804",
+  "parentRoot": "18640493982054883886955153798002895061039450518371341238673536502196298745571",
+  "contentRoot": "97349327118568466779609446662939988221287696762075284738918673226692685974561",
+  "publicationAdmissionVerified": false,
+  "friendReady": false
+}

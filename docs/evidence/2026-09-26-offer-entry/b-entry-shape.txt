@@ -1,0 +1,1 @@
+restrict,command="/opt/minidregg-offer-20260926/bin/grain-ssh /opt/minidregg-offer-20260926/bin/grain-runtime /home/miniworkb26/grain-7803/state/control.sock soft" ssh-ed25519 <public-key-redacted>

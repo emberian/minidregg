@@ -1,0 +1,17 @@
+attached:1:soft=false
+attached-output:1:true
+hard-interrupt:1
+line:1:status
+line-output:1:false
+detached:1:hard=true
+attached:2:soft=true
+attached-output:2:true
+line:2:status
+line-output:2:false
+detached:2:hard=false
+attached:3:soft=true
+attached-output:3:true
+line:3:status
+line-output:3:false
+detached:3:hard=false
+PASS hard EOF interrupted once; two soft EOFs detached and reconnected; original command ignored

@@ -1,0 +1,10 @@
+{
+  "stage": "rendered-not-installed",
+  "task": "7803",
+  "manifestSha256": "a12f09d5a0365abefeafb9ae3a130d2ec1860f047b5fdc01d656c615b96cc428",
+  "configSha256": "5b2291aaaef02fa701cff1822d3c317bb15a1d442987fbed199930c0b0dd4f98",
+  "pinsSha256": "55883b7d621c0bebd8bfba9ec8aca0ec0194238039dff32cc5bb1c762cee3613",
+  "unitSha256": "45807a6fd066ee7588f5e4f813ca17233efe251cb13ec3f342dc5bb1d6f63fed",
+  "currentAuthorityVerified": false,
+  "friendReady": false
+}

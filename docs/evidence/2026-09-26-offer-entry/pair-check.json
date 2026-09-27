@@ -1,0 +1,9 @@
+{
+  "stage": "two-account-handoff-checked",
+  "parentA": "7801",
+  "parentB": "7803",
+  "sharedContentRoot": "97349327118568466779609446662939988221287696762075284738918673226692685974561",
+  "readbackIsSnapshot": true,
+  "publicationAdmissionVerified": false,
+  "friendReady": false
+}

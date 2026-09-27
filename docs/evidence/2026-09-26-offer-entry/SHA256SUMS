@@ -1,0 +1,14 @@
+8dd8ed6aee1c5c1f897c881319564d1ed7eaf39015ad1aa5bc5381d6de93bfe3  docs/evidence/2026-09-26-offer-entry/README.md
+526d599a28b016a09c9a3cc6db8c24924c285ced7375ce8fb6641f5d063bf8b1  docs/evidence/2026-09-26-offer-entry/a-entry-shape.txt
+1fa684186dbebc674221fb90c552403ecc1ef1bbee113ed592a738cd4ad72261  docs/evidence/2026-09-26-offer-entry/a-readback-verdict.json
+cf481f5a8c285f7e849af2f141d069e6e232a4d8d7bc114512354b2ff2f76da9  docs/evidence/2026-09-26-offer-entry/a-render-stage.json
+684b82364ea72e1ebcf1b687a2402e3073e88973d153e3c932ce9616f7118056  docs/evidence/2026-09-26-offer-entry/b-entry-shape.txt
+d821f8d94458825c9d135410556730ce986d1e9d7b5010ef4e85f61da5b68379  docs/evidence/2026-09-26-offer-entry/b-readback-verdict.json
+b03bf636a4f86209eb5bf902dea86c56afa34011b270cad5cfafed5b28637c07  docs/evidence/2026-09-26-offer-entry/b-render-stage.json
+156f8b1ef65b5ab6378a93f7a351a415f96c74081cb4f9fe7f4ae223cc47057a  docs/evidence/2026-09-26-offer-entry/connector-probe.log
+ee8d21d06bf02893f894e38f78f139075543b64851e46beab7827c89b261f5f1  docs/evidence/2026-09-26-offer-entry/negative-output-overlap.log
+027754afffd8687ce8d61e921447dbbbdc1d991cb0bc79c39ff4e455eedac5f9  docs/evidence/2026-09-26-offer-entry/negative-unit-overlap.log
+2f0641e0633b94b865419bf728872a6221c299c3b12cb0f641452ea085fb34db  docs/evidence/2026-09-26-offer-entry/negative-wrapper-pin.log
+c2cb039997df2491a1ee0328006c657dd7ce106da007655468a9fec1df53496a  docs/evidence/2026-09-26-offer-entry/pair-check.json
+2621936f38d2e6b07412bfd13b51e41d081d6766622cf243c2998273a7fc2e17  docs/evidence/2026-09-26-offer-entry/private-product-sha256.txt
+780a9b0da382044dc091fb923c2403258c67c430d56edd92e8c15d2fd00194c3  docs/evidence/2026-09-26-offer-entry/provision-check.json

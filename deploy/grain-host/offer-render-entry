@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Print a reviewed forced-key entrance for one already-running offered grain.
+# This does not install an SSH key or grant Mini authority.
+set -euo pipefail
+umask 077
+if (($# != 6)); then
+  echo 'usage: offer-render-entry ABS_TASK_MANIFEST ABS_GRAIN_SSH GRAIN_SSH_SHA256 RENDER_FRIEND_KEY_SHA256 hard|soft FRIEND_PUBKEY' >&2
+  exit 64
+fi
+for tool in jq realpath stat sha256sum cmp systemctl; do
+  command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
+done
+fail() { echo "offer-render-entry: $*" >&2; exit 65; }
+safe() {
+  [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
+     $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
+    fail "unsafe absolute path: $1"
+}
+existing() {
+  safe "$1"
+  [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
+    fail "missing, linked, or noncanonical path: $1"
+}
+sha() { sha256sum -- "$1" | cut -d' ' -f1; }
+pin() {
+  existing "$1"
+  [[ -f $1 && $2 =~ ^[0-9a-f]{64}$ && $(sha "$1") == "$2" ]] ||
+    fail "SHA-256 pin mismatch: $1"
+}
+operator_exec() {
+  local path=$1 ancestor=${1%/*}
+  [[ -x $path && $(stat -c %u -- "$path") != "$(id -u)" &&
+     $(stat -c %a -- "$path") == 755 && ! -w $path ]] ||
+    fail "entry executable is task-writable or not operator-owned: $path"
+  while [[ -n $ancestor && $ancestor != / ]]; do
+    [[ $(stat -c %u -- "$ancestor") != "$(id -u)" && ! -w $ancestor ]] ||
+      fail "task account can replace an entry executable ancestor: $ancestor"
+    ancestor=${ancestor%/*}
+  done
+}
+
+manifest=$1 wrapper=$2 wrapper_sha=$3 helper_sha=$4 mode=$5 public_key=$6
+[[ $mode == hard || $mode == soft ]] || fail 'attachment mode must be hard or soft'
+existing "$manifest"
+[[ -f $manifest && $(stat -c %u -- "$manifest") == "$(id -u)" &&
+   $(stat -c %a -- "$manifest") == 600 ]] ||
+  fail 'task manifest must be an owned 0600 file'
+jq -e '.profile == "mini-offer-task-v1" and (.peer == "a" or .peer == "b")' \
+  "$manifest" >/dev/null || fail 'not an offering task manifest'
+v() { jq -er "$1" "$manifest"; }
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+pin "$here/offer-render-task" "$(v .rendererSourceSha256)"
+pin "$here/install-controller" "$(v .installerSourceSha256)"
+pin "$here/render-friend-key" "$helper_sha"
+pin "$wrapper" "$wrapper_sha"
+operator_exec "$wrapper"
+operator_exec "$here/render-friend-key"
+runtime=$(v .runtime)
+pin "$runtime" "$(v .runtimeSha256)"
+operator_exec "$runtime"
+config=$(v .outputDir)/runtime-config.json
+stage=$(v .outputDir)/stage.json
+pins=$(v .outputDir)/pins.json
+rendered=$(v .outputDir)/rendered.service
+for path in "$config" "$stage" "$pins" "$rendered"; do
+  existing "$path"
+  [[ -f $path && $(stat -c %u -- "$path") == "$(id -u)" ]] ||
+    fail "rendered product is not task owned: $path"
+done
+jq -e --arg manifestSha "$(sha "$manifest")" \
+  --arg configSha "$(sha "$config")" --arg pinsSha "$(sha "$pins")" \
+  --arg unitSha "$(sha "$rendered")" '
+  .stage == "rendered-not-installed" and
+  .manifestSha256 == $manifestSha and .configSha256 == $configSha and
+  .pinsSha256 == $pinsSha and .unitSha256 == $unitSha
+' "$stage" >/dev/null || fail 'rendered stage differs from selected task manifest'
+socket=$(jq -er .controlSocket "$config")
+state=$(v .stateDir)
+safe "$state"; existing "$state"
+safe "$socket"
+[[ $(dirname -- "$socket") == "$state" && -S $socket && ! -L $socket &&
+   $(stat -c %u -- "$socket") == "$(id -u)" &&
+   $(stat -c %a -- "$socket") == 600 ]] ||
+  fail 'live control socket is not the task-owned private entrance'
+[[ $(jq -er .task "$config") == "$(if [[ $(v .peer) == a ]]; then echo 7801; else echo 7803; fi)" &&
+   $(jq -er .hostSocket "$config") == "$(v .frontSocket)" &&
+   $(jq -er .hostConfig "$config") == "$(v .frontConfig)" ]] ||
+  fail 'rendered config selects another task or frontend'
+unit=mini-grain-controller@$(jq -er .task "$config").service
+fragment=$(v .unitDir)/$unit
+existing "$fragment"
+cmp -s "$rendered" "$fragment" || fail 'installed unit differs from reviewed render'
+[[ $(systemctl --user show "$unit" -p ActiveState --value) == active &&
+   $(systemctl --user show "$unit" -p FragmentPath --value) == "$fragment" ]] ||
+  fail 'exact offered controller unit is not active'
+pid=$(systemctl --user show "$unit" -p MainPID --value)
+[[ $pid =~ ^[1-9][0-9]*$ ]] || fail 'active controller has no MainPID'
+[[ $(stat -c %u -- "/proc/$pid") == "$(id -u)" &&
+   $(sha "/proc/$pid/exe") == "$(v .runtimeSha256)" ]] ||
+  fail 'active controller process UID or executable bytes differ from the pin'
+mapfile -d '' -t argv <"/proc/$pid/cmdline"
+[[ ${#argv[@]} == 3 && ${argv[0]} == "$runtime" &&
+   ${argv[1]} == serve && ${argv[2]} == "$config" ]] ||
+  fail 'active controller command does not serve the reviewed config'
+[[ $(systemctl --user show "$unit" -p MainPID --value) == "$pid" ]] ||
+  fail 'controller MainPID changed during entry review'
+
+"$here/render-friend-key" "$wrapper" "$runtime" "$socket" "$mode" "$public_key"
+printf 'Offer entrance: ssh -T TASK_ACCOUNT@HOST (hard default; soft is a separate reviewed key).\n' >&2

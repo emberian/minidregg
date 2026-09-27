@@ -1,0 +1,32 @@
+a
+3761cc12112f25317605031326bce3c55da8b805d2e9546de384739d75b0fe26  /home/miniworka26/grain-7801/offer-task-live.json
+aa9efd0f018298dda87f542ec76dc0cef844b54da75880baa92c666ad225e0e9  /home/miniworka26/grain-7801/rendered-live/runtime-config.json
+55883b7d621c0bebd8bfba9ec8aca0ec0194238039dff32cc5bb1c762cee3613  /home/miniworka26/grain-7801/rendered-live/pins.json
+fe44c2b8cc9983a98a0de44953a9231e81f753d245718af077dcf10608b4bd3d  /home/miniworka26/grain-7801/rendered-live/rendered.service
+cf481f5a8c285f7e849af2f141d069e6e232a4d8d7bc114512354b2ff2f76da9  /home/miniworka26/grain-7801/rendered-live/stage.json
+34f6f61d348dff4690fe2fa8579d0796be7ac4cd4ff80fe3199acc4fda541391  /home/miniworka26/grain-7801/readback-offer-live/parent/signed-observation.bin
+650f95967a7f560afae7de6b9447cfc14029f7c9d6f5e28b0ed229fac7583b54  /home/miniworka26/grain-7801/readback-offer-live/parent/view.bin
+077c4de88859f448d375208233880b3fff5f117456105a91b88801e30ae2e6b9  /home/miniworka26/grain-7801/readback-offer-live/tool/signed-observation.bin
+b223bc308e1a487836543690e1b36ed0b243633bafc36cba4ea4d691120a5113  /home/miniworka26/grain-7801/readback-offer-live/tool/view.bin
+2728ac343050612aa9567e3ea67d844f5341e016455fd8de80d66d352796933d  /home/miniworka26/grain-7801/readback-offer-live/witness/signed-observation.bin
+650f95967a7f560afae7de6b9447cfc14029f7c9d6f5e28b0ed229fac7583b54  /home/miniworka26/grain-7801/readback-offer-live/witness/view.bin
+5dd86adc0738056f4860f67c49561dfecd15fb311af62cc6d186fd11f3c937ca  /home/miniworka26/grain-7801/readback-offer-live/content/signed-observation.bin
+98e082ab918c8b21ec96e1bc636b474abeebf6435df13a170a6459ea951867b8  /home/miniworka26/grain-7801/readback-offer-live/content/view.bin
+eaeb728d39cf2cebf5f0c92ed67b1f67714ee1f139cdd232a24daa5e15550f60  /home/miniworka26/grain-7801/readback-offer-live/parent-policy/signed-observation.bin
+3d62cb0f2545a9aa566575b232e217481953abe6d662dc070c42c16a4bfbb3bb  /home/miniworka26/grain-7801/readback-offer-live/parent-policy/view.bin
+b
+a12f09d5a0365abefeafb9ae3a130d2ec1860f047b5fdc01d656c615b96cc428  /home/miniworkb26/grain-7803/offer-task-live.json
+5b2291aaaef02fa701cff1822d3c317bb15a1d442987fbed199930c0b0dd4f98  /home/miniworkb26/grain-7803/rendered-live/runtime-config.json
+55883b7d621c0bebd8bfba9ec8aca0ec0194238039dff32cc5bb1c762cee3613  /home/miniworkb26/grain-7803/rendered-live/pins.json
+45807a6fd066ee7588f5e4f813ca17233efe251cb13ec3f342dc5bb1d6f63fed  /home/miniworkb26/grain-7803/rendered-live/rendered.service
+b03bf636a4f86209eb5bf902dea86c56afa34011b270cad5cfafed5b28637c07  /home/miniworkb26/grain-7803/rendered-live/stage.json
+c5d552bbbf2a9e7813557ef4a833d390cb2aff88f706af3dc262f927f28b6a92  /home/miniworkb26/grain-7803/readback-offer-live/parent/signed-observation.bin
+2e00b191d604ba52eab3dfc3c9b7310cf6f4b3ede39c89ccf42a3bc3b774441d  /home/miniworkb26/grain-7803/readback-offer-live/parent/view.bin
+25609a7133f97fbf3256a4636d6cc6e6be48cccf3c3cdd6b749650f0e6139f0e  /home/miniworkb26/grain-7803/readback-offer-live/tool/signed-observation.bin
+891de08e7c93c30daf9ecc37c05ed3fec054e3dc82e823eac787ec9a7d1f72f0  /home/miniworkb26/grain-7803/readback-offer-live/tool/view.bin
+6b93922e0575a1bc1d963c0f15765c61614a073005b01741185d5be5c30e8436  /home/miniworkb26/grain-7803/readback-offer-live/witness/signed-observation.bin
+2e00b191d604ba52eab3dfc3c9b7310cf6f4b3ede39c89ccf42a3bc3b774441d  /home/miniworkb26/grain-7803/readback-offer-live/witness/view.bin
+c7f72250ab25976cdd5bb356fa772201e661cab7edeefe26d982be60d94a5bca  /home/miniworkb26/grain-7803/readback-offer-live/content/signed-observation.bin
+98e082ab918c8b21ec96e1bc636b474abeebf6435df13a170a6459ea951867b8  /home/miniworkb26/grain-7803/readback-offer-live/content/view.bin
+714a46bb8a962aa82b66939f15693a916062dc5b53d3149b7432949fdc7b58cd  /home/miniworkb26/grain-7803/readback-offer-live/parent-policy/signed-observation.bin
+2f33b2eb29daffbdac3b82ac8a23a418c24b8929195ad3ceb87a7c72cef7a7a6  /home/miniworkb26/grain-7803/readback-offer-live/parent-policy/view.bin
