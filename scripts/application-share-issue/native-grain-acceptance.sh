@@ -68,6 +68,51 @@ CONTROLLER_KEY="$BASE/workroom/controller.key"
 CONTROLLER_PUBLIC="$BASE/workroom/controller.pub"
 STORE="$BASE/workroom/store"
 
+# Keep routine signed reads and the reserve on one verifier-backed Host. A
+# later explicit service restart still tests durable ticket read and lookup.
+SERVICE_PID=
+cleanup() {
+  if [ -n "$SERVICE_PID" ]; then
+    kill "$SERVICE_PID" 2>/dev/null || :
+    wait "$SERVICE_PID" 2>/dev/null || :
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+start_service() {
+  mode=$1 name=$2
+  mkdir -m 700 "$EVIDENCE/$name"
+  SOCKET="$EVIDENCE/$name/mini.sock"
+  "$MINI" "$mode" --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    >"$EVIDENCE/$name/stdout" 2>"$EVIDENCE/$name/stderr" &
+  SERVICE_PID=$!
+  tick=0
+  until [ -S "$SOCKET" ]; do
+    kill -0 "$SERVICE_PID" 2>/dev/null || exit 1
+    tick=$((tick + 1)); [ "$tick" -lt 120 ] || exit 1
+    sleep 1
+  done
+}
+stop_service() {
+  kill "$SERVICE_PID" 2>/dev/null || :
+  wait "$SERVICE_PID" 2>/dev/null || :
+  SERVICE_PID=
+}
+query_payer_balance() {
+  name=$1 nonce=$2
+  jq -n --arg nonce "$nonce" \
+    '{subject:"8",nonce:$nonce,purpose:{type:"query",kind:"account",
+      target:"8",view:"resource"},
+      grants:[{kind:"account",target:"8",capability:"42"}]}' \
+    >"$EVIDENCE/$name-intent.json"
+  "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --intent "$EVIDENCE/$name-intent.json" --key "$KEY" --view resource \
+    --dir "$EVIDENCE/$name" >"$EVIDENCE/$name.stdout"
+  jq -er '[.balances[] | select(.[0] == "0")][0][1]' \
+    "$EVIDENCE/$name/view.json" >"$EVIDENCE/$name-balance.txt"
+}
+
+start_service serve participant-service
+
 # The base has already settled its app/session births. Its worker tool is
 # running hard with remaining budget 38 and zero reservation, so a new source-
 # admitted reserve of exactly the configured grain birth charge (2+1) is
@@ -76,7 +121,7 @@ jq -n '{subject:"8",nonce:"85990",purpose:{type:"query",kind:"object",
     target:"7902",view:"resource"},
     grants:[{kind:"object",target:"7902",capability:"81"}]}' \
   >"$EVIDENCE/tool-before-reserve-intent.json"
-"$MINI" query --host "$HOST" --config "$CONFIG" \
+"$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/tool-before-reserve-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-before-reserve" \
   >"$EVIDENCE/tool-before-reserve.stdout"
@@ -92,7 +137,7 @@ jq -n --slurpfile read "$EVIDENCE/tool-before-reserve/view.json" \
       operation:{type:"reserve",amount:"3"},publications:[]},
     grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:"85991"}' \
   >"$EVIDENCE/tool-reserve-intent.json"
-"$MINI" submit --host "$HOST" --config "$CONFIG" \
+"$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/tool-reserve-intent.json" --intent-kind grain-intent \
   --key "$KEY" --dir "$EVIDENCE/tool-reserve-attempt" \
   >"$EVIDENCE/tool-reserve.stdout"
@@ -102,7 +147,7 @@ jq -n '{subject:"8",nonce:"85992",purpose:{type:"query",kind:"object",
     target:"7902",view:"resource"},
     grants:[{kind:"object",target:"7902",capability:"81"}]}' \
   >"$EVIDENCE/tool-reserved-intent.json"
-"$MINI" query --host "$HOST" --config "$CONFIG" \
+"$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/tool-reserved-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-reserved" \
   >"$EVIDENCE/tool-reserved.stdout"
@@ -112,7 +157,7 @@ jq -n '{subject:"8",nonce:"85993",purpose:{type:"query",kind:"object",
     target:"7901",view:"resource"},
     grants:[{kind:"object",target:"7901",capability:"73"}]}' \
   >"$EVIDENCE/parent-ready-intent.json"
-"$MINI" query --host "$HOST" --config "$CONFIG" \
+"$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/parent-ready-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/parent-ready" \
   >"$EVIDENCE/parent-ready.stdout"
@@ -190,49 +235,7 @@ jq -s --arg request "$REQUEST_SHA" --arg spec "$SPEC" \
     tool:$inspected[0].tool,parent:$inspected[0].parent,signers:.}' \
   "$EVIDENCE/signers.ndjson" >"$EVIDENCE/approval.json"
 
-SERVICE_PID=
-cleanup() {
-  if [ -n "$SERVICE_PID" ]; then
-    kill "$SERVICE_PID" 2>/dev/null || :
-    wait "$SERVICE_PID" 2>/dev/null || :
-  fi
-}
-trap cleanup EXIT HUP INT TERM
-start_service() {
-  mode=$1 name=$2
-  mkdir -m 700 "$EVIDENCE/$name"
-  SOCKET="$EVIDENCE/$name/mini.sock"
-  "$MINI" "$mode" --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-    >"$EVIDENCE/$name/stdout" 2>"$EVIDENCE/$name/stderr" &
-  SERVICE_PID=$!
-  tick=0
-  until [ -S "$SOCKET" ]; do
-    kill -0 "$SERVICE_PID" 2>/dev/null || exit 1
-    tick=$((tick + 1)); [ "$tick" -lt 120 ] || exit 1
-    sleep 1
-  done
-}
-stop_service() {
-  kill "$SERVICE_PID" 2>/dev/null || :
-  wait "$SERVICE_PID" 2>/dev/null || :
-  SERVICE_PID=
-}
-query_payer_balance() {
-  name=$1 nonce=$2
-  jq -n --arg nonce "$nonce" \
-    '{subject:"8",nonce:$nonce,purpose:{type:"query",kind:"account",
-      target:"8",view:"resource"},
-      grants:[{kind:"account",target:"8",capability:"42"}]}' \
-    >"$EVIDENCE/$name-intent.json"
-  "$MINI" query --host "$HOST" --config "$CONFIG" \
-    --intent "$EVIDENCE/$name-intent.json" --key "$KEY" --view resource \
-    --dir "$EVIDENCE/$name" >"$EVIDENCE/$name.stdout"
-  jq -er '[.balances[] | select(.[0] == "0")][0][1]' \
-    "$EVIDENCE/$name/view.json" >"$EVIDENCE/$name-balance.txt"
-}
-
 # The participant service cannot prepare an unsigned issue plan.
-start_service serve participant-service
 if "$MINI" grain-share-issue-prepare --host "$HOST" --config "$CONFIG" \
     --socket "$SOCKET" --request "$EVIDENCE/request.json" \
     --approval "$EVIDENCE/approval.json" --dir "$EVIDENCE/public-refusal" \
@@ -319,7 +322,7 @@ jq -n '{subject:"8",nonce:"86002",purpose:{type:"query",kind:"object",
     target:"7902",view:"resource"},
     grants:[{kind:"object",target:"7902",capability:"81"}]}' \
   >"$EVIDENCE/tool-after-issue-intent.json"
-"$MINI" query --host "$HOST" --config "$CONFIG" \
+"$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/tool-after-issue-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-after-issue" \
   >"$EVIDENCE/tool-after-issue.stdout"
@@ -329,7 +332,7 @@ jq -n '{subject:"8",nonce:"86003",purpose:{type:"query",kind:"object",
     target:"7901",view:"resource"},
     grants:[{kind:"object",target:"7901",capability:"73"}]}' \
   >"$EVIDENCE/parent-after-issue-intent.json"
-"$MINI" query --host "$HOST" --config "$CONFIG" \
+"$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/parent-after-issue-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/parent-after-issue" \
   >"$EVIDENCE/parent-after-issue.stdout"
