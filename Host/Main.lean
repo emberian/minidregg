@@ -190,17 +190,22 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   signature := ⟨settings.signatureBinary⟩
   fnGateway := settings.fnGateway.map GatewayPinSettings.pin
 
+def Settings.providerMeteringPin (settings : Settings) :
+    Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
+  let some metering := settings.providerMetering | return none
+  unless metering.providerResourceId > 0 do
+    throw "provider metering resource ID must be positive"
+  if let some continuityId := settings.continuityProviderResourceId then
+    unless continuityId == metering.providerResourceId do
+      throw "provider metering and continuity resource IDs differ"
+  let tariff ← ProviderUsage.parseTariff metering.tariff.compress
+  return some (metering.providerResourceId, tariff)
+
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
-  if let some metering := settings.providerMetering then
-    unless metering.providerResourceId > 0 do
-      throw (IO.userError "provider metering resource ID must be positive")
-    discard <| IO.ofExcept (ProviderUsage.parseTariff metering.tariff.compress)
-    if let some continuityId := settings.continuityProviderResourceId then
-      unless continuityId == metering.providerResourceId do
-        throw (IO.userError "provider metering and continuity resource IDs differ")
+  discard <| IO.ofExcept settings.providerMeteringPin
   pure settings
 
 /-- Human-readable fn inbox projection is a pure presentation of the exact
@@ -212,9 +217,10 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
 this reads neither storage nor protected resource values. Full-width integers
 are decimal strings so clients cannot silently round a digest. -/
-def profileDescription (config : NativeHost.Config) : Lean.Json :=
+def profileDescription (config : NativeHost.Config)
+    (metering : Option (Nat × Kernel.ProviderMetering.Tariff) := none) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
-  Lean.Json.mkObj
+  let base :=
     [("runtime", toJson "minidregg-native"),
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
@@ -233,6 +239,17 @@ def profileDescription (config : NativeHost.Config) : Lean.Json :=
        ("collector", n config.tariff.collector), ("asset", n config.tariff.asset)]),
      ("runtimeParameters", toJson (Minidregg.Host.Json.encodeHex config.runtimeParameters)),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
+  let meteringFields := match metering with
+    | none => []
+    | some (providerResourceId, tariff) =>
+        [("providerMetering", Lean.Json.mkObj [
+          ("providerResourceId", n providerResourceId),
+          ("tariffVersion", n tariff.version),
+          ("model", toJson tariff.model),
+          ("inputMicroPerMillion", n tariff.inputMicroPerMillion),
+          ("outputMicroPerMillion", n tariff.outputMicroPerMillion),
+          ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)])]
+  Lean.Json.mkObj (base ++ meteringFields)
 
 def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
   let n := fun value : Nat => toJson (toString value)
@@ -344,6 +361,7 @@ def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
 memory, while every state-dependent operation refreshes the verified tip. -/
 def dispatchSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (meteringProfile : Lean.Json)
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
@@ -383,7 +401,7 @@ def dispatchSession (config : NativeHost.Config)
       | .error detail => return (255, failure "observation" detail)
   | 6 =>
       unless payload.isEmpty do throw (IO.userError "profile does not accept a payload")
-      return (6, (profileDescription config).compress.toUTF8.toList)
+      return (6, meteringProfile.compress.toUTF8.toList)
   | 7 =>
       let (kind, source) ← splitKind payload
       let some text := String.fromUTF8? source.toByteArray
@@ -449,6 +467,7 @@ partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : I
 
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (meteringProfile : Lean.Json)
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
@@ -459,12 +478,12 @@ partial def serveSession (config : NativeHost.Config)
   let frame ← readExactly input length
   let (operation, payload) ← match frame.toList with
     | [] => throw (IO.userError "empty native host frame")
-    | operation :: payload => dispatchSession config state fnDispatch operation payload
+    | operation :: payload => dispatchSession config state meteringProfile fnDispatch operation payload
   let response := (operation :: payload).toByteArray
   if response.size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
   output.write (lengthBytes response.size ++ response)
   output.flush
-  serveSession config state fnDispatch input output
+  serveSession config state meteringProfile fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
@@ -2568,7 +2587,9 @@ def run (arguments : List String) : IO UInt32 := do
       let settings ← loadSettings configPath
       let config := settings.config
       match command, rest with
-      | "profile", [] => IO.println (profileDescription config).pretty; pure 0
+      | "profile", [] =>
+          IO.println (profileDescription config (← IO.ofExcept settings.providerMeteringPin)).pretty
+          pure 0
       | "author", [kind, input, output] =>
           let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind (← readJson input))
           writeBytes output bytes
@@ -2665,7 +2686,10 @@ def run (arguments : List String) : IO UInt32 := do
                                 return ((255 : UInt8), failure "provider-metering" reason)
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
-                  serveSession pinnedConfig state fnDispatch (← IO.getStdin) (← IO.getStdout)
+                  let meteringProfile := profileDescription pinnedConfig
+                    (← IO.ofExcept settings.providerMeteringPin)
+                  serveSession pinnedConfig state meteringProfile fnDispatch
+                    (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
