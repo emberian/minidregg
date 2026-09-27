@@ -30,17 +30,20 @@ variable {spec : ApplicationShareIssueSource.Spec}
 variable {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
 
 private def appGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
-    ReadGuard := observationGuard ingress.dispatch.dispatch.app.resource ingress.dispatch.appRoot
+    ReadGuard := observationGuard ingress.dispatch.dispatch.app.resource
+      (ResourceBirthCodec.physicalRoot (.live _checked.appRead.selected.observed.before))
 
 private def manifestGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
     ReadGuard := observationGuard ingress.dispatch.dispatch.app.packageManifest
-      ingress.dispatch.dispatch.app.manifestRoot
+      (ResourceBirthCodec.physicalRoot (.live _checked.manifestRead.selected.observed.before))
 
 private def enrollmentGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
-    ReadGuard := observationGuard ingress.dispatch.enrollmentResource ingress.dispatch.enrollmentRoot
+    ReadGuard := observationGuard ingress.dispatch.enrollmentResource
+      (ResourceBirthCodec.physicalRoot (.live _checked.enrollmentRead.selected.observed.before))
 
 private def ticketGuard (_checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) :
-    ReadGuard := observationGuard spec.ticket.resource ingress.ticketRoot
+    ReadGuard := observationGuard spec.ticket.resource
+      (ResourceBirthCodec.physicalRoot (.live _checked.ticketRead.selected.observed.before))
 
 /-- Four independently signed and checked current reads are bound to the
 same physical CAS as the session/agent witness. -/

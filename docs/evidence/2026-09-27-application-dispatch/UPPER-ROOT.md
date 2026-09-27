@@ -1,0 +1,18 @@
+# Dispatch physical-root and upper-selection checkpoint
+
+The signed observation's `preStateRoot` is the selected resource payload's inner root. The durable CAS `ReadGuard.expectedRoot` is instead the root of the complete physical lifecycle cell. `ApplicationDispatchAdmission.CheckedRead.signedInnerRoot` retains the former equality; `CheckedRead.current` now uses `PhysicalResourceReadGuard.current` to prove the latter from the verifier-loaded directory and snapshot. `ApplicationDispatchPending.readGuards` uses those four physical roots (app, manifest, enrollment, ticket). No equality between inner and outer roots is assumed.
+
+The upper join selects a historical share issuance through `NativeHostReplay.VerifiedSelection`, re-admits its native issue against the selected original `before`, and compares the complete original intent. `ApplicationShareIssueHistorical.Issued.toEvidence` feeds the cycle-safe lower evidence; `ApplicationDispatchUpper.admit` then checks the exact issue-ingress bytes and present native dispatch authority. Its private `Accepted` exposes only a pending candidate. It does not submit a CAS, check post-CAS readback, or permit physical HTTP delivery. Replay still needs its chronological prior-issue context for event 11, and that route is outside this checkpoint.
+
+| Source | SHA-256 |
+| --- | --- |
+| `Kernel/PhysicalResourceReadGuard.lean` (shared fnContracts helper) | `2c447ebbd5846308eab23486c59a235352343343477ce4f227c9589945334f8d` |
+| `Kernel/ApplicationDispatchAdmission.lean` | `6c7aab7c3930dd2a8c5d868494e9c475f293f781d0d40c0135b0996f0c584e17` |
+| `Kernel/ApplicationDispatchPending.lean` | `528263f2de24f4cb670ade1a9a6bb604020f28e43a1324ebc6a3b34509e0bc58` |
+| `Kernel/ApplicationDispatchHistoricalCore.lean` | `93e19e0c0ae4c6ba98264477b4633a8ac22bbc8caf6344f4b1672418a9b77ff8` |
+| `Kernel/ApplicationShareIssueHistorical.lean` (fnMiniReview selector) | `c1ae4be48b528f37a654c49b815386c1892508383902fb0505d6efdd35a05576` |
+| `Kernel/ApplicationDispatchUpper.lean` | `0aba9a44a9049ffd6b3433f3c447ddfcde5b475dfd06f055413a29968b47ccb7` |
+
+Serial direct `lake env lean` builds of those six modules passed in that order in independent private Persvati copy `/home/ember/build/minidregg-dispatch-upper-20260927-spkcompat`. Each command ran under `systemd-run --user --scope --collect -p MemoryMax=64G -p CPUQuota=200%` with `LEAN_NUM_THREADS=2`, emitted an OLean, exited 0, and had no Lean diagnostics. Captured per-module logs are `compile-<module>.log`; their SHA-256 values in the same order are `6c1345c84432baf82d56a5a4e21312f14897a7b31ea97633b02e6e6f501a4a03`, `b58050a3196d57de21061230196e2591f49100712a7b14c7c589f58a928e1775`, `fb06db518a6b7bdbf56e5efec53fcb132bb25af48d1a8e29cc5938d0467a04ad`, `fac3ed99727144a5c4a28c8f0162611ad95986d06a1e354aafbd133fcc59addf`, `34177f0053adec0192d0c83d72893e0a5cd7393dbee1c6c327798e81ee09125b`, and `ac84a344a8a3519351f008069766cbe6af433a9f110386fba7b4afebfe4eeb96`.
+
+The imported `NativeHostReplay.olean` SHA-256 `a2079b41c1b120193d39c794ab723ab4617c67bed0fcdcf8f06c779d2962bce9` was built by the Replay owner from committed selector source SHA-256 `1c4522541e1bd9092f83606c1d3f65b4429697f2decd7ccbf302163b03fd76f7` (`b07628f`); that exact source was restored inside this private copy for inspection. `ApplicationGrain.lean` source SHA-256 `104667cc3562d1d9931225c3f1518106077797601a5d863f7eb30c44c0cd1a93` and its previously source-matched OLean SHA-256 `dcc797aec734d10e894591e18efefc8fb514c2d25ec63d5496b80f1b2359534f` supplied the v2 policy dependency. This is a narrow compile checkpoint, not a full Mini test or a physical SPK/HTTP run.

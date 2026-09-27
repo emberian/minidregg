@@ -1,5 +1,7 @@
 # Dispatch current-image admission checkpoint (2026-09-27)
 
+Later source checkpoints are recorded in `PENDING.md`, `HISTORICAL-CORE.md`, and `UPPER-ROOT.md`. The selector limitation described below was repaired by the verifier-selected original-prefix API documented in `UPPER-ROOT.md`; the remaining receiver/CAS boundary is still open.
+
 This checkpoint covers only the two new Mini dispatch admission modules. It is a current-image candidate check, not a committed dispatch receiver or a physical HTTP permit.
 
 | Source | SHA-256 |

@@ -9,6 +9,7 @@ import Kernel.ApplicationDispatchWitness
 import Kernel.ApplicationDispatchAuthority
 import Kernel.ApplicationShareIssueSource
 import Kernel.ResourceObservationAdmission
+import Kernel.PhysicalResourceReadGuard
 
 namespace Minidregg.Kernel.ApplicationDispatchAdmission
 
@@ -170,6 +171,16 @@ def observationRequest {F : Type} [Field F]
 def observationGuard (resource : Nat) (root : Digest) : ReadGuard :=
   ⟨⟨resource⟩, root⟩
 
+/-- A signed observation names the inner payload root. A durable CAS guard
+protects the complete encoded physical cell, whose root is generally distinct. -/
+theorem observedPhysicalRoot_current {deployment : Deployment} {durable : Durable}
+    (context : ResourceObservationAdmission.Context deployment durable)
+    (resource : Nat) (packed : PackedCell CanonicalCellRegistry.registry)
+    (present : context.directory.directory.slots resource = .present packed) :
+    ResourceBirthCodec.physicalRoot (.live packed) =
+      durable.snapshot.model.roots ⟨resource⟩ :=
+  PhysicalResourceReadGuard.current context.directory resource packed present
+
 /-- Native observation signatures bind the base signed request and the
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
@@ -208,9 +219,27 @@ structure CheckedRead {F : Type} [Field F] [DecidableEq F]
       resource capability root)
     (observationMarker ingress selection) capability (observationContext ingress)
   checked : ResourceObservationAdmission.Checked selected envelope
-  current : root = durable.snapshot.model.roots (observationGuard resource root).cellId
-  readonly : (observationGuard resource root).cellId ∉
+  current : ResourceBirthCodec.physicalRoot (.live selected.observed.before) =
+    durable.snapshot.model.roots ⟨resource⟩
+  readonly : (observationGuard resource
+    (ResourceBirthCodec.physicalRoot (.live selected.observed.before))).cellId ∉
     (DeclaredResourceController.writes prepared).map DataWrite.cellId
+
+/-- The same checked read retains the signed inner commitment. It is not
+substituted for the physical root used by the later CAS read guard. -/
+theorem CheckedRead.signedInnerRoot {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {durable : Durable}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {selection : Selection}
+    {prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
+      (command ingress.dispatch selection ingress.parent)}
+    {resource : Nat} {capability : CapabilityId} {root : Digest}
+    {envelope : List UInt8}
+    (read : CheckedRead deployment profile ambient durable ingress selection prepared
+      resource capability root envelope) :
+    root = read.selected.observed.before.payload.root :=
+  ResourceObservationAdmission.preparation_actual_root read.selected
 
 def checkRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -233,13 +262,13 @@ def checkRead {F : Type} [Field F] [DecidableEq F]
       match ← ResourceObservationAdmission.check native selected envelope with
       | .error _ => return .error "signed application observation refused"
       | .ok checked =>
-          if current : root = durable.snapshot.model.roots
-              (observationGuard resource root).cellId then
-            if readonly : (observationGuard resource root).cellId ∉
-                (DeclaredResourceController.writes prepared).map DataWrite.cellId then
-              return .ok ⟨selected, checked, current, readonly⟩
-            else return .error "application observation overlaps dispatch writes"
-          else return .error "application observation differs from loaded image"
+          let current := observedPhysicalRoot_current context resource
+            selected.observed.before selected.observed.present
+          if readonly : (observationGuard resource
+              (ResourceBirthCodec.physicalRoot (.live selected.observed.before))).cellId ∉
+              (DeclaredResourceController.writes prepared).map DataWrite.cellId then
+            return .ok ⟨selected, checked, current, readonly⟩
+          else return .error "application observation overlaps dispatch writes"
 
 /-- Exact meaning extracted from four current, independently observed cells.
 The share ceiling is app-issued, while the participant's enrollment requests
