@@ -277,12 +277,15 @@ def nullifiersFreshCheck [DecidableEq Nullifier]
         before.consumed nullifier = false := by
   simp [nullifiersFreshCheck]
 
-/-- Ordered fail-closed preflight.  The checks read only the atomic snapshot;
-no candidate post is exposed on any error branch. -/
+/-- Ordered fail-closed preflight. A claim-only intent is a real atomic
+mutation of the consumed-nullifier set, charge, history, and retry journal;
+an intent with neither a cell write nor a claim remains a no-op refusal.
+The checks read only the atomic snapshot, and no candidate post is exposed on
+any error branch. -/
 def preflight [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event) : Except RejectReason Unit :=
-  if intent.rootWrites = [] then
+  if intent.rootWrites = [] ∧ intent.nullifiers = [] then
     .error .noCells
   else if !(decide (intent.rootWrites.map RootWrite.cellId).Nodup) then
     .error .duplicateCell
@@ -296,6 +299,43 @@ def preflight [DecidableEq CellId] [DecidableEq Nullifier]
     .error .insufficientBudget
   else
     .ok ()
+
+theorem preflight_empty_effect_rejected [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (noWrites : intent.rootWrites = []) (noClaims : intent.nullifiers = []) :
+    intent.preflight before = .error .noCells := by
+  simp [Intent.preflight, noWrites, noClaims]
+
+theorem preflight_claim_only_ready [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (noWrites : intent.rootWrites = []) (hasClaim : intent.nullifiers ≠ [])
+    (distinctClaims : intent.nullifiers.Nodup)
+    (fresh : intent.nullifiersFreshCheck before = true)
+    (funded : Charge.fundedCheck intent.exactCharge before.available = true) :
+    intent.preflight before = .ok () := by
+  simp [Intent.preflight, noWrites, hasClaim, distinctClaims, fresh, funded,
+    Intent.rootsMatchCheck]
+
+theorem install_claim_only_preserves_roots [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (noWrites : intent.rootWrites = []) :
+    (Snapshot.install before intent).roots = before.roots := by
+  funext cellId
+  simp [Snapshot.install, noWrites, Snapshot.lookupPost]
+
+theorem preflight_spent_single_claim_rejected [DecidableEq CellId]
+    [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event) (claim : Nullifier)
+    (noWrites : intent.rootWrites = [])
+    (oneClaim : intent.nullifiers = [claim])
+    (spent : before.consumed claim = true) :
+    intent.preflight before = .error .alreadyConsumed := by
+  simp [Intent.preflight, noWrites, oneClaim, Intent.rootsMatchCheck,
+    Intent.nullifiersFreshCheck, spent]
 
 end Intent
 
@@ -426,6 +466,26 @@ theorem execute_crash_after_then_retry
   constructor
   · simp [execute, unrecorded, ready]
   · simp
+
+/-- A claim-only event has the same exact lost-reply recovery as a cell write:
+the crash-after image has unchanged roots, but its claim, charge and original
+journal record are installed atomically, so retry cannot charge it twice. -/
+theorem execute_claim_only_crash_after_then_retry
+    {TxId : Type u} {CellId : Type v} {Nullifier : Type w} {Event : Type x}
+    [DecidableEq TxId] [DecidableEq CellId] [DecidableEq Nullifier]
+    [DecidableEq Event]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (noWrites : intent.rootWrites = [])
+    (unrecorded : Snapshot.lookupRecorded intent.transactionId before.journal = none)
+    (ready : intent.preflight before = .ok ()) :
+    execute (.crash .afterAtomicInstall) before intent =
+        .crashed .afterAtomicInstall (Snapshot.install before intent) ∧
+      execute .complete (Snapshot.install before intent) intent = .replayed intent ∧
+      (Snapshot.install before intent).roots = before.roots := by
+  rcases execute_crash_after_then_retry before intent unrecorded ready with
+    ⟨crashed, replayed⟩
+  exact ⟨crashed, replayed, Intent.install_claim_only_preserves_roots before intent noWrites⟩
 
 /-! ## Commit-indexed multi-cell metering -/
 

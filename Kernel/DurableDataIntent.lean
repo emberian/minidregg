@@ -263,6 +263,14 @@ def install (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes) :
         rw [rootSome]
         simp only [Option.getD_some]
 
+/-- A claim-only commit changes the durable journal, claim and metering state,
+but never manufactures a new canonical cell value. -/
+theorem install_claim_only_preserves_canonicalBytes
+    (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
+    (noWrites : intent.writes = []) (cellId : CellId) :
+    (install before intent).canonicalBytes cellId = before.canonicalBytes cellId := by
+  simp [install, noWrites, lookupPostBytes]
+
 @[simp] theorem install_model (before : DataSnapshot rootBytes)
     (intent : DataIntent rootBytes) :
     (install before intent).model = Snapshot.install before.model intent.erase := rfl
@@ -286,6 +294,9 @@ end DataSnapshot
 inductive RejectReason
   | durable (reason : DurableCommitProtocol.RejectReason)
   | staleReadGuard
+  /-- A claim-only event needs a nonempty, exact-current read guard; source
+  admission separately proves the authority meaning of its selected guard. -/
+  | unguardedEventOnly
   deriving DecidableEq, Repr
 
 namespace DataIntent
@@ -311,10 +322,44 @@ def preflight (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes) 
     Except RejectReason Unit :=
   if !intent.readGuardsMatchCheck before then
     .error .staleReadGuard
+  -- The lower protocol knows only roots and claims. The data adapter also
+  -- requires a current read guard before admitting an event-only claim.
+  else if intent.writes = [] ∧ intent.nullifiers ≠ [] ∧ intent.readGuards = [] then
+    .error .unguardedEventOnly
   else
     match intent.erase.preflight before.model with
     | .error reason => .error (.durable reason)
     | .ok () => .ok ()
+
+theorem unguarded_claim_only_rejected (before : DataSnapshot rootBytes)
+    (intent : DataIntent rootBytes) (noWrites : intent.writes = [])
+    (hasClaim : intent.nullifiers ≠ []) (noGuards : intent.readGuards = []) :
+    intent.preflight before = .error .unguardedEventOnly := by
+  simp [preflight, readGuardsMatchCheck, noWrites, hasClaim, noGuards]
+
+theorem guarded_claim_only_ready (before : DataSnapshot rootBytes)
+    (intent : DataIntent rootBytes) (noWrites : intent.writes = [])
+    (hasClaim : intent.nullifiers ≠ [])
+    (hasGuard : intent.readGuards ≠ [])
+    (current : intent.readGuardsMatchCheck before = true)
+    (lowerReady : intent.erase.preflight before.model = .ok ()) :
+    intent.preflight before = .ok () := by
+  simp [preflight, noWrites, hasClaim, hasGuard, current, lowerReady]
+
+theorem guarded_fresh_claim_only_ready (before : DataSnapshot rootBytes)
+    (intent : DataIntent rootBytes) (noWrites : intent.writes = [])
+    (hasClaim : intent.nullifiers ≠ [])
+    (distinctClaims : intent.nullifiers.Nodup)
+    (fresh : intent.erase.nullifiersFreshCheck before.model = true)
+    (funded : Charge.fundedCheck intent.exactCharge before.model.available = true)
+    (hasGuard : intent.readGuards ≠ [])
+    (current : intent.readGuardsMatchCheck before = true) :
+    intent.preflight before = .ok () := by
+  have lowerReady : intent.erase.preflight before.model = .ok () :=
+    DurableCommitProtocol.Intent.preflight_claim_only_ready before.model intent.erase
+      (by simp [erase, noWrites]) (by simpa [erase] using hasClaim)
+      (by simpa [erase] using distinctClaims) fresh (by simpa [erase] using funded)
+  exact guarded_claim_only_ready before intent noWrites hasClaim hasGuard current lowerReady
 
 end DataIntent
 
@@ -500,6 +545,50 @@ def intent : DataIntent lengthRoot where
   postRootsBound := by simp [write, lengthRoot]
   guardsReadOnly := by simp [guard, write, readCell, writeCell]
 
+/-- A namespace-style registration spends one stable claim and meters one
+event while leaving every canonical cell untouched. -/
+def claimOnlyIntent : DataIntent lengthRoot where
+  transactionId := ⟨92⟩
+  writes := []
+  readGuards := [guard]
+  nullifiers := [nullifier]
+  exactCharge := fun _ => 1
+  event := event
+  postRootsBound := by simp
+  guardsReadOnly := by simp
+
+theorem claim_only_ready : claimOnlyIntent.preflight before = .ok () := by decide
+
+theorem claim_only_spent_claim_refused :
+    claimOnlyIntent.preflight (DataSnapshot.install before claimOnlyIntent) =
+      .error (.durable .alreadyConsumed) := by decide
+
+def claimOnlyNoGuard : DataIntent lengthRoot where
+  transactionId := ⟨93⟩
+  writes := []
+  readGuards := []
+  nullifiers := [nullifier]
+  exactCharge := fun _ => 1
+  event := event
+  postRootsBound := by simp
+  guardsReadOnly := by simp
+
+theorem claim_only_no_guard_refused :
+    claimOnlyNoGuard.preflight before = .error .unguardedEventOnly := by decide
+
+def claimOnlyNoClaim : DataIntent lengthRoot where
+  transactionId := ⟨94⟩
+  writes := []
+  readGuards := [guard]
+  nullifiers := []
+  exactCharge := fun _ => 1
+  event := event
+  postRootsBound := by simp
+  guardsReadOnly := by simp
+
+theorem claim_only_no_claim_refused :
+    claimOnlyNoClaim.preflight before = .error (.durable .noCells) := by decide
+
 @[simp] theorem ready : intent.preflight before = .ok () := by decide
 
 @[simp] theorem positive_install :
@@ -531,6 +620,9 @@ def afterConcurrentReadMove : DataSnapshot lengthRoot where
   model := afterConcurrentReadMoveModel
   canonicalBytes := afterConcurrentReadMoveBytes
   coherent := fun _ => rfl
+
+theorem claim_only_stale_guard :
+    claimOnlyIntent.preflight afterConcurrentReadMove = .error .staleReadGuard := by decide
 
 @[simp] theorem stale_after_concurrent_read_move :
     intent.preflight afterConcurrentReadMove = .error .staleReadGuard := by decide
