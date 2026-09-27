@@ -11,6 +11,7 @@ import Kernel.ContentResource
 import Kernel.ApplicationGrainBirth
 import Kernel.ApplicationGrainSessionBirth
 import Kernel.ApplicationShareIssueAuthoring
+import Kernel.ApplicationDispatchAuthoring
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
 
@@ -1545,9 +1546,43 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result
     .prepare (.install subject control (PolicyInstallController.declarationCodec.encode declaration)),
     grants⟩
 
+private def dispatchHttpHeader (path : String) (json : Lean.Json) : Result ApplicationDispatchCodec.Header := do
+  let obj ← exactObject path ["nameHex", "valueHex", "generated"] json
+  pure ⟨← decodeHex (path ++ ".nameHex") (← field path "nameHex" obj),
+    ← decodeHex (path ++ ".valueHex") (← field path "valueHex" obj),
+    ← bool (path ++ ".generated") (← field path "generated" obj)⟩
+
+private def dispatchHttpRequest (path : String) (json : Lean.Json) :
+    Result ApplicationDispatchCodec.Request := do
+  let obj ← exactObject path
+    ["operationId", "methodHex", "pathHex", "queryHex", "headers", "bodyHex"] json
+  pure ⟨← nat (path ++ ".operationId") (← field path "operationId" obj),
+    ← decodeHex (path ++ ".methodHex") (← field path "methodHex" obj),
+    ← decodeHex (path ++ ".pathHex") (← field path "pathHex" obj),
+    ← decodeHex (path ++ ".queryHex") (← field path "queryHex" obj),
+    ← list (path ++ ".headers") dispatchHttpHeader (← field path "headers" obj),
+    ← decodeHex (path ++ ".bodyHex") (← field path "bodyHex" obj)⟩
+
+private def dispatchAuthorRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$"
+    ["issueIndex", "ticketResource", "packageManifest", "snapshotManifest",
+     "sessionObserveCapability", "manifestObserveCapability",
+     "enrollmentObserveCapability", "http"] json
+  let request : ApplicationDispatchAuthoring.Request :=
+    ⟨← nat "$.issueIndex" (← field "$" "issueIndex" obj),
+     ← nat "$.ticketResource" (← field "$" "ticketResource" obj),
+     ← nat "$.packageManifest" (← field "$" "packageManifest" obj),
+     ← nat "$.snapshotManifest" (← field "$" "snapshotManifest" obj),
+     ⟨← nat "$.sessionObserveCapability" (← field "$" "sessionObserveCapability" obj)⟩,
+     ⟨← nat "$.manifestObserveCapability" (← field "$" "manifestObserveCapability" obj)⟩,
+     ⟨← nat "$.enrollmentObserveCapability" (← field "$" "enrollmentObserveCapability" obj)⟩,
+     ← dispatchHttpRequest "$.http" (← field "$" "http" obj)⟩
+  pure (ApplicationDispatchAuthoring.requestCodec.encode request)
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
+  | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
@@ -1749,6 +1784,61 @@ private def shareIssueRequestJson
      ("sourceCapabilities", .arr <| request.sourceCapabilities.toArray.map
        (fun capability => decimal capability.value))]
 
+private def dispatchRequestJson
+    (request : ApplicationDispatchAuthoring.Request) : Lean.Json :=
+  let http := request.http
+  .mkObj
+    [("type", "application-dispatch-author-request-v1"),
+     ("canonicalRequest", hexJson <| ApplicationDispatchAuthoring.requestCodec.encode request),
+     ("issueIndex", decimal request.issueIndex),
+     ("ticketResource", decimal request.ticketResource),
+     ("packageManifest", decimal request.packageManifest),
+     ("snapshotManifest", decimal request.snapshotManifest),
+     ("sessionObserveCapability", decimal request.sessionObserveCapability.value),
+     ("manifestObserveCapability", decimal request.manifestObserveCapability.value),
+     ("enrollmentObserveCapability", decimal request.enrollmentObserveCapability.value),
+     ("http", .mkObj
+       [("operationId", decimal http.operationId),
+        ("methodHex", hexJson http.method),
+        ("pathHex", hexJson http.path),
+        ("queryHex", hexJson http.query),
+        ("headers", .arr <| http.headers.toArray.map fun header => .mkObj
+          [("nameHex", hexJson header.name),
+           ("valueHex", hexJson header.value),
+           ("generated", .bool header.generated)]),
+        ("bodyHex", hexJson http.body)])]
+
+/-- Presentation of the complete detached challenge. It repeats the exact
+canonical request and ordered signing headers but confers no authority; op34
+independently re-admits the assembled ingress at the current verified tip. -/
+private def dispatchPlanJson (plan : ApplicationDispatchAuthoring.Plan) :
+    Result Lean.Json := do
+  let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode plan.unsignedIngress
+    | failAt "application-dispatch-plan" "noncanonical unsigned ingress"
+  let slotJson := fun (slot : SigningSlot) => .mkObj
+    [("role", decimal slot.role), ("index", decimal slot.index),
+     ("header", hexJson slot.header), ("signing", signedHeaderJson slot.header)]
+  let dispatch := unsigned.dispatch.dispatch
+  pure <| .mkObj
+    [("type", "application-dispatch-author-plan-v1"),
+     ("canonicalPlan", hexJson <| ApplicationDispatchAuthoring.planCodec.encode plan),
+     ("request", dispatchRequestJson plan.request),
+     ("unsignedIngress", hexJson plan.unsignedIngress),
+     ("domain", decimal plan.invocation.domain.value),
+     ("semantics", decimal plan.invocation.semantics.value),
+     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("height", decimal plan.invocation.height),
+     ("appResource", decimal dispatch.app.resource),
+     ("appGeneration", signedDecimal dispatch.app.generation),
+     ("sessionResource", decimal dispatch.session.resource),
+     ("sessionGeneration", signedDecimal dispatch.session.generation),
+     ("subject", decimal dispatch.session.subject.value),
+     ("principalHex", hexJson dispatch.identity.principal),
+     ("permissionSchemaRoot", decimal dispatch.identity.permissionSchemaRoot.value),
+     ("permissionBits", decimal dispatch.identity.permissionBits),
+     ("slots", .arr <|
+       (plan.invocation.slots ++ plan.observationSlots).toArray.map slotJson)]
+
 private def intentJson (value : Intent) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value), ("nonce", decimal value.nonce),
    ("purpose", match value.purpose with
@@ -1892,6 +1982,11 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       decoded "application-share-issue-plan" ApplicationShareIssueAuthoring.planCodec bytes
   | "application-share-issue-request" => shareIssueRequestJson <$>
       decoded "application-share-issue-request" ApplicationShareIssueAuthoring.requestCodec bytes
+  | "application-dispatch-request" => dispatchRequestJson <$>
+      decoded "application-dispatch-request" ApplicationDispatchAuthoring.requestCodec bytes
+  | "application-dispatch-plan" => do
+      let plan ← decoded "application-dispatch-plan" ApplicationDispatchAuthoring.planCodec bytes
+      dispatchPlanJson plan
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"

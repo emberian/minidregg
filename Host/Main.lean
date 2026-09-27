@@ -10,7 +10,8 @@ payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 23=application lifecycle begin lookup, 24=selected source publication submit,
 25=selected source publication lookup, 28=app share issue submit,
 29=app share issue lookup, 34=fresh checked dispatch permit,
-35=historical dispatch receipt-only lookup. Op34 success uses a distinct
+35=historical dispatch receipt-only lookup, 36=private dispatch signing plan,
+37=private detached dispatch assembly. Op34 success uses a distinct
 committed-permit frame; all other op34 outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -33,6 +34,7 @@ import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
+import Kernel.ApplicationDispatchAuthoring
 import Host.ApplicationDispatchInspection
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
@@ -688,6 +690,18 @@ def dispatchSession (config : NativeHost.Config)
   | 35 =>
       return (35, outcomeCodec.encode
         (← applicationDispatchLookupSession config state payload))
+  | 36 =>
+      let session ← sessionCurrent config state
+      match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
+      | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
+      | .error detail => return (255, failure "application-dispatch-author" detail)
+  | 37 =>
+      let (planBytes, signaturesBytes) ← splitPair payload
+      let some plan := ApplicationDispatchAuthoring.planCodec.decode planBytes
+        | throw (IO.userError "noncanonical dispatch authoring plan")
+      let signatures ← decodeSignatures signaturesBytes
+      let ingress ← IO.ofExcept (ApplicationDispatchAuthoring.assemble plan signatures)
+      return (37, ingress)
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
@@ -3325,10 +3339,14 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "inspect", [kind, input, output] =>
           let bytes ← if kind == "fn-inbox-resource" ||
-              kind == "application-dispatch-committed" then
+              kind == "application-dispatch-committed" ||
+              kind == "application-dispatch-plan" ||
+              kind == "application-dispatch-request" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
-          if kind == "application-dispatch-committed" then
+          if kind == "application-dispatch-committed" ||
+              kind == "application-dispatch-plan" ||
+              kind == "application-dispatch-request" then
             let serialized := value.compress
             unless serialized.toUTF8.size ≤ maxDispatchInspectionJsonBytes do
               throw (IO.userError "application dispatch inspection exceeds JSON budget")
