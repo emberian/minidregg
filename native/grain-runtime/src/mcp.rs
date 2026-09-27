@@ -52,7 +52,11 @@ impl Drop for BrokerEndpoint {
     }
 }
 
-pub fn start_broker(path: &Path, worker_wall: Duration) -> Result<BrokerEndpoint, String> {
+pub fn start_broker(
+    path: &Path,
+    worker_wall: Duration,
+    birth_families: Vec<String>,
+) -> Result<BrokerEndpoint, String> {
     if worker_wall.is_zero() || worker_wall > MAX_WORKER_WALL {
         return Err("MCP broker worker wall time must be 1..1800 seconds".into());
     }
@@ -69,6 +73,7 @@ pub fn start_broker(path: &Path, worker_wall: Duration) -> Result<BrokerEndpoint
     let prompt_epoch = Arc::new(AtomicU64::new(0));
     let thread_stop = stop.clone();
     let thread_epoch = prompt_epoch.clone();
+    let birth_families = Arc::new(birth_families);
     thread::spawn(move || {
         while !thread_stop.load(Ordering::SeqCst) {
             match listener.accept() {
@@ -80,8 +85,15 @@ pub fn start_broker(path: &Path, worker_wall: Duration) -> Result<BrokerEndpoint
                     let tx = tx.clone();
                     let active = active.clone();
                     let epoch = thread_epoch.clone();
+                    let birth_families = birth_families.clone();
                     thread::spawn(move || {
-                        serve_broker_connection(stream, tx, epoch, response_timeout);
+                        serve_broker_connection(
+                            stream,
+                            tx,
+                            epoch,
+                            response_timeout,
+                            birth_families,
+                        );
                         active.fetch_sub(1, Ordering::SeqCst);
                     });
                 }
@@ -106,6 +118,7 @@ fn serve_broker_connection(
     tx: SyncSender<BrokerRequest>,
     epoch: Arc<AtomicU64>,
     response_timeout: Duration,
+    birth_families: Arc<Vec<String>>,
 ) {
     if stream
         .set_write_timeout(Some(Duration::from_secs(5)))
@@ -135,6 +148,17 @@ fn serve_broker_connection(
     let Some(name) = req.get("name").and_then(Value::as_str) else {
         return;
     };
+    // MCP initialization asks for this before the prompt epoch is active.
+    // It carries only validated operator-selected names, never grant paths,
+    // private policy bytes, resource IDs, or custody credentials.
+    if name == "__catalog" && req.get("arguments") == Some(&json!({})) {
+        let _ = writeln!(
+            stream,
+            "{}",
+            json!({"type":"mini-grain-tool-catalog-v1","birthFamilies":birth_families.as_ref()})
+        );
+        return;
+    }
     let prompt_epoch = epoch.load(Ordering::SeqCst);
     let (reply_tx, reply_rx) = mpsc::channel();
     if tx
@@ -161,6 +185,51 @@ fn serve_broker_connection(
 
 fn call_controller(path: &Path, name: &str, arguments: Value) -> Value {
     call_controller_with_timeout(path, name, arguments, MAX_PROXY_WAIT)
+}
+
+fn catalog_birth_families(reply: &Value) -> Result<Vec<String>, String> {
+    if reply.get("type").and_then(Value::as_str) != Some("mini-grain-tool-catalog-v1") {
+        return Err("controller MCP catalog unavailable".into());
+    }
+    let families = reply
+        .get("birthFamilies")
+        .and_then(Value::as_array)
+        .ok_or("controller MCP birth catalog absent")?;
+    if families.len() > 8 {
+        return Err("controller MCP birth catalog exceeds bound".into());
+    }
+    let mut result = Vec::with_capacity(families.len());
+    for family in families {
+        let name = family.as_str().ok_or("MCP birth family is not a name")?;
+        if name.is_empty()
+            || name.len() > 32
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || result.iter().any(|prior| prior == name)
+        {
+            return Err("controller MCP birth catalog has an invalid name".into());
+        }
+        result.push(name.to_owned());
+    }
+    Ok(result)
+}
+
+fn tools_for_birth_families(families: &[String]) -> Value {
+    let mut tools = vec![
+        json!({"name":"mini_grain_status","description":"Read the signed Mini task resource",
+            "inputSchema":{"type":"object","properties":{}}}),
+        json!({"name":"mini_read_resource","description":"Read one operator-named Mini resource with signed delegated observe authority",
+            "inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}}),
+        json!({"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns a historical signed publication receipt; current content requires a fresh signed read.",
+            "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}),
+    ];
+    if !families.is_empty() {
+        tools.push(json!({"name":"mini_create_resource",
+            "description":"Create one resource in an operator-approved family through Mini's signed, budgeted composite birth. The family selects fixed factory, payer, tariff, policy and bounded ID namespace; the model supplies no IDs or capabilities. Success returns a historical birth receipt. Later reads and writes require fresh Mini admission.",
+            "inputSchema":{"type":"object","properties":{"family":{"type":"string","enum":families}},"required":["family"],"additionalProperties":false}}));
+    }
+    json!({"tools":tools})
 }
 
 fn call_controller_with_timeout(
@@ -244,14 +313,13 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
                 "capabilities":{"tools":{}},
                 "serverInfo":{"name":"mini-grain","version":"0.1.0"}}),
             "ping" => json!({}),
-            "tools/list" => json!({"tools":[
-                {"name":"mini_grain_status","description":"Read the signed Mini task resource",
-                 "inputSchema":{"type":"object","properties":{}}},
-                {"name":"mini_read_resource","description":"Read one operator-allowlisted Mini resource with signed delegated observe authority",
-                 "inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}},
-                {"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns the current signed tool grain view plus a publicationReceipt for this historical accepted transition (transaction/event IDs, accepted count, image boundary, target IDs). MCP delivery is not acknowledged; recovery may repeat the receipt. This does not prove current target content.",
-                 "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}
-            ]}),
+            "tools/list" => {
+                let catalog = call_controller(path, "__catalog", json!({}));
+                match catalog_birth_families(&catalog) {
+                    Ok(families) => tools_for_birth_families(&families),
+                    Err(reason) => json!({"tools":[],"catalogError":reason}),
+                }
+            }
             "tools/call" => {
                 let name = msg
                     .pointer("/params/name")
@@ -283,6 +351,50 @@ mod tests {
     static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
 
     #[test]
+    fn birth_catalog_is_operator_named_and_available_before_prompt() {
+        let (mut client, broker) = UnixStream::pair().unwrap();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let epoch = Arc::new(AtomicU64::new(0));
+        let worker = thread::spawn(move || {
+            serve_broker_connection(
+                broker,
+                tx,
+                epoch,
+                Duration::from_secs(1),
+                Arc::new(vec!["note".into()]),
+            );
+        });
+        writeln!(client, "{}", json!({"name":"__catalog","arguments":{}})).unwrap();
+        let mut reply = String::new();
+        io::BufReader::new(&client).read_line(&mut reply).unwrap();
+        worker.join().unwrap();
+        assert!(rx.try_recv().is_err());
+        let families = catalog_birth_families(&serde_json::from_str(&reply).unwrap()).unwrap();
+        let tools = tools_for_birth_families(&families);
+        let birth = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_create_resource")
+            .unwrap();
+        assert_eq!(
+            birth["inputSchema"]["properties"]["family"]["enum"],
+            json!(["note"])
+        );
+        assert_eq!(birth["inputSchema"]["additionalProperties"], false);
+        assert!(tools_for_birth_families(&[])["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "mini_create_resource"));
+        assert!(
+            catalog_birth_families(&json!({"type":"mini-grain-tool-catalog-v1",
+            "birthFamilies":["note","note"]}))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn broker_deadline_reports_unknown_delivery_without_claiming_settlement() {
         let (mut client, broker) = UnixStream::pair().unwrap();
         client
@@ -291,7 +403,13 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(1);
         let epoch = Arc::new(AtomicU64::new(1));
         let worker = thread::spawn(move || {
-            serve_broker_connection(broker, tx, epoch, Duration::from_millis(30));
+            serve_broker_connection(
+                broker,
+                tx,
+                epoch,
+                Duration::from_millis(30),
+                Arc::new(vec![]),
+            );
         });
         writeln!(client, "{}", json!({"name":"mini_publish","arguments":{}})).unwrap();
         let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();

@@ -519,8 +519,9 @@ pub(super) fn select_read<'a>(
 
 /// A born owner grant has observe and mutate verbs in the source factory law.
 /// These adapters only locate its recorded capability for an ordinary signed
-/// Mini query/publication. The caller must derive `born` from a verified,
-/// current-image composite receipt; neither adapter creates authority.
+/// Mini query/publication. The caller must derive `born` from a retained,
+/// verified historical birth receipt. Each subsequent Mini operation still
+/// checks the current signed grant and policy; neither adapter creates authority.
 pub(super) fn born_read(born: &BornResource) -> AllowedResourceRead {
     AllowedResourceRead {
         name: born.name.clone(),

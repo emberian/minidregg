@@ -15,6 +15,8 @@ use std::time::Duration;
 const MODEL: &str = "mini-hermes-protocol-fixture";
 const READ_ID: &str = "mini-fixture-read-1";
 const PUBLISH_ID: &str = "mini-fixture-publish-1";
+const BIRTH_ID: &str = "mini-fixture-birth-1";
+const BIRTH_NOTE: &str = "A newborn Mini note from the signed composite birth.";
 const CONTENT_ORIGINAL: &str = "Workroom research note: verify the source receipt before reuse.";
 const CONTENT_REVISED: &str = "Revised workroom note: Mini accepted the receipt; fn provenance remains a separate check.";
 const STALE_INTERVENING: &str = "Owner intervened after the tool's signed empty-room read.";
@@ -40,6 +42,7 @@ enum Mode {
     ContentPeerB,
     ContentReceipt8801,
     ContentStale8901,
+    ContentBirth9301,
 }
 
 fn decimal(value: &str) -> bool {
@@ -129,6 +132,151 @@ fn find_content_page(value: &Value, depth: usize) -> Option<Value> {
         Value::String(text) => nested_json(text).and_then(|nested| find_content_page(&nested, depth + 1)),
         _ => None,
     }
+}
+
+fn find_born_page(value: &Value, depth: usize) -> Option<Value> {
+    if depth > 12 {
+        return None;
+    }
+    if value.get("kind").and_then(Value::as_str) == Some("object")
+        && value.get("target").and_then(Value::as_str) == Some("9303")
+    {
+        let page = value.pointer("/view/page")?;
+        if page.get("document").and_then(Value::as_str) == Some("9303")
+            && page.get("root").and_then(Value::as_str).is_some_and(decimal)
+        {
+            return Some(page.clone());
+        }
+    }
+    match value {
+        Value::Array(items) => items.iter().find_map(|item| find_born_page(item, depth + 1)),
+        Value::Object(fields) => fields.values().find_map(|item| find_born_page(item, depth + 1)),
+        Value::String(text) => nested_json(text).and_then(|nested| find_born_page(&nested, depth + 1)),
+        _ => None,
+    }
+}
+
+fn has_born_receipt(value: &Value, depth: usize) -> bool {
+    if depth > 12 {
+        return false;
+    }
+    if value.get("type").and_then(Value::as_str) == Some("confirmed-mini-resource-birth-v1")
+        && value.get("scope").and_then(Value::as_str) == Some("historical-accepted-transition")
+        && value.get("name").and_then(Value::as_str) == Some("note-0")
+        && value.get("kind").and_then(Value::as_str) == Some("object")
+        && value.get("target").and_then(Value::as_str) == Some("9303")
+    {
+        let Some(receipt) = value.get("birthReceipt") else { return false; };
+        return ["operationId", "transactionId", "eventId", "acceptedCount", "imageBoundary"]
+            .iter()
+            .all(|field| receipt.get(*field).and_then(Value::as_str).is_some_and(decimal));
+    }
+    match value {
+        Value::Array(items) => items.iter().any(|item| has_born_receipt(item, depth + 1)),
+        Value::Object(fields) => fields.values().any(|item| has_born_receipt(item, depth + 1)),
+        Value::String(text) => nested_json(text).is_some_and(|nested| has_born_receipt(&nested, depth + 1)),
+        _ => false,
+    }
+}
+
+fn has_born_publication_receipt(value: &Value, depth: usize) -> bool {
+    if depth > 12 {
+        return false;
+    }
+    if value.pointer("/grain/task").and_then(Value::as_str) == Some("9302")
+        && value.pointer("/publicationReceipt/type").and_then(Value::as_str)
+            == Some("confirmed-mini-publication-v1")
+        && value.pointer("/publicationReceipt/scope").and_then(Value::as_str)
+            == Some("historical-accepted-transition")
+        && value.pointer("/publicationReceipt/publicationTargetIds") == Some(&json!(["9303"]))
+    {
+        return true;
+    }
+    match value {
+        Value::Array(items) => items.iter().any(|item| has_born_publication_receipt(item, depth + 1)),
+        Value::Object(fields) => fields.values().any(|item| has_born_publication_receipt(item, depth + 1)),
+        Value::String(text) => nested_json(text).is_some_and(|nested| has_born_publication_receipt(&nested, depth + 1)),
+        _ => false,
+    }
+}
+
+fn born_recovery_line(line: &str) -> bool {
+    let fields: Vec<_> = line.split(' ').collect();
+    fields.len() == 9
+        && matches!(fields[0], "originSession=current" | "originSession=prior")
+        && fields[1].strip_prefix("promptOperationId=").is_some_and(decimal)
+        && fields[2].strip_prefix("toolOperationId=").is_some_and(decimal)
+        && fields[3].strip_prefix("transactionId=").is_some_and(decimal)
+        && fields[4].strip_prefix("eventId=").is_some_and(decimal)
+        && fields[5].strip_prefix("acceptedCount=").is_some_and(decimal)
+        && fields[6].strip_prefix("imageBoundary=").is_some_and(decimal)
+        && fields[7] == "bornResourceName=note-0"
+        && fields[8] == "bornTargetId=9303"
+}
+
+fn birth_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
+    if request.get("model").and_then(Value::as_str) != Some(MODEL) {
+        return Err("unexpected model".into());
+    }
+    let messages = request.get("messages").and_then(Value::as_array).ok_or("messages absent")?;
+    let current_prompt = messages.iter().rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("current user prompt absent")?;
+    let prompt = messages[current_prompt].get("content").and_then(Value::as_str).ok_or("prompt text absent")?;
+    let (stage, recovery) = if let Some((stage, suffix)) = prompt.split_once("\n\n") {
+        let lines = suffix.strip_prefix(RECOVERY_HEADER).and_then(|tail| tail.strip_prefix('\n'))
+            .ok_or("unexpected text after birth prompt")?;
+        if !lines.lines().any(born_recovery_line) {
+            return Err("birth recovery receipt absent or malformed".into());
+        }
+        (stage, true)
+    } else { (prompt, false) };
+    if !matches!(stage, "birth-note-create" | "birth-note-resume") {
+        return Err("unexpected birth fixture prompt".into());
+    }
+    let current = &messages[current_prompt..];
+    if let Some(published) = tool_result(current, PUBLISH_ID) {
+        if tool_failed(published, 0) || !has_born_publication_receipt(published, 0) {
+            return Err("newborn publication has no exact signed receipt".into());
+        }
+        return Ok((json!({"role":"assistant","content":"Mini confirmed the newborn note publication. A fresh signed read is needed to establish its current content."}),
+            "stop", "born publication confirmed".into()));
+    }
+    if let Some(read) = tool_result(current, READ_ID) {
+        if tool_failed(read, 0) { return Err("newborn signed read failed".into()); }
+        let page = find_born_page(read, 0).ok_or("signed newborn page absent")?;
+        let root = page.get("root").and_then(Value::as_str).ok_or("newborn root absent")?;
+        let entries = page.get("entries").and_then(Value::as_array).ok_or("newborn entries absent")?;
+        if !entries.is_empty() {
+            if entries.iter().any(|entry| entry.get("payload").and_then(Value::as_str) == Some(hex_bytes(BIRTH_NOTE).as_str())) {
+                return Ok((json!({"role":"assistant","content":"A fresh signed Mini read found the newborn note; no second birth was issued."}),
+                    "stop", "born content already present".into()));
+            }
+            return Err("newborn content has unexpected entries".into());
+        }
+        let publish = tool_name(request, "__mini_publish").ok_or("mini_publish absent")?;
+        let args = json!({"publications":[{"kind":"object","target":"9303",
+            "expectedTargetRoot":root,"payload":{"type":"content","actions":[
+                {"type":"createAtom","atom":"9304","kind":{"type":"text"},
+                    "payload":hex_bytes(BIRTH_NOTE)}]}}]});
+        return Ok((json!({"role":"assistant","content":null,"tool_calls":[call(publish,PUBLISH_ID,args)]}),
+            "tool_calls", format!("born publish root={root}")));
+    }
+    if let Some(birth) = tool_result(current, BIRTH_ID) {
+        if tool_failed(birth, 0) || !has_born_receipt(birth, 0) {
+            return Err("resource birth has no exact signed receipt".into());
+        }
+    } else if stage == "birth-note-create" && !recovery {
+        let create = tool_name(request, "__mini_create_resource").ok_or("mini_create_resource absent")?;
+        return Ok((json!({"role":"assistant","content":null,
+            "tool_calls":[call(create,BIRTH_ID,json!({"family":"note"}))]}),
+            "tool_calls", "birth note family".into()));
+    } else if !recovery {
+        return Err("resume has no retained historical birth receipt".into());
+    }
+    let read = tool_name(request, "__mini_read_resource").ok_or("mini_read_resource absent")?;
+    Ok((json!({"role":"assistant","content":null,
+        "tool_calls":[call(read,READ_ID,json!({"name":"note-0"}))]}),
+        "tool_calls", "read newborn note".into()))
 }
 
 fn tool_failed(value: &Value, depth: usize) -> bool {
@@ -757,6 +905,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             (message, finish, stage)
         }),
         Mode::ContentStale8901 => stale_8901_reply_for(&request),
+        Mode::ContentBirth9301 => birth_reply_for(&request),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -817,6 +966,7 @@ fn main() -> Result<(), String> {
         Some("--content-peer-b") => Mode::ContentPeerB,
         Some("--content-receipt-8801") => Mode::ContentReceipt8801,
         Some("--content-stale-8901") => Mode::ContentStale8901,
+        Some("--content-birth-9301") => Mode::ContentBirth9301,
         Some(_) => return Err("unknown fixture mode".into()),
     };
     let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {
@@ -868,6 +1018,62 @@ mod tests {
             {"type":"function","function":{"name":"mcp__mini_grain__mini_read_resource"}},
             {"type":"function","function":{"name":"mcp__mini_grain__mini_publish"}}
         ]})
+    }
+
+    fn birth_request(messages: Value) -> Value {
+        let mut request = request(messages);
+        request["tools"].as_array_mut().unwrap().push(json!({
+            "type":"function","function":{"name":"mcp__mini_grain__mini_create_resource"}
+        }));
+        request
+    }
+
+    #[test]
+    fn birth_fixture_uses_only_named_family_then_signed_read_and_publish() {
+        let first = birth_reply_for(&birth_request(json!([
+            {"role":"user","content":"birth-note-create"}
+        ]))).unwrap();
+        assert_eq!(first.0["tool_calls"][0]["function"]["name"], "mcp__mini_grain__mini_create_resource");
+        assert_eq!(first.0["tool_calls"][0]["function"]["arguments"], "{\"family\":\"note\"}");
+
+        let receipt = json!({"type":"confirmed-mini-resource-birth-v1",
+            "scope":"historical-accepted-transition","name":"note-0","kind":"object",
+            "target":"9303","birthReceipt":{"operationId":"12","transactionId":"30",
+                "eventId":"31","acceptedCount":"32","imageBoundary":"33"}});
+        let after_birth = birth_reply_for(&birth_request(json!([
+            {"role":"user","content":"birth-note-create"},
+            {"role":"tool","tool_call_id":BIRTH_ID,"content":receipt.to_string()}
+        ]))).unwrap();
+        assert_eq!(after_birth.0["tool_calls"][0]["function"]["name"], "mcp__mini_grain__mini_read_resource");
+        assert_eq!(after_birth.0["tool_calls"][0]["function"]["arguments"], "{\"name\":\"note-0\"}");
+
+        let page = json!({"kind":"object","target":"9303","view":{"page":{
+            "document":"9303","root":"456","entries":[]}}});
+        let after_read = birth_reply_for(&birth_request(json!([
+            {"role":"user","content":"birth-note-create"},
+            {"role":"tool","tool_call_id":BIRTH_ID,"content":receipt.to_string()},
+            {"role":"tool","tool_call_id":READ_ID,"content":page.to_string()}
+        ]))).unwrap();
+        let args: Value = serde_json::from_str(after_read.0["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["publications"][0]["target"], "9303");
+        assert_eq!(args["publications"][0]["expectedTargetRoot"], "456");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["atom"], "9304");
+        assert_eq!(args["publications"][0]["payload"]["actions"][0]["payload"], hex_bytes(BIRTH_NOTE));
+
+        let resume = format!("birth-note-resume\n\n{RECOVERY_HEADER}\noriginSession=current promptOperationId=2 toolOperationId=12 transactionId=30 eventId=31 acceptedCount=32 imageBoundary=33 bornResourceName=note-0 bornTargetId=9303");
+        let resumed = birth_reply_for(&birth_request(json!([
+            {"role":"user","content":resume}
+        ]))).unwrap();
+        assert_eq!(resumed.0["tool_calls"][0]["function"]["name"], "mcp__mini_grain__mini_read_resource");
+        assert!(birth_reply_for(&birth_request(json!([
+            {"role":"user","content":"birth-note-resume"}
+        ]))).is_err());
+        let mut bad_receipt = receipt;
+        bad_receipt["birthReceipt"]["eventId"] = json!("not-decimal");
+        assert!(birth_reply_for(&birth_request(json!([
+            {"role":"user","content":"birth-note-create"},
+            {"role":"tool","tool_call_id":BIRTH_ID,"content":bad_receipt.to_string()}
+        ]))).is_err());
     }
 
     #[test]

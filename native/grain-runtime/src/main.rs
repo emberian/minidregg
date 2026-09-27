@@ -336,7 +336,9 @@ fn publication_receipt_json(record: &PublicationReceipt) -> Value {
 }
 
 fn birth_receipt_json(record: &BornResourceRecord) -> Value {
-    json!({"name":record.pending.born.name,"kind":record.pending.born.kind,
+    json!({"type":"confirmed-mini-resource-birth-v1",
+        "scope":"historical-accepted-transition",
+        "name":record.pending.born.name,"kind":record.pending.born.kind,
         "target":record.pending.born.target,
         "birthReceipt":{"operationId":record.pending.operation_id.to_string(),
         "transactionId":record.transaction_id,"eventId":record.event_id,
@@ -5430,6 +5432,16 @@ impl Runtime {
         let broker = mcp::start_broker(
             &broker_path,
             Duration::from_secs(spec.wall_time_seconds.unwrap_or(600)),
+            self.config
+                .tool_task
+                .as_ref()
+                .map(|tool| {
+                    tool.allowed_birth_families
+                        .iter()
+                        .map(|family| family.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
         )?;
         let broker_program = if spec.systemd_scope {
             PathBuf::from("/agent/grain-runtime")
