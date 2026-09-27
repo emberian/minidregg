@@ -15,6 +15,7 @@ reservation does not establish an implemented or accepted native path.
 | 14 | Source publication authorization | Reserved for source-side admission |
 | 15 | Application share issuance | Reserved for special issuance admission |
 | 16 | Application lifecycle current claim | Reserved for durable claim admission |
+| 17 | Selected fn poll coverage | Reserved for bounded local scan coverage tied to an admitted selected release; no remote completeness claim |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -39,6 +40,17 @@ retain its domain-separated canonical bytes and exact decoding checks.
 | 31 | Current-image application-session birth intent authoring (reserved; no commit) |
 | 32 | Current-image application share-issue signing plan (reserved; no commit) |
 | 33 | Application share-issue detached signature assembly (reserved; no commit) |
+| 34 | Fresh checked application dispatch (source route; native qualification pending) |
+| 35 | Historical dispatch receipt-only lookup (never a delivery permit) |
+| 36 | Application dispatch signing plan (reserved private authoring; no commit) |
+| 37 | Application dispatch detached signature assembly (reserved private authoring; no commit) |
+
+Selected fn coverage must bind the configured local consumer scope, prior ACK,
+bounded first-match scan, exact projected article and an originally admitted
+selected-release transaction. A transport cursor alone is not authority to
+advance Mini progress or install content. Coverage says what the pinned local
+consumer observed; it does not prove that a remote provider delivered every
+article. The precise signed carrier and native route remain under construction.
 
 Replay must decode the original ingress, admit it against its original verified
 prefix, and compare the entire derived intent, including writes, read guards,
