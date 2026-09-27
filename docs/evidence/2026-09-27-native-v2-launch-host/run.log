@@ -1,0 +1,54 @@
+successful-prefix reuse check PASS 278 compiled prefix modules
+lean[279/294] Kernel.ApplicationSpkLaunchDescriptor start
+lean[279/294] Kernel.ApplicationSpkLaunchDescriptor PASS 18s
+lean[280/294] Host.ApplicationSpkLaunchDescriptorAuthoring start
+lean[280/294] Host.ApplicationSpkLaunchDescriptorAuthoring PASS 9s
+lean[281/294] Host.Json start
+lean[281/294] Host.Json PASS 35s
+lean[282/294] Kernel.FnSelectiveReleaseArticle start
+lean[282/294] Kernel.FnSelectiveReleaseArticle PASS 10s
+lean[283/294] Host.FnSelectiveReleaseAuthoring start
+lean[283/294] Host.FnSelectiveReleaseAuthoring PASS 13s
+lean[284/294] Host.FnSelectiveReleaseSourceAuthoring start
+lean[284/294] Host.FnSelectiveReleaseSourceAuthoring PASS 13s
+lean[285/294] Host.FnSelectiveReleaseFnReceiving start
+lean[285/294] Host.FnSelectiveReleaseFnReceiving PASS 14s
+lean[286/294] Host.FnSelectiveReleaseFnAck start
+lean[286/294] Host.FnSelectiveReleaseFnAck PASS 9s
+lean[287/294] Host.ApplicationCurrentBirthAuthoring start
+lean[287/294] Host.ApplicationCurrentBirthAuthoring PASS 9s
+lean[288/294] Host.FnInboxView start
+lean[288/294] Host.FnInboxView PASS 12s
+lean[289/294] Host.GrainOriginSource start
+lean[289/294] Host.GrainOriginSource PASS 11s
+lean[290/294] Host.GrainOriginPreparation start
+lean[290/294] Host.GrainOriginPreparation PASS 13s
+lean[291/294] Host.GrainOriginCommand start
+lean[291/294] Host.GrainOriginCommand PASS 14s
+lean[292/294] Kernel.ProviderMetering start
+lean[292/294] Kernel.ProviderMetering PASS 10s
+lean[293/294] Host.ProviderUsage start
+lean[293/294] Host.ProviderUsage PASS 9s
+lean[294/294] Host.Main start
+lean[294/294] Host.Main PASS 45s
+end_utc=2026-09-27T13:30:56Z
+elapsed_seconds=750
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/tank/dregg-build/minidregg-v2-launch-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/hbox/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=16
+resumed_prefix_modules=278
+source_modules=294
+package_modules=2933
+response_objects=3227
+reusable_artifact_manifest_sha256=60f3ad01ad4ca956c6f55daa76aaf82df6fa631a57027bf8852a1511a67d93f5
+checkpointed_success=1
+successful_baseline=/tank/dregg-build/minidregg-55d3868-evidence/build-r8
+reused_success_prefix_modules=278
+recompiled_project_c_modules=16
+usage_exit=1
+binary=/tank/dregg-build/minidregg-v2-launch-evidence/minidregg-host-v2-launch-r1
+binary_sha256=4fba53294067013e3f32c012733375bcf51a8ef7895e996d2bdd605bc3c75506

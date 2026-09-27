@@ -1,0 +1,10 @@
+4fba53294067013e3f32c012733375bcf51a8ef7895e996d2bdd605bc3c75506  /tank/dregg-build/minidregg-v2-launch-evidence/minidregg-host-v2-launch-r1
+9bc91ea1dc2d0aafe58f019f9dca2f66b041a39b8096f08d20e17c32d8261d00  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/minidregg-host.rsp
+ae93a87b7e6e5908650a869d315eae7d053b6d2549a14000d32ea54cdf4e3b1b  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/transitive-imports.json
+60f3ad01ad4ca956c6f55daa76aaf82df6fa631a57027bf8852a1511a67d93f5  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/reusable-artifact-sha256.txt
+6c2130c5eabf32dec239d2631553bb3b523b6d238e1a312b1264cd491e84de47  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/resume-input-sha256.txt
+0f140eac3b07b9d26d0321d243499d8b57f6691ee6efb310ba4c56ba7dab95f0  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/resume-contract.txt
+73ec38e32574465ccf7386fbb64edcf13f38a0157fa06cfb84e1b1b555b824e5  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/source-input-sha256.txt
+463026fb9e722c00b23517caac06b4ec28d269e8ddd3c23512bb4b932c1b708d  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/toolchain-symlinks.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/package-symlinks-recursive.txt
+8a18e1658977adee14be8089d39ed8699422f6ef3d7d048cb974d0e17768de7e  /tank/dregg-build/minidregg-v2-launch-evidence/build-r1/success-checkpoint-sha256.txt

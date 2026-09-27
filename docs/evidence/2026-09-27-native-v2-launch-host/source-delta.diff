@@ -1,0 +1,13 @@
+--- docs/evidence/2026-09-27-native-55d3868-host/source-sha256.txt	2026-09-27 09:09:29
++++ docs/evidence/2026-09-27-native-v2-launch-host/source-sha256.txt	2026-09-27 09:32:46
+@@ -276,7 +276,9 @@
+ 8cc7a19c63b041c13164715c22e8ebd9bd94a10553c110b7ae043d526cf0053c  Kernel/ApplicationGrainSessionBirth.lean
+ 28e7435b69e6b09a322a14986df487397f72311575d44bcb56e535b9ea26bf18  Host/ApplicationShareIssueGrainInspection.lean
+ 32bc18ba7ea15fb9384761edba7d067216ee9d9761fdd286ef5998deace204f8  Host/ApplicationPermissionSchemaAuthoring.lean
+-e9bea5b5c942e467ee0be53273df092de9a8079a9c40f5703a83c0e25c816a30  Host/Json.lean
++fa25ebfa13ac9d64c4e95b9e679b0e15350854690e8ea9410f7bbfae2ebf1d4a  Kernel/ApplicationSpkLaunchDescriptor.lean
++8b18b03a9add550a28b1c521dbe08f9efd9f5d980404a2735df6c91fb0cc6e03  Host/ApplicationSpkLaunchDescriptorAuthoring.lean
++daef81cee11fac18001a46caafe8a932522353959894b59f2839e04180aa7038  Host/Json.lean
+ 6d6ed4e9449f300d2f5d7a471393c706e910dc8915fed31b3f88e9685cd1dde4  Kernel/FnSelectiveReleaseArticle.lean
+ 04fa421528cb56f643149114e2e81900e1f5764edf310064c942325bdfbf7257  Host/FnSelectiveReleaseAuthoring.lean
+ 6f07db7d818d38bb8e252951b62975e0ebfa20fbc462e2f2c5a84ff0df5d8933  Host/FnSelectiveReleaseSourceAuthoring.lean
