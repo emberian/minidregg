@@ -8,7 +8,7 @@ umask 077
 usage() {
   cat >&2 <<'EOF'
 usage: journey.sh status ROOT
-       journey.sh resume-base ROOT HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE
+       journey.sh resume-base ROOT ORIGINAL_HOST CONTINUATION_HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE
        journey.sh prepare-install ROOT QUALIFIED_HOST HOST_SHA256 OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL
        journey.sh install-prepare ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh install-complete ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
@@ -139,7 +139,7 @@ case "$ACTION" in
        note:"component receipts are not final browser/API or same-app content acceptance"}'
     ;;
   resume-base)
-    [ "$#" -eq 8 ] || usage
+    [ "$#" -eq 9 ] || usage
     [ ! -e "$HANDOFF" ] || fail "base already completed"
     /bin/sh "$HERE/resume-base.sh" "$ROOT" "$@"
     ;;

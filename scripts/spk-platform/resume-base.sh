@@ -6,12 +6,12 @@ set -eu
 umask 077
 
 usage() {
-  echo "usage: $0 ROOT HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE" >&2
+  echo "usage: $0 ROOT ORIGINAL_HOST CONTINUATION_HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE" >&2
   exit 2
 }
-[ "$#" -eq 9 ] || usage
-ROOT=$1 HOST=$2 MINI=$3 STORE_BINARY=$4 SIGNATURE_BINARY=$5 SPK_HOST=$6
-SUBMIT_RECEIPT=$7 LOOKUP_RECEIPT=$8 RUN_SOURCE=$9
+[ "$#" -eq 10 ] || usage
+ROOT=$1 ORIGINAL_HOST=$2 HOST=$3 MINI=$4 STORE_BINARY=$5 SIGNATURE_BINARY=$6 SPK_HOST=$7
+SUBMIT_RECEIPT=$8 LOOKUP_RECEIPT=$9 RUN_SOURCE=${10}
 fail() { echo "integrated base continuation: $*" >&2; exit 2; }
 sha() { sha256sum "$1" | cut -d ' ' -f 1; }
 absolute() {
@@ -36,11 +36,11 @@ protected_dir_chain() {
     directory=${directory%/*}; [ -n "$directory" ] || directory=/
   done
 }
-for path in "$ROOT" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+for path in "$ROOT" "$ORIGINAL_HOST" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
     "$SPK_HOST" "$SUBMIT_RECEIPT" "$LOOKUP_RECEIPT" "$RUN_SOURCE"; do absolute "$path"; done
 case "$ROOT" in /var/lib/minidregg/spk/fixtures/*) ;; *) fail "unexpected fixture root" ;; esac
 protected_dir_chain "$ROOT"
-for executable in "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" "$SPK_HOST"; do
+for executable in "$ORIGINAL_HOST" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" "$SPK_HOST"; do
   [ -x "$executable" ] && [ ! -L "$executable" ] || fail "pinned executable unavailable"
 done
 WORKROOM="$ROOT/base/workroom"
@@ -81,12 +81,14 @@ test "$(sha "$ATTEMPT/call.bin")" = \
   1ff9d4ad41644a376884d13a6092787a2ca6a2a7d99c30659263f04221d8bdb7 || fail "original birth call differs"
 test "$(sha "$ATTEMPT/config.json")" = \
   c2c79aa69f66ecc7922f69f620a9dd9ca24cfea25cd94282fcb1a40c2b8296b8 || fail "original Settings differ"
-jq -e --arg host "$HOST" --arg config "$ATTEMPT/config.json" '
+jq -e --arg host "$ORIGINAL_HOST" --arg config "$ATTEMPT/config.json" '
   .format == "minidregg-resource-client-attempt-v1" and
   .operation == "submit" and .host == $host and .config == $config' \
   "$ATTEMPT/attempt.json" >/dev/null || fail "retained operation identity differs"
-test "$(sha "$HOST")" = \
+test "$(sha "$ORIGINAL_HOST")" = \
   95cd66117983796e4887f03f3ddd25b048d70713fb56ae93c36dbbc379139285 || fail "original Host differs"
+test "$(sha "$HOST")" = \
+  2c28356f8c59dc5ec4d17c594ed718bca3f73f336790c8eb30bb395557f28bf7 || fail "reviewed continuation Host differs"
 test "$(sha "$MINI")" = \
   a339b384f9a6c15d9c3f64e5df243b230da7e5a50d0b252cafbbcd94ad8e47ee || fail "original Mini differs"
 test "$(sha "$SPK_HOST")" = \
@@ -122,13 +124,19 @@ if [ "$new_action" = true ]; then
 mkdir -m 700 "$ACTION" || fail "continuation already claimed"
 printf '%s\n' "$submit_fields" >"$ACTION/adopted-birth-receipt-fields.json"
 cp "$LOOKUP_RECEIPT" "$ACTION/adopted-birth-receipt.json"
+jq -n --arg originalHost "$ORIGINAL_HOST" --arg continuationHost "$HOST" \
+  --arg originalSha256 "$(sha "$ORIGINAL_HOST")" --arg continuationSha256 "$(sha "$HOST")" \
+  '{protocol:"mini-spk-gitweb-host-transition-v1",originalHost:$originalHost,
+    originalSha256:$originalSha256,continuationHost:$continuationHost,
+    continuationSha256:$continuationSha256}' >"$ACTION/host-transition.json"
 sync -f "$ACTION/adopted-birth-receipt-fields.json"
 sync -f "$ACTION/adopted-birth-receipt.json"
+sync -f "$ACTION/host-transition.json"
 sync -f "$ACTION"
 sync -f "$ROOT/continuations/gitweb-journey"
 sha256sum "$ATTEMPT/call.bin" "$ATTEMPT/config.json" "$SUBMIT_RECEIPT" \
   "$LOOKUP_RECEIPT" "$WORKROOM_SOURCE" "$APP_SOURCE" "$RUN_SOURCE" \
-  "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" "$SPK_HOST" \
+  "$ORIGINAL_HOST" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" "$SPK_HOST" \
   >"$ACTION/input-sha256.txt"
 
 # The generated scripts are a literal projection of the retained reviewed
@@ -209,10 +217,17 @@ else
   protected_dir_chain "$ACTION"
   private_file "$ACTION/adopted-birth-receipt-fields.json"
   private_file "$ACTION/adopted-birth-receipt.json"
+  private_file "$ACTION/host-transition.json"
   private_file "$ACTION/input-sha256.txt"
   private_file "$ACTION/generated-sha256.txt"
   [ "$(cat "$ACTION/adopted-birth-receipt-fields.json")" = "$lookup_fields" ] || fail "retained adopted receipt differs"
   [ "$(sha "$ACTION/adopted-birth-receipt.json")" = "$(sha "$LOOKUP_RECEIPT")" ] || fail "retained lookup bytes differ"
+  jq -e --arg originalHost "$ORIGINAL_HOST" --arg continuationHost "$HOST" \
+    --arg originalSha256 "$(sha "$ORIGINAL_HOST")" --arg continuationSha256 "$(sha "$HOST")" '
+    .protocol == "mini-spk-gitweb-host-transition-v1" and
+    .originalHost == $originalHost and .originalSha256 == $originalSha256 and
+    .continuationHost == $continuationHost and .continuationSha256 == $continuationSha256' \
+    "$ACTION/host-transition.json" >/dev/null || fail "retained Host transition differs"
   sha256sum -c "$ACTION/input-sha256.txt" >/dev/null || fail "retained action input pin differs"
   sha256sum -c "$ACTION/generated-sha256.txt" >/dev/null || fail "retained generated source differs"
 fi

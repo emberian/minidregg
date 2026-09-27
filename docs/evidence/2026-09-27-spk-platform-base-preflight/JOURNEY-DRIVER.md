@@ -24,10 +24,15 @@ Completed workroom/application/handoff phases can be resumed from their saved
 markers. A started phase without completion refuses an automatic rerun; an
 uncertain Mini attempt needs its own exact lookup/recovery review.
 
-The continuation pins the original Host SHA `95cd66117983796e4887f03f3ddd25b048d70713fb56ae93c36dbbc379139285`.
-If profiling yields an optimized successor, this script refuses it. A
-separate source-qualified profile/replay transition and review is required
-before using that successor on the retained Store.
+The continuation checks the original attempt against its original Host SHA
+`95cd66117983796e4887f03f3ddd25b048d70713fb56ae93c36dbbc379139285`.
+It separately allows only the reviewed successor SHA
+`2c28356f8c59dc5ec4d17c594ed718bca3f73f336790c8eb30bb395557f28bf7`
+for new work. Before any later native mutation, it durably records both paths
+and hashes in `host-transition.json` and pins both binaries in its input
+manifest. The copied-Store birth was confirmed installed at count 1 in
+418.68 seconds; the cold original-call lookup was still pending when this
+source cut was prepared. Neither observation is a live r3 receipt.
 
 The driver exposes only the currently sourced stage transitions:
 
@@ -67,7 +72,5 @@ action directory. This is a source and refusal gate, not successful same-Store
 base continuation or final hosted app acceptance.
 
 Root review tightened retained-file custody to reject group as well as world
-writes. This continuation pins the original Host2649 binary; a faster successor
-requires an explicit source-qualified same-Store compatibility transition before
-this script can use it. The original attempt's artifact identity must not be
-rewritten merely to pass the pin check.
+writes. The original attempt's artifact identity remains unchanged; the
+successor is a separate, explicit continuation binary selection.
