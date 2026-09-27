@@ -8,9 +8,12 @@ fee, current parent-generation witness, and owner/control grant creation.
 
 The script exact-hash guards `scripts/workroom/provision.sh` and makes a private
 copy with an independent grain-birth permission tariff and an installed factory
-law: owner 7 may use bare birth; worker 8 may birth only through the
-`birth/mode/grain-backed` projection. A worker bare-birth attempt must reach
-native admission and be refused. The original workroom provisioner creates an
+law: owner 7 may use bare birth; worker 8 may observe the factory with its
+observe grant and may birth only through the `birth/mode/grain-backed`
+projection. A worker bare-birth attempt must reach
+native admission and receive the exact policy rejection. A matching owner-7
+bare content birth must succeed under the same enabled profile. The original
+workroom provisioner creates an
 unrelated content object 8001; 8301 is absent until the composite receipt.
 
 Run only with a source-matched composite native Host and compatible Mini,

@@ -36,7 +36,7 @@ trap cleanup EXIT HUP INT TERM
 sed \
   -e 's|"signatureBinary":"$SIGNATURE_BINARY"}|"signatureBinary":"$SIGNATURE_BINARY","grainBirthTariff":{"base":2,"perBirth":1}}|' \
   -e 's|"birth":{"genesis":|"birth":{"grainBirthTariff":{"base":"2","perBirth":"1"},"genesis":|' \
-  -e 's|"factoryPredicate":{"type":"all","predicates":\[\]}|"factoryPredicate":{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}|' \
+  -e 's|"factoryPredicate":{"type":"all","predicates":\[\]}|"factoryPredicate":{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"1"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}|' \
   "$SOURCE" > "$STAGE/provision.sh"
 test "$(rg -c 'grainBirthTariff' "$STAGE/provision.sh")" = 2
 test "$(rg -c 'birth/mode/grain-backed' "$STAGE/provision.sh")" = 1
@@ -52,7 +52,9 @@ jq -e '.factoryPredicate == {type:"any",predicates:[
     {type:"eq",slot:"request/subject",value:"7"},
     {type:"all",predicates:[
       {type:"eq",slot:"request/subject",value:"8"},
-      {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}' \
+      {type:"any",predicates:[
+        {type:"eq",slot:"request/verb",value:"1"},
+        {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}]}' \
   "$EVIDENCE/genesis.json" >/dev/null
 jq -e '.birth.grainBirthTariff == {base:"2",perBirth:"1"} and
     ([.birth.resources[].target] | index("8301") | not)' \
@@ -121,6 +123,9 @@ jq -e '.page.grain.status == "3" and .page.grain.reserved == "4"' \
   "$EVIDENCE/tool-ready/view.json" >/dev/null
 jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
   "$EVIDENCE/parent-ready/view.json" >/dev/null
+jq -e --slurpfile parent "$EVIDENCE/parent-ready/challenge.json" \
+  '.height == $parent[0].height and .imageBoundary == $parent[0].imageBoundary' \
+  "$EVIDENCE/tool-ready/challenge.json" >/dev/null
 
 # New object 8301 is absent from genesis and from the earlier provisioner.
 # Its owner/control grants are allocated by the birth source, not by Rust.
@@ -131,7 +136,8 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
   '{subject:"8",nonce:"41000",
     grainBirth:{tariff:{base:"2",perBirth:"1"},authorityRoot:$challenge[0].signing[0].authorityRoot,
       birth:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
-        creator:"8",nonce:"41000",resources:[{kind:"object",storage:"content",
+        height:$challenge[0].height,creator:"8",nonce:"41000",
+        resources:[{kind:"object",storage:"content",
           target:"8301",owner:"8",ownerCapability:"85",controlCapability:"86",
           predicate:{type:"all",predicates:[]}}],
         sourceCapabilities:["42"],funding:[],feePayer:"8"},
@@ -164,8 +170,10 @@ jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
 # A same-profile owner-7 bare content birth is the positive factory-law
 # control. The only factory predicate alternative for worker 8 requires the
 # composite mode slot; both account predicates are the genesis's `all []`.
-jq '{subject:"7",nonce:"41500",
+jq --slurpfile observed "$EVIDENCE/tool-after/challenge.json" \
+  '{subject:"7",nonce:"41500",
     birth:(.grainBirth.birth | .creator="7" | .nonce="41500" |
+      .height=$observed[0].height |
       .grainBirthTariff={base:"2",perBirth:"1"} |
       .resources[0].target="8303" | .resources[0].owner="7" |
       .resources[0].ownerCapability="103" |
@@ -186,8 +194,10 @@ jq -e '.page.document == "8303" and .page.entries == []' \
 # The same worker's ordinary bare birth has valid source-account authority,
 # but the installed factory law has no grain-backed mode slot on that route.
 # Require the native birth admission refusal, not an arbitrary CLI failure.
-jq '{subject:"8",nonce:"42000",
+jq --slurpfile observed "$EVIDENCE/owner-bare-content/challenge.json" \
+  '{subject:"8",nonce:"42000",
     birth:(.grainBirth.birth | .nonce="42000" |
+      .height=$observed[0].height |
       .grainBirthTariff={base:"2",perBirth:"1"} |
       .resources[0].target="8302" |
       .resources[0].ownerCapability="87" |

@@ -910,9 +910,27 @@ private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) :
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
   else []
 
+private def birthRootCapability {kind : ResourceKind}
+    (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
+    (source : NativeHostGenesis.Config) (height : Nat)
+    (identifier : CapabilityId) (owner : SubjectId) (target : Nat)
+    (verbs : Finset (Verb kind)) : Capability kind :=
+  { NativeHostGenesis.rootCapability profile source kind identifier owner target verbs with
+    notBefore := height, notAfter := height + profile.template.lifetime }
+
+private theorem birthRootCapability_time_window {kind : ResourceKind}
+    (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
+    (source : NativeHostGenesis.Config) (height : Nat)
+    (identifier : CapabilityId) (owner : SubjectId) (target : Nat)
+    (verbs : Finset (Verb kind)) :
+    (birthRootCapability profile source height identifier owner target verbs).notBefore = height ∧
+    (birthRootCapability profile source height identifier owner target verbs).notAfter =
+      height + profile.template.lifetime := by
+  constructor <;> rfl
+
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
-    (source : NativeHostGenesis.Config) (json : Lean.Json) : Result BirthParts := do
+    (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -952,13 +970,13 @@ private def birthParts (path : String)
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner⟩
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
-    | .object => ⟨.object, ⟨NativeHostGenesis.rootCapability profile source .object
+    | .object => ⟨.object, ⟨birthRootCapability profile source height
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
-    | .account => ⟨.account, ⟨NativeHostGenesis.rootCapability profile source .account
+    | .account => ⟨.account, ⟨birthRootCapability profile source height
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account), []⟩⟩
-    | .program => ⟨.program, ⟨NativeHostGenesis.rootCapability profile source .program
+    | .program => ⟨.program, ⟨birthRootCapability profile source height
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program), []⟩⟩
-  let control : Capability .program := NativeHostGenesis.rootCapability profile source .program
+  let control : Capability .program := birthRootCapability profile source height
     controlId owner target {.installPolicy, .revokeCapability}
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,
     ⟨rule.policyId, PolicyRecordCodec.digest rule, PolicyRecordCodec.encode rule⟩⟩
@@ -971,7 +989,8 @@ private def birth (path : String) (json : Lean.Json)
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
-      if (raw.get? "grainBirthTariff").isSome then ["grainBirthTariff"] else []) json
+      (if (raw.get? "grainBirthTariff").isSome then ["grainBirthTariff"] else []) ++
+      (if (raw.get? "height").isSome then ["height"] else [])) json
   let suppliedTariff ← match obj.get? "grainBirthTariff" with
     | none => pure none
     | some encoded => do
@@ -989,6 +1008,9 @@ private def birth (path : String) (json : Lean.Json)
         throw s!"{path}.grainBirthTariff: differs from enclosing grain birth tariff"
   let grainBirthTariff := if grainBirthTariff.isSome then grainBirthTariff else suppliedTariff
   let source ← genesis (path ++ ".genesis") (← field path "genesis" obj)
+  let height ← match obj.get? "height" with
+    | none => pure source.genesisHeight
+    | some encoded => nat (path ++ ".height") encoded
   let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
     (← field path "template" obj)
   let template : CanonicalRuntimeProfile.FactoryTemplate :=
@@ -1007,7 +1029,7 @@ private def birth (path : String) (json : Lean.Json)
     throw s!"{path}.genesis.expectedSemantics: does not match the source-derived native profile"
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
-  let parts ← list (path ++ ".resources") (fun itemPath => birthParts itemPath profile source)
+  let parts ← list (path ++ ".resources") (fun itemPath => birthParts itemPath profile source height)
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
