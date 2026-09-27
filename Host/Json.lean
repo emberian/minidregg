@@ -968,8 +968,26 @@ absent roots, declared cells, owner/control grants, policy addresses, identity,
 nullifier and quoted fee are never supplied as JSON assertions. -/
 private def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none) : Result Draft := do
-  let obj ← exactObject path ["genesis", "template", "creator", "nonce", "resources",
-    "sourceCapabilities", "funding", "feePayer"] json
+  let raw ← object path json
+  let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
+    "sourceCapabilities", "funding", "feePayer"] ++
+      if (raw.get? "grainBirthTariff").isSome then ["grainBirthTariff"] else []) json
+  let suppliedTariff ← match obj.get? "grainBirthTariff" with
+    | none => pure none
+    | some encoded => do
+        let pin ← exactObject (path ++ ".grainBirthTariff") ["base", "perBirth"] encoded
+        let value : NativeHost.GrainBirthTariffPin :=
+          ⟨← nat (path ++ ".grainBirthTariff.base")
+              (← field (path ++ ".grainBirthTariff") "base" pin),
+            ← nat (path ++ ".grainBirthTariff.perBirth")
+              (← field (path ++ ".grainBirthTariff") "perBirth" pin)⟩
+        unless 0 < value.base do throw s!"{path}.grainBirthTariff.base: must be positive"
+        pure (some value)
+  if let some expected := grainBirthTariff then
+    if let some supplied := suppliedTariff then
+      unless supplied == expected do
+        throw s!"{path}.grainBirthTariff: differs from enclosing grain birth tariff"
+  let grainBirthTariff := if grainBirthTariff.isSome then grainBirthTariff else suppliedTariff
   let source ← genesis (path ++ ".genesis") (← field path "genesis" obj)
   let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
     (← field path "template" obj)
