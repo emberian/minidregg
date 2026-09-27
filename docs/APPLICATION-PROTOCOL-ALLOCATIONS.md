@@ -45,9 +45,10 @@ current app delegation law/capability. Tombstones, invalid edits, revoked delega
 must refuse. Current parent generation, reserved state, physical root and
 signed DRC witness remain per-dispatch fences, distinct from historical issue
 origin. Hard disconnect invalidates those in-flight witnesses without silently
-turning an old generation-bound ticket into a persistent grant. No new native
-opcode is allocated for this family yet; a host-side generation projection is
-not sufficient authority. Issuance signatures retain their exact historical
+turning an old generation-bound ticket into a persistent grant. Operations
+72–79 are reserved below; this allocation alone does not establish a native
+route. A host-side generation projection is not sufficient authority.
+Issuance signatures retain their exact historical
 authority root, registry commitment, app root and policy revision. Do not
 recheck an old signature as if signed for the current snapshot, waive those
 equalities, or require a new owner signature on every ordinary prompt. Current
@@ -129,6 +130,18 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 69 | Source-bound launch claim detached signature assembly (reserved operator-private authoring) |
 | 70 | Source-bound launch completion signing plan (reserved operator-private authoring) |
 | 71 | Source-bound launch completion detached signature assembly (reserved operator-private authoring) |
+| 72 | Event27 persistent agent grant submit (reserved private admission) |
+| 73 | Event27 historical grant receipt-only lookup (reserved private) |
+| 74 | Verified-current-image event27 grant signing plan (reserved private authoring) |
+| 75 | Event27 grant detached signature assembly (reserved private authoring) |
+| 76 | Fresh event26 grant-bound agent dispatch (reserved private admission) |
+| 77 | Event26 historical receipt-only lookup (reserved; never a delivery permit) |
+| 78 | Verified-current-image event26 grant-bound dispatch signing plan (reserved private authoring) |
+| 79 | Event26 grant-bound dispatch detached signature assembly (reserved private authoring) |
+
+The event26 authoring family may also need a distinct reserve plan and
+assembly pair. No opcode is allocated for that pair until its typed source API
+is reviewed; operations78/79 cover only the post-reserve dispatch plan.
 
 Events23–25 and operations66–71 are reserved for the source-bound first-create
 and continued-launch contract. They are not implemented by this reservation.
