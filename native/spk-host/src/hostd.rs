@@ -177,8 +177,14 @@ fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
         .spawn()?;
     let end = Instant::now() + deadline;
     loop {
-        if child.try_wait()?.is_some() {
-            return child.wait_with_output();
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output(),
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
         }
         if Instant::now() >= end {
             let _ = child.kill();
@@ -247,7 +253,8 @@ impl UnitInstance {
 
 /// Source of truth is an exact systemd manager and cgroup inspection. A unit
 /// omitted by `list-units`, a mismatched invocation or an unknown cgroup is
-/// never interpreted as empty. The production inspector is still pending.
+/// never interpreted as empty. The production inspector queries the manager
+/// and the previously pinned cgroup path; uncertainty retains Fenced.
 #[derive(Clone, Debug)]
 pub(crate) struct UnitStopAudit {
     unit: String,
@@ -638,6 +645,15 @@ impl Journal {
                 let record = self
                     .read()?
                     .ok_or_else(|| invalid("missing fenced record"))?;
+                // A prior stop may have succeeded just before the Stopped
+                // record fsync failed. Systemd then clears InvocationID. A
+                // complete exact post-stop audit permits this idempotent retry.
+                if UnitStopAudit::inspect(&record)
+                    .and_then(|audit| audit.prove(&record))
+                    .is_ok()
+                {
+                    return Ok(());
+                }
                 UnitStopAudit::before_stop(&record)?;
                 let output = bounded_systemctl(
                     &["--system", "stop", unit],
@@ -944,6 +960,16 @@ mod tests {
             .unwrap()
             .prove(&record)
             .unwrap();
+        // Simulate a crash after systemd stop but before Stopped fsync. The
+        // production retry must recognize the exact cleared manager/cgroup
+        // state and finish the durable tombstone without a second stop.
+        let path = Path::new("/run").join(format!("mini-spk-stop-audit-{}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        let journal = Journal::open(&path).unwrap();
+        journal.with_lock(|this| this.write_unlocked(&record)).unwrap();
+        journal.fence_and_stop_manager().unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
