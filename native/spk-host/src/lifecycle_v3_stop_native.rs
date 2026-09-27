@@ -4,13 +4,20 @@
 //! before/after audit and the fresh op26 STOP callback is joined by the caller.
 #![allow(dead_code)]
 
+use crate::dispatch_native::{private_dir, write_new};
 use crate::hostd::{Phase, Record};
 use crate::lifecycle_v3_native::{decimal, hex, lowercase_hex, unhex};
 use crate::volume_custody::VolumeWitness;
-use serde_json::Value;
-use std::io;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs::OpenOptions;
+use std::io::{self, Read};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 
 const MAX_INSPECTION: usize = 2 * 1024 * 1024;
+const MARKER_NAME: &str = "stop-fence-requested.json";
+const MAX_MARKER: u64 = 8192;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -61,6 +68,9 @@ pub(crate) struct StopTarget {
     volume_id_hex: String,
     custody: Vec<u8>,
     physical_witness: Vec<u8>,
+    plan_sha256: String,
+    claim_sha256: String,
+    begin_sha256: String,
 }
 
 #[derive(Clone, Copy)]
@@ -220,7 +230,84 @@ impl StopTarget {
             volume_id_hex,
             custody: bounded_hex(field(running, "custodyHex")?, 8192)?,
             physical_witness: bounded_hex(field(running, "physicalWitnessHex")?, 4096)?,
+            plan_sha256: hex(&Sha256::digest(retained_plan)),
+            claim_sha256: hex(&Sha256::digest(fresh_committed_frame)),
+            begin_sha256: hex(&Sha256::digest(original_begin)),
         })
+    }
+
+    fn marker_bytes(&self) -> io::Result<Vec<u8>> {
+        let bytes = serde_json::to_vec(&json!({
+            "protocol":"mini-spk-lifecycle-stop-fence-requested-v1",
+            "planSha256":self.plan_sha256,
+            "freshCommittedSha256":self.claim_sha256,
+            "originalBeginSha256":self.begin_sha256,
+            "runningIndex":self.running_index.to_string(),
+            "runningReceiptHex":self.running_receipt_hex,
+            "app":self.app.to_string(),
+            "operationGeneration":self.operation_generation.to_string(),
+            "runningGeneration":self.running_generation.to_string(),
+            "unitHex":hex(self.unit.as_bytes()),
+            "imageHex":self.image_hex,
+            "invocationIdHex":hex(self.invocation_id.as_bytes()),
+            "controlGroupHex":hex(self.control_group.as_bytes()),
+            "volumeIdHex":self.volume_id_hex,
+            "custodySha256":hex(&Sha256::digest(&self.custody)),
+            "physicalWitnessSha256":hex(&Sha256::digest(&self.physical_witness)),
+        }))?;
+        if bytes.is_empty() || bytes.len() as u64 > MAX_MARKER {
+            return Err(invalid("STOP marker exceeds recoverable bound"));
+        }
+        Ok(bytes)
+    }
+
+    /// This private marker is fsynced before any future manager fence. The
+    /// caller has to retain the exact source plan/claim/BEGIN artifacts too;
+    /// their SHA-256 values are pinned here for crash recovery.
+    fn persist_marker(&self, attempt_dir: &Path) -> io::Result<PathBuf> {
+        private_dir(attempt_dir)?;
+        write_new(attempt_dir, MARKER_NAME, &self.marker_bytes()?)
+    }
+
+    /// A recovered STOP may audit the same Fenced unit, never submit op26
+    /// again. The marker must match freshly re-inspected original bytes and
+    /// the same selected event25 receipt/incarnation.
+    fn check_marker(&self, attempt_dir: &Path) -> io::Result<()> {
+        private_dir(attempt_dir)?;
+        let expected = self.marker_bytes()?;
+        let path = attempt_dir.join(MARKER_NAME);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)?;
+        let before = file.metadata()?;
+        if !before.is_file()
+            || before.uid() != unsafe { libc::geteuid() }
+            || before.nlink() != 1
+            || before.permissions().mode() & 0o777 != 0o600
+            || before.len() == 0
+            || before.len() > MAX_MARKER
+        {
+            return Err(invalid("STOP marker file custody refused"));
+        }
+        let mut actual = Vec::with_capacity(before.len() as usize);
+        file.by_ref()
+            .take(MAX_MARKER + 1)
+            .read_to_end(&mut actual)?;
+        let after = file.metadata()?;
+        if actual != expected
+            || actual.len() as u64 != before.len()
+            || after.dev() != before.dev()
+            || after.ino() != before.ino()
+            || after.len() != before.len()
+            || after.mtime() != before.mtime()
+            || after.mtime_nsec() != before.mtime_nsec()
+            || after.ctime() != before.ctime()
+            || after.ctime_nsec() != before.ctime_nsec()
+        {
+            return Err(invalid("STOP retained marker differs from source attempt"));
+        }
+        Ok(())
     }
 
     fn compare_identity(&self, actual: RunningState<'_>) -> io::Result<()> {
@@ -278,6 +365,9 @@ impl StopTarget {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs::{self, DirBuilder};
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const LARGE_DIGEST: &str = "340282366920938463463374607431768211456";
 
@@ -351,6 +441,19 @@ mod tests {
         )
     }
 
+    fn private_attempt() -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mini-spk-stop-marker-{}-{stamp}",
+            std::process::id()
+        ));
+        DirBuilder::new().mode(0o700).create(&path).unwrap();
+        path
+    }
+
     #[test]
     fn stop_target_requires_exact_source_echoes_and_running_incarnation() {
         let plan = b"plan";
@@ -414,5 +517,37 @@ mod tests {
         view["plan"]["operationGeneration"] = json!("7");
         view["plan"]["running"]["receipt"]["transactionId"] = json!("01");
         assert!(checked(plan, committed, begin, &view).is_err());
+    }
+
+    #[test]
+    fn stop_target_marker_reopens_exactly_and_refuses_interrupted_write() {
+        let plan = b"plan";
+        let committed = b"fresh-claim";
+        let begin = b"original-begin";
+        let view = inspected(plan, committed, begin);
+        let target = checked(plan, committed, begin, &view).unwrap();
+        let directory = private_attempt();
+        let marker = target.persist_marker(&directory).unwrap();
+        target.check_marker(&directory).unwrap();
+        assert!(target.persist_marker(&directory).is_err());
+        let other = checked(
+            b"other-plan",
+            committed,
+            begin,
+            &inspected(b"other-plan", committed, begin),
+        )
+        .unwrap();
+        assert!(other.check_marker(&directory).is_err());
+        fs::remove_file(marker).unwrap();
+        fs::remove_dir(directory).unwrap();
+
+        let interrupted = private_attempt();
+        let partial = interrupted.join(MARKER_NAME);
+        fs::write(&partial, b"partial").unwrap();
+        fs::set_permissions(&partial, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(target.check_marker(&interrupted).is_err());
+        assert!(target.persist_marker(&interrupted).is_err());
+        fs::remove_file(partial).unwrap();
+        fs::remove_dir(interrupted).unwrap();
     }
 }

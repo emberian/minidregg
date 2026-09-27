@@ -1,9 +1,10 @@
    Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-stop-agent/native/spk-host)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.43s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.07s
 ────────────
- Nextest run ID 7bb9faa8-f803-42ce-b54e-bea966c636ec with nextest profile: default
-    Starting 2 tests across 7 binaries (146 tests skipped)
-        PASS [   0.010s] (1/2) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_rejects_inconsistent_receipt_or_generation
-        PASS [   0.010s] (2/2) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_requires_exact_source_echoes_and_running_incarnation
+ Nextest run ID f2f93f4c-4e36-4702-83ea-b989ecfd82fb with nextest profile: default
+    Starting 3 tests across 7 binaries (146 tests skipped)
+        PASS [   0.005s] (1/3) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_rejects_inconsistent_receipt_or_generation
+        PASS [   0.005s] (2/3) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_marker_reopens_exactly_and_refuses_interrupted_write
+        PASS [   0.005s] (3/3) minidregg-spk-host lifecycle_v3_stop_native::tests::stop_target_requires_exact_source_echoes_and_running_incarnation
 ────────────
-     Summary [   0.011s] 2 tests run: 2 passed, 146 skipped
+     Summary [   0.005s] 3 tests run: 3 passed, 146 skipped
