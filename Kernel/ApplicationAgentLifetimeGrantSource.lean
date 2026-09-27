@@ -45,6 +45,10 @@ def Spec.valid (spec : Spec) : Prop :=
   spec.grantOwnerCapability ≠ spec.grantControlCapability ∧
   spec.grantOwnerCapability ≠ spec.grant.approval.delegateCapability ∧
   spec.grantControlCapability ≠ spec.grant.approval.delegateCapability ∧
+  spec.grant.participant.grantObserveCapability ≠ spec.grantOwnerCapability ∧
+  spec.grant.participant.grantObserveCapability ≠ spec.grantControlCapability ∧
+  spec.grant.participant.grantObserveCapability ≠
+    spec.grant.approval.delegateCapability ∧
   spec.grant.approval.ceiling.valid = true
 
 instance (spec : Spec) : Decidable spec.valid := by
@@ -297,15 +301,26 @@ private def controlGrant {F : Type} [Field F]
       spec.grantControlCapability spec.grant.approval.issuer spec.grant.source.resource
       {.installPolicy, .revokeCapability}, []⟩⟩
 
+/-- A bounded current-read selector for the participant. It cannot mutate the
+grant content or manage policy. Event26 still checks its current signature,
+revocation, law, and exact physical content root. -/
+private def participantObserveGrant {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
+    (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.object, ⟨rootCapability .object profile authority height
+      spec.grant.participant.grantObserveCapability spec.grant.participant.subject
+      spec.grant.source.resource {.observeObject}, []⟩⟩
+
 def Ready.grants {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (authority : AuthState) (height : Nat) : List AuthorityGrant :=
-  [ownerGrant profile authority height spec, controlGrant profile authority height spec]
+  [ownerGrant profile authority height spec, controlGrant profile authority height spec,
+    participantObserveGrant profile authority height spec]
 
-theorem Ready.two_grants {F : Type} [Field F]
+theorem Ready.three_grants {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (authority : AuthState) (height : Nat) :
-    (ready.grants profile authority height).length = 2 := rfl
+    (ready.grants profile authority height).length = 3 := rfl
 
 /-- The initial policy permits observation but locks ordinary mutation of the
 signed grant atom. Future policy changes are not intrinsically revocations:
@@ -330,7 +345,7 @@ def Ready.initialPolicies {F : Type} [Field F]
     PolicyRecordCodec.encode record⟩]
 
 /-- The factory/Book descriptor is fixed by issuer, nonce, one empty content
-birth, two source-derived capabilities and the pinned final-payload tariff.
+birth, three source-derived capabilities and the pinned final-payload tariff.
 The later event27 admission must compare the complete decoded descriptor and
 install `initializedCell` only after the current app delegation check. -/
 def Ready.descriptor {F : Type} [Field F]

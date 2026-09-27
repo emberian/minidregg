@@ -54,6 +54,7 @@ structure Participant where
   subject : SubjectId
   parentTask : Nat
   originalGeneration : Int
+  grantObserveCapability : CapabilityId
   deriving DecidableEq
 
 def participantStream : StreamCodec Participant :=
@@ -62,11 +63,15 @@ def participantStream : StreamCodec Participant :=
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
           (StreamCodec.product StreamCodec.nat
-            DeclaredEffectPageMaterializer.intStream))))
+            (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+              CredentialAuthorityEntryCodec.capabilityIdStream)))))
     (fun participant => (participant.app, participant.session,
-      participant.subject, participant.parentTask, participant.originalGeneration))
-    (fun (app, session, subject, parentTask, originalGeneration) =>
-      ⟨app, session, subject, parentTask, originalGeneration⟩)
+      participant.subject, participant.parentTask, participant.originalGeneration,
+      participant.grantObserveCapability))
+    (fun (app, session, subject, parentTask, originalGeneration,
+          grantObserveCapability) =>
+      ⟨app, session, subject, parentTask, originalGeneration,
+        grantObserveCapability⟩)
     (by intro participant; cases participant; rfl)
 
 /-- The app delegate's selected capability needs historical admission at the
