@@ -413,6 +413,35 @@ def writes {F : Type} [Field F]
   birth.prepared.writes ++
     (List.finRange (source.grainCommand tariff).targets.length).map (targetWrite birth grain)
 
+/-- Every byte image in the coalesced birth-and-grain write set hashes to its
+exact planned post root. The grain target branch uses the existing packed-write
+constructor, while the birth branch retains its proved source lowering. -/
+theorem writes_roots_bound {F : Type} [Field F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source)
+    (grain : PreparedTargets deployment birth.prepared.pre.directory.directory
+      birth.prepared.pre.authority.snapshot profile.semantics ambient
+      (source.grainCommand tariff)) (write : DataWrite)
+    (member : write ∈ writes birth grain) :
+    rootBytes write.canonicalPostBytes = write.exactPost := by
+  rcases List.mem_append.mp member with birthWrite | target
+  · rcases List.mem_append.mp birthWrite with front | authority
+    · rcases List.mem_append.mp front with allocation | native
+      · obtain ⟨request, _, rfl⟩ := List.mem_map.mp allocation
+        exact ResourceBirthController.birthWrite_root_bound request
+      · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
+        rcases native with rfl | rfl <;> rfl
+    · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound
+        deployment.authorityAnchor durable.snapshot
+        birth.prepared.pre.authority.snapshot.catalogue
+        birth.prepared.authorityCombined.checked.postPages
+        birth.prepared.authorityCombined.physical.placement write authority
+  · obtain ⟨index, _, rfl⟩ := List.mem_map.mp target
+    rfl
+
 def targetSourceGuards {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
