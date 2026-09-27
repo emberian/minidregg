@@ -1,0 +1,4 @@
+data: {"id":"meter-fixture-1","object":"chat.completion.chunk","model":"mini-hermes-protocol-fixture","choices":[{"index":0,"finish_reason":"stop"}]}
+
+data: [DONE]
+
