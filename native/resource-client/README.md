@@ -155,6 +155,41 @@ transaction, event, accepted count and image boundary. Native receiving
 rechecks current authority and installed policy; a signed Plan alone is not
 an accepted share or a dispatch grant.
 
+Event21's independent purse reserve has a separate operator custody path.
+The controller allocates `reserveOperationId` and supplies a source JSON
+request containing the full canonical HTTP bytes and its configured purse,
+parent, ticket, and allowance selectors. The private Host checks those
+selectors against its startup pin before op58 releases a current-image Plan.
+The operator approval is an owner-private JSON object with type
+`minidregg-agent-reserve-approval-v1`, the exact `requestSha256` and
+`planSha256`, the complete `fixedSelectors` object from
+`plan-inspected.json`, and ordered `signers`. Each signer pins the slot's
+decimal `role`, `index`, `keyId`, `keyEpoch`, lowercase `publicKey`,
+`headerSha256`, and absolute owner-private `keyPath`. The controller must
+compare the source plan's context and intended request before issuing that
+approval; the resident app never receives the purse key.
+
+```sh
+mini agent-reserve-plan --host HOST --config PINNED-CONFIG.json \
+  --operator-socket /operator/private/host.sock \
+  --public-socket /private/host.sock --request SOURCE.json \
+  --dir /operator/private/reserve-attempt
+mini agent-reserve-seal --attempt /operator/private/reserve-attempt \
+  --approval /operator/private/reserve-approval.json
+mini agent-reserve-submit --attempt /operator/private/reserve-attempt
+mini agent-reserve-lookup --attempt /operator/private/reserve-attempt
+```
+
+The Plan and its inspection, source signature list, op59 frame, and exact
+canonical op2/op3 `call.bin` live in that single private attempt directory.
+The client signs only Host-selected headers matching the approval. It writes
+and syncs `submit-marker.json` before its **one** public op2. On a lost or
+refused reply, `agent-reserve-lookup` is the read-only exact op3 recovery;
+the command never resubmits. A confirmed result retains the native four-field
+receipt and decimal `reserveIndex = acceptedCount − 1` in `receipt.json`.
+Event21 still rechecks that admitted reserve and the current purse before any
+dispatch; this custody command grants no delivery permit.
+
 Selected public release uses a distinct Lean-authored canonical ingress and
 the same native receiver, through Host operations 20 and 21:
 

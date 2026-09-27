@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+────────────
+ Nextest run ID a6da57d4-5aff-4bf4-b96d-2cbb74fd90d3 with nextest profile: default
+    Starting 4 tests across 1 binary (74 tests skipped)
+        PASS [   0.009s] (1/4) minidregg-resource-client::bin/mini agent_reserve::tests::approval_requires_exact_plan_and_ordered_headers
+        PASS [   0.009s] (2/4) minidregg-resource-client::bin/mini agent_reserve::tests::confirmed_receipt_requires_all_four_canonical_fields
+        PASS [   0.074s] (3/4) minidregg-resource-client::bin/mini agent_reserve::tests::host_written_files_become_durable_owner_private_evidence
+        PASS [   0.887s] (4/4) minidregg-resource-client::bin/mini agent_reserve::tests::lost_op2_reply_keeps_one_shot_marker_and_exact_call
+────────────
+     Summary [   0.887s] 4 tests run: 4 passed, 74 skipped

@@ -12,6 +12,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+mod agent_reserve;
+#[cfg(unix)]
 mod current_birth;
 #[cfg(unix)]
 mod drain;
@@ -133,6 +135,10 @@ usage:
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
   mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-reserve-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --public-socket PUBLIC-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-reserve-submit --attempt PRIVATE-DIR
+  mini agent-reserve-lookup --attempt PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
@@ -2235,6 +2241,43 @@ fn run(mut args: Args) -> Result<()> {
                 .get()
                 .ok_or("current birth authoring requires --socket")?;
             current_birth::author(&host, &config, socket, &source, &directory, route)
+        }
+        #[cfg(unix)]
+        "agent-reserve-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let operator_socket = path(args.required("operator-socket")?);
+            let public_socket = path(args.required("public-socket")?);
+            let request = path(args.required("request")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            agent_reserve::plan(
+                &host,
+                &config,
+                &operator_socket,
+                &public_socket,
+                &request,
+                &directory,
+            )
+        }
+        #[cfg(unix)]
+        "agent-reserve-seal" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            agent_reserve::seal(&directory, &approval)
+        }
+        #[cfg(unix)]
+        "agent-reserve-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::submit(&directory)
+        }
+        #[cfg(unix)]
+        "agent-reserve-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::lookup(&directory)
         }
         #[cfg(unix)]
         "share-issue-prepare" => {
