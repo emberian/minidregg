@@ -33,6 +33,7 @@ import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
+import Host.ApplicationDispatchInspection
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
 import Host.FnSelectiveReleaseSourceAuthoring
@@ -242,6 +243,8 @@ def loadSettings (path : System.FilePath) : IO Settings := do
 native view bytes. Query authority remains with the signed native read. -/
 def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :=
   if kind == "fn-inbox-resource" then FnInboxView.render bytes
+  else if kind == "application-dispatch-committed" then
+    ApplicationDispatchInspection.inspect bytes
   else Minidregg.Host.Json.inspect kind bytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
@@ -688,6 +691,10 @@ def dispatchSession (config : NativeHost.Config)
   | _ => fnDispatch operation payload
 
 def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
+
+/-- Inspection repeats the exact frame and full request as hex. A hostd
+consumer must cap this JSON separately from the smaller binary input. -/
+def maxDispatchInspectionJsonBytes : Nat := 8 * maxFrame
 
 partial def readExactly (input : IO.FS.Stream) (count : Nat) (acc : ByteArray := ByteArray.empty) :
     IO ByteArray := do
@@ -3317,10 +3324,16 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
-          let bytes ← if kind == "fn-inbox-resource" then
+          let bytes ← if kind == "fn-inbox-resource" ||
+              kind == "application-dispatch-committed" then
               readBoundedBytes input maxFrame else readBytes input
           let value ← IO.ofExcept (inspectHost kind bytes)
-          writeJson output value
+          if kind == "application-dispatch-committed" then
+            let serialized := value.compress
+            unless serialized.toUTF8.size ≤ maxDispatchInspectionJsonBytes do
+              throw (IO.userError "application dispatch inspection exceeds JSON budget")
+            IO.FS.writeFile output serialized
+          else writeJson output value
           pure 0
       | "derive", [kind, input, output] =>
           let value ← IO.ofExcept (Minidregg.Host.Json.derive kind (← readJson input))
