@@ -1,0 +1,2 @@
+'_private._stdin.0.Minidregg.Kernel.ResourceBirthPolicyController.Concrete.directFinCases_eq' depends on axioms: [propext,
+ Quot.sound]

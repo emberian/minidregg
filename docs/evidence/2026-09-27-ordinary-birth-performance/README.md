@@ -1,0 +1,33 @@
+# Retained r3 workroom birth: measured bottleneck and repair
+
+The retained 212,637-byte first-workroom call is an **ordinary** resource birth (`DREGG/RESOURCE-BIRTH/SIGNED-INGRESS`), not a grain composite ingress. Its SHA-256 is `1ff9d4ad41644a376884d13a6092787a2ca6a2a7d99c30659263f04221d8bdb7`. The original certified Host2649 binary SHA-256 is `95cd66117983796e4887f03f3ddd25b048d70713fb56ae93c36dbbc379139285`. All measurements here used distinct private copies of the physical genesis SQLite Store, initially SHA-256 `8ce7e8e82cfd7b750bbfdebff10e477479212d253e2e02ae11f5117a183b4b29`. That physical file hash is distinct from the canonical read-to genesis image hash `6a3e5c8a128d5737c2165bdd94d5e8795553896219121029c66fbdb1bd752ef2`.
+
+The timing-only diagnostic sources were compiled in independent Persvati copies of certified 2649, with at most two Lean threads and two native C jobs. The deepest diagnostic built all 351 Lean modules, 213 affected modules in its suffix, and linked ELF SHA-256 `5ab3843202f2b78ccf6d5cf53440f330576ad51db6b6cebc6190d198abc64cef`. Its private copied-genesis call was stopped before CAS after 7:14.54 wall seconds (421.19 user CPU seconds), exit 143, with no outcome file and unchanged physical SQLite hash. The preceding three narrower diagnostic attempts were also stopped before CAS and retained the same physical genesis hash; their exits 143 do not constitute accepted or refused outcomes.
+
+Measured exact-call stages from the private diagnostic (nanosecond timer, reported here in seconds):
+
+| Stage | Time |
+| --- | ---: |
+| Native call decode | 0.023468 |
+| Open existing genesis Store | 0.247444 |
+| Composite discriminator | 0.000019, false |
+| Ordinary ingress decode | 0.084331 |
+| Historical replay lookup | 0.000011 |
+| Prepare birth | 0.434015 |
+| Prepare pending | 36.616526 |
+| Admit complete 69-branch bundle | 107.072908 |
+| Entire native admission | 144.123686 |
+
+Within those 69 branches, request construction summed to 27.179 seconds, native signatures 5.412 seconds, and branch policy checks 74.469 seconds. The remaining **post-admission** interval exceeded 270 seconds in the deep run before it was stopped. Two bounded root-GDB samples of that owned private PID found active worker frames in `ResourceBirthPolicyController.sequenceFin`'s nested `Fin.cases`/`Fin.induction_go` closures. A deeper stack reached `AcceptedBirth.sourceReadGuards` → `ResourceBirthReceiver.readGuards` → compiler-selected `ResourceBirthReceiver.materializedIntent` → ordinary `ResourceBirthReceiver.receiveLoaded` → `NativeHost.submitLoadedWith`. This rules out the textual `intent`/materialized-charge call site as an unaddressed compiler cutover: the compiled worker was already in `materializedIntent`.
+
+The clean repair in `Kernel/ResourceBirthPolicyController.lean` replaces only the result selector inside `sequenceFin` with a direct zero/predecessor finite-index selector. `directFinCases_eq` proves equality to `Fin.cases` for every length, dependent result family, head, and tail. No admission branch, credential, policy, request, or durable check changes. The final clean source SHA-256 is `92e28ed05a2de77a3ae70acb4beef956ff031ab479e97886e7c232b0ac6df9ff`; its source-matched direct Lean check passed with an empty log. A separate private `#print axioms directFinCases_eq` probe passed and reported only `propext` and `Quot.sound`.
+
+The source-matched native repair build (certified 2649 source plus only this clean repair) passed all 351 Lean modules and the affected native C/link and usage gates. Its ELF SHA-256 is `2c28356f8c59dc5ec4d17c594ed718bca3f73f336790c8eb30bb395557f28bf7`; the reusable build manifest SHA-256 is `4e180cf5eaca57e645efc4cdbfaff21e23b66be31fab5232e8e1f971720fde0a`. This is a private source-qualified experiment, not a claim about the later full Host cut or the live r3 Store.
+
+The same retained call, unchanged SHA-256 `1ff9d4ad41644a376884d13a6092787a2ca6a2a7d99c30659263f04221d8bdb7`, was submitted **once** against another private copy of the original physical genesis Store under a 900-second timeout. The repaired Host returned exit 0 after 6:58.68 wall seconds (386.65 user CPU seconds; maximum RSS 1,927,780 KiB) and a typed `confirmed/installed` outcome with accepted count 1. Its outcome bytes SHA-256 are `21672e21e1caa002ad76e906542de4b5c77eabd73e6587180c046eb823d31c88`. The copied physical Store then had SHA-256 `e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5`.
+
+A **separate cold Host process** reopened that accepted copied Store and performed only exact-call receipt lookup; it did not resubmit. Lookup exited 0 after 4:01.01 wall seconds (216.68 user CPU seconds; maximum RSS 1,935,112 KiB), returning `confirmed/replayed`, accepted count 1, and the same four receipt fields as the installed outcome: transaction ID `21452126580387832849295759345841801346003355297904064439953413667585429370297`, event ID `42274396663273669929974823207448344706044618477292890883734173696896699073815`, accepted count `1`, image boundary `14446137707838494980671458133208750893239572581456245670174131992965079679473`. Lookup bytes SHA-256 are `4beb5fe21c57769135e848dc90f524a49f094dd49dd9cb189544069eb95b94b3`. The physical Store SHA-256 remained `e5515e15…` across the read-only lookup. The original live r3 Store and retained call were not modified.
+
+A bounded GDB sample of the repaired private submit at about 4:40 wall time found an active worker in `CredentialSignatureIO.verify` under `Pending.admitBranchNative`. The old `Fin.induction_go` frame was absent in this sample. The earlier 144-second admission stage was measured in a timing-instrumented binary that could change evaluation/sharing; it is not a direct production-stage timing comparison. The original uninstrumented Host2649 call was killed after 663.66 seconds by the client pipeline's nominal 600-second socket deadline, without a receipt; the repaired private exact-call submit completed with an installed receipt in 418.68 seconds. This establishes a successful exact private run, not a controlled speedup ratio. Cold lookup took an additional 241.01 seconds and should not be counted as part of the fresh submit.
+
+The bounded raw artifacts under `raw/` contain diagnostic phase lines, exit/timing output, typed submit and lookup JSON, clean Lean and axiom reports, the repair build manifest and artifact hashes, and the sampled repaired-process stack excerpt. They omit the signed call, private config, keys, binaries, and Store. `SHA256SUMS` fixes the copied artifact bytes. The deep diagnostic GDB sample was observed interactively and its decisive frames are recorded above; its full debugger transcript was not retained as a standalone file.

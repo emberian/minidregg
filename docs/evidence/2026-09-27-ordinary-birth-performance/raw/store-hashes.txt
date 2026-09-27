@@ -1,0 +1,9 @@
+Original retained call.bin SHA-256: 1ff9d4ad41644a376884d13a6092787a2ca6a2a7d99c30659263f04221d8bdb7
+Original physical genesis forward-link.sqlite3 SHA-256: 8ce7e8e82cfd7b750bbfdebff10e477479212d253e2e02ae11f5117a183b4b29
+Original canonical read-to genesis image SHA-256: 6a3e5c8a128d5737c2165bdd94d5e8795553896219121029c66fbdb1bd752ef2
+Deep diagnostic copied physical Store after exit 143 SHA-256: 8ce7e8e82cfd7b750bbfdebff10e477479212d253e2e02ae11f5117a183b4b29
+Repaired private copied physical Store after confirmed/installed submit SHA-256: e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5
+Repaired private copied physical Store before read-only cold lookup SHA-256: e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5
+Repaired private copied physical Store after read-only cold lookup SHA-256: e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5
+Submit outcome.bin SHA-256: 21672e21e1caa002ad76e906542de4b5c77eabd73e6587180c046eb823d31c88
+Lookup lookup.bin SHA-256: 4beb5fe21c57769135e848dc90f524a49f094dd49dd9cb189544069eb95b94b3
