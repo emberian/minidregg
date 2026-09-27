@@ -5,14 +5,17 @@
 //! lifecycle receipts and caller HTTP headers cannot authorize calls here.
 #![allow(dead_code)] // Staged until Mini exposes a checked current-session projection.
 
+use crate::hostd::DispatchIdentity;
+use minidregg_spk_rpc::web_session_capnp;
 use minidregg_spk_rpc::{
     dispatch_web, SessionParameters, SupervisorConnection, ViewInfo, WebRequest, WebResponse,
 };
-use minidregg_spk_rpc::web_session_capnp;
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as sync_mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
@@ -21,6 +24,7 @@ use tokio::task::LocalSet;
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CALL_TIME: Duration = Duration::from_secs(30);
 const MAX_CACHED_SESSIONS: usize = 32;
+const CANCEL_ACK_GRACE: Duration = Duration::from_secs(2);
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -29,9 +33,18 @@ fn invalid(message: &'static str) -> io::Error {
 fn remaining(deadline: Instant) -> io::Result<Duration> {
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
-        Err(io::Error::new(io::ErrorKind::TimedOut, "SPK RPC operation deadline"))
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "SPK RPC operation deadline",
+        ))
     } else {
         Ok(left)
+    }
+}
+
+async fn wait_cancelled(cancelled: &AtomicBool) {
+    while !cancelled.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -108,7 +121,9 @@ fn cache_matches(cached: &CachedSession, binding: &SessionBinding) -> bool {
 }
 
 fn oldest_by_use<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Option<K> {
-    entries.min_by_key(|(_, last_use)| *last_use).map(|(key, _)| key)
+    entries
+        .min_by_key(|(_, last_use)| *last_use)
+        .map(|(key, _)| key)
 }
 
 enum Command {
@@ -121,6 +136,7 @@ enum Command {
         request: Box<WebRequest>,
         max_response_bytes: usize,
         deadline: Instant,
+        cancelled: Arc<AtomicBool>,
         reply: sync_mpsc::SyncSender<io::Result<WebResponse>>,
     },
     Stats {
@@ -134,9 +150,82 @@ pub(crate) struct RpcStats {
     pub cached_sessions: usize,
 }
 
+/// Physical command fence, not proof the app did not perform the operation.
+/// The private constructor binds one exact journal coordinate to either a
+/// proven absence from the worker queue or an acknowledged worker command
+/// completion. Failed commands evict their app-side session before the ACK;
+/// successful commands may retain it for another separately admitted request.
+pub(crate) struct DispatchFence {
+    identity: DispatchIdentity,
+    worker_released: bool,
+}
+
+impl DispatchFence {
+    pub(crate) fn matches_and_consume(self, expected: &DispatchIdentity) -> bool {
+        self.identity == *expected
+    }
+
+    pub(crate) fn worker_released(&self) -> bool {
+        self.worker_released
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_worker_released_for(identity: DispatchIdentity) -> Self {
+        Self {
+            identity,
+            worker_released: true,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_no_enqueue_for(identity: DispatchIdentity) -> Self {
+        Self {
+            identity,
+            worker_released: false,
+        }
+    }
+}
+
+pub(crate) struct CancellableFailure {
+    error: io::Error,
+    fence: Option<Box<DispatchFence>>,
+}
+
+impl CancellableFailure {
+    fn no_enqueue(error: io::Error, identity: DispatchIdentity) -> Self {
+        Self {
+            error,
+            fence: Some(Box::new(DispatchFence {
+                identity,
+                worker_released: false,
+            })),
+        }
+    }
+
+    fn released(error: io::Error, identity: DispatchIdentity) -> Self {
+        Self {
+            error,
+            fence: Some(Box::new(DispatchFence {
+                identity,
+                worker_released: true,
+            })),
+        }
+    }
+
+    fn unreleased(error: io::Error) -> Self {
+        Self { error, fence: None }
+    }
+
+    pub(crate) fn into_parts(self) -> (io::Error, Option<DispatchFence>) {
+        (self.error, self.fence.map(|fence| *fence))
+    }
+}
+
 /// One connected fd3 for one app generation. A dedicated LocalSet drives
 /// Cap'n Proto callbacks throughout its lifetime, including between calls.
-/// A timeout poisons the driver: an uncertain write is never resent.
+/// A call without a worker release ACK poisons the driver. A released failed
+/// call remains one-shot uncertain in its journal but does not block unrelated
+/// participants from this shared app process.
 pub(crate) struct RpcDriver {
     app: u64,
     generation: u64,
@@ -188,17 +277,33 @@ impl RpcDriver {
                                     let left = remaining(deadline)?;
                                     tokio::time::timeout(left, supervisor.get_view_info())
                                         .await
-                                        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK view-info timeout"))?
+                                        .map_err(|_| {
+                                            io::Error::new(
+                                                io::ErrorKind::TimedOut,
+                                                "SPK view-info timeout",
+                                            )
+                                        })?
                                         .map_err(io::Error::other)
                                 }
                                 .await;
                                 let _ = reply.send(result);
                             }
                             Command::Dispatch {
-                                binding, request, max_response_bytes, deadline, reply,
+                                binding,
+                                request,
+                                max_response_bytes,
+                                deadline,
+                                cancelled,
+                                reply,
                             } => {
+                                let key = binding.key();
                                 let result = async {
-                                    let key = binding.key();
+                                    if cancelled.load(Ordering::Acquire) {
+                                        return Err(io::Error::new(
+                                            io::ErrorKind::Interrupted,
+                                            "SPK caller disconnected before RPC",
+                                        ));
+                                    }
                                     if sessions
                                         .get(&key)
                                         .is_some_and(|cached| !cache_matches(cached, &binding))
@@ -213,43 +318,78 @@ impl RpcDriver {
                                         cached.client.clone()
                                     } else {
                                         let left = remaining(deadline)?;
-                                        let client = tokio::time::timeout(left, async {
-                                            match binding.kind {
-                                                SessionKind::Web => supervisor.new_web_session(&binding.params).await,
-                                                SessionKind::Api => supervisor.new_api_session(&binding.params).await,
-                                            }
-                                        })
-                                        .await
-                                        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK session timeout"))?
-                                        .map_err(io::Error::other)?;
+                                        let client = tokio::select! {
+                                            biased;
+                                            _ = wait_cancelled(&cancelled) => Err(io::Error::new(
+                                                io::ErrorKind::Interrupted,
+                                                "SPK caller disconnected during session setup")),
+                                            result = tokio::time::timeout(left, async {
+                                                match binding.kind {
+                                                    SessionKind::Web => {
+                                                        supervisor.new_web_session(&binding.params).await
+                                                    }
+                                                    SessionKind::Api => {
+                                                        supervisor.new_api_session(&binding.params).await
+                                                    }
+                                                }
+                                            }) => result.map_err(|_| {
+                                                io::Error::new(io::ErrorKind::TimedOut,
+                                                    "SPK session timeout")
+                                            })?.map_err(io::Error::other),
+                                        }?;
                                         if sessions.len() >= MAX_CACHED_SESSIONS {
                                             let old = oldest_by_use(
-                                                sessions.iter().map(|(key, cached)| (*key, cached.last_use))
+                                                sessions
+                                                    .iter()
+                                                    .map(|(key, cached)| (*key, cached.last_use)),
                                             )
-                                                .ok_or_else(|| invalid("SPK session cache drift"))?;
+                                            .ok_or_else(|| invalid("SPK session cache drift"))?;
                                             sessions.remove(&old);
                                         }
-                                        sessions.insert(key, CachedSession {
-                                            fingerprint: binding.projection_fingerprint,
-                                            params: binding.params.clone(),
-                                            client: client.clone(),
-                                            last_use: use_clock,
-                                        });
-                                        sessions_created = sessions_created.checked_add(1).ok_or_else(|| {
-                                            invalid("SPK session creation counter exhausted")
-                                        })?;
+                                        sessions.insert(
+                                            key,
+                                            CachedSession {
+                                                fingerprint: binding.projection_fingerprint,
+                                                params: binding.params.clone(),
+                                                client: client.clone(),
+                                                last_use: use_clock,
+                                            },
+                                        );
+                                        sessions_created =
+                                            sessions_created.checked_add(1).ok_or_else(|| {
+                                                invalid("SPK session creation counter exhausted")
+                                            })?;
                                         client
                                     };
+                                    if cancelled.load(Ordering::Acquire) {
+                                        return Err(io::Error::new(
+                                            io::ErrorKind::Interrupted,
+                                            "SPK caller disconnected before fd3 request",
+                                        ));
+                                    }
                                     let left = remaining(deadline)?;
-                                    tokio::time::timeout(
-                                        left,
-                                        dispatch_web(&session, &request, max_response_bytes, left),
-                                    )
-                                    .await
-                                    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK dispatch timeout"))?
-                                    .map_err(io::Error::other)
+                                    tokio::select! {
+                                        biased;
+                                        _ = wait_cancelled(&cancelled) => Err(io::Error::new(io::ErrorKind::Interrupted,
+                                            "SPK caller disconnected; effect uncertain")),
+                                        result = tokio::time::timeout(
+                                            left,
+                                            dispatch_web(&session, &request, max_response_bytes, left),
+                                        ) => result.map_err(|_| {
+                                            io::Error::new(io::ErrorKind::TimedOut,
+                                                "SPK dispatch timeout")
+                                        })?.map_err(io::Error::other),
+                                    }
                                 }
                                 .await;
+                                if result.is_err() {
+                                    // A failed request may already have reached the app.
+                                    // Retain its one-shot journal tombstone at the caller.
+                                    // Before acknowledging command release, evict only this
+                                    // app-side session; unrelated participants may continue
+                                    // after the caller's exact journal fence is released.
+                                    sessions.remove(&key);
+                                }
                                 let _ = reply.send(result);
                             }
                             Command::Stats { reply } => {
@@ -263,9 +403,17 @@ impl RpcDriver {
                 });
             })?;
         match ready_rx.recv_timeout(Duration::from_secs(2)) {
-            Ok(Ok(())) => Ok(Self { app, generation, sender, uncertain: false }),
+            Ok(Ok(())) => Ok(Self {
+                app,
+                generation,
+                sender,
+                uncertain: false,
+            }),
             Ok(Err(error)) => Err(io::Error::other(error)),
-            Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "SPK RPC worker initialization timeout")),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "SPK RPC worker initialization timeout",
+            )),
         }
     }
 
@@ -290,11 +438,17 @@ impl RpcDriver {
             }
             Err(sync_mpsc::RecvTimeoutError::Timeout) => {
                 self.uncertain = true;
-                Err(io::Error::new(io::ErrorKind::TimedOut, "SPK RPC result uncertain; no automatic resend"))
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "SPK RPC result uncertain; no automatic resend",
+                ))
             }
             Err(sync_mpsc::RecvTimeoutError::Disconnected) => {
                 self.uncertain = true;
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "SPK RPC worker exited"))
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "SPK RPC worker exited",
+                ))
             }
         }
     }
@@ -306,11 +460,75 @@ impl RpcDriver {
         Ok(Instant::now() + timeout)
     }
 
+    fn receive_cancellable(
+        &mut self,
+        reply: sync_mpsc::Receiver<io::Result<WebResponse>>,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+        identity: DispatchIdentity,
+    ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
+        let mut cancellation_deadline = None;
+        loop {
+            if cancelled.load(Ordering::Acquire) && cancellation_deadline.is_none() {
+                cancellation_deadline = Some(Instant::now() + CANCEL_ACK_GRACE);
+            }
+            let wait_until = cancellation_deadline.unwrap_or(deadline);
+            let left = wait_until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                self.uncertain = true;
+                let message = if cancellation_deadline.is_some() {
+                    "SPK caller canceled without worker release ACK"
+                } else {
+                    "SPK RPC deadline without worker release ACK"
+                };
+                return Err(CancellableFailure::unreleased(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    message,
+                )));
+            }
+            match reply.recv_timeout(left.min(Duration::from_millis(10))) {
+                Ok(result) => {
+                    if cancelled.load(Ordering::Acquire) {
+                        return Err(CancellableFailure::released(
+                            io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "SPK caller disconnected; app effect remains uncertain",
+                            ),
+                            identity,
+                        ));
+                    }
+                    return result
+                        .map(|response| {
+                            (
+                                response,
+                                DispatchFence {
+                                    identity: identity.clone(),
+                                    worker_released: true,
+                                },
+                            )
+                        })
+                        .map_err(|error| CancellableFailure::released(error, identity));
+                }
+                Err(sync_mpsc::RecvTimeoutError::Timeout) => {}
+                Err(sync_mpsc::RecvTimeoutError::Disconnected) => {
+                    self.uncertain = true;
+                    return Err(CancellableFailure::unreleased(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "SPK RPC worker exited without release ACK",
+                    )));
+                }
+            }
+        }
+    }
+
     pub(crate) fn get_view_info(&mut self, timeout: Duration) -> io::Result<ViewInfo> {
         let deadline = self.check_bound(timeout)?;
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
         self.sender
-            .try_send(Command::View { deadline, reply: reply_tx })
+            .try_send(Command::View {
+                deadline,
+                reply: reply_tx,
+            })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
         self.receive(reply_rx, deadline)
     }
@@ -325,6 +543,86 @@ impl RpcDriver {
         max_response_bytes: usize,
         timeout: Duration,
     ) -> io::Result<WebResponse> {
+        self.dispatch_inner(
+            binding,
+            request,
+            max_response_bytes,
+            timeout,
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+
+    /// One admitted caller whose hard EOF fences only its command and cached
+    /// app-side session. A release witness is returned only after the worker
+    /// has left that command; it says nothing about app-side effect rollback.
+    /// The durable operation marker remains one-shot on every uncertainty.
+    pub(crate) fn dispatch_cancellable(
+        &mut self,
+        binding: SessionBinding,
+        request: WebRequest,
+        max_response_bytes: usize,
+        timeout: Duration,
+        identity: DispatchIdentity,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(CancellableFailure::no_enqueue(
+                io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "SPK caller disconnected before queue",
+                ),
+                identity,
+            ));
+        }
+        let deadline = self
+            .check_bound(timeout)
+            .map_err(|error| CancellableFailure::no_enqueue(error, identity.clone()))?;
+        if binding.app != self.app
+            || binding.process_generation != self.generation
+            || binding.app != identity.app
+            || binding.process_generation != identity.app_generation
+            || binding.session_resource.to_string() != identity.session_resource
+            || max_response_bytes == 0
+            || max_response_bytes > MAX_RESPONSE_BYTES
+        {
+            return Err(CancellableFailure::no_enqueue(
+                invalid("SPK dispatch identity or response bound refused"),
+                identity,
+            ));
+        }
+        let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.sender
+            .try_send(Command::Dispatch {
+                binding: Box::new(binding),
+                request: Box::new(request),
+                max_response_bytes,
+                deadline,
+                cancelled: Arc::clone(&cancelled),
+                reply: reply_tx,
+            })
+            .map_err(|_| {
+                CancellableFailure::no_enqueue(
+                    invalid("SPK RPC worker queue unavailable"),
+                    identity.clone(),
+                )
+            })?;
+        self.receive_cancellable(reply_rx, deadline, &cancelled, identity)
+    }
+
+    fn dispatch_inner(
+        &mut self,
+        binding: SessionBinding,
+        request: WebRequest,
+        max_response_bytes: usize,
+        timeout: Duration,
+        cancelled: Arc<AtomicBool>,
+    ) -> io::Result<WebResponse> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "SPK caller disconnected before enqueue",
+            ));
+        }
         let deadline = self.check_bound(timeout)?;
         if binding.app != self.app
             || binding.process_generation != self.generation
@@ -336,8 +634,12 @@ impl RpcDriver {
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
         self.sender
             .try_send(Command::Dispatch {
-                binding: Box::new(binding), request: Box::new(request),
-                max_response_bytes, deadline, reply: reply_tx,
+                binding: Box::new(binding),
+                request: Box::new(request),
+                max_response_bytes,
+                deadline,
+                cancelled: Arc::clone(&cancelled),
+                reply: reply_tx,
             })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
         self.receive(reply_rx, deadline)
@@ -349,15 +651,30 @@ impl RpcDriver {
         self.sender
             .try_send(Command::Stats { reply: reply_tx })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
-        reply_rx.recv_timeout(Duration::from_secs(1)).map_err(|_| {
-            io::Error::new(io::ErrorKind::TimedOut, "SPK RPC stats unavailable")
-        })
+        reply_rx
+            .recv_timeout(Duration::from_secs(1))
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SPK RPC stats unavailable"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dispatch_identity() -> DispatchIdentity {
+        DispatchIdentity {
+            permit_sha256: "a".repeat(64),
+            request_digest: "1".into(),
+            app: 91,
+            app_generation: 2,
+            invocation_id: "b".repeat(32),
+            operation_id: "17".into(),
+            session_resource: "6208".into(),
+            session_generation: "1".into(),
+            dispatch_transaction: "18".into(),
+            dispatch_event: "19".into(),
+        }
+    }
 
     fn binding() -> SessionBinding {
         SessionBinding {
@@ -402,10 +719,13 @@ mod tests {
             &original.params,
             &changed_ticket
         ));
-        assert_ne!(original.key(), SessionKey {
-            generation: 3,
-            ..original.key()
-        });
+        assert_ne!(
+            original.key(),
+            SessionKey {
+                generation: 3,
+                ..original.key()
+            }
+        );
     }
 
     #[test]
@@ -422,18 +742,31 @@ mod tests {
         assert_eq!(zero.key().app, 0);
         // The disconnected bridge fails as transport, not because an
         // incidental fixture-era nonzero check rejected native Nat values.
-        assert!(driver.dispatch(zero, WebRequest {
-            method: minidregg_spk_rpc::Method::Get,
-            path_and_query: "".into(),
-            context: minidregg_spk_rpc::RequestContext::default(),
-            body: None,
-        }, 1, Duration::from_millis(100)).is_err());
+        assert!(driver
+            .dispatch(
+                zero,
+                WebRequest {
+                    method: minidregg_spk_rpc::Method::Get,
+                    path_and_query: "".into(),
+                    context: minidregg_spk_rpc::RequestContext::default(),
+                    body: None,
+                },
+                1,
+                Duration::from_millis(100)
+            )
+            .is_err());
     }
 
     #[test]
     fn bounded_cache_evicts_oldest_session_instead_of_exhausting() {
-        assert_eq!(oldest_by_use([(11, 3), (12, 1), (13, 2)].into_iter()), Some(12));
-        assert_eq!(oldest_by_use([(11, 3), (12, 4), (13, 2)].into_iter()), Some(13));
+        assert_eq!(
+            oldest_by_use([(11, 3), (12, 1), (13, 2)].into_iter()),
+            Some(12)
+        );
+        assert_eq!(
+            oldest_by_use([(11, 3), (12, 4), (13, 2)].into_iter()),
+            Some(13)
+        );
         assert_eq!(oldest_by_use(std::iter::empty::<(u64, u64)>()), None);
     }
 
@@ -456,5 +789,122 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(driver.uncertain);
         assert!(driver.get_view_info(Duration::from_secs(1)).is_err());
+    }
+
+    #[test]
+    fn caller_disconnect_abandons_only_its_wait_and_keeps_shared_driver_available() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        cancelled.store(true, Ordering::Release);
+        let before_send = driver.dispatch_cancellable(
+            binding(),
+            WebRequest {
+                method: minidregg_spk_rpc::Method::Get,
+                path_and_query: String::new(),
+                context: minidregg_spk_rpc::RequestContext::default(),
+                body: None,
+            },
+            1024,
+            Duration::from_secs(1),
+            dispatch_identity(),
+            Arc::clone(&cancelled),
+        );
+        let (error, fence) = before_send.err().unwrap().into_parts();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        let fence = fence.expect("proven no enqueue");
+        assert!(!fence.worker_released());
+        assert!(fence.matches_and_consume(&dispatch_identity()));
+        assert_eq!(driver.stats().unwrap().cached_sessions, 0);
+        cancelled.store(false, Ordering::Release);
+        let signal = Arc::clone(&cancelled);
+        let watcher = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(25));
+            signal.store(true, Ordering::Release);
+        });
+        let start = Instant::now();
+        let result = driver.dispatch_cancellable(
+            binding(),
+            WebRequest {
+                method: minidregg_spk_rpc::Method::Get,
+                path_and_query: "repo.git/info/refs".into(),
+                context: minidregg_spk_rpc::RequestContext::default(),
+                body: None,
+            },
+            1024,
+            Duration::from_secs(2),
+            dispatch_identity(),
+            cancelled,
+        );
+        watcher.join().unwrap();
+        let (error, fence) = result.err().unwrap().into_parts();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        let fence = fence.expect("worker release ACK");
+        assert!(fence.worker_released());
+        assert!(fence.matches_and_consume(&dispatch_identity()));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(!driver.uncertain);
+        assert_eq!(driver.stats().unwrap().cached_sessions, 0);
+    }
+
+    #[test]
+    fn missing_worker_ack_never_creates_release_witness() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let (_held_reply, receiver) = sync_mpsc::sync_channel(1);
+        let cancelled = AtomicBool::new(true);
+        let start = Instant::now();
+        let failure = driver
+            .receive_cancellable(
+                receiver,
+                Instant::now() + Duration::from_secs(30),
+                &cancelled,
+                dispatch_identity(),
+            )
+            .err()
+            .unwrap();
+        let (error, fence) = failure.into_parts();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(fence.is_none());
+        assert!(driver.uncertain);
+        assert!(start.elapsed() >= CANCEL_ACK_GRACE);
+        assert!(start.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn successful_worker_reply_carries_fence_for_later_format_failure() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let (sender, receiver) = sync_mpsc::sync_channel(1);
+        sender
+            .send(Ok(WebResponse {
+                result: minidregg_spk_rpc::WebResult::Content {
+                    status: 200,
+                    mime_type: "text/plain".into(),
+                    encoding: String::new(),
+                    language: String::new(),
+                    etag: None,
+                    body: b"ok".to_vec(),
+                    download_name: None,
+                },
+                headers: Vec::new(),
+                set_cookies: Vec::new(),
+            }))
+            .unwrap();
+        let (reply, fence) = driver
+            .receive_cancellable(
+                receiver,
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+                dispatch_identity(),
+            )
+            .ok()
+            .unwrap();
+        assert!(matches!(
+            reply.result,
+            minidregg_spk_rpc::WebResult::Content { status: 200, .. }
+        ));
+        assert!(fence.worker_released());
+        assert!(fence.matches_and_consume(&dispatch_identity()));
     }
 }

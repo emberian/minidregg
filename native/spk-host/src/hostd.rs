@@ -5,6 +5,7 @@
 //! receipt, exact event, and current pending query. In particular, a generic
 //! resource transaction or caller JSON is never enough to start an app.
 
+use crate::rpc_adapter::DispatchFence;
 use crate::sandbox::open_protected_directory;
 use crate::spawn_gate::{self, BoundedChild, SpawnSpec};
 use serde::{Deserialize, Serialize};
@@ -212,12 +213,13 @@ impl Record {
     }
 }
 
-/// Identity projected from one fresh Mini op34 committed permit and compared
-/// against the captured HTTP request. No public socket constructs this type.
+/// Inert coordinates projected from one fresh Mini op34 committed permit and
+/// compared against the captured HTTP request. Constructing this data grants
+/// no authority; no public socket constructs a journal dispatch from it.
 /// The permit bytes themselves remain in a separate private capture; this
 /// durable row records their SHA-256 and the exact request/process coordinate.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct DispatchIdentity {
+pub struct DispatchIdentity {
     pub permit_sha256: String,
     pub request_digest: String,
     pub app: u64,
@@ -1064,6 +1066,60 @@ impl Journal {
         })
     }
 
+    /// Release only the shared RPC slot after the worker has stopped holding
+    /// this exact command. The app-side effect is still uncertain: its
+    /// operation tombstone remains terminal and must never be dispatched
+    /// again. A missing/mismatched worker fence or a concurrently fenced app
+    /// keeps the global slot held for audit.
+    pub(crate) fn finish_dispatch_uncertain_released(
+        &self,
+        identity: &DispatchIdentity,
+        worker_fence: DispatchFence,
+    ) -> io::Result<()> {
+        identity.validate()?;
+        if !worker_fence.matches_and_consume(identity) {
+            return Err(invalid("RPC worker release identity drift"));
+        }
+        self.with_lock(|this| {
+            let mut record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing BEGIN"))?;
+            if record.phase != Phase::Running
+                || record.dispatch_in_flight.as_ref() != Some(identity)
+                || identity.app != record.identity.app
+                || identity.app_generation != record.identity.generation
+                || record.invocation_id.as_deref() != Some(identity.invocation_id.as_str())
+            {
+                return Err(invalid("RPC worker release app execution identity drift"));
+            }
+            if this.read_active_dispatch_unlocked()? != *identity {
+                return Err(invalid("RPC worker release active marker drift"));
+            }
+            this.verify_dispatch_permit_unlocked(identity)?;
+            match this.read_dispatch_unlocked(identity)?.phase {
+                DispatchPhase::DeliveryRequested => {
+                    this.write_dispatch_unlocked(
+                        &DispatchTombstone {
+                            version: VERSION,
+                            identity: identity.clone(),
+                            phase: DispatchPhase::Uncertain,
+                        },
+                        false,
+                    )?;
+                }
+                DispatchPhase::Uncertain => {}
+                DispatchPhase::Delivered => {
+                    return Err(invalid("delivered operation cannot release as uncertain"));
+                }
+            }
+            // Clearing the record before the active marker is deliberate.
+            // A crash at either step leaves the marker and blocks new work.
+            record.dispatch_in_flight = None;
+            this.write_unlocked(&record)?;
+            this.clear_active_dispatch_unlocked(identity)
+        })
+    }
+
     pub fn read(&self) -> io::Result<Option<Record>> {
         self.with_lock(Self::read_unlocked)
     }
@@ -1236,6 +1292,7 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use minidregg_spk_rpc::{Header, WebResponse, WebResult};
     use std::os::unix::fs::DirBuilderExt;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Barrier};
@@ -1406,6 +1463,235 @@ mod tests {
         );
         assert!(journal
             .request_dispatch(dispatch_identity('3'), committed_permit())
+            .is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn worker_release_keeps_uncertain_operation_terminal_but_allows_other_session() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('1');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        let released = DispatchFence::test_worker_released_for(cancelled.clone());
+        journal
+            .finish_dispatch_uncertain_released(&cancelled, released)
+            .unwrap();
+        assert_eq!(
+            journal.read_dispatch_unlocked(&cancelled).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(journal
+            .read()
+            .unwrap()
+            .unwrap()
+            .dispatch_in_flight
+            .is_none());
+        assert!(journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .is_err());
+
+        let mut other = dispatch_identity('2');
+        other.session_resource = "6209".into();
+        journal
+            .request_dispatch(other.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&other, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn proven_no_enqueue_releases_slot_without_rearming_operation() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('9');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        let no_enqueue = DispatchFence::test_no_enqueue_for(cancelled.clone());
+        journal
+            .finish_dispatch_uncertain_released(&cancelled, no_enqueue)
+            .unwrap();
+        assert_eq!(
+            journal.read_dispatch_unlocked(&cancelled).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        assert!(journal
+            .request_dispatch(cancelled, committed_permit())
+            .is_err());
+        let mut other = dispatch_identity('1');
+        other.session_resource = "6209".into();
+        journal
+            .request_dispatch(other.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&other, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn completed_worker_invalid_http_response_retains_uncertainty_and_frees_other_session() {
+        let (path, journal, _) = running_journal();
+        let first = dispatch_identity('2');
+        journal
+            .request_dispatch(first.clone(), committed_permit())
+            .unwrap();
+        // Component boundary: the worker completed, but the host must refuse
+        // this app-forged security header before returning a controller reply.
+        let response = WebResponse {
+            result: WebResult::Content {
+                status: 200,
+                mime_type: "text/plain".into(),
+                encoding: "".into(),
+                language: "".into(),
+                etag: None,
+                body: b"ok".to_vec(),
+                download_name: None,
+            },
+            headers: vec![Header {
+                name: "x-sandstorm-app-permissions".into(),
+                value: "write".into(),
+            }],
+            set_cookies: vec![],
+        };
+        assert!(crate::http_response::serialize(&response, false).is_err());
+        let released = DispatchFence::test_worker_released_for(first.clone());
+        journal
+            .finish_dispatch_uncertain_released(&first, released)
+            .unwrap();
+        assert_eq!(
+            journal.read_dispatch_unlocked(&first).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        let mut second = dispatch_identity('3');
+        second.session_resource = "6209".into();
+        journal
+            .request_dispatch(second.clone(), committed_permit())
+            .unwrap();
+        journal.finish_dispatch(&second, true).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn worker_release_rejects_wrong_identity_and_fenced_or_restarted_app() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('3');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        let other = dispatch_identity('4');
+        let wrong = DispatchFence::test_worker_released_for(other);
+        assert!(journal
+            .finish_dispatch_uncertain_released(&cancelled, wrong)
+            .is_err());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&cancelled).unwrap().phase,
+            DispatchPhase::DeliveryRequested
+        );
+        assert!(journal.active_dispatch_path().exists());
+
+        // A restart with only the durable tombstone is not a worker ACK.
+        drop(journal);
+        let reopened = Journal::open(&path).unwrap();
+        assert!(reopened
+            .request_dispatch(dispatch_identity('5'), committed_permit())
+            .is_err());
+        reopened.fence_and_stop(|_| Ok(()), stopped).unwrap();
+        let released = DispatchFence::test_worker_released_for(cancelled.clone());
+        assert!(reopened
+            .finish_dispatch_uncertain_released(&cancelled, released)
+            .is_err());
+        assert!(reopened.active_dispatch_path().exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn worker_release_after_uncertain_tombstone_can_finish_same_live_operation() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('6');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        assert!(journal.finish_dispatch(&cancelled, false).is_err());
+        assert_eq!(
+            journal.read_dispatch_unlocked(&cancelled).unwrap().phase,
+            DispatchPhase::Uncertain
+        );
+        let released = DispatchFence::test_worker_released_for(cancelled.clone());
+        journal
+            .finish_dispatch_uncertain_released(&cancelled, released)
+            .unwrap();
+        assert!(!journal.active_dispatch_path().exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn crash_between_record_clear_and_active_unlink_stays_fail_closed() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('7');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        assert!(journal.finish_dispatch(&cancelled, false).is_err());
+        journal
+            .with_lock(|this| {
+                let mut record = this.read_unlocked()?.unwrap();
+                record.dispatch_in_flight = None;
+                this.write_unlocked(&record)
+            })
+            .unwrap();
+        drop(journal);
+        let reopened = Journal::open(&path).unwrap();
+        assert!(reopened.active_dispatch_path().exists());
+        assert!(reopened
+            .request_dispatch(dispatch_identity('8'), committed_permit())
+            .is_err());
+        let released = DispatchFence::test_worker_released_for(cancelled.clone());
+        assert!(reopened
+            .finish_dispatch_uncertain_released(&cancelled, released)
+            .is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn concurrent_app_fence_serializes_with_exact_worker_release() {
+        let (path, journal, _) = running_journal();
+        let cancelled = dispatch_identity('4');
+        journal
+            .request_dispatch(cancelled.clone(), committed_permit())
+            .unwrap();
+        let release_journal = Journal::open(&path).unwrap();
+        let stop_journal = Journal::open(&path).unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+        let release_barrier = Arc::clone(&barrier);
+        let release_identity = cancelled.clone();
+        let release = thread::spawn(move || {
+            let witness = DispatchFence::test_worker_released_for(release_identity.clone());
+            release_barrier.wait();
+            release_journal
+                .finish_dispatch_uncertain_released(&release_identity, witness)
+                .is_ok()
+        });
+        let stop_barrier = Arc::clone(&barrier);
+        let stop = thread::spawn(move || {
+            stop_barrier.wait();
+            stop_journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
+        });
+        barrier.wait();
+        let released = release.join().unwrap();
+        stop.join().unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        assert_eq!(
+            journal.read_dispatch_unlocked(&cancelled).unwrap().phase,
+            if released {
+                DispatchPhase::Uncertain
+            } else {
+                DispatchPhase::DeliveryRequested
+            }
+        );
+        assert_eq!(journal.active_dispatch_path().exists(), !released);
+        assert!(journal
+            .request_dispatch(dispatch_identity('5'), committed_permit())
             .is_err());
         fs::remove_dir_all(path).unwrap();
     }

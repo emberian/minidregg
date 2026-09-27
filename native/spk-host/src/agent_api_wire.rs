@@ -12,6 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 pub(crate) const MAX_FRAME: usize = 262_144;
+pub(crate) const MAX_REPLY_FRAME: usize = 1_048_576;
 pub(crate) const MAX_BODY: usize = 65_536;
 const TRANSFER_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -68,6 +69,8 @@ pub(crate) enum Request {
     Inspect {
         protocol: String,
         operation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding_sha256: Option<String>,
     },
 }
 
@@ -111,8 +114,19 @@ impl Request {
         }
         match &request {
             Self::Hello { .. } => {}
-            Self::Inspect { operation_id, .. } => {
-                if !canonical_decimal(operation_id) {
+            Self::Inspect {
+                operation_id,
+                binding_sha256,
+                ..
+            } => {
+                if !canonical_decimal(operation_id)
+                    || binding_sha256.as_ref().is_some_and(|sha| {
+                        sha.len() != 64
+                            || !sha
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    })
+                {
                     return Err(refuse("agent API inspection operation ID refused"));
                 }
             }
@@ -170,8 +184,11 @@ pub(crate) struct FixedBinding {
     pub session_generation: String,
     pub subject: String,
     pub ticket: String,
-    pub dispatch_task: String,
-    pub dispatch_generation: String,
+    pub parent_task: String,
+    pub parent_generation: String,
+    pub purse_task: String,
+    pub purse_generation: String,
+    pub signed_api_path: String,
     pub host_unit: String,
     pub host_invocation: String,
 }
@@ -186,11 +203,18 @@ impl FixedBinding {
                 &self.session_generation,
                 &self.subject,
                 &self.ticket,
-                &self.dispatch_task,
-                &self.dispatch_generation,
+                &self.parent_task,
+                &self.parent_generation,
+                &self.purse_task,
+                &self.purse_generation,
             ]
             .iter()
             .all(|value| canonical_decimal(value))
+            || self.parent_task == self.purse_task
+            || !self.signed_api_path.starts_with('/')
+            || !self.signed_api_path.ends_with('/')
+            || self.signed_api_path.len() > 256
+            || !control_free(&self.signed_api_path)
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || !control_free(&self.host_unit)
@@ -221,7 +245,7 @@ impl FixedBinding {
 pub(crate) enum Reply {
     Binding {
         protocol: String,
-        binding: FixedBinding,
+        binding: Box<FixedBinding>,
         binding_sha256: String,
     },
     Http {
@@ -249,6 +273,12 @@ pub(crate) enum Reply {
         operation_id: String,
         binding_sha256: String,
         state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definite_reply_sha256: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definite_reply_json_hex: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retention_error: Option<String>,
     },
 }
 
@@ -296,7 +326,7 @@ fn read_exact_deadline(
 }
 
 pub(crate) fn write_frame(stream: &mut UnixStream, bytes: &[u8]) -> io::Result<()> {
-    if bytes.is_empty() || bytes.len() > MAX_FRAME {
+    if bytes.is_empty() || bytes.len() > MAX_REPLY_FRAME {
         return Err(refuse("agent API response bound refused"));
     }
     let deadline = Instant::now() + TRANSFER_DEADLINE;
@@ -327,6 +357,23 @@ pub(crate) fn write_frame(stream: &mut UnixStream, bytes: &[u8]) -> io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn historical_inspect_requires_exact_lowercase_binding_pin() {
+        let valid = format!(
+            "{{\"type\":\"inspect\",\"protocol\":\"mini-spk-agent-api-v1\",\
+             \"operation_id\":\"17\",\"binding_sha256\":\"{}\"}}",
+            "a".repeat(64)
+        );
+        assert!(matches!(
+            Request::parse(valid.as_bytes()),
+            Ok(Request::Inspect { binding_sha256: Some(pin), .. }) if pin == "a".repeat(64)
+        ));
+        for bad in ["A".repeat(64), "a".repeat(63), "g".repeat(64)] {
+            let changed = valid.replace(&"a".repeat(64), &bad);
+            assert!(Request::parse(changed.as_bytes()).is_err());
+        }
+    }
 
     #[test]
     fn fixed_agent_wire_refuses_caller_subject_headers_and_alias_ids() {
@@ -371,8 +418,11 @@ mod tests {
             session_generation: "1".into(),
             subject: "9".into(),
             ticket: "8501".into(),
-            dispatch_task: "8601".into(),
-            dispatch_generation: "3".into(),
+            parent_task: "8601".into(),
+            parent_generation: "3".into(),
+            purse_task: "8701".into(),
+            purse_generation: "4".into(),
+            signed_api_path: "/repo.git/".into(),
             host_unit: "mini-spk-a8401-g2.service".into(),
             host_invocation: "a".repeat(32),
         };
@@ -383,5 +433,17 @@ mod tests {
         changed = binding.clone();
         changed.host_invocation = "b".repeat(32);
         assert_ne!(first, changed.fingerprint().unwrap());
+        changed = binding.clone();
+        changed.parent_task = "8602".into();
+        assert_ne!(first, changed.fingerprint().unwrap());
+        changed = binding.clone();
+        changed.purse_task = "8702".into();
+        assert_ne!(first, changed.fingerprint().unwrap());
+        changed = binding.clone();
+        changed.signed_api_path = "/other.git/".into();
+        assert_ne!(first, changed.fingerprint().unwrap());
+        changed = binding.clone();
+        changed.purse_task = changed.parent_task.clone();
+        assert!(changed.validate().is_err());
     }
 }

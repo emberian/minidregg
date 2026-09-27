@@ -1,0 +1,117 @@
+Running as unit: mini-spk-resident-nextest-20260927-r12.service; invocation ID: 845a6e5c02384b85b9db8c989ccad7cc
+   Compiling minidregg-spk-host v0.1.0 (/tank/chreatures/mini-spk-resident-check-20260927/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.92s
+────────────
+ Nextest run ID f9b740a6-3772-47a4-b4f5-cee0c49b3598 with nextest profile: default
+    Starting 104 tests across 1 binary
+        PASS [   0.011s] (  1/104) minidregg-spk-host agent_api_native::tests::committed_agent_requires_exact_op46_and_distinct_tag
+        PASS [   0.010s] (  2/104) minidregg-spk-host agent_api_native::tests::committed_marker_clear_refuses_replaced_inode_with_same_bytes
+        PASS [   0.032s] (  3/104) minidregg-spk-host agent_api_custody::tests::controller_payer_signature_must_cover_exact_current_source_header
+        PASS [   0.012s] (  4/104) minidregg-spk-host agent_api_native::tests::lost_reserve_reply_uses_only_read_only_inspect_v2
+        PASS [   0.023s] (  5/104) minidregg-spk-host agent_api_native::tests::concrete_reverse_client_preserves_forward_and_paid_plan_identity
+        PASS [   0.009s] (  6/104) minidregg-spk-host agent_api_native::tests::saturated_reverse_listener_fails_before_send_without_waiting_for_deadline
+        PASS [   0.009s] (  7/104) minidregg-spk-host agent_api_server::tests::binary_git_reply_keeps_status_headers_and_body
+        PASS [   0.010s] (  8/104) minidregg-spk-host agent_api_server::tests::definite_recovery_requires_exact_saved_reply_digest_operation_and_binding
+        PASS [   0.017s] (  9/104) minidregg-spk-host agent_api_server::tests::distinct_controller_uid_gets_exact_traverse_and_socket_acl
+        PASS [   0.010s] ( 10/104) minidregg-spk-host agent_api_server::tests::event21_projection_requires_original_reserve_and_exact_request
+        PASS [   0.009s] ( 11/104) minidregg-spk-host agent_api_server::tests::inspect_observes_native_uncertainty_before_client_marker
+        PASS [   0.011s] ( 12/104) minidregg-spk-host agent_api_server::tests::listener_drops_only_the_socket_inode_it_bound
+        PASS [   0.009s] ( 13/104) minidregg-spk-host agent_api_server::tests::preflight_refuses_dangling_socket_symlink_before_one_shot_start
+        PASS [   0.011s] ( 14/104) minidregg-spk-host agent_api_wire::tests::binding_fingerprint_changes_with_session_and_invocation
+        PASS [   0.010s] ( 15/104) minidregg-spk-host agent_api_wire::tests::fixed_agent_wire_refuses_caller_subject_headers_and_alias_ids
+        PASS [   0.010s] ( 16/104) minidregg-spk-host agent_api_wire::tests::historical_inspect_requires_exact_lowercase_binding_pin
+        PASS [   0.010s] ( 17/104) minidregg-spk-host claim_descriptor::tests::signed_gitweb_bridge_projects_exact_ordered_schema_and_api_path
+        PASS [   0.012s] ( 18/104) minidregg-spk-host claim_descriptor::tests::start_identity_binds_exact_unit_raw_spk_digest_and_native_decimal_receipt
+        PASS [   0.010s] ( 19/104) minidregg-spk-host claim_native::tests::only_exact_op26_committed_v2_frame_classifies_as_launch_candidate
+        PASS [   0.010s] ( 20/104) minidregg-spk-host completion_native::tests::canonical_completion_ids_refuse_aliases
+        PASS [   0.011s] ( 21/104) minidregg-spk-host completion_native::tests::completion_plan_and_outcome_are_exact_private_opcodes
+        PASS [   0.010s] ( 22/104) minidregg-spk-host dispatch_author::tests::wrong_form_api_target_and_private_key_mode_refuse
+        PASS [   0.024s] ( 23/104) minidregg-spk-host dispatch_author::tests::signed_api_path_and_source_slot_are_exact
+        PASS [   0.012s] ( 24/104) minidregg-spk-host dispatch_inspection::tests::caller_drift_agent_origin_and_wrong_signed_prefix_refuse
+        PASS [   0.009s] ( 25/104) minidregg-spk-host dispatch_inspection::tests::decimal_digest_is_exact_little_endian_and_refuses_overflow
+        PASS [   0.009s] ( 26/104) minidregg-spk-host dispatch_inspection::tests::same_private_payload_and_signed_api_route_match_exact_http
+        PASS [   0.008s] ( 27/104) minidregg-spk-host dispatch_native::tests::native_submit_marker_is_create_new_and_blocks_a_second_attempt
+        PASS [   0.012s] ( 28/104) minidregg-spk-host dispatch_inspection::tests::signed_api_root_maps_to_canonical_relative_repo_root
+        PASS [   0.007s] ( 29/104) minidregg-spk-host dispatch_web_input::tests::app_cookie_and_session_parameter_wire_bounds_refuse_before_rpc
+        PASS [   0.014s] ( 30/104) minidregg-spk-host dispatch_native::tests::private_v2_operator_frame_pins_host_config_and_socket
+        PASS [   0.007s] ( 31/104) minidregg-spk-host dispatch_web_input::tests::empty_post_without_content_type_is_a_typed_body
+        PASS [   0.007s] ( 32/104) minidregg-spk-host dispatch_web_input::tests::signed_git_push_body_and_identity_reach_typed_api_session
+        PASS [   0.010s] ( 33/104) minidregg-spk-host dispatch_web_input::tests::ordinary_browser_headers_map_or_refuse_without_silent_drop
+        PASS [   0.009s] ( 34/104) minidregg-spk-host endpoint::tests::request_id_and_exact_protocol_are_strict
+        PASS [   0.010s] ( 35/104) minidregg-spk-host endpoint::tests::private_socket_refuses_second_instance_and_returns_exact_request_id
+        PASS [   0.011s] ( 36/104) minidregg-spk-host hostd::tests::changed_captured_permit_cannot_be_marked_delivered
+        PASS [   0.012s] ( 37/104) minidregg-spk-host hostd::tests::completed_worker_invalid_http_response_retains_uncertainty_and_frees_other_session
+        PASS [   0.010s] ( 38/104) minidregg-spk-host hostd::tests::crash_after_active_marker_fsync_blocks_new_dispatch
+        PASS [   0.012s] ( 39/104) minidregg-spk-host hostd::tests::concurrent_app_fence_serializes_with_exact_worker_release
+        PASS [   0.011s] ( 40/104) minidregg-spk-host hostd::tests::crash_between_record_clear_and_active_unlink_stays_fail_closed
+        PASS [   0.011s] ( 41/104) minidregg-spk-host hostd::tests::dispatch_delivered_is_one_shot_and_next_distinct_request_can_run
+        PASS [   0.009s] ( 42/104) minidregg-spk-host hostd::tests::dispatch_operation_ids_are_fsynced_and_never_reused_after_reopen
+        PASS [   0.009s] ( 43/104) minidregg-spk-host hostd::tests::dispatch_refuses_other_app_generation_or_unit_invocation_before_marker
+        PASS [   0.011s] ( 44/104) minidregg-spk-host hostd::tests::dispatch_refuses_wrong_permit_hash_without_marking_in_flight
+        PASS [   0.011s] ( 45/104) minidregg-spk-host hostd::tests::dispatch_tombstone_is_per_session_operation_not_http_digest
+        PASS [   0.011s] ( 46/104) minidregg-spk-host hostd::tests::duplicate_conflict_and_fence_are_durable
+        PASS [   0.010s] ( 47/104) minidregg-spk-host hostd::tests::fence_waits_for_spawn_linearization_then_stops_exact_unit
+        PASS [   0.009s] ( 48/104) minidregg-spk-host hostd::tests::installed_system_unit_stop_audit_probe
+        PASS [   0.012s] ( 49/104) minidregg-spk-host hostd::tests::hard_fence_between_rpc_send_and_reply_retains_uncertain_one_shot
+        PASS [   0.011s] ( 50/104) minidregg-spk-host hostd::tests::mismatched_or_missing_unit_audit_retains_fence
+        PASS [   0.011s] ( 51/104) minidregg-spk-host hostd::tests::proven_no_enqueue_releases_slot_without_rearming_operation
+        PASS [   0.009s] ( 52/104) minidregg-spk-host hostd::tests::running_fsync_failure_aborts_spawn_before_unlock
+        PASS [   0.008s] ( 53/104) minidregg-spk-host hostd::tests::source_digest_and_receipt_ids_are_canonical_decimal_nats
+        PASS [   0.008s] ( 54/104) minidregg-spk-host hostd::tests::unit_process_matches_manager_invocation_probe
+        PASS [   0.011s] ( 55/104) minidregg-spk-host hostd::tests::uncertain_start_and_stop_never_clear_tombstone_early
+        PASS [   0.010s] ( 56/104) minidregg-spk-host hostd::tests::worker_release_after_uncertain_tombstone_can_finish_same_live_operation
+        PASS [   0.010s] ( 57/104) minidregg-spk-host hostd::tests::worker_release_keeps_uncertain_operation_terminal_but_allows_other_session
+        PASS [   0.007s] ( 58/104) minidregg-spk-host http_entrance::tests::api_bearer_is_separate_and_security_headers_never_reach_app
+        PASS [   0.010s] ( 59/104) minidregg-spk-host hostd::tests::worker_release_rejects_wrong_identity_and_fenced_or_restarted_app
+        PASS [   0.008s] ( 60/104) minidregg-spk-host http_entrance::tests::browser_unsafe_requires_same_origin_and_strips_session_cookie
+        PASS [   0.009s] ( 61/104) minidregg-spk-host http_entrance::tests::auxiliary_poll_routes_two_agents_by_stable_index
+        PASS [   0.009s] ( 62/104) minidregg-spk-host http_entrance::tests::exact_owned_refused_socket_rebinds_after_stopped_listener
+        PASS [   0.009s] ( 63/104) minidregg-spk-host http_entrance::tests::direct_bookmark_navigation_is_safe_but_cross_site_and_unsafe_none_are_refused
+        PASS [   0.013s] ( 64/104) minidregg-spk-host http_entrance::tests::owner_private_socket_binds_one_fixed_custodian_and_refuses_second_instance
+        PASS [   0.011s] ( 65/104) minidregg-spk-host http_entrance::tests::private_bootstrap_sets_host_cookie_once_without_url_secret
+        PASS [   0.012s] ( 66/104) minidregg-spk-host http_entrance::tests::transport_deadline_and_unavailable_response_do_not_deliver_app_call
+        PASS [   0.043s] ( 67/104) minidregg-spk-host http_entrance::tests::incomplete_http_frame_expires_on_one_absolute_deadline
+        PASS [   0.009s] ( 68/104) minidregg-spk-host http_entrance::tests::two_private_poll_channels_report_only_the_ready_participant
+        PASS [   0.010s] ( 69/104) minidregg-spk-host http_response::tests::aggregate_response_headers_fit_private_tls_proxy
+        PASS [   0.009s] ( 70/104) minidregg-spk-host http_response::tests::app_cannot_replace_transport_cookie_or_forge_security_header
+        PASS [   0.008s] ( 71/104) minidregg-spk-host http_response::tests::git_smart_http_preserves_binary_body_and_head_suppresses_it
+        PASS [   0.010s] ( 72/104) minidregg-spk-host http_response::tests::app_cookie_absolute_expiry_path_and_octet_rules
+        PASS [   0.010s] ( 73/104) minidregg-spk-host http_response::tests::not_modified_omits_body_and_length
+        PASS [   0.010s] ( 74/104) minidregg-spk-host http_response::tests::no_content_has_no_length_and_ordinary_download_name_is_encoded
+        PASS [   0.010s] ( 75/104) minidregg-spk-host install_service::tests::private_tmp_sources_cannot_enter_bounded_install_unit
+        PASS [   0.010s] ( 76/104) minidregg-spk-host http_response::tests::redirect_refuses_cross_origin_and_header_injection
+        PASS [   0.010s] ( 77/104) minidregg-spk-host install_service::tests::stale_install_artifact_refuses_before_any_native_or_image_work
+        PASS [   0.010s] ( 78/104) minidregg-spk-host materialize::tests::rejects_archive_escape_and_mountpoint_substitution
+        PASS [   0.011s] ( 79/104) minidregg-spk-host native_dispatch::tests::exact_op34_payload_is_preserved_without_semantic_authority
+        PASS [   0.013s] ( 80/104) minidregg-spk-host resident_begin_native::tests::concurrent_allocations_keep_distinct_durable_ids
+        PASS [   0.025s] ( 81/104) minidregg-spk-host native_dispatch::tests::candidate_lookup_trailing_and_truncated_frames_refuse
+        PASS [   0.009s] ( 82/104) minidregg-spk-host resident_begin_native::tests::only_exact_begin_opcode_and_canonical_numbers_pass
+        PASS [   0.009s] ( 83/104) minidregg-spk-host resident_begin_native::tests::interrupted_ledger_creation_or_append_refuses_reuse
+        PASS [   0.009s] ( 84/104) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+        PASS [   0.010s] ( 85/104) minidregg-spk-host resident_begin_native::tests::original_history_index_is_confirmed_begin_count_minus_one
+        PASS [   0.008s] ( 86/104) minidregg-spk-host resident_service::tests::distinct_agent_uids_need_disjoint_socket_parent_acl_scopes
+        PASS [   0.008s] ( 87/104) minidregg-spk-host resident_service::tests::parsed_api_root_and_discovery_keep_one_canonical_prefix
+        PASS [   0.007s] ( 88/104) minidregg-spk-host rpc_adapter::tests::bounded_cache_evicts_oldest_session_instead_of_exhausting
+        PASS [   0.009s] ( 89/104) minidregg-spk-host resident_service::tests::resident_config_refuses_two_agent_sockets_under_one_acl_parent
+        PASS [   0.009s] ( 90/104) minidregg-spk-host rpc_adapter::tests::disconnected_fd3_has_no_view_or_dispatch_authority
+        PASS [   0.045s] ( 91/104) minidregg-spk-host rpc_adapter::tests::caller_disconnect_abandons_only_its_wait_and_keeps_shared_driver_available
+        PASS [   0.009s] ( 92/104) minidregg-spk-host rpc_adapter::tests::session_reuse_requires_current_projection_and_full_parameter_match
+        PASS [   0.061s] ( 93/104) minidregg-spk-host rpc_adapter::tests::stalled_fd3_times_out_and_poisoned_driver_cannot_resend
+        PASS [   0.009s] ( 94/104) minidregg-spk-host rpc_adapter::tests::successful_worker_reply_carries_fence_for_later_format_failure
+        PASS [   0.008s] ( 95/104) minidregg-spk-host rpc_adapter::tests::zero_coordinates_are_source_domain_values_not_local_authority_tests
+        PASS [   0.009s] ( 96/104) minidregg-spk-host sandbox::tests::denies_symlinked_or_world_writable_ancestor
+        PASS [   0.007s] ( 97/104) minidregg-spk-host sandbox::tests::rejects_ambiguous_or_unusable_command
+        PASS [   0.006s] ( 98/104) minidregg-spk-host sandbox::tests::shared_bwrap_args_preserve_ordered_package_environment_and_fd_mounts
+        PASS [   1.013s] ( 99/104) minidregg-spk-host spawn_gate::tests::bounded_exec_of_pinned_harmless_elf_reaps
+        PASS [   2.012s] (100/104) minidregg-spk-host rpc_adapter::tests::missing_worker_ack_never_creates_release_witness
+        PASS [   0.018s] (101/104) minidregg-spk-host spawn_gate::tests::preexec_death_can_close_handshake_without_readiness
+        PASS [   0.015s] (102/104) minidregg-spk-host spawn_gate::tests::rejects_unpinned_or_ambient_launch
+        PASS [   0.013s] (103/104) minidregg-spk-host spawn_gate::tests::root_gate_drops_to_unprivileged_uid_before_exec
+        PASS [  10.023s] (104/104) minidregg-spk-host spawn_gate::tests::hung_preexec_is_killed_at_handshake_deadline
+────────────
+     Summary [  11.699s] 104 tests run: 104 passed, 0 skipped
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 17.635s
+CPU time consumed: 6.576s
+Memory peak: 791.4M (swap: 0B)

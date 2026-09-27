@@ -641,16 +641,18 @@ impl PrivateHttpEntrance {
     /// One resident process owns one fd3 RpcDriver and a bounded collection
     /// of separately fixed participant origins. Native admission remains a
     /// per-request duty of the callback; an entrance never supplies authority.
-    pub(crate) fn serve_many(
+    /// Poll an optional private auxiliary socket in the same MainPID as all
+    /// human entrances. Its callback must consume at most one ready request;
+    /// it shares the caller's single fd3 owner and cannot introduce a second
+    /// app process or RPC driver.
+    pub(crate) fn serve_many_with_aux(
         entrances: &[Self],
+        auxiliary_fds: &[libc::c_int],
         mut dispatch: impl FnMut(
-            usize,
-            ReceivedRequest,
-            EntranceKind,
-            &CustodianPolicy,
-        ) -> io::Result<Vec<u8>>,
+            Result<(usize, ReceivedRequest, EntranceKind, &CustodianPolicy), usize>,
+        ) -> io::Result<Option<Vec<u8>>>,
     ) -> io::Result<()> {
-        if entrances.is_empty() || entrances.len() > 8 {
+        if entrances.is_empty() || entrances.len() > 8 || auxiliary_fds.len() > 8 {
             return Err(refuse("resident entrance count refused"));
         }
         for (index, entrance) in entrances.iter().enumerate() {
@@ -673,6 +675,16 @@ impl PrivateHttpEntrance {
                 revents: 0,
             })
             .collect();
+        for fd in auxiliary_fds {
+            if *fd < 0 || polls.iter().any(|poll| poll.fd == *fd) {
+                return Err(refuse("resident auxiliary fd refused"));
+            }
+            polls.push(libc::pollfd {
+                fd: *fd,
+                events: libc::POLLIN,
+                revents: 0,
+            });
+        }
         loop {
             for poll in &mut polls {
                 poll.revents = 0;
@@ -680,7 +692,15 @@ impl PrivateHttpEntrance {
             if !poll_entrances(&mut polls, -1)? {
                 continue;
             }
-            for (index, poll) in polls.iter().enumerate() {
+            for (index, auxiliary) in polls.iter().skip(entrances.len()).enumerate() {
+                if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                    return Err(refuse("resident auxiliary poll error"));
+                }
+                if auxiliary.revents & libc::POLLIN != 0 {
+                    let _ = dispatch(Err(index))?;
+                }
+            }
+            for (index, poll) in polls.iter().take(entrances.len()).enumerate() {
                 if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     return Err(refuse("resident entrance poll error"));
                 }
@@ -694,7 +714,10 @@ impl PrivateHttpEntrance {
                         stream,
                         &entrance.policy,
                         entrance.socket.parent(),
-                        &mut |request, kind, policy| dispatch(index, request, kind, policy),
+                        &mut |request, kind, policy| {
+                            dispatch(Ok((index, request, kind, policy)))?
+                                .ok_or_else(|| refuse("resident HTTP response absent"))
+                        },
                     );
                 }
             }
@@ -1013,6 +1036,60 @@ mod tests {
         assert_ne!(polls[0].revents & libc::POLLIN, 0);
         assert_eq!(polls[1].revents & libc::POLLIN, 0);
         a.read_exact(&mut consumed).unwrap();
+    }
+
+    #[test]
+    fn auxiliary_poll_routes_two_agents_by_stable_index() {
+        let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            Path::new(&runtime).join(format!("mini-spk-multipoll-{}-{nonce}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let socket = directory.join("http.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let metadata = fs::symlink_metadata(&socket).unwrap();
+        let entrance = PrivateHttpEntrance {
+            listener,
+            socket,
+            socket_dev: metadata.dev(),
+            socket_ino: metadata.ino(),
+            _lock: File::create(directory.join(".lock")).unwrap(),
+            policy: policy(),
+        };
+        let (agent_a, mut writer_a) = UnixStream::pair().unwrap();
+        let (agent_b, mut writer_b) = UnixStream::pair().unwrap();
+        let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut agents = [agent_a, agent_b];
+            let fds = [agents[0].as_raw_fd(), agents[1].as_raw_fd()];
+            let mut count = 0;
+            let result = PrivateHttpEntrance::serve_many_with_aux(&[entrance], &fds, |event| {
+                let index = event.err().ok_or_else(|| refuse("unexpected human poll"))?;
+                let mut byte = [0u8; 1];
+                agents[index].read_exact(&mut byte)?;
+                seen_tx.send(index).unwrap();
+                count += 1;
+                if count == 2 {
+                    Err(refuse("poll fixture complete"))
+                } else {
+                    Ok(None)
+                }
+            });
+            assert!(result.is_err());
+        });
+        writer_b.write_all(b"b").unwrap();
+        assert_eq!(seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(), 1);
+        writer_a.write_all(b"a").unwrap();
+        assert_eq!(seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(), 0);
+        worker.join().unwrap();
+        fs::remove_file(directory.join(".lock")).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     fn policy() -> CustodianPolicy {

@@ -1,14 +1,18 @@
 //! One operator-owned systemd MainPID holds the verified app and its fd3 RPC.
-//! This fresh-start path deliberately has no claim retry or image installation.
-//! Install completion, stopped wake and native physical completion remain
-//! separate qualified lifecycle operations.
+//! START consumes current-image BEGIN/claim plans once, launches the one fd3
+//! owner, and opens HTTP only after fresh native physical completion. INSTALL
+//! materialization and stopped wake remain separate lifecycle operations.
 #![allow(dead_code)] // Enabled only after root reviews the exact native cut.
 
+use crate::agent_api_custody::AgentCustody;
+use crate::agent_api_native::ReverseCustodyClient;
+use crate::agent_api_server::{AgentApiListener, ResidentAgent};
 use crate::claim_native::{match_signed_package, submit_once};
 use crate::completion_native::{
     assemble_current_completion, preflight_custodian, prepare_running_report,
     submit_completion_once, FixedCompletionSigners,
 };
+use crate::descriptor_native::author_signed_package;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_delivery::ResidentHuman;
 use crate::dispatch_inspection::{HttpProjection, Route};
@@ -16,6 +20,9 @@ use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::hostd::Journal;
 use crate::http_entrance::{CustodianPolicy, EntranceKind, PrivateHttpEntrance, ReceivedRequest};
 use crate::materialize::verify_installed_spk;
+use crate::resident_begin_native::{
+    assemble_current_claim, submit_once as submit_begin_once, FixedBeginSigners, FixedClaimSigners,
+};
 use crate::resident_launch::PreparedResident;
 use crate::sandbox::{open_protected_directory, SandboxSpec};
 use serde::Deserialize;
@@ -26,7 +33,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MAX_CONFIG: u64 = 16 * 1024;
-const MAX_INGRESS: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -71,6 +77,19 @@ struct FixedEntranceConfig {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FixedAgentConfig {
+    socket: PathBuf,
+    controller_uid: u32,
+    custody: PathBuf,
+    reverse_socket: PathBuf,
+    route_name: String,
+    attempt_dir: PathBuf,
+    display_name: String,
+    preferred_handle: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
     protocol: String,
     journal_dir: PathBuf,
@@ -88,8 +107,13 @@ struct ResidentConfig {
     mini_config: PathBuf,
     mini_config_sha256: String,
     mini_operator_socket: PathBuf,
-    begin_ingress: PathBuf,
-    claim_ingress: PathBuf,
+    begin_management_custody: PathBuf,
+    claim_management_custody: PathBuf,
+    begin_operation_ledger: PathBuf,
+    claim_nonce_ledger: PathBuf,
+    descriptor_attempt_dir: PathBuf,
+    begin_attempt_dir: PathBuf,
+    claim_author_attempt_dir: PathBuf,
     claim_attempt_dir: PathBuf,
     completion_attempt_dir: PathBuf,
     completion_sign_attempt_dir: PathBuf,
@@ -98,6 +122,8 @@ struct ResidentConfig {
     completion_management_custody: PathBuf,
     completion_semantics: String,
     entrances: Vec<FixedEntranceConfig>,
+    #[serde(default)]
+    agents: Vec<FixedAgentConfig>,
 }
 
 fn hex64(value: &str) -> bool {
@@ -107,13 +133,40 @@ fn hex64(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn agent_socket_parent_overlap(earlier: &[FixedAgentConfig], socket: &Path) -> bool {
+    let Some(parent) = socket.parent() else {
+        return true;
+    };
+    earlier.iter().any(|prior| {
+        let Some(prior_parent) = prior.socket.parent() else {
+            return true;
+        };
+        parent.starts_with(prior_parent) || prior_parent.starts_with(parent)
+    })
+}
+
+fn require_source_bound_start_action() -> io::Result<()> {
+    // BEGIN-v2/CLAIM-v2 identifies the signed package, but does not select
+    // its first-create action versus continue for a retained grain volume.
+    // Keep this physical entry closed until a versioned Mini claim binds the
+    // exact signed command and volume identity. An operator config or /var
+    // contents must not supply that authority.
+    Err(invalid("source-bound START action selection unavailable"))
+}
+
 impl ResidentConfig {
     fn load(path: &Path) -> io::Result<Self> {
         let bytes = private_file(path, MAX_CONFIG)?;
         let config: Self = serde_json::from_slice(&bytes)?;
-        if config.protocol != "mini-spk-resident-start-v2"
+        if config.protocol != "mini-spk-resident-start-v3"
             || path.parent() != Some(config.journal_dir.as_path())
+            || config.descriptor_attempt_dir.parent() != Some(config.journal_dir.as_path())
+            || config.begin_attempt_dir.parent() != Some(config.journal_dir.as_path())
+            || config.claim_author_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.claim_attempt_dir.parent() != Some(config.journal_dir.as_path())
+            || config.begin_operation_ledger.parent() != Some(config.journal_dir.as_path())
+            || config.claim_nonce_ledger.parent() != Some(config.journal_dir.as_path())
+            || config.begin_operation_ledger == config.claim_nonce_ledger
             || config.completion_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_sign_attempt_dir.parent() != Some(config.journal_dir.as_path())
             || config.completion_submit_attempt_dir.parent() != Some(config.journal_dir.as_path())
@@ -125,6 +178,7 @@ impl ResidentConfig {
             || config.app_gid == 0
             || config.entrances.is_empty()
             || config.entrances.len() > 8
+            || config.agents.len() > 8
             || config.persistent_var_max_bytes == 0
             || !config
                 .completion_semantics
@@ -138,8 +192,8 @@ impl ResidentConfig {
                 &config.mini_host,
                 &config.mini_config,
                 &config.mini_operator_socket,
-                &config.begin_ingress,
-                &config.claim_ingress,
+                &config.begin_management_custody,
+                &config.claim_management_custody,
                 &config.completion_custodian_seed,
                 &config.completion_management_custody,
             ]
@@ -164,6 +218,37 @@ impl ResidentConfig {
                 return Err(invalid("resident entrance config refused"));
             }
         }
+        for (index, agent) in config.agents.iter().enumerate() {
+            if !agent.socket.is_absolute()
+                || agent.controller_uid == 0
+                || agent.controller_uid == config.app_uid
+                || !agent.custody.is_absolute()
+                || !agent.reverse_socket.is_absolute()
+                || agent.attempt_dir.parent() != Some(config.journal_dir.as_path())
+                || agent.socket.parent().is_some_and(|parent| {
+                    parent.starts_with(&config.journal_dir)
+                        || parent.starts_with(&agent.attempt_dir)
+                })
+                || agent.display_name.is_empty()
+                || agent.display_name.len() > 256
+                || agent.preferred_handle.is_empty()
+                || agent.preferred_handle.len() > 256
+                || config
+                    .entrances
+                    .iter()
+                    .any(|entry| agent.socket.starts_with(&entry.directory))
+                || config.agents[..index].iter().any(|prior| {
+                    prior.socket == agent.socket
+                        || prior.controller_uid == agent.controller_uid
+                        || prior.custody == agent.custody
+                        || prior.reverse_socket == agent.reverse_socket
+                        || prior.attempt_dir == agent.attempt_dir
+                })
+                || agent_socket_parent_overlap(&config.agents[..index], &agent.socket)
+            {
+                return Err(invalid("resident agent config refused"));
+            }
+        }
         Ok(config)
     }
 }
@@ -173,10 +258,28 @@ impl ResidentConfig {
 /// choose a package, task UID, Mini signer, command, or app generation.
 pub fn run(config_path: &Path) -> io::Result<()> {
     let config = ResidentConfig::load(config_path)?;
+    require_source_bound_start_action()?;
     let journal = Journal::open(&config.journal_dir)?;
     Journal::preflight_current_unit(&config.unit)?;
     if journal.read()?.is_some() {
         return Err(invalid("resident generation journal is already occupied"));
+    }
+    // An old one-shot attempt is an uncertainty or recovery record, not a
+    // fresh destination. Check every later phase before consuming BEGIN.
+    for path in [
+        &config.descriptor_attempt_dir,
+        &config.begin_attempt_dir,
+        &config.claim_author_attempt_dir,
+        &config.claim_attempt_dir,
+        &config.completion_attempt_dir,
+        &config.completion_sign_attempt_dir,
+        &config.completion_submit_attempt_dir,
+    ] {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Err(invalid("resident lifecycle attempt already exists")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
     }
     let package = verify_installed_spk(&config.image_dir, config.app_uid)?;
     // The operator Host/config/socket and signer live outside the worker mount
@@ -197,6 +300,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if package.raw_sha256 != config.expected_raw_sha256 {
         return Err(invalid("resident signed package pin drift"));
     }
+    // Staged v2 code below remains unreachable under the action guard above.
+    // The v3 claim must replace this with its signed create/continue selection.
     let command = &package.manifest.continue_command;
     let spec = SandboxSpec {
         bwrap: config.bwrap.clone(),
@@ -257,22 +362,89 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         policies.push(policy);
         custodies.push(custody);
     }
-    let ingress = private_file(&config.claim_ingress, MAX_INGRESS)?;
-    let begin_ingress = private_file(&config.begin_ingress, MAX_INGRESS)?;
-    let begin_source = write_begin_source(&config.claim_attempt_dir, &begin_ingress)?;
-    let echoed_begin = operator.tool(
-        "author",
-        "application-lifecycle-resident-begin",
-        &begin_source,
-        &config.journal_dir.join("resident-begin.bin"),
-    )?;
-    if echoed_begin != begin_ingress {
-        return Err(invalid(
-            "source resident BEGIN echo differs from pinned ingress",
-        ));
+    let mut agent_preflights = Vec::with_capacity(config.agents.len());
+    for agent in &config.agents {
+        open_protected_directory(
+            agent
+                .socket
+                .parent()
+                .ok_or_else(|| invalid("agent socket parent"))?,
+            config.app_uid,
+            false,
+        )?;
+        AgentApiListener::preflight_parent(&agent.socket, agent.controller_uid)?;
+        open_protected_directory(
+            agent
+                .reverse_socket
+                .parent()
+                .ok_or_else(|| invalid("reverse custody parent"))?,
+            config.app_uid,
+            false,
+        )?;
+        let custody: AgentCustody =
+            serde_json::from_slice(&private_file(&agent.custody, MAX_CONFIG)?)?;
+        custody.validate()?;
+        if agent_preflights
+            .iter()
+            .any(|(prior, _): &(AgentCustody, ReverseCustodyClient)| {
+                prior.session == custody.session
+                    || prior.ticket_resource == custody.ticket_resource
+                    || prior.parent_task == custody.parent_task
+                    || prior.purse_task == custody.purse_task
+            })
+            || custodies.iter().any(|human| {
+                human.session == custody.session || human.ticket_resource == custody.ticket_resource
+            })
+        {
+            return Err(invalid("resident agent authority route duplicated"));
+        }
+        private_dir(&agent.attempt_dir)?;
+        let reverse = ReverseCustodyClient::new(
+            agent.reverse_socket.clone(),
+            agent.controller_uid,
+            agent.route_name.clone(),
+        )?;
+        agent_preflights.push((custody, reverse));
     }
+    let descriptor = author_signed_package(&operator, &package, &config.descriptor_attempt_dir)?;
+    if (!config.agents.is_empty()
+        || policies
+            .iter()
+            .any(|policy| policy.fixed_session_kind == EntranceKind::Api))
+        && descriptor.api_path.is_none()
+    {
+        return Err(invalid("signed package has no configured API interface"));
+    }
+    let begin_signers: FixedBeginSigners =
+        serde_json::from_slice(&private_file(&config.begin_management_custody, MAX_CONFIG)?)?;
+    let claim_signers: FixedClaimSigners =
+        serde_json::from_slice(&private_file(&config.claim_management_custody, MAX_CONFIG)?)?;
+    let begin = submit_begin_once(
+        &operator,
+        &begin_signers,
+        config.app_uid,
+        &descriptor.canonical,
+        "start",
+        &config.begin_operation_ledger,
+        &config.begin_attempt_dir,
+    )?;
+    let ingress = assemble_current_claim(
+        &operator,
+        &claim_signers,
+        config.app_uid,
+        &begin,
+        &config.claim_nonce_ledger,
+        &config.claim_author_attempt_dir,
+    )?;
     let captured = submit_once(&operator, &ingress, &config.claim_attempt_dir)?;
     let matched = match_signed_package(&operator, &package, &captured, &config.claim_attempt_dir)?;
+    if matched.descriptor_root != descriptor.root
+        || matched.begin.image_identity != hex_bytes(&descriptor.image_identity)
+    {
+        return Err(invalid(
+            "native claim differs from pre-BEGIN signed descriptor",
+        ));
+    }
     if matched.begin.unit != config.unit {
         return Err(invalid(
             "source lifecycle unit differs from installed service",
@@ -293,6 +465,14 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "fixed participant custody differs from claimed shared app",
         ));
     }
+    for (custody, _) in &agent_preflights {
+        if custody.app != matched.begin.app.to_string()
+            || custody.app_generation != matched.begin.generation.to_string()
+            || matched.bridge.api_path.is_none()
+        {
+            return Err(invalid("agent custody differs from claimed shared app"));
+        }
+    }
     journal.arm(matched.begin.clone())?;
     journal.request_launch(&matched.begin)?;
     let mut resident = prepared.start(&journal, &matched.begin)?;
@@ -305,7 +485,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let report = prepare_running_report(
         &operator,
         &journal,
-        &begin_ingress,
+        &begin.ingress,
         &captured.payload,
         &config.completion_custodian_seed,
         &config.completion_semantics,
@@ -313,7 +493,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     )?;
     let completion_ingress = assemble_current_completion(
         &operator,
-        &begin_ingress,
+        &begin.ingress,
         &ingress,
         &report.signed_report,
         &signers,
@@ -334,49 +514,63 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .map(|entry| PrivateHttpEntrance::bind(&entry.directory))
         .collect::<io::Result<Vec<_>>>()?;
     let api_path = matched.bridge.api_path;
-    PrivateHttpEntrance::serve_many(&entrances, |index, request, kind, policy| {
-        let entry = &config.entrances[index];
-        let mut human = ResidentHuman {
+    let mut agent_routes = config
+        .agents
+        .iter()
+        .zip(agent_preflights)
+        .map(|(agent, (custody, reverse))| {
+            AgentApiListener::bind(&agent.socket, agent.controller_uid)
+                .map(|listener| (listener, custody, reverse, agent))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let agent_fds: Vec<_> = agent_routes
+        .iter()
+        .map(|(listener, _, _, _)| listener.as_raw_fd())
+        .collect();
+    PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
+        if let Ok((index, request, kind, policy)) = event {
+            let entry = &config.entrances[index];
+            let mut human = ResidentHuman {
+                operator: &operator,
+                custody: &custodies[index],
+                journal: &journal,
+                rpc: &mut resident.rpc,
+                display_name: &entry.display_name,
+                preferred_handle: &entry.preferred_handle,
+            };
+            return deliver_request(
+                &mut human,
+                request,
+                kind,
+                policy,
+                api_path.as_deref(),
+                &config.journal_dir,
+            )
+            .map(Some);
+        }
+        let index = match event {
+            Err(index) => index,
+            Ok(_) => unreachable!("HTTP branch returned above"),
+        };
+        let (listener, custody, reverse, agent) = agent_routes
+            .get_mut(index)
+            .ok_or_else(|| invalid("resident agent poll index drift"))?;
+        let mut context = ResidentAgent {
             operator: &operator,
-            custody: &custodies[index],
+            custody,
             journal: &journal,
             rpc: &mut resident.rpc,
-            display_name: &entry.display_name,
-            preferred_handle: &entry.preferred_handle,
+            reverse_reserve: reverse,
+            signed_api_path: api_path
+                .as_deref()
+                .ok_or_else(|| invalid("signed API path absent"))?,
+            display_name: &agent.display_name,
+            preferred_handle: &agent.preferred_handle,
+            attempt_parent: &agent.attempt_dir,
         };
-        deliver_request(
-            &mut human,
-            request,
-            kind,
-            policy,
-            api_path.as_deref(),
-            &config.journal_dir,
-        )
+        listener.poll_once(&mut context)?;
+        Ok(None)
     })
-}
-
-fn write_begin_source(attempt_dir: &Path, ingress: &[u8]) -> io::Result<PathBuf> {
-    private_dir(
-        attempt_dir
-            .parent()
-            .ok_or_else(|| invalid("BEGIN source parent absent"))?,
-    )?;
-    let path = attempt_dir
-        .parent()
-        .unwrap()
-        .join("resident-begin-source.json");
-    let bytes = serde_json::to_vec(&serde_json::json!({"begin": hex_bytes(ingress)}))?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
-    use std::io::Write as _;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    std::fs::File::open(attempt_dir.parent().unwrap())?.sync_all()?;
-    Ok(path)
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -431,8 +625,123 @@ mod tests {
     use super::*;
     use crate::dispatch_inspection::app_route_path;
     use crate::http_entrance::read_request;
+    use serde_json::json;
+    use std::fs::{self, DirBuilder};
     use std::io::Write;
+    use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::net::UnixStream;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn distinct_agent_uids_need_disjoint_socket_parent_acl_scopes() {
+        let first = FixedAgentConfig {
+            socket: PathBuf::from("/run/mini-spk/agent-a/api.sock"),
+            controller_uid: 1001,
+            custody: PathBuf::from("/var/lib/mini-spk/a-custody.json"),
+            reverse_socket: PathBuf::from("/run/mini-spk/reverse-a.sock"),
+            route_name: "a".into(),
+            attempt_dir: PathBuf::from("/var/lib/mini-spk/a-attempt"),
+            display_name: "A".into(),
+            preferred_handle: "a".into(),
+        };
+        assert!(agent_socket_parent_overlap(
+            std::slice::from_ref(&first),
+            Path::new("/run/mini-spk/agent-a/other.sock")
+        ));
+        assert!(agent_socket_parent_overlap(
+            std::slice::from_ref(&first),
+            Path::new("/run/mini-spk/agent-a/nested/api.sock")
+        ));
+        assert!(!agent_socket_parent_overlap(
+            &[first],
+            Path::new("/run/mini-spk/agent-b/api.sock")
+        ));
+    }
+
+    #[test]
+    fn resident_config_refuses_two_agent_sockets_under_one_acl_parent() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let journal =
+            std::env::temp_dir().join(format!("mini-spk-config-{}-{unique}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&journal).unwrap();
+        let path = journal.join("resident.json");
+        let agent = |name: &str, uid: u32| {
+            json!({
+                "socket": format!("/run/mini-spk/{name}/api.sock"),
+                "controllerUid": uid,
+                "custody": format!("/var/lib/mini-spk/{name}-custody.json"),
+                "reverseSocket": format!("/run/mini-spk/{name}-reverse.sock"),
+                "routeName": name,
+                "attemptDir": journal.join(format!("{name}-attempt")),
+                "displayName": name,
+                "preferredHandle": name
+            })
+        };
+        let mut config = json!({
+            "protocol": "mini-spk-resident-start-v3",
+            "journalDir": journal.clone(),
+            "imageDir": "/var/lib/mini-spk/image",
+            "expectedRawSha256": "a".repeat(64),
+            "persistentVar": "/var/lib/mini-spk/var",
+            "persistentVarMaxBytes": 1048576,
+            "bwrap": "/usr/bin/bwrap",
+            "bwrapSha256": "b".repeat(64),
+            "appUid": 1000,
+            "appGid": 1000,
+            "unit": "mini-spk-a8401-g1.service",
+            "miniHost": "/opt/mini/host",
+            "miniHostSha256": "c".repeat(64),
+            "miniConfig": "/etc/mini/host.json",
+            "miniConfigSha256": "d".repeat(64),
+            "miniOperatorSocket": "/run/mini/operator.sock",
+            "beginManagementCustody": "/etc/mini/begin.json",
+            "claimManagementCustody": "/etc/mini/claim.json",
+            "beginOperationLedger": journal.join("begin-ledger"),
+            "claimNonceLedger": journal.join("claim-ledger"),
+            "descriptorAttemptDir": journal.join("descriptor-attempt"),
+            "beginAttemptDir": journal.join("begin-attempt"),
+            "claimAuthorAttemptDir": journal.join("claim-author-attempt"),
+            "claimAttemptDir": journal.join("claim-attempt"),
+            "completionAttemptDir": journal.join("completion-attempt"),
+            "completionSignAttemptDir": journal.join("completion-sign-attempt"),
+            "completionSubmitAttemptDir": journal.join("completion-submit-attempt"),
+            "completionCustodianSeed": "/etc/mini/completion.seed",
+            "completionManagementCustody": "/etc/mini/completion.json",
+            "completionSemantics": "1",
+            "entrances": [{
+                "directory": "/run/mini-spk/human",
+                "dispatchCustody": "/run/mini-spk/human/dispatch.json",
+                "displayName": "human",
+                "preferredHandle": "human"
+            }],
+            "agents": [agent("agent-a", 1001), agent("agent-b", 1002)]
+        });
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(&serde_json::to_vec(&config).unwrap())
+            .unwrap();
+        file.sync_all().unwrap();
+        assert!(ResidentConfig::load(&path).is_ok());
+        assert_eq!(
+            run(&path).unwrap_err().to_string(),
+            "source-bound START action selection unavailable"
+        );
+        assert_eq!(fs::read_dir(&journal).unwrap().count(), 1);
+        config["agents"][1]["socket"] = json!("/run/mini-spk/agent-a/other.sock");
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        config["agents"][1]["socket"] = json!("/run/mini-spk/agent-a/nested/api.sock");
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        fs::remove_dir_all(&journal).unwrap();
+    }
 
     #[test]
     fn parsed_api_root_and_discovery_keep_one_canonical_prefix() {

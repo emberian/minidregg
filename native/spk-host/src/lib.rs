@@ -3,6 +3,12 @@
 //! Unix socketpair. The public binary deliberately has no app-launch command yet.
 
 #[cfg(target_os = "linux")]
+mod agent_api_custody;
+#[cfg(target_os = "linux")]
+mod agent_api_native;
+#[cfg(target_os = "linux")]
+mod agent_api_server;
+#[cfg(target_os = "linux")]
 mod agent_api_wire;
 #[cfg(target_os = "linux")]
 mod claim_descriptor;

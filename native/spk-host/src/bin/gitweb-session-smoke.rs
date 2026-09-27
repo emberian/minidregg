@@ -4,6 +4,7 @@
 #[path = "../rpc_adapter.rs"]
 mod rpc_adapter;
 
+use minidregg_spk_host::hostd;
 use minidregg_spk_host::sandbox::{spawn_sandbox, SandboxSpec};
 use minidregg_spk_rpc::{Method, RequestContext, SessionParameters, WebRequest, WebResult};
 use rpc_adapter::{RpcDriver, SessionBinding, SessionKind};
