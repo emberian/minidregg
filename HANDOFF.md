@@ -1,6 +1,15 @@
 # Mini / agent-grain handoff
 
-**September 26 overnight construction is active.** Begin with the suite's
+**Current goal, September 27 UTC:** read the suite's
+[SPK application platform cycle](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/spk-platform-cycle.md).
+Ember cleared the previous goal after a retrospective and requested substantially
+greater use of actual packaged apps, shared browser/API access and fn version
+publication. Mini remains the semantic construction home. Prior lanes stopped
+safely; current work grounds actual package execution and implements the missing
+application lifecycle and compatibility contract. Existing independent fixture
+results are not a combined SPK deployment.
+
+**Previous September 26 overnight construction:** the suite's
 [current construction brief](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/overnight.md)
 and [construction checkpoint](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/checkpoint-17.md).
 Main now contains the recovered fn integration lineage and persistent-host,
