@@ -1,0 +1,6 @@
+reject bytes=1356 reason=mini_read_resource absent
+completion bytes=36959 stream=true stage=8901 signed empty read
+completion bytes=38044 stream=true stage=8901 captured root=97349327118568466779609446662939988221287696762075284738918673226692685974561
+completion bytes=38211 stream=true stage=8901 stale publish oldRoot=97349327118568466779609446662939988221287696762075284738918673226692685974561
+reject bytes=1356 reason=earlier capture prompt absent
+completion bytes=39670 stream=true stage=8901 native stale refusal and cleanup

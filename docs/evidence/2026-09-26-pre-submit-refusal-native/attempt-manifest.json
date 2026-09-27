@@ -1,0 +1,7 @@
+{
+  "config": "/tmp/mga-pre-submit-stale-8901-20260926/provision/runtime-state/attempt-0000000000000027/config.json",
+  "format": "minidregg-resource-client-attempt-v1",
+  "host": "/home/ember/build/minidregg-overnight-20260926/evidence/minidregg-host-final-combined",
+  "operation": "submit",
+  "socket": "/tmp/mga-pre-submit-stale-8901-20260926/runtime-host/host.sock"
+}

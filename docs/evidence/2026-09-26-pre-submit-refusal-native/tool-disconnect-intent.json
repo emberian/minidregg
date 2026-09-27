@@ -1,0 +1,33 @@
+{
+  "grain": {
+    "before": {
+      "generation": "1",
+      "remaining": "50",
+      "reserved": "0",
+      "status": "1"
+    },
+    "capability": "81",
+    "context": {
+      "operationId": "31",
+      "payload": "refused publication cleanup"
+    },
+    "expectedAuthorityRoot": "35911597963223946679356344268824090482988194156355513980797393714749140845784",
+    "expectedTargetRoot": "111552148536531723102521397665877475850103987313536561585358544617921789452933",
+    "observeCapability": "81",
+    "operation": {
+      "type": "disconnect"
+    },
+    "publications": [],
+    "schemaVersion": "1",
+    "subject": "8",
+    "task": "8902"
+  },
+  "grants": [
+    {
+      "capability": "81",
+      "kind": "object",
+      "target": "8902"
+    }
+  ],
+  "intentNonce": "31"
+}

@@ -1,0 +1,27 @@
+{"tariffPerInitialPayloadByte": 0,
+ "tariffPerGrant": 1,
+ "tariffPerBirth": 2,
+ "tariffBase": 3,
+ "storageRoot": "/tmp/mga-pre-submit-stale-8901-20260926/provision/store",
+ "storageBinary":
+ "/tmp/mini-grain-ssh-live.i35dUm/bin/minidregg-link-sqlite-store",
+ "signatureBinary":
+ "/tmp/mini-grain-ssh-live.i35dUm/bin/minidregg-credential-signature-verifier",
+ "resourceBookId": 11,
+ "ownerBudget": 100000,
+ "lifetime": 10000,
+ "issuer": 5,
+ "genesisHeight": 10,
+ "fnReplyPoll": null,
+ "fnReplyCatalog": null,
+ "fnPoll": null,
+ "fnGateway": null,
+ "federation": 9,
+ "factoryId": 10,
+ "expectedSeed":
+ 75001604273711022189880762066692815448388922937336873720345439546086776902364,
+ "domain": 8501,
+ "continuityProviderResourceId": null,
+ "collector": 99,
+ "authorityCatalogueId": 12,
+ "asset": 0}

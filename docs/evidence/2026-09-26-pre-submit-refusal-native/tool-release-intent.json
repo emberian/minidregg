@@ -1,0 +1,34 @@
+{
+  "grain": {
+    "before": {
+      "generation": "1",
+      "remaining": "48",
+      "reserved": "2",
+      "status": "3"
+    },
+    "capability": "81",
+    "context": {
+      "operationId": "29",
+      "payload": "definitively refused publication"
+    },
+    "expectedAuthorityRoot": "64748499934742399743715167219447994771848232616163922348547783773479633291530",
+    "expectedTargetRoot": "96215159084747934268081657132277431816845171540988350296550123113093477437694",
+    "observeCapability": "81",
+    "operation": {
+      "charge": "0",
+      "type": "settle"
+    },
+    "publications": [],
+    "schemaVersion": "1",
+    "subject": "8",
+    "task": "8902"
+  },
+  "grants": [
+    {
+      "capability": "81",
+      "kind": "object",
+      "target": "8902"
+    }
+  ],
+  "intentNonce": "29"
+}
