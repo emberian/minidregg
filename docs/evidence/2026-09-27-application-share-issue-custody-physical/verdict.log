@@ -1,0 +1,17 @@
+2026-09-27 independent Persvati warm snapshot
+source_root=/home/ember/build/minidregg-overnight-20260927-shareissue-plan-inspect-narrow
+compiler=Lean 4.30.0
+command=env LEAN_NUM_THREADS=2 lake env lean -o .lake/build/lib/lean/<Module>.olean <Module>.lean
+PASS Kernel.PhysicalResourceReadGuard
+PASS Kernel.FnSelectiveReleaseSourceAuthority
+PASS Kernel.FnSelectiveReleaseSourceReceiver
+PASS Kernel.ApplicationShareIssueDelegation
+PASS Kernel.ApplicationShareIssueAdmission
+PASS Kernel.ApplicationShareIssueReceiver
+PASS Kernel.ApplicationShareIssueAuthoring
+PASS Host.Json
+PASS Kernel.NativeHostReplay
+PASS Kernel.NativeHost
+PASS Kernel.NativeHostSession
+PASS Host.Main
+scope=narrow Lean source/OLean only; no native link or signed acceptance

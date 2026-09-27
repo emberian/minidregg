@@ -10,6 +10,7 @@ import Kernel.CapabilityRevocationController
 import Kernel.ContentResource
 import Kernel.ApplicationGrainBirth
 import Kernel.ApplicationGrainSessionBirth
+import Kernel.ApplicationShareIssueAuthoring
 import Host.ApplicationPermissionSchemaAuthoring
 import Lean.Data.Json
 
@@ -734,6 +735,123 @@ private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.In
     ← nat (path ++ ".asset") (← field path "asset" obj),
     ← nat (path ++ ".amount") (← field path "amount" obj)⟩
 
+private def shareIssueOrigin (path : String) (json : Lean.Json) :
+    Result ApplicationDispatchCodec.Origin := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "human" =>
+      let _ ← exactObject path ["type"] json
+      pure .human
+  | "agent" =>
+      let obj ← exactObject path ["type", "task", "generation"] json
+      pure <| .agent
+        (← nat (path ++ ".task") (← field path "task" obj))
+        (← int (path ++ ".generation") (← field path "generation" obj))
+  | _ => failAt path "expected human or agent origin"
+
+private def shareIssueRoleBasis (path : String) (json : Lean.Json) :
+    Result ApplicationGrainSessionEnrollment.RoleBasis := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "none" =>
+      let _ ← exactObject path ["type"] json
+      pure .none
+  | "allAccess" =>
+      let _ ← exactObject path ["type"] json
+      pure .allAccess
+  | "role" =>
+      let obj ← exactObject path ["type", "id"] json
+      pure <| .role (← nat (path ++ ".id") (← field path "id" obj))
+  | _ => failAt path "expected none, allAccess, or role basis"
+
+private def shareIssueRole (path : String) (json : Lean.Json) :
+    Result ApplicationGrainSessionEnrollment.RoleAssignment := do
+  let obj ← exactObject path
+    ["basis", "added", "removed", "roleSchemaRoot", "roleVersion"] json
+  let role : ApplicationGrainSessionEnrollment.RoleAssignment :=
+    ⟨← shareIssueRoleBasis (path ++ ".basis") (← field path "basis" obj),
+     ← list (path ++ ".added")
+       (fun p j => (·.toUTF8.toList) <$> string p j) (← field path "added" obj),
+     ← list (path ++ ".removed")
+       (fun p j => (·.toUTF8.toList) <$> string p j) (← field path "removed" obj),
+     ⟨← nat (path ++ ".roleSchemaRoot") (← field path "roleSchemaRoot" obj)⟩,
+     ← nat (path ++ ".roleVersion") (← field path "roleVersion" obj)⟩
+  unless role.valid do failAt path "invalid role assignment"
+  pure role
+
+private def shareIssueTicket (path : String) (json : Lean.Json) :
+    Result ApplicationDispatchAuthority.Ticket := do
+  let obj ← exactObject path
+    ["resource", "scope", "participant", "ceiling", "issueNonce"] json
+  let scopePath := path ++ ".scope"
+  let scopeObj ← exactObject scopePath
+    ["app", "packageVersion", "packageRoot", "interfaceId", "interfaceVersion",
+     "interfaceRoot", "schemaRoot", "schemaVersion"]
+    (← field path "scope" obj)
+  let scope : ApplicationDispatchAuthority.Scope :=
+    ⟨← nat (scopePath ++ ".app") (← field scopePath "app" scopeObj),
+     ← int (scopePath ++ ".packageVersion") (← field scopePath "packageVersion" scopeObj),
+     ⟨← nat (scopePath ++ ".packageRoot") (← field scopePath "packageRoot" scopeObj)⟩,
+     ← nat (scopePath ++ ".interfaceId") (← field scopePath "interfaceId" scopeObj),
+     ← nat (scopePath ++ ".interfaceVersion") (← field scopePath "interfaceVersion" scopeObj),
+     ⟨← nat (scopePath ++ ".interfaceRoot") (← field scopePath "interfaceRoot" scopeObj)⟩,
+     ⟨← nat (scopePath ++ ".schemaRoot") (← field scopePath "schemaRoot" scopeObj)⟩,
+     ← nat (scopePath ++ ".schemaVersion") (← field scopePath "schemaVersion" scopeObj)⟩
+  let participantPath := path ++ ".participant"
+  let participantObj ← exactObject participantPath
+    ["session", "descriptorResource", "kind", "subject", "origin",
+     "sessionCapability", "appObserveCapability", "ticketObserveCapability"]
+    (← field path "participant" obj)
+  let kind ← string (participantPath ++ ".kind")
+    (← field participantPath "kind" participantObj)
+  let kind : ApplicationDispatchCodec.InterfaceKind ← match kind with
+    | "web" => pure .web
+    | "api" => pure .api
+    | _ => failAt (participantPath ++ ".kind") "expected web or api"
+  let participant : ApplicationDispatchAuthority.Participant :=
+    ⟨← nat (participantPath ++ ".session") (← field participantPath "session" participantObj),
+     ← nat (participantPath ++ ".descriptorResource")
+       (← field participantPath "descriptorResource" participantObj),
+     kind,
+     ⟨← nat (participantPath ++ ".subject") (← field participantPath "subject" participantObj)⟩,
+     ← shareIssueOrigin (participantPath ++ ".origin")
+       (← field participantPath "origin" participantObj),
+     ⟨← nat (participantPath ++ ".sessionCapability")
+       (← field participantPath "sessionCapability" participantObj)⟩,
+     ⟨← nat (participantPath ++ ".appObserveCapability")
+       (← field participantPath "appObserveCapability" participantObj)⟩,
+     ⟨← nat (participantPath ++ ".ticketObserveCapability")
+       (← field participantPath "ticketObserveCapability" participantObj)⟩⟩
+  pure ⟨← nat (path ++ ".resource") (← field path "resource" obj),
+    scope, participant,
+    ← shareIssueRole (path ++ ".ceiling") (← field path "ceiling" obj),
+    ← nat (path ++ ".issueNonce") (← field path "issueNonce" obj)⟩
+
+/-- Operator-only JSON authoring of a canonical share-issue signing request.
+This does not authorize a plan or sign any header. -/
+def shareIssueRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["spec", "payer", "funding", "sourceCapabilities"] json
+  let specPath := "$.spec"
+  let specObj ← exactObject specPath
+    ["ticket", "issuer", "appDelegateCapability", "ticketOwnerCapability",
+     "ticketControlCapability"] (← field "$" "spec" obj)
+  let spec : ApplicationShareIssueSource.Spec :=
+    ⟨← shareIssueTicket (specPath ++ ".ticket") (← field specPath "ticket" specObj),
+     ⟨← nat (specPath ++ ".issuer") (← field specPath "issuer" specObj)⟩,
+     ⟨← nat (specPath ++ ".appDelegateCapability")
+       (← field specPath "appDelegateCapability" specObj)⟩,
+     ⟨← nat (specPath ++ ".ticketOwnerCapability")
+       (← field specPath "ticketOwnerCapability" specObj)⟩,
+     ⟨← nat (specPath ++ ".ticketControlCapability")
+       (← field specPath "ticketControlCapability" specObj)⟩⟩
+  let request : ApplicationShareIssueAuthoring.Request :=
+    ⟨spec,
+     ← nat "$.payer" (← field "$" "payer" obj),
+     ← list "$.funding" funding (← field "$" "funding" obj),
+     ← list "$.sourceCapabilities"
+       (fun p j => return ⟨← nat p j⟩) (← field "$" "sourceCapabilities" obj)⟩
+  pure (ApplicationShareIssueAuthoring.requestCodec.encode request)
+
 private structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
   ownerGrant : ResourceBirth.AuthorityGrant
@@ -1430,6 +1548,7 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   match kind with
+  | "application-share-issue-request" => shareIssueRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
       let raw ← object "$" json
@@ -1572,6 +1691,64 @@ private def planJson (plan : SigningPlan) : Lean.Json := .mkObj
      [("role", decimal slot.role), ("index", decimal slot.index),
       ("header", hexJson slot.header), ("signing", signedHeaderJson slot.header)])]
 
+/-- Custody presentation of a composite share-issue plan. Every signing header
+is exposed in its exact order; this presentation does not authorize signing. -/
+private def shareIssuePlanJson
+    (plan : ApplicationShareIssueAuthoring.Plan) : Lean.Json :=
+  let ticket := plan.request.spec.ticket
+  let scope := ticket.scope
+  let participant := ticket.participant
+  let slotJson := fun (slot : SigningSlot) => .mkObj
+    [("role", decimal slot.role), ("index", decimal slot.index),
+     ("header", hexJson slot.header), ("signing", signedHeaderJson slot.header)]
+  .mkObj
+    [("type", "application-share-issue-plan-v2"),
+     ("canonicalRequest", hexJson (ApplicationShareIssueAuthoring.requestCodec.encode plan.request)),
+     ("canonicalSpec", hexJson (ApplicationShareIssueSource.specCodec.encode plan.request.spec)),
+     ("spec", .mkObj
+       [("issuer", decimal plan.request.spec.issuer.value),
+        ("appDelegateCapability", decimal plan.request.spec.appDelegateCapability.value),
+        ("ticketOwnerCapability", decimal plan.request.spec.ticketOwnerCapability.value),
+        ("ticketControlCapability", decimal plan.request.spec.ticketControlCapability.value),
+        ("ticket", .mkObj
+          [("canonical", hexJson (ApplicationDispatchAuthority.ticketCodec.encode ticket)),
+           ("resource", decimal ticket.resource),
+           ("issueNonce", decimal ticket.issueNonce),
+           ("scope", .mkObj
+             [("app", decimal scope.app), ("packageVersion", signedDecimal scope.packageVersion),
+              ("packageRoot", decimal scope.packageRoot.value),
+              ("interfaceId", decimal scope.interfaceId),
+              ("interfaceVersion", decimal scope.interfaceVersion),
+              ("interfaceRoot", decimal scope.interfaceRoot.value),
+              ("schemaRoot", decimal scope.schemaRoot.value),
+              ("schemaVersion", decimal scope.schemaVersion)]),
+           ("participant", .mkObj
+             [("session", decimal participant.session),
+              ("descriptorResource", decimal participant.descriptorResource),
+              ("subject", decimal participant.subject.value),
+              ("sessionCapability", decimal participant.sessionCapability.value),
+              ("appObserveCapability", decimal participant.appObserveCapability.value),
+              ("ticketObserveCapability", decimal participant.ticketObserveCapability.value)])])]),
+     ("birth", planJson plan.birth),
+     ("appSlot", slotJson plan.appSlot),
+     ("slots", .arr <| (plan.birth.slots ++ [plan.appSlot]).toArray.map slotJson)]
+
+/-- The same source codec supplies both custody projections. Comparing these
+canonical spec bytes binds all ticket fields, including origin and ceiling,
+without a second ticket codec in the client. -/
+private def shareIssueRequestJson
+    (request : ApplicationShareIssueAuthoring.Request) : Lean.Json :=
+  .mkObj
+    [("type", "application-share-issue-request-v1"),
+     ("canonicalRequest", hexJson (ApplicationShareIssueAuthoring.requestCodec.encode request)),
+     ("canonicalSpec", hexJson (ApplicationShareIssueSource.specCodec.encode request.spec)),
+     ("payer", decimal request.payer),
+     ("funding", .arr <| request.funding.toArray.map fun item => .mkObj
+       [("source", decimal item.source), ("destination", decimal item.destination),
+        ("asset", decimal item.asset), ("amount", decimal item.amount)]),
+     ("sourceCapabilities", .arr <| request.sourceCapabilities.toArray.map
+       (fun capability => decimal capability.value))]
+
 private def intentJson (value : Intent) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value), ("nonce", decimal value.nonce),
    ("purpose", match value.purpose with
@@ -1711,6 +1888,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
   | "challenge" => challengeJson <$> decoded "challenge" challengeCodec bytes
   | "plan" => planJson <$> decoded "plan" signingPlanCodec bytes
+  | "application-share-issue-plan" => shareIssuePlanJson <$>
+      decoded "application-share-issue-plan" ApplicationShareIssueAuthoring.planCodec bytes
+  | "application-share-issue-request" => shareIssueRequestJson <$>
+      decoded "application-share-issue-request" ApplicationShareIssueAuthoring.requestCodec bytes
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"

@@ -8,6 +8,7 @@ image and one durable CAS by ApplicationShareIssueAdmission.
 -/
 import Kernel.ApplicationShareIssueSource
 import Kernel.ResourceObservationAdmission
+import Kernel.PhysicalResourceReadGuard
 
 namespace Minidregg.Kernel.ApplicationShareIssueDelegation
 open Minidregg.Compiler
@@ -39,7 +40,8 @@ structure Prepared (context : Context deployment durable)
   observed : ResourceTargetAdmission.Observed deployment context.directory.directory
     .object spec.ticket.scope.app root
   declared : observed.before.kind = .declaredObject
-  rootCurrent : root = durable.snapshot.model.roots ⟨spec.ticket.scope.app⟩
+  physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
+    durable.snapshot.model.roots ⟨spec.ticket.scope.app⟩
   epochCurrent :
     (appRequest deployment.domain profile.semantics federation
       context.authority.snapshot.authState height root spec descriptor).policyEpoch =
@@ -72,10 +74,10 @@ def prepare (context : Context deployment durable)
       | none => .error refused
       | some observed =>
           if declared : observed.before.kind = .declaredObject then
-            if rootCurrent : packed.payload.root =
-                durable.snapshot.model.roots ⟨spec.ticket.scope.app⟩ then
-              .ok ⟨packed.payload.root, observed, declared, rootCurrent, rfl, rfl⟩
-            else .error refused
+            .ok ⟨packed.payload.root, observed, declared,
+              PhysicalResourceReadGuard.current context.directory
+                spec.ticket.scope.app observed.before observed.present,
+              rfl, rfl⟩
           else .error refused
 
 variable {context : Context deployment durable}
@@ -150,11 +152,12 @@ def check (native : CredentialSignatureIO.NativeConfig)
 
 def readGuard (prepared : Prepared context profile federation height spec descriptor) :
     DurableDataIntent.ReadGuard :=
-  ⟨⟨spec.ticket.scope.app⟩, prepared.root⟩
+  ⟨⟨spec.ticket.scope.app⟩,
+    ResourceBirthCodec.physicalRoot (.live prepared.observed.before)⟩
 
 theorem readGuard_current (prepared : Prepared context profile federation height spec descriptor) :
     (readGuard prepared).expectedRoot =
       durable.snapshot.model.roots (readGuard prepared).cellId :=
-  prepared.rootCurrent
+  prepared.physicalCurrent
 
 end Minidregg.Kernel.ApplicationShareIssueDelegation

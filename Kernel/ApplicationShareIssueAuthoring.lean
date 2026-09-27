@@ -43,20 +43,20 @@ def requestCodec : LawfulCodec Request :=
     requestStream
 
 structure Plan where
-  spec : Spec
+  request : Request
   birth : SigningPlan
   appSlot : SigningSlot
 
 private def planStream : StreamCodec Plan :=
   StreamCodec.xmap
-    (StreamCodec.product specStream
+    (StreamCodec.product requestStream
       (StreamCodec.product signingPlanStream signingSlotStream))
-    (fun plan => (plan.spec, plan.birth, plan.appSlot))
-    (fun (spec, birth, appSlot) => ⟨spec, birth, appSlot⟩)
+    (fun plan => (plan.request, plan.birth, plan.appSlot))
+    (fun (request, birth, appSlot) => ⟨request, birth, appSlot⟩)
     (by intro plan; cases plan; rfl)
 
 def planCodec : LawfulCodec Plan :=
-  NativeHostCodec.framed "DREGG/APPLICATION/SHARE-ISSUE-PLAN/v1".toUTF8.toList
+  NativeHostCodec.framed "DREGG/APPLICATION/SHARE-ISSUE-PLAN/v2".toUTF8.toList
     planStream
 
 /-- Derive the ordinary birth draft, its source-generated authority shards,
@@ -100,7 +100,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       prepared.prepared.authority.snapshot
       (ApplicationShareIssueSource.issueMarker spec prepared.descriptor) wanted
     | throw "share ticket app signing key selection refused"
-  pure ⟨spec, birth,
+  pure ⟨⟨spec, payer, funding, sourceCapabilities⟩, birth,
     ⟨5, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩⟩
 
 def prepareRequestLoaded (config : NativeHost.Config)
@@ -131,6 +131,6 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) : Except String (Lis
   let appEnvelope := CredentialSignedEnvelopeController.envelopeCodec.encode
     ⟨header, signature⟩
   pure (ApplicationShareIssueSource.ingressCodec.encode
-    ⟨plan.spec, birthIngress, appEnvelope⟩)
+    ⟨plan.request.spec, birthIngress, appEnvelope⟩)
 
 end Minidregg.Kernel.ApplicationShareIssueAuthoring
