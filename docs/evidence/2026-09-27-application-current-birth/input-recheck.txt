@@ -1,0 +1,6 @@
+/tmp/mini-application-current-birth-20260927/source/scripts/application-current-birth/native-acceptance.sh: OK
+/tmp/mini-application-current-birth-20260927/source/scripts/grain-birth/native-acceptance.sh: OK
+/home/ember/build/minidregg-overnight-20260927-currentbirth-native-evidence/minidregg-host-currentbirth-r1: OK
+/tmp/minidregg-bd883d8-resource-client-evidence/bin/mini: OK
+/tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-link-sqlite-store: OK
+/tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-credential-signature-verifier: OK

@@ -189,7 +189,8 @@ query snapshot-born 8 8403 145 "$EVIDENCE/workroom/tool.key" 43202
 query_policy app-policy 8 8401 141 "$EVIDENCE/workroom/tool.key" 43203
 query_policy package-policy 8 8402 143 "$EVIDENCE/workroom/tool.key" 43204
 query_policy snapshot-policy 8 8403 145 "$EVIDENCE/workroom/tool.key" 43205
-jq -e '.page.document == "8401" and (.page.entries | length) == 4' \
+jq -e --arg target "8401" \
+  '([.page.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/app-born/view.json" >/dev/null
 jq -e '.page.document == "8402" and .page.entries == []' \
   "$EVIDENCE/package-born/view.json" >/dev/null
@@ -236,7 +237,8 @@ query session-born 8 8404 147 "$EVIDENCE/workroom/tool.key" 44200
 query descriptor-born 8 8405 149 "$EVIDENCE/workroom/tool.key" 44201
 query_policy session-policy 8 8404 147 "$EVIDENCE/workroom/tool.key" 44204
 query_policy descriptor-policy 8 8405 149 "$EVIDENCE/workroom/tool.key" 44205
-jq -e '.page.document == "8404" and (.page.entries | length) == 4' \
+jq -e --arg target "8404" \
+  '([.page.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/session-born/view.json" >/dev/null
 jq -e '.page.document == "8405" and .page.entries == []' \
   "$EVIDENCE/descriptor-born/view.json" >/dev/null

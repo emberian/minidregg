@@ -1,0 +1,6 @@
+dcdb69f155843821d14b5c5ae4cdb7eae30b2488100c5526ed65290210836a43  /tmp/mini-application-current-birth-20260927/source/scripts/application-current-birth/native-acceptance.sh
+7f90a21e5c94a971d7b1822490efb04fcbd85446653668746558890d6644a073  /tmp/mini-application-current-birth-20260927/source/scripts/grain-birth/native-acceptance.sh
+4661301b549c2703b6910beceb8b32aaaee1e82b450ae9d70c408e10e41050a2  /home/ember/build/minidregg-overnight-20260927-currentbirth-native-evidence/minidregg-host-currentbirth-r1
+29809a46e5cd64d49246ddcbb164012f993d7abd7eb623cafafe654a6ea7e1e7  /tmp/minidregg-bd883d8-resource-client-evidence/bin/mini
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-link-sqlite-store
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /tmp/minidregg-776ba59-helpers-evidence/bin/minidregg-credential-signature-verifier
