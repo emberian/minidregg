@@ -14,6 +14,7 @@ reservation does not establish an implemented or accepted native path.
 | 13 | Selected release, atom-bound v2 | Assigned replacement for the colliding proposed tag 11 |
 | 14 | Source publication authorization | Reserved for source-side admission |
 | 15 | Application share issuance | Reserved for special issuance admission |
+| 16 | Application lifecycle current claim | Reserved for durable claim admission |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
