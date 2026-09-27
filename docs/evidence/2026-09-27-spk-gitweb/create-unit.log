@@ -1,0 +1,47 @@
+Running as unit: mini-spk-gitweb-991003-create.service
+app_spawned mode=create pid=3654780
++ mkdir -p /var/lib/nginx
++ mkdir -p /var/log/nginx
++ mkdir -p /var/run
+view="" roles=guest[read],developer[read,write]
+api_sessions=developer,guest web_session=owner
++ mkdir -p /var/repo.git
++ cd /var/repo.git
++ git --bare init --shared
+Initialized empty shared Git repository in /var/repo.git/
++ ln -sf /opt/app/post-receive-hook.sh hooks/post-receive
++ git config --file config http.receivepack true
++ git config --file config receive.denyNonFastForwards false
++ git update-server-info
++ cat
++ cat config
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+	sharedrepository = 1
+[receive]
+	denyNonFastForwards = false
+[http]
+	receivepack = true
++ cd /
++ /continue.sh
++ /usr/sbin/nginx
++ /usr/sbin/fcgiwrap -f -s tcp:127.0.0.1:9000
++ sleep infinity
+source_commit=27c7e7dbe3c66cc5d8381748d0b0e5fbae05bafc
+git_rpc method=Get path=info/refs?service=git-receive-pack status=200 bytes=180 sha256=c5dee52783c3db532e0d0080b3474cb4a77b725188bcbd82571259799f901f23
+git_rpc method=Post path=git-receive-pack status=200 bytes=52 sha256=2aee2acc693256606857df29f5a45cce383f5d4299c5af9b41f9f3d6f64e1371
+git_exit=exit status: 0 stdout="To http://127.0.0.1:37093/\n*\tHEAD:refs/heads/master\t[new branch]\nDone\n" stderr=""
+push_post_count=1
+guest_receive_pack_status=403
+git_rpc method=Get path=info/refs?service=git-upload-pack status=200 bytes=351 sha256=2abf1e34639cf807f5f0dfef2d9ef6811b3bfde90025209c20937c402c71a88b
+git_rpc method=Post path=git-upload-pack status=200 bytes=293 sha256=4c53892956d9e84bf7da7d88f1f9a2464e5043fd4a12a83aa1e02f96433a64ba
+git_exit=exit status: 0 stdout="" stderr=""
+guest_fetched_commit=27c7e7dbe3c66cc5d8381748d0b0e5fbae05bafc readme_sha256=fa2447c2dc837cb77e517024df9363e276bd12eae115190fc2dc2c3c95e32403
+browser_path="gitweb.cgi?p=repo.git;a=summary" status=200 mime="text/html; charset=utf-8" bytes=5418 sha256=71903eeedc766601946d96177f465f23ce695961d3917453fae0fecefdc636b0
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 1.835s
+CPU time consumed: 1.813s
+Memory peak: 162.4M (swap: 0B)

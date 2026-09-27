@@ -1,0 +1,18 @@
+Running as unit: mini-spk-gitweb-991003-wake.service; invocation ID: b5579374234640e6a04fe145abe0b548
+app_spawned mode=wake pid=3657189
++ /usr/sbin/nginx
++ /usr/sbin/fcgiwrap -f -s tcp:127.0.0.1:9000
+view="" roles=guest[read],developer[read,write]
+api_sessions=developer,guest web_session=owner
++ sleep infinity
+guest_receive_pack_status=403
+git_rpc method=Get path=info/refs?service=git-upload-pack status=200 bytes=351 sha256=2abf1e34639cf807f5f0dfef2d9ef6811b3bfde90025209c20937c402c71a88b
+git_rpc method=Post path=git-upload-pack status=200 bytes=293 sha256=4c53892956d9e84bf7da7d88f1f9a2464e5043fd4a12a83aa1e02f96433a64ba
+git_exit=exit status: 0 stdout="" stderr=""
+guest_fetched_commit=27c7e7dbe3c66cc5d8381748d0b0e5fbae05bafc readme_sha256=fa2447c2dc837cb77e517024df9363e276bd12eae115190fc2dc2c3c95e32403
+browser_path="gitweb.cgi?p=repo.git;a=summary" status=200 mime="text/html; charset=utf-8" bytes=5418 sha256=80dd143a7d95746db705e9d02567944f49e3784e63c5654e1fc4814f7e6db485
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 1.757s
+CPU time consumed: 1.727s
+Memory peak: 162.1M (swap: 0B)

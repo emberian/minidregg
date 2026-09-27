@@ -44,7 +44,8 @@ Guest receive-pack **advertisement** returned 403. A guest smart-HTTP clone
 fetched the exact source commit and README SHA-256
 `fa2447c2dc837cb77e517024df9363e276bd12eae115190fc2dc2c3c95e32403`.
 An owner WebSession GET returned HTML status 200, 5,418 bytes, and identified
-the commit. The private create log SHA-256 is
+the expected commit hash or its exact subject. The retained keyless
+`docs/evidence/2026-09-27-spk-gitweb/create-unit.log` SHA-256 is
 `27e134c8c09afc29056ed787b1389e6966171f8df24996db52da317fa0becc41`.
 The bare repo's branch tip was independently read from the retained volume
 before wake and matched the source commit. No second push was attempted.
@@ -52,8 +53,9 @@ before wake and matched the source commit. No second push was attempted.
 Wake used the same volume and the exact retained expected commit as a CLI
 argument. It completed successfully in 1.757 seconds, peak 162.1 MiB. Guest
 receive-pack advertisement was again 403, smart-HTTP clone fetched the same
-commit and README, and owner browser GET returned identifying HTML 200.
-The private wake log SHA-256 is
+commit and README, and owner browser GET returned HTML 200 identifying that
+commit hash or subject. The retained keyless
+`docs/evidence/2026-09-27-spk-gitweb/wake-unit.log` SHA-256 is
 `782937898224a01020c031795dc1aff7edeb80dff58183e7a2b4ab39fef0d0db`.
 Afterward both units were inactive with MainPID 0 and empty ControlGroup;
 the retained repo tip remained the exact commit. No host TCP listener on the
