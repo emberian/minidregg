@@ -350,8 +350,8 @@ jq -e '.type == "absent"' \
 query_resource recipient 600 after-negatives 30012
 test "$(jq -er '.page.root' "$EVIDENCE/recipient/after-negatives/view.json")" = \
   "$(jq -er '.page.root' "$EVIDENCE/recipient/after-original/view.json")"
-test "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/after-negatives/challenge.json")" = \
-  "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/after-original/challenge.json")"
+test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-negatives/challenge.json")" = \
+  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-original/challenge.json")"
 
 # The proxy forwards one exact op20 frame, waits for and privately retains its
 # complete native reply, then drops only the client response. A confirmed
@@ -453,8 +453,8 @@ cmp "$EVIDENCE/recipient/after-law-image.bin" \
 query_resource recipient 600 after-law-refusal 30020
 test "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law-refusal/view.json")" = \
   "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law/view.json")"
-test "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/after-law-refusal/challenge.json")" = \
-  "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
+test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law-refusal/challenge.json")" = \
+  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
 
 "$MINI" selected-release-lookup --attempt "$EVIDENCE/recipient/original-attempt" \
   --socket "$RECIPIENT_SOCKET" \
@@ -484,8 +484,8 @@ done
 query_resource recipient 600 reopened 30021
 test "$(jq -er '.page.root' "$EVIDENCE/recipient/reopened/view.json")" = \
   "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law/view.json")"
-test "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/reopened/challenge.json")" = \
-  "$(jq -er '.signing[0].imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
+test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/reopened/challenge.json")" = \
+  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
 query_resource source 8001 source-final 30022
 test "$(jq -er '.page.root' "$EVIDENCE/source/source-final/view.json")" = \
   "$(jq -er '.page.root' "$EVIDENCE/source/selected/view.json")"
