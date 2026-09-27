@@ -600,13 +600,56 @@ fn confirmed_after_retry(
     prepare: &Path,
     mode: &str,
     upgrade: Option<&HostUpgrade>,
-) -> Result<Option<String>> {
+) -> Result<Option<(String, Value, PathBuf)>> {
     let json = latest_retry_path(prepare)?;
     let value = retry_outcome(prepare, mode, upgrade)?;
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         return Ok(None);
     }
-    outcome_transaction(&json)
+    Ok(outcome_transaction(&json)?.map(|txn| (txn, value, json)))
+}
+
+fn retain_confirmed_anchor(
+    pending: &Path,
+    prepare: &Path,
+    outcome_json: &Path,
+    value: &Value,
+) -> Result<()> {
+    let outcome_bin = outcome_json.with_extension("bin");
+    let anchor = json!({
+        "type":"minidregg-b-consumer-confirmed-anchor-v1",
+        "prepare":utf8_path(prepare)?,
+        "callSha256":file_digest(&prepare.join("call.bin"))?,
+        "attemptManifestSha256":file_digest(&prepare.join("attempt.json"))?,
+        "outcomePath":utf8_path(outcome_json)?,
+        "outcomeSha256":file_digest(&outcome_bin)?,
+        "confirmedFields":confirmed_fields(value)?
+    });
+    let path = pending.join("confirmed-anchor.json");
+    if path.exists() {
+        let retained = read_json(&path)?;
+        if retained.get("type") != anchor.get("type")
+            || retained.get("prepare") != anchor.get("prepare")
+            || retained.get("callSha256") != anchor.get("callSha256")
+            || retained.get("attemptManifestSha256") != anchor.get("attemptManifestSha256")
+            || retained.get("confirmedFields") != anchor.get("confirmedFields")
+            || retained
+                .get("outcomePath")
+                .and_then(Value::as_str)
+                .is_none_or(|path| {
+                    file_digest(&PathBuf::from(path).with_extension("bin"))
+                        .ok()
+                        .as_deref()
+                        != retained.get("outcomeSha256").and_then(Value::as_str)
+                })
+        {
+            return Err("confirmed worker anchor changed between exact lookups".into());
+        }
+    } else {
+        write_json_new(&path, &anchor)?;
+        sync_directory_ancestors(pending)?;
+    }
+    Ok(())
 }
 
 fn classify_poll(value: &Value) -> Result<(String, bool)> {
@@ -835,6 +878,173 @@ fn hold<T>(pending: &Path, state: &mut Value, reason: &str) -> Result<T> {
     Err(reason.to_owned())
 }
 
+fn held_ack_anchor(
+    state_dir: &Path,
+    pending: &Path,
+    state: &Value,
+    host: &Path,
+) -> Result<(Value, Option<HostUpgrade>)> {
+    let prepare = pending.join(field(state, "prepare")?);
+    let call = prepare.join("call.bin");
+    sync_retained_call(&prepare, &call)?;
+    let mut sending = state.clone();
+    sending["phase"] = json!("Sending");
+    let upgrade = load_upgrade(state_dir, pending, &sending, host)?;
+    let anchor_path = pending.join("confirmed-anchor.json");
+    let expected = if anchor_path.exists() {
+        let anchor = read_json(&anchor_path)?;
+        if anchor.get("type").and_then(Value::as_str)
+            != Some("minidregg-b-consumer-confirmed-anchor-v1")
+            || anchor.get("prepare").and_then(Value::as_str) != Some(utf8_path(&prepare)?)
+            || anchor.get("callSha256").and_then(Value::as_str)
+                != Some(file_digest(&call)?.as_str())
+            || anchor.get("attemptManifestSha256").and_then(Value::as_str)
+                != Some(file_digest(&prepare.join("attempt.json"))?.as_str())
+        {
+            return Err("retained confirmed ACK anchor differs from exact call".into());
+        }
+        let outcome_path = PathBuf::from(field(&anchor, "outcomePath")?);
+        if !outcome_path.starts_with(&prepare)
+            || file_digest(&outcome_path.with_extension("bin"))? != field(&anchor, "outcomeSha256")?
+        {
+            return Err("retained confirmed ACK outcome bytes changed".into());
+        }
+        let fields = confirmed_fields(&read_json(&outcome_path)?)?;
+        if anchor.get("confirmedFields") != Some(&fields) {
+            return Err("retained confirmed ACK outcome presentation changed".into());
+        }
+        fields
+    } else if let Some(upgrade) = &upgrade {
+        upgrade.expected_fields.clone()
+    } else {
+        return Err("held ACK lacks a durable exact-call confirmed receipt anchor".into());
+    };
+    if expected.get("transactionId").and_then(Value::as_str) != Some(field(state, "txn")?) {
+        return Err("held ACK transaction differs from confirmed exact-call anchor".into());
+    }
+    if let Some(upgrade) = &upgrade {
+        if expected != upgrade.expected_fields {
+            return Err("confirmed ACK anchor differs from host migration receipt".into());
+        }
+    }
+    Ok((expected, upgrade))
+}
+
+fn archive_exact_ack(state_dir: &Path, pending: &Path, state: &mut Value) -> Result<()> {
+    if retained_ack(pending, state)? != Some(AckEvidence::Exact) {
+        return Err("held ACK recovery lacks a retained exact durable reply".into());
+    }
+    set(state, "phase", json!("Acking"));
+    save_state(pending, state)?;
+    finish(state_dir, pending, state)
+}
+
+pub(super) fn resume_held_ack(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    key: &Path,
+    state_dir: &Path,
+) -> Result<()> {
+    private_dir(state_dir)?;
+    let socket_dir = socket.parent().ok_or("socket lacks parent")?;
+    private_dir(socket_dir)?;
+    let _global = transport::service_lock(&socket_dir.join("consumer-worker.lock"))?;
+    let _worker = transport::service_lock(&state_dir.join("worker.lock"))?;
+    pin(state_dir, host, config, socket, key)?;
+    if read_json(&state_dir.join("pin.json"))?
+        .get("type")
+        .and_then(Value::as_str)
+        != Some("minidregg-b-consumer-worker-pin-v2")
+    {
+        return Err("explicit held ACK recovery requires a v2 host image pin".into());
+    }
+    pin_worker_host_image(state_dir)?;
+    let pending = state_dir.join("pending");
+    private_dir(&pending)?;
+    let mut state = read_json(&pending.join("state.json"))?;
+    if field(&state, "phase")? != "Held" {
+        return Err("explicit ACK recovery requires a held B decision".into());
+    }
+    let poll = pending.join(field(&state, "poll")?);
+    let (retained_kind, _) = classify_poll(&read_json(&poll.join("decision.json"))?)?;
+    if !matches!(retained_kind.as_str(), "publication" | "skip")
+        || field(&state, "kind")? != retained_kind
+    {
+        return Err("held ACK kind differs from retained source poll decision".into());
+    }
+    if state.get("ackRetryStarted").and_then(Value::as_bool) == Some(true) {
+        return Err("existing exact ACK retry is already exhausted".into());
+    }
+    let (expected, upgrade) = held_ack_anchor(state_dir, &pending, &state, host)?;
+    if state.get("ackRecoveryStarted").and_then(Value::as_bool) == Some(true) {
+        if retained_ack(&pending, &state)? == Some(AckEvidence::Exact) {
+            return archive_exact_ack(state_dir, &pending, &mut state);
+        }
+        return Err(
+            "one exact held ACK recovery was already started without a complete exact reply".into(),
+        );
+    }
+    let prior_ack = field(&state, "ack")?.to_owned();
+    let prior_frame_path = pending.join(&prior_ack).join("reply.frame");
+    let prior_frame = fs::read(&prior_frame_path).map_err(|e| e.to_string())?;
+    if prior_frame.first() != Some(&255)
+        || prior_frame.len() < 2
+        || pending.join(&prior_ack).join("ack.json").exists()
+    {
+        return Err("held ACK lacks a complete source refusal frame".into());
+    }
+    let reconcile = attempt(&pending, &mut state, "reconcile")?;
+    private_dir(&reconcile)?;
+    create_private(&reconcile.join("prior-refusal.bin"), &prior_frame[1..])?;
+    let decoded = inspect(
+        host,
+        config,
+        "outcome",
+        &reconcile.join("prior-refusal.bin"),
+        &reconcile.join("prior-refusal.json"),
+    )?;
+    if decoded.get("type").and_then(Value::as_str) != Some("refused")
+        || decoded.get("phase").and_then(Value::as_str) != Some("666e2d73657373696f6e")
+    {
+        return Err("prior ACK frame is not a source-owned fn-session refusal".into());
+    }
+    let prepare = pending.join(field(&state, "prepare")?);
+    let lookup_json = latest_retry_path(&prepare)?;
+    let lookup = retry_outcome(&prepare, "lookup", upgrade.as_ref())?;
+    require_upgraded_receipt(&lookup, &expected)?;
+    if outcome_transaction(&lookup_json)?.as_deref() != Some(field(&state, "txn")?) {
+        return Err("recovery lookup transaction differs from retained ACK transaction".into());
+    }
+    let proof = json!({
+        "type":"minidregg-b-consumer-held-ack-recovery-v1",
+        "priorAck":prior_ack, "priorFrameSha256":hex(&Sha256::digest(&prior_frame)),
+        "priorReason":field(&state, "reason")?, "lookupPath":utf8_path(&lookup_json)?,
+        "lookupSha256":file_digest(&lookup_json.with_extension("bin"))?,
+        "confirmedFields":expected, "transactionId":field(&state, "txn")?,
+        "scope":"one exact typed ACK retry; no Mini submit or new intent"
+    });
+    write_json_new(&reconcile.join("recovery.json"), &proof)?;
+    sync_directory_ancestors(&reconcile)?;
+    set(&mut state, "ackRecoveryStarted", json!(true));
+    set(&mut state, "ackRecoveryPriorAck", json!(prior_ack));
+    save_state(&pending, &state)?;
+    let ack = attempt(&pending, &mut state, "ack")?;
+    let sent = consumer_ack(host, config, field(&state, "txn")?, &ack, B_CONSUMER);
+    if sent.is_ok() || retained_ack(&pending, &state).ok() == Some(Some(AckEvidence::Exact)) {
+        sync_directory_ancestors(&ack)?;
+        return archive_exact_ack(state_dir, &pending, &mut state);
+    }
+    hold(
+        &pending,
+        &mut state,
+        &format!(
+            "one explicit exact ACK recovery did not prove durable acceptance: {}",
+            sent.unwrap_err()
+        ),
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Stop {
     Idle,
@@ -972,6 +1182,7 @@ pub(super) fn run_locked(
                         )
                     }
                 };
+                retain_confirmed_anchor(&pending, &path, &outcome_path, &outcome)?;
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
                 save_state(&pending, &state)?;
@@ -995,7 +1206,7 @@ pub(super) fn run_locked(
                     Err(error) => return hold(&pending, &mut state,
                         &format!("exact lookup unresolved; retained call requires operator reconciliation: {error}")),
                 };
-                let txn = match lookup.get("type").and_then(Value::as_str) {
+                let (txn, anchored, anchor_path) = match lookup.get("type").and_then(Value::as_str) {
                     Some("confirmed") => {
                         if let Some(upgrade) = &upgrade {
                             if require_upgraded_receipt(&lookup, &upgrade.expected_fields).is_err() {
@@ -1003,13 +1214,13 @@ pub(super) fn run_locked(
                                     "upgraded lookup confirmed a different four-field receipt; no ACK or resubmit");
                             }
                         }
-                        outcome_transaction(&lookup_path)?
-                            .ok_or("confirmed exact lookup lacks transaction ID")?
+                        (outcome_transaction(&lookup_path)?
+                            .ok_or("confirmed exact lookup lacks transaction ID")?, lookup, lookup_path)
                     }
                     Some("absent") if upgrade.is_some() => return hold(&pending, &mut state,
                         "upgraded lookup is absent despite prior confirmed receipt; exact call retained for operator review"),
                     Some("absent") => match confirmed_after_retry(&path, "submit", None) {
-                        Ok(Some(txn)) => txn,
+                        Ok(Some(confirmed)) => confirmed,
                         Ok(None) => return hold(&pending, &mut state,
                             "same-call resubmit did not confirm; exact call retained"),
                         Err(error) => return hold(&pending, &mut state,
@@ -1018,6 +1229,7 @@ pub(super) fn run_locked(
                     _ => return hold(&pending, &mut state,
                         "exact lookup did not confirm or prove absence; retained call requires operator reconciliation"),
                 };
+                retain_confirmed_anchor(&pending, &path, &anchor_path, &anchored)?;
                 set(&mut state, "txn", json!(txn));
                 set(&mut state, "phase", json!("Acking"));
                 save_state(&pending, &state)?;
@@ -1192,6 +1404,95 @@ mod tests {
         }
         replay["type"] = json!("absent");
         assert!(confirmed_fields(&replay).is_err());
+    }
+
+    #[test]
+    fn confirmed_anchor_survives_new_lookup_but_rejects_different_receipt() {
+        let root = env::temp_dir().join(format!(
+            "mini-anchor-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let pending = root.join("pending");
+        let prepare = pending.join("prepare-00000002");
+        private_dir(&pending).unwrap();
+        private_dir(&prepare).unwrap();
+        create_private(&prepare.join("call.bin"), b"call").unwrap();
+        create_private(&prepare.join("attempt.json"), b"manifest").unwrap();
+        let absent = json!({"type":"absent"});
+        create_private(&prepare.join("retry-0000.bin"), b"absent lookup").unwrap();
+        write_json_new(&prepare.join("retry-0000.json"), &absent).unwrap();
+        assert!(retain_confirmed_anchor(
+            &pending,
+            &prepare,
+            &prepare.join("retry-0000.json"),
+            &absent
+        )
+        .is_err());
+        let value = json!({"type":"confirmed", "acceptedCount":"3",
+            "transactionId":"123", "eventId":"456", "imageBoundary":"789"});
+        create_private(&prepare.join("retry-0001.bin"), b"binary receipt").unwrap();
+        write_json_new(&prepare.join("retry-0001.json"), &value).unwrap();
+        retain_confirmed_anchor(&pending, &prepare, &prepare.join("retry-0001.json"), &value)
+            .unwrap();
+        create_private(&prepare.join("retry-0002.bin"), b"same receipt new lookup").unwrap();
+        write_json_new(&prepare.join("retry-0002.json"), &value).unwrap();
+        retain_confirmed_anchor(&pending, &prepare, &prepare.join("retry-0002.json"), &value)
+            .unwrap();
+        let mut fork = value;
+        fork["imageBoundary"] = json!("790");
+        assert!(retain_confirmed_anchor(
+            &pending,
+            &prepare,
+            &prepare.join("retry-0002.json"),
+            &fork
+        )
+        .is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retained_exact_ack_archives_after_crash_without_resending() {
+        let root = env::temp_dir().join(format!(
+            "mini-ack-archive-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        private_dir(&root).unwrap();
+        let pending = root.join("pending");
+        let ack = pending.join("ack-00000003");
+        private_dir(&pending).unwrap();
+        private_dir(&ack).unwrap();
+        let reply = json!({"type":B_CONSUMER.ack_type,
+            "miniTransactionId":"123", "fnAck":"durable-accepted"});
+        let mut frame = vec![B_CONSUMER.ack_opcode];
+        frame.extend(serde_json::to_vec(&reply).unwrap());
+        create_private(&ack.join("reply.frame"), &frame).unwrap();
+        let mut state = json!({"phase":"Held", "ackRecoveryStarted":true,
+            "ack":"ack-00000003", "txn":"123"});
+        save_state(&pending, &state).unwrap();
+        archive_exact_ack(&root, &pending, &mut state).unwrap();
+        assert!(!pending.exists());
+        assert_eq!(
+            fs::read(root.join("completed/123/ack-00000003/reply.frame")).unwrap(),
+            frame
+        );
+        assert_eq!(
+            field(
+                &read_json(&root.join("completed/123/state.json")).unwrap(),
+                "phase"
+            )
+            .unwrap(),
+            "Acking"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -83,6 +83,7 @@ usage:
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
+  mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
   mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
   mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
@@ -1706,6 +1707,24 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("consumer-drain-once requires Unix sockets".to_owned())
+            }
+        }
+        "consumer-resume-ack" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let key = path(args.required("key")?);
+            let state_dir = path(args.required("state-dir")?);
+            args.finish()?;
+            #[cfg(unix)]
+            {
+                let socket = SOCKET
+                    .get()
+                    .ok_or("consumer-resume-ack requires --socket")?;
+                drain::resume_held_ack(&host, &config, socket, &key, &state_dir)
+            }
+            #[cfg(not(unix))]
+            {
+                Err("consumer-resume-ack requires Unix sockets".to_owned())
             }
         }
         "consumer-host-upgrade" => {
