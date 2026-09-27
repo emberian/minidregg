@@ -28,6 +28,16 @@ permissions from a URL, HTTP header, or unverified role. Its current
 `SandstormApi` and `SessionContext` implementations fail closed on unsupported
 methods. The typed operations are `getViewInfo`, `newSession` for `WebSession`
 or `ApiSession`, and `dispatch_web` for GET, HEAD, POST, PUT, PATCH, and DELETE.
+`getViewInfo` retains ordered permission definitions and role definitions,
+including localized title/description text, obsolete and default flags,
+each role's raw permission bitset, and the view's denied-permission bitset.
+Permission and role IDs are list indexes. These are app-supplied descriptors,
+not effective grants: `RoleAssignment.none` means the single declared default
+role or an empty set, whereas `allAccess` is a separate assignment. The decoder
+rejects duplicate/invalid permission names and multiple defaults. It preserves
+bitset lengths rather than treating missing bits as an authorization rule;
+the Mini controller must reconcile a committed descriptor with current sharing
+authority before it supplies session permissions.
 The latter sends exact typed request content, cookies, accept/encoding,
 ETag preconditions, and whitelisted additional headers. It returns the
 Sandstorm response union, status where the union defines one, response

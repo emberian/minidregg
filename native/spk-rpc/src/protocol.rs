@@ -1,4 +1,4 @@
-use crate::{api_session_capnp, grain_capnp, identity_capnp, web_session_capnp};
+use crate::{api_session_capnp, grain_capnp, identity_capnp, util_capnp, web_session_capnp};
 use capnp::traits::HasTypeId;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
@@ -22,8 +22,67 @@ pub struct SessionParameters {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ViewInfo {
     pub app_title: String,
+    /// Stable wire indexes are their positions in this vector.
+    pub permissions: Vec<PermissionDefinition>,
+    /// Stable wire role IDs are their positions in this vector.
+    pub roles: Vec<RoleDefinition>,
+    /// Proxy UiView attenuation metadata, not an authorization decision.
+    pub denied_permissions: Vec<bool>,
+    /// Compatibility summary; use `permissions` for complete metadata.
     pub permission_names: Vec<String>,
+    /// Compatibility summary; use `roles` for definitions/default bits.
     pub role_count: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct LocalizedText {
+    pub default_text: String,
+    pub localizations: Vec<(String, String)>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PermissionDefinition {
+    pub name: String,
+    pub title: LocalizedText,
+    pub description: LocalizedText,
+    pub obsolete: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct RoleDefinition {
+    pub title: LocalizedText,
+    pub verb_phrase: LocalizedText,
+    pub description: LocalizedText,
+    /// Raw PermissionSet bit list, whose wire length may differ from definitions.
+    pub permissions: Vec<bool>,
+    pub obsolete: bool,
+    /// Legacy `RoleAssignment.none` may refer to a role with this flag.
+    pub default: bool,
+}
+
+fn bounded_text(value: capnp::text::Reader<'_>, maximum: usize) -> capnp::Result<String> {
+    let value = value.to_str()?;
+    if value.len() > maximum {
+        return Err(capnp::Error::failed("ViewInfo text exceeds bound".into()));
+    }
+    Ok(value.to_owned())
+}
+
+fn localized(value: util_capnp::localized_text::Reader<'_>) -> capnp::Result<LocalizedText> {
+    let default_text = bounded_text(value.get_default_text()?, 4096)?;
+    let entries = value.get_localizations()?;
+    bounded_len(entries.len() as usize, 32, "localizations")?;
+    let mut localizations = Vec::with_capacity(entries.len() as usize);
+    for item in entries.iter() {
+        localizations.push((
+            bounded_text(item.get_locale()?, 128)?,
+            bounded_text(item.get_text()?, 4096)?,
+        ));
+    }
+    Ok(LocalizedText {
+        default_text,
+        localizations,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -108,20 +167,67 @@ impl SupervisorConnection {
     pub async fn get_view_info(&self) -> capnp::Result<ViewInfo> {
         let reply = self.view.get_view_info_request().send().promise.await?;
         let info = reply.get()?;
-        let app_title = info
-            .get_app_title()?
-            .get_default_text()?
-            .to_str()?
-            .to_owned();
-        let permissions = info.get_permissions()?;
-        let mut permission_names = Vec::with_capacity(permissions.len() as usize);
-        for permission in permissions.iter() {
-            permission_names.push(permission.get_name()?.to_str()?.to_owned());
+        let app_title = bounded_text(info.get_app_title()?.get_default_text()?, 4096)?;
+        let raw_permissions = info.get_permissions()?;
+        let raw_roles = info.get_roles()?;
+        bounded_len(
+            raw_permissions.len() as usize,
+            4096,
+            "permission definitions",
+        )?;
+        bounded_len(raw_roles.len() as usize, 4096, "role definitions")?;
+        let mut names = std::collections::HashSet::new();
+        let mut permissions = Vec::with_capacity(raw_permissions.len() as usize);
+        for item in raw_permissions.iter() {
+            let name = bounded_text(item.get_name()?, 256)?;
+            if !name.starts_with(|c: char| c.is_ascii_alphabetic())
+                || !name.chars().all(|c| c.is_ascii_alphanumeric())
+                || !names.insert(name.clone())
+            {
+                return Err(capnp::Error::failed(
+                    "invalid or duplicate permission name".into(),
+                ));
+            }
+            permissions.push(PermissionDefinition {
+                name,
+                title: localized(item.get_title()?)?,
+                description: localized(item.get_description()?)?,
+                obsolete: item.get_obsolete(),
+            });
         }
+        let mut roles = Vec::with_capacity(raw_roles.len() as usize);
+        let mut defaults = 0;
+        for item in raw_roles.iter() {
+            let bits = item.get_permissions()?;
+            bounded_len(bits.len() as usize, 4096, "role permission bits")?;
+            let default = item.get_default();
+            if default {
+                defaults += 1;
+            }
+            roles.push(RoleDefinition {
+                title: localized(item.get_title()?)?,
+                verb_phrase: localized(item.get_verb_phrase()?)?,
+                description: localized(item.get_description()?)?,
+                permissions: bits.iter().collect(),
+                obsolete: item.get_obsolete(),
+                default,
+            });
+        }
+        if defaults > 1 {
+            return Err(capnp::Error::failed(
+                "multiple default roles are ambiguous".into(),
+            ));
+        }
+        let denied = info.get_denied_permissions()?;
+        bounded_len(denied.len() as usize, 4096, "denied permission bits")?;
+        let permission_names = permissions.iter().map(|p| p.name.clone()).collect();
         Ok(ViewInfo {
             app_title,
+            permissions,
+            roles,
+            denied_permissions: denied.iter().collect(),
             permission_names,
-            role_count: info.get_roles()?.len(),
+            role_count: raw_roles.len(),
         })
     }
 
@@ -285,6 +391,7 @@ mod tests {
         identity_profile: String,
         paths: Vec<String>,
         posts: Vec<(String, Vec<u8>, String, String)>,
+        view_fault: u8,
     }
 
     struct FakeApp(Rc<RefCell<Observed>>);
@@ -298,8 +405,57 @@ mod tests {
             info.reborrow()
                 .init_app_title()
                 .set_default_text("Actual app");
-            info.reborrow().init_permissions(1).get(0).set_name("edit");
-            info.init_roles(0);
+            let mut permissions = info.reborrow().init_permissions(2);
+            let mut read = permissions.reborrow().get(0);
+            read.set_name("read");
+            read.reborrow().init_title().set_default_text("Read");
+            read.reborrow()
+                .init_description()
+                .set_default_text("See tasks");
+            let mut edit = permissions.reborrow().get(1);
+            edit.set_name(if self.0.borrow().view_fault == 1 {
+                "read"
+            } else {
+                "edit"
+            });
+            edit.set_obsolete(true);
+            let mut title = edit.reborrow().init_title();
+            title.set_default_text("Edit");
+            let mut localized = title.init_localizations(1);
+            localized.reborrow().get(0).set_locale("fr");
+            localized.get(0).set_text("Modifier");
+            edit.init_description().set_default_text("Change tasks");
+            let mut roles = info.reborrow().init_roles(2);
+            let mut viewer = roles.reborrow().get(0);
+            viewer.reborrow().init_title().set_default_text("Viewer");
+            viewer
+                .reborrow()
+                .init_verb_phrase()
+                .set_default_text("can view");
+            viewer
+                .reborrow()
+                .init_description()
+                .set_default_text("Read only");
+            viewer.set_default(true);
+            viewer.init_permissions(2).set(0, true);
+            let mut editor = roles.get(1);
+            editor.reborrow().init_title().set_default_text("Editor");
+            editor
+                .reborrow()
+                .init_verb_phrase()
+                .set_default_text("can edit");
+            editor
+                .reborrow()
+                .init_description()
+                .set_default_text("Full task editing");
+            editor.set_obsolete(true);
+            if self.0.borrow().view_fault == 2 {
+                editor.set_default(true);
+            }
+            let mut bits = editor.init_permissions(2);
+            bits.set(0, true);
+            bits.set(1, true);
+            info.init_denied_permissions(2).set(1, true);
             Ok(())
         }
 
@@ -469,8 +625,20 @@ mod tests {
 
                 let info = host.get_view_info().await.unwrap();
                 assert_eq!(info.app_title, "Actual app");
-                assert_eq!(info.permission_names, ["edit"]);
-                assert_eq!(info.role_count, 0);
+                assert_eq!(info.permission_names, ["read", "edit"]);
+                assert_eq!(info.role_count, 2);
+                assert_eq!(info.denied_permissions, [false, true]);
+                assert_eq!(info.permissions[1].title.localizations, [("fr".into(), "Modifier".into())]);
+                assert!(info.permissions[1].obsolete);
+                assert_eq!(info.roles[0].permissions, [true, false]);
+                assert!(info.roles[0].default);
+                assert_eq!(info.roles[1].permissions, [true, true]);
+                assert!(info.roles[1].obsolete);
+                observed.borrow_mut().view_fault = 1;
+                assert!(host.get_view_info().await.is_err());
+                observed.borrow_mut().view_fault = 2;
+                assert!(host.get_view_info().await.is_err());
+                observed.borrow_mut().view_fault = 0;
 
                 let params = SessionParameters {
                     identity_id: [7; 32],

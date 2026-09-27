@@ -6,7 +6,10 @@
 
 mod protocol;
 mod web;
-pub use protocol::{InlineResponse, SessionParameters, SupervisorConnection, ViewInfo};
+pub use protocol::{
+    InlineResponse, LocalizedText, PermissionDefinition, RoleDefinition, SessionParameters,
+    SupervisorConnection, ViewInfo,
+};
 pub use web::{
     dispatch_web, Body, Cookie, CookieExpiry, ETag, ETagPrecondition, Header, Method,
     RequestContext, SetCookie, WebRequest, WebResponse, WebResult,
