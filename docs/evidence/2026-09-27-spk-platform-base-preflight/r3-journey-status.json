@@ -1,0 +1,13 @@
+{
+  "protocol": "mini-spk-gitweb-journey-status-v1",
+  "root": "/var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3",
+  "firstBirth": "absent-at-last-lookup",
+  "baseReady": false,
+  "install": "none",
+  "resident": "none",
+  "nextGate": "profile-and-recover-original-birth",
+  "humanBrowserQualified": false,
+  "agentApiQualified": false,
+  "sameAppContentQualified": false,
+  "note": "component receipts are not final browser/API or same-app content acceptance"
+}

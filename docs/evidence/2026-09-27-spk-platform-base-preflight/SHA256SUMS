@@ -1,4 +1,5 @@
 258a8a87d1d5b11df57c97e9419511810de550d7fb8121ba4505be9577599bc8  docs/evidence/2026-09-27-spk-platform-base-preflight/README.md
+c01da50016380cad971170fcf1851a69f487a3c75363f77d4bfd96db910a7cfc  docs/evidence/2026-09-27-spk-platform-base-preflight/JOURNEY-DRIVER.md
 a080c78ad4682506e7951b875c7b5551e28d4a9f4eff91ce5235fb8d26e5b8a7  docs/evidence/2026-09-27-spk-platform-base-preflight/r1-boundary.txt
 a638b10851a6725a6b7568476ad1364f022c9ecaf544e6179d80e0ddd3e25078  docs/evidence/2026-09-27-spk-platform-base-preflight/r1-total.time
 a996998086076e60cd3917a265e2e96037c226d8bbc4186025c150d595f50b5c  docs/evidence/2026-09-27-spk-platform-base-preflight/r1-verdict.txt
@@ -9,3 +10,4 @@ eead2bccaa803f3c80c0d060df491f649ed4d100397dbdd04b32fcecb8c43f23  docs/evidence/
 29a20c43d524f177b6056e6525d283c74d433a0e05533e437e227620ad484c0d  docs/evidence/2026-09-27-spk-platform-base-preflight/r3-qualify-launch-result.json
 a8fcf55e31150fc7558c7f0419851a89420c82c521f846c34355625b3b1d535a  docs/evidence/2026-09-27-spk-platform-base-preflight/r3-workroom.stderr
 dfec3d8544c62ae3e669e14eb868872ad622867d7655377e80cb0d7fc86d572d  docs/evidence/2026-09-27-spk-platform-base-preflight/r3-lookup.json
+5c3730e4b64b1fe468340de9e0c36f22d8a86c0efeee2dc0872ef7ccda4d1882  docs/evidence/2026-09-27-spk-platform-base-preflight/r3-journey-status.json
