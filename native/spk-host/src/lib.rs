@@ -5,6 +5,8 @@
 #[cfg(target_os = "linux")]
 mod agent_api_custody;
 #[cfg(target_os = "linux")]
+mod agent_api_lifetime_v3;
+#[cfg(target_os = "linux")]
 mod agent_api_native;
 #[cfg(target_os = "linux")]
 mod agent_api_server;
