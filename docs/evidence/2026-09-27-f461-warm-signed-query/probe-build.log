@@ -1,0 +1,142 @@
+     Locking 11 packages to highest compatible versions
+      Adding itoa v1.0.18
+      Adding memchr v2.8.3
+      Adding proc-macro2 v1.0.107
+      Adding quote v1.0.47
+      Adding serde v1.0.229
+      Adding serde_core v1.0.229
+      Adding serde_derive v1.0.229
+      Adding serde_json v1.0.151
+      Adding syn v3.0.6
+      Adding unicode-ident v1.0.26
+      Adding zmij v1.0.23
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling mini-warm-query-probe v0.1.0 (/tank/dregg-build/minidregg-warm-query-f461-20260927/bench-client)
+warning: function `host_image_sha256` is never used
+  --> src/transport.rs:18:4
+   |
+18 | fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+   |    ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `request_from_envelope` is never used
+  --> src/transport.rs:50:4
+   |
+50 | fn request_from_envelope<'a>(
+   |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `allowed_operation` is never used
+  --> src/transport.rs:85:4
+   |
+85 | fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
+   |    ^^^^^^^^^^^^^^^^^
+
+warning: function `allowed_operator_operation` is never used
+   --> src/transport.rs:140:4
+    |
+140 | fn allowed_operator_operation(request: &[u8]) -> bool {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `service_lock` is never used
+   --> src/transport.rs:265:15
+    |
+265 | pub(crate) fn service_lock(path: &Path) -> Result<fs::File, String> {
+    |               ^^^^^^^^^^^^
+
+warning: function `pin_config` is never used
+   --> src/transport.rs:308:4
+    |
+308 | fn pin_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    |    ^^^^^^^^^^
+
+warning: function `pin_service_mode` is never used
+   --> src/transport.rs:349:4
+    |
+349 | fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists: bool) -> Result<(), String> {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `clear_stale_socket` is never used
+   --> src/transport.rs:363:4
+    |
+363 | fn clear_stale_socket(path: &Path) -> Result<(), String> {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `set_nonblocking` is never used
+   --> src/transport.rs:388:4
+    |
+388 | fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: struct `DeadlinePipeWrite` is never constructed
+   --> src/transport.rs:440:8
+    |
+440 | struct DeadlinePipeWrite<'a, W: Write + AsRawFd> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `invoke` is never used
+   --> src/transport.rs:483:8
+    |
+483 | pub fn invoke(
+    |        ^^^^^^
+
+warning: function `serve` is never used
+   --> src/transport.rs:558:8
+    |
+558 | pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
+    |        ^^^^^
+
+warning: function `serve_operator` is never used
+   --> src/transport.rs:562:8
+    |
+562 | pub fn serve_operator(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `serve_with_mode` is never used
+   --> src/transport.rs:566:4
+    |
+566 | fn serve_with_mode(
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `peer_uid` is never used
+   --> src/transport.rs:731:4
+    |
+731 | fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+    |    ^^^^^^^^
+
+warning: function `effective_uid` is never used
+   --> src/transport.rs:769:4
+    |
+769 | fn effective_uid() -> u32 {
+    |    ^^^^^^^^^^^^^
+
+warning: function `fcntl` is never used
+   --> src/transport.rs:261:8
+    |
+261 |     fn fcntl(fd: i32, command: i32, ...) -> i32;
+    |        ^^^^^
+
+warning: function `flock` is never used
+   --> src/transport.rs:262:8
+    |
+262 |     fn flock(fd: i32, operation: i32) -> i32;
+    |        ^^^^^
+
+warning: function `getsockopt` is never used
+   --> src/transport.rs:739:12
+    |
+739 |         fn getsockopt(fd: i32, level: i32, name: i32, value: *mut Ucred, length: *mut u32) -> i32;
+    |            ^^^^^^^^^^
+
+warning: function `geteuid` is never used
+   --> src/transport.rs:771:12
+    |
+771 |         fn geteuid() -> u32;
+    |            ^^^^^^^
+
+warning: `mini-warm-query-probe` (bin "mini-warm-query-probe") generated 20 warnings
+    Finished `release` profile [optimized] target(s) in 3.95s

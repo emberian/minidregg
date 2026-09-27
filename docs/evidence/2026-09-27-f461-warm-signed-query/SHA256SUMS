@@ -1,0 +1,17 @@
+7de481fe664aa05c5e1fd85512a9e1b91c16b3338e98cd63c44486a9fa913365  docs/evidence/2026-09-27-f461-warm-signed-query/README.md
+d132a6c108e5690750bdcf55d52e95ff05abfb912969f1873af81bedec47d075  docs/evidence/2026-09-27-f461-warm-signed-query/r3-after-first-unit.txt
+8ffdd66f4f5d70839c7c6372fc60cb409ca6923f563ac155b4a3a9fbc8811578  docs/evidence/2026-09-27-f461-warm-signed-query/r3-after-repeat1-unit.txt
+c1e8611ff8d1e6469ecd9bbb3c5c2134a5859ccc0aa8209cdc3c352513d39df6  docs/evidence/2026-09-27-f461-warm-signed-query/r3-after-repeat2-unit.txt
+85736efdc27a168a6303fd65e0af10404a15679cc064da8e379bf6b313e8088b  docs/evidence/2026-09-27-f461-warm-signed-query/r3-before-first-unit.txt
+d98af433b8030f5a492d438c25967821d86b6c805d966e81ce28cfd5535f4d8f  docs/evidence/2026-09-27-f461-warm-signed-query/r3-before-repeat1-unit.txt
+07461bc2b6ee1db315ac76439ab5c85d2f04ce2ee29e3b3700dec51de105cdf7  docs/evidence/2026-09-27-f461-warm-signed-query/r3-before-repeat2-unit.txt
+94ae1aa4083b23c7d61dd51287e2aa63902a94ed1a712342bb7f593d52249605  docs/evidence/2026-09-27-f461-warm-signed-query/r3-final-unit.txt
+b68d35e86169de1e409cfaa832242298f67e03e5e8cfef331013ab0570c0ac00  docs/evidence/2026-09-27-f461-warm-signed-query/r3-first-time.txt
+0844d6961a8816581c5a4726228b34d918f0476cb8325f6cfe5b62062cb74d2e  docs/evidence/2026-09-27-f461-warm-signed-query/r3-repeat1-time.txt
+7ccc3b829b583dc178ade2cae49d14d66960241ed837095a0052d026a092ad22  docs/evidence/2026-09-27-f461-warm-signed-query/r3-repeat2-time.txt
+ce3c04679b0a9ab589d7a2d161394cca85147a57934f56a486e091f4fa9c3914  docs/evidence/2026-09-27-f461-warm-signed-query/r3-startup.txt
+98744b5baa2114a766c2ff635a00fd157a108860cb52e75a262c44d6169e8766  docs/evidence/2026-09-27-f461-warm-signed-query/probe-build.log
+5874ed6a84082adc5a43da1f50dbbdde8d6c94bf472b0c5d6940b8de272afbf2  docs/evidence/2026-09-27-f461-warm-signed-query/identity.sha256
+2f68756ffadc298fc23fe8976fd80073a4b62013158d04d3e1ccb3a3907a4623  docs/evidence/2026-09-27-f461-warm-signed-query/probe-main.rs
+b3c2750bcf5ad58595b664fefd40db4e1db9fd650b40c46d13d12f82b8070b6d  docs/evidence/2026-09-27-f461-warm-signed-query/probe-Cargo.toml
+f983666d39878869d05eaca00e0a63df962ad37248907ff20ba976594a60286d  docs/evidence/2026-09-27-f461-warm-signed-query/probe-Cargo.lock
