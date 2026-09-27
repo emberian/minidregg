@@ -21,23 +21,31 @@ fn selected_state(journal: &Value) -> (&'static str, bool, bool) {
         .get("unresolvedExternal")
         .and_then(Value::as_array)
         .is_some_and(|items| !items.is_empty());
-    let uncertain = ["pending", "toolPending", "providerPending"]
-        .iter()
-        .any(|key| {
-            journal
-                .get(key)
-                .and_then(|entry| entry.get("uncertain"))
-                .and_then(Value::as_bool)
-                == Some(true)
-        });
+    let uncertain = [
+        "pending",
+        "toolPending",
+        "providerPending",
+        "dispatchPending",
+    ]
+    .iter()
+    .any(|key| {
+        journal
+            .get(key)
+            .and_then(|entry| entry.get("uncertain"))
+            .and_then(Value::as_bool)
+            == Some(true)
+    });
     let child = present("child");
     let held = [
         "pending",
         "toolPending",
         "providerPending",
+        "dispatchPending",
         "parentHold",
         "toolHold",
         "providerHold",
+        "dispatchHold",
+        "dispatchAttempt",
         "settlementDue",
     ]
     .iter()
@@ -76,16 +84,28 @@ fn selected_state(journal: &Value) -> (&'static str, bool, bool) {
 }
 
 /// A strict, nonauthoritative projection; never serialize the private journal.
-pub fn state(journal: &Value, attachment_id: u64, request_id: u64) -> Value {
+pub fn state(
+    journal: &Value,
+    attachment_id: u64,
+    request_id: u64,
+    registered_shared_application_count: usize,
+) -> Value {
     let (activity, retained_session, review_needed) = selected_state(journal);
     json!({"v":1,"type":"state","attachmentId":attachment_id,
         "requestId":request_id,"activity":activity,
-        "retainedSession":retained_session,"reviewNeeded":review_needed})
+        "retainedSession":retained_session,"reviewNeeded":review_needed,
+        "registeredSharedApplicationCount":registered_shared_application_count})
 }
 
 /// An error is never presented as a successful prompt, including when native
 /// refusal was definitive but another cleanup transition remains uncertain.
-pub fn completion(journal: &Value, attachment_id: u64, request_id: u64, success: bool) -> Value {
+pub fn completion(
+    journal: &Value,
+    attachment_id: u64,
+    request_id: u64,
+    success: bool,
+    registered_shared_application_count: usize,
+) -> Value {
     let (activity, retained_session, review_needed) = selected_state(journal);
     let outcome = if success && !review_needed && activity == "ready" {
         "completed"
@@ -96,7 +116,8 @@ pub fn completion(journal: &Value, attachment_id: u64, request_id: u64, success:
     };
     json!({"v":1,"type":"prompt-complete","attachmentId":attachment_id,
         "requestId":request_id,"outcome":outcome,"activity":activity,
-        "retainedSession":retained_session,"reviewNeeded":review_needed})
+        "retainedSession":retained_session,"reviewNeeded":review_needed,
+        "registeredSharedApplicationCount":registered_shared_application_count})
 }
 
 pub fn parse_status_command(line: &str) -> Option<(u64, u64)> {
@@ -484,19 +505,27 @@ mod tests {
             "toolPending":null,"parentHold":null,"toolHold":null,"settlementDue":null,
             "unresolvedExternal":[],"custodyKey":"private","stateDir":"/secret",
             "hermesSession":{"id":"retained-private-id","pendingPrompt":false}});
-        let safe = state(&private, 7, 11).to_string();
+        let safe = state(&private, 7, 11, 2).to_string();
+        assert!(safe.contains("\"registeredSharedApplicationCount\":2"));
         assert!(safe.contains("\"activity\":\"ready\""));
         assert!(!safe.contains("private"));
         assert!(!safe.contains("/secret"));
+        for key in ["dispatchPending", "dispatchHold", "dispatchAttempt"] {
+            let mut pending = private.clone();
+            pending[key] = json!({"privatePath":"/secret"});
+            let projected = state(&pending, 7, 11, 2).to_string();
+            assert!(!projected.contains("\"activity\":\"ready\""));
+            assert!(!projected.contains("/secret"));
+        }
         let uncertain = json!({"connection":"soft","child":null,"toolHold":{},
             "toolPending":{"uncertain":true},"unresolvedExternal":[]});
         assert_eq!(
-            completion(&uncertain, 7, 12, true)["outcome"],
+            completion(&uncertain, 7, 12, true, 2)["outcome"],
             "review-needed"
         );
-        assert_eq!(completion(&private, 7, 12, false)["outcome"], "failed");
+        assert_eq!(completion(&private, 7, 12, false, 2)["outcome"], "failed");
         assert_eq!(
-            state(&json!({"connection":"detached"}), 7, 13)["activity"],
+            state(&json!({"connection":"detached"}), 7, 13, 2)["activity"],
             "review-needed"
         );
     }

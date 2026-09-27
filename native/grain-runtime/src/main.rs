@@ -15,6 +15,7 @@ mod provider_profile;
 #[cfg(test)]
 mod publication_refusal_tests;
 mod resource_tools;
+mod shared_app_refs;
 mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -88,6 +89,10 @@ struct ToolTask {
     allowed_application_families: Vec<application_tools::ApplicationFamily>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_session_families: Vec<application_tools::SessionFamily>,
+    /// Operator-pinned foreign applications are names and evidence pointers,
+    /// never locally born resources or imported owner grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    registered_shared_applications: Vec<shared_app_refs::SharedApplicationRef>,
     /// Explicit operator enablement for the qualified current-author Host
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -360,6 +365,8 @@ struct BirthPending {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     selected_application: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_shared: Option<shared_app_refs::CurrentSharedApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     authored_intent_sha256: Option<String>,
     tool_view: Value,
     parent_view: Value,
@@ -413,6 +420,12 @@ impl BirthPending {
             || self.route.is_some() != self.authored_intent_sha256.is_some()
         {
             return Err("birth bundle has an invalid application selector".into());
+        }
+        if self.selected_shared.as_ref().is_some_and(|shared| {
+            self.route != Some(ApplicationBirthRoute::Session)
+                || self.selected_application.as_deref() != Some(shared.name.as_str())
+        }) {
+            return Err("birth bundle has a mismatched shared application reference".into());
         }
         let mut names = std::collections::HashSet::new();
         let mut targets = std::collections::HashSet::new();
@@ -1695,6 +1708,7 @@ fn validate(c: &Config) -> Result<()> {
             decimal(&grant.observe_capability, "publication observe capability")?;
         }
         resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
+        shared_app_refs::validate_refs(&t.registered_shared_applications, t)?;
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -1735,11 +1749,14 @@ fn validate(c: &Config) -> Result<()> {
         application_tools::validate_families(
             &t.allowed_application_families,
             &t.allowed_session_families,
+            &t.registered_shared_applications
+                .iter()
+                .map(|reference| reference.application_family.as_str())
+                .collect::<Vec<_>>(),
             &t.allowed_birth_families,
             &t.allowed_reads,
             &t.allowed_publications,
-            &peer_targets,
-            &peer_capabilities,
+            (&peer_targets, &peer_capabilities),
         )?;
         for family in &t.allowed_birth_families {
             let charge = resource_tools::planned_birth_charge(family)?;
@@ -3106,22 +3123,36 @@ impl Runtime {
                     .selected_application
                     .as_deref()
                     .ok_or("session birth has no retained application selector")?;
-                let app_record = self
-                    .journal
-                    .born_resources
-                    .iter()
-                    .find(|record| {
-                        record.pending.route == Some(ApplicationBirthRoute::Application)
-                            && record.pending.family == family.application_family
-                            && record.pending.born.name == app_name
-                    })
-                    .ok_or("session birth selected application is not retained")?;
-                self.verify_born_record(app_record)?;
+                let app_target = if let Some(shared) = origin.selected_shared.as_ref() {
+                    let reference = tool
+                        .registered_shared_applications
+                        .iter()
+                        .find(|reference| {
+                            reference.name == app_name
+                                && reference.application_family == family.application_family
+                        })
+                        .ok_or("session birth shared reference is no longer configured")?;
+                    shared_app_refs::validate_selected(reference, shared)?;
+                    shared.app_target.as_str()
+                } else {
+                    let app_record = self
+                        .journal
+                        .born_resources
+                        .iter()
+                        .find(|record| {
+                            record.pending.route == Some(ApplicationBirthRoute::Application)
+                                && record.pending.family == family.application_family
+                                && record.pending.born.name == app_name
+                        })
+                        .ok_or("session birth selected application is not retained")?;
+                    self.verify_born_record(app_record)?;
+                    app_record.pending.born.target.as_str()
+                };
                 application_tools::plan_session_birth(
                     family,
                     tool,
                     &self.config.task,
-                    &app_record.pending.born.target,
+                    app_target,
                     application_tools::BirthIndex {
                         nonce: pending.operation_id,
                         ordinal: origin.ordinal,
@@ -3589,6 +3620,84 @@ impl Runtime {
             )));
         }
         Ok(())
+    }
+    fn supervised_resource_read(
+        &self,
+        tool: &ToolTask,
+        read: &resource_tools::AllowedResourceRead,
+        nonce: u64,
+    ) -> Result<Value> {
+        resource_tools::read_resource_with(&self.config, tool, read, nonce, |command| {
+            let output = self
+                .custody_gate
+                .run_capture(&self.cancelled, command)
+                .map_err(|error| format!("supervised native resource read: {error}"))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "native resource read exited {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Ok(())
+        })
+    }
+    fn supervised_json_command(&self, mut command: Command) -> Result<Value> {
+        let output = self
+            .custody_gate
+            .run_capture(&self.cancelled, &mut command)
+            .map_err(|error| format!("supervised native lookup: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "native historical lookup exited {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        serde_json::from_slice(&output.stdout)
+            .map_err(|error| format!("native historical lookup JSON: {error}"))
+    }
+    fn resolve_shared_app(
+        &mut self,
+        tool: &ToolTask,
+        reference: &shared_app_refs::SharedApplicationRef,
+    ) -> Result<shared_app_refs::CurrentSharedApplication> {
+        let mut nonces = [0u64; 4];
+        for nonce in &mut nonces {
+            *nonce = self.next_id()?;
+        }
+        shared_app_refs::resolve_with(&self.config, tool, reference, nonces, |operation| {
+            match operation {
+                shared_app_refs::NativeOperation::BirthLookup { attempt } => {
+                    let mut command = Command::new(&self.config.mini);
+                    command
+                        .arg("retry")
+                        .arg("--attempt")
+                        .arg(attempt)
+                        .arg("--mode")
+                        .arg("lookup");
+                    self.supervised_json_command(command)
+                }
+                shared_app_refs::NativeOperation::IssueLookup { attempt } => {
+                    let socket = self
+                        .config
+                        .host_socket
+                        .as_ref()
+                        .ok_or("shared app issue lookup requires pinned hostSocket")?;
+                    let mut command = Command::new(&self.config.mini);
+                    command
+                        .arg("share-issue-lookup")
+                        .arg("--socket")
+                        .arg(socket)
+                        .arg("--attempt")
+                        .arg(attempt);
+                    self.supervised_json_command(command)
+                }
+                shared_app_refs::NativeOperation::SignedRead { read, nonce } => {
+                    self.supervised_resource_read(tool, &read, nonce)
+                }
+            }
+        })
     }
     fn query(&mut self) -> Result<Value> {
         let a = self.parent();
@@ -5795,10 +5904,11 @@ impl Runtime {
         {
             return Err("resource birth has an unresolved delegated attempt".into());
         }
-        // A caller-selected application must already be a complete exact
-        // locally accepted bundle. Reject an unknown/stale selector before
-        // consuming an ordinal, attaching, or holding any allowance.
-        let selected_app_birth = if route == Some(ApplicationBirthRoute::Session) {
+        // Resolve a named local birth or an operator-pinned foreign reference
+        // before consuming an ordinal or holding allowance. A foreign name
+        // supplies discovery provenance, never a locally born owner grant.
+        let (selected_app_birth, selected_shared) = if route == Some(ApplicationBirthRoute::Session)
+        {
             let family = tool
                 .allowed_session_families
                 .iter()
@@ -5807,20 +5917,32 @@ impl Runtime {
             let name = selected_application
                 .as_deref()
                 .ok_or("session application selector absent")?;
-            let record = self
-                .journal
-                .born_resources
+            let local = self.journal.born_resources.iter().find(|record| {
+                record.pending.route == Some(ApplicationBirthRoute::Application)
+                    && record.pending.family == family.application_family
+                    && record.pending.born.name == name
+            });
+            let shared = tool
+                .registered_shared_applications
                 .iter()
-                .find(|record| {
-                    record.pending.route == Some(ApplicationBirthRoute::Application)
-                        && record.pending.family == family.application_family
-                        && record.pending.born.name == name
-                })
-                .ok_or("session application has no confirmed local birth")?;
-            self.verify_born_record(record)?;
-            Some(record.pending.born.clone())
+                .find(|reference| {
+                    reference.name == name
+                        && reference.application_family == family.application_family
+                });
+            match (local, shared) {
+                (Some(_), Some(_)) => return Err("session application name is ambiguous".into()),
+                (Some(record), None) => {
+                    self.verify_born_record(record)?;
+                    (Some(record.pending.born.clone()), None)
+                }
+                (None, Some(reference)) => {
+                    let reference = reference.clone();
+                    (None, Some(self.resolve_shared_app(&tool, &reference)?))
+                }
+                (None, None) => return Err("session application has no confirmed local birth or registered shared reference".into()),
+            }
         } else {
-            None
+            (None, None)
         };
         let ordinal = *self
             .journal
@@ -5930,21 +6052,30 @@ impl Runtime {
                     .iter()
                     .find(|family| family.name == family_name)
                     .ok_or("session family changed during birth")?;
-                let app = selected_app_birth
-                    .as_ref()
-                    .ok_or("session application selection disappeared")?;
-                let read = resource_tools::born_read(app);
-                let read_nonce = self.next_id()?;
-                let observation =
-                    resource_tools::read_resource(&self.config, &tool, &read, read_nonce)?;
-                if observation.get("target").and_then(Value::as_str) != Some(app.target.as_str()) {
-                    return Err("fresh signed application read differs from retained birth".into());
-                }
+                let app_target = if let Some(app) = selected_app_birth.as_ref() {
+                    let read = resource_tools::born_read(app);
+                    let read_nonce = self.next_id()?;
+                    let observation = self.supervised_resource_read(&tool, &read, read_nonce)?;
+                    if observation.get("target").and_then(Value::as_str)
+                        != Some(app.target.as_str())
+                    {
+                        return Err(
+                            "fresh signed application read differs from retained birth".into()
+                        );
+                    }
+                    app.target.as_str()
+                } else {
+                    selected_shared
+                        .as_ref()
+                        .ok_or("session shared application selection disappeared")?
+                        .app_target
+                        .as_str()
+                };
                 application_tools::plan_session_birth(
                     family,
                     &tool,
                     &self.config.task,
-                    &app.target,
+                    app_target,
                     application_tools::BirthIndex { nonce: id, ordinal },
                     &tool_view,
                     &parent_view,
@@ -6009,6 +6140,7 @@ impl Runtime {
             route,
             born_bundle: if route.is_some() { born } else { Vec::new() },
             selected_application,
+            selected_shared,
             authored_intent_sha256,
             tool_view,
             parent_view,
@@ -6179,7 +6311,7 @@ impl Runtime {
                 // exact composite receipt is revalidated above.
                 let read = resource_tools::select_read(&reads, arguments)?.clone();
                 let nonce = self.next_id()?;
-                resource_tools::read_resource(&self.config, &configured, &read, nonce)
+                self.supervised_resource_read(&configured, &read, nonce)
             }
             "mini_create_resource" => self.create_resource(arguments, None),
             "mini_create_application" => {
@@ -7100,15 +7232,25 @@ impl Runtime {
                         .any(|family| family.application_family == record.pending.family)
                 {
                     self.verify_born_record(record)?;
-                    if !seen.insert(&record.pending.born.name) {
+                    if !seen.insert(record.pending.born.name.clone()) {
                         return Err("duplicate confirmed application name".into());
                     }
-                    if applications.len() < 64 {
-                        applications.push(record.pending.born.name.clone());
+                    if applications.len() >= 64 {
+                        return Err("application catalog exceeds 64 names".into());
                     }
+                    applications.push(record.pending.born.name.clone());
                 }
             }
             applications.reverse();
+            for name in shared_app_refs::discovery_names(&tool.registered_shared_applications) {
+                if !seen.insert(name.clone()) {
+                    return Err("registered shared application duplicates a local name".into());
+                }
+                if applications.len() >= 64 {
+                    return Err("application catalog exceeds 64 names".into());
+                }
+                applications.push(name);
+            }
         }
         Ok(mcp::ToolCatalog {
             birth_families: tool
@@ -9507,7 +9649,9 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let delivered = rt.output.as_ref().is_some_and(|output| {
                         output.try_terminal_event_for(
                             attachment,
-                            terminal::state(&journal, attachment, request),
+                            terminal::state(&journal, attachment, request,
+                                rt.config.tool_task.as_ref().map_or(0, |tool|
+                                    tool.registered_shared_applications.len())),
                         )
                     });
                     if delivered {
@@ -9591,7 +9735,9 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let delivered = rt.output.as_ref().is_some_and(|output| {
                         output.try_terminal_event_for(
                             attachment,
-                            terminal::completion(&journal, attachment, request, result.is_ok()),
+                            terminal::completion(&journal, attachment, request, result.is_ok(),
+                                rt.config.tool_task.as_ref().map_or(0, |tool|
+                                    tool.registered_shared_applications.len())),
                         )
                     });
                     if delivered {
@@ -9764,6 +9910,7 @@ mod tests {
             route: None,
             born_bundle: Vec::new(),
             selected_application: None,
+            selected_shared: None,
             authored_intent_sha256: None,
             tool_view: json!({}),
             parent_view: json!({}),
@@ -10076,6 +10223,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 allowed_birth_families: vec![],
                 allowed_application_families: vec![],
                 allowed_session_families: vec![],
+                registered_shared_applications: vec![],
                 current_birth_host_sha256: None,
             }),
             provider_task: None,

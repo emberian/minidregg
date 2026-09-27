@@ -547,11 +547,15 @@ pub(super) fn born_publication(born: &BornResource) -> PublicationGrant {
     }
 }
 
-pub(super) fn read_resource(
+/// `run` owns the exact child lifetime. Production controller callers should
+/// use its CustodyGate so hard disconnect cancels and reaps a query instead of
+/// leaving an untracked native process.
+pub(super) fn read_resource_with(
     config: &Config,
     tool: &ToolTask,
     read: &AllowedResourceRead,
     nonce: u64,
+    run: impl FnOnce(&mut Command) -> Result<()>,
 ) -> Result<Value> {
     if read.observe_capability == tool.capability
         || read.observe_capability == tool.parent_capability
@@ -604,17 +608,13 @@ pub(super) fn read_resource(
     if read.fn_inbox_summary {
         command.arg("--presentation").arg("fn-inbox-resource");
     }
-    let status = command
-        .status()
-        .map_err(|e| format!("native Mini resource query: {e}"))?;
-    if !status.success() {
-        return Err(format!(
-            "native Mini refused resource read {} ({}); retained attempt at {}",
+    run(&mut command).map_err(|error| {
+        format!(
+            "native Mini refused resource read {} ({error}); retained attempt at {}",
             read.name,
-            status,
             attempt.display()
-        ));
-    }
+        )
+    })?;
     // The query above is the only authority-bearing read. With fn summary
     // selected, the native client asks Lean to present its exact retained
     // view.bin directly as typed JSON. It skips the potentially much larger
@@ -684,6 +684,7 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn birth_family() -> AllowedBirthFamily {
         AllowedBirthFamily {
@@ -707,6 +708,53 @@ mod tests {
     }
 
     #[test]
+    fn supervised_read_runner_can_refuse_before_native_spawn() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let state = std::env::temp_dir().join(format!("mini-supervised-read-{suffix}"));
+        fs::create_dir(&state).unwrap();
+        let config: Config = serde_json::from_value(json!({
+            "mini":"/unused/mini","host":"/unused/host",
+            "hostConfig":"/unused/config","controlSocket":"/unused/control.sock",
+            "custodyKey":"/unused/parent.key","stateDir":state,
+            "cwd":"/unused/workspace","task":"1","subject":"7",
+            "capability":"71","queryCapability":"72","commands":[]
+        }))
+        .unwrap();
+        let tool: ToolTask = serde_json::from_value(json!({
+            "task":"2","subject":"8","capability":"81",
+            "queryCapability":"82","custodyKey":"/unused/tool.key",
+            "parentCapability":"83","parentObserveCapability":"84",
+            "reserve":"3","charge":"1","allowedPublications":[]
+        }))
+        .unwrap();
+        let read = AllowedResourceRead {
+            name: "shared-app".into(),
+            kind: "object".into(),
+            target: "100".into(),
+            observe_capability: "90".into(),
+            max_result_bytes: 1024,
+            fn_inbox_summary: false,
+        };
+        let mut entered = false;
+        let error = read_resource_with(&config, &tool, &read, 5, |command| {
+            entered = true;
+            assert_eq!(command.get_program(), "/unused/mini");
+            Err("fenced before spawn".into())
+        })
+        .unwrap_err();
+        assert!(entered && error.contains("fenced before spawn"));
+        let dir = config.state_dir.join("resource-read-0000000000000005");
+        let intent: Value =
+            serde_json::from_slice(&fs::read(dir.join("intent-source.json")).unwrap()).unwrap();
+        assert_eq!(intent["grants"][0]["capability"], "90");
+        assert!(!dir.join("attempt").exists());
+        fs::remove_dir_all(&config.state_dir).unwrap();
+    }
+
+    #[test]
     fn content_birth_uses_exact_factory_payer_tool_parent_footprint() {
         let family = birth_family();
         let tool = ToolTask {
@@ -724,6 +772,7 @@ mod tests {
             allowed_birth_families: vec![],
             allowed_application_families: vec![],
             allowed_session_families: vec![],
+            registered_shared_applications: vec![],
             current_birth_host_sha256: None,
         };
         let peer = |root: &str| {

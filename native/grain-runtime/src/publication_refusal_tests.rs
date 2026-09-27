@@ -148,6 +148,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             allowed_birth_families: vec![],
             allowed_application_families: vec![],
             allowed_session_families: vec![],
+            registered_shared_applications: vec![],
             current_birth_host_sha256: None,
         }),
         provider_task: None,

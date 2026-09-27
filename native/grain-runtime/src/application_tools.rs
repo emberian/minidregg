@@ -228,14 +228,17 @@ fn own_ranges(
 /// Reject every overlap before any allowance is reserved. Target and
 /// capability identities have separate namespaces, but every range in one
 /// namespace is compared with every configured family and fixed peer ID.
+/// `shared_application_families` comes from validated operator references;
+/// it allows a session namespace without pretending the external app was
+/// locally born.
 pub(super) fn validate_families(
     applications: &[ApplicationFamily],
     sessions: &[SessionFamily],
+    shared_application_families: &[&str],
     content: &[AllowedBirthFamily],
     reads: &[AllowedResourceRead],
     publications: &[PublicationGrant],
-    peer_targets: &[&str],
-    peer_capabilities: &[&str],
+    peer_ids: (&[&str], &[&str]),
 ) -> Result<()> {
     if applications.len() > MAX_FAMILIES || sessions.len() > MAX_FAMILIES {
         return Err(
@@ -243,11 +246,13 @@ pub(super) fn validate_families(
         );
     }
     let mut families = Vec::new();
-    let mut fixed_targets = peer_targets
+    let mut fixed_targets = peer_ids
+        .0
         .iter()
         .map(|s| (*s).to_owned())
         .collect::<Vec<_>>();
-    let mut fixed_capabilities = peer_capabilities
+    let mut fixed_capabilities = peer_ids
+        .1
         .iter()
         .map(|s| (*s).to_owned())
         .collect::<Vec<_>>();
@@ -309,9 +314,12 @@ pub(super) fn validate_families(
         if !applications
             .iter()
             .any(|app| app.name == family.application_family)
+            && !shared_application_families
+                .iter()
+                .any(|name| *name == family.application_family)
         {
             return Err(format!(
-                "{} has no configured application family",
+                "{} has no local or registered shared application family",
                 family.name
             ));
         }
@@ -690,7 +698,31 @@ mod tests {
     }
 
     fn check(applications: &[ApplicationFamily], sessions: &[SessionFamily]) -> Result<()> {
-        validate_families(applications, sessions, &[], &[], &[], &["1"], &["2"])
+        validate_families(applications, sessions, &[], &[], &[], &[], (&["1"], &["2"]))
+    }
+
+    #[test]
+    fn session_family_accepts_only_registered_external_application_family() {
+        validate_families(
+            &[],
+            &[session()],
+            &["office"],
+            &[],
+            &[],
+            &[],
+            (&["1"], &["2"]),
+        )
+        .unwrap();
+        assert!(validate_families(
+            &[],
+            &[session()],
+            &["other"],
+            &[],
+            &[],
+            &[],
+            (&["1"], &["2"])
+        )
+        .is_err());
     }
 
     #[test]
@@ -736,6 +768,7 @@ mod tests {
             allowed_birth_families: vec![],
             allowed_application_families: vec![],
             allowed_session_families: vec![],
+            registered_shared_applications: vec![],
             current_birth_host_sha256: None,
         };
         let view = json!({"targetRoot":"41","authorityRoot":"42","height":"9",
