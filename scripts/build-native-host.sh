@@ -6,10 +6,14 @@
 # native artifact while resolving the executable closure.
 
 set -euo pipefail
+# `comm` and `join -t TAB` compare module keys bytewise.  Use the same byte
+# collation for every inventory producer and consumer, independent of the
+# caller's locale (whose punctuation ordering can differ for parent modules).
+export LC_ALL=C
 
 usage() {
   cat <<'EOF'
-usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
+usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSHOT BUILD_OUTPUT] [--incremental-suffix-from SNAPSHOT BUILD_OUTPUT MODULE [--allow-suffix-change MODULE ...] [--allow-inserted-module MODULE ...] [--allow-unchanged-restart]] [--checkpoint-resume | --resume-failed BUILD_OUTPUT | --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256 | --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT] [--output DIR] [--binary PATH]
 
   --umbrella  run the literal `lake build Minidregg` gate through a serialized
               Lean wrapper, build Host.Main leanArts, then link the native host
@@ -38,6 +42,12 @@ usage: scripts/build-native-host.sh [--umbrella] [--incremental-host-from SNAPSH
               resume the compiled prefix of a failed, non-umbrella full build
               in this same snapshot, only after checkpointed source, Lean,
               package, project, and toolchain hashes all still match
+  --resume-complete-lean BUILD_OUTPUT BUILDER_SHA256
+              recover a failed post-Lean link from a complete checkpointed
+              Lean closure in the same snapshot. Verify every source, OLean,
+              ILean, generated C and external input; allow only the named
+              builder-script hash to change, then recompile all project C
+              objects before package resolution and linking
   --reuse-success-prefix-from SNAPSHOT BUILD_OUTPUT
               in a new independent snapshot, reuse the longest topological
               prefix of a successful --checkpoint-resume build with an exact
@@ -64,6 +74,8 @@ suffix_allowed_modules=()
 inserted_modules=()
 allow_unchanged_restart=0
 resume_failed_output=""
+resume_complete_output=""
+resume_complete_builder_sha=""
 checkpoint_resume=0
 success_baseline_root=""
 success_baseline_output=""
@@ -122,6 +134,14 @@ while [[ $# -gt 0 ]]; do
       checkpoint_resume=1
       shift 2
       ;;
+    --resume-complete-lean)
+      [[ $# -ge 3 && -z "$resume_complete_output" &&
+         "$3" =~ ^[[:xdigit:]]{64}$ ]] || { usage >&2; exit 64; }
+      resume_complete_output=$2
+      resume_complete_builder_sha=$3
+      checkpoint_resume=1
+      shift 3
+      ;;
     --checkpoint-resume)
       checkpoint_resume=1
       shift
@@ -163,8 +183,10 @@ if [[ "$checkpoint_resume" == 1 &&
   printf 'build-native-host: checkpoint/resume is exclusive with other build modes\n' >&2
   exit 64
 fi
-if [[ -n "$success_baseline_root" && -n "$resume_failed_output" ]]; then
-  printf 'build-native-host: successful-prefix and failed-build resume are exclusive\n' >&2
+if [[ ( -n "$success_baseline_root" &&
+        ( -n "$resume_failed_output" || -n "$resume_complete_output" ) ) ||
+      ( -n "$resume_failed_output" && -n "$resume_complete_output" ) ]]; then
+  printf 'build-native-host: resume and successful-prefix modes are exclusive\n' >&2
   exit 64
 fi
 if [[ ${#suffix_allowed_modules[@]} -gt 0 && "$incremental_suffix_mode" != 1 ]]; then
@@ -499,7 +521,143 @@ if [[ "$checkpoint_resume" == 1 ]]; then
   printf 'snapshot_root=%s\ntoolchain=%s\nmode=full-nonumbrella\n' "$root" "$toolchain" \
     > "$output_dir/resume-contract.txt"
 
-  if [[ -n "$resume_failed_output" ]]; then
+  if [[ -n "$resume_complete_output" ]]; then
+    resume_complete_output=$(cd "$resume_complete_output" && pwd -P)
+    [[ "$resume_complete_output" != "$output_dir" &&
+       -f "$resume_complete_output/resume-contract.txt" &&
+       -f "$resume_complete_output/resume-input-sha256.txt" &&
+       -f "$resume_complete_output/source-input-sha256.txt" &&
+       -f "$resume_complete_output/build.log" &&
+       -f "$resume_complete_output/compile-args.txt" &&
+       ! -e "$resume_complete_output/manifest.txt" ]] || {
+      printf 'build-native-host: post-Lean output lacks a failed resume contract\n' >&2
+      exit 65
+    }
+    cmp -s "$resume_complete_output/resume-contract.txt" \
+      "$output_dir/resume-contract.txt" || {
+      printf 'build-native-host: post-Lean snapshot or toolchain changed\n' >&2
+      exit 65
+    }
+    for list in source-modules.txt build-modules.txt transitive-imports.json; do
+      cmp -s "$resume_complete_output/$list" "$output_dir/$list" || {
+        printf 'build-native-host: post-Lean source closure changed: %s\n' "$list" >&2
+        exit 65
+      }
+    done
+    # The prior locale may have ordered punctuation differently. Compare the
+    # package set, with duplicate rejection, rather than trusting either order.
+    for side in prior current; do
+      if [[ "$side" == prior ]]; then
+        list="$resume_complete_output/package-modules.txt"
+      else
+        list="$output_dir/package-modules.txt"
+      fi
+      sort "$list" > "$output_dir/post-lean-$side-packages.txt"
+      uniq -d "$output_dir/post-lean-$side-packages.txt" \
+        > "$output_dir/post-lean-$side-package-duplicates.txt"
+      [[ ! -s "$output_dir/post-lean-$side-package-duplicates.txt" ]] || {
+        printf 'build-native-host: duplicate package in post-Lean closure\n' >&2
+        exit 65
+      }
+    done
+    cmp -s "$output_dir/post-lean-prior-packages.txt" \
+      "$output_dir/post-lean-current-packages.txt" || {
+      printf 'build-native-host: post-Lean package closure changed\n' >&2
+      exit 65
+    }
+    cmp -s "$resume_complete_output/source-input-sha256.txt" \
+      "$source_inputs" || {
+      printf 'build-native-host: post-Lean source input manifest changed\n' >&2
+      exit 65
+    }
+    (cd "$root" && shasum -a 256 -c "$source_inputs") \
+      > "$output_dir/post-lean-source-check.log"
+    # Exactly one reviewed builder revision may differ. All other toolchain,
+    # package-library, and build inputs retain their predecessor digests.
+    old_builder_line=$(grep -E '^[[:xdigit:]]{64}  scripts/build-native-host\.sh$' \
+      "$resume_complete_output/resume-input-sha256.txt") || exit 65
+    [[ "$old_builder_line" == "$resume_complete_builder_sha  scripts/build-native-host.sh" &&
+       "$(grep -c '  scripts/build-native-host.sh$' \
+          "$resume_complete_output/resume-input-sha256.txt")" == 1 ]] || {
+      printf 'build-native-host: predecessor builder hash differs from declared pin\n' >&2
+      exit 65
+    }
+    grep -v '  scripts/build-native-host.sh$' \
+      "$resume_complete_output/resume-input-sha256.txt" \
+      | sort -k2,2 > "$output_dir/post-lean-prior-external-sha256.txt"
+    grep -v '  scripts/build-native-host.sh$' "$resume_inputs" \
+      | sort -k2,2 > "$output_dir/post-lean-current-external-sha256.txt"
+    for side in prior current; do
+      awk '{ print $2 }' "$output_dir/post-lean-$side-external-sha256.txt" \
+        | uniq -d > "$output_dir/post-lean-$side-external-duplicates.txt"
+      [[ ! -s "$output_dir/post-lean-$side-external-duplicates.txt" ]] || {
+        printf 'build-native-host: duplicate post-Lean external input path\n' >&2
+        exit 65
+      }
+    done
+    cmp -s "$output_dir/post-lean-prior-external-sha256.txt" \
+      "$output_dir/post-lean-current-external-sha256.txt" || {
+      printf 'build-native-host: post-Lean external input changed beyond builder\n' >&2
+      exit 65
+    }
+    (cd "$root" && shasum -a 256 -c \
+      "$output_dir/post-lean-prior-external-sha256.txt") \
+      > "$output_dir/post-lean-external-check.log"
+    for list in toolchain-symlinks.txt package-symlinks-recursive.txt; do
+      sort "$resume_complete_output/$list" > "$output_dir/post-lean-prior-$list"
+      sort "$output_dir/$list" > "$output_dir/post-lean-current-$list"
+      cmp -s "$output_dir/post-lean-prior-$list" \
+        "$output_dir/post-lean-current-$list" || {
+        printf 'build-native-host: post-Lean symlink inventory changed: %s\n' "$list" >&2
+        exit 65
+      }
+    done
+    total=$(wc -l < "$build_modules" | tr -d ' ')
+    checkpoint_count=$(find "$resume_complete_output/resume-checkpoints" \
+      -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')
+    [[ "$checkpoint_count" == "$total" ]] || {
+      printf 'build-native-host: post-Lean checkpoint count is incomplete\n' >&2
+      exit 65
+    }
+    index=0
+    while IFS= read -r module; do
+      index=$((index + 1))
+      awk -v want="lean[$index/$total] $module PASS " \
+        'index($0, want) == 1 { found = 1 } END { exit !found }' \
+        "$resume_complete_output/build.log" || {
+        printf 'build-native-host: post-Lean module lacks PASS: %s\n' "$module" >&2
+        exit 65
+      }
+      stem=${module//./\/}
+      checkpoint="$resume_complete_output/resume-checkpoints/$(printf '%04d' "$index")-${module//./_}.sha256"
+      [[ -f "$checkpoint" ]] || exit 65
+      module_checkpoint_paths "$stem" | sed '/\.c\.o\.export$/d' \
+        > "$output_dir/post-lean-expected-paths.txt"
+      sed -n 's/^[[:xdigit:]]\{64\}  //p' "$checkpoint" \
+        | sed '/\.c\.o\.export$/d' \
+        > "$output_dir/post-lean-recorded-paths.txt"
+      cmp -s "$output_dir/post-lean-expected-paths.txt" \
+        "$output_dir/post-lean-recorded-paths.txt" || {
+        printf 'build-native-host: post-Lean checkpoint path set changed: %s\n' "$module" >&2
+        exit 65
+      }
+      grep -vE '^[[:xdigit:]]{64}  .*\.c\.o\.export$' "$checkpoint" \
+        | (cd "$root" && shasum -a 256 -c) \
+        >> "$output_dir/post-lean-prefix-check.log" || {
+        printf 'build-native-host: post-Lean source/OLean/C changed: %s\n' "$module" >&2
+        exit 65
+      }
+    done < "$build_modules"
+    cp "$resume_complete_output"/resume-checkpoints/*.sha256 \
+      "$resume_checkpoint_dir/"
+    resume_prefix=$total
+    printf 'post_lean_output=%s\nverified_modules=%s\nold_builder_sha256=%s\nnew_builder_sha256=%s\nproject_c_action=recompile_all\n' \
+      "$resume_complete_output" "$total" "$resume_complete_builder_sha" \
+      "$(shasum -a 256 scripts/build-native-host.sh | cut -d ' ' -f 1)" \
+      > "$output_dir/post-lean-recovery.txt"
+    printf 'post-Lean recovery check PASS %s source/OLean/C modules; recompile project C\n' \
+      "$total" | tee -a "$output_dir/build.log"
+  elif [[ -n "$resume_failed_output" ]]; then
     resume_failed_output=$(cd "$resume_failed_output" && pwd -P)
     [[ "$resume_failed_output" != "$output_dir" &&
        -f "$resume_failed_output/resume-contract.txt" &&
@@ -1181,6 +1339,12 @@ if [[ -n "$incremental_baseline_root" ]]; then
   }
   shasum -a 256 "$compile_args" >> "$output_dir/toolchain-sha256.txt"
 fi
+if [[ -n "$resume_complete_output" ]]; then
+  cmp -s "$resume_complete_output/compile-args.txt" "$compile_args" || {
+    printf 'build-native-host: post-Lean C compiler arguments changed\n' >&2
+    exit 65
+  }
+fi
 
 export toolchain output_dir
 project_c_modules="$source_modules"
@@ -1221,7 +1385,7 @@ make_package_index() {
       gsub(/\//, ".", module)
       print module "\t" path
     }
-  ' | sort
+  ' | sort -t $'\t' -k1,1 -k2,2
 }
 
 package_index="$output_dir/package-object-index.tsv"
@@ -1255,7 +1419,7 @@ if [[ -s "$output_dir/missing-package-objects.txt" ]]; then
       gsub(/\//, ".", module)
       print module "\t" path
     }
-  ' | sort > "$package_c_index"
+  ' | sort -t $'\t' -k1,1 -k2,2 > "$package_c_index"
   cut -f1 "$package_c_index" | sort -u > "$output_dir/package-c-modules.txt"
   comm -23 "$output_dir/missing-package-objects.txt" "$output_dir/package-c-modules.txt" \
     > "$output_dir/unresolved-package-c-modules.txt"
@@ -1459,6 +1623,12 @@ git status --short > "$output_dir/git-status.txt"
     "$(shasum -a 256 "$output_dir/reusable-artifact-sha256.txt" | cut -d ' ' -f 1)"
   if [[ "$checkpoint_resume" == 1 ]]; then
     printf 'checkpointed_success=1\n'
+    if [[ -n "$resume_complete_output" ]]; then
+      printf 'post_lean_recovery=%s\n' "$resume_complete_output"
+      printf 'post_lean_prior_builder_sha256=%s\n' "$resume_complete_builder_sha"
+      printf 'recompiled_project_c_modules=%s\n' \
+        "$(wc -l < "$project_c_modules" | tr -d ' ')"
+    fi
     if [[ -n "$success_baseline_root" ]]; then
       printf 'successful_baseline=%s\n' "$success_baseline_output"
       printf 'reused_success_prefix_modules=%s\n' "$resume_prefix"
