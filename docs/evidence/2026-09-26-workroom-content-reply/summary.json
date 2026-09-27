@@ -1,0 +1,89 @@
+{
+  "aDecision": {
+    "decision": "proposed-fresh",
+    "fnStoreSequence": "5",
+    "fnStoreTransactionId": "5",
+    "miniOrigin": {
+      "acceptedCount": "20",
+      "eventId": "19302899713478614648317033798292983451013749099175324834566009145612214627877",
+      "imageBoundary": "53417682264557877670488054077774732041751696713496998209344473990154327520105",
+      "transactionId": "75066520320494335503287207186282537477487057135753415221093985984904776611415",
+      "type": "verified-mini-native-prefix-v1"
+    },
+    "operation": "7d0414329c98ef451d5744ee16e4e69436a974f7061f6a9518259c98b955be12",
+    "qSourceIdentity": "666e2f7375626a6563742f7631000101f818dc0624e762db454162320b12acdefba769430a5e71070f07777d2eb55712",
+    "status": "accepted-decision",
+    "type": "fn-a-reply-consumer-decision-v1"
+  },
+  "aFnAck": {
+    "fnAck": "durable-accepted",
+    "fnStoreSequence": "5",
+    "fnStoreTransactionId": "5",
+    "miniTransactionId": "55568422944075166105115456938465576647508336961605526692885446644952255855081"
+  },
+  "aMiniConfirmation": "installed",
+  "aMiniReceipt": {
+    "acceptedCount": "4",
+    "eventId": "56774624046572113999580556325752612720839287366639903406186452550257118925981",
+    "imageBoundary": "32106318936082726850040081882753298751838548185132231548652760465204185353195",
+    "transactionId": "55568422944075166105115456938465576647508336961605526692885446644952255855081"
+  },
+  "aRetainedProjection": {
+    "carrierSha256": "c49f35a302c6a72776ab5931c5950fc78908a04ce472e3efdaa6a86865d4f46b",
+    "messageId": "<mini-e2-f25758a50130db36735f2491da5213f5f43bf8822be08f2cce95dc4dcdbd38daff@example.invalid>",
+    "sourceEqualsSignedQ": true,
+    "sourceIdentity": "666e2f7375626a6563742f7631000101f818dc0624e762db454162320b12acdefba769430a5e71070f07777d2eb55712",
+    "sourceSha256": "9009bab21d80d4b71710c39497a284685e70322d7f3bc7179d828a2d7addfcbf"
+  },
+  "firstAReplyPoll": {
+    "miniMutation": false,
+    "reason": "A consumer first returned its own R; Q parser refused source",
+    "replyFrameSha256": "c88ae7a97c6ba77aec3c2aabacd8518269cd7c6eaf28c817e96f57e10a3121c0",
+    "status": "refused"
+  },
+  "fnGroupAfterQ": {
+    "a": 2,
+    "b": 2
+  },
+  "nativeAHybridVerification": {
+    "sourceEqualsSignedQ": true,
+    "sourceIdentity": "666e2f7375626a6563742f7631000101f818dc0624e762db454162320b12acdefba769430a5e71070f07777d2eb55712",
+    "sourceSha256": "9009bab21d80d4b71710c39497a284685e70322d7f3bc7179d828a2d7addfcbf",
+    "type": "fn-portable-v1"
+  },
+  "ownRAck": {
+    "cursorSha256": "c5798be79c95b869651eaa7a52b7bd33e58d7e527216927f08712fb415170c64",
+    "eventSha256": "04007e14b6dcc1506cc88eafd725693c1cc58887da342b873a9f1421b8fcec66",
+    "miniProgressBeforeAck": false,
+    "operatorAssisted": true,
+    "preAckGate": "exact retained R Message-ID",
+    "sourceEqualityCheckedAfterAck": true,
+    "status": "accepted by isolated fn operator harness"
+  },
+  "qFirstSign": {
+    "stage": "transport-fault",
+    "type": "fn-reply-sign-stage-v1"
+  },
+  "qPlan": {
+    "messageId": "<mini-e2-f25758a50130db36735f2491da5213f5f43bf8822be08f2cce95dc4dcdbd38daff@example.invalid>",
+    "miniTransactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180",
+    "stage": "durable-accepted",
+    "type": "fn-reply-plan-stage-v1"
+  },
+  "qPlanReadbackEqual": true,
+  "qSign": {
+    "messageId": "<mini-e2-f25758a50130db36735f2491da5213f5f43bf8822be08f2cce95dc4dcdbd38daff@example.invalid>",
+    "miniTransactionId": "82876784764185867945530134274097760617071008281531308989391057144998338336180",
+    "sourceIdentity": "666e2f7375626a6563742f7631000101f818dc0624e762db454162320b12acdefba769430a5e71070f07777d2eb55712",
+    "stage": "durable-accepted",
+    "type": "fn-reply-sign-stage-v1"
+  },
+  "qSignedReadbackEqual": true,
+  "scope": "one isolated private fn A/B pair; workroom content edit43 of resource8001 atom7401",
+  "signedAQuery": {
+    "entryCount": "3",
+    "presentation": "fn-inbox-resource-summary-v1",
+    "viewSha256": "d67e6073ce31937c540107837bfe13ea0a0b4e58f53293fa2519c48c12d5b508"
+  },
+  "type": "workroom-content-q-a-evidence-v1"
+}

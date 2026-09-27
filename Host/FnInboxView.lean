@@ -7,6 +7,8 @@ foreign operation, rerun fn signatures, or apply its carried publication at B.
 -/
 import Host.Json
 import Kernel.FnConsumerOperation
+import Kernel.FnReplyConsumption
+import Kernel.FnOriginOutbox
 
 namespace Minidregg.Host.FnInboxView
 
@@ -41,6 +43,13 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
    ("eventId", number receipt.eventId.value),
    ("acceptedCount", number receipt.acceptedCount),
    ("imageBoundary", number receipt.imageBoundary.value)]
+
+private def ascii (label : String) (bytes : List UInt8) : Except String String := do
+  unless bytes.all (fun byte => 32 ≤ byte.toNat && byte.toNat ≤ 126) do
+    throw s!"{label} is not printable ASCII"
+  let some value := String.fromUTF8? bytes.toByteArray
+    | throw s!"{label} is not UTF-8"
+  pure value
 
 private def keyJson : Minidregg.Theory.EffectDeclaration.StateKey → Json
   | .objectField resource field => .mkObj
@@ -202,6 +211,75 @@ private def typedAtom (schema : String) (payload : List UInt8) : Except String J
          ("messageIdHex", hex poll.messageId),
          ("verdictPrincipal", hex poll.verdictPrincipal),
          ("exactEventBytes", number poll.event.length)]
+  | "6" =>
+      let some result := FnReplyConsumption.resultCodec.decode payload
+        | throw "A reply result atom is noncanonical"
+      unless result.reply.application == result.application &&
+          result.reply.operation == result.operation &&
+          result.reply.sourceIdentity == result.parentSourceIdentity &&
+          result.reply.miniReceipt == result.originReceipt do
+        throw "A reply result differs from its retained R binding"
+      pure <| Json.mkObj
+        [("type", toJson "aReplyResult"),
+         ("applicationHex", hex result.application),
+         ("operationHex", hex result.operation),
+         ("parentSourceIdentity", hex result.parentSourceIdentity),
+         ("parentMessageId", toJson (← ascii "R Message-ID" result.parentMessageId)),
+         ("replySourceIdentity", hex result.replySourceIdentity),
+         ("replyMessageId", toJson (← ascii "Q Message-ID" result.replyMessageId)),
+         ("originReceipt", receiptJson result.originReceipt),
+         ("exactPayloadBytes", number payload.length)]
+  | "7" =>
+      let some inbox := FnReplyConsumption.reportCodec.decode payload
+        | throw "A reply inbox atom is noncanonical"
+      let result ← FnReplyConsumption.check
+        ⟨inbox.application, inbox.subject, inbox.target, inbox.capability⟩ inbox
+      pure <| Json.mkObj
+        [("type", toJson "aReplyInbox"),
+         ("applicationHex", hex result.application),
+         ("operationHex", hex result.operation),
+         ("parentSourceIdentity", hex result.parentSourceIdentity),
+         ("parentMessageId", toJson (← ascii "R Message-ID" result.parentMessageId)),
+         ("replySourceIdentity", hex result.replySourceIdentity),
+         ("replyMessageId", toJson (← ascii "Q Message-ID" result.replyMessageId)),
+         ("replySource", toJson (String.fromUTF8! inbox.replySource.toByteArray)),
+         ("originReceipt", receiptJson result.originReceipt),
+         ("pollCallObserved", toJson inbox.storePoll.pollCallObserved),
+         ("fnStoreSequence", number inbox.storePoll.sequence),
+         ("fnStoreTransactionId", number inbox.storePoll.transactionId),
+         ("exactCarrierBytes", number inbox.portableInbox.carrier.length),
+         ("exactEventBytes", number inbox.storePoll.event.length),
+         ("exactPayloadBytes", number payload.length)]
+  | "8" =>
+      let some conflict := FnReplyConsumption.reportCodec.decode payload
+        | throw "A reply conflict atom is noncanonical"
+      let result ← FnReplyConsumption.check
+        ⟨conflict.application, conflict.subject, conflict.target,
+          conflict.capability⟩ conflict
+      pure <| Json.mkObj
+        [("type", toJson "aReplyConflict"),
+         ("applicationHex", hex result.application),
+         ("operationHex", hex result.operation),
+         ("parentMessageId", toJson (← ascii "R Message-ID" result.parentMessageId)),
+         ("replyMessageId", toJson (← ascii "Q Message-ID" result.replyMessageId)),
+         ("exactPayloadBytes", number payload.length)]
+  | "10" =>
+      let some prepared := FnOriginOutbox.preparedCodec.decode payload
+        | throw "prepared R outbox atom is noncanonical"
+      unless prepared.valid do
+        throw "prepared R outbox atom is invalid"
+      pure <| Json.mkObj
+        [("type", toJson "preparedOriginOutbox"),
+         ("applicationHex", hex prepared.application),
+         ("operationHex", hex prepared.operation),
+         ("messageId", toJson (← ascii "R Message-ID" prepared.messageId)),
+         ("sourceIdentity", hex prepared.sourceIdentity),
+         ("packageIdentity", number prepared.packageIdentity.value),
+         ("originCallIdentity", number prepared.originCallIdentity.value),
+         ("originReceipt", receiptJson prepared.originReceipt),
+         ("exactCarrierBytes", number prepared.carrier.length),
+         ("exactPayloadBytes", number payload.length),
+         ("custody", toJson "prepared locally; fn Store admission is separate")]
   | _ => pure (Json.mkObj [("type", toJson "other"), ("schema", toJson schema),
       ("exactPayloadBytes", number payload.length)])
 
@@ -241,6 +319,6 @@ def render (viewBin : List UInt8) : Except String Json := do
      ("pageNumber", (page.getObjVal? "pageNumber").toOption.getD .null),
      ("entryCount", number entries.size), ("entries", .arr summaries),
      ("interpretation", toJson
-       "decoded B resource view and carried A evidence; consult retained signed query; remote publication is not a B mutation")]
+       "decoded signed Mini resource view; carried fn publication is not a local mutation of its origin resource")]
 
 end Minidregg.Host.FnInboxView

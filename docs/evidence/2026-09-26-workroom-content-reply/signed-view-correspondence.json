@@ -1,0 +1,23 @@
+{
+  "aPollQSourceSha256": "9009bab21d80d4b71710c39497a284685e70322d7f3bc7179d828a2d7addfcbf",
+  "nativeAHybridSourceIdentity": "666e2f7375626a6563742f7631000101f818dc0624e762db454162320b12acdefba769430a5e71070f07777d2eb55712",
+  "nativeAHybridVerifiedSameQSource": true,
+  "nativeViewEntryCount": 3,
+  "nativeViewRoot": "13196282993306484723709095505908727451232968464661757972407652318889204185319",
+  "schemaPayloads": {
+    "6": {
+      "atomId": "3973746706221648791602563342569360841645629826966842426976834352868374917877052",
+      "equalsHistoricalAcceptedExport": true,
+      "payloadBytes": 805,
+      "sha256": "8e8c23cd6193add5bede034265af90c6e123bbcc59d81fb232010546c0ac1e11"
+    },
+    "7": {
+      "atomId": "3973746706221648791602563342569360841645629826966842426976834352868374917877053",
+      "equalsHistoricalAcceptedExport": true,
+      "payloadBytes": 23039,
+      "sha256": "dc49bc7bbfb2f8a0adf3c99b814ee62981982542ed61a554c5bb505294f45c88"
+    }
+  },
+  "signedViewSha256": "d67e6073ce31937c540107837bfe13ea0a0b4e58f53293fa2519c48c12d5b508",
+  "type": "signed-a-view-reply-correspondence-v1"
+}

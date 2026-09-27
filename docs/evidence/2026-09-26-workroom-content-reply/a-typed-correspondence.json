@@ -1,0 +1,22 @@
+{
+  "fnStoreSequence": "5",
+  "inboxObservedStorePoll": true,
+  "inboxReplySourceEqualsSignedQ": true,
+  "originReceipt": {
+    "acceptedCount": "20",
+    "eventId": "19302899713478614648317033798292983451013749099175324834566009145612214627877",
+    "imageBoundary": "53417682264557877670488054077774732041751696713496998209344473990154327520105",
+    "transactionId": "75066520320494335503287207186282537477487057135753415221093985984904776611415"
+  },
+  "outboxResultInboxOperationEqual": true,
+  "outboxResultInboxOriginReceiptEqual": true,
+  "outboxResultInboxParentIdentityEqual": true,
+  "outboxResultInboxParentMessageIdEqual": true,
+  "replyMessageId": "<mini-e2-f25758a50130db36735f2491da5213f5f43bf8822be08f2cce95dc4dcdbd38daff@example.invalid>",
+  "resultInboxReplyMessageIdEqual": true,
+  "signedQSourceSha256": "9009bab21d80d4b71710c39497a284685e70322d7f3bc7179d828a2d7addfcbf",
+  "signedViewSha256": "d67e6073ce31937c540107837bfe13ea0a0b4e58f53293fa2519c48c12d5b508",
+  "sourceModuleSha256": "7c2f69f9c34a521b0ce0ea32eefc3fd2a741240ef60bc7cc35128610887afe7b",
+  "status": "source-only Lean probe; current linked Host predates this presentation",
+  "type": "workroom-a-typed-source-correspondence-v1"
+}
