@@ -1,0 +1,43 @@
+Persvati read-only physical observations; all IDs belong to fresh Store `/tmp/mini-offer-cross-uid-20260926-r1`.
+
+A create, captured while native tool active:
+  unit=mini-grain-t7801-o11.service
+  UID=1001  ActiveState=active  MainPID=835482  gate=started
+  ControlGroup=/user.slice/user-1001.slice/user@1001.service/app.slice/mini-grain-t7801-o11.service
+  BindsTo=mini-grain-controller@7801.service
+  cgroup.procs=835482,835484,835485,837153,837155
+  processes=bwrap,bwrap,python,grain-runtime,python (all UID1001)
+
+B review, captured while native tool active:
+  unit=mini-grain-t7803-o11.service
+  UID=1002  ActiveState=active  MainPID=875556  gate=started
+  ControlGroup=/user.slice/user-1002.slice/user@1002.service/app.slice/mini-grain-t7803-o11.service
+  BindsTo=mini-grain-controller@7803.service
+  cgroup held bwrap, Hermes Python, and keyless grain-runtime MCP under UID1002.
+
+A reconcile, captured while native tool active:
+  unit=mini-grain-t7801-o36.service
+  UID=1001  ActiveState=active  MainPID=906760  gate=started
+  ControlGroup=/user.slice/user-1001.slice/user@1001.service/app.slice/mini-grain-t7801-o36.service
+  BindsTo=mini-grain-controller@7801.service
+  cgroup.procs=906760,906775,906776,909560,909561
+  journal hermesSession.id=efe4ab6e-1310-46d5-aa68-937757622316 loadVerified=true
+
+Final read-only inspection after all prompts and after quiet Store snapshot/restart:
+  mini-grain-t7801-o11.service  inactive MainPID=0 ControlGroup= gate=fenced
+  mini-grain-t7803-o11.service  inactive MainPID=0 ControlGroup= gate=fenced
+  mini-grain-t7801-o36.service  inactive MainPID=0 ControlGroup= gate=fenced
+  mini-grain-controller@7801.service UID1001 active MainPID=794288
+  mini-grain-controller@7803.service UID1002 active MainPID=794329
+  mini-offer-host-20260926.service active MainPID=948950
+  mini-offer-front-a-20260926.service active MainPID=696949
+  mini-offer-front-b-20260926.service active MainPID=696952
+  mini-offer-provider-a-20260926.service active MainPID=704577
+  mini-offer-provider-b-20260926.service active MainPID=704579
+
+Task-owned state/workspace/output dirs: UID1001 and UID1002 respectively, mode0700.
+Frontend A directory ACL: owner rwx, named miniworka26 --x, group/other ---.
+Frontend B directory ACL: owner rwx, named miniworkb26 --x, group/other ---.
+Operator runtime-a/runtime-b roots: ember-owned, mode0755.
+
+The active snapshots were captured contemporaneously during each prompt; final state was re-read after completion. This log contains process/cgroup metadata only, no keys, Store, prompt body, or signed call bytes.
