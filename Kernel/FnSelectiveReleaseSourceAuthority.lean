@@ -9,6 +9,7 @@ authority.
 -/
 import Kernel.FnSelectiveReleaseSourcePublication
 import Kernel.ResourceObservationAdmission
+import Kernel.PhysicalResourceReadGuard
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSourceAuthority
 
@@ -59,8 +60,8 @@ structure Prepared (context : Context deployment durable)
   observed : ResourceTargetAdmission.Observed deployment context.directory.directory
     .object spec.packet.release.source.resource root
   contentKind : observed.before.kind = .content
-  rootCurrent : root = durable.snapshot.model.roots
-    ⟨spec.packet.release.source.resource⟩
+  physicalCurrent : ResourceBirthCodec.physicalRoot (.live observed.before) =
+    durable.snapshot.model.roots ⟨spec.packet.release.source.resource⟩
   sourceDomain : spec.packet.release.source.domain = deployment.domain
   sourceSemantics : spec.packet.release.source.semantics = profile.semantics
   sourceRoot : spec.packet.release.source.parent = root
@@ -80,16 +81,15 @@ def prepare (context : Context deployment durable)
       | none => .error "selected source publication refused"
       | some observed =>
           if contentKind : observed.before.kind = .content then
-            if rootCurrent : packed.payload.root = durable.snapshot.model.roots
-                ⟨spec.packet.release.source.resource⟩ then
-              if sourceDomain : spec.packet.release.source.domain = deployment.domain then
-                if sourceSemantics : spec.packet.release.source.semantics = profile.semantics then
-                  if sourceRoot : spec.packet.release.source.parent = packed.payload.root then
-                    if selectedExact : currentContent context spec =
-                        some (packed.payload.root, spec.packet.release.content) then
-                      .ok ⟨packed.payload.root, observed, contentKind, rootCurrent,
-                        sourceDomain, sourceSemantics, sourceRoot, selectedExact⟩
-                    else .error "selected source publication refused"
+            let physicalCurrent := PhysicalResourceReadGuard.current context.directory
+              spec.packet.release.source.resource observed.before observed.present
+            if sourceDomain : spec.packet.release.source.domain = deployment.domain then
+              if sourceSemantics : spec.packet.release.source.semantics = profile.semantics then
+                if sourceRoot : spec.packet.release.source.parent = packed.payload.root then
+                  if selectedExact : currentContent context spec =
+                      some (packed.payload.root, spec.packet.release.content) then
+                    .ok ⟨packed.payload.root, observed, contentKind, physicalCurrent,
+                      sourceDomain, sourceSemantics, sourceRoot, selectedExact⟩
                   else .error "selected source publication refused"
                 else .error "selected source publication refused"
               else .error "selected source publication refused"
@@ -180,11 +180,12 @@ def check (native : CredentialSignatureIO.NativeConfig)
 
 def readGuard (prepared : Prepared context profile federation height spec) :
     DurableDataIntent.ReadGuard :=
-  ⟨⟨spec.packet.release.source.resource⟩, prepared.root⟩
+  ⟨⟨spec.packet.release.source.resource⟩,
+    ResourceBirthCodec.physicalRoot (.live prepared.observed.before)⟩
 
 theorem readGuard_current (prepared : Prepared context profile federation height spec) :
     (readGuard prepared).expectedRoot =
       durable.snapshot.model.roots (readGuard prepared).cellId :=
-  prepared.rootCurrent
+  prepared.physicalCurrent
 
 end Minidregg.Kernel.FnSelectiveReleaseSourceAuthority
