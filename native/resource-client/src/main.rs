@@ -12,6 +12,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+mod current_birth;
+#[cfg(unix)]
 mod drain;
 #[cfg(unix)]
 mod meter;
@@ -121,6 +123,8 @@ usage:
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
+  mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
+  mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
@@ -2189,6 +2193,23 @@ fn run(mut args: Args) -> Result<()> {
                 return Err("public inspect kind is unavailable".to_owned());
             }
             inspect_public(&host, &config, kind, &input, &output)
+        }
+        #[cfg(unix)]
+        "current-application-intent" | "current-session-intent" => {
+            let route = if args.command == OsStr::new("current-application-intent") {
+                current_birth::Route::Application
+            } else {
+                current_birth::Route::Session
+            };
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let source = path(args.required("source")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("current birth authoring requires --socket")?;
+            current_birth::author(&host, &config, socket, &source, &directory, route)
         }
         "submit" => {
             let host = path(args.required("host")?);

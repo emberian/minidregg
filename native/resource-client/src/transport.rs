@@ -123,6 +123,12 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             response_prefix < payload.len() && payload.len() - response_prefix <= 8_388_608
         }
         [20 | 21, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [30 | 31, payload @ ..] => {
+            !payload.is_empty()
+                && payload.len() <= 256 * 1024
+                && serde_json::from_slice::<serde_json::Value>(payload)
+                    .is_ok_and(|value| value.is_object())
+        }
         _ => false,
     }
 }
@@ -836,6 +842,19 @@ mod tests {
         assert!(allowed_operation(&[21, 1], false));
         assert!(!allowed_operation(&[20], false));
         assert!(!allowed_operation(&[21], false));
+    }
+
+    #[test]
+    fn current_birth_authoring_accepts_only_bounded_json_objects() {
+        assert!(allowed_operation(&[30, b'{', b'}'], false));
+        assert!(allowed_operation(&[31, b'{', b'}'], false));
+        assert!(!allowed_operation(&[30, b'[', b']'], false));
+        assert!(!allowed_operation(&[31, b'{'], false));
+        let mut oversized = vec![b' '; 256 * 1024 + 2];
+        oversized[0] = 30;
+        oversized[1] = b'{';
+        *oversized.last_mut().unwrap() = b'}';
+        assert!(!allowed_operation(&oversized, false));
     }
 
     #[test]
