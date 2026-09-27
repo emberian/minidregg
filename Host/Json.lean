@@ -22,6 +22,7 @@ import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
+import Host.ApplicationSpkLaunchDescriptorAuthoring
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -1833,6 +1834,8 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "application-lifecycle-resident-begin-operator-request" => residentBeginOperatorRequest json
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
+  | "application-spk-launch-descriptor" =>
+      (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
   | "application-agent-reserve-request" => agentPaidReserveRequest json
   | "application-agent-paid-request" => agentPaidRequest json
@@ -1888,7 +1891,7 @@ def author (kind : String) (json : Lean.Json) : Result (List UInt8) :=
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
   | _ => failAt "kind"
-      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], application-grain-birth-intent, application-session-grain-birth-intent, application-permission-schema, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
+      "expected predicate, grain-policy, grain-caveat, grain-policy-install-intent, policy, policy-install[-draft], delegation[-draft], revocation[-draft], birth, grain-birth[-intent], application-birth[-intent], application-session-birth[-intent], application-grain-birth-intent, application-session-grain-birth-intent, application-permission-schema, application-spk-launch-descriptor, content, resource, joint[-draft], grain[-intent], draft, intent, or genesis"
 
 private def authorRefused (kind : String) (value : Lean.Json) : Bool :=
   match author kind value with
@@ -2438,6 +2441,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let descriptor ← decoded "application-spk-package-identity"
         ApplicationSpkPackageIdentity.codec bytes
       applicationSpkPackageIdentityJson descriptor
+  | "application-spk-launch-descriptor" =>
+      ApplicationSpkLaunchDescriptorAuthoring.inspect bytes
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"

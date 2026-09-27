@@ -39,6 +39,28 @@ source object and truncated descriptor. The inspector preserves one signed
 create action with `start.sh` and the signed `continue.sh` command, retaining
 ordered argv and environment bytes.
 
-The `Host/Json.lean` author/inspect arms are staged separately and have not yet
-passed the later full-closure compile or native Host link. No Store, app birth,
-launch, lifecycle permit, or resident process is established by this pure check.
+The additive `Host/Json.lean` author/inspect arms (whole source SHA-256
+`daef81cee11fac18001a46caafe8a932522353959894b59f2839e04180aa7038`)
+then passed a direct Lean check against the exact immutable completed
+module-292 prefix (manifest SHA-256
+`0c0b8fd0aedf4f97650d3ad4d369629e955943fd472c0ec089eb4de0f017d1cd`).
+`Host.Json.log` (SHA-256
+`616480c41cbfd5457524c926373cbc617422864137a7b70f11f011005bccb31d`)
+has existing unrelated policy proof warnings and axiom reports, with no error.
+`CheckRoute.lean` (SHA-256
+`19bae840939f922bfd48dfa4dc667183b55a3ebdac6ab2b3540287131384abdd`)
+ran through the actual `Host.Json.parse`, `author`, and `inspect` functions:
+
+```sh
+LEAN_NUM_THREADS=2 lake env lean --run docs/evidence/2026-09-27-spk-launch-lean-v2/CheckRoute.lean
+```
+
+Run this from the repository root after building the named modules; it reads
+the retained evidence files directly from this directory.
+
+`route.log` (SHA-256
+`305d7aa9078715a520f8b1a1a47407f90a43f219d4e4ed5e049f03587aa3bfb8`)
+records exit 0: author and inspect reproduced the retained bytes and JSON
+exactly; duplicate JSON keys and a wrong descriptor frame were refused.
+These checks are source-only: no new native Host was linked, and no Store, app
+birth, launch, lifecycle permit, or resident process is established.
