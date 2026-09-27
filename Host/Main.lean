@@ -6,9 +6,10 @@ private signing keys. `assemble` combines detached custody signatures only.
 stdio framing: four-byte little-endian length, then one operation byte and
 payload. 0=describe, 1=authorized prepare, 2=submit, 3=lookup, 4=challenge,
 5=authorized query, 20=owner-signed selected-public-release submit,
-21=selected-release lookup, 22=application lifecycle begin submit,
-23=application lifecycle begin lookup, 24=selected source publication submit,
-25=selected source publication lookup, 28=app share issue submit,
+ 21=selected-release lookup, 22=descriptor-bound lifecycle begin submit,
+ 23=lifecycle begin receipt-only lookup, 24=selected source publication submit,
+25=selected source publication lookup, 26=fresh descriptor-bound lifecycle claim,
+27=lifecycle claim receipt-only lookup, 28=app share issue submit,
 29=app share issue lookup, 34=fresh checked dispatch permit,
 35=historical dispatch receipt-only lookup, 36=private dispatch signing plan,
 37=private detached dispatch assembly. Op34 success uses a distinct
@@ -29,12 +30,14 @@ import Kernel.FnReplyConsumption
 import Kernel.FnOriginOutbox
 import Kernel.FnPortableSource
 import Kernel.FnSelectiveReleaseReceiver
-import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationShareIssueReceiver
 import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
 import Kernel.ApplicationDispatchAuthoring
+import Kernel.ApplicationLifecycleBeginV2Receiver
+import Kernel.ApplicationLifecycleClaimV2Receiver
+import Kernel.ApplicationLifecycleV2Lookup
 import Host.ApplicationDispatchInspection
 import Kernel.FnSelectiveReleaseSourceReceiver
 import Host.FnSelectiveReleaseAuthoring
@@ -421,39 +424,56 @@ completion require separate host custody and current claim validation. -/
 def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let opened ← sessionOpened config state
-  let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-  let result ← ApplicationLifecycleBeginReceiver.receiveLoaded config.deployment
-    config.profile ambient config.signature config.storage.transport opened.durable payload
-  let outcome ← match result with
-    | .historical receipt =>
-        sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
-    | .confirmed kind receipt =>
-        sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused "application-lifecycle-begin".toUTF8.toList
-        "request refused".toUTF8.toList)
-    | .contention => pure .contention
-    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
-    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
-  return NativeHost.publicSubmissionOutcome outcome
+  let session ← sessionCurrent config state
+  let result ← ApplicationLifecycleBeginV2Receiver.receiveVerified config
+    session.verified payload
+  match result with
+    | .confirmed confirmed =>
+        state.set (some ⟨_, confirmed.verified⟩)
+        return .confirmed confirmed.confirmation confirmed.receipt
+    | .rejected _ =>
+        return .refused "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
+    | .contention => return .contention
+    | .unavailable detail => return .unavailable detail.toUTF8.toList
+    | .uncertain detail => return .uncertain detail.toUTF8.toList
 
 def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let opened ← sessionOpened config state
-  let some ingress := ApplicationLifecycleBeginIngress.codec.decode payload
-    | return .refused "application-lifecycle-begin".toUTF8.toList
+  let session ← sessionCurrent config state
+  let result := if (ApplicationLifecycleBeginV2Ingress.codec.decode payload).isSome then
+      ApplicationLifecycleV2Lookup.beginVerified session.verified payload
+    else ApplicationLifecycleV2Lookup.beginLegacyVerified session.verified payload
+  match result with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-lifecycle-begin".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
-  match ApplicationLifecycleBeginReceiver.replay opened.durable ingress with
-  | none => return .absent
-  | some (.error _) =>
-      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
-  | some (.ok receipt) =>
-      match NativeHost.historicalReceipt config opened.durable
-          receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some historical => return .confirmed .replayed historical
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "original lifecycle BEGIN receipt unavailable".toUTF8.toList
+
+def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result := if (ApplicationLifecycleClaimV2Ingress.codec.decode payload).isSome then
+      ApplicationLifecycleV2Lookup.claimVerified session.verified payload
+    else ApplicationLifecycleV2Lookup.claimLegacyVerified session.verified payload
+  match result with
+  | .ok none => return .absent
+  | .ok (some receipt) => return .confirmed .replayed receipt
+  | .error .malformed =>
+      return .refused "application-lifecycle-claim".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  | .error .transactionConflict =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
+  | .error .nativeHistoryUnavailable =>
+      return .uncertain "original lifecycle claim receipt unavailable".toUTF8.toList
 
 /-- This records current source authorization for one selected content version.
 External fn delivery is a separate effect with its own uncertain outcome. -/
@@ -681,6 +701,9 @@ def dispatchSession (config : NativeHost.Config)
   | 23 =>
       return (23, outcomeCodec.encode
         (← applicationLifecycleBeginLookupSession config state payload))
+  | 27 =>
+      return (27, outcomeCodec.encode
+        (← applicationLifecycleClaimLookupSession config state payload))
   | 24 =>
       return (24, outcomeCodec.encode
         (← selectedSourcePublicationSubmitSession config state payload))
@@ -764,6 +787,39 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
+/-- Op26 returns a launch reservation only inside the receiver's physical-tip
+callback. This is a point-in-time check, not a lease against later writes or
+proof that the external process has started. -/
+def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationLifecycleClaimV2Receiver.receiveVerified config
+    session.verified payload
+  match result with
+  | .reserved reservation =>
+      let handed ← reservation.withFreshTip fun committedBytes =>
+        writeSessionFrame output 26 committedBytes
+      match handed with
+      | .ok _ => state.set (some ⟨_, reservation.verified⟩)
+      | .error detail =>
+          writeSessionFrame output 26 <| outcomeCodec.encode <|
+            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .rejected _ =>
+      writeSessionFrame output 26 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome
+          (.refused "application-lifecycle-claim".toUTF8.toList
+            "request refused".toUTF8.toList)
+  | .contention =>
+      writeSessionFrame output 26 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome .contention
+  | .unavailable detail =>
+      writeSessionFrame output 26 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
+  | .uncertain detail =>
+      writeSessionFrame output 26 <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+
 partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
@@ -796,6 +852,8 @@ partial def serveSession (config : NativeHost.Config)
     | operation :: payload => pure (operation, payload)
   if operation == 34 then
     dispatchApplicationSubmitSession config state payload output
+  else if operation == 26 then
+    dispatchLifecycleClaimSubmitSession config state payload output
   else
     let (responseOperation, responsePayload) ←
       dispatchSession config state meteringProfile fnDispatch operation payload
@@ -3570,6 +3628,14 @@ def run (arguments : List String) : IO UInt32 := do
             let ingress ← readBoundedBytes input maxFrame
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleBeginLookupSession pinnedConfig state ingress))
+            pure 0
+      | "application-lifecycle-claim-lookup", [input, output] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let state ← IO.mkRef (some session)
+            let ingress ← readBoundedBytes input maxFrame
+            writeBytes output (outcomeCodec.encode
+              (← applicationLifecycleClaimLookupSession pinnedConfig state ingress))
             pure 0
       | "selected-source-publication-submit", [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
