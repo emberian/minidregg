@@ -769,6 +769,8 @@ mod tests {
             allowed_application_families: vec![],
             allowed_session_families: vec![],
             registered_shared_applications: vec![],
+            allowed_application_api_routes: vec![],
+            agent_api_host_sha256: None,
             current_birth_host_sha256: None,
         };
         let view = json!({"targetRoot":"41","authorityRoot":"42","height":"9",

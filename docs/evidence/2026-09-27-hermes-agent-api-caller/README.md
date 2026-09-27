@@ -1,0 +1,13 @@
+# Hosted Hermes application API caller — source gate
+
+This checkpoint covers the controller-side, opt-in forward caller and the existing recipient-only shared-app reference changes. The model can select an operator-named application and bounded HTTP input; it cannot select app/session/ticket/purse identities. The controller retains an operation ID and request hash before starting the socket worker, compares the host's fixed binding and invocation, pumps reverse custody requests while the forward call waits, and never resends an uncertain dispatch. A proven no-dispatch error is archived so a new explicit call can use a new ID. Hard cancellation fences the first request byte; a post-send failure remains inspect-only.
+
+`source-sha256.txt` pins the crate manifest/lock and ten source files for this gate. `main.rs` contains the recipient op3/op29 callback from the shared-app lane as well as the application API caller. The private Linux test copy at `/tmp/mga-agent-api-connect-20260927` had matching manifest/lock and source bytes for the four principal files (`application_api_tools.rs`, `main.rs`, `mcp.rs`, `shared_app_refs.rs`) before the final run. No production executable or deployment was replaced.
+
+Checks:
+
+- Mac: `cargo nextest run --manifest-path native/grain-runtime/Cargo.toml --status-level fail --final-status-level fail` — **107/107 pass**, `mac-nextest.log` SHA-256 `ad757f1d561fa0126a24b956aa7272a3de906785583edbb3afe586c8509e8e64`.
+- Persvati Linux private copy: `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/tmp/mga-agent-api-connect-20260927/target cargo nextest run --status-level fail --final-status-level fail` — **110/110 pass**, `linux-nextest.log` SHA-256 `2d130777c6d870868e4289b8b4049dd0c98a84b0d29252b0e8aa480c89be3839`. Linux cases include a nonaccepting saturated Unix listener with a two-second deadline and bounded refusal, and hard EOF before a forward request byte.
+- `cargo clippy --manifest-path native/grain-runtime/Cargo.toml --all-targets -- -D warnings`, `cargo fmt --manifest-path native/grain-runtime/Cargo.toml --all -- --check`, and `git diff --check` passed on this source cut.
+
+The live paid route is **not qualified or enabled**. The current reverse dispatch reserve still uses a v1 digest-only nonce and cannot authorize event21. A source-owned v2 reserve plan (Host ops58/59), ordinary native reserve confirmation, separate current payer signature, and fresh event21 permit (op46) must be integrated and native-tested before enabling a resident SPK agent dispatch. The forward hello is transport identity only; it is not a Mini permit. No real model, paid request, or shared app delivery was run in this gate.

@@ -1,5 +1,6 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
+mod application_api_tools;
 mod application_tools;
 #[cfg(test)]
 mod birth_lifecycle_tests;
@@ -93,6 +94,15 @@ struct ToolTask {
     /// never locally born resources or imported owner grants.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     registered_shared_applications: Vec<shared_app_refs::SharedApplicationRef>,
+    /// Fixed resident app-API endpoints. A route is a selector and transport
+    /// pin; the event21 native permit remains mandatory for every dispatch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_application_api_routes: Vec<application_api_tools::RoutePin>,
+    /// Only an explicitly certified Mini Host with the agent event21 route
+    /// may enable the forward API tool. The SPK host still obtains and checks
+    /// a fresh event21 permit for each request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_api_host_sha256: Option<String>,
     /// Explicit operator enablement for the qualified current-author Host
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +270,10 @@ struct Journal {
     dispatch_hold: Option<HeldCharge>,
     #[serde(default)]
     dispatch_attempt: Option<DispatchAttempt>,
+    #[serde(default)]
+    application_api_attempt: Option<ApplicationApiAttempt>,
+    #[serde(default)]
+    application_api_history: Vec<ApplicationApiAttempt>,
     #[serde(default)]
     provider_hold: Option<HeldCharge>,
     #[serde(default)]
@@ -733,6 +747,63 @@ struct DispatchAttempt {
     response_sha256: Option<String>,
 }
 
+/// The controller persists this before any byte of the forward request can
+/// cross to the resident host. Socket errors after that point never allocate
+/// a replacement ID or resend the request.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApplicationApiAttempt {
+    operation_id: u64,
+    route_name: String,
+    request_path: PathBuf,
+    request_sha256: String,
+    phase: ApplicationApiPhase,
+    #[serde(default)]
+    binding_sha256: Option<String>,
+    #[serde(default)]
+    host_invocation: Option<String>,
+    #[serde(default)]
+    reply_path: Option<PathBuf>,
+    #[serde(default)]
+    reply_sha256: Option<String>,
+    #[serde(default)]
+    reported: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ApplicationApiPhase {
+    Prepared,
+    BindingVerified,
+    DispatchStarted,
+    NoDispatch,
+    Definite,
+    Uncertain,
+}
+
+enum ApplicationApiStep {
+    Hello(application_api_tools::PendingExchange),
+    Dispatch(application_api_tools::PendingExchange),
+}
+
+struct ActiveApplicationApi {
+    operation_id: u64,
+    route: application_api_tools::RoutePin,
+    request: Value,
+    reply: mpsc::Sender<Value>,
+    step: ApplicationApiStep,
+    deadline: Instant,
+}
+
+fn cancel_application_api_on_acp_failure(
+    cancelled: &AtomicBool,
+    gate: &application_api_tools::ForwardSendGate,
+) -> Instant {
+    cancelled.store(true, Ordering::SeqCst);
+    gate.cancel();
+    Instant::now() + Duration::from_secs(2)
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DispatchSettlement {
@@ -959,6 +1030,58 @@ struct HermesSession {
 }
 
 impl Journal {
+    fn validate_application_api(&self, state_dir: &Path) -> Result<()> {
+        if self.application_api_history.len() > 16 {
+            return Err("application API history exceeds retention bound".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for attempt in self
+            .application_api_history
+            .iter()
+            .chain(self.application_api_attempt.iter())
+        {
+            if !seen.insert(attempt.operation_id)
+                || attempt.operation_id >= self.next_operation_id
+                || attempt.request_path
+                    != state_dir.join(format!("application-api-{:016}.json", attempt.operation_id))
+                || sha256_bytes(&bounded_regular_file(&attempt.request_path, 262_144)?)?
+                    != attempt.request_sha256
+            {
+                return Err("application API attempt has changed or repeated".into());
+            }
+            if attempt.binding_sha256.is_some() != attempt.host_invocation.is_some()
+                || (matches!(
+                    attempt.phase,
+                    ApplicationApiPhase::BindingVerified
+                        | ApplicationApiPhase::DispatchStarted
+                        | ApplicationApiPhase::Definite
+                ) && attempt.binding_sha256.is_none())
+            {
+                return Err("application API binding phase is inconsistent".into());
+            }
+            match (&attempt.reply_path, &attempt.reply_sha256) {
+                (None, None) if !matches!(attempt.phase, ApplicationApiPhase::Definite) => {}
+                (Some(path), Some(digest))
+                    if *path
+                        == state_dir.join(format!(
+                            "application-api-reply-{:016}.json",
+                            attempt.operation_id
+                        ))
+                        && sha256_bytes(&bounded_regular_file(path, 262_144)?)? == *digest => {}
+                _ => return Err("application API retained reply differs".into()),
+            }
+            if attempt.reported
+                && !matches!(
+                    attempt.phase,
+                    ApplicationApiPhase::Definite | ApplicationApiPhase::NoDispatch
+                )
+            {
+                return Err("application API reported a nondefinite result".into());
+            }
+        }
+        Ok(())
+    }
+
     fn validate_birth_registry(&self) -> Result<()> {
         let mut operations = std::collections::HashSet::new();
         let mut names = std::collections::HashSet::new();
@@ -1060,6 +1183,8 @@ impl Journal {
             dispatch_pending: None,
             dispatch_hold: None,
             dispatch_attempt: None,
+            application_api_attempt: None,
+            application_api_history: Vec::new(),
             provider_hold: None,
             provider_attempt: None,
             provider_settlement: None,
@@ -1709,6 +1834,29 @@ fn validate(c: &Config) -> Result<()> {
         }
         resource_tools::validate_reads(&t.allowed_reads, &t.allowed_publications)?;
         shared_app_refs::validate_refs(&t.registered_shared_applications, t)?;
+        if !t.allowed_application_api_routes.is_empty() {
+            let dispatch = c
+                .dispatch_task
+                .as_ref()
+                .ok_or("application API routes require a distinct dispatchTask")?;
+            application_api_tools::validate_routes(
+                &t.allowed_application_api_routes,
+                &dispatch.task,
+                &dispatch.subject,
+                dispatch.host_uid,
+            )?;
+            let expected = t
+                .agent_api_host_sha256
+                .as_deref()
+                .ok_or("application API routes require a source-qualified event21 Mini Host pin")?;
+            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+                return Err(
+                    "application API Mini Host or persistent socket differs from pin".into(),
+                );
+            }
+        } else if t.agent_api_host_sha256.is_some() {
+            return Err("application API Host pin has no operator route".into());
+        }
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -1940,6 +2088,7 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     custody_gate: Arc<custody_gate::CustodyGate>,
+    application_api_send_gate: Arc<application_api_tools::ForwardSendGate>,
     completion_phase: Arc<AtomicU8>,
     current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
@@ -2910,6 +3059,7 @@ impl Runtime {
                 return Err("controller config differs from journal binding".into());
             }
             j.validate_birth_registry()?;
+            j.validate_application_api(&config.state_dir)?;
             j
         } else {
             let j = Journal::fresh(binding);
@@ -2928,6 +3078,7 @@ impl Runtime {
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
             custody_gate: Arc::new(custody_gate::CustodyGate::new()),
+            application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
             provider_control: Arc::new(Mutex::new(None)),
@@ -3668,17 +3819,40 @@ impl Runtime {
         }
         shared_app_refs::resolve_with(&self.config, tool, reference, nonces, |operation| {
             match operation {
-                shared_app_refs::NativeOperation::BirthLookup { attempt } => {
+                shared_app_refs::NativeOperation::BirthLookup { call } => {
+                    let socket = self
+                        .config
+                        .host_socket
+                        .as_ref()
+                        .ok_or("shared app birth lookup requires pinned hostSocket")?;
                     let mut command = Command::new(&self.config.mini);
                     command
-                        .arg("retry")
-                        .arg("--attempt")
-                        .arg(attempt)
-                        .arg("--mode")
-                        .arg("lookup");
+                        .arg("historical-call-receipt-lookup")
+                        .arg("--host")
+                        .arg(&self.config.host)
+                        .arg("--config")
+                        .arg(&self.config.host_config)
+                        .arg("--socket")
+                        .arg(socket)
+                        .arg("--call")
+                        .arg(call)
+                        .arg("--transaction-id")
+                        .arg(&reference.birth.transaction_id)
+                        .arg("--event-id")
+                        .arg(&reference.birth.event_id)
+                        .arg("--accepted-count")
+                        .arg(&reference.birth.accepted_count)
+                        .arg("--image-boundary")
+                        .arg(&reference.birth.image_boundary)
+                        .arg("--dir")
+                        .arg(
+                            self.config
+                                .state_dir
+                                .join(format!("shared-app-refs/birth-lookup-{:016}", nonces[0])),
+                        );
                     self.supervised_json_command(command)
                 }
-                shared_app_refs::NativeOperation::IssueLookup { attempt } => {
+                shared_app_refs::NativeOperation::IssueLookup { ingress } => {
                     let socket = self
                         .config
                         .host_socket
@@ -3686,11 +3860,29 @@ impl Runtime {
                         .ok_or("shared app issue lookup requires pinned hostSocket")?;
                     let mut command = Command::new(&self.config.mini);
                     command
-                        .arg("share-issue-lookup")
+                        .arg("share-issue-receipt-lookup")
+                        .arg("--host")
+                        .arg(&self.config.host)
+                        .arg("--config")
+                        .arg(&self.config.host_config)
                         .arg("--socket")
                         .arg(socket)
-                        .arg("--attempt")
-                        .arg(attempt);
+                        .arg("--ingress")
+                        .arg(ingress)
+                        .arg("--transaction-id")
+                        .arg(&reference.issue.transaction_id)
+                        .arg("--event-id")
+                        .arg(&reference.issue.event_id)
+                        .arg("--accepted-count")
+                        .arg(&reference.issue.accepted_count)
+                        .arg("--image-boundary")
+                        .arg(&reference.issue.image_boundary)
+                        .arg("--dir")
+                        .arg(
+                            self.config
+                                .state_dir
+                                .join(format!("shared-app-refs/issue-lookup-{:016}", nonces[1])),
+                        );
                     self.supervised_json_command(command)
                 }
                 shared_app_refs::NativeOperation::SignedRead { read, nonce } => {
@@ -4531,6 +4723,340 @@ impl Runtime {
             Err(error) => json!({"isError":true,"text":error}),
         };
         let _ = request.reply.send(response);
+    }
+    fn begin_application_api(
+        &mut self,
+        request: &mcp::BrokerRequest,
+    ) -> Result<ActiveApplicationApi> {
+        if request.prompt_epoch != 1
+            || !self.prompt_active
+            || self.cancelled.load(Ordering::SeqCst)
+            || self.journal.connection == Connection::Fenced
+            || self.journal.child.is_none()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+        {
+            return Err(
+                "application API caller is busy, fenced, or has an unresolved dispatch".into(),
+            );
+        }
+        let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+        let expected_host = tool
+            .agent_api_host_sha256
+            .as_deref()
+            .ok_or("application API event21 Host pin is absent; agent delivery is unavailable")?;
+        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+            return Err("application API event21 Host image or socket differs from pin".into());
+        }
+        let routes = &tool.allowed_application_api_routes;
+        let allowed = routes
+            .iter()
+            .map(|route| route.name.clone())
+            .collect::<Vec<_>>();
+        let input = application_api_tools::parse_input(&request.arguments, &allowed)?;
+        let route = routes
+            .iter()
+            .find(|route| route.name == input.application)
+            .ok_or("application API route is absent")?
+            .clone();
+        // These retained receipts locate the operator-selected app/session.
+        // They are not an agent dispatch grant: the resident host must obtain
+        // a fresh event21 permit for this exact request and purse before fd3.
+        let registered = tool
+            .registered_shared_applications
+            .iter()
+            .find(|reference| reference.name == route.name);
+        if let Some(reference) = registered {
+            if reference.app_target != route.app_resource
+                || reference.ticket_target != route.ticket_resource
+            {
+                return Err("application API route differs from registered app/ticket".into());
+            }
+        } else if self
+            .verified_born_named(&route.name)?
+            .is_none_or(|born| born.target != route.app_resource)
+        {
+            return Err("application API route has no confirmed local app birth".into());
+        }
+        if self
+            .verified_born_target("object", &route.session_resource)?
+            .is_none()
+        {
+            return Err("application API route has no confirmed local session birth".into());
+        }
+        let operation_id = self.next_id()?;
+        self.application_api_send_gate.reset()?;
+        let dispatch = application_api_tools::dispatch_request(operation_id, &input);
+        let bytes = serde_json::to_vec(&dispatch).map_err(|error| error.to_string())?;
+        let path = self
+            .config
+            .state_dir
+            .join(format!("application-api-{operation_id:016}.json"));
+        write_new(&path, &bytes)?;
+        self.journal.application_api_attempt = Some(ApplicationApiAttempt {
+            operation_id,
+            route_name: route.name.clone(),
+            request_path: path,
+            request_sha256: sha256_bytes(&bytes)?,
+            phase: ApplicationApiPhase::Prepared,
+            binding_sha256: None,
+            host_invocation: None,
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        });
+        self.save()?;
+        let deadline = Instant::now() + Duration::from_secs(1800);
+        let hello = match application_api_tools::start_exchange_once(
+            &route.socket_path,
+            route.host_uid,
+            application_api_tools::hello_request(),
+            deadline,
+            self.cancelled.clone(),
+        ) {
+            Ok(worker) => worker,
+            Err(error) => {
+                self.finish_application_api_no_dispatch(operation_id)?;
+                return Err(format!("application API hello: {error:?}"));
+            }
+        };
+        Ok(ActiveApplicationApi {
+            operation_id,
+            route,
+            request: dispatch,
+            reply: request.reply.clone(),
+            step: ApplicationApiStep::Hello(hello),
+            deadline,
+        })
+    }
+
+    fn finish_application_api_no_dispatch(&mut self, operation_id: u64) -> Result<()> {
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("application API no-dispatch attempt disappeared")?;
+        if attempt.operation_id != operation_id
+            || !matches!(
+                attempt.phase,
+                ApplicationApiPhase::Prepared
+                    | ApplicationApiPhase::BindingVerified
+                    | ApplicationApiPhase::DispatchStarted
+            )
+            || attempt.reply_path.is_some()
+        {
+            return Err("application API no-dispatch phase differs".into());
+        }
+        let mut finished = self.journal.application_api_attempt.take().unwrap();
+        finished.phase = ApplicationApiPhase::NoDispatch;
+        finished.reported = true;
+        if self.journal.application_api_history.len() >= 16 {
+            self.journal.application_api_history.remove(0);
+        }
+        self.journal.application_api_history.push(finished);
+        self.save()
+    }
+
+    fn poll_application_api(&mut self, active: &mut Option<ActiveApplicationApi>) -> Result<()> {
+        let Some(call) = active.as_mut() else {
+            return Ok(());
+        };
+        let completed = match &call.step {
+            ApplicationApiStep::Hello(worker) | ApplicationApiStep::Dispatch(worker) => {
+                worker.poll()
+            }
+        };
+        let Some(result) = completed else {
+            return Ok(());
+        };
+        let result = match result {
+            Ok(value) => value,
+            Err(error) => {
+                let no_dispatch = matches!(call.step, ApplicationApiStep::Hello(_))
+                    || matches!(error, application_api_tools::TransportError::BeforeSend(_));
+                let reason = if no_dispatch {
+                    self.finish_application_api_no_dispatch(call.operation_id)?;
+                    format!("application API request was not dispatched: {error:?}")
+                } else {
+                    if let Some(attempt) = self.journal.application_api_attempt.as_mut() {
+                        attempt.phase = ApplicationApiPhase::Uncertain;
+                    }
+                    self.save()?;
+                    format!("application API forward result is unresolved: {error:?}")
+                };
+                let _ = call.reply.send(json!({"isError":true,"text":reason}));
+                *active = None;
+                return Ok(());
+            }
+        };
+        let reply = match application_api_tools::parse_host_reply(result.clone()) {
+            Ok(reply) => reply,
+            Err(error) if matches!(call.step, ApplicationApiStep::Hello(_)) => {
+                self.finish_application_api_no_dispatch(call.operation_id)?;
+                let _ = call.reply.send(json!({"isError":true,"text":error}));
+                *active = None;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        if matches!(call.step, ApplicationApiStep::Hello(_)) {
+            let (digest, invocation) =
+                match application_api_tools::verify_binding(reply, &call.route) {
+                    Ok(binding) => binding,
+                    Err(error) => {
+                        self.finish_application_api_no_dispatch(call.operation_id)?;
+                        let _ = call.reply.send(json!({"isError":true,"text":error}));
+                        *active = None;
+                        return Ok(());
+                    }
+                };
+            let attempt = self
+                .journal
+                .application_api_attempt
+                .as_mut()
+                .ok_or("application API attempt disappeared while hello was pending")?;
+            attempt.binding_sha256 = Some(digest);
+            attempt.host_invocation = Some(invocation);
+            attempt.phase = ApplicationApiPhase::BindingVerified;
+            self.save()?;
+            // Persist the last pre-dispatch state before the one-shot worker
+            // can send any byte. A crash here is inspect-only, never resend.
+            self.journal.application_api_attempt.as_mut().unwrap().phase =
+                ApplicationApiPhase::DispatchStarted;
+            self.save()?;
+            let worker = match application_api_tools::start_dispatch_once(
+                &call.route.socket_path,
+                call.route.host_uid,
+                call.request.clone(),
+                call.deadline,
+                self.application_api_send_gate.clone(),
+                self.cancelled.clone(),
+            ) {
+                Ok(worker) => worker,
+                Err(error) => {
+                    self.finish_application_api_no_dispatch(call.operation_id)?;
+                    let _ = call.reply.send(json!({"isError":true,
+                        "text":format!("application API forward spawn: {error:?}")}));
+                    *active = None;
+                    return Ok(());
+                }
+            };
+            call.step = ApplicationApiStep::Dispatch(worker);
+            return Ok(());
+        }
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("application API attempt disappeared before a forward reply")?;
+        let digest = attempt
+            .binding_sha256
+            .as_deref()
+            .ok_or("application API attempt lacks a checked host binding")?;
+        application_api_tools::verify_operation_reply(&reply, call.operation_id, digest)?;
+        let path = self.config.state_dir.join(format!(
+            "application-api-reply-{:016}.json",
+            call.operation_id
+        ));
+        let bytes = serde_json::to_vec(&result).map_err(|error| error.to_string())?;
+        write_new(&path, &bytes)?;
+        let definite = matches!(
+            reply,
+            application_api_tools::HostReply::Http { .. }
+                | application_api_tools::HostReply::Refused { .. }
+        );
+        let attempt = self.journal.application_api_attempt.as_mut().unwrap();
+        attempt.reply_path = Some(path);
+        attempt.reply_sha256 = Some(sha256_bytes(&bytes)?);
+        attempt.phase = if definite {
+            ApplicationApiPhase::Definite
+        } else {
+            ApplicationApiPhase::Uncertain
+        };
+        self.save()?;
+        let refused = matches!(reply, application_api_tools::HostReply::Refused { .. });
+        let delivered = call
+            .reply
+            .send(json!({"isError":!definite || refused,
+            "text":result.to_string()}))
+            .is_ok();
+        if definite && delivered {
+            let mut finished = self.journal.application_api_attempt.take().unwrap();
+            finished.reported = true;
+            if self.journal.application_api_history.len() >= 16 {
+                self.journal.application_api_history.remove(0);
+            }
+            self.journal.application_api_history.push(finished);
+            self.save()?;
+        }
+        *active = None;
+        Ok(())
+    }
+
+    /// After a crash, inspect the exact operation ID on the same host
+    /// invocation. Inspection is read-only and never constructs a dispatch
+    /// request or clears an unresolved purse hold.
+    fn inspect_application_api(&self) -> Result<Value> {
+        let attempt = self
+            .journal
+            .application_api_attempt
+            .as_ref()
+            .ok_or("no unresolved application API attempt")?;
+        if sha256_file(&attempt.request_path)? != attempt.request_sha256 {
+            return Err("retained application API request bytes changed".into());
+        }
+        let route = self
+            .config
+            .tool_task
+            .as_ref()
+            .and_then(|tool| {
+                tool.allowed_application_api_routes
+                    .iter()
+                    .find(|route| route.name == attempt.route_name)
+            })
+            .ok_or("retained application API route is absent")?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let hello = application_api_tools::exchange_once(
+            &route.socket_path,
+            route.host_uid,
+            &application_api_tools::hello_request(),
+            deadline,
+        )
+        .map_err(|error| format!("application API read-only hello: {error:?}"))?;
+        let (binding, invocation) = application_api_tools::verify_binding(
+            application_api_tools::parse_host_reply(hello)?,
+            route,
+        )?;
+        if attempt
+            .binding_sha256
+            .as_deref()
+            .is_some_and(|saved| saved != binding)
+            || attempt
+                .host_invocation
+                .as_deref()
+                .is_some_and(|saved| saved != invocation)
+        {
+            return Err(
+                "application API host invocation or binding changed; operator audit required"
+                    .into(),
+            );
+        }
+        let response = application_api_tools::exchange_once(
+            &route.socket_path,
+            route.host_uid,
+            &application_api_tools::inspect_request(attempt.operation_id),
+            deadline,
+        )
+        .map_err(|error| format!("application API read-only inspect: {error:?}"))?;
+        let reply = application_api_tools::parse_host_reply(response)?;
+        application_api_tools::verify_operation_reply(&reply, attempt.operation_id, &binding)?;
+        if !matches!(reply, application_api_tools::HostReply::Inspection { .. }) {
+            return Err("application API inspect returned a non-inspection reply".into());
+        }
+        Ok(json!({"operationId":attempt.operation_id.to_string(),
+            "phase":attempt.phase,"host":reply}))
     }
     fn provider_lease_current(&self, lease: &provider::LeaseId) -> Result<()> {
         if self.provider_lease.as_ref() != Some(lease)
@@ -6753,6 +7279,7 @@ impl Runtime {
         // Signal first on detection; neither filesystem sync nor Mini's
         // potentially slow replay may precede local physical interruption.
         let stopped = self.kill_child();
+        self.application_api_send_gate.cancel();
         let custody_stopped = self
             .custody_gate
             .cancel()
@@ -7269,6 +7796,14 @@ impl Runtime {
                 .map(|family| family.name.clone())
                 .collect(),
             applications,
+            api_applications: if tool.agent_api_host_sha256.is_some() {
+                tool.allowed_application_api_routes
+                    .iter()
+                    .map(|route| route.name.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -7899,7 +8434,29 @@ impl Runtime {
         broker: &mcp::BrokerEndpoint,
         provider_runtime: Option<&ActiveProvider>,
     ) -> Result<Value> {
+        let mut application_api_call: Option<ActiveApplicationApi> = None;
+        let mut completed_acp: Option<Value> = None;
+        let mut completed_acp_error: Option<String> = None;
+        let mut acp_failure_deadline: Option<Instant> = None;
         loop {
+            if let Err(error) = self.poll_application_api(&mut application_api_call) {
+                if let Some(attempt) = self.journal.application_api_attempt.as_mut() {
+                    attempt.phase = ApplicationApiPhase::Uncertain;
+                }
+                self.save()?;
+                if let Some(call) = application_api_call.take() {
+                    let _ = call.reply.send(json!({"isError":true,
+                        "text":format!("application API attempt retained for read-only inspection: {error}")}));
+                }
+            }
+            if application_api_call.is_none() {
+                if let Some(error) = completed_acp_error.take() {
+                    return Err(error);
+                }
+                if let Some(result) = completed_acp.take() {
+                    return Ok(result);
+                }
+            }
             if let Some(active) = provider_runtime {
                 for _ in 0..2 {
                     match active.requests.try_recv() {
@@ -7910,6 +8467,20 @@ impl Runtime {
             }
             for _ in 0..4 {
                 match broker.requests.try_recv() {
+                    Ok(request) if request.name == "mini_application_api" => {
+                        if application_api_call.is_some() {
+                            let _ = request.reply.send(json!({"isError":true,
+                                "text":"application API call already in progress"}));
+                        } else {
+                            match self.begin_application_api(&request) {
+                                Ok(active) => application_api_call = Some(active),
+                                Err(error) => {
+                                    let _ =
+                                        request.reply.send(json!({"isError":true,"text":error}));
+                                }
+                            }
+                        }
+                    }
                     Ok(request) => self.handle_tool(request, broker),
                     Err(_) => break,
                 }
@@ -7960,19 +8531,65 @@ impl Runtime {
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
+            if completed_acp_error.is_some() {
+                if acp_failure_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    if let Some(call) = application_api_call.take() {
+                        if matches!(call.step, ApplicationApiStep::Hello(_)) {
+                            self.finish_application_api_no_dispatch(call.operation_id)?;
+                        } else if let Some(attempt) = self.journal.application_api_attempt.as_mut()
+                        {
+                            attempt.phase = ApplicationApiPhase::Uncertain;
+                            self.save()?;
+                        }
+                        let _ = call.reply.send(json!({"isError":true,
+                            "text":"application API caller stopped; exact operation retained for inspection"}));
+                    }
+                    return Err(completed_acp_error.take().unwrap());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
             let msg = match rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(Ok(v)) => v,
+                Ok(Err(e)) if application_api_call.is_some() => {
+                    completed_acp_error = Some(format!("ACP wire: {e}"));
+                    acp_failure_deadline = Some(cancel_application_api_on_acp_failure(
+                        &self.cancelled,
+                        &self.application_api_send_gate,
+                    ));
+                    continue;
+                }
                 Ok(Err(e)) => return Err(format!("ACP wire: {e}")),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Hermes ACP stream closed".into())
+                    if application_api_call.is_some() {
+                        completed_acp_error = Some("Hermes ACP stream closed".into());
+                        acp_failure_deadline = Some(cancel_application_api_on_acp_failure(
+                            &self.cancelled,
+                            &self.application_api_send_gate,
+                        ));
+                        continue;
+                    }
+                    return Err("Hermes ACP stream closed".into());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
             };
             if msg.get("id") == Some(&json!(id)) {
                 if let Some(error) = msg.get("error") {
+                    if application_api_call.is_some() {
+                        completed_acp_error = Some(format!("Hermes ACP: {error}"));
+                        acp_failure_deadline = Some(cancel_application_api_on_acp_failure(
+                            &self.cancelled,
+                            &self.application_api_send_gate,
+                        ));
+                        continue;
+                    }
                     return Err(format!("Hermes ACP: {error}"));
                 }
                 if let Some(result) = msg.get("result") {
+                    if application_api_call.is_some() {
+                        completed_acp = Some(result.clone());
+                        continue;
+                    }
                     return Ok(result.clone());
                 }
             }
@@ -9527,6 +10144,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
     let current_unit = rt.current_unit.clone();
     let provider_control = rt.provider_control.clone();
     let custody_gate = rt.custody_gate.clone();
+    let application_api_send_gate = rt.application_api_send_gate.clone();
     let state_dir = rt.config.state_dir.clone();
     let interrupt: control::HardInterrupt = Arc::new(move |_| {
         cancelled.store(true, Ordering::SeqCst);
@@ -9550,6 +10168,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
         // The systemd unit is the physical worker authority on Linux. Its
         // stop/fence signals must precede even the brief Mini spawn gate.
         let _ = custody_gate.cancel();
+        application_api_send_gate.cancel();
     });
     clear_stale_control_socket(&rt.config.control_socket)?;
     let server = control::start(&rt.config.control_socket, interrupt)?;
@@ -9673,6 +10292,15 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let _ = request
                         .reply
                         .send("admin action expired before dispatch".into());
+                    continue;
+                }
+                if request.command == "inspect application api" {
+                    let result = rt.inspect_application_api();
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match &result {
+                        Ok(value) => value.to_string(),
+                        Err(error) => format!("error: {error}"),
+                    });
                     continue;
                 }
                 let outcome = match request.command.as_str() {
@@ -9883,6 +10511,77 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_api_journal_rejects_changed_request_and_repeated_id() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-api-journal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("application-api-0000000000000007.json");
+        let request = b"{\"operation_id\":\"7\"}";
+        write_new(&path, request).unwrap();
+        let mut journal = Journal::fresh(json!({}));
+        journal.next_operation_id = 8;
+        journal.application_api_attempt = Some(ApplicationApiAttempt {
+            operation_id: 7,
+            route_name: "workroom-app".into(),
+            request_path: path.clone(),
+            request_sha256: sha256_bytes(request).unwrap(),
+            phase: ApplicationApiPhase::Prepared,
+            binding_sha256: None,
+            host_invocation: None,
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        });
+        journal.validate_application_api(&directory).unwrap();
+        journal
+            .application_api_history
+            .push(journal.application_api_attempt.clone().unwrap());
+        assert!(journal.validate_application_api(&directory).is_err());
+        journal.application_api_history.clear();
+        let mut no_dispatch = journal.application_api_attempt.take().unwrap();
+        no_dispatch.phase = ApplicationApiPhase::NoDispatch;
+        no_dispatch.reported = true;
+        journal.application_api_history.push(no_dispatch);
+        let next_path = directory.join("application-api-0000000000000008.json");
+        let next_request = b"{\"operation_id\":\"8\"}";
+        write_new(&next_path, next_request).unwrap();
+        journal.next_operation_id = 9;
+        journal.application_api_attempt = Some(ApplicationApiAttempt {
+            operation_id: 8,
+            route_name: "workroom-app".into(),
+            request_path: next_path,
+            request_sha256: sha256_bytes(next_request).unwrap(),
+            phase: ApplicationApiPhase::Prepared,
+            binding_sha256: None,
+            host_invocation: None,
+            reply_path: None,
+            reply_sha256: None,
+            reported: false,
+        });
+        journal.validate_application_api(&directory).unwrap();
+        fs::write(&path, b"changed").unwrap();
+        assert!(journal.validate_application_api(&directory).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn acp_failure_cancels_forward_api_and_sets_bounded_exit() {
+        let cancelled = AtomicBool::new(false);
+        let gate = application_api_tools::ForwardSendGate::new();
+        let start = Instant::now();
+        let deadline = cancel_application_api_on_acp_failure(&cancelled, &gate);
+        assert!(cancelled.load(Ordering::SeqCst));
+        assert!(deadline >= start + Duration::from_secs(2));
+        assert!(deadline <= Instant::now() + Duration::from_secs(2));
+    }
 
     fn birth_member(
         name: &str,
@@ -10224,6 +10923,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 allowed_application_families: vec![],
                 allowed_session_families: vec![],
                 registered_shared_applications: vec![],
+                allowed_application_api_routes: vec![],
+                agent_api_host_sha256: None,
                 current_birth_host_sha256: None,
             }),
             provider_task: None,

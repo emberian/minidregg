@@ -1,0 +1,23 @@
+   Compiling minidregg-grain-runtime v0.1.0 (/tmp/mini-shared-ref-recipient-check)
+warning: unused import: `super::*`
+ --> src/dispatch_runtime_tests.rs:1:5
+  |
+1 | use super::*;
+  |     ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `minidregg-grain-runtime` (bin "grain-runtime" test) generated 1 warning (run `cargo fix --bin "grain-runtime" -p minidregg-grain-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.71s
+────────────
+ Nextest run ID da4376ee-6809-449f-b867-2481ffc09842 with nextest profile: default
+    Starting 7 tests across 2 binaries (95 tests skipped)
+        PASS [   0.010s] (1/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::read_projection_cannot_replace_signed_target_or_complete_page
+        PASS [   0.012s] (2/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::references_are_not_local_birth_records_or_owner_grants
+        PASS [   0.012s] (3/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::historical_receipt_requires_every_exact_native_field
+        PASS [   0.012s] (4/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::only_bounded_unique_names_are_discovered
+        PASS [   0.012s] (5/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::tampered_receipt_or_cross_controller_grant_is_refused
+        PASS [   0.012s] (6/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::retained_shared_selection_cannot_swap_names_targets_or_receipts
+        PASS [   0.013s] (7/7) minidregg-grain-runtime::bin/grain-runtime shared_app_refs::tests::issue_lookup_needs_only_recipient_ingress_with_public_deployment
+────────────
+     Summary [   0.014s] 7 tests run: 7 passed, 95 skipped

@@ -773,6 +773,8 @@ mod tests {
             allowed_application_families: vec![],
             allowed_session_families: vec![],
             registered_shared_applications: vec![],
+            allowed_application_api_routes: vec![],
+            agent_api_host_sha256: None,
             current_birth_host_sha256: None,
         };
         let peer = |root: &str| {

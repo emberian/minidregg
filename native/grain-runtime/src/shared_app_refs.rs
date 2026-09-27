@@ -8,7 +8,7 @@
 //! author/receiver must still decide every proposed transition.
 
 use crate::resource_tools::AllowedResourceRead;
-use crate::{bounded_regular_file, decimal, Config, Result, ToolTask};
+use crate::{decimal, Config, Result, ToolTask};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 
 const MAX_REFERENCES: usize = 64;
 const MAX_READ_BYTES: usize = 256 * 1024;
-const MAX_HOST_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CALL_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ISSUE_BYTES: u64 = 12_102_759;
 
@@ -72,9 +71,9 @@ fn hash_bounded_file(path: &Path, maximum: u64) -> Result<String> {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ExactReceiptPin {
-    /// A private copy of the original native client attempt, including its
-    /// exact signed call. `mini retry --mode lookup` never resubmits it.
-    pub attempt: PathBuf,
+    /// Only the exact original signed call is staged in this controller's
+    /// private state. Native op3 replays its historical receipt.
+    pub call: PathBuf,
     pub call_sha256: String,
     pub transaction_id: String,
     pub event_id: String,
@@ -85,10 +84,9 @@ pub(super) struct ExactReceiptPin {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ShareIssuePin {
-    /// Private copy of the native client's prepared and submitted issue
-    /// attempt. Its op29 lookup replays the source event and nullifier at the
-    /// original accepted prefix; `ingressSha256` pins `ingress.bin` inside it.
-    pub attempt: PathBuf,
+    /// Only the source-authored exact ingress is staged here. Native op29
+    /// replays the event/nullifier; no issuer approval or attempt is imported.
+    pub ingress: PathBuf,
     pub ingress_sha256: String,
     pub transaction_id: String,
     pub event_id: String,
@@ -147,8 +145,8 @@ fn sha256_hex(value: &str) -> bool {
 }
 
 fn validate_pin(pin: &ExactReceiptPin) -> Result<()> {
-    if !pin.attempt.is_absolute() || !sha256_hex(&pin.call_sha256) {
-        return Err("shared application receipt needs an absolute attempt and SHA-256".into());
+    if !pin.call.is_absolute() || !sha256_hex(&pin.call_sha256) {
+        return Err("shared application receipt needs an absolute call and SHA-256".into());
     }
     for (value, label) in [
         (&pin.transaction_id, "transactionId"),
@@ -165,8 +163,8 @@ fn validate_pin(pin: &ExactReceiptPin) -> Result<()> {
 }
 
 fn validate_issue_pin(pin: &ShareIssuePin) -> Result<()> {
-    if !pin.attempt.is_absolute() || !sha256_hex(&pin.ingress_sha256) {
-        return Err("shared app issue needs an absolute retained attempt and SHA-256".into());
+    if !pin.ingress.is_absolute() || !sha256_hex(&pin.ingress_sha256) {
+        return Err("shared app issue needs an absolute ingress and SHA-256".into());
     }
     for (value, label) in [
         (&pin.transaction_id, "transactionId"),
@@ -264,47 +262,17 @@ pub(super) fn validate_refs(refs: &[SharedApplicationRef], tool: &ToolTask) -> R
     Ok(())
 }
 
-fn same_pinned_deployment(config: &Config, attempt: &Path) -> Result<()> {
-    let manifest = bounded_regular_file(&attempt.join("attempt.json"), 65_536)?;
-    let value: Value = serde_json::from_slice(&manifest)
-        .map_err(|error| format!("shared application attempt manifest: {error}"))?;
-    if value.get("format").and_then(Value::as_str) != Some("minidregg-resource-client-attempt-v1") {
-        return Err("shared application attempt manifest format differs".into());
-    }
-    let host = value
-        .get("host")
-        .and_then(Value::as_str)
-        .ok_or("shared application attempt has no Host pin")?;
-    let native_config = value
-        .get("config")
-        .and_then(Value::as_str)
-        .ok_or("shared application attempt has no config pin")?;
-    if hash_bounded_file(Path::new(host), MAX_HOST_IMAGE_BYTES)?
-        != hash_bounded_file(&config.host, MAX_HOST_IMAGE_BYTES)?
-        || bounded_regular_file(Path::new(native_config), 65_536)?
-            != bounded_regular_file(&config.host_config, 65_536)?
-    {
-        return Err("shared application receipt uses a different native deployment".into());
-    }
-    if let Some(socket) = value.get("socket").and_then(Value::as_str) {
-        if config.host_socket.as_deref() != Some(Path::new(socket)) {
-            return Err("shared application receipt uses a different native socket".into());
-        }
-    }
-    Ok(())
-}
-
 /// The runtime owns process lifetime and cancellation for every operation.
 /// A callback must use a supervised native client/Host route, retain the exact
 /// input and binary reply, and return only the Host-inspected JSON. In
-/// particular, `IssueLookup` is native op29 or its source CLI equivalent, not
-/// a generic transaction lookup that would lose the event-15 check.
+/// particular, `BirthLookup` is native op3 over the exact signed call and
+/// `IssueLookup` is op29 over exact ingress. Neither may resubmit a transition.
 pub(super) enum NativeOperation {
     BirthLookup {
-        attempt: PathBuf,
+        call: PathBuf,
     },
     IssueLookup {
-        attempt: PathBuf,
+        ingress: PathBuf,
     },
     SignedRead {
         read: AllowedResourceRead,
@@ -316,56 +284,30 @@ fn exact_birth_input(config: &Config, pin: &ExactReceiptPin) -> Result<PathBuf> 
     validate_pin(pin)?;
     let root = fs::canonicalize(&config.state_dir)
         .map_err(|error| format!("private shared application root: {error}"))?;
-    let attempt = fs::canonicalize(&pin.attempt)
-        .map_err(|error| format!("private shared application attempt: {error}"))?;
-    if !attempt.starts_with(root.join("shared-app-refs")) {
-        return Err("shared application attempt must be staged in private stateDir".into());
+    let call = fs::canonicalize(&pin.call)
+        .map_err(|error| format!("private shared application call: {error}"))?;
+    if !call.starts_with(root.join("shared-app-refs")) || !call.is_file() {
+        return Err("shared application call must be staged in private stateDir".into());
     }
-    same_pinned_deployment(config, &attempt)?;
-    if hash_bounded_file(&attempt.join("call.bin"), MAX_CALL_BYTES)? != pin.call_sha256 {
+    if hash_bounded_file(&call, MAX_CALL_BYTES)? != pin.call_sha256 {
         return Err("shared application exact call digest changed".into());
     }
-    Ok(attempt)
+    Ok(call)
 }
 
 fn exact_issue_input(config: &Config, pin: &ShareIssuePin) -> Result<PathBuf> {
     validate_issue_pin(pin)?;
     let root = fs::canonicalize(&config.state_dir)
         .map_err(|error| format!("private shared application root: {error}"))?;
-    let attempt = fs::canonicalize(&pin.attempt)
-        .map_err(|error| format!("private shared app issue attempt: {error}"))?;
-    if !attempt.starts_with(root.join("shared-app-refs"))
-        || hash_bounded_file(&attempt.join("ingress.bin"), MAX_ISSUE_BYTES)? != pin.ingress_sha256
+    let ingress = fs::canonicalize(&pin.ingress)
+        .map_err(|error| format!("private shared app issue ingress: {error}"))?;
+    if !ingress.starts_with(root.join("shared-app-refs"))
+        || !ingress.is_file()
+        || hash_bounded_file(&ingress, MAX_ISSUE_BYTES)? != pin.ingress_sha256
     {
         return Err("shared app issue ingress differs from private exact pin".into());
     }
-    let metadata = bounded_regular_file(&attempt.join("pin.json"), 65_536)?;
-    let value: Value = serde_json::from_slice(&metadata)
-        .map_err(|error| format!("shared app issue custody pin: {error}"))?;
-    let host = value
-        .get("host")
-        .and_then(Value::as_str)
-        .ok_or("shared app issue has no Host pin")?;
-    let native_config = value
-        .get("config")
-        .and_then(Value::as_str)
-        .ok_or("shared app issue has no config pin")?;
-    // The original source author used a private operator socket. Historical
-    // op29 is also available through this controller's fixed public Host
-    // socket, and the native client deliberately supports that override.
-    // Keep the original pin intact; it is not this runtime's read socket.
-    value
-        .get("operatorSocket")
-        .and_then(Value::as_str)
-        .ok_or("shared app issue has no original operator socket pin")?;
-    if hash_bounded_file(Path::new(host), MAX_HOST_IMAGE_BYTES)?
-        != hash_bounded_file(&config.host, MAX_HOST_IMAGE_BYTES)?
-        || bounded_regular_file(Path::new(native_config), 65_536)?
-            != bounded_regular_file(&config.host_config, 65_536)?
-    {
-        return Err("shared app issue belongs to a different native deployment".into());
-    }
-    Ok(attempt)
+    Ok(ingress)
 }
 
 fn receipt_matches(
@@ -376,10 +318,7 @@ fn receipt_matches(
     image_boundary: &str,
 ) -> Result<()> {
     if result.get("type").and_then(Value::as_str) != Some("confirmed")
-        || !matches!(
-            result.get("confirmation").and_then(Value::as_str),
-            Some("installed" | "replayed")
-        )
+        || result.get("confirmation").and_then(Value::as_str) != Some("replayed")
     {
         return Err("shared application call has no historical accepted receipt".into());
     }
@@ -442,10 +381,10 @@ pub(super) fn resolve_with(
     {
         return Err("shared application signed reads need distinct durable nonces".into());
     }
-    let birth_attempt = exact_birth_input(config, &reference.birth)?;
-    let issue_attempt = exact_issue_input(config, &reference.issue)?;
+    let birth_call = exact_birth_input(config, &reference.birth)?;
+    let issue_ingress = exact_issue_input(config, &reference.issue)?;
     let birth_receipt = run(NativeOperation::BirthLookup {
-        attempt: birth_attempt.clone(),
+        call: birth_call.clone(),
     })?;
     receipt_matches(
         &birth_receipt,
@@ -454,13 +393,11 @@ pub(super) fn resolve_with(
         &reference.birth.accepted_count,
         &reference.birth.image_boundary,
     )?;
-    if hash_bounded_file(&birth_attempt.join("call.bin"), MAX_CALL_BYTES)?
-        != reference.birth.call_sha256
-    {
+    if hash_bounded_file(&birth_call, MAX_CALL_BYTES)? != reference.birth.call_sha256 {
         return Err("shared application exact birth call changed during lookup".into());
     }
     let issue_receipt = run(NativeOperation::IssueLookup {
-        attempt: issue_attempt.clone(),
+        ingress: issue_ingress.clone(),
     })?;
     receipt_matches(
         &issue_receipt,
@@ -469,9 +406,7 @@ pub(super) fn resolve_with(
         &reference.issue.accepted_count,
         &reference.issue.image_boundary,
     )?;
-    if hash_bounded_file(&issue_attempt.join("ingress.bin"), MAX_ISSUE_BYTES)?
-        != reference.issue.ingress_sha256
-    {
+    if hash_bounded_file(&issue_ingress, MAX_ISSUE_BYTES)? != reference.issue.ingress_sha256 {
         return Err("shared application exact issue ingress changed during lookup".into());
     }
     let selections = [
@@ -564,10 +499,10 @@ mod tests {
     use crate::application_tools::{BirthProfile, SessionFamily, SessionNamespace};
     use serde_json::json;
 
-    fn pin(attempt: &str, call: &str) -> ExactReceiptPin {
+    fn pin(call: &str, digest: &str) -> ExactReceiptPin {
         ExactReceiptPin {
-            attempt: PathBuf::from(attempt),
-            call_sha256: call.into(),
+            call: PathBuf::from(call),
+            call_sha256: digest.into(),
             transaction_id: "1".into(),
             event_id: "2".into(),
             accepted_count: "3".into(),
@@ -587,9 +522,9 @@ mod tests {
             manifest_observe_capability: "201".into(),
             snapshot_observe_capability: "202".into(),
             ticket_observe_capability: "203".into(),
-            birth: pin("/private/birth", &"a".repeat(64)),
+            birth: pin("/private/birth-call.bin", &"a".repeat(64)),
             issue: ShareIssuePin {
-                attempt: PathBuf::from("/private/issue"),
+                ingress: PathBuf::from("/private/issue-ingress.bin"),
                 ingress_sha256: "b".repeat(64),
                 transaction_id: "5".into(),
                 event_id: "6".into(),
@@ -641,6 +576,8 @@ mod tests {
                 max_result_bytes: 1024,
             }],
             registered_shared_applications: vec![],
+            allowed_application_api_routes: vec![],
+            agent_api_host_sha256: None,
             current_birth_host_sha256: None,
         }
     }
@@ -678,7 +615,10 @@ mod tests {
     #[test]
     fn only_bounded_unique_names_are_discovered() {
         let reference = reference();
-        assert_eq!(discovery_names(&[reference.clone()]), vec!["shared-app"]);
+        assert_eq!(
+            discovery_names(std::slice::from_ref(&reference)),
+            vec!["shared-app"]
+        );
         assert!(validate_refs(&[reference.clone(), reference], &tool()).is_err());
     }
 
@@ -743,30 +683,25 @@ mod tests {
     }
 
     #[test]
-    fn issue_lookup_can_use_current_public_socket_distinct_from_original_operator_socket() {
+    fn issue_lookup_needs_only_recipient_ingress_with_public_deployment() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let root =
             std::env::temp_dir().join(format!("mini-shared-issue-{}-{unique}", std::process::id()));
-        let attempt = root.join("state/shared-app-refs/issue");
-        fs::create_dir_all(&attempt).unwrap();
+        let staging = root.join("state/shared-app-refs/issue");
+        fs::create_dir_all(&staging).unwrap();
         let host = root.join("host");
         let host_config = root.join("host.json");
         fs::write(&host, b"pinned native host").unwrap();
         fs::write(&host_config, b"pinned deployment config").unwrap();
         let ingress = b"canonical issue ingress";
-        fs::write(attempt.join("ingress.bin"), ingress).unwrap();
-        fs::write(
-            attempt.join("pin.json"),
-            serde_json::to_vec(&json!({
-                "host":host,"config":host_config,
-                "operatorSocket":root.join("old-operator.sock")
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        let ingress_path = staging.join("ingress.bin");
+        fs::write(&ingress_path, ingress).unwrap();
+        let call = b"exact signed application birth call";
+        let call_path = staging.join("call.bin");
+        fs::write(&call_path, call).unwrap();
         let config: Config = serde_json::from_value(json!({
             "mini":root.join("mini"),"host":host,"hostConfig":host_config,
             "hostSocket":root.join("current-public.sock"),
@@ -776,7 +711,7 @@ mod tests {
         }))
         .unwrap();
         let pin = ShareIssuePin {
-            attempt: attempt.clone(),
+            ingress: ingress_path.clone(),
             ingress_sha256: format!("{:x}", Sha256::digest(ingress)),
             transaction_id: "1".into(),
             event_id: "2".into(),
@@ -785,8 +720,30 @@ mod tests {
         };
         assert_eq!(
             exact_issue_input(&config, &pin).unwrap(),
-            fs::canonicalize(&attempt).unwrap()
+            fs::canonicalize(&ingress_path).unwrap()
         );
+        let birth = ExactReceiptPin {
+            call: call_path.clone(),
+            call_sha256: format!("{:x}", Sha256::digest(call)),
+            transaction_id: "5".into(),
+            event_id: "6".into(),
+            accepted_count: "7".into(),
+            image_boundary: "8".into(),
+        };
+        assert_eq!(
+            exact_birth_input(&config, &birth).unwrap(),
+            fs::canonicalize(&call_path).unwrap()
+        );
+        let outside = root.join("owner-private-call.bin");
+        fs::write(&outside, call).unwrap();
+        let mut other_controller = birth;
+        other_controller.call = outside;
+        assert!(exact_birth_input(&config, &other_controller).is_err());
+        let mut changed_issue = pin;
+        changed_issue.ingress_sha256 = "0".repeat(64);
+        assert!(exact_issue_input(&config, &changed_issue).is_err());
+        assert!(!staging.join("pin.json").exists());
+        assert!(!staging.join("attempt.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

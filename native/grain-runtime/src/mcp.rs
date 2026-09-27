@@ -67,6 +67,7 @@ pub struct ToolCatalog {
     pub application_families: Vec<String>,
     pub session_families: Vec<String>,
     pub applications: Vec<String>,
+    pub api_applications: Vec<String>,
 }
 
 pub fn start_broker(
@@ -180,7 +181,8 @@ fn serve_broker_connection(
                 "birthFamilies":snapshot.birth_families,
                 "applicationFamilies":snapshot.application_families,
                 "sessionFamilies":snapshot.session_families,
-                "applications":snapshot.applications})
+                "applications":snapshot.applications,
+                "apiApplications":snapshot.api_applications})
         );
         return;
     }
@@ -246,10 +248,12 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         application_families: catalog_names(reply, "applicationFamilies", 8)?,
         session_families: catalog_names(reply, "sessionFamilies", 8)?,
         applications: catalog_names(reply, "applications", 64)?,
+        api_applications: catalog_names(reply, "apiApplications", 16)?,
     };
     if catalog
         .applications
         .iter()
+        .chain(&catalog.api_applications)
         .any(|name| !name.ends_with("-app"))
     {
         return Err("controller MCP application selector is not a named app".into());
@@ -292,6 +296,19 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "family":{"type":"string","enum":catalog.session_families},
                 "application":application_selector},
                 "required":["family","application"],"additionalProperties":false}}));
+    }
+    if !catalog.api_applications.is_empty() {
+        tools.push(json!({"name":"mini_application_api",
+            "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input.",
+            "inputSchema":{"type":"object","properties":{
+                "application":{"type":"string","enum":catalog.api_applications},
+                "method":{"type":"string","enum":["GET","HEAD","POST","PUT","PATCH","DELETE"]},
+                "path":{"type":"string","maxLength":8192},
+                "query":{"type":"string","maxLength":8192},
+                "headers":{"type":"array","maxItems":128,"items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}},
+                "bodyHex":{"type":"string","maxLength":49152}},
+                "required":["application","method","path","query","headers","bodyHex"],
+                "additionalProperties":false}}));
     }
     json!({"tools":tools})
 }
@@ -415,6 +432,32 @@ mod tests {
     static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
 
     #[test]
+    fn application_api_catalog_exposes_only_operator_selected_route_names() {
+        let absent = tools_for_catalog(&ToolCatalog::default());
+        assert!(absent["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "mini_application_api"));
+        let listed = tools_for_catalog(&ToolCatalog {
+            api_applications: vec!["workroom-app".into()],
+            ..ToolCatalog::default()
+        });
+        let api = listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "mini_application_api")
+            .unwrap();
+        assert_eq!(
+            api["inputSchema"]["properties"]["application"]["enum"],
+            json!(["workroom-app"])
+        );
+        assert_eq!(api["inputSchema"]["additionalProperties"], false);
+        assert!(api["inputSchema"]["properties"].get("ticket").is_none());
+    }
+
+    #[test]
     fn birth_catalog_lists_only_named_confirmed_routes_before_prompt() {
         let (mut client, broker) = UnixStream::pair().unwrap();
         let (tx, rx) = mpsc::sync_channel(1);
@@ -430,6 +473,7 @@ mod tests {
                     application_families: vec!["office".into()],
                     session_families: vec!["office-web".into()],
                     applications: vec!["office-0-app".into()],
+                    api_applications: vec![],
                 })),
             );
         });
