@@ -27,12 +27,13 @@ struct Args {
     bwrap: PathBuf,
     max_var_bytes: u64,
     commit: String,
+    capacity: bool,
 }
 
 fn args() -> Result<Args, Box<dyn Error>> {
     let words: Vec<_> = std::env::args().collect();
-    if words.len() != 6 {
-        return Err("usage: gitweb-session-smoke PACKAGE_DIR COPIED_VAR_DIR BWRAP MAX_VAR_BYTES EXPECTED_COMMIT".into());
+    if !(words.len() == 6 || (words.len() == 7 && words[6] == "--capacity")) {
+        return Err("usage: gitweb-session-smoke PACKAGE_DIR COPIED_VAR_DIR BWRAP MAX_VAR_BYTES EXPECTED_COMMIT [--capacity]".into());
     }
     let commit = words[5].clone();
     if commit.len() != 40
@@ -46,6 +47,7 @@ fn args() -> Result<Args, Box<dyn Error>> {
         bwrap: PathBuf::from(&words[3]),
         max_var_bytes: words[4].parse()?,
         commit,
+        capacity: words.len() == 7,
     })
 }
 
@@ -237,6 +239,31 @@ fn run(input: Args, manifest: SpkManifest) -> Result<(), Box<dyn Error>> {
             println!("upload_pack_commit={} bytes={} sha256={:x}", input.commit, body.len(), Sha256::digest(&body));
         }
         other => return Err(format!("retained Git repo upload-pack differs: {other:?}").into()),
+    }
+
+    if input.capacity {
+        let baseline = driver.stats()?.sessions_created;
+        for number in 0..33_u8 {
+            let mut friend = binding(SessionKind::Web, [true, false], number + 31);
+            friend.session_resource = 7000 + u64::from(number);
+            friend.subject = 1000 + u64::from(number);
+            friend.params = params(number + 31, [true, false]);
+            checked_html(&mut driver, friend, &input.commit)?;
+        }
+        let full = driver.stats()?;
+        if full.sessions_created != baseline + 33 || full.cached_sessions != 32 {
+            return Err("33 distinct WebSessions did not retain bounded capacity".into());
+        }
+        let mut evicted = binding(SessionKind::Web, [true, false], 31);
+        evicted.session_resource = 7000;
+        evicted.subject = 1000;
+        evicted.params = params(31, [true, false]);
+        checked_html(&mut driver, evicted, &input.commit)?;
+        let revisited = driver.stats()?;
+        if revisited.sessions_created != baseline + 34 || revisited.cached_sessions != 32 {
+            return Err("least-recently-used app session was not recreated".into());
+        }
+        println!("capacity_sessions_created={} cached={} evicted_oldest_recreated=true", revisited.sessions_created, revisited.cached_sessions);
     }
 
     // This last read-only request intentionally has an unusably short budget.
