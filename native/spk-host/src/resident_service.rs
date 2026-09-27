@@ -97,6 +97,8 @@ struct ResidentConfig {
     expected_raw_sha256: String,
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
+    deployment_id: String,
+    host_id: String,
     bwrap: PathBuf,
     bwrap_sha256: String,
     app_uid: u32,
@@ -174,6 +176,8 @@ impl ResidentConfig {
             || !hex64(&config.bwrap_sha256)
             || !hex64(&config.mini_host_sha256)
             || !hex64(&config.mini_config_sha256)
+            || !hex64(&config.deployment_id)
+            || !hex64(&config.host_id)
             || config.app_uid == 0
             || config.app_gid == 0
             || config.entrances.is_empty()
@@ -687,6 +691,8 @@ mod tests {
             "expectedRawSha256": "a".repeat(64),
             "persistentVar": "/var/lib/mini-spk/var",
             "persistentVarMaxBytes": 1048576,
+            "deploymentId": "e".repeat(64),
+            "hostId": "f".repeat(64),
             "bwrap": "/usr/bin/bwrap",
             "bwrapSha256": "b".repeat(64),
             "appUid": 1000,

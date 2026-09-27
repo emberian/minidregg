@@ -87,3 +87,14 @@ rechecks the same handoff immediately before one-shot spawn. Its bounded
 snapshot with this file copied byte-for-byte (2 jobs, 4 GiB cap, 393.6 MiB
 peak). No v3 Mini claim or app launch was run, and this physical comparison
 does not by itself grant START authority.
+
+The next staged `resident_service.rs` config cut (SHA-256
+`029c4efcf8ca107d8abef215fafd984ac4ffcccfadac24e769c008577b7a1145`)
+requires protected, canonical `deploymentId` and `hostId` pins for the future
+root-witness comparison. It still refuses START before opening the Journal or
+calling Mini. The [focused resident config test](resident-config-v3-r1.log)
+passed 1/1 on hbox (122 skipped, 4 GiB/2-job cap), and
+[strict all-targets Clippy](resident-config-clippy-r1.log) passed on the same
+copied source. No volume ID was inferred by Rust; the source v3 inspector must
+provide lowercase hex of Mini's exact 32-byte little-endian digest before
+the physical START join can proceed.
