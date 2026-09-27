@@ -14,7 +14,7 @@ const FORMAT: &str = "minidregg-application-share-issue-custody-v1";
 // against the same pinned Host executable directly; routing them through the
 // process-global SOCKET would tunnel public author/inspect op7/8/9 into the
 // operator service and be refused before the checked op32 plan.
-fn source_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
+pub(super) fn source_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()> {
     let output = Command::new(host)
         .arg(config)
         .args(arguments)
@@ -31,7 +31,7 @@ fn source_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<()
     Ok(())
 }
 
-fn source_inspect(
+pub(super) fn source_inspect(
     host: &Path,
     config: &Path,
     kind: &str,
@@ -54,11 +54,11 @@ fn source_inspect(
         .map_err(|error| format!("invalid host JSON {}: {error}", output.display()))
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub(super) fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     File::open(path)
         .map_err(|e| format!("cannot open {}: {e}", path.display()))?
@@ -71,7 +71,7 @@ fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -110,14 +110,18 @@ fn strict_hex(value: &str, bytes: usize) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
+pub(super) fn member<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("share issue approval or inspection lacks {name}"))
 }
 
-fn approved_header(slot: &Value, signer: &Value, signing: &SigningKey) -> Result<Vec<u8>> {
+pub(super) fn approved_header(
+    slot: &Value,
+    signer: &Value,
+    signing: &SigningKey,
+) -> Result<Vec<u8>> {
     let header = member(slot, "header")?;
     let details = slot
         .get("signing")
@@ -152,7 +156,7 @@ fn approved_header(slot: &Value, signer: &Value, signing: &SigningKey) -> Result
     Ok(bytes)
 }
 
-fn custody_key(path: &Path) -> Result<SigningKey> {
+pub(super) fn custody_key(path: &Path) -> Result<SigningKey> {
     let parent = path
         .parent()
         .ok_or("share issue key has no parent directory")?;
@@ -219,7 +223,7 @@ fn check_intended_selectors(approval: &Value, plan: &Value) -> Result<()> {
     Ok(())
 }
 
-fn operator_socket_owned(socket: &Path) -> Result<()> {
+pub(super) fn operator_socket_owned(socket: &Path) -> Result<()> {
     unsafe extern "C" {
         fn geteuid() -> u32;
     }
@@ -243,7 +247,7 @@ fn operator_socket_owned(socket: &Path) -> Result<()> {
     Ok(())
 }
 
-fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
+pub(super) fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [255, ..] => Err(format!(
             "share issue Host refused op{operation}; frame retained"
@@ -255,7 +259,7 @@ fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
-fn retain_json(path: &Path, value: &Value) -> Result<()> {
+pub(super) fn retain_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
@@ -330,7 +334,7 @@ fn outcome_at(
     )
 }
 
-fn receipt_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
+pub(super) fn receipt_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
     let text = member(value, field)?;
     if text.is_empty()
         || text.len() > 80
@@ -342,7 +346,7 @@ fn receipt_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
     Ok(text)
 }
 
-fn confirmed(value: &Value) -> Result<()> {
+pub(super) fn confirmed(value: &Value) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         return Err("share issue outcome did not confirm".into());
     }
@@ -352,7 +356,7 @@ fn confirmed(value: &Value) -> Result<()> {
     Ok(())
 }
 
-fn same_receipt(original: &Value, recovered: &Value) -> Result<()> {
+pub(super) fn same_receipt(original: &Value, recovered: &Value) -> Result<()> {
     confirmed(original)?;
     confirmed(recovered)?;
     for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
@@ -363,7 +367,7 @@ fn same_receipt(original: &Value, recovered: &Value) -> Result<()> {
     Ok(())
 }
 
-fn receipt_projection(value: &Value) -> Result<Value> {
+pub(super) fn receipt_projection(value: &Value) -> Result<Value> {
     confirmed(value)?;
     Ok(
         json!({"transactionId":receipt_field(value,"transactionId")?,
@@ -373,7 +377,7 @@ fn receipt_projection(value: &Value) -> Result<Value> {
     )
 }
 
-fn reconcile_receipt(first: Option<&Value>, observed: &Value) -> Result<Option<Value>> {
+pub(super) fn reconcile_receipt(first: Option<&Value>, observed: &Value) -> Result<Option<Value>> {
     if confirmed(observed).is_err() {
         return Ok(first.cloned());
     }

@@ -20,6 +20,8 @@ mod drain;
 #[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
+mod grain_share_issue;
+#[cfg(unix)]
 mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
@@ -160,6 +162,10 @@ usage:
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
   mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
+  mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
   mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
@@ -2328,6 +2334,63 @@ fn run(mut args: Args) -> Result<()> {
                 })
                 .collect::<Result<Vec<_>>>()?;
             share_issue_receipt::lookup(
+                &host,
+                &config,
+                socket,
+                &ingress,
+                [fields[0], fields[1], fields[2], fields[3]],
+                &directory,
+            )
+        }
+        #[cfg(unix)]
+        "grain-share-issue-prepare" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let request = path(args.required("request")?);
+            let approval = path(args.required("approval")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("grain-share-issue-prepare requires --socket")?;
+            grain_share_issue::prepare(&host, &config, socket, &request, &approval, &directory)
+        }
+        #[cfg(unix)]
+        "grain-share-issue-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            grain_share_issue::submit(&directory, SOCKET.get().map(PathBuf::as_path))
+        }
+        #[cfg(unix)]
+        "grain-share-issue-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            grain_share_issue::lookup(&directory, SOCKET.get().map(PathBuf::as_path))
+        }
+        #[cfg(unix)]
+        "grain-share-issue-receipt-lookup" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let ingress = path(args.required("ingress")?);
+            let transaction_id = args.required("transaction-id")?;
+            let event_id = args.required("event-id")?;
+            let accepted_count = args.required("accepted-count")?;
+            let image_boundary = args.required("image-boundary")?;
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("grain share issue receipt lookup requires --socket")?;
+            let expected = [transaction_id, event_id, accepted_count, image_boundary];
+            let fields = expected
+                .iter()
+                .map(|value| {
+                    value
+                        .to_str()
+                        .ok_or_else(|| "grain share receipt field must be UTF-8".to_owned())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            share_issue_receipt::lookup_grain(
                 &host,
                 &config,
                 socket,

@@ -1,5 +1,6 @@
 //! Recipient-side historical share receipt. This route accepts only exact
-//! source ingress, invokes native read-only op29, and retains its full reply.
+//! source ingress, invokes the explicitly selected native read-only op29 or
+//! op55, and retains its full reply.
 //! It never imports the issuer's approval, signing plan, keys, or submit path.
 
 use super::*;
@@ -9,6 +10,28 @@ use std::io::Read;
 const MAX_INGRESS: usize = transport::HOST_MAX_FRAME - 1;
 const MAX_OUTCOME: usize = 65_536;
 const MAX_CONFIG: usize = 65_536;
+
+#[derive(Clone, Copy)]
+enum IssueProfile {
+    BareEvent15,
+    GrainBackedEvent22,
+}
+
+impl IssueProfile {
+    fn operation(self) -> u8 {
+        match self {
+            Self::BareEvent15 => 29,
+            Self::GrainBackedEvent22 => 55,
+        }
+    }
+
+    fn marker(self) -> &'static str {
+        match self {
+            Self::BareEvent15 => "minidregg-share-issue-recipient-lookup-v1",
+            Self::GrainBackedEvent22 => "minidregg-grain-share-issue-recipient-lookup-v1",
+        }
+    }
+}
 
 fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     let metadata =
@@ -60,14 +83,24 @@ fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
     Ok(())
 }
 
-fn invoke_lookup(host: &Path, socket: &Path, config: &Path, ingress: &[u8]) -> Result<Vec<u8>> {
+fn invoke_profile(
+    host: &Path,
+    socket: &Path,
+    config: &Path,
+    ingress: &[u8],
+    profile: IssueProfile,
+) -> Result<Vec<u8>> {
     // The only native operation reachable from this recipient route is the
     // source-specific historical lookup. It cannot submit an issue.
-    session_invoke(host, socket, config, 29, ingress)
+    session_invoke(host, socket, config, profile.operation(), ingress)
+}
+
+fn invoke_lookup(host: &Path, socket: &Path, config: &Path, ingress: &[u8]) -> Result<Vec<u8>> {
+    invoke_profile(host, socket, config, ingress, IssueProfile::BareEvent15)
 }
 
 fn inspect_direct(host: &Path, config: &Path, input: &Path, output: &Path) -> Result<Value> {
-    // The public transport carries only op29. Outcome presentation is a
+    // The broker may carry only the explicitly allowed lookup. Presentation is a
     // local, pinned Host operation over the retained exact reply bytes.
     let status = Command::new(host)
         .arg(config)
@@ -97,6 +130,45 @@ pub(super) fn lookup(
     expected: [&str; 4],
     directory: &Path,
 ) -> Result<()> {
+    lookup_profile(
+        host,
+        config,
+        socket,
+        ingress_path,
+        expected,
+        directory,
+        IssueProfile::BareEvent15,
+    )
+}
+
+pub(super) fn lookup_grain(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    ingress_path: &Path,
+    expected: [&str; 4],
+    directory: &Path,
+) -> Result<()> {
+    lookup_profile(
+        host,
+        config,
+        socket,
+        ingress_path,
+        expected,
+        directory,
+        IssueProfile::GrainBackedEvent22,
+    )
+}
+
+fn lookup_profile(
+    host: &Path,
+    config: &Path,
+    socket: &Path,
+    ingress_path: &Path,
+    expected: [&str; 4],
+    directory: &Path,
+    profile: IssueProfile,
+) -> Result<()> {
     if !host.is_absolute()
         || !config.is_absolute()
         || !socket.is_absolute()
@@ -119,7 +191,7 @@ pub(super) fn lookup(
     let host_sha = host_image_sha256(host)?;
     drain::private_dir(directory)?;
     create_private(&directory.join("ingress.bin"), &ingress)?;
-    let marker = json!({"type":"minidregg-share-issue-recipient-lookup-v1",
+    let marker = json!({"type":profile.marker(),
         "host":utf8_path(host)?,"hostSha256":host_sha,
         "config":utf8_path(config)?,
         "configSha256":hex(&Sha256::digest(&config_bytes)),
@@ -135,20 +207,37 @@ pub(super) fn lookup(
 
     // A lost reply leaves the marker and exact ingress. The caller may issue
     // another *read-only* lookup in a fresh directory; no submission exists.
-    let frame = invoke_lookup(host, socket, config, &ingress)?;
+    let frame = match profile {
+        IssueProfile::BareEvent15 => invoke_lookup(host, socket, config, &ingress)?,
+        IssueProfile::GrainBackedEvent22 => {
+            invoke_profile(host, socket, config, &ingress, profile)?
+        }
+    };
     create_private(&directory.join("reply.frame"), &frame)?;
     sync_directory_ancestors(directory)?;
     if host_image_sha256(host)? != host_sha
         || bounded(config, MAX_CONFIG)? != config_bytes
         || bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
     {
-        return Err("share issue Host, config, or exact ingress changed after op29".into());
+        return Err(format!(
+            "share issue Host, config, or exact ingress changed after op{}",
+            profile.operation()
+        ));
     }
-    let [29, body @ ..] = frame.as_slice() else {
-        return Err("share issue op29 returned wrong reply operation; frame retained".into());
+    let [actual, body @ ..] = frame.as_slice() else {
+        return Err("share issue lookup returned malformed reply; frame retained".into());
     };
+    if *actual != profile.operation() {
+        return Err(format!(
+            "share issue op{} returned wrong reply operation; frame retained",
+            profile.operation()
+        ));
+    }
     if body.is_empty() || body.len() > MAX_OUTCOME {
-        return Err("share issue op29 outcome size is outside profile; frame retained".into());
+        return Err(format!(
+            "share issue op{} outcome size is outside profile; frame retained",
+            profile.operation()
+        ));
     }
     let binary = directory.join("outcome.bin");
     create_private(&binary, body)?;
@@ -233,6 +322,51 @@ mod tests {
         assert_eq!(
             invoke_lookup(&host, &socket, &config, b"exact signed issue ingress").unwrap(),
             vec![29, 1, 2]
+        );
+        worker.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn grain_recipient_profile_sends_only_op55_with_exact_ingress() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = PathBuf::from(format!("/tmp/msr-grain-{}-{unique:x}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let host = root.join("host");
+        let config = root.join("config.json");
+        let socket = root.join("public.sock");
+        fs::write(&host, b"pinned host image").unwrap();
+        fs::write(&config, b"pinned config").unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut length = [0u8; 4];
+            stream.read_exact(&mut length).unwrap();
+            let mut envelope = vec![0u8; u32::from_le_bytes(length) as usize];
+            stream.read_exact(&mut envelope).unwrap();
+            let config_len = u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize;
+            let operation = 5 + config_len + 32;
+            assert_eq!(envelope[operation], 55);
+            assert_eq!(&envelope[operation + 1..], b"exact grain issue ingress");
+            let reply = [55u8, 1, 2];
+            stream
+                .write_all(&(reply.len() as u32).to_le_bytes())
+                .unwrap();
+            stream.write_all(&reply).unwrap();
+        });
+        assert_eq!(
+            invoke_profile(
+                &host,
+                &socket,
+                &config,
+                b"exact grain issue ingress",
+                IssueProfile::GrainBackedEvent22
+            )
+            .unwrap(),
+            vec![55, 1, 2]
         );
         worker.join().unwrap();
         fs::remove_dir_all(root).unwrap();
