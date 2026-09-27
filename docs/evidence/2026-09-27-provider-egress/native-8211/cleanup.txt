@@ -1,0 +1,6 @@
+MainPID=0
+Result=success
+Id=mini-grain-controller@8211.service
+ActiveState=inactive
+gateway_socket_mode=600 owner=ember type=socket
+bridge_processes=0

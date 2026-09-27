@@ -1,0 +1,5 @@
+provider_settlement_confirmed
+soft_turn_settled
+hard_child_observed
+hard_callback_fenced
+full_fixture_pass

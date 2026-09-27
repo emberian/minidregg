@@ -1,0 +1,9 @@
+040d9837824d99ac81350f035df00aabdc13c0704eebd52bff3b1e5d759f93ca  docs/evidence/2026-09-27-provider-egress/README.md
+791711c87e70fe0ad3a8e0a0079327aadfa8501611e3942a76a18a33bf46e462  docs/evidence/2026-09-27-provider-egress/native-8211/cleanup.txt
+a17dd81f5a1eab737fa28fbff336f3abfc36476432173c110020eb5fa518c851  docs/evidence/2026-09-27-provider-egress/native-8211/final-journal-projection.json
+a64fecb99a35e55c98d2d44288a904ae8994105b87529ee96c8043c211efb945  docs/evidence/2026-09-27-provider-egress/native-8211/hard-worker-unit.txt
+90619d96229e6234c06de63d3840add720c3860e19e3b4f6c9d698abcf0ba35f  docs/evidence/2026-09-27-provider-egress/native-8211/images.sha256
+50192986e171c151674563bc8bd01824f03cef6a13200334117deb290640cac8  docs/evidence/2026-09-27-provider-egress/native-8211/provider-stages.log
+9f3e5d6679acf89b10682e07c3fda32feed837d1761ac299b933b8b935000221  docs/evidence/2026-09-27-provider-egress/native-8211/run.log
+80cdc1e736bf00f982818370f911fdd292ba19dd41d13e41879d94bff2079590  docs/evidence/2026-09-27-provider-egress/native-8211/selected-native-receipts.json
+6cede45730983b7b83a8b55a38d1fbde0a5ac9190612bb5184868bbde3ba76b2  docs/evidence/2026-09-27-provider-egress/native-8211/signed-final-views.json

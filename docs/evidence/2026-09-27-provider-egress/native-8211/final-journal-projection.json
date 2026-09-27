@@ -1,0 +1,55 @@
+{
+  "connection": "fenced",
+  "pending": null,
+  "toolPending": null,
+  "providerPending": null,
+  "child": null,
+  "settlementDue": null,
+  "parentHold": {
+    "reserve": "3",
+    "charge": "1",
+    "beforeGeneration": "1",
+    "beforeTargetRoot": "40009889338463928478062875434540286352918259924026979798778247228937634638768",
+    "reserveAttempt": "/tmp/mini-provider-egress.HdVYET/fresh-8211/runtime-state/attempt-0000000000000094",
+    "reserveConfirmed": true,
+    "reserveRefused": false,
+    "reserveBoundary": "35643492061497474562505309363354874609415967648001937491180917479262346165349",
+    "reserveCallSha256": null,
+    "reserveOutcomePath": null,
+    "reserveOutcomeSha256": null,
+    "reserveAnchor": null
+  },
+  "toolHold": null,
+  "providerHold": null,
+  "providerAttempt": null,
+  "providerReplays": 0,
+  "publicationReceipts": [
+    {
+      "operationId": 60,
+      "promptOperationId": 11,
+      "targets": [
+        "8213"
+      ],
+      "acceptedCount": "19",
+      "imageBoundary": "46429931725376111673313138848595374172486492839732961140131955966554334795634",
+      "reported": false,
+      "sourceSha256": "67a63b119404ac400e09513d6cea23f043ae2143481d01afc468a15f94f9fdf4",
+      "callSha256": "b1bddf8756aa416ece3792b31e4ba761c723ed2bf1fae0c7c7d15a0fa4764715",
+      "outcomeSha256": "fe5242ac2ae4d201f05ce4d81f36d6bce91058c467c144b4d5db078611211993"
+    }
+  ],
+  "providerSettlement": {
+    "operationId": 80,
+    "charge": "3",
+    "receipt": {
+      "transactionId": "81393776744285793821454761637097448618141559241288935323018438852317630073347",
+      "eventId": "114015902046823792913991795446769515773246329213962682109228770091567371036750",
+      "acceptedCount": "23",
+      "imageBoundary": "66666854038269153043602889831722929885131029653972781308774474064998966151504"
+    },
+    "sourceSha256": "ae79f926b7edba63ad030a5387b5b3370661f646682ef142d4f1ca87fbfe1320",
+    "callSha256": "ba978b4dc2d3b39878448800697b213116ac20a7a946856b33ac7448a9174c89",
+    "outcomeSha256": "e7aaef10694da3f5ee8f6ff28344732b39ec6d2c0ecac5a26107ce22326b9cc4"
+  },
+  "unresolvedExternal": []
+}
