@@ -59,15 +59,32 @@ The broker bounds a client frame to 10 seconds, a host request write to 30
 seconds, and a host reply to 600 seconds. On a host pipe timeout it exits and
 reaps the child; the caller still treats the request as uncertain.
 
+Public `mini inspect` accepts the typed fn inbox summary and the source-owned
+`application-permission-schema` presentation. The schema route bounds both
+input and output to 1 MiB and requires Host's canonical bytes to equal the
+exact supplied schema binary before writing the requested result. Host owns
+the schema root, permission, role, and denial interpretation.
+
 Selected public release uses a distinct Lean-authored canonical ingress and
 the same native receiver, through Host operations 20 and 21:
 
 ```sh
+mini selected-release-sign --host SOURCE-HOST --config SOURCE-CONFIG.json \
+  --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
 mini selected-release-submit --host HOST --config CONFIG.json \
   --socket /private/path/mini-session/host.sock \
   --ingress INGRESS.bin --dir /private/path/attempt-1
 mini selected-release-lookup --attempt /private/path/attempt-1
 ```
+
+Signing first asks the source-owned Host to strictly decode and re-encode the
+bounded public release preimage. The client compares those bytes to the exact
+input, requires an owner-private regular key file, and signs only those bytes
+with its existing Ed25519 custody implementation. It writes a new private
+64-byte signature file; no release codec is implemented in Rust. This command
+uses direct Host validation and does not accept `--socket`.
+Canonical public-release validation does not establish current source
+publication authority; outbound publication has a separate admission gate.
 
 The attempt directory is created private (`0700`). It retains exact
 `ingress.bin`, config bytes, Host image and input digests, and a durable

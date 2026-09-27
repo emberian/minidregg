@@ -119,11 +119,12 @@ usage:
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
-  mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource --input VIEW.bin --output RESULT.json
+  mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
+  mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
   mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
@@ -279,6 +280,105 @@ fn read_secret(path: &Path) -> Result<SigningKey> {
         )
     })?;
     Ok(SigningKey::from_bytes(&seed))
+}
+
+#[cfg(unix)]
+fn selected_release_sign(
+    host: &Path,
+    config: &Path,
+    preimage: &Path,
+    key: &Path,
+    output: &Path,
+) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    if SOCKET.get().is_some() {
+        return Err("selected-release-sign requires direct source Host validation".into());
+    }
+    if output.exists() {
+        return Err(format!("refusing to replace {}", output.display()));
+    }
+    let mut bytes = Vec::new();
+    File::open(preimage)
+        .map_err(|e| format!("cannot open selected release preimage: {e}"))?
+        .take(1_520_481)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read selected release preimage: {e}"))?;
+    if bytes.is_empty() || bytes.len() > 1_520_480 {
+        return Err("selected release preimage exceeds bounded profile".into());
+    }
+    let named =
+        fs::symlink_metadata(key).map_err(|e| format!("cannot inspect owner signing key: {e}"))?;
+    let mut key_file =
+        File::open(key).map_err(|e| format!("cannot open owner signing key: {e}"))?;
+    let opened = key_file
+        .metadata()
+        .map_err(|e| format!("cannot inspect opened owner signing key: {e}"))?;
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    if !named.file_type().is_file()
+        || named.uid() != unsafe { geteuid() }
+        || named.mode() & 0o077 != 0
+        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
+    {
+        return Err("owner signing key must be an owner-private regular file".into());
+    }
+    let mut seed = [0u8; 32];
+    key_file
+        .read_exact(&mut seed)
+        .map_err(|e| format!("owner signing key must contain 32 bytes: {e}"))?;
+    let mut excess = [0u8; 1];
+    if key_file
+        .read(&mut excess)
+        .map_err(|e| format!("cannot finish owner signing key read: {e}"))?
+        != 0
+    {
+        return Err("owner signing key must contain exactly 32 bytes".into());
+    }
+    let signing = SigningKey::from_bytes(&seed);
+    seed.fill(0);
+    let parent = output
+        .parent()
+        .filter(|part| !part.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temporary = parent.join(format!(
+        ".mini-selected-release-check-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("clock before Unix epoch: {e}"))?
+            .as_nanos()
+    ));
+    let mut builder = fs::DirBuilder::new();
+    use std::os::unix::fs::DirBuilderExt;
+    builder.mode(0o700);
+    builder
+        .create(&temporary)
+        .map_err(|e| format!("cannot create private source check directory: {e}"))?;
+    let result = (|| {
+        let canonical_path = temporary.join("canonical.bin");
+        process(
+            host,
+            config,
+            &[
+                OsStr::new("selected-release-check-preimage"),
+                preimage.as_os_str(),
+                canonical_path.as_os_str(),
+            ],
+        )?;
+        let mut canonical = Vec::new();
+        File::open(&canonical_path)
+            .map_err(|e| format!("cannot open Host-checked preimage: {e}"))?
+            .take(1_520_481)
+            .read_to_end(&mut canonical)
+            .map_err(|e| format!("cannot read Host-checked preimage: {e}"))?;
+        if canonical != bytes {
+            return Err("Host-checked selected release preimage differs from exact input".into());
+        }
+        create_private(output, &signing.sign(&bytes).to_bytes())
+    })();
+    let _ = fs::remove_dir_all(&temporary);
+    result
 }
 
 fn keygen(secret: &Path, public: &Path) -> Result<()> {
@@ -561,10 +661,56 @@ fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, output: &Path) 
         .map_err(|error| format!("invalid host JSON {}: {error}", output.display()))
 }
 
-fn inspect_fn_inbox(host: &Path, config: &Path, input: &Path, output: &Path) -> Result<()> {
+fn validate_public_inspection(kind: &str, value: &Value, input: Option<&[u8]>) -> Result<()> {
+    match kind {
+        "fn-inbox-resource"
+            if value.get("type").and_then(Value::as_str)
+                == Some("fn-inbox-resource-summary-v1") =>
+        {
+            Ok(())
+        }
+        "application-permission-schema"
+            if value.get("type").and_then(Value::as_str)
+                == Some("minidregg-application-permission-schema-v1") =>
+        {
+            let canonical = value
+                .get("canonical")
+                .and_then(Value::as_str)
+                .ok_or("schema inspection lacks canonical bytes")?;
+            let decoded = decode_hex(canonical)?;
+            if hex(&decoded) != canonical || Some(decoded.as_slice()) != input {
+                return Err("schema inspection canonical bytes differ from exact input".into());
+            }
+            Ok(())
+        }
+        _ => Err("Host returned an unexpected public inspection type".into()),
+    }
+}
+
+fn inspect_public(
+    host: &Path,
+    config: &Path,
+    kind: &str,
+    input: &Path,
+    output: &Path,
+) -> Result<()> {
     if output.exists() {
         return Err(format!("refusing to replace {}", output.display()));
     }
+    let schema_input = if kind == "application-permission-schema" {
+        let mut bytes = Vec::new();
+        File::open(input)
+            .map_err(|e| format!("cannot open schema input: {e}"))?
+            .take(1_048_577)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("cannot read schema input: {e}"))?;
+        if bytes.is_empty() || bytes.len() > 1_048_576 {
+            return Err("schema input must be 1..=1048576 bytes".into());
+        }
+        Some(bytes)
+    } else {
+        None
+    };
     let parent = output
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -588,12 +734,34 @@ fn inspect_fn_inbox(host: &Path, config: &Path, input: &Path, output: &Path) -> 
         .map_err(|error| format!("cannot create private inspection directory: {error}"))?;
     let result = (|| {
         let temporary_output = temporary.join("result.json");
-        let summary = inspect(host, config, "fn-inbox-resource", input, &temporary_output)?;
-        if summary.get("type").and_then(Value::as_str) != Some("fn-inbox-resource-summary-v1") {
-            return Err("host returned an unexpected fn inbox summary type".to_owned());
+        process(
+            host,
+            config,
+            &[
+                OsStr::new("inspect"),
+                OsStr::new(kind),
+                input.as_os_str(),
+                temporary_output.as_os_str(),
+            ],
+        )?;
+        let mut bytes = Vec::new();
+        let mut file = File::open(&temporary_output)
+            .map_err(|error| format!("cannot open host inspection output: {error}"))?;
+        if schema_input.is_some() {
+            (&mut file)
+                .take(1_048_577)
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("cannot read schema inspection output: {error}"))?;
+            if bytes.len() > 1_048_576 {
+                return Err("schema inspection output exceeds 1 MiB".into());
+            }
+        } else {
+            file.read_to_end(&mut bytes)
+                .map_err(|error| format!("cannot read host inspection output: {error}"))?;
         }
-        let bytes = fs::read(&temporary_output)
-            .map_err(|error| format!("cannot read host inspection output: {error}"))?;
+        let summary: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid host inspection JSON: {error}"))?;
+        validate_public_inspection(kind, &summary, schema_input.as_deref())?;
         write_new(output, &bytes)?;
         print_json(&summary)
     })();
@@ -2012,10 +2180,11 @@ fn run(mut args: Args) -> Result<()> {
             let input = path(args.required("input")?);
             let output = path(args.required("output")?);
             args.finish()?;
-            if kind != OsStr::new("fn-inbox-resource") {
-                return Err("public inspect kind must be fn-inbox-resource".to_owned());
+            let kind = kind.to_str().ok_or("public inspect kind must be UTF-8")?;
+            if !matches!(kind, "fn-inbox-resource" | "application-permission-schema") {
+                return Err("public inspect kind is unavailable".to_owned());
             }
-            inspect_fn_inbox(&host, &config, &input, &output)
+            inspect_public(&host, &config, kind, &input, &output)
         }
         "submit" => {
             let host = path(args.required("host")?);
@@ -2104,6 +2273,16 @@ fn run(mut args: Args) -> Result<()> {
                 .get()
                 .ok_or("selected-release-submit requires --socket")?;
             selected_release::submit(&host, &config, socket, &ingress, &directory)
+        }
+        #[cfg(unix)]
+        "selected-release-sign" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let preimage = path(args.required("preimage")?);
+            let key = path(args.required("key")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            selected_release_sign(&host, &config, &preimage, &key, &output)
         }
         #[cfg(unix)]
         "selected-release-lookup" => {
@@ -2383,6 +2562,31 @@ mod tests {
     }
 
     #[test]
+    fn public_schema_inspection_requires_exact_canonical_input() {
+        let input = b"canonical schema bytes";
+        let valid = json!({"type":"minidregg-application-permission-schema-v1",
+            "version":"1","root":"7","canonical":hex(input),
+            "permissions":[],"roles":[],"denied":[]});
+        assert!(
+            validate_public_inspection("application-permission-schema", &valid, Some(input))
+                .is_ok()
+        );
+        assert!(validate_public_inspection(
+            "application-permission-schema",
+            &valid,
+            Some(b"changed")
+        )
+        .is_err());
+        let mut wrong = valid.clone();
+        wrong["canonical"] = json!("00");
+        assert!(
+            validate_public_inspection("application-permission-schema", &wrong, Some(input))
+                .is_err()
+        );
+        assert!(validate_public_inspection("fn-inbox-resource", &valid, None).is_err());
+    }
+
+    #[test]
     fn inspected_headers_are_signed_as_exact_bytes_in_order() {
         let challenge = json!({"headers": ["00ff10", "6d696e69"]});
         let headers = challenge_headers(&challenge).unwrap();
@@ -2433,6 +2637,54 @@ mod tests {
         fs::write(&source, b"replacement").unwrap();
         assert!(copy_new(&source, &public).is_err());
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_release_sign_requires_exact_host_checked_bytes_and_private_key() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = scratch("selected-release-sign");
+        let host = directory.join("host.sh");
+        let config = directory.join("config.json");
+        let preimage = directory.join("preimage.bin");
+        let key = directory.join("owner.key");
+        let signature = directory.join("owner.sig");
+        fs::write(&host, b"#!/bin/sh\ncp \"$3\" \"$4\"\n").unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&config, b"{}\n").unwrap();
+        fs::write(&preimage, b"exact host-authored preimage").unwrap();
+        fs::write(&key, [9u8; 32]).unwrap();
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(
+            selected_release_sign(&host, &config, &preimage, &key, &signature)
+                .unwrap_err()
+                .contains("owner-private")
+        );
+        assert!(!signature.exists());
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&host, b"#!/bin/sh\nprintf changed >\"$4\"\n").unwrap();
+        assert!(
+            selected_release_sign(&host, &config, &preimage, &key, &signature)
+                .unwrap_err()
+                .contains("differs from exact input")
+        );
+        assert!(!signature.exists());
+        fs::write(&host, b"#!/bin/sh\ncp \"$3\" \"$4\"\n").unwrap();
+        selected_release_sign(&host, &config, &preimage, &key, &signature).unwrap();
+        let bytes: [u8; 64] = fs::read(&signature).unwrap().try_into().unwrap();
+        let public = SigningKey::from_bytes(&[9; 32]).verifying_key();
+        public
+            .verify_strict(
+                b"exact host-authored preimage",
+                &ed25519_dalek::Signature::from_bytes(&bytes),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::metadata(&signature).unwrap().permissions().mode() & 0o077,
+            0
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
