@@ -38,8 +38,12 @@ Event 20 selects a consumer lineage explicitly. Unrelated historical tag-9
 records cannot claim or poison another namespace through copied scope fields.
 Fresh registration starts at zero; adopting legacy progress requires the exact
 authenticated receipt named by the signed registration. A transport ACK is not
-an initial authority witness. Gateway rotation requires a new registered
-namespace or a separate authorized migration, never a silent cursor reset.
+an initial authority witness. The current receiver and replay require a fixed
+operator gateway pin for the deployment. That pin is not encoded in runtime
+parameters today: changing it can invalidate historical replay even when a new
+namespace is selected. In-deployment rotation therefore remains unimplemented;
+it needs authenticated historical issuer provenance and an explicit migration
+rule. A new namespace alone does not implement rotation or justify a cursor reset.
 
 ## Native stdio operations
 
@@ -69,6 +73,8 @@ namespace or a separate authorized migration, never a silent cursor reset.
 | 41 | Consumer namespace registration receipt-only lookup (reserved) |
 | 42 | Consumer namespace registration signing plan (reserved private authoring; no commit) |
 | 43 | Consumer namespace registration detached signature assembly (reserved private authoring; no commit) |
+| 44 | Verified-current-image lifecycle completion signing plan (reserved private authoring; no commit) |
+| 45 | Lifecycle completion detached signature assembly (reserved private authoring; no commit) |
 
 Selected fn coverage must bind the configured local consumer scope, prior ACK,
 bounded first-match scan, exact projected article and an originally admitted

@@ -70,9 +70,9 @@ cp "$STAGE/scripts/workroom/provision.sh" "$EVIDENCE/positive-provision.sh"
 cp "$STAGE/scripts/grain-birth/native-share-member.sh" \
   "$EVIDENCE/positive-member.sh"
 jq -e '.tariffPerInitialPayloadByte == 1' \
-  "$EVIDENCE/base/workroom/operator.json" >/dev/null
+  "$EVIDENCE/workroom/operator.json" >/dev/null
 jq -e '.tariffPerInitialPayloadByte == "1"' \
-  "$EVIDENCE/base/workroom/genesis.json" >/dev/null
+  "$EVIDENCE/workroom/genesis.json" >/dev/null
 sha256sum -c "$EVIDENCE/positive-input-sha256.txt" \
   >"$EVIDENCE/positive-input-recheck.txt"
 sha256sum -c "$EVIDENCE/private-source-sha256.txt" \
