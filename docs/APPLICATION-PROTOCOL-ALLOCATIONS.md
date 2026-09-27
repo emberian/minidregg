@@ -21,6 +21,9 @@ reservation does not establish an implemented or accepted native path.
 | 20 | Consumer namespace registration | Reserved for a gateway-authorized durable namespace, gateway-independent uniqueness nullifier, and explicit authenticated initial anchor; not native-qualified |
 | 21 | Agent dispatch with a claimed reservation | Reserved for replayable dispatch binding the exact delegated purse reservation and consuming its one-use claim; not native-qualified |
 | 22 | Grain-backed application share issuance | Reserved for atomic ticket issuance with composite grain birth, current app delegation authority and grain settlement; distinct from bare event15 |
+| 23 | Source-bound launch BEGIN v3 | Reserved for signed package launch descriptor and per-grain volume/action binding; old event12 unchanged |
+| 24 | Source-bound launch claim v3 | Reserved for exact BEGIN/action claim and atomic first-create attempt marker; old event16 unchanged |
+| 25 | Source-bound launch completion v2 | Reserved for exact physical action/volume attestation and completed-create evidence; old event18 unchanged |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -96,6 +99,25 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 63 | Event19 historical progress receipt-only lookup (reserved operator-private) |
 | 64 | Verified-current-image fn progress signing plan, selected or empty variant (reserved operator-private authoring) |
 | 65 | Fn progress detached gateway-signature assembly (reserved operator-private authoring) |
+| 66 | Source-bound launch BEGIN signing plan (reserved operator-private authoring) |
+| 67 | Source-bound launch BEGIN detached signature assembly (reserved operator-private authoring) |
+| 68 | Source-bound launch claim signing plan (reserved operator-private authoring) |
+| 69 | Source-bound launch claim detached signature assembly (reserved operator-private authoring) |
+| 70 | Source-bound launch completion signing plan (reserved operator-private authoring) |
+| 71 | Source-bound launch completion detached signature assembly (reserved operator-private authoring) |
+
+Events23–25 and operations66–71 are reserved for the source-bound first-create
+and continued-launch contract. They are not implemented by this reservation.
+Submit/lookup pairs22/23,26/27,38/39 may accept the new ingress only through
+strict version dispatch preserving old canonical bytes and original replay.
+The reusable signed package descriptor commits creation actions and the
+continue command; per-grain volume identity belongs to the launch binding,
+not the package root. First-create claim consumes its one-use attempt marker;
+successful checked completion establishes exact completed-create evidence.
+An unresolved attempt does not authorize another create. Continuation requires
+verified creation lineage for the same grain volume plus current lifecycle
+authority. Rust maps the admitted volume/action to protected physical custody;
+an empty directory or operator flag cannot choose the semantic action.
 
 Operations60–65 are reserved for the fn integration continuation. They are not
 implemented or native-qualified by this allocation. The selected variant must
