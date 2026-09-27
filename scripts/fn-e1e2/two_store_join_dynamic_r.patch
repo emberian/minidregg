@@ -9,22 +9,27 @@
  GROUP = "fn.test"
  CONSUMER = "worker"  # Mini's bridge settles an ACK against consumer "worker".
  CUTS = ("none", "a-accepted", "b-verdict", "ack-response", "reply-at-b")
-@@ -214,6 +212,13 @@
+@@ -214,6 +212,11 @@
              'tls_cert = "{}"\ntls_key = "{}"\n[control]\npath = "{}"\n'
              '[auth]\nrequired = true\nprotected_only = true\npath = "{}"\n'.format(
                  store, port, cert, root / (name + "-key.pem"), control, root / "auth.toml"))
-+        # This isolated AgentGrain R is a 191 KiB authored source. The served
-+        # v2 POST route needs room for its hybrid carrier. The developer
-+        # Store's 65,535-group structural ceiling makes its article-record
-+        # bound >17 MiB when A rises to 256 KiB; H remains the 24 MiB default.
++        # An operator-selected, bounded article cap admits the signed carrier
++        # plus fn's served injection prefix. The default preserves prior runs.
 +        self.native_ok("operator", config, "store", "upgrade-profile",
-+                       "--max-article-octets", "262144",
++                       "--max-article-octets", str(self.state["max_article_octets"]),
 +                       "--max-record-octets", "18874368")
          self.native_ok("operator", config, "principal", "set-password", login, "--posting",
                         stdin=(password + "\n" + password + "\n").encode())
          listed = self.native_ok("operator", config, "principal", "list").stdout.decode()
-@@ -270,9 +275,10 @@
-         self.state = {"version": 1, "openssl_prefix": prefix, "cut": args.cut}
+@@ -267,12 +270,16 @@
+         prefix = args.openssl_prefix
+         if not Path(prefix, "bin", "openssl").is_file():
+             raise Outcome(REFUSED, "no OpenSSL at " + prefix)
+-        self.state = {"version": 1, "openssl_prefix": prefix, "cut": args.cut}
++        if args.max_article_octets not in (262144, 524288, 1048576):
++            raise Outcome(REFUSED, "max article octets must be an approved private fixture cap")
++        self.state = {"version": 1, "openssl_prefix": prefix, "cut": args.cut,
++                      "max_article_octets": args.max_article_octets}
          self.state.update(self.image_pair(args.image_dir, args.manifest))
          r_source = Path(args.r_source).read_bytes()
 -        if hashlib.sha256(r_source).hexdigest() != R_SOURCE_SHA256 or \
@@ -37,7 +42,7 @@
          port_a, port_b = self.free_ports(2)
          a = self.initialize("a", port_a, "b-at-a")
          b = self.initialize("b", port_b, "a-at-b")
-@@ -449,6 +455,45 @@
+@@ -449,6 +456,45 @@
                          if row == b".\r\n":
                              return status, bytes(body)
                          body.extend(row[1:] if row.startswith(b"..") else row)
@@ -83,7 +88,7 @@
  
      def article(self, node, message_id):
          status, body = self.nntp(node, b"ARTICLE " + message_id.encode())
-@@ -505,7 +550,7 @@
+@@ -505,7 +551,7 @@
  
      def message_id(self, token):
          if token == "R":
@@ -92,7 +97,7 @@
          if token == "Q":
              return self.state["q_message_id"]
          return token
-@@ -535,19 +580,20 @@
+@@ -535,19 +581,20 @@
  
      def cmd_author_r(self, args):
          a, r = self.node("a"), self.state["r"]
@@ -125,16 +130,17 @@
  
      def cmd_verify(self, args):
          node = self.node(args.node)
-@@ -708,6 +754,8 @@
+@@ -708,6 +755,9 @@
      p.add_argument("--manifest")
      p.add_argument("--openssl-prefix", required=True)
      p.add_argument("--r-source", required=True)
 +    p.add_argument("--r-message-id", required=True)
 +    p.add_argument("--r-source-sha256", required=True)
++    p.add_argument("--max-article-octets", type=int, default=262144)
      p.add_argument("--cut", default="none")
      p = sub.add_parser("start")
      p.add_argument("node", choices=("a", "b"))
-@@ -957,7 +1005,7 @@
+@@ -957,7 +1007,7 @@
          config["fnReplyPoll"] = {
              "originConfigPath": str(Path(self.args.origin_pin).resolve()),
              "rPinPath": str(L / "r-fn-pin.json"),
@@ -143,18 +149,19 @@
              "rCarrierPath": str(L / "r-at-a.eml"),
              "qPinPath": str(L / "q-fn-pin.json"),
              "scopePath": str(L / "a-scope-pin.json"),
-@@ -1055,7 +1103,9 @@
+@@ -1055,7 +1105,10 @@
  
          self.fn("provision", "provision", "--image-dir", a.image_dir,
                  "--openssl-prefix", a.openssl_prefix, "--cut", cut,
 -                "--r-source", self.scratch + "/harness/" + Path(a.r_source).name)
 +                "--r-source", self.scratch + "/harness/" + Path(a.r_source).name,
 +                "--r-message-id", a.r_message_id,
-+                "--r-source-sha256", a.r_source_sha256)
++                "--r-source-sha256", a.r_source_sha256,
++                "--max-article-octets", str(a.max_article_octets))
          # Cut a-accepted: A runs the developer image whose feed worker stops
          # (SIGSTOP) after the durable :feed-sent record and before the
          # article bytes reach B (FN_NATIVE_FEED_TEST_STOP_AFTER_SENT).
-@@ -1103,10 +1153,15 @@
+@@ -1103,10 +1156,15 @@
                                (b_root + "/b-preview.fncu", "b-preview.fncu"),
                                (b_root + "/b-preview.fn-e", "b-preview.fn-e")):
              self.scp_from("fetch-" + local, remote, self.out / local)
@@ -171,7 +178,7 @@
          r_pin = self.pin(self.bridge, r_keys)
          (self.out / "r-fn-pin.json").write_text(json.dumps(r_pin, sort_keys=True) + "\n")
          fields = self.project("mini-project-b-preview", self.out / "b-preview.fncu",
-@@ -1136,7 +1191,7 @@
+@@ -1136,7 +1194,7 @@
                        check=session_decision)
          else:
              self.mini("mini-b-poll-decide", [self.mini_bin, mini_b, "consumer-poll-decide",
@@ -180,7 +187,7 @@
                        a.mini_b_policy or a.policy, ready["b_control"], L / "b-live.fncu",
                        L / "b-live.fn-e", L / "b-live.eml", L / "intent.bin",
                        L / "decision.json"], check=fresh_decision)
-@@ -1292,7 +1347,7 @@
+@@ -1292,7 +1350,7 @@
                        "--dir", L / "a-poll-session"], check=a_session_decision)
          else:
              self.mini("mini-a-reply-decide", [self.mini_bin, mini_a, "reply-consumer-poll-decide",
@@ -189,7 +196,7 @@
                        L / "q-fn-pin.json", L / "a-scope-pin.json", L / "q-claim.json",
                        a.mini_a_policy or a.policy, ready["a_control"], L / "a-live.fncu",
                        L / "a-live.fn-e", L / "a-live.eml", L / "a-intent.bin",
-@@ -1397,8 +1452,9 @@
+@@ -1397,8 +1455,10 @@
          for field in ("pinned-config", "genesis", "birth-intent", "custody-key", "policy"):
              parser.add_argument("--mini-{}-{}".format(side, field))
      here = Path(__file__).resolve().parent.parent.parent
@@ -198,6 +205,7 @@
 +    parser.add_argument("--r-source", required=True)
 +    parser.add_argument("--r-message-id", required=True)
 +    parser.add_argument("--r-source-sha256", required=True)
++    parser.add_argument("--max-article-octets", type=int, default=262144)
      args = parser.parse_args(argv)
      if args.public_b_session and args.cut != "none":
          parser.error("public B session currently supports --cut none only")

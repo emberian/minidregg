@@ -383,3 +383,17 @@ at Mini's current 196,608-byte fn poll-event reader bound for the observed
 391,022-byte Store report. See
 `docs/evidence/2026-09-26-fresh-fn/public-grain-r-bbf/README.md` for exact
 qualification and retained artifacts. It does not claim B Mini consumption.
+
+The private fn harness adaptation accepts `FN_MAX_ARTICLE_OCTETS` when
+`run-grain-r.sh` provisions new fn Stores. Its default remains 262144 for the
+historical recipe; the only accepted values are 262144, 524288 and 1048576.
+The selected value is passed to the fn `operator store upgrade-profile`
+command before either Store starts. It does not alter an existing Store.
+Before posting a signed carrier, run
+`scripts/fn-e1e2/check-signed-carrier-cap.sh CARRIER FN_MAX_ARTICLE_OCTETS`.
+That read-only check requires strict CRLF framing and budgets both the
+qualified recipe-v2 75-byte `Path`/`Injection-Info` prefix and POST
+dot-stuffing. For the dedicated-account A reconcile source, the sizing carrier
+is 706101 bytes; its served article is 706176 bytes and fits the explicitly
+selected 1048576-byte private article cap. This is a size preflight, not a
+POST or Mini acceptance claim.

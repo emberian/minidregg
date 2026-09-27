@@ -23,6 +23,11 @@ FN_HARNESS=${FN_HARNESS:-"$REPO/../fn/tools/runbooks/two_store_join.py"}
 EXPECTED_HARNESS_SHA256=c88160cf459d3959928f6ae913f455ed9ff49971b89619518ab7b49c884c99e6
 EXPECTED_MINI_SHA256=${MINI_SHA256:?set MINI_SHA256 to the exact linked native Host hash}
 EXPECTED_CLIENT_SHA256=${MINI_CLIENT_SHA256:-d6edadd46960dd055dc1d8e88b05ccbcf2ca0363c424c5a05f8747716c32fc8e}
+FN_MAX_ARTICLE_OCTETS=${FN_MAX_ARTICLE_OCTETS:-262144}
+case "$FN_MAX_ARTICLE_OCTETS" in
+  262144|524288|1048576) ;;
+  *) echo "unsupported private fn article cap: $FN_MAX_ARTICLE_OCTETS" >&2; exit 2 ;;
+esac
 COPY_DIR=$LOCAL_OUT.harness
 
 for input in "$FN_HARNESS" "$MINI_HOST" "$MINI_CLIENT" "$R_SOURCE" "$ORIGIN_PIN" \
@@ -93,7 +98,8 @@ python3 "$COPY_DIR/two_store_join.py" run \
   --mini-client "$MINI_CLIENT" --scratch "$FN_SCRATCH" \
   --local-out "$LOCAL_OUT" --cut none \
   --r-source "$R_SOURCE" --r-message-id "$R_MESSAGE_ID" \
-  --r-source-sha256 "$R_SOURCE_SHA256" --origin-pin "$ORIGIN_PIN" \
+  --r-source-sha256 "$R_SOURCE_SHA256" \
+  --max-article-octets "$FN_MAX_ARTICLE_OCTETS" --origin-pin "$ORIGIN_PIN" \
   --mini-b-pinned-config "$MINI_B/gateway-config.json" \
   --mini-b-genesis "$MINI_B/deployment/genesis.bin" \
   --mini-b-birth-intent "$MINI_B/birth-intent.json" \
