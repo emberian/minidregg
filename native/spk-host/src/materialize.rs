@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::sandbox::open_protected_directory;
+use minidregg_spk_rpc::{decode_bridge_config, BridgeConfig};
+use serde_json::{json, Value};
 
 const MAX_SPK_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_FILES: usize = 100_000;
@@ -256,6 +258,46 @@ fn verified_identity(raw: &[u8], directory: PathBuf) -> io::Result<(Spk, Install
             manifest,
         },
     ))
+}
+
+/// Parse one signed SPK without publishing an image. The caller must run this
+/// decoder inside a bounded offline service: Bread's XZ block allocation is
+/// not bounded by the final archive size. A later INSTALL must materialize the
+/// same raw SHA-256 and compare its retained signed members again.
+pub fn qualify_bridge_spk(package: &Path) -> io::Result<(InstalledPackage, BridgeConfig)> {
+    let raw = bounded_spk(package)?;
+    let (_, verified) = verified_identity(&raw, PathBuf::new())?;
+    let member = verified
+        .signed_bridge_config
+        .as_deref()
+        .ok_or_else(|| invalid("bridge-only SPK lacks signed config"))?;
+    let bridge = decode_bridge_config(member).map_err(invalid)?;
+    if bridge.save_identity_caps
+        || bridge.expect_app_hooks
+        || !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/"))
+    {
+        return Err(invalid(
+            "signed bridge requires unsupported physical profile",
+        ));
+    }
+    Ok((verified, bridge))
+}
+
+/// Exact signed bridge role source consumed by Mini's schema author. This
+/// describes verified package metadata; only Mini derives the canonical
+/// schema and descriptor roots and admits a lifecycle operation.
+pub fn signed_schema_source(bridge: &BridgeConfig, signed_app_version: u32) -> Value {
+    json!({
+        "type":"minidregg-application-permission-schema-source-v1",
+        "version":signed_app_version.to_string(),
+        "permissions":bridge.view_info.permissions.iter().map(|permission| {
+            json!({"name":permission.name,"obsolete":permission.obsolete})
+        }).collect::<Vec<_>>(),
+        "roles":bridge.view_info.roles.iter().map(|role| {
+            json!({"permissions":role.permissions,"obsolete":role.obsolete,"default":role.default})
+        }).collect::<Vec<_>>(),
+        "denied":bridge.view_info.denied_permissions,
+    })
 }
 
 /// Install a package only after Bread's real SPK signature, archive hash, and

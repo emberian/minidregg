@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Parse a signed bridge SPK under a bounded offline systemd unit; publish no image.
+set -euo pipefail
+umask 077
+
+(( $# == 3 )) || { echo 'usage: spk-qualify HOST_BINARY HOST_SHA256 INBOX_SPK' >&2; exit 2; }
+host_binary=$1 expected_host_sha=$2 package=$3
+[[ $expected_host_sha =~ ^[0-9a-f]{64}$ ]] || exit 2
+(( EUID == 0 )) || { echo 'spk-qualify requires root' >&2; exit 1; }
+base=/var/lib/minidregg/spk
+inbox=$base/inbox
+qualifications=$base/qualifications
+safe_dir() {
+  local path=$1 mode=$2 actual
+  if [[ ! -e $path && ! -L $path ]]; then
+    install -d -o root -g root -m "$mode" -- "$path"
+  fi
+  [[ -d $path && ! -L $path && $(stat -c '%u' -- "$path") == 0 ]] || {
+    echo "unsafe qualification directory $path" >&2; exit 1;
+  }
+  actual=$(stat -c '%a' -- "$path")
+  [[ $actual == "$mode" ]] || { echo "qualification mode drift $path: $actual" >&2; exit 1; }
+}
+safe_dir /var 755
+safe_dir /var/lib 755
+safe_dir /var/lib/minidregg 755
+safe_dir "$base" 755
+safe_dir "$inbox" 700
+safe_dir "$qualifications" 700
+lock=$base/.ingest.lock
+[[ ! -L $lock ]] || { echo 'unsafe qualification lock' >&2; exit 1; }
+exec 9>>"$lock"
+[[ $(stat -c '%u:%a' -- "$lock") == 0:600 ]] || {
+  echo 'qualification lock owner/mode drift' >&2; exit 1;
+}
+flock -n 9 || { echo 'another SPK ingest/qualification is active' >&2; exit 1; }
+[[ $package == "$inbox"/* && $(dirname -- "$package") == "$inbox" &&
+   $package != */../* && $package != */./* && -f $package && ! -L $package ]] || {
+  echo 'SPK must be a regular file directly under root-private inbox' >&2; exit 1;
+}
+[[ $(stat -c '%u:%a' -- "$package") == 0:600 ]] || {
+  echo 'SPK inbox file owner/mode drift' >&2; exit 1;
+}
+(( $(stat -c '%s' -- "$package") <= 268435456 )) || {
+  echo 'SPK exceeds input cap' >&2; exit 1;
+}
+input_sha=$(sha256sum -- "$package")
+input_sha=${input_sha%% *}
+output=$qualifications/sha256-$input_sha.json
+[[ ! -e $output && ! -L $output ]] || { echo 'qualification already exists' >&2; exit 1; }
+[[ $host_binary == /* && -f $host_binary && ! -L $host_binary && -x $host_binary ]] || {
+  echo 'host binary must be an absolute regular executable' >&2; exit 1;
+}
+part=/
+IFS=/ read -ra segments <<< "${host_binary#/}"
+for segment in "${segments[@]}"; do
+  [[ -n $segment && $segment != . && $segment != .. ]] || {
+    echo 'invalid Host path' >&2; exit 1;
+  }
+  part=${part%/}/$segment
+  [[ ! -L $part && $(stat -c '%u' -- "$part") == 0 ]] || {
+    echo "Host path is symlinked or non-root-owned: $part" >&2; exit 1;
+  }
+  mode=$(stat -c '%a' -- "$part")
+  (( (8#$mode & 8#022) == 0 )) || { echo "writable Host path: $part" >&2; exit 1; }
+done
+actual_host_sha=$(sha256sum -- "$host_binary")
+[[ ${actual_host_sha%% *} == "$expected_host_sha" ]] || { echo 'Host SHA mismatch' >&2; exit 1; }
+unit=mini-spk-qualify-$(date -u +%Y%m%d%H%M%S)-$$
+stdout_log=$(mktemp "$base/.qualify-stdout.XXXXXXXX")
+stderr_log=$(mktemp "$base/.qualify-stderr.XXXXXXXX")
+cleanup_unit() {
+  systemctl stop -- "$unit" >/dev/null 2>&1 || true
+  rm -f -- "$stdout_log" "$stderr_log"
+}
+trap cleanup_unit EXIT
+run_rc=0
+timeout --kill-after=5s 150s systemd-run --unit="$unit" --wait --pipe --collect \
+  -p Type=exec -p User=root -p NoNewPrivileges=yes \
+  -p PrivateNetwork=yes -p PrivateTmp=yes -p ProtectSystem=strict \
+  -p MemoryMax=1G -p CPUQuota=100% -p TasksMax=16 \
+  -p RuntimeMaxSec=120 -p LimitFSIZE=1048576 -p KillMode=control-group \
+  -- "$host_binary" qualify "$package" >"$stdout_log" 2>"$stderr_log" || run_rc=$?
+if [[ $run_rc != 0 ]] ||
+  ! grep -Eq "^Running as unit: ${unit}[.]service(; invocation ID: [0-9a-f]{32})?$" "$stderr_log" ||
+  ! grep -Fxq 'Finished with result: success' "$stderr_log" ||
+  ! grep -Fxq 'Main processes terminated with: code=exited, status=0/SUCCESS' "$stderr_log"; then
+  cat -- "$stderr_log" >&2
+  echo 'SPK qualification unit did not finish successfully' >&2
+  exit 1
+fi
+[[ $(sha256sum -- "$package" | cut -c1-64) == "$input_sha" ]] || {
+  echo 'SPK inbox bytes changed during qualification' >&2; exit 1;
+}
+[[ $(wc -l < "$stdout_log") == 1 ]] || { echo 'qualification output shape refused' >&2; exit 1; }
+jq -e --arg sha "$input_sha" '
+  .protocol == "mini-spk-bridge-qualification-v1" and .rawSha256 == $sha and
+  (.rawLength | test("^[1-9][0-9]*$")) and
+  (.signedAppId | test("^[0-9a-z]{52}$")) and
+  (.manifestSha256 | test("^[0-9a-f]{64}$")) and
+  (.bridgeConfigSha256 | test("^[0-9a-f]{64}$")) and
+  (.signedBridgeConfigHex | test("^([0-9a-f]{2})+$")) and
+  (.bridgeApiPath == "" or .bridgeApiPath == "/repo.git/")
+' "$stdout_log" >/dev/null || { echo 'qualification JSON refused' >&2; exit 1; }
+install -o root -g root -m 0600 -- "$stdout_log" "$output"
+[[ $(stat -c '%u:%a' -- "$output") == 0:600 ]] || {
+  echo 'qualification output owner/mode drift' >&2; exit 1;
+}
+echo "qualification_verified unit=$unit spkSha256=$input_sha output=$output"

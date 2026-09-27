@@ -5,9 +5,9 @@
 //! and a structurally decodable frame cannot arm the physical journal.
 #![allow(dead_code)] // Resident CLI is staged separately from the native link.
 
-use crate::claim_descriptor::{compare_claim, schema_source_json, MatchedPackage};
+use crate::claim_descriptor::{compare_claim, MatchedPackage};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
-use crate::materialize::InstalledPackage;
+use crate::materialize::{signed_schema_source, InstalledPackage};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::{DirBuilder, File, OpenOptions};
@@ -124,7 +124,7 @@ pub(crate) fn match_signed_package(
         .as_deref()
         .ok_or_else(|| invalid("bridge-only SPK lacks signed config"))?;
     let bridge = minidregg_spk_rpc::decode_bridge_config(signed).map_err(io::Error::other)?;
-    let source = schema_source_json(&bridge, package.manifest.app_version);
+    let source = signed_schema_source(&bridge, package.manifest.app_version);
     let source_path = write_new(
         attempt_dir,
         "schema-source.json",

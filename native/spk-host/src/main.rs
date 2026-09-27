@@ -1,6 +1,9 @@
 #[cfg(target_os = "linux")]
 fn main() {
-    use minidregg_spk_host::materialize::materialize_spk;
+    use minidregg_spk_host::materialize::{
+        materialize_spk, qualify_bridge_spk, signed_schema_source,
+    };
+    use serde_json::json;
     use std::path::Path;
 
     fn hex(bytes: [u8; 32]) -> String {
@@ -12,6 +15,37 @@ fn main() {
     }
 
     let args: Vec<_> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "qualify" {
+        match qualify_bridge_spk(Path::new(&args[2])) {
+            Ok((package, bridge)) => {
+                let bridge_sha = package
+                    .signed_bridge_config_sha256
+                    .expect("qualified bridge has signed member");
+                let member = package
+                    .signed_bridge_config
+                    .expect("qualified bridge has signed member");
+                let json = json!({
+                    "protocol":"mini-spk-bridge-qualification-v1",
+                    "rawSha256":package.raw_sha256,
+                    "rawLength":package.raw_length.to_string(),
+                    "signedAppId":package.manifest.app_id.0,
+                    "signedAppVersion":package.manifest.app_version.to_string(),
+                    "manifestSha256":hex(package.signed_manifest_sha256),
+                    "bridgeConfigSha256":hex(bridge_sha),
+                    "signedBridgeConfigHex":member.iter().map(|byte| format!("{byte:02x}"))
+                        .collect::<String>(),
+                    "bridgeApiPath":bridge.api_path.clone().unwrap_or_default(),
+                    "signedSchema":signed_schema_source(&bridge, package.manifest.app_version),
+                });
+                println!("{json}");
+            }
+            Err(error) => {
+                eprintln!("spk-host: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.len() == 5 && args[1] == "materialize" {
         let uid: u32 = match args[4].parse() {
             Ok(uid) => uid,
@@ -40,7 +74,9 @@ fn main() {
         }
         return;
     }
-    eprintln!("usage: spk-host materialize VERIFIED_SPK OPERATOR_STORE APP_UID");
+    eprintln!(
+        "usage: spk-host qualify VERIFIED_SPK | materialize VERIFIED_SPK OPERATOR_STORE APP_UID"
+    );
     eprintln!("spk-host: application launch is unavailable until Mini admission is installed");
     std::process::exit(2);
 }

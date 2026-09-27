@@ -33,6 +33,8 @@ pub mod materialize;
 #[cfg(target_os = "linux")]
 mod native_dispatch;
 #[cfg(target_os = "linux")]
+mod resident_begin_native;
+#[cfg(target_os = "linux")]
 mod resident_launch;
 #[cfg(target_os = "linux")]
 pub mod resident_service;

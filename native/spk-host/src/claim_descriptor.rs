@@ -4,7 +4,7 @@
 #![allow(dead_code)] // Resident lifecycle-v2 route is not linked yet.
 
 use crate::hostd::VerifiedBegin;
-use crate::materialize::InstalledPackage;
+use crate::materialize::{signed_schema_source, InstalledPackage};
 use minidregg_spk_rpc::{decode_bridge_config, BridgeConfig};
 use serde_json::{json, Value};
 use std::io;
@@ -34,23 +34,6 @@ fn canonical_decimal(value: &str) -> bool {
         && value.len() <= 128
         && (value == "0" || !value.starts_with('0'))
         && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-/// Exact role-relevant projection of signed BridgeConfig ViewInfo. Mini's
-/// source `application-permission-schema` author route owns canonical bytes
-/// and the schema root; Rust only supplies the decoded signed fields.
-pub(crate) fn schema_source_json(bridge: &BridgeConfig, signed_app_version: u32) -> Value {
-    json!({
-        "type":"minidregg-application-permission-schema-source-v1",
-        "version":signed_app_version.to_string(),
-        "permissions":bridge.view_info.permissions.iter().map(|permission| {
-            json!({"name":permission.name,"obsolete":permission.obsolete})
-        }).collect::<Vec<_>>(),
-        "roles":bridge.view_info.roles.iter().map(|role| {
-            json!({"permissions":role.permissions,"obsolete":role.obsolete,"default":role.default})
-        }).collect::<Vec<_>>(),
-        "denied":bridge.view_info.denied_permissions,
-    })
 }
 
 pub(crate) struct MatchedPackage {
@@ -117,7 +100,7 @@ fn verified_start_identity(inspected: &Value, raw_sha256: &[u8; 32]) -> io::Resu
 }
 
 /// `schema_inspection` must come from the pinned Host's strict inspection of
-/// bytes it just source-authored from `schema_source_json`. Comparing its
+/// bytes it just source-authored from `signed_schema_source`. Comparing its
 /// canonical echo and role fields to the signed bridge closes the physical
 /// schema join without reimplementing Mini's cSHAKE/codec in Rust.
 pub(crate) fn compare_claim(
@@ -183,7 +166,7 @@ pub(crate) fn compare_claim(
     }
 
     let source_schema: Value = serde_json::from_slice(schema_inspection)?;
-    let signed_schema = schema_source_json(&bridge, package.manifest.app_version);
+    let signed_schema = signed_schema_source(&bridge, package.manifest.app_version);
     if text(&source_schema, "type")? != "minidregg-application-permission-schema-v1"
         || text(&source_schema, "canonical")? != hex(schema_bytes)
         || source_schema.get("version") != Some(&json!(package.manifest.app_version.to_string()))
@@ -237,7 +220,7 @@ mod tests {
     #[test]
     fn signed_gitweb_bridge_projects_exact_ordered_schema_and_api_path() {
         let bridge = decode_bridge_config(GITWEB).unwrap();
-        let projected = schema_source_json(&bridge, 10);
+        let projected = signed_schema_source(&bridge, 10);
         assert_eq!(projected["version"], "10");
         assert_eq!(
             projected["permissions"],
