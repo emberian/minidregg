@@ -1,0 +1,4 @@
+warning: mathlib: repository '/private/tmp/mini-image-boundary-check-20260927/.lake/packages/mathlib' has local changes
+warning: batteries: repository '/private/tmp/mini-image-boundary-check-20260927/.lake/packages/batteries' has local changes
+'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_encode' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_loaded' depends on axioms: [propext, Classical.choice, Quot.sound]

@@ -107,6 +107,32 @@ def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
 def imageBoundary (config : Config) (image : DurableReceiver.Image) : Digest :=
   NativeHostCodec.imageBoundary config.deployment.domain config.profile.semantics image
 
+/-- The same source-owned image commitment from bytes already certified as the
+canonical encoding of a durable image. This saves a second whole-image encode
+at a receiving step; it does not skip or replace the full boundary hash. -/
+def imageBoundaryCanonical (config : Config) (canonicalBytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
+    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
+      (config.deployment.domain, config.profile.semantics, canonicalBytes))).digest
+
+theorem imageBoundaryCanonical_encode (config : Config) (image : DurableReceiver.Image) :
+    imageBoundaryCanonical config (DurableReceiverCodec.encode image) =
+      imageBoundary config image := by
+  rfl
+
+/-- `Loaded.canonical` is minted by strict durable decoding or checked advance;
+the physical caller cannot supply unrelated bytes to this optimization. -/
+theorem imageBoundaryCanonical_loaded (config : Config) (durable : Durable) :
+    imageBoundaryCanonical config durable.bytes = imageBoundary config durable.image := by
+  calc
+    imageBoundaryCanonical config durable.bytes =
+        imageBoundaryCanonical config (DurableReceiverCodec.encode durable.image) :=
+      congrArg (imageBoundaryCanonical config) durable.canonical.symm
+    _ = imageBoundary config durable.image := imageBoundaryCanonical_encode config durable.image
+
+#print axioms imageBoundaryCanonical_encode
+#print axioms imageBoundaryCanonical_loaded
+
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length
 
