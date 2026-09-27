@@ -3,6 +3,69 @@ use super::*;
 
 #[cfg(target_os = "linux")]
 #[test]
+fn agent_route_participant_is_parent_subject_not_purse_payer() {
+    let root = std::env::temp_dir().join(format!(
+        "mini-agent-subject-split-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let state = root.join("state");
+    fs::create_dir_all(&state).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o711)).unwrap();
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+    let operator_socket = state.join("operator.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&operator_socket).unwrap();
+    fs::set_permissions(&operator_socket, fs::Permissions::from_mode(0o600)).unwrap();
+    let host = root.join("host");
+    fs::write(&host, b"source-pinned host fixture").unwrap();
+    let host_sha = sha256_file(&host).unwrap();
+    let host_uid = unsafe { libc::geteuid() } + 1;
+    let route = json!({
+        "name":"gitweb-app","socketPath":root.join("agent.sock"),
+        "hostUid":host_uid,"hostUnit":"mini-spk-a8401-g1.service",
+        "appResource":"8401","appGeneration":"1",
+        "sessionResource":"8420","sessionGeneration":"1",
+        "ticketResource":"8520","participantSubject":"10",
+        "parentTask":"7920","parentGeneration":"1",
+        "purseResource":"7940","dispatchGeneration":"1",
+        "signedApiPath":"/repo.git/",
+        "dispatchSelectors":{"issueIndex":"9","packageManifest":"8402",
+            "snapshotManifest":"8403","sessionObserve":"101",
+            "manifestObserve":"102","enrollmentObserve":"103"}
+    });
+    let mut value = json!({
+        "mini":root.join("mini"),"host":host,
+        "hostConfig":root.join("host.json"),"hostSocket":root.join("public.sock"),
+        "controlSocket":state.join("control.sock"),"custodyKey":root.join("parent.key"),
+        "stateDir":state,"cwd":root.clone(),"task":"7920","subject":"10",
+        "capability":"71","queryCapability":"72","policyControlCapability":"73",
+        "dispatchTask":{"task":"7940","subject":"12","capability":"81",
+            "queryCapability":"82","custodyKey":root.join("purse.key"),
+            "parentCapability":"83","parentObserveCapability":"84",
+            "reserve":"5","charge":"0","socketPath":root.join("dispatch.sock"),
+            "hostUid":host_uid,"operatorSocket":operator_socket,
+            "reserveSigner":{"role":"1","index":"0","publicKey":"a".repeat(64),
+                "keyId":"1200","keyEpoch":"1"}},
+        "toolTask":{"task":"7930","subject":"11","capability":"91",
+            "queryCapability":"92","custodyKey":root.join("tool.key"),
+            "parentCapability":"93","parentObserveCapability":"94",
+            "reserve":"3","charge":"1","allowedPublications":[],
+            "allowedApplicationApiRoutes":[route],"agentApiHostSha256":host_sha},
+        "commands":[]
+    });
+    let config: Config = serde_json::from_value(value.clone()).unwrap();
+    validate(&config).unwrap();
+    value["toolTask"]["allowedApplicationApiRoutes"][0]["participantSubject"] = json!("12");
+    let wrong_participant: Config = serde_json::from_value(value).unwrap();
+    assert!(validate(&wrong_participant).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn confirmed_v2_reserve_recovers_missing_signed_purse_coordinate_after_crash() {
     let root = std::env::temp_dir().join(format!(
         "mini-v2-reserve-crash-{}-{}",

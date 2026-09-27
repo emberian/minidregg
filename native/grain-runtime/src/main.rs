@@ -1953,7 +1953,7 @@ fn validate(c: &Config) -> Result<()> {
                 &t.allowed_application_api_routes,
                 &c.task,
                 &dispatch.task,
-                &dispatch.subject,
+                &c.subject,
                 dispatch.host_uid,
             )?;
             let expected = t

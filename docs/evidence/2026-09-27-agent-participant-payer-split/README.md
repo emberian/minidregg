@@ -1,0 +1,7 @@
+# Agent API participant and payer: Rust configuration gate
+
+The hosted API session/ticket participant and the dispatch purse payer are different enrolled subjects. The existing controller config validated `RoutePin.participantSubject` against `dispatchTask.subject`, incorrectly equating the two. The [two-file source cut](source-sha256.txt) now compares the route participant with the controller parent `Config.subject`. Reverse reserve construction and the source-plan checks still bind the separate purse payer to `dispatchTask.subject`.
+
+The new Linux configuration-level test constructs a valid route for parent/controller subject **10**, tool subject **11**, and purse payer **12**, with a private operator socket and pinned Host image. Full `validate(&Config)` accepts participant 10. Changing only the route participant to 12 is refused. The [bounded hbox nextest log](nextest-linux.log) records **1/1 passed** under a separate 4 GiB/one-CPU user unit with two Cargo jobs. [Darwin strict Clippy](clippy-darwin.log) and `cargo fmt --check` passed.
+
+Two earlier focused Linux attempts did not test this predicate: the first private source copy lacked the separately frozen event22 lookup selector; the second test fixture gave its operator socket a nonprivate default mode. The final copy included the exact event22 source and set that socket to `0600`. No native Host, Store, SPK, model, or paid API call was run. The fresh two-agent fixture allocation and current source permit still require separate native qualification.

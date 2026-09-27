@@ -1,0 +1,8 @@
+   Compiling minidregg-grain-runtime v0.1.0 (/tank/dregg-build/minidregg-api-controller-v2-test)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.77s
+────────────
+ Nextest run ID c915455f-9016-414e-8bcd-c0f38b73635e with nextest profile: default
+    Starting 1 test across 2 binaries (116 tests skipped)
+        PASS [   0.048s] (1/1) minidregg-grain-runtime::bin/grain-runtime dispatch_runtime_tests::agent_route_participant_is_parent_subject_not_purse_payer
+────────────
+     Summary [   0.054s] 1 test run: 1 passed, 116 skipped
