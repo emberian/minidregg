@@ -8,13 +8,19 @@ fn main() {
     use std::path::Path;
 
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 || (args[1] != "serve-status" && args[1] != "serve-http-unavailable") {
-        eprintln!("usage: spk-hostd serve-status|serve-http-unavailable ABS_OWNER_PRIVATE_DIR");
+    if (args.len() != 3 || (args[1] != "serve-status" && args[1] != "serve-http-unavailable"))
+        && (args.len() != 8 || args[1] != "init-custodian")
+    {
+        eprintln!("usage: spk-hostd serve-status|serve-http-unavailable ABS_OWNER_PRIVATE_DIR | init-custodian ABS_NEW_PRIVATE_DIR HTTPS_HOST APP SUBJECT SESSION TICKET");
         std::process::exit(2);
     }
     let directory = Path::new(&args[2]);
     let outcome = (|| {
-        if args[1] == "serve-status" {
+        if args[1] == "init-custodian" {
+            minidregg_spk_host::http_entrance::initialize_custodian(
+                directory, &args[3], &args[4], &args[5], &args[6], &args[7],
+            )
+        } else if args[1] == "serve-status" {
             let journal = Journal::open(directory)?;
             let endpoint = PrivateEndpoint::bind(directory, &journal)?;
             endpoint.serve(&journal)

@@ -1,0 +1,39 @@
+Persvati private source: /tmp/minidregg-gitweb-smoke-20260927/source/native/spk-host
+Cargo.toml SHA256 ebb319b97c5ef5545d93fab959665125a136ee3cb57e6763f2d4c678cb54c1e2
+Cargo.lock SHA256 c3d426d284e0b535b28826ce246a3d4e812a14615e6cfaf6f9e2ed29cf6eb9ed
+http_entrance.rs SHA256 50f4d90666348434e2830058e1d99deba6abb333ffb748ed1fe93fb8eee59b48
+spk-hostd.rs SHA256 bd5e43fe7ac118f70965bdade67e76b25a71cc98bf24a27461554be72159f4b0
+spk-browser-proxy.rs SHA256 22254284d28dde66a4de12f782e4b94507b8dad3b46a040fbdf72d61b896a2c4
+
+Focused final command: CARGO_BUILD_JOBS=2 cargo nextest run --locked --lib -E 'test(http_entrance)'
+Nextest run ID 61eb57f7-dd7a-4519-ab90-b5192c2f5254
+Summary: 8 tests run, 8 passed, 22 skipped
+Included: one-time private bootstrap, direct browser navigation, same-origin browser write,
+API bearer separation, exact stale-socket rebind/live-second-instance refusal,
+owner-private Unix listener, 503 app path, absolute incomplete-frame deadline.
+Final command: CARGO_BUILD_JOBS=2 cargo clippy --locked --all-targets -- -D warnings
+Result: PASS, exit 0.
+rustfmt --check on the three owned Rust files: PASS, exit 0.
+Final source-matched release build: spk-hostd SHA256 df7a054590cf04ee6c129290bef7daa41bb3aa1be476cb7e007ef6f6202f31c2;
+spk-browser-proxy SHA256 11dbb7ada4a4469aec2fd10384041192ac3fc698691dacdc0a5465434089c4a9.
+The one-time POST physical test below ran pre-rustfmt binaries; formatting
+made no semantic change. The final source-matched binary pair was then
+restarted on the already-consumed private custodian: HTTPS form GET 200,
+cookie-authenticated GitWeb GET 503. No second bootstrap POST was issued.
+
+Physical private test units:
+mini-spk-browser-http-probe-20260927.service InvocationID 3dfa89412ac342529698a53044144bb6
+mini-spk-browser-tls-probe-20260927.service InvocationID e8cd1856c5524d5a912306620668f507
+mini-spk-browser-http-restart-probe-20260927.service InvocationID 8d76b71bcc314ac2b9200a6cb9b2c70d
+mini-spk-browser-http-final-20260927.service InvocationID ac877cb7cfa84096b8c9ebc284db5337
+mini-spk-browser-tls-final-20260927.service InvocationID 5acf262ecd704f3caef9780c4644613b
+All stopped: ActiveState=inactive, MainPID=0, empty ControlGroup.
+Private TLS listener: 127.0.0.1:18443 during test; none after stop.
+Bootstrap form GET: HTTP 200, 290 bytes.
+Bootstrap form POST: HTTP 303, Location /, cookie attributes verified, durable marker present.
+Repeated POST: refused. Exact new source returns generic 403; original physical first binary closed the connection.
+Cookie-authenticated direct GitWeb GET: HTTP 503 (no native dispatch).
+Laptop SSH loopback forward + TLS form GET: HTTP 200 at 127.0.0.1.
+First SIGTERM left owned stale socket; revised binary started over it and returned form HTTP 200.
+Test certificate SHA256 ccd1859b12ed15ffcc8aad18079d0c0a0255b9430ac14afe4b69d0a575df37e2.
+No tokens, cookie values, private response headers, Store pages or SPK execution in this log.
