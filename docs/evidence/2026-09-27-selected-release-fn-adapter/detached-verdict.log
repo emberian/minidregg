@@ -1,0 +1,12 @@
+2026-09-27 independent writable fn-adapter recheck
+source_root=/home/ember/build/minidregg-overnight-20260927-fn-adapter-narrow
+detachment=130650 regular files atomically replaced with private copies; zero hardlinked files remain
+source_check=374/374 original source SHA-256 values preserved
+sampled_artifact_check=5/5 original OLean SHA-256 values preserved before rerun
+command=env LEAN_NUM_THREADS=2 lake env lean -o .lake/build/lib/lean/<Module>.olean <Module>.lean
+PASS Host.FnSelectiveReleaseFnReceiving fd84f8fe; OLean SHA256 803218d431c1b4f62ba76db6a75eb023bbfdfa77d9a0d178d1a5f694ea257c64
+PASS Host.FnSelectiveReleaseFnAck fa8eca60; OLean SHA256 bc42d10f61ff0bdb8b76fa6ebe4e56f1bac72e87ad5c84437621e41a3ecbea26
+PASS Host.Main 4cd996ea; OLean SHA256 12f6255a9f9944819533138ab93ae6403123fa4b2c0776ef931b2f5517f3ff45
+hardlinked_files_after_compile=0
+free_space_after_compile=>10 GiB
+scope=narrow 776+overlay dependency cut; no native link or receiving acceptance

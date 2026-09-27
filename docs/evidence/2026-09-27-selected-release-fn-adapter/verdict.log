@@ -1,4 +1,4 @@
-2026-09-27 independent Persvati narrow gate
+2026-09-27 initial hardlink-backed Persvati diagnostic (superseded by detached-verdict.log)
 source_root=/home/ember/build/minidregg-overnight-20260927-fn-adapter-narrow
 command=env LEAN_NUM_THREADS=2 lake env lean -o .lake/build/lib/lean/<Module>.olean <Module>.lean
 PASS Host.FnSelectiveReleaseFnReceiving fd84f8fe

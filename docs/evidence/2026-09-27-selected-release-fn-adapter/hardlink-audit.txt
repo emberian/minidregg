@@ -1,0 +1,23 @@
+2026-09-27 read-only hardlink audit before detachment
+clone_mechanism=cp -al from shareissue-plan-inspect-narrow to fn-adapter-narrow
+shared_hardlinked_regular_files_in_fn_adapter=130650
+logical_bytes_of_shared_hardlinked_files=8.85 GiB
+generated_fn_receiving_olean=private link-count 1
+generated_fn_ack_olean=private link-count 1
+generated_main_olean=private link-count 1; original Main target removed before each compile
+inherited_NativeHost_olean=inode 42221246, link-count 2 in both trees, SHA256 c0d892b328b0f99bfc8e75e654003f08a65b0e2d06f89104c6aa8468bf97153f, mtime 2026-09-27 03:03:37 EDT in both
+11_inherited_dependency_sources=all match documented custody/physical source manifest
+newer_hardlinked_regular_files_since_clone=none found
+package_git_indexes=10 rewritten by Lake, each split to a private link-count-1 inode; peer indexes kept earlier mtime/hash
+finding=no observed in-place shared source/OLean mutation, but hardlinked writable cache disqualifies independent-provenance claim
+2026-09-27 detached recheck
+detached_files=130650
+detached_bytes=9506233414
+pre_detach_free_bytes=27465588736
+post_detach_free_bytes=15178731520
+source_hashes_preserved=374/374
+sampled_artifact_hashes_preserved=5/5
+hardlinked_regular_files_after=0
+temporary_detachment_files_after=0
+detached_fn_receiving_main_narrow=3/3 PASS
+scope=independent writable files for this narrow source cut; no whole-commit checkout or native acceptance claim
