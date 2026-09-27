@@ -12,6 +12,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+mod agent_lifetime_grant;
+#[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
 mod agent_reserve;
@@ -145,6 +147,14 @@ usage:
   mini agent-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-reserve-submit --attempt PRIVATE-DIR
   mini agent-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-reserve-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --public-socket PUBLIC-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-reserve-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-reserve-lookup --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
   mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
@@ -2292,6 +2302,72 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_reserve::lookup(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-reserve-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let operator_socket = path(args.required("operator-socket")?);
+            let public_socket = path(args.required("public-socket")?);
+            let request = path(args.required("request")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            agent_reserve::lifetime_plan(
+                &host,
+                &config,
+                &operator_socket,
+                &public_socket,
+                &request,
+                &directory,
+            )
+        }
+        #[cfg(unix)]
+        "agent-lifetime-reserve-seal" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            agent_reserve::lifetime_seal(&directory, &approval)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-reserve-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::lifetime_submit(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-reserve-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_reserve::lifetime_lookup(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-grant-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let operator_socket = path(args.required("operator-socket")?);
+            let request = path(args.required("request")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            agent_lifetime_grant::grant_plan(&host, &config, &operator_socket, &request, &directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-grant-seal" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            agent_lifetime_grant::grant_seal(&directory, &approval)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-grant-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_lifetime_grant::grant_submit(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-grant-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            agent_lifetime_grant::grant_lookup(&directory)
         }
         #[cfg(unix)]
         "agent-payer-sign" => {

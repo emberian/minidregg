@@ -1,0 +1,12 @@
+   Compiling minidregg-resource-client v0.1.0 (/Users/ember/dev/minidregg/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.34s
+────────────
+ Nextest run ID fc3df1c9-ace4-40e3-9605-13a99d622fad with nextest profile: default
+    Starting 5 tests across 1 binary (90 tests skipped)
+        PASS [   0.011s] (1/5) minidregg-resource-client::bin/mini agent_lifetime_grant::tests::grant_receipt_requires_four_canonical_fields
+        PASS [   0.075s] (2/5) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::tests::lifetime_slot_uses_exact_header_without_canonical_alias
+        PASS [   0.080s] (3/5) minidregg-resource-client::bin/mini agent_lifetime_grant::tests::grant_slot_uses_exact_header_without_canonical_alias
+        PASS [   0.131s] (4/5) minidregg-resource-client::bin/mini agent_lifetime_grant::tests::lost_submit_reply_reenters_only_exact_read_only_lookup
+        PASS [   0.137s] (5/5) minidregg-resource-client::bin/mini agent_reserve::lifetime_v3::tests::lost_submit_reply_reenters_only_exact_read_only_lookup
+────────────
+     Summary [   0.137s] 5 tests run: 5 passed, 90 skipped

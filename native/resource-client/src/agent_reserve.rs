@@ -12,6 +12,9 @@ const REQUEST_LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 // contains hex copies of the plan, request, context, and complete HTTP body.
 const JSON_LIMIT: usize = 8 * transport::HOST_MAX_FRAME;
 
+mod lifetime_v3;
+pub(super) use lifetime_v3::{lifetime_lookup, lifetime_plan, lifetime_seal, lifetime_submit};
+
 pub(super) fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
