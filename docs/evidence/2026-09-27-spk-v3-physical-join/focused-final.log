@@ -1,0 +1,13 @@
+Running as unit: run-rdd1291a7ea08452ca6812938240a2af3.scope; invocation ID: a0cda7ede6df4feaa79464ab39c3bfed
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.25s
+────────────
+ Nextest run ID d95ebaad-745c-4d02-83b1-dff9ab1302e4 with nextest profile: default
+    Starting 5 tests across 1 binary (112 tests skipped)
+        PASS [   0.008s] (1/5) minidregg-spk-host install_service::install_v3::tests::deployment_and_host_pins_are_required_only_for_v2_install
+        PASS [   0.008s] (2/5) minidregg-spk-host install_service::install_v3::tests::retained_qualifier_must_equal_entire_source_authored_launch
+        PASS [   0.008s] (3/5) minidregg-spk-host resident_launch::tests::inspected_create_index_and_digest_select_exact_signed_action
+        PASS [   0.008s] (4/5) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.008s] (5/5) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+────────────
+     Summary [   0.025s] 5 tests run: 5 passed, 112 skipped

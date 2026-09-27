@@ -3,7 +3,10 @@
 //! exact `VerifiedBegin` and package command before calling this module.
 #![allow(dead_code)] // Native lifecycle-v2 Host route is not linked yet.
 
+use crate::dispatch_native::PrivateOperator;
 use crate::hostd::{Journal, VerifiedBegin};
+use crate::launch_descriptor_native::{author_signed_launch, SourceLaunchDescriptor};
+use crate::materialize::InstalledPackage;
 use crate::rpc_adapter::RpcDriver;
 use crate::sandbox::{
     bwrap_args, directory_entry, inherited_fd, open_protected_directory, verify_executable,
@@ -11,12 +14,65 @@ use crate::sandbox::{
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use crate::volume_custody::VolumeWitness;
+use sandstorm_package::manifest::Command as SpkCommand;
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, reason)
+}
+
+/// A source descriptor and commands from one signature-verified SPK parse.
+/// Callers cannot pair an arbitrary package with a different descriptor.
+pub(crate) struct SourceBoundLaunch<'a> {
+    package: &'a InstalledPackage,
+    descriptor: SourceLaunchDescriptor,
+}
+
+impl<'a> SourceBoundLaunch<'a> {
+    pub(crate) fn author(
+        operator: &PrivateOperator,
+        package: &'a InstalledPackage,
+        attempt_dir: &Path,
+    ) -> io::Result<Self> {
+        let descriptor = author_signed_launch(operator, package, attempt_dir)?;
+        Ok(Self {
+            package,
+            descriptor,
+        })
+    }
+
+    pub(crate) fn descriptor(&self) -> &SourceLaunchDescriptor {
+        &self.descriptor
+    }
+
+    /// Select only the signed create command named by Mini's inspected v3
+    /// BEGIN/claim. No default action or `continueCommand` may substitute.
+    pub(crate) fn source_selected_create(
+        &self,
+        index: usize,
+        source_digest: &str,
+    ) -> io::Result<&SpkCommand> {
+        if self
+            .descriptor
+            .create_digests
+            .get(index)
+            .map(String::as_str)
+            != Some(source_digest)
+        {
+            return Err(invalid(
+                "source create selection differs from signed launch descriptor",
+            ));
+        }
+        self.package
+            .manifest
+            .actions
+            .get(index)
+            .map(|action| &action.command)
+            .ok_or_else(|| invalid("source create selection absent from signed SPK"))
+    }
 }
 
 /// Preopened file descriptors never appear in HTTP or Mini JSON. The app end
@@ -139,6 +195,10 @@ impl PreparedResident {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::descriptor_native::SourceDescriptor;
+    use sandstorm_package::manifest::Action;
+    use sandstorm_package::SpkManifest;
+    use serde_json::json;
 
     #[test]
     fn resident_refuses_app_uid_equal_to_operator_before_opening_paths() {
@@ -157,5 +217,57 @@ mod tests {
             &"0".repeat(64),
         )
         .is_err());
+    }
+
+    #[test]
+    fn inspected_create_index_and_digest_select_exact_signed_action() {
+        let mut manifest: SpkManifest = serde_json::from_value(json!({
+            "app_id":"signed", "app_title":"test", "app_version":1,
+            "actions":[],
+            "continue_command":{"argv":["/continue"],"environ":[]}
+        }))
+        .unwrap();
+        manifest.actions = ["/first", "/second"]
+            .into_iter()
+            .map(|executable| Action {
+                noun_phrase: executable.into(),
+                command: SpkCommand {
+                    argv: vec![executable.into()],
+                    environ: vec![],
+                },
+            })
+            .collect();
+        let package = InstalledPackage {
+            directory: "/protected/image".into(),
+            raw_sha256: "a".repeat(64),
+            raw_sha256_bytes: [0xaa; 32],
+            raw_length: 1,
+            signed_manifest_sha256: [0xbb; 32],
+            signed_bridge_config_sha256: None,
+            signed_bridge_config: None,
+            manifest,
+        };
+        let launch = SourceLaunchDescriptor {
+            package: SourceDescriptor {
+                canonical: b"package".to_vec(),
+                root: "1".into(),
+                image_identity: b"image".to_vec(),
+                api_path: None,
+            },
+            canonical: b"launch".to_vec(),
+            root: "2".into(),
+            create_digests: vec!["3".into(), "4".into()],
+            continue_digest: "5".into(),
+        };
+        let bound = SourceBoundLaunch {
+            package: &package,
+            descriptor: launch,
+        };
+        assert_eq!(
+            bound.source_selected_create(1, "4").unwrap().argv,
+            ["/second"]
+        );
+        assert!(bound.source_selected_create(1, "3").is_err());
+        assert!(bound.source_selected_create(2, "4").is_err());
     }
 }

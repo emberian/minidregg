@@ -3,6 +3,9 @@
 //! Every native submit has a fresh durable attempt directory and no retry.
 #![allow(dead_code)] // Enabled only with the matching native descriptor route.
 
+#[path = "install_v3.rs"]
+mod install_v3;
+
 use crate::claim_native::{
     match_signed_install_package, submit_once as submit_claim_once, CapturedClaim,
 };
@@ -103,6 +106,9 @@ struct InstallConfig {
     image_dir: PathBuf,
     expected_raw_sha256: String,
     app_uid: u32,
+    deployment_id: Option<String>,
+    host_id: Option<String>,
+    launch_qualification: Option<PathBuf>,
     mini_host: PathBuf,
     mini_host_sha256: String,
     mini_config: PathBuf,
@@ -116,10 +122,32 @@ struct InstallConfig {
 }
 
 impl InstallConfig {
+    fn valid_host_identity(&self) -> bool {
+        match self.protocol.as_str() {
+            "mini-spk-resident-install-v1" => {
+                self.deployment_id.is_none()
+                    && self.host_id.is_none()
+                    && self.launch_qualification.is_none()
+            }
+            "mini-spk-resident-install-v2" => {
+                self.deployment_id.as_deref().is_some_and(hex64)
+                    && self.host_id.as_deref().is_some_and(hex64)
+                    && self
+                        .launch_qualification
+                        .as_ref()
+                        .is_some_and(|path| path.is_absolute() && !hidden_by_private_tmp(path))
+            }
+            _ => false,
+        }
+    }
+
     fn load(path: &Path) -> io::Result<Self> {
         let config: Self = serde_json::from_slice(&private_file(path, MAX_CONFIG)?)?;
-        if config.protocol != "mini-spk-resident-install-v1"
-            || path.parent() != Some(config.journal_dir.as_path())
+        if !matches!(
+            config.protocol.as_str(),
+            "mini-spk-resident-install-v1" | "mini-spk-resident-install-v2"
+        ) || path.parent() != Some(config.journal_dir.as_path())
+            || !config.valid_host_identity()
             || !hex64(&config.expected_raw_sha256)
             || !hex64(&config.mini_host_sha256)
             || !hex64(&config.mini_config_sha256)
@@ -221,6 +249,14 @@ impl InstallConfig {
                 false,
             )?;
         }
+        if let Some(path) = &self.launch_qualification {
+            open_protected_directory(
+                path.parent()
+                    .ok_or_else(|| invalid("launch qualification parent absent"))?,
+                self.app_uid,
+                false,
+            )?;
+        }
         Ok(())
     }
 }
@@ -229,6 +265,9 @@ impl InstallConfig {
 /// whole-block peak not constrained by its archive output limit.
 pub fn prepare(config_path: &Path) -> io::Result<()> {
     let config = InstallConfig::load(config_path)?;
+    if config.protocol == "mini-spk-resident-install-v2" {
+        return install_v3::preflight_prepare(&config);
+    }
     config.preflight_artifacts()?;
     config.preflight_operator_paths()?;
     open_protected_directory(
@@ -310,6 +349,9 @@ pub fn prepare(config_path: &Path) -> io::Result<()> {
 /// INSTALL claim. Neither this phase nor Mini completion starts an app child.
 pub fn complete(config_path: &Path) -> io::Result<()> {
     let config = InstallConfig::load(config_path)?;
+    if config.protocol == "mini-spk-resident-install-v2" {
+        return install_v3::preflight_complete(&config);
+    }
     config.preflight_operator_paths()?;
     private_dir(&config.journal_dir)?;
     for name in [
@@ -461,6 +503,9 @@ mod tests {
             image_dir: PathBuf::from("/nonexistent/image"),
             expected_raw_sha256: "a".repeat(64),
             app_uid: 12345,
+            deployment_id: None,
+            host_id: None,
+            launch_qualification: None,
             mini_host: PathBuf::from("/nonexistent/host"),
             mini_host_sha256: "b".repeat(64),
             mini_config: PathBuf::from("/nonexistent/config"),
