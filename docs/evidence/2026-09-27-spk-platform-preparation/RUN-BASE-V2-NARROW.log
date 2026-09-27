@@ -1,0 +1,37 @@
+2026-09-27 run-base v2 preparation: bounded, source-only checks
+
+Source SHA-256:
+  scripts/spk-platform/run-base.sh
+  2603f594fa3a18465d71faf80b3862043cb568452e4d685b3141abb03d52e090
+
+Commands from /Users/ember/dev/minidregg:
+  sh -n scripts/spk-platform/prepare.sh scripts/spk-platform/run-base.sh scripts/spk-platform/prepare-install-config.sh
+  shellcheck scripts/spk-platform/prepare.sh scripts/spk-platform/run-base.sh scripts/spk-platform/prepare-install-config.sh
+  git diff --check -- scripts/spk-platform/run-base.sh docs/evidence/2026-09-27-spk-platform-preparation/README.md
+Verdict: all exit 0, no diagnostics. No whole Mini build.
+
+Offline Settings comparison: in a private scratch copy, run-base's generated
+offline-operator.json and the reviewed provision source's post-overlay
+operator.json were normalized with `jq -S .`. Both normalized files had
+SHA-256 4b95ae70f122e097a8598014b99ee7bbd8f4810613e711d97ed434ec229b32e4;
+`cmp` returned 0. A copy with completionManagement.appCapability changed
+to 999 was refused by `cmp` (exit 1). The heredoc-only evaluation did not
+invoke Host, Mini bootstrap, or a Store helper.
+
+Unsupported physical qualifier: a scratch copy of run-base changed only the
+allowed root prefix to a protected user-owned scratch fixture path and the
+repository path to the current checkout. Its SHA-256 was
+52e4fbbd9771c1b40ff5b070bf0396323c32007e86a64c3b73fa4e77ad08279d.
+With the actual prepared signed GitWeb SPK and source files, and an executable
+that does not implement `qualify-launch`, it refused with:
+  source-backed SPK qualify-launch unavailable or refused
+The captured refusal output SHA-256 was
+3fe9ad7644741447cf64398cc946ddea1b004874bdab9ac1423277df537ee3be.
+The scratch fixture had neither `base` nor `base.source-stage` after refusal.
+The scratch root was /Users/ember/spk-guard-check-20260927/fixtures/ok4;
+it is not a deployment path and contains no accepted native Store.
+
+No positive `qualify-launch` run, source-qualified v2 Host binary, INSTALL,
+START, session/share issuance, physical app request, or agent request is
+claimed by these checks. The current install helper is not qualified for the
+v3 launch-root lifecycle.

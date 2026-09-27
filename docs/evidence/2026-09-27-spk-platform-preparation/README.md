@@ -50,13 +50,24 @@ asserted by these preparation scripts.
 1. `prepare.sh NEW_ROOT SIGNED_GITWEB_SPK SOURCE_DESCRIPTOR MINI_CLIENT` verifies
    source and package bytes, creates the protected input copy and completion key,
    and stages a source overlay. It produces no Store.
-2. After the 9746c47 Host binary is independently qualified, set
-   `QUALIFIED_HOST_SHA256` to that reviewed binary hash and call
-   `run-base.sh PREPARED_ROOT QUALIFIED_HOST MINI_CLIENT SQLITE_HELPER SIGNATURE_HELPER`.
+2. After the source Host and physical SPK Host binaries are independently
+   qualified, set `QUALIFIED_HOST_SHA256` and `QUALIFIED_SPK_HOST_SHA256` to
+   their reviewed hashes and call
+   `run-base.sh PREPARED_ROOT QUALIFIED_HOST MINI_CLIENT SQLITE_HELPER SIGNATURE_HELPER QUALIFIED_SPK_HOST`.
    All executable paths must be absolute and outside `/tmp` and `/var/tmp` for
-   the later `PrivateTmp` physical unit. This runs the actual reviewed birth
-   scripts in a **new** Store, ending at app/package/snapshot and Alice's Web
-   session. It checks the pinned completion key and management config.
+   the later `PrivateTmp` physical unit. Before any Store is created, the
+   physical `qualify-launch` command must parse this signed SPK once, use the
+   source Host's pure v2 launch-descriptor author/inspect codec, and return
+   exact package/launch roots, ordered create-command and continue-command
+   digests, canonical bytes and retained inspection. The script compares
+   those fields and refuses a missing CLI, unsupported version or mismatch.
+   The reviewed workroom source then regenerates its operator Settings JSON;
+   a full canonical JSON comparison with the pre-Store offline Host config
+   must pass **before bootstrap**. This catches any drift in the duplicate
+   preflight settings producer, rather than comparing just the custody fields.
+   Only then does it run the reviewed birth scripts in a **new** Store, ending
+   at app/package/snapshot and Alice's Web session. It checks the pinned
+   completion key and management config.
 3. With a protected live Mini operator socket under `/run`, call
    `prepare-install-config.sh PREPARED_ROOT QUALIFIED_HOST OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL`.
    The image path is exactly
@@ -64,6 +75,13 @@ asserted by these preparation scripts.
    the fresh journal is under `/var/lib/minidregg/spk/install-ops/`. This writes
    private BEGIN, CLAIM and INSTALL-completion signer profiles and
    `mini-spk-resident-install-v1` config. It submits no lifecycle event.
+
+   This existing helper describes the earlier INSTALL contract and is **not
+   yet qualified for the v3 launch-root lifecycle**. Do not submit its output
+   to the fresh integrated Store. The eventual INSTALL/START recipe must use
+   the qualified v2 `launchRoot` and retained canonical descriptor, while the
+   embedded v1 `packageRoot` identifies the signed package inside that
+   descriptor.
 
 The three signer files pin subject 8/key 8008/epoch 2 to the existing
 management seed and exact ordered Mini plan roles. BEGIN pins invocation
@@ -111,14 +129,23 @@ source inspections, post-CAS receipts, physical image comparison, two human
 sessions, direct API and two agent routes have **not** been run in this cut.
 Those are the next acceptance steps after the qualified Host and final
 resident route schema are available.
+At this evidence date the v2 source author and offline physical
+`qualify-launch` route are still being qualified, so this new positive gate
+has no accepted native execution result. The script's post-gate birth path
+has not run under this version. A focused scratch run with an unsupported
+physical qualifier refused before `base` or `base.source-stage` was created.
+The checked provision overlay passed `sh -n`; a heredoc-only evaluation of its
+post-overlay operator JSON and the offline config had identical full
+`jq -S` SHA-256
+`4b95ae70f122e097a8598014b99ee7bbd8f4810613e711d97ed434ec229b32e4`.
+This scratch comparison did not invoke Host, Mini bootstrap or a Store helper.
 
-There is one concrete fresh-volume START gap in the current physical source.
-`native/spk-host/src/resident_service.rs` selects the signed
-`manifest.continue_command` for every resident launch. GitWeb's signed create
-action runs `start.sh`, which initializes `/var/repo.git`, configures the hook
-and receive-pack, then starts the continuing service. The isolated
-`gitweb-smoke` runner selects `manifest.actions[0].command` for create and
-`continue_command` for wake, but that choice is not yet integrated with the
-resident one-shot claim and fresh `/var` journal. A fresh platform deployment
-must initialize its own volume from the signed action with durable uncertainty
-handling; the old smoke volume is not an input to this fixture.
+At the first review of this preparation cut, the then-current resident source
+selected signed `manifest.continue_command` for every launch. That dated
+finding explained why a virgin GitWeb volume could not start: its signed
+create action runs `start.sh` to initialize `/var/repo.git`, the hook and
+receive-pack. The resident source has since changed to refuse a virgin launch
+before writing a journal; the v3 source-bound create/wake claim and volume
+custody path are still being qualified. This preparation has not exercised
+that path. The isolated `gitweb-smoke` volume is not an input to the fresh
+fixture.
