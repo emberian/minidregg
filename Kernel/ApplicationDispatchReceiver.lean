@@ -71,13 +71,21 @@ private def permitCodec : LawfulCodec
     (StreamCodec.product ApplicationDispatchProjection.candidateStream
       NativeHostCodec.receiptStream)
 
+/-- Strict read-only inspection of a committed-frame shape. Decoding bytes
+does not establish CAS provenance: only `Permit.withFreshTip` may supply this
+frame to the physical host's private op34 response channel. -/
+def inspectCommittedBytes (bytes : List UInt8) :
+    Option (ApplicationDispatchProjection.Candidate × NativeHostCodec.Receipt) :=
+  permitCodec.decode bytes
+
 private def Permit.canonicalBytes {config : Config} (permit : Permit config) : List UInt8 :=
   permitCodec.encode (permit.projection, permit.receipt)
 
-/-- Delivery is offered only while a fresh physical read still equals the
-exact post-CAS bytes. The callback is the host's immediate fd3 handoff; it
-must not cache these bytes or treat this point-in-time check as a lease against
-later turns. It does not lock out concurrent writers after the read. -/
+/-- A committed frame is offered only while a fresh physical read still equals
+the exact post-CAS bytes. The Host callback writes and flushes the native
+response; app fd3 delivery is a later physical hop. This point-in-time check
+is not a lease or cancellation barrier against later turns, and it does not
+lock out concurrent writers after the read. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
   let .ok (some current) ← config.storage.transport.read
