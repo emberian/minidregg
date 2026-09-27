@@ -20,6 +20,8 @@ mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
+mod selected_release;
+#[cfg(unix)]
 mod transport;
 #[cfg(unix)]
 mod worker;
@@ -121,6 +123,9 @@ usage:
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
   mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
+  mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
+  mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
+  mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
@@ -2087,6 +2092,30 @@ fn run(mut args: Args) -> Result<()> {
                 .to_str()
                 .ok_or_else(|| "--mode must be UTF-8".to_owned())?;
             retry(&directory, mode, direct)
+        }
+        #[cfg(unix)]
+        "selected-release-submit" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let ingress = path(args.required("ingress")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("selected-release-submit requires --socket")?;
+            selected_release::submit(&host, &config, socket, &ingress, &directory)
+        }
+        #[cfg(unix)]
+        "selected-release-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            selected_release::lookup(&directory, SOCKET.get().map(PathBuf::as_path))
+        }
+        #[cfg(unix)]
+        "selected-release-retry" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            selected_release::retry_submit(&directory, SOCKET.get().map(PathBuf::as_path))
         }
         "export-evidence" => {
             let host = path(args.required("host")?);

@@ -122,6 +122,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             let response_prefix = request_prefix + 4 + request_length;
             response_prefix < payload.len() && payload.len() - response_prefix <= 8_388_608
         }
+        [20 | 21, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         _ => false,
     }
 }
@@ -831,6 +832,10 @@ mod tests {
         let mut missing_request = frame;
         missing_request[7..11].copy_from_slice(&0u32.to_le_bytes());
         assert!(!allowed_operation(&missing_request, false));
+        assert!(allowed_operation(&[20, 1], false));
+        assert!(allowed_operation(&[21, 1], false));
+        assert!(!allowed_operation(&[20], false));
+        assert!(!allowed_operation(&[21], false));
     }
 
     #[test]

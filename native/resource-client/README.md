@@ -59,6 +59,33 @@ The broker bounds a client frame to 10 seconds, a host request write to 30
 seconds, and a host reply to 600 seconds. On a host pipe timeout it exits and
 reaps the child; the caller still treats the request as uncertain.
 
+Selected public release uses a distinct Lean-authored canonical ingress and
+the same native receiver, through Host operations 20 and 21:
+
+```sh
+mini selected-release-submit --host HOST --config CONFIG.json \
+  --socket /private/path/mini-session/host.sock \
+  --ingress INGRESS.bin --dir /private/path/attempt-1
+mini selected-release-lookup --attempt /private/path/attempt-1
+```
+
+The attempt directory is created private (`0700`). It retains exact
+`ingress.bin`, config bytes, Host image and input digests, and a durable
+per-request marker before transmission. Each response frame is retained
+before the Host decodes its `Outcome`; a lost or mismatched response is
+uncertain even if the receiver may have committed. Lookup sends the same
+ingress to the source-owned historical replay path and never submits missing
+work. Only a retained latest lookup with `type: "absent"` permits an explicit
+`mini selected-release-retry --attempt /private/path/attempt-1`, which sends
+the exact retained ingress once; it does not author a new nonce or release.
+At retry, the pinned Host re-decodes the exact retained lookup binary; cached
+JSON cannot authorize submission. The latest lookup's ingress digest and
+selected socket must match the retry request.
+After any resubmit, another absent lookup is required before a further
+resubmit. A historical confirmed lookup reports the original native receipt.
+An optional `--socket NEW-SOCKET` on lookup or retry selects a restarted
+endpoint while retaining the Host image/config/ingress pins.
+
 The existing file-oriented fn consumer Host/Main commands are exposed by a
 restricted direct bridge, for example:
 
