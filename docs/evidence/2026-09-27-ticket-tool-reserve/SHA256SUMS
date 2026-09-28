@@ -1,0 +1,6 @@
+d303d55f23c68a302847c61bf2bea67d8587edf788311e1d260e36e9b06d7501  scripts/spk-platform/reserve-ticket-tool.sh
+3f66991ce6fabfd01e777b6fb62156a7664abe0b91a591c53585642673b9e84e  docs/evidence/2026-09-27-ticket-tool-reserve/README.md
+ed480ad9fb27d733dc0bdd216300d8ed28c55ac80755771190f7b82cb3193ee1  docs/evidence/2026-09-27-ticket-tool-reserve/mock-mini.sh
+42d6aa331813f68bdb2d42ffeabb71fa5ba68ed561a705c6ca318c9e76eacece  docs/evidence/2026-09-27-ticket-tool-reserve/test-restart.sh
+a0f096f395b3c6d7bb22ee20cb17549d7c8860de0c599740c912d4e27473e0bf  docs/evidence/2026-09-27-ticket-tool-reserve/schema-only-hbox.log
+84531028a8c9d6d1c8da4213783b2bbaff1be8daf91c12e64b42c78c3bd1847c  docs/evidence/2026-09-27-ticket-tool-reserve/shell-gates.log

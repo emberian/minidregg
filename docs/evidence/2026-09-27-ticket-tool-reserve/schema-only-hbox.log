@@ -1,0 +1,9 @@
+exact reserve prepared at /home/hbox/mini-ticket-tool-fixture-r8/root/alice-web-86023001; send once only after review
+exact reserve receipt retained at /home/hbox/mini-ticket-tool-fixture-r8/root/alice-web-86023001/confirmed.json
+accepted event22 consumed exact reserve; archived at /home/hbox/mini-ticket-tool-fixture-r8/root/closed-alice-web-86023001.json
+first send: ticket tool reserve: submit outcome uncertain; use lookup, never send again
+second send: ticket tool reserve: reserve submit already requested; lookup only
+lost readback: ticket tool reserve: reserved tool current readback unavailable
+stale before: ticket tool reserve: tool is not settled with at least 3 remaining
+writable binary: ticket tool reserve: binary custody drift
+one mock native send, exact lookup, event22 receipt/plan join, marker closed; bad before no send
