@@ -1,0 +1,15 @@
+source_commit=9d84b6e
+source_archive_sha256=6818e16f1ef58e7499c0390c33ac714b5ca39808a45b92f52c26f655587fe687
+source_scope=native/spk-host native/spk-rpc
+source_files=96
+source_manifest_sha256=6e4104985df79f13dcc78c3a8a6bd5cff347769db86f16e3974a6e51bb2a3b9e
+new_bin_source_sha256=71170393aed441bb86a411765785dc976aeed74b66328f45064b3a0861112991
+build_command=cargo build --release --locked --offline --bin gitweb-human-journey
+build_unit=minidregg-spk-gitweb-9d84b6e-r1.service
+build_invocation=9999686f80cf404bb720ddc233d0de0e
+build_result=success
+rustc=1.98.0-nightly (13f1859f2 2026-06-27)
+elf=bin/gitweb-human-journey
+elf_sha256=bc0e40e87101ab8413eea5e8b0604e4e34acac48d90bfa89b53c919e24f7af18
+elf_mode=0500
+no_service_install=true

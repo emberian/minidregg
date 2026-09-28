@@ -1,0 +1,7 @@
+● bonsai2-ptq1-local-64k-v1.service - /tank/dregg-build/bonsai2-local-20260927/bin/llama-prism-b10743-adfffbe/llama-server --model /tank/dregg-build/bonsai2-local-20260927/model/Ternary-Bonsai-2-27B-PTQ1_0.gguf --alias bonsai2-27b-ptq1 --host 127.0.0.1 --port 18081 --device Vulkan0 --n-gpu-layers 99 --ctx-size 65536 --parallel 1 --threads 2 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --jinja --reasoning-budget 512 --no-webui --api-key-file /tank/dregg-build/bonsai2-local-20260927/evidence/api-key --cors-origins http://127.0.0.1:18081
+     Loaded: loaded (/run/user/1000/systemd/transient/bonsai2-ptq1-local-64k-v1.service; transient)
+  Transient: yes
+     Active: active (running) since Sun 2026-09-27 21:16:33 EDT; 17min ago
+      Until: Sun 2026-09-27 23:16:33 EDT; 1h 42min left
+ Invocation: 1a3be0a0dacb42cf92a826a454d7cbeb
+   Main PID: 3457733 (llama-server)

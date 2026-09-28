@@ -1,0 +1,9 @@
+RuntimeMaxUSec=2h
+MainPID=3457733
+ExecMainStartTimestamp=Sun 2026-09-27 21:16:33 EDT
+MemoryMax=34359738368
+Id=bonsai2-ptq1-local-64k-v1.service
+ActiveState=active
+FragmentPath=/run/user/1000/systemd/transient/bonsai2-ptq1-local-64k-v1.service
+ActiveEnterTimestamp=Sun 2026-09-27 21:16:33 EDT
+InvocationID=1a3be0a0dacb42cf92a826a454d7cbeb
