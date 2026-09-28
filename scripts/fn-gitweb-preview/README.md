@@ -1,5 +1,10 @@
 # Selected GitWeb file preview over fn
 
+For new selected Mini content versions, use the reusable
+[`mini selected-exchange` consumer](../../native/resource-client/SELECTED-EXCHANGE.md).
+This script and its GitWeb-specific contract remain a dated fixture and recovery
+reference; GitWeb provenance is no longer required by the generic exchange.
+
 `join.sh` joins existing source-owned Mini commands. It does not read a raw
 GitWeb volume as publication authority. A separate app/runtime step must place
 the operator-chosen public version payload in one Mini content atom and return a
