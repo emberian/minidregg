@@ -10663,7 +10663,7 @@ impl Runtime {
         if request.get("type").and_then(Value::as_str) != Some("minidregg-workspace-proposal-v1")
             || !matches!(
                 request.get("action").and_then(Value::as_str),
-                Some("invoke" | "install-policy")
+                Some("invoke" | "install-policy" | "delegate")
             )
         {
             return Err("workspace proposal has unsupported typed action".into());
@@ -10872,6 +10872,7 @@ impl Runtime {
             return Err("workspace operation source changed after reservation".into());
         }
         let mut outcome: Option<Value> = None;
+        let mut pre_submit_refused = false;
         if !pending.no_submit {
             let attempt_meta = fs::symlink_metadata(&pending.attempt)
                 .map_err(|e| format!("workspace retained attempt: {e}"))?;
@@ -10901,6 +10902,13 @@ impl Runtime {
                         .map_err(|e| format!("workspace native outcome JSON: {e}"))?;
                 if matches!(direct["type"].as_str(), Some("confirmed" | "refused")) {
                     outcome = Some(direct);
+                }
+            }
+            if outcome.is_none() && !pending.attempt.join("call.bin").exists() {
+                if let Some(refusal) = inspected_pre_submit_refusal(&self.config, &pending.attempt)?
+                {
+                    pre_submit_refused = true;
+                    outcome = Some(refusal);
                 }
             }
             if outcome.is_none() && lookup {
@@ -10940,7 +10948,7 @@ impl Runtime {
             .definite = true;
         self.save()?;
         let authority = self.tool()?;
-        let charge = if pending.no_submit {
+        let charge = if pending.no_submit || pre_submit_refused {
             "0".to_owned()
         } else {
             self.config
@@ -11162,6 +11170,7 @@ impl Runtime {
             return Err("workspace birth request changed after reservation".into());
         }
         let mut outcome: Option<Value> = None;
+        let mut pre_submit_refused = false;
         if !birth.no_submit {
             let meta = fs::symlink_metadata(&birth.attempt)
                 .map_err(|e| format!("workspace birth attempt: {e}"))?;
@@ -11210,7 +11219,18 @@ impl Runtime {
                         .into(),
                 );
             }
-            bounded_regular_file(&birth.attempt.join("call.bin"), 4_194_304)?;
+            if birth.attempt.join("call.bin").exists() {
+                bounded_regular_file(&birth.attempt.join("call.bin"), 4_194_304)?;
+            } else if let Some(refusal) =
+                inspected_pre_submit_refusal(&self.config, &birth.attempt)?
+            {
+                pre_submit_refused = true;
+                outcome = Some(refusal);
+            } else {
+                return Err(
+                    "workspace birth has no retained call or verified prepare refusal".into(),
+                );
+            }
             if birth.attempt.join("outcome.json").is_file() {
                 let direct: Value = serde_json::from_slice(&bounded_regular_file(
                     &birth.attempt.join("outcome.json"),
@@ -11295,7 +11315,7 @@ impl Runtime {
             .definite = true;
         self.save()?;
         let authority = self.tool()?;
-        let charge = if birth.no_submit {
+        let charge = if birth.no_submit || pre_submit_refused {
             "0".to_owned()
         } else {
             self.config
@@ -11667,7 +11687,7 @@ impl Runtime {
                         != Some("minidregg-workspace-proposal-v1")
                     || !matches!(
                         request.get("action").and_then(Value::as_str),
-                        Some("invoke" | "install-policy")
+                        Some("invoke" | "install-policy" | "delegate")
                     )
                     || serde_json::to_vec(arguments)
                         .map_err(|e| e.to_string())?
