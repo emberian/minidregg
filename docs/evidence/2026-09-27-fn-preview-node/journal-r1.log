@@ -1,0 +1,10 @@
+2026-09-27T20:08:29-04:00 hbox systemd[3727309]: Started mini-fn-gitweb-preview-r3.service - Isolated Mini GitWeb fn preview.
+2026-09-27T20:08:30-04:00 hbox env[3153612]: OWNER-OPEN open=full-replay reason=absent
+2026-09-27T20:08:30-04:00 hbox env[3153612]: CONTROL /tank/dregg-preview/fn-gitweb-r3-20260927/control.sock
+2026-09-27T20:08:30-04:00 hbox env[3153612]: LISTENING 11213
+2026-09-27T20:09:07-04:00 hbox env[3153612]: accepted reader connection=0 time=2026-09-28T00:09:07Z
+2026-09-27T20:09:21-04:00 hbox env[3153612]: accepted reader connection=1 time=2026-09-28T00:09:21Z
+2026-09-27T20:09:29-04:00 hbox env[3153612]: accepted reader connection=2 time=2026-09-28T00:09:29Z
+2026-09-27T20:10:03-04:00 hbox env[3153612]: accepted reader connection=3 time=2026-09-28T00:10:03Z
+2026-09-27T20:11:10-04:00 hbox env[3153612]: accepted reader connection=4 time=2026-09-28T00:11:10Z
+2026-09-27T20:11:10-04:00 hbox env[3153612]: accepted reader connection=5 time=2026-09-28T00:11:10Z

@@ -1,0 +1,30 @@
+qualified image and private artifacts:
+432622d29a28d59455e01f3e5b426036c5862db21d5f7d1205a9304ab11e3505  /tank/fn/gates/qual-bbf52159-20260925/build/images/bbf52159dcab19228bd6cd0b855b99dd6d68758d/fn-host
+6e569af117ba4afcf52bfd74f2a40ac222ead7701bb0b84bac799c53521bfe9e  /tank/fn/gates/qual-bbf52159-20260925/build/images/bbf52159dcab19228bd6cd0b855b99dd6d68758d/fn-host.core
+5eb98f78d8a26f7d9a47762ea2381aa7f0fb67b283ee7d59b9e8347bc5ab169f  /tank/dregg-preview/fn-gitweb-r3-20260927/fn.toml
+ae2be87dc39bb01962b3f153c17995e4146935630960a2a945641445b23e3db7  /tank/dregg-preview/fn-gitweb-r3-20260927/tls-cert.pem
+8ffefcd65314629f44370b9eac4c42456d0930e45660a55195b0f36110c75e4b  /tank/dregg-preview/fn-gitweb-r3-20260927/registered.fncu
+8ffefcd65314629f44370b9eac4c42456d0930e45660a55195b0f36110c75e4b  /tank/dregg-preview/fn-gitweb-r3-20260927/position.fncu
+be65fbd1b4c15132daf8b3faf4230b94822662460fbb7255df2f7691694a4e12  /tank/dregg-preview/fn-gitweb-r3-20260927/empty-poll.fncu
+user unit:
+MainPID=3153612
+Result=success
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/mini-fn-gitweb-preview-r3.service
+MemoryPeak=61030400
+MemoryMax=8589934592
+TasksMax=64
+ActiveState=active
+SubState=running
+InvocationID=7ab63ee537434f278d80ffdbb13b038e
+listener:
+127.0.0.1:11213
+accepted operator status
+transactions=2 articles=0 staging-orphans=0 unsigned-legacy-experiment
+profile format=8 max-transactions=4294967295 max-history-octets=1099511627776 max-record-octets=67108864 max-article-octets=1048576 max-groups-per-article=4096 max-group-name-octets=256 max-open-suffix=65536 max-consumers=1048576 max-bp-rows=1048576 max-config-generations=1048576 max-credentials=1048576 max-policy-members=1048576 history-marker=unmarked
+consumer status accepted committed-ack=0 committed-journal-frontier=2 journal-event-distance=2
+fn-consumer-inspect-v1 history=f4b53b367d8571ade77685aa2106c2638cb03876c7a358f8ce88647535b007d9 incarnation=78f24ec2a52acdd4a9b4898c9455c10aad29702258d654a502de0a69f65034a1 consumer=73656c65637465642d6d696e692d67617465776179 principal=6c6f63616c query=666e2e74657374 query-version=1 view-version=0 registration-epoch=1 position=0 currentness=unverified acceptance=unverified processing=unverified
+fn-consumer-inspect-v1 history=f4b53b367d8571ade77685aa2106c2638cb03876c7a358f8ce88647535b007d9 incarnation=78f24ec2a52acdd4a9b4898c9455c10aad29702258d654a502de0a69f65034a1 consumer=73656c65637465642d6d696e692d67617465776179 principal=6c6f63616c query=666e2e74657374 query-version=1 view-version=0 registration-epoch=1 position=2 currentness=unverified acceptance=unverified processing=unverified
+cleartext authentication gate: 483 a protected channel is required; use STARTTLS
+480 authentication required
+TLS certificate verified and unauthenticated GROUP refused
+read-only preview verification passed; no POST or ACK

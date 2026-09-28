@@ -157,4 +157,9 @@ mv "$scratch/contract.tmp" "$scratch/contract.json"
 shasum -a 256 "$scratch/contract.json" | awk '{print $1}' >"$scratch/state/contract.sha256"
 "$here/join.sh" verify "$scratch/contract.json" "$scratch/state" >"$scratch/verify-large.log" 2>&1
 [ "$(cat "$scratch/state/readback-selected")" = recipient-readback-0003 ]
-echo 'join recovery command-fake PASS: partial poll, latest absent, ACK reentry, exact target/atom, 100KiB binary readback'
+dd if=/dev/zero of="$scratch/state/article.eml" bs=1048577 count=1 2>/dev/null
+if "$here/join.sh" publish "$scratch/contract.json" "$scratch/state" >"$scratch/publish-oversize.log" 2>&1; then
+  echo 'oversize assembled article reached publication' >&2; exit 1
+fi
+grep -q 'assembled signed article exceeds qualified fn 1MiB admission cap' "$scratch/publish-oversize.log"
+echo 'join recovery command-fake PASS: partial poll, latest absent, ACK reentry, exact target/atom, 100KiB readback, oversize article refusal'

@@ -77,6 +77,14 @@ private_state() {
     echo 'state must have mode 0700' >&2; exit 2;
   }
 }
+article_size() {
+  # This fixture's qualified fn store was initialized with 1,048,576 bytes.
+  # Count the exact assembled owner article, not the selected atom payload.
+  article_bytes=$(wc -c <"$STATE/article.eml" | tr -d ' ')
+  [ "$article_bytes" -le 1048576 ] || {
+    echo 'assembled signed article exceeds qualified fn 1MiB admission cap' >&2; exit 2;
+  }
+}
 pin() {
   [ "$(hash "$CONTRACT")" = "$(cat "$STATE/contract.sha256")" ] || {
     echo 'contract changed after preparation' >&2; exit 2;
@@ -216,6 +224,7 @@ prepare)
   "$HOST" "$SOURCE_CONFIG" selected-release-assemble "$STATE/preimage.bin" \
     "$STATE/signature.bin" "$(field from)" "$(field date)" "$(field subject)" \
     "$STATE/packet.bin" "$STATE/article.eml"
+  article_size
   "$MINI" selected-source-sign --host "$HOST" --config "$SOURCE_CONFIG" \
     --packet "$STATE/packet.bin" --delegate-capability "$(decimal sourceDelegateCapability)" \
     --key "$(field ownerKey)" --dir "$STATE/source-sign"
@@ -234,6 +243,9 @@ prepare)
   ;;
 publish)
   private_state; pin
+  article_size
+  "$HOST" "$SOURCE_CONFIG" selected-release-source-check \
+    "$STATE/source-sign/ingress.bin" "$STATE/article.eml"
   "$MINI" selected-source-publish --host "$HOST" --config "$SOURCE_CONFIG" \
     --ingress "$STATE/source-sign/ingress.bin" --article "$STATE/article.eml" \
     --state-dir "$STATE/source-publish" --post-config "$(field privatePostConfig)"
