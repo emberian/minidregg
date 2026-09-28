@@ -51,6 +51,15 @@ fn main() {
             }
         }
     }
+    if args.len() == 3 && args[1] == "resident-stop" {
+        match minidregg_spk_host::lifecycle_v3_stop_service::run(Path::new(&args[2])) {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("spk-host: resident STOP refused: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.len() == 3 && args[1] == "qualify" {
         match qualify_bridge_spk(Path::new(&args[2])) {
             Ok((package, bridge)) => {
@@ -111,7 +120,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG"
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
     std::process::exit(2);

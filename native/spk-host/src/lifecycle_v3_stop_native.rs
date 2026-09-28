@@ -275,7 +275,7 @@ impl StopTarget {
     /// A recovered STOP may audit the same Fenced unit, never submit op26
     /// again. The marker must match freshly re-inspected original bytes and
     /// the same selected event25 receipt/incarnation.
-    fn check_marker(&self, attempt_dir: &Path) -> io::Result<()> {
+    pub(crate) fn check_marker(&self, attempt_dir: &Path) -> io::Result<()> {
         private_dir(attempt_dir)?;
         let expected = self.marker_bytes()?;
         let path = attempt_dir.join(MARKER_NAME);
@@ -363,7 +363,7 @@ impl StopTarget {
         volume.recheck_handoff()
     }
 
-    fn stop_identity(&self) -> StopIdentity {
+    pub(crate) fn stop_identity(&self) -> StopIdentity {
         StopIdentity {
             app: self.app,
             generation: self.running_generation,
@@ -372,6 +372,14 @@ impl StopTarget {
             invocation_id: self.invocation_id.clone(),
             control_group: self.control_group.clone(),
         }
+    }
+
+    pub(crate) fn operation_generation(&self) -> u64 {
+        self.operation_generation
+    }
+
+    pub(crate) fn volume_id_hex(&self) -> &str {
+        &self.volume_id_hex
     }
 }
 

@@ -3,10 +3,12 @@
 //! exact `VerifiedBegin` and package command before calling this module.
 #![allow(dead_code)] // Native lifecycle-v2 Host route is not linked yet.
 
-use crate::dispatch_native::PrivateOperator;
+use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::hostd::{Journal, VerifiedBegin};
-use crate::launch_descriptor_native::{author_signed_launch, SourceLaunchDescriptor};
-use crate::materialize::InstalledPackage;
+use crate::launch_descriptor_native::{
+    author_signed_launch, signed_launch_source, SourceLaunchDescriptor,
+};
+use crate::materialize::{signed_schema_source, InstalledPackage};
 use crate::rpc_adapter::RpcDriver;
 use crate::sandbox::{
     bwrap_args, directory_entry, inherited_fd, open_protected_directory, verify_executable,
@@ -14,11 +16,69 @@ use crate::sandbox::{
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use crate::volume_custody::VolumeWitness;
+use minidregg_spk_rpc::decode_bridge_config;
 use sandstorm_package::manifest::Command as SpkCommand;
+use serde_json::Value;
+use std::fs::{DirBuilder, OpenOptions};
 use std::io;
+use std::io::Read;
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+
+const MAX_RETAINED_DESCRIPTOR: u64 = 12_102_759;
+
+fn retained_descriptor_file(path: &Path) -> io::Result<Vec<u8>> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("descriptor parent absent"))?;
+    private_dir(parent)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file()
+        || meta.uid() != unsafe { libc::geteuid() }
+        || meta.nlink() != 1
+        || meta.permissions().mode() & 0o777 != 0o600
+        || meta.len() == 0
+        || meta.len() > MAX_RETAINED_DESCRIPTOR
+    {
+        return Err(invalid("retained signed descriptor file custody refused"));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    file.by_ref()
+        .take(MAX_RETAINED_DESCRIPTOR + 1)
+        .read_to_end(&mut bytes)?;
+    let after = file.metadata()?;
+    if bytes.len() as u64 != meta.len()
+        || after.dev() != meta.dev()
+        || after.ino() != meta.ino()
+        || after.len() != meta.len()
+        || after.mtime() != meta.mtime()
+        || after.mtime_nsec() != meta.mtime_nsec()
+    {
+        return Err(invalid("retained signed descriptor changed during read"));
+    }
+    Ok(bytes)
+}
+
+fn source_text<'a>(view: &'a Value, name: &str) -> io::Result<&'a str> {
+    view.get(name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("retained signed descriptor source field absent"))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(result, "{byte:02x}").expect("hex String");
+    }
+    result
+}
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, reason)
@@ -49,6 +109,188 @@ impl<'a> SourceBoundLaunch<'a> {
         attempt_dir: &Path,
     ) -> io::Result<Self> {
         let descriptor = author_signed_launch(operator, package, attempt_dir)?;
+        Ok(Self {
+            package,
+            descriptor,
+        })
+    }
+
+    /// Reopen a retained descriptor after process restart without issuing a
+    /// second author request. A fresh private read-only inspector rechecks all
+    /// canonical bytes against this one verified signed-SPK parse.
+    pub(crate) fn load_retained(
+        operator: &PrivateOperator,
+        package: &'a InstalledPackage,
+        attempt_dir: &Path,
+        probe_dir: &Path,
+    ) -> io::Result<Self> {
+        private_dir(attempt_dir)?;
+        private_dir(
+            probe_dir
+                .parent()
+                .ok_or_else(|| invalid("descriptor probe parent absent"))?,
+        )?;
+        DirBuilder::new().mode(0o700).create(probe_dir)?;
+        let package_dir = attempt_dir.join("package-v1");
+        let member = package
+            .signed_bridge_config
+            .as_deref()
+            .ok_or_else(|| invalid("retained signed bridge absent"))?;
+        let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
+        if bridge.save_identity_caps
+            || bridge.expect_app_hooks
+            || !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/"))
+        {
+            return Err(invalid("retained signed bridge outside resident mapping"));
+        }
+        let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
+        let schema = retained_descriptor_file(&package_dir.join("schema.bin"))?;
+        let schema_view: Value = serde_json::from_slice(&operator.tool(
+            "inspect",
+            "application-permission-schema",
+            &package_dir.join("schema.bin"),
+            &probe_dir.join("schema.json"),
+        )?)?;
+        if source_text(&schema_view, "type")? != "minidregg-application-permission-schema-v1"
+            || source_text(&schema_view, "canonical")? != hex_bytes(&schema)
+            || schema_view.get("version") != schema_source.get("version")
+            || schema_view.get("permissions") != schema_source.get("permissions")
+            || schema_view.get("roles") != schema_source.get("roles")
+            || schema_view.get("denied") != schema_source.get("denied")
+        {
+            return Err(invalid("retained schema differs from signed bridge"));
+        }
+        let package_canonical = retained_descriptor_file(&package_dir.join("descriptor.bin"))?;
+        let package_view: Value = serde_json::from_slice(&operator.tool(
+            "inspect",
+            "application-spk-package-identity",
+            &package_dir.join("descriptor.bin"),
+            &probe_dir.join("package.json"),
+        )?)?;
+        let bridge_sha = package
+            .signed_bridge_config_sha256
+            .ok_or_else(|| invalid("retained signed bridge digest absent"))?;
+        let mut image_identity = b"DREGG/SPK-IMAGE/v1".to_vec();
+        image_identity.extend_from_slice(&package.raw_sha256_bytes);
+        if source_text(&package_view, "type")? != "application-spk-package-identity-v1"
+            || source_text(&package_view, "canonical")? != hex_bytes(&package_canonical)
+            || source_text(&package_view, "rawSha256")? != hex_bytes(&package.raw_sha256_bytes)
+            || source_text(&package_view, "rawLength")? != package.raw_length.to_string()
+            || source_text(&package_view, "signedAppId")?
+                != hex_bytes(package.manifest.app_id.0.as_bytes())
+            || source_text(&package_view, "signedAppVersion")?
+                != package.manifest.app_version.to_string()
+            || source_text(&package_view, "manifestSha256")?
+                != hex_bytes(&package.signed_manifest_sha256)
+            || source_text(&package_view, "bridgeConfigSha256")? != hex_bytes(&bridge_sha)
+            || source_text(&package_view, "imageIdentity")? != hex_bytes(&image_identity)
+            || source_text(&package_view, "bridgeApiPath")?
+                != hex_bytes(bridge.api_path.as_deref().unwrap_or("").as_bytes())
+        {
+            return Err(invalid(
+                "retained package descriptor differs from signed SPK",
+            ));
+        }
+        let interfaces = package_view
+            .get("interfaces")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("retained package interfaces absent"))?;
+        let expected: &[(&str, &str)] = if bridge.api_path.is_some() {
+            &[("1", "web"), ("2", "api")]
+        } else {
+            &[("1", "web")]
+        };
+        if interfaces.len() != expected.len() {
+            return Err(invalid("retained package interface count differs"));
+        }
+        for (interface, (id, kind)) in interfaces.iter().zip(expected) {
+            if source_text(interface, "id")? != *id
+                || source_text(interface, "version")? != "1"
+                || source_text(interface, "kind")? != *kind
+                || source_text(interface, "schema")? != hex_bytes(&schema)
+                || source_text(interface, "schemaRoot")? != source_text(&schema_view, "root")?
+            {
+                return Err(invalid(
+                    "retained package interface differs from signed bridge",
+                ));
+            }
+        }
+        let package_root = source_text(&package_view, "root")?.to_owned();
+        if !crate::lifecycle_v3_native::decimal(&package_root) {
+            return Err(invalid("retained package root malformed"));
+        }
+        let launch_source = signed_launch_source(&package.manifest, &package_canonical)?;
+        let retained_source: Value = serde_json::from_slice(&retained_descriptor_file(
+            &attempt_dir.join("launch-source.json"),
+        )?)?;
+        if retained_source != launch_source {
+            return Err(invalid(
+                "retained launch source differs from signed command order",
+            ));
+        }
+        let canonical = retained_descriptor_file(&attempt_dir.join("launch-descriptor.bin"))?;
+        let view: Value = serde_json::from_slice(&operator.tool(
+            "inspect",
+            "application-spk-launch-descriptor",
+            &attempt_dir.join("launch-descriptor.bin"),
+            &probe_dir.join("launch.json"),
+        )?)?;
+        if source_text(&view, "type")? != "application-spk-launch-descriptor-v2"
+            || source_text(&view, "canonical")? != hex_bytes(&canonical)
+            || source_text(&view, "packageCanonicalHex")? != hex_bytes(&package_canonical)
+            || source_text(&view, "packageRoot")? != package_root
+            || !crate::lifecycle_v3_native::decimal(source_text(&view, "root")?)
+        {
+            return Err(invalid("retained launch descriptor differs from package"));
+        }
+        let creates = view
+            .get("createCommands")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("retained create command projection absent"))?;
+        let expected = launch_source["createCommands"]
+            .as_array()
+            .ok_or_else(|| invalid("signed create commands absent"))?;
+        if creates.len() != expected.len() {
+            return Err(invalid("retained create count differs"));
+        }
+        let mut create_digests = Vec::with_capacity(creates.len());
+        for (actual, expected) in creates.iter().zip(expected) {
+            if actual.get("argvHex") != expected.get("argvHex")
+                || actual.get("environHex") != expected.get("environHex")
+            {
+                return Err(invalid("retained create command differs from signed SPK"));
+            }
+            let digest = source_text(actual, "digest")?;
+            if !crate::lifecycle_v3_native::decimal(digest)
+                || source_text(actual, "canonical")?.is_empty()
+            {
+                return Err(invalid("retained create command commitment malformed"));
+            }
+            create_digests.push(digest.to_owned());
+        }
+        let continuation = &view["continueCommand"];
+        if continuation.get("argvHex") != launch_source["continueCommand"].get("argvHex")
+            || continuation.get("environHex") != launch_source["continueCommand"].get("environHex")
+        {
+            return Err(invalid("retained continue command differs from signed SPK"));
+        }
+        if !crate::lifecycle_v3_native::decimal(source_text(continuation, "digest")?)
+            || source_text(continuation, "canonical")?.is_empty()
+        {
+            return Err(invalid("retained continue command commitment malformed"));
+        }
+        let descriptor = SourceLaunchDescriptor {
+            package: crate::descriptor_native::SourceDescriptor {
+                canonical: package_canonical,
+                root: package_root,
+                image_identity,
+                api_path: bridge.api_path,
+            },
+            canonical,
+            root: source_text(&view, "root")?.to_owned(),
+            create_digests,
+            continue_digest: source_text(continuation, "digest")?.to_owned(),
+        };
         Ok(Self {
             package,
             descriptor,

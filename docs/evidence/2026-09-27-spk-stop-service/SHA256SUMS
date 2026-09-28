@@ -1,0 +1,9 @@
+847e20845a565292c0d888204f0f63d4fa655fc2d1150a8ea020293298da2f19  native/spk-host/src/lifecycle_v3_stop_service.rs
+4f371383fe347caa503814c9801ed946989e2a7e0d3d963532b2e395050db75a  native/spk-host/src/hostd.rs
+ec18dbdb568b102093a974667d2aefb5d98e0e584433ae92657cd923870c3e70  native/spk-host/src/resident_launch.rs
+e05fb4026e23259e56ea3bb03ec8956760decf5ac62aa616c0c4be88be49981b  native/spk-host/src/lifecycle_v3_stop_native.rs
+b998771cd0934a69127041f592cd6e4bf4d3efbd24764ef1d96a01be49de397e  native/spk-host/src/lib.rs
+fe3f448197dffa5373f5a10af9ca6714607f10a6416e145fa605142649de4554  native/spk-host/src/main.rs
+cdb9372a57bf31a120e33cdeb5c3193e56844d71387366e2349546ac649b35c2  docs/evidence/2026-09-27-spk-stop-service/README.md
+bf4d3dfb785ec8d4401c477f59b51267514aa7f47a20763366e34e66c3d5dc68  docs/evidence/2026-09-27-spk-stop-service/nextest.log
+910d6a3b02babef6a09d7c1c816a6aabf92ef4cedcbeea39be7a569683beb341  docs/evidence/2026-09-27-spk-stop-service/clippy.log

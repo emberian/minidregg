@@ -511,6 +511,80 @@ impl StopIdentity {
 }
 
 impl UnitStopAudit {
+    /// Project only the checked post-stop manager/cgroup observations into
+    /// Mini's typed StopAudit authoring input. The digest commits this exact
+    /// operator-attested summary; Mini still relies on the distinct physical
+    /// custodian signature and does not inspect systemd itself.
+    pub(crate) fn source_stop_audit(
+        &self,
+        expected: &StopIdentity,
+    ) -> io::Result<serde_json::Value> {
+        let hex_bytes = |bytes: &[u8]| -> String {
+            let mut out = String::with_capacity(bytes.len() * 2);
+            for byte in bytes {
+                use std::fmt::Write as _;
+                write!(out, "{byte:02x}").expect("writing hex into String");
+            }
+            out
+        };
+        if self.unit != expected.unit
+            || self.invocation_id.is_some()
+            || self.control_group.as_deref() != Some(expected.control_group.as_str())
+            || !self.unit_loaded
+            || !self.inactive
+            || self.main_pid != 0
+            || self.queued_job
+            || !self.exact_cgroup_empty
+        {
+            return Err(invalid(
+                "STOP physical audit differs from selected prior incarnation",
+            ));
+        }
+        let projection = serde_json::json!({
+            "unit": hex_bytes(expected.unit.as_bytes()),
+            "recordedInvocationId": hex_bytes(expected.invocation_id.as_bytes()),
+            "recordedControlGroup": hex_bytes(expected.control_group.as_bytes()),
+            "managerLoaded": self.unit_loaded,
+            "managerInactive": self.inactive,
+            "managerMainPid": self.main_pid.to_string(),
+            "managerJobEmpty": !self.queued_job,
+            "managerInvocationCleared": self.invocation_id.is_none(),
+            "cgroupUnpopulated": self.exact_cgroup_empty,
+        });
+        let mut hasher = Sha256::new();
+        hasher.update(b"DREGG/SPK-STOP-POST-AUDIT/v1");
+        // The report codec contains only StopAudit fields. Bind the operator's
+        // full source-selected incarnation in the attested digest as well.
+        hasher.update(serde_json::to_vec(&serde_json::json!({
+            "app": expected.app.to_string(),
+            "generation": expected.generation.to_string(),
+            "imageIdentity": hex_bytes(expected.image_identity.as_bytes()),
+            "audit": projection,
+        }))?);
+        let digest = hasher.finalize();
+        let mut decimal_digits = vec![0u8];
+        for byte in digest.iter().rev() {
+            let mut carry = u16::from(*byte);
+            for digit in &mut decimal_digits {
+                let value = u16::from(*digit) * 256 + carry;
+                *digit = (value % 10) as u8;
+                carry = value / 10;
+            }
+            while carry > 0 {
+                decimal_digits.push((carry % 10) as u8);
+                carry /= 10;
+            }
+        }
+        let observation_digest: String = decimal_digits
+            .iter()
+            .rev()
+            .map(|digit| char::from(b'0' + *digit))
+            .collect();
+        let mut projection = projection;
+        projection["observationDigest"] = serde_json::Value::String(observation_digest);
+        Ok(projection)
+    }
+
     fn before_stop(record: &Record) -> io::Result<()> {
         let output = systemd_show(record.unit())?;
         if property(&output, "Id")? != record.unit() || property(&output, "LoadState")? != "loaded"
@@ -1572,6 +1646,44 @@ impl Journal {
         )
     }
 
+    /// Read-only audit after a completed fence. This cannot enter Fenced or
+    /// issue another manager command; it is solely for finishing the original
+    /// signed STOP report after a process crash.
+    pub(crate) fn audit_stopped_manager_checked(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+    ) -> io::Result<UnitStopAudit> {
+        self.audit_stopped_checked_with(expected, verify_volume, UnitStopAudit::inspect)
+    }
+
+    fn audit_stopped_checked_with(
+        &self,
+        expected: &StopIdentity,
+        verify_volume: impl Fn() -> io::Result<()>,
+        inspect: impl Fn(&Record) -> io::Result<UnitStopAudit>,
+    ) -> io::Result<UnitStopAudit> {
+        self.with_lock(|this| {
+            let record = this
+                .read_unlocked()?
+                .ok_or_else(|| invalid("missing stopped STOP journal"))?;
+            if record.phase != Phase::Stopped
+                || record.app() != expected.app
+                || record.generation() != expected.generation
+                || record.unit() != expected.unit
+                || record.image_identity() != expected.image_identity
+                || record.invocation_id() != Some(expected.invocation_id.as_str())
+                || record.control_group() != Some(expected.control_group.as_str())
+            {
+                return Err(invalid("stopped journal differs from source incarnation"));
+            }
+            verify_volume()?;
+            let audit = inspect(&record)?;
+            audit.prove(&record)?;
+            Ok(audit)
+        })
+    }
+
     fn fence_and_stop_checked_with(
         &self,
         expected: &StopIdentity,
@@ -2461,6 +2573,86 @@ mod tests {
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
         assert_eq!(stops.load(Ordering::SeqCst), 1);
         assert!(volume_checks.load(Ordering::SeqCst) >= 2);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn checked_stop_audit_projects_prior_incarnation_and_commits_observation() {
+        let (path, _, begin) = running_journal();
+        let expected = StopIdentity {
+            app: begin.app,
+            generation: begin.generation,
+            unit: begin.unit,
+            image_identity: begin.image_identity,
+            invocation_id: instance().invocation_id,
+            control_group: instance().control_group,
+        };
+        let audit = UnitStopAudit {
+            unit: expected.unit.clone(),
+            invocation_id: None,
+            control_group: Some(expected.control_group.clone()),
+            unit_loaded: true,
+            inactive: true,
+            main_pid: 0,
+            queued_job: false,
+            exact_cgroup_empty: true,
+        };
+        let projected = audit.source_stop_audit(&expected).unwrap();
+        assert_eq!(projected["managerMainPid"], "0");
+        assert_eq!(
+            projected["recordedInvocationId"],
+            expected
+                .invocation_id
+                .as_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        );
+        let digest = projected["observationDigest"].as_str().unwrap();
+        assert!(canonical_digest_decimal(digest));
+        assert_eq!(audit.source_stop_audit(&expected).unwrap(), projected);
+        let mut wrong = expected.clone();
+        wrong.unit = "different.service".into();
+        assert!(audit.source_stop_audit(&wrong).is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn stopped_audit_is_read_only_and_refuses_running_or_wrong_incarnation() {
+        let (path, journal, begin) = running_journal();
+        let expected = StopIdentity {
+            app: begin.app,
+            generation: begin.generation,
+            unit: begin.unit,
+            image_identity: begin.image_identity,
+            invocation_id: instance().invocation_id,
+            control_group: instance().control_group,
+        };
+        assert!(journal
+            .audit_stopped_checked_with(&expected, || Ok(()), stopped)
+            .is_err());
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Running);
+        journal
+            .fence_and_stop_checked_with(&expected, || Ok(()), |_| Ok(()), |_| Ok(()), stopped)
+            .unwrap();
+        let before = journal.read().unwrap().unwrap();
+        let audit = journal
+            .audit_stopped_checked_with(&expected, || Ok(()), stopped)
+            .unwrap();
+        assert!(audit.source_stop_audit(&expected).is_ok());
+        assert_eq!(journal.read().unwrap().unwrap(), before);
+        let mut wrong = expected.clone();
+        wrong.image_identity.push('x');
+        assert!(journal
+            .audit_stopped_checked_with(&wrong, || Ok(()), stopped)
+            .is_err());
+        assert!(journal
+            .audit_stopped_checked_with(
+                &expected,
+                || Err(invalid("injected volume drift")),
+                stopped
+            )
+            .is_err());
         fs::remove_dir_all(path).unwrap();
     }
 

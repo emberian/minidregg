@@ -72,6 +72,8 @@ mod lifecycle_v3_stop_begin_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_stop_assembly_native;
 #[cfg(target_os = "linux")]
+pub mod lifecycle_v3_stop_service;
+#[cfg(target_os = "linux")]
 pub mod materialize;
 #[cfg(target_os = "linux")]
 mod native_dispatch;

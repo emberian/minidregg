@@ -1,0 +1,15 @@
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-stop-service-20260927/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.30s
+────────────
+ Nextest run ID dfbcfc35-4e7b-4696-afe7-d7f747cd034d with nextest profile: default
+    Starting 8 tests across 7 binaries (179 tests skipped)
+        PASS [   0.007s] (1/8) minidregg-spk-host lifecycle_v3_stop_service::tests::report_mkdir_and_partial_source_reopen_without_changing_first_bytes
+        PASS [   0.008s] (2/8) minidregg-spk-host lifecycle_v3_stop_service::tests::completion_pre_submit_replans_but_op38_marker_never_does
+        PASS [   0.010s] (3/8) minidregg-spk-host hostd::tests::checked_stop_audit_projects_prior_incarnation_and_commits_observation
+        PASS [   0.012s] (4/8) minidregg-spk-host hostd::tests::stopped_audit_is_read_only_and_refuses_running_or_wrong_incarnation
+        PASS [   0.012s] (5/8) minidregg-spk-host hostd::tests::source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence
+        PASS [   0.012s] (6/8) minidregg-spk-host lifecycle_v3_stop_service::tests::recovered_receipt_anchor_compares_all_four_large_fields
+        PASS [   0.012s] (7/8) minidregg-spk-host lifecycle_v3_stop_service::tests::truncated_first_completion_frame_never_becomes_receipt_anchor
+        PASS [   0.013s] (8/8) minidregg-spk-host lifecycle_v3_stop_service::tests::concurrent_stop_supervisor_refuses_second_owner_until_first_exits
+────────────
+     Summary [   0.014s] 8 tests run: 8 passed, 179 skipped
