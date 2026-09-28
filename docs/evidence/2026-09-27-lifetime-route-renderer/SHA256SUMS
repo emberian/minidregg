@@ -1,0 +1,5 @@
+e5b0d4b8a448043dadefec736043676c574edc481ec91225f781c1c75c7a57cf  scripts/spk-platform/prepare-lifetime-route.sh
+c39f71858ec128864dd45ab85ff0f1ba23a60a1616f178b1ff091bd82e345abb  docs/evidence/2026-09-27-lifetime-route-renderer/README.md
+d77cba6fdfcac8e739ebae6df67f65c93f910133ca20e2a294226bc460cde428  docs/evidence/2026-09-27-lifetime-route-renderer/schema-only-linux.log
+4e3cb0ee226d8d4f49376a5d0d445c59cff03e59568fc32619ec582bc3f895c8  docs/evidence/2026-09-27-lifetime-route-renderer/schema-only-large-ingress-linux.log
+d46f568ac2bc86a1f5166db3cd895f2f2276dbef512164da071ac9e01b39ed2d  docs/evidence/2026-09-27-lifetime-route-renderer/shell-gates.log
