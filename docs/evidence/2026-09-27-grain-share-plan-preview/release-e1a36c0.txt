@@ -1,0 +1,15 @@
+source_commit=e1a36c0
+source_scope=native/resource-client
+source_archive_sha256=2c87caae59c1dbf5137db1adc46203693bd5d7b9989f4e31599666fa813dd8e2
+source_file_count=33
+source_sha256_manifest_sha256=c70ebb78e60b6f080c27ce4474c4301a4a1fa92ee1ea3d3b6d3f7242ebf3ac7a
+source_main_sha256=b65fb1240dc5df999b4a7e1c752a49b971ab353dad9a4fbded9711478eaa7c35
+source_grain_share_issue_sha256=74210af50fe46e3a947093d3cab052c776570ac6ed219450ed1d0661fb4e25fc
+build_command=CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/ember/build/minidregg-mini-e1a36c0-target cargo build --release --locked --offline --bin mini
+build_limit=MemoryMax=4G CPUQuota=200% timeout=900
+build_unit=run-p333431-i989784694.scope
+build_verdict=PASS release profile 6.64s
+build_log_sha256=cb63bd80d3320fbb89339e47f477d576d592f72a4bb8579081cdf68cdd57179a
+binary_sha256=2c0fee88774e003c1eac9c9a715a0f9c18c5a92bbe862c1bc651d695ca757e6a
+binary_path=/tank/dregg-build/minidregg-mini-e1a36c0/bin/mini
+prior_source_gates=focused nextest 5/5 PASS; strict all-target Clippy PASS; exact crate source byte-identical to committed archive
