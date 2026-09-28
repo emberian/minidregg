@@ -3,6 +3,8 @@ Read-only custody view of the exact event27 request and detached signing plan.
 This projection is not a grant receipt or a permission to dispatch an agent.
 -/
 import Host.ApplicationAgentLifetimeGrantAuthoring
+import Kernel.ApplicationAgentLifetimeGrantLookup
+import Kernel.ApplicationAgentLifetimeDispatchReserveContext
 import Lean.Data.Json
 
 namespace Minidregg.Host.ApplicationAgentLifetimeGrantInspection
@@ -97,5 +99,56 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
        NativeHostCodec.draftStream.encode plan.birth.finalizedDraft),
      ("birthSlots", .arr <| plan.birth.slots.toArray.map slotJson),
      ("appSlot", slotJson plan.appSlot)]
+
+/-- Historical route provenance comes from the verifier-selected event27,
+not a proposed grant plan. This does not authorize a current dispatch. -/
+private def inspectAcceptedVerified {config : NativeHost.Config}
+    {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target)
+    (bytes : List UInt8) : Except String Json := do
+  let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes
+    | throw "noncanonical agent lifetime grant ingress"
+  unless ingress.canonicalBytes.toByteArray == bytes.toByteArray do
+    throw "noncanonical agent lifetime grant ingress"
+  match ApplicationAgentLifetimeGrantReceiver.lookupVerified verified ingress with
+  | none => throw "exact agent lifetime grant has not been accepted"
+  | some (.error detail) => throw detail
+  | some (.ok original) =>
+      let grant := original.ingress.spec.grant
+      let receiptJson (receipt : NativeHostCodec.Receipt) := Json.mkObj
+        [("acceptedCount", decimal receipt.acceptedCount),
+         ("transactionId", decimal receipt.transactionId.value),
+         ("eventId", decimal receipt.eventId.value),
+         ("imageBoundary", decimal receipt.imageBoundary.value)]
+      pure <| .mkObj
+        [("type", "application-agent-lifetime-grant-accepted-v1"),
+         ("canonicalIngressHex", hex original.ingress.canonicalBytes),
+         ("grantIssueIndex", decimal original.index),
+         ("grantIssueReceipt", receiptJson original.receipt),
+         ("grantInitializedRoot", decimal original.finalRoot.value),
+         ("grantDigest", decimal
+           (ApplicationAgentLifetimeDispatchReserveContext.grantDigest grant).value),
+         ("grantResource", decimal grant.source.resource),
+         ("originalEvent22Index", decimal grant.source.issueIndex),
+         ("originalEvent22Receipt", receiptJson grant.source.issueReceipt),
+         ("originalDescriptorHex", hex <|
+           (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
+             original.ticket.evidence.descriptor),
+         ("ticketResource", decimal grant.source.ticketResource),
+         ("ticketDigest", decimal grant.source.ticketDigest.value),
+         ("app", decimal grant.participant.app),
+         ("session", decimal grant.participant.session),
+         ("subject", decimal grant.participant.subject.value),
+         ("parentTask", decimal grant.participant.parentTask),
+         ("originalGeneration", .str (toString grant.participant.originalGeneration)),
+         ("grantObserveCapability", decimal grant.participant.grantObserveCapability.value)]
+
+def inspectAcceptedCurrent (config : NativeHost.Config) (bytes : List UInt8) :
+    IO (Except String Json) := do
+  match ← NativeHost.openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      match ← NativeHostReplay.verifyLoaded config opened.durable with
+      | .error _ => return .error "agent lifetime grant history unverified"
+      | .ok verified => return inspectAcceptedVerified verified bytes
 
 end Minidregg.Host.ApplicationAgentLifetimeGrantInspection

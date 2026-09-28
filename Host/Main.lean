@@ -4647,6 +4647,16 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "paid ingress inspection exceeds JSON budget")
           IO.FS.writeFile output serialized
           pure 0
+      | "inspect-accepted-agent-lifetime-grant", [ingressPath, output] =>
+          let ingress ← readBoundedBytes ingressPath FnEvidenceCodec.maxHostFrameBytes
+          let view ← IO.ofExcept (←
+            Minidregg.Host.ApplicationAgentLifetimeGrantInspection.inspectAcceptedCurrent
+              config ingress)
+          let serialized := view.compress
+          unless serialized.toUTF8.size ≤ maxDispatchInspectionJsonBytes do
+            throw (IO.userError "accepted grant inspection exceeds JSON budget")
+          IO.FS.writeFile output serialized
+          pure 0
       | "inspect-stop-claim", [planPath, committedPath, output] =>
           let plan ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let committed ← readBoundedBytes committedPath FnEvidenceCodec.maxHostFrameBytes
