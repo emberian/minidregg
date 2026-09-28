@@ -1,0 +1,31 @@
+{
+  "httpPath": "/v1/chat/completions",
+  "messageChars": [
+    4919,
+    41
+  ],
+  "messageCount": 2,
+  "model": "bonsai2-27b-ptq1",
+  "requestBytes": 35808,
+  "requestSha256": "31f72dbd03928cb613383473373e41e9428a3656b9c9c1cac34b6a40d5cfe695",
+  "scope": "upstream ACP built-in tools only; no Mini MCP server",
+  "toolCount": 16,
+  "toolNames": [
+    "delegate_task",
+    "execute_code",
+    "patch",
+    "process_manage",
+    "read_file",
+    "search_files",
+    "session_search",
+    "skill_manage",
+    "skill_view",
+    "skills_list",
+    "terminal",
+    "todo_list",
+    "vision_analyze",
+    "web_extract",
+    "web_search",
+    "write_file"
+  ]
+}

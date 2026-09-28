@@ -1,0 +1,1 @@
+{"finish": "stop", "kind": "nonstream", "model": "bonsai2-27b-ptq1", "seconds": 3.979, "sha256": "a419b64e9c24c6d0bf02f4904f0e56ba164dc1b223e4fd1904a680def629c271", "status": 200, "usage": {"completion_tokens": 37, "prompt_tokens": 65, "prompt_tokens_details": {"cached_tokens": 0}, "total_tokens": 102}}

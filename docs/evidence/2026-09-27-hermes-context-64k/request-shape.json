@@ -1,0 +1,19 @@
+{
+  "fields": [
+    "messages",
+    "model",
+    "stream",
+    "stream_options",
+    "tools"
+  ],
+  "majorToolSchemaChars": 29354,
+  "maxTokensPresent": false,
+  "model": "bonsai2-27b-ptq1",
+  "requestBytes": 35808,
+  "requestSha256": "31f72dbd03928cb613383473373e41e9428a3656b9c9c1cac34b6a40d5cfe695",
+  "scope": "upstream ACP built-in tools only; no Mini MCP",
+  "stream": true,
+  "streamIncludeUsage": true,
+  "toolCount": 16,
+  "upstreamRoughToolTokens": 7339
+}

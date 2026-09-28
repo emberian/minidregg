@@ -1,0 +1,11 @@
+Running as unit: mini-grain-t3439612-o1.service; invocation ID: 84a19717d1f9447d88de9cc18b87ecc3
+Traceback (most recent call last):
+  File "/workspace/capture.py", line 60, in <module>
+    if not sid: raise RuntimeError(f'session/new: {str(session)[:300]}')
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: session/new: {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Internal error', 'data': {'details': 'Model bonsai2-27b-ptq1 has a context window of 7,168 tokens, which is below the minimum 64,000 required by Hermes Agent.  Your local server is serving a 7,168-token window.  Start it with at least
+Finished with result: exit-code
+Main processes terminated with: code=exited, status=1/FAILURE
+Service runtime: 29.221s
+CPU time consumed: 6.499s
+Memory peak: 199M (swap: 0B)

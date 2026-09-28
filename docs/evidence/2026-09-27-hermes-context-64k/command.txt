@@ -1,0 +1,1 @@
+llama-server --model PINNED-GGUF --alias bonsai2-27b-ptq1 --host 127.0.0.1 --port 18081 --device Vulkan0 --n-gpu-layers 99 --ctx-size 65536 --parallel 1 --threads 2 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --jinja --reasoning-budget 512 --no-webui --api-key-file EXISTING-PRIVATE-FILE --cors-origins http://127.0.0.1:18081

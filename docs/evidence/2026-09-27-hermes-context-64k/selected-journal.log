@@ -1,0 +1,5 @@
+Sep 27 21:17:13 hbox llama-server[3457733]: 0.39.854.552 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 65536, kv_unified = 'false'
+Sep 27 21:17:14 hbox llama-server[3457733]: 0.40.735.362 I srv  llama_server: model loaded
+Sep 27 21:17:14 hbox llama-server[3457733]: 0.40.735.365 I srv  llama_server: listening on http://127.0.0.1:18081
+Sep 27 21:21:20 hbox llama-server[3457733]: 4.46.337.949 I slot print_timing: id  0 | task 106 | prompt eval time =  138554.43 ms /  8947 tokens (   15.49 ms per token,    64.57 tokens per second)
+Sep 27 21:21:20 hbox llama-server[3457733]: 4.46.337.951 I slot print_timing: id  0 | task 106 |       total time =  140393.77 ms /  8970 tokens
